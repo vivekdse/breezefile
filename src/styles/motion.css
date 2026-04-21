@@ -1,0 +1,80 @@
+/*
+ * Shared motion primitives — keyframes referenced by multiple components.
+ *
+ * All @keyframes here consume the semantic --motion-* tokens from tokens.css
+ * via the animation shorthand on the consuming component. This file only
+ * declares the shape of the motion; durations and easings stay centralized.
+ *
+ * Every animation must degrade cleanly under `prefers-reduced-motion: reduce`
+ * — tokens.css already zeroes out --dur-*, which is sufficient for animations
+ * driven by `animation: <name> var(--dur-*) var(--ease-*)`. Transforms that
+ * move content significant distances should additionally be guarded with a
+ * local @media query in the component where they're applied.
+ */
+
+/* Row fade-in — used by FileRow for directory-load stagger (fm-z1f) and by
+   FileGrid tiles for thumbnail reveal (fm-a98). Slight upward slide
+   reinforces the "rows settling onto the page" metaphor. */
+@keyframes gpRowFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Drag-source pulse — a slow accent breathing loop applied to the row
+   being dragged (fm-9q6). Uses low-opacity accent-soft ring rather than a
+   bg flicker to stay legible under the pointer. */
+@keyframes gpDragPulse {
+  0%, 100% { box-shadow: 0 0 0 0   var(--accent-soft, rgba(0,0,0,0.06)); }
+  50%      { box-shadow: 0 0 0 6px var(--accent-soft, rgba(0,0,0,0.10)); }
+}
+
+/* Drop settle — one-shot pop used when a drag completes on the drop
+   target (fm-9q6). A tiny scale + ring to confirm the drop registered. */
+@keyframes gpDropSettle {
+  0%   { transform: scale(1);     box-shadow: 0 0 0 0  var(--accent-soft); }
+  40%  { transform: scale(1.015); box-shadow: 0 0 0 8px var(--accent-soft); }
+  100% { transform: scale(1);     box-shadow: 0 0 0 0  var(--accent-soft); }
+}
+
+/* Mark/yank/tag state-change chip — soft flash when a row's boolean state
+   flips (fm-7mw). Drives attention to the state change without dragging
+   the eye away from the cursor. */
+@keyframes gpChipFlash {
+  0%   { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+
+/* Statusbar message slide-in (fm-30p). A message appears, slides up from
+   below, dwells, then fades out — the dismiss timing is driven by JS so
+   only the entry is here. */
+@keyframes gpStatusSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Generic pop/zoom — settings drawer, context menu, mode-line cross-fade,
+   and other small transient surfaces. Keeps scale deltas subtle (0.98 →
+   1.0) so motion reads as premium rather than jumpy. */
+@keyframes gpPopIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+@keyframes gpPopOut {
+  from { opacity: 1; transform: scale(1);    }
+  to   { opacity: 0; transform: scale(0.98); }
+}
+
+/* Tab open/close — width-only so sibling tabs reflow naturally. */
+@keyframes gpTabOpen {
+  from { opacity: 0; max-width: 0;    margin-right: 0; }
+  to   { opacity: 1; max-width: 240px; }
+}
+
+/* Reduced-motion safeguard for ones that translate significantly. */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes gpRowFadeIn { from { opacity: 1; } to { opacity: 1; } }
+  @keyframes gpStatusSlideIn { from { opacity: 1; } to { opacity: 1; } }
+  @keyframes gpDragPulse { 0%, 100% { box-shadow: none; } }
+  @keyframes gpDropSettle { 0%, 100% { transform: none; } }
+  @keyframes gpTabOpen { from { opacity: 1; } to { opacity: 1; } }
+}

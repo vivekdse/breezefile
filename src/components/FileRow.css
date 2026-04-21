@@ -60,6 +60,9 @@
 
 .row--marked {
   background: var(--accent-soft);
+  /* Soft flash on first mark (fm-7mw) — the chip settles into its
+     steady-state background rather than snapping in. */
+  animation: gpChipFlash var(--dur-med) var(--ease-out) 1;
 }
 .row--marked.row--selected {
   background: linear-gradient(180deg, var(--hi), var(--accent-soft));
@@ -68,13 +71,40 @@
 .row--yanked {
   opacity: 0.55;
   font-style: italic;
+  /* Ease the opacity / italic transition so yank reads as "lifted" rather
+     than snap-styled (fm-7mw). */
+  transition: opacity var(--motion-toggle), font-style var(--motion-toggle);
 }
 
+/* Dragging source (fm-9q6) — slow accent breathing loop instead of a
+   static opacity + bg change. The pulse scans the same accent-soft color
+   as drop targets so the eye reads "this belongs to the drag gesture". */
 .row--dragging {
-  opacity: 0.5;
+  opacity: 0.55;
   background: var(--accent-soft) !important;
   box-shadow: inset 0 0 0 1px var(--accent) !important;
   transition: background var(--motion-select), opacity var(--motion-select);
+  animation: gpDragPulse var(--dur-xslow) var(--ease-in-out) infinite;
+}
+
+/* Drop settle (fm-9q6) — add .row--dropped for ~400ms after a successful
+   drop completes; the one-shot pop confirms the action registered. The
+   class is expected to be added then auto-removed by the drop handler. */
+.row--dropped {
+  animation: gpDropSettle var(--dur-med) var(--ease-spring) 1;
+}
+
+/* Directory-load stagger (fm-z1f) — rows fade+rise as readdir populates.
+   animation-delay is applied inline via style={{ '--row-i': i }} on each
+   FileRow, and we cap it at ~200ms total (25 rows × 8ms) so large folders
+   don't turn into a slow motion show. Skipping refresh-in-place (the
+   animation only runs on first mount of a row). */
+.row {
+  animation: gpRowFadeIn var(--dur-slow) var(--ease-emphasis) both;
+  animation-delay: calc(min(var(--row-i, 0), 25) * 8ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .row { animation: none; }
 }
 
 /* Checkbox — monochrome-muted when unchecked, on-hue when checked.

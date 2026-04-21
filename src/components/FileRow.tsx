@@ -14,6 +14,8 @@ type Props = {
   marked: boolean;
   tag?: string;
   yanked: boolean;
+  /** Zero-based row position — wires into the staggered fade-in (fm-z1f). */
+  index?: number;
   onClick?: () => void;
   onDoubleClick?: () => void;
   onToggleMark?: () => void;
@@ -152,6 +154,7 @@ export function FileRow({
   marked,
   tag,
   yanked,
+  index,
   onClick,
   onDoubleClick,
   onToggleMark,
@@ -311,6 +314,8 @@ export function FileRow({
     <li
       ref={ref}
       className={cls}
+      /* --row-i feeds the staggered fade-in keyframe (FileRow.css → fm-z1f). */
+      style={index != null ? ({ ['--row-i' as string]: index } as React.CSSProperties) : undefined}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}

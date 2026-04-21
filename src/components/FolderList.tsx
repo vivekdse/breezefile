@@ -94,6 +94,7 @@ export function FolderList() {
             <FileRow
               key={e.path}
               entry={e}
+              index={j}
               selected={selIdx === j}
               activeColumn={true}
               marked={!!tab.marks[e.path]}
