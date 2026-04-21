@@ -3,6 +3,7 @@ import { OverlayCtx, type OverlayApi, type RenameMode } from './overlays';
 import { Titlebar } from './components/Titlebar';
 import { Pathbar } from './components/Pathbar';
 import { FolderList } from './components/FolderList';
+import { Preview } from './components/Preview';
 import { Statusbar } from './components/Statusbar';
 import { Tabbar } from './components/Tabbar';
 import { ModeLine } from './components/ModeLine';
@@ -101,12 +102,8 @@ function Shell() {
       <main className="shell__main">
         <FolderList />
       </main>
-      {/* preview slot — owned by fm-fda (Preview). Visible at 340px per
-          fm-ehb Finder-style default; contents are still a placeholder
-          until the Preview owner ships. */}
-      <aside className="shell__preview" aria-label="Preview">
-        <div className="shell__placeholder" />
-      </aside>
+      {/* preview slot — Preview (fm-fda) fills the reserved 340px slot. */}
+      <Preview />
       {/* status slot — ModeLine stacked above Statusbar */}
       <div className="shell__status">
         <ModeLine />

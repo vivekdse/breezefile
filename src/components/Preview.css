@@ -1,0 +1,223 @@
+/*
+ * Preview pane — editorial sidebar for the selected entry.
+ * Ported from design-assets/inspirations/themes.html .preview.
+ *
+ * Consumes theme tokens (--panel, --panel-2, --rule, --rule-soft, --ink,
+ * --muted, --accent, --accent-ink, --chip, --hero-tint, --font-serif),
+ * so Dawn/Dusk/Paper/etc. restyle automatically.
+ */
+
+.preview {
+  grid-area: preview;
+  overflow: auto;
+  padding: 24px 22px 26px;
+  position: relative;
+  background: var(--panel);
+  border-left: 1px solid var(--panel-rule, var(--rule));
+  color: var(--panel-ink, var(--ink));
+  font-family: var(--font-sans, -apple-system, 'Segoe UI', system-ui, sans-serif);
+}
+
+/* Empty state — centered fleuron when no entry is selected. */
+.preview--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 22px;
+  color: var(--muted);
+}
+.preview__empty-mark {
+  font-family: var(--font-serif);
+  font-size: 28px;
+  color: var(--accent);
+  opacity: 0.6;
+}
+.preview__empty-text {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+/* ─── Plate: framed photo area ─────────────────────────────────────── */
+
+.preview__plate {
+  background: var(--panel-2);
+  padding: 16px 16px 40px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 18px 36px -18px rgba(0, 0, 0, 0.28),
+    0 4px 10px -4px rgba(0, 0, 0, 0.12);
+  position: relative;
+}
+.preview__plate::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border: 1px solid var(--rule-soft);
+  pointer-events: none;
+}
+.preview__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: saturate(1.02) contrast(1.03);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* Placeholder plate for non-image kinds — same aspect ratio as an image,
+   so selection-switching doesn't jump the layout. */
+.preview__placeholder {
+  aspect-ratio: 4 / 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, var(--chip), var(--panel-2));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) inset;
+  color: var(--muted);
+}
+.preview__placeholder--dir   { color: var(--accent); }
+.preview__placeholder--image { color: var(--hero-tint); }
+.preview__placeholder--film  { color: var(--accent-2); }
+
+.preview__cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  text-align: center;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  padding: 0 20px;
+  /* Keep captions on one line; clip with ellipsis if the name is long. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Kind eyebrow + H2 title ──────────────────────────────────────── */
+
+.preview__kind {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 22px;
+  font-weight: 600;
+}
+.preview__title {
+  margin: 4px 0 2px;
+  font-family: var(--font-serif);
+  font-variation-settings: 'opsz' 72;
+  font-weight: 600;
+  font-size: 28px;
+  letter-spacing: -0.015em;
+  word-break: break-word;
+  line-height: 1.1;
+  color: var(--panel-ink, var(--ink));
+}
+
+/* ─── Definition list of metadata ──────────────────────────────────── */
+
+.preview__dl {
+  font-size: 12px;
+  line-height: 1.9;
+  margin: 0;
+  font-variant-numeric: oldstyle-nums tabular-nums;
+}
+.preview__dl-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 0 14px;
+}
+.preview__dl-k {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  align-self: center;
+  font-weight: 600;
+}
+.preview__dl-v {
+  color: var(--panel-ink, var(--ink));
+  overflow-wrap: anywhere;
+}
+
+/* ─── Tag pills ────────────────────────────────────────────────────── */
+
+.preview__tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.preview__tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 100px;
+  background: var(--chip);
+  color: var(--panel-ink, var(--ink-2));
+  font-weight: 500;
+}
+.preview__tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.preview__tag--fav {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.preview__tag--fav .preview__tag-dot {
+  background: var(--hero-tint);
+}
+
+/* ─── Action row ───────────────────────────────────────────────────── */
+
+.preview__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+.preview__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 100px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  color: var(--panel-ink, var(--ink));
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 2px 4px -2px rgba(0, 0, 0, 0.08);
+  font-family: inherit;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.preview__btn:hover { background: var(--panel-2); }
+.preview__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.preview__btn--primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.preview__btn--primary:hover {
+  background: var(--accent);
+  filter: brightness(1.05);
+}
