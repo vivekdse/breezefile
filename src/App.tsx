@@ -4,6 +4,7 @@ import { Titlebar } from './components/Titlebar';
 import { Pathbar } from './components/Pathbar';
 import { FolderList } from './components/FolderList';
 import { Preview } from './components/Preview';
+import { Sidebar } from './components/Sidebar';
 import { Statusbar } from './components/Statusbar';
 import { Tabbar } from './components/Tabbar';
 import { ModeLine } from './components/ModeLine';
@@ -92,10 +93,8 @@ function Shell() {
           onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
         />
       </div>
-      {/* side slot — owned by fm-4zi (Sidebar). Empty placeholder until then. */}
-      <aside className="shell__side" aria-label="Sidebar">
-        <div className="shell__placeholder" />
-      </aside>
+      {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot. */}
+      <Sidebar />
       {/* main slot — the recessed plate. FolderList (single-list Finder-style
           view per fm-ehb) fills it. MillerColumns remains in the tree for a
           future optional view mode. */}

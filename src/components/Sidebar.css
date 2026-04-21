@@ -1,0 +1,160 @@
+/*
+ * Sidebar — Favorites / Locations / Tags column.
+ * Ported from design-assets/inspirations/themes.html .sidebar rules.
+ *
+ * All colors flow through theme tokens so Dawn/Dusk/Paper/etc. restyle
+ * automatically. Respects --panel-ink for text on chrome where a theme
+ * inverts the sidebar luminance (e.g. feminism-night).
+ */
+
+.sidebar {
+  grid-area: side;
+  background: var(--panel);
+  border-right: 1px solid var(--panel-rule, var(--rule));
+  padding: 18px 10px 14px;
+  overflow: auto;
+  color: var(--panel-ink, var(--ink));
+  font-family: var(--font-sans, -apple-system, 'Segoe UI', system-ui, sans-serif);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ─── Section headings ─────────────────────────────────────────────── */
+
+.sidebar__section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--panel-muted, var(--muted));
+  margin: 18px 12px 8px;
+  font-weight: 600;
+}
+.sidebar__section-title:first-of-type {
+  margin-top: 0;
+}
+.sidebar__section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--panel-rule, var(--rule));
+}
+
+/* ─── Links ────────────────────────────────────────────────────────── */
+
+.sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--panel-ink, var(--ink-2));
+  cursor: default;
+  font-weight: 450;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+}
+
+/* Favorites/tags are <button>s for keyboard activation — give them a
+   real cursor + focus ring. */
+button.sidebar__link {
+  cursor: pointer;
+}
+button.sidebar__link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sidebar__link:hover {
+  background: var(--bg-2, var(--panel-2));
+}
+
+.sidebar__link--active {
+  background: linear-gradient(180deg, var(--hi), var(--bg));
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 0 0 1px var(--rule),
+    0 2px 5px -2px var(--accent-soft);
+}
+.sidebar__link--active .sidebar__ico {
+  color: var(--accent);
+}
+
+.sidebar__ico {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--panel-muted, var(--muted));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12) inset;
+  flex-shrink: 0;
+}
+
+/* ─── Drives ───────────────────────────────────────────────────────── */
+
+.sidebar__drive {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--panel-ink, var(--ink-2));
+}
+.sidebar__drive-ico {
+  color: var(--panel-muted, var(--muted));
+}
+.sidebar__drive-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sidebar__drive-bar {
+  grid-column: 2;
+  height: 3px;
+  background: var(--chip);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sidebar__drive-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-2), var(--hero-tint));
+  transition: width 240ms ease;
+}
+.sidebar__drive-sub {
+  grid-column: 2;
+  font-size: 10px;
+  color: var(--panel-muted, var(--muted));
+  font-variant-numeric: oldstyle-nums tabular-nums;
+  margin-top: 2px;
+}
+
+/* ─── Crest ────────────────────────────────────────────────────────── */
+
+.sidebar__crest {
+  text-align: center;
+  margin-top: auto;
+  padding-top: 28px;
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  letter-spacing: 0.4em;
+  opacity: 0.5;
+}
