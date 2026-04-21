@@ -10,7 +10,7 @@
 .folder-header {
   position: relative;
   z-index: 1;
-  padding: 30px 40px 10px;
+  padding: 22px 40px 8px;
   flex-shrink: 0;
 }
 
@@ -41,15 +41,19 @@
   flex-shrink: 0;
 }
 
-/* Big Fraunces folder headline. */
+/* Fraunces folder headline — editorial but not billboard. Opsz dropped
+   from 144 (display) to 48 (text-weight serif), weight down to 500, and
+   tracking near zero so the curves read functional rather than ornamental
+   at this much smaller size. Was 58px / 600 / opsz 144 — user feedback
+   flagged that as too magazine-cover for a functional file pane. */
 .folder-header__title {
   font-family: var(--font-serif);
-  font-variation-settings: 'opsz' 144;
-  font-weight: 600;
-  font-size: 58px;
-  line-height: 1;
-  letter-spacing: -0.025em;
-  margin: 6px 0 10px;
+  font-variation-settings: 'opsz' 48;
+  font-weight: 500;
+  font-size: 32px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 4px 0 8px;
   color: var(--ink);
   word-break: break-word;
 }
@@ -66,7 +70,7 @@
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
-  font-size: 17px;
+  font-size: 15px;
   color: var(--ink-2);
   line-height: 1.5;
   max-width: 620px;
