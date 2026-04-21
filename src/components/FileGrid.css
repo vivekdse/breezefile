@@ -46,6 +46,10 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* fm-a98 — fade each thumbnail in when its src resolves.
+     Thumbs are fetched asynchronously via fm.thumb; without this the
+     grid flashes rectangles as they resolve. */
+  animation: gpRowFadeIn var(--dur-med) var(--ease-out) both;
 }
 .tile__icon {
   font-family: var(--font-mono);

@@ -33,9 +33,21 @@
   overflow: hidden;
   white-space: nowrap;
   letter-spacing: -0.005em;
+  /* fm-vym — gracefully compress when the search field captures focus so
+     we don't clip mid-crumb. */
+  transition: opacity var(--motion-toggle), max-width var(--motion-toggle);
+  max-width: 100%;
+}
+.pathbar:focus-within .pathbar__crumbs {
+  opacity: 0.55;
+  max-width: 40%;
 }
 
+/* fm-vym — breadcrumb motion. Each crumb fades+slides in on navigation
+   (React keys by index+segment, so changing path re-mounts and re-runs
+   the animation). */
 .pathbar__crumb-wrap {
+  animation: gpPopIn var(--dur-med) var(--ease-emphasis) both;
   display: inline-flex;
   align-items: center;
 }

@@ -8,6 +8,7 @@
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--fg-2);
+  overflow: hidden;
 }
 
 .modeline__pending {
@@ -17,4 +18,19 @@
 
 .modeline__status {
   color: var(--fg-2);
+}
+
+/* fm-30p — status messages slide up into place. JS (ModeLine.tsx) controls
+   dismissal by nulling the local msg after 3s; the exit is a React-unmount
+   rather than an animation so we don't need to manage two-phase state. */
+.modeline__slide {
+  animation: gpStatusSlideIn var(--dur-med) var(--ease-emphasis) both;
+}
+
+/* fm-pdx — mode/prefix cross-fade. The span is re-keyed in React whenever
+   the mode or pending prefix changes, so the animation re-runs on every
+   transition (normal → command → find → visual) and reads as "gearing
+   up" rather than a text swap. */
+.modeline__xfade {
+  animation: gpPopIn var(--dur-fast) var(--ease-in-out) both;
 }
