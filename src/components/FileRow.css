@@ -323,6 +323,11 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   color: var(--ink);
   font-size: var(--fs-sm);
+  /* fm-74p — origin-anchored reveal. The .tsx handler sets
+     transform-origin to 'left top' (the cursor point, since the menu is
+     positioned with the click coords). gpPopIn scales from 0.98 to 1 so
+     the menu appears to grow from where the user clicked. */
+  animation: gpPopIn var(--dur-med) var(--ease-emphasis) both;
 }
 .ctx-menu__item {
   display: flex;

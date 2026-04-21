@@ -1,25 +1,40 @@
+/* fm-8s9 — Settings as a right-edge drawer.
+   Backdrop stays a dimmed scrim; the panel docks to the right side and
+   slides in from off-screen instead of popping centered. */
 .settings {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: flex-end;
   z-index: var(--z-overlay);
   animation: fade var(--motion-enter);
 }
 
 .settings__panel {
-  width: min(720px, 92vw);
-  max-height: 82vh;
+  width: min(520px, 92vw);
+  height: 100%;
+  max-height: none;
   background: var(--bg-1);
-  border: 1px solid var(--border-2);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-2);
+  border-left: 1px solid var(--border-2);
+  border-radius: 0;
+  box-shadow: -24px 0 48px -12px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: pop var(--motion-enter);
+  animation: gpDrawerIn var(--motion-slide);
+}
+
+@keyframes gpDrawerIn {
+  from { transform: translateX(100%); opacity: 0.6; }
+  to   { transform: translateX(0);    opacity: 1;   }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes gpDrawerIn {
+    from { transform: none; opacity: 1; }
+    to   { transform: none; opacity: 1; }
+  }
 }
 
 .settings__head {

@@ -431,6 +431,11 @@ function showContextMenu(x: number, y: number, items: MenuItem[]) {
   el.className = 'ctx-menu';
   el.style.left = `${x}px`;
   el.style.top = `${y}px`;
+  /* fm-74p — transform-origin pinned to the cursor so the menu scales
+     out from where you clicked (gpPopIn handles the actual anim). The
+     cursor is in viewport coords; the menu is positioned with the same
+     coords so `left top` of the element IS the click point. */
+  el.style.transformOrigin = 'left top';
   for (const item of items) {
     if ('separator' in item) {
       const sep = document.createElement('div');

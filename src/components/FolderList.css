@@ -56,3 +56,15 @@
   font-style: italic;
   font-size: var(--fs-sm);
 }
+
+/* fm-n8s — view-mode cross-fade. The wrapper is keyed by viewMode in
+   FolderList.tsx, so toggling grid↔list remounts the body and replays
+   this subtle pop. Gives the mode change a deliberate beat. */
+.folder-list__body {
+  animation: gpPopIn var(--dur-med) var(--ease-in-out) both;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}

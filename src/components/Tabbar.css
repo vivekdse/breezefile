@@ -18,9 +18,46 @@
   color: var(--fg-2);
   font-size: var(--fs-sm);
   max-width: 220px;
-  transition: background var(--motion-hover),
+  overflow: hidden;
+  position: relative;
+  /* fm-cpk — tab open animates from zero width + fade. Closing tabs get
+     data-closing="true" applied before their React unmount so the
+     collapse animation plays; Tabbar.tsx handles the post-transition
+     unmount. The accent underline (::after) transitions when the active
+     class moves between tabs. */
+  animation: gpTabOpen var(--dur-slow) var(--ease-emphasis) both;
+  transition:
+    background var(--motion-hover),
     color var(--motion-hover),
-    border-color var(--motion-hover);
+    border-color var(--motion-hover),
+    max-width var(--motion-toggle),
+    opacity var(--motion-toggle),
+    padding var(--motion-toggle),
+    margin var(--motion-toggle);
+}
+.tabbar__tab[data-closing='true'] {
+  max-width: 0;
+  opacity: 0;
+  padding-left: 0;
+  padding-right: 0;
+  margin-left: 0;
+  margin-right: -2px;
+  border-width: 0;
+  pointer-events: none;
+}
+.tabbar__tab::after {
+  content: '';
+  position: absolute;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+  transform: scaleX(0);
+  transform-origin: center;
+  opacity: 0;
+  transition: transform var(--motion-toggle), opacity var(--motion-toggle);
 }
 .tabbar__tab:hover {
   background: var(--bg-3);
@@ -31,6 +68,10 @@
   color: var(--fg-1);
   border-color: var(--accent-glow);
   box-shadow: 0 0 0 1px var(--accent-soft);
+}
+.tabbar__tab--active::after {
+  transform: scaleX(1);
+  opacity: 1;
 }
 
 .tabbar__num {

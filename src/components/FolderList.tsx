@@ -78,17 +78,22 @@ export function FolderList() {
         <span className="folder-list__name">{basename(cwd) || '/'}</span>
         <span className="folder-list__meta">{entries.length}</span>
       </div>
+      {/* fm-n8s — view-mode cross-fade. Keying the wrapper on viewMode
+          forces a remount when the user toggles grid↔list, which makes
+          the receiving side animate in (via gpPopIn on .folder-list__body). */}
       {tab.viewMode === 'grid' ? (
-        <FileGrid
-          entries={entries}
-          selIdx={selIdx}
-          activeColumn={true}
-          marks={tab.marks}
-          onSelect={selectAt}
-          onOpen={doubleOpen}
-        />
+        <div key="grid" className="folder-list__body">
+          <FileGrid
+            entries={entries}
+            selIdx={selIdx}
+            activeColumn={true}
+            marks={tab.marks}
+            onSelect={selectAt}
+            onOpen={doubleOpen}
+          />
+        </div>
       ) : (
-        <ul className="folder-list__list">
+        <ul key="list" className="folder-list__list folder-list__body">
           {entries.length === 0 && <li className="folder-list__empty">empty</li>}
           {entries.map((e, j) => (
             <FileRow
@@ -110,3 +115,7 @@ export function FolderList() {
     </div>
   );
 }
+
+// fm-n8s — ensure the scalable wrapper has the fade class. If the
+// enclosing CSS ever grows complex, consider promoting this to its own
+// <FolderListBody> component.
