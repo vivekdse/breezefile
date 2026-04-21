@@ -21,8 +21,12 @@ type Fm = {
   reveal: (p: string) => Promise<void>;
   openTerminal: (cwd: string) => Promise<void>;
   runCommand: (cwd: string, cmd: string) => Promise<void>;
-  open: (p: string) => Promise<string>;
+  open: (p: string, appPath?: string) => Promise<void>;
   openWith: (p: string, appName: string) => Promise<void>;
+  pickApplication: () => Promise<string | null>;
+  getBindings: () => Promise<Record<string, string>>;
+  setBinding: (ext: string, appPath: string) => Promise<void>;
+  clearBinding: (ext: string) => Promise<void>;
   clipboardWrite: (p: string) => Promise<void>;
   thumb: (p: string, size: number) => Promise<string | null>;
   readTextFile: (

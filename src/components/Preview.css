@@ -270,3 +270,27 @@
   background: var(--accent);
   filter: brightness(1.05);
 }
+
+/* Subdued row beneath the primary actions — reserved for secondary
+   affordances like "Reveal in Finder" that don't deserve a full pill. */
+.preview__sub-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 14px;
+}
+.preview__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--rule-soft, var(--rule));
+  text-underline-offset: 3px;
+}
+.preview__link:hover {
+  color: var(--panel-ink, var(--ink));
+}

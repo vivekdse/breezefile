@@ -1,9 +1,44 @@
-import { ipcMain, shell, app, BrowserWindow, clipboard, nativeImage } from 'electron';
+import { ipcMain, shell, app, BrowserWindow, clipboard, nativeImage, dialog } from 'electron';
 import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
 import crypto from 'node:crypto';
+
+// ─── Per-extension "Open With" bindings ─────────────────────────────
+// Persisted as JSON at userData/openwith.json; loaded on startup and
+// kept in-memory for fast dispatch from `app:open`.
+type OpenWithBindings = Record<string, string>;
+let bindings: OpenWithBindings = {};
+let bindingsLoaded = false;
+
+function bindingsPath(): string {
+  return path.join(app.getPath('userData'), 'openwith.json');
+}
+async function loadBindings(): Promise<void> {
+  if (bindingsLoaded) return;
+  try {
+    const raw = await fs.readFile(bindingsPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') bindings = parsed as OpenWithBindings;
+  } catch {
+    bindings = {};
+  }
+  bindingsLoaded = true;
+}
+async function saveBindings(): Promise<void> {
+  const p = bindingsPath();
+  await fs.mkdir(path.dirname(p), { recursive: true });
+  await fs.writeFile(p, JSON.stringify(bindings, null, 2), 'utf8');
+}
+function normExt(ext: string): string {
+  return ext.replace(/^\./, '').toLowerCase();
+}
+function extOf(p: string): string | undefined {
+  const base = path.basename(p);
+  if (!base.includes('.') || base.startsWith('.')) return undefined;
+  return base.split('.').pop()!.toLowerCase();
+}
 
 export type Entry = {
   name: string;
@@ -125,6 +160,66 @@ async function thumbnailFor(p: string, size = 128): Promise<string | null> {
 }
 
 export function registerIpc() {
+  // Hydrate persisted "Open With" bindings on startup so `app:open` can
+  // dispatch to the bound app without an extra async hop on each call.
+  void loadBindings();
+
+  ipcMain.handle('app:open', async (_e, filepath: string, appPath?: string) => {
+    const abs = expandHome(filepath);
+    await loadBindings();
+    let bound = appPath;
+    if (!bound) {
+      const ext = extOf(abs);
+      if (ext && bindings[ext]) bound = bindings[ext];
+    }
+    if (bound) {
+      // On macOS `open -a <app.app> <file>` is the canonical way to route
+      // a file to a specific application bundle.
+      return new Promise<void>((resolve, reject) => {
+        spawn('open', ['-a', bound!, abs], { stdio: 'ignore', detached: true })
+          .on('error', reject)
+          .on('spawn', () => resolve());
+      });
+    }
+    await shell.openPath(abs);
+  });
+
+  ipcMain.handle('app:pickApplication', async () => {
+    const win = BrowserWindow.getFocusedWindow();
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Choose an Application',
+      defaultPath: '/Applications',
+      properties: ['openFile', 'treatPackageAsDirectory'],
+      filters: process.platform === 'darwin'
+        ? [{ name: 'Applications', extensions: ['app'] }]
+        : undefined,
+    };
+    const res = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts);
+    if (res.canceled || res.filePaths.length === 0) return null;
+    return res.filePaths[0];
+  });
+
+  ipcMain.handle('bindings:get', async () => {
+    await loadBindings();
+    return { ...bindings };
+  });
+  ipcMain.handle('bindings:set', async (_e, ext: string, appPath: string) => {
+    await loadBindings();
+    const key = normExt(ext);
+    if (!key) return;
+    bindings[key] = appPath;
+    await saveBindings();
+  });
+  ipcMain.handle('bindings:clear', async (_e, ext: string) => {
+    await loadBindings();
+    const key = normExt(ext);
+    if (!key) return;
+    delete bindings[key];
+    await saveBindings();
+  });
+
   ipcMain.handle('fs:readdir', async (_e, dirpath: string) => {
     return readdirEntries(dirpath);
   });

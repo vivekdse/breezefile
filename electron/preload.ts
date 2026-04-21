@@ -21,8 +21,12 @@ const fm = {
   reveal: (p: string) => ipcRenderer.invoke('shell:reveal', p),
   openTerminal: (cwd: string) => ipcRenderer.invoke('shell:openTerminal', cwd),
   runCommand: (cwd: string, cmd: string) => ipcRenderer.invoke('shell:runCommand', cwd, cmd),
-  open: (p: string) => ipcRenderer.invoke('shell:open', p),
+  open: (p: string, appPath?: string) => ipcRenderer.invoke('app:open', p, appPath),
   openWith: (p: string, appName: string) => ipcRenderer.invoke('shell:openWith', p, appName),
+  pickApplication: () => ipcRenderer.invoke('app:pickApplication') as Promise<string | null>,
+  getBindings: () => ipcRenderer.invoke('bindings:get') as Promise<Record<string, string>>,
+  setBinding: (ext: string, appPath: string) => ipcRenderer.invoke('bindings:set', ext, appPath),
+  clearBinding: (ext: string) => ipcRenderer.invoke('bindings:clear', ext),
   clipboardWrite: (p: string) => ipcRenderer.invoke('shell:clipboardWrite', p),
   thumb: (p: string, size: number) =>
     ipcRenderer.invoke('thumb:get', p, size) as Promise<string | null>,

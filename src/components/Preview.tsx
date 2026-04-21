@@ -4,6 +4,7 @@ import { currentEntry, lastCol, visibleEntries } from '../actions';
 import { fm } from '../bridge';
 import type { Entry } from '../types';
 import { Icon, type IconName } from './Icon';
+import { OpenWithDialog } from './OpenWithDialog';
 import './Preview.css';
 
 /**
@@ -52,6 +53,15 @@ function PreviewBody({ entry, tag }: PreviewBodyProps) {
   const [text, setText] = useState<
     { content: string; truncated: boolean; error?: string } | null
   >(null);
+  // When the user picks an app from the native dialog, we show our own
+  // confirm modal so they can opt into a persistent binding. Null when
+  // no picker is active.
+  const [pickedApp, setPickedApp] = useState<string | null>(null);
+
+  async function handleOpenWith() {
+    const picked = await fm.pickApplication();
+    if (picked) setPickedApp(picked);
+  }
 
   // Reset failure flag when selection changes — otherwise a previous
   // broken image would hide a perfectly good successor.
@@ -166,7 +176,9 @@ function PreviewBody({ entry, tag }: PreviewBodyProps) {
         </div>
       )}
 
-      {/* Action row */}
+      {/* Action row — Open (default/bound app) + Open With… (picker).
+          Reveal in Finder survives as a subdued link below so power
+          users keep the affordance they had before. */}
       <div className="preview__actions">
         <button
           type="button"
@@ -180,13 +192,40 @@ function PreviewBody({ entry, tag }: PreviewBodyProps) {
         <button
           type="button"
           className="preview__btn"
+          onClick={() => fm.open(entry.path)}
+          title="Open with the default (or bound) application"
+        >
+          <Icon name="open" size={14} />
+          Open
+        </button>
+        <button
+          type="button"
+          className="preview__btn"
+          onClick={handleOpenWith}
+          title="Choose an application to open this file"
+        >
+          Open With…
+        </button>
+      </div>
+      <div className="preview__sub-actions">
+        <button
+          type="button"
+          className="preview__link"
           onClick={() => fm.reveal(entry.path)}
           title="Reveal in Finder"
         >
-          <Icon name="open" size={14} />
-          Open with…
+          Reveal in Finder
         </button>
       </div>
+
+      {pickedApp && (
+        <OpenWithDialog
+          filePath={entry.path}
+          ext={entry.ext}
+          appPath={pickedApp}
+          onClose={() => setPickedApp(null)}
+        />
+      )}
     </section>
   );
 }
