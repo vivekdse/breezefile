@@ -1,37 +1,68 @@
+/*
+ * FileRow — editorial treatment (fm-4ur).
+ * Migrated from the dark --bg-0/--fg-* palette to the paper-family editorial
+ * tokens (--bg, --panel, --ink, --accent, --hi, --rule, --muted, --chip).
+ * Mockup: design-assets/inspirations/themes.html (.row / .row.sel / .row:hover).
+ */
+
 .row {
   display: grid;
-  grid-template-columns: 18px 20px 1fr auto auto;
+  /* checkbox / glyph / name / meta / chev — close to the mockup's
+     26px|1fr|100px|110px while keeping our 5-slot layout. */
+  grid-template-columns: 18px 22px 1fr auto 14px;
   align-items: center;
-  gap: var(--sp-2);
-  padding: 4px var(--sp-3) 4px var(--sp-4);
+  gap: var(--sp-3);
+  padding: 10px 12px;
   margin: 0 var(--sp-1);
-  border-radius: var(--r-sm);
-  color: var(--fg-1);
-  font-size: var(--fs-md);
+  border-radius: var(--r-lg);
+  border-bottom: 1px dotted var(--rule);
+  color: var(--ink);
+  font-size: 13.5px;
   cursor: default;
   transition: background var(--motion-hover), color var(--motion-hover);
 }
 
-.row:hover {
-  background: var(--bg-3);
+.row:last-child {
+  border-bottom: none;
 }
 
+.row:hover {
+  background: var(--panel-2);
+}
+.row:hover .row__name {
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+}
+
+/* Selected — on-hue gradient; border replaces the dotted rule so the
+   selected row reads as a recessed plate rather than another list item. */
 .row--selected {
-  background: var(--sel-bg);
-  color: var(--sel-fg);
-  box-shadow: inset 0 0 0 1px var(--accent-glow);
+  background: linear-gradient(180deg, var(--hi), var(--accent-soft));
+  border: 1px solid var(--rule);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 6px 16px -8px var(--accent-soft);
+  /* slightly tighter to compensate for the added border */
+  padding: 9px 11px;
+  margin: 2px var(--sp-1);
+}
+.row--selected:hover {
+  background: linear-gradient(180deg, var(--hi), var(--accent-soft));
+}
+.row--selected:hover .row__name {
+  text-decoration: none;
 }
 
 .row--selected-inactive {
-  background: var(--sel-bg-unfocused);
-  color: var(--fg-1);
+  background: var(--panel-2);
+  color: var(--ink);
 }
 
 .row--marked {
-  background: rgba(126, 230, 168, 0.10);
+  background: var(--accent-soft);
 }
 .row--marked.row--selected {
-  background: linear-gradient(to right, rgba(126, 230, 168, 0.14), var(--sel-bg));
+  background: linear-gradient(180deg, var(--hi), var(--accent-soft));
 }
 
 .row--yanked {
@@ -46,6 +77,134 @@
   transition: background var(--motion-select), opacity var(--motion-select);
 }
 
+/* Checkbox — monochrome-muted when unchecked, on-hue when checked.
+   Class hooks (row__checkbox, row__checkbox--checked) from fm-zi2 remain. */
+.row__checkbox {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+  transition: opacity var(--motion-hover), color var(--motion-hover);
+}
+.row:hover .row__checkbox,
+.row--marked .row__checkbox,
+.row--selected .row__checkbox {
+  opacity: 1;
+}
+.row__checkbox--checked {
+  color: var(--accent);
+}
+
+/* Glyph — default to muted ink. Per-type tints below pick up a hue
+   without shouting (editorial, not cartoon). */
+.row__glyph {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  text-align: center;
+  line-height: 1;
+  color: var(--ink-2);
+  opacity: 0.7;
+}
+.row.row--folder .row__glyph {
+  color: var(--accent);
+  opacity: 1;
+}
+.row.row--image .row__glyph {
+  color: var(--hero-tint);
+  opacity: 1;
+}
+.row.row--film .row__glyph {
+  color: var(--accent-2);
+  opacity: 0.95;
+}
+.row.row--code .row__glyph {
+  color: var(--accent-2);
+  opacity: 0.85;
+}
+.row.row--link .row__glyph {
+  color: var(--accent-2);
+  opacity: 0.9;
+}
+.row.row--exec .row__glyph {
+  color: var(--accent);
+  opacity: 0.9;
+}
+.row.row--archive .row__glyph {
+  color: var(--hero-tint);
+  opacity: 0.8;
+}
+.row--selected .row__glyph {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* Name — Fraunces, the editorial voice of the row. */
+.row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 15px;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+.row--selected .row__name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.row__tag {
+  margin-left: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.row--selected .row__tag {
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+/* Meta — Inter Tight with oldstyle tabular numerals so file sizes and
+   timestamps feel like type, not a spreadsheet. */
+.row__meta {
+  display: flex;
+  gap: var(--sp-3);
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  font-variant-numeric: oldstyle-nums tabular-nums;
+  white-space: nowrap;
+}
+.row--selected .row__meta {
+  color: var(--ink-2);
+}
+
+.row__mtime {
+  min-width: 84px;
+  text-align: right;
+}
+
+.row__chev {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  opacity: 0;
+  transition: opacity var(--motion-reveal), transform var(--motion-reveal);
+  transform: translateX(-2px);
+}
+.row:hover .row__chev,
+.row--selected .row__chev {
+  opacity: 1;
+  transform: translateX(0);
+}
+.row--selected .row__chev {
+  color: var(--accent);
+}
+
 /* drag toast — floats near the top of the window while a drag is initiated */
 .drag-toast {
   position: fixed;
@@ -56,11 +215,11 @@
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-4);
-  background: var(--bg-2);
+  background: var(--panel);
   border: 1px solid var(--accent);
   border-radius: 999px;
-  box-shadow: var(--shadow-2), 0 0 0 4px var(--accent-soft);
-  color: var(--fg-1);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 0 0 4px var(--accent-soft);
+  color: var(--ink);
   font-size: var(--fs-sm);
   font-family: var(--font-mono);
   z-index: 2000;
@@ -75,91 +234,27 @@
   font-size: var(--fs-lg);
 }
 .drag-toast__text {
-  color: var(--fg-2);
+  color: var(--ink-2);
 }
 
 @keyframes drag-toast-in {
-  from { opacity: 0; transform: translate(-50%, -4px) scale(0.96); }
-  to   { opacity: 1; transform: translate(-50%, 0)    scale(1); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, -4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }
 @keyframes drag-toast-out {
-  from { opacity: 1; }
-  to   { opacity: 0; transform: translate(-50%, -4px); }
-}
-
-/* Neutral checkbox styling — real visual tokens owned by design-system teammate.
-   The class hooks (row__checkbox, row__checkbox--checked) are stable. */
-.row__checkbox {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  line-height: 1;
-  color: var(--fg-3);
-  opacity: 0.5;
-  cursor: pointer;
-  user-select: none;
-  text-align: center;
-  transition: opacity var(--motion-hover), color var(--motion-hover);
-}
-.row:hover .row__checkbox,
-.row--marked .row__checkbox,
-.row--selected .row__checkbox {
-  opacity: 1;
-}
-.row__checkbox--checked {
-  color: var(--accent, var(--fg-1));
-}
-
-.row__glyph {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  text-align: center;
-  opacity: 0.9;
-  line-height: 1;
-}
-
-.row__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.row__tag {
-  margin-left: var(--sp-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  opacity: 0.8;
-}
-
-.row__meta {
-  display: flex;
-  gap: var(--sp-3);
-  color: var(--fg-3);
-  font-size: var(--fs-xs);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.row--selected .row__meta {
-  color: var(--fg-2);
-}
-
-.row__mtime {
-  min-width: 84px;
-  text-align: right;
-}
-
-.row__chev {
-  color: var(--fg-3);
-  font-size: var(--fs-sm);
-  opacity: 0;
-  transition: opacity var(--motion-reveal), transform var(--motion-reveal);
-  transform: translateX(-2px);
-}
-.row:hover .row__chev,
-.row--selected .row__chev {
-  opacity: 1;
-  transform: translateX(0);
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
 }
 
 /* context menu */
@@ -168,10 +263,11 @@
   z-index: 1000;
   min-width: 200px;
   padding: 4px;
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
+  background: var(--panel);
+  border: 1px solid var(--rule);
   border-radius: var(--r-md);
-  box-shadow: var(--shadow-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
   font-size: var(--fs-sm);
 }
 .ctx-menu__item {
@@ -180,19 +276,19 @@
   align-items: center;
   padding: 5px var(--sp-3);
   border-radius: var(--r-sm);
-  color: var(--fg-1);
+  color: var(--ink);
   cursor: default;
 }
 .ctx-menu__item:hover {
   background: var(--accent-soft);
-  color: var(--fg-1);
+  color: var(--accent);
 }
 .ctx-menu__arrow {
-  color: var(--fg-3);
+  color: var(--muted);
   margin-left: var(--sp-2);
 }
 .ctx-menu__sep {
   height: 1px;
-  background: var(--border-1);
+  background: var(--rule);
   margin: 4px 0;
 }

@@ -1,41 +1,231 @@
+/*
+ * Titlebar — editorial chrome. Ported from design-assets/inspirations/themes.html
+ * (.titlebar / .brand / .search / .restyle-btn / .theme-pop). Uses new editorial
+ * tokens (--panel, --bg, --ink, --accent, --rule, --muted, --chip) instead of
+ * the legacy --bg-0/--fg-* scale.
+ */
+
 .titlebar {
-  height: 44px;
-  display: grid;
-  grid-template-columns: 80px 1fr auto;
+  height: 48px;
+  display: flex;
   align-items: center;
-  background: linear-gradient(to bottom, var(--bg-1), var(--bg-0));
-  border-bottom: 1px solid var(--border-1);
+  gap: 14px;
+  padding: 0 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-rule, var(--rule));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset;
+  color: var(--panel-ink, var(--ink));
   position: relative;
   z-index: var(--z-chrome);
 }
 
 .titlebar__traffic {
   /* leaves space for macOS hiddenInset traffic lights */
+  width: 68px;
   height: 100%;
+  flex-shrink: 0;
 }
 
-.titlebar__title {
-  text-align: center;
-  font-size: var(--fs-sm);
-  color: var(--fg-3);
-  letter-spacing: 0.02em;
+/* Brand wordmark — Fraunces italic, accent middle-dot as the "logo". */
+.titlebar__brand {
+  margin-left: 4px;
+  font-family: var(--font-serif);
+  font-style: italic;
   font-weight: 500;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  user-select: none;
+}
+.titlebar__brand em {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 600;
+  padding: 0 1px;
 }
 
-.titlebar__actions {
+/* Search pill — looks like a field, acts like the tab filter. */
+.titlebar__search {
+  margin-left: auto;
   display: flex;
-  gap: var(--sp-1);
-  padding-right: var(--sp-3);
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 260px;
+  max-width: 360px;
+  flex: 0 1 320px;
+  border: 1px solid var(--rule);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.titlebar__search:focus-within {
+  border-color: var(--accent-soft);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 3px var(--accent-soft);
+}
+.titlebar__search svg {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.titlebar__search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink);
+}
+.titlebar__search-input::placeholder {
+  color: var(--muted);
 }
 
-.titlebar__btn {
-  width: 24px;
-  height: 24px;
-  border-radius: var(--r-sm);
-  color: var(--fg-2);
-  transition: background var(--motion-hover), color var(--motion-hover);
+/* Dark-panel variant — mockup special-case for feminism-night. */
+[data-theme='feminism-night'] .titlebar__search,
+[data-theme='dusk'] .titlebar__search {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--panel-muted, var(--muted));
+  border-color: var(--panel-rule, var(--rule));
 }
-.titlebar__btn:hover {
-  background: var(--bg-3);
-  color: var(--fg-1);
+
+.titlebar__kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  color: var(--muted);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 1px 0 rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
+}
+
+/* Restyle pill + popover */
+.titlebar__restyle-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.titlebar__restyle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-2, var(--chip));
+  border: 1px solid var(--rule);
+  border-radius: 100px;
+  padding: 6px 14px 6px 12px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2, var(--ink));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 1px 2px -1px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease,
+    border-color 140ms ease;
+}
+.titlebar__restyle:hover {
+  background: var(--hi);
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+.titlebar__restyle svg {
+  color: var(--accent);
+}
+
+.titlebar__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 14px 14px 12px;
+  min-width: 360px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 20px 50px -18px rgba(0, 0, 0, 0.32),
+    0 4px 12px -6px rgba(0, 0, 0, 0.14);
+  animation: titlebar-pop-in 140ms ease;
+}
+@keyframes titlebar-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.titlebar__pop h5 {
+  margin: 0 0 10px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.titlebar__pop h5::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+.titlebar__pop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.titlebar__sw {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.titlebar__sw:hover {
+  background: var(--bg-2, var(--bg));
+}
+.titlebar__sw--active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.titlebar__sw-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 8px);
+  gap: 2px;
+}
+.titlebar__sw-strip i {
+  display: block;
+  height: 22px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.titlebar__sw-name {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+.titlebar__sw--active .titlebar__sw-name {
+  color: var(--accent);
+  font-weight: 600;
 }

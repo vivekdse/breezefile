@@ -25,17 +25,30 @@ function glyphFor(e: Entry): string {
   return '·';
 }
 
-function colorVarFor(e: Entry): string {
-  if (e.kind === 'dir') return 'var(--type-dir)';
-  if (e.kind === 'link') return 'var(--type-link)';
-  if (e.kind === 'exec') return 'var(--type-exec)';
+/**
+ * Per-type row modifier class — drives the glyph tint in FileRow.css.
+ * Editorial: different hues for dir / image / film / code / link / exec /
+ * archive, with plain entries left at muted ink. CSS owns the colors so
+ * theme switching stays centralized.
+ */
+function typeClassFor(e: Entry): string {
+  if (e.kind === 'dir') return 'row--folder';
+  if (e.kind === 'link') return 'row--link';
+  if (e.kind === 'exec') return 'row--exec';
   switch (e.ext) {
     case 'png':
     case 'jpg':
     case 'jpeg':
     case 'gif':
     case 'webp':
-      return 'var(--type-image)';
+    case 'svg':
+      return 'row--image';
+    case 'mp4':
+    case 'mov':
+    case 'webm':
+    case 'mkv':
+    case 'avi':
+      return 'row--film';
     case 'ts':
     case 'tsx':
     case 'js':
@@ -46,13 +59,13 @@ function colorVarFor(e: Entry): string {
     case 'go':
     case 'md':
     case 'sh':
-      return 'var(--type-code)';
+      return 'row--code';
     case 'zip':
     case 'tar':
     case 'gz':
-      return 'var(--type-archive)';
+      return 'row--archive';
     default:
-      return 'var(--fg-2)';
+      return '';
   }
 }
 
@@ -73,6 +86,7 @@ export function FileRow({
 
   const cls = [
     'row',
+    typeClassFor(entry),
     selected && (activeColumn ? 'row--selected' : 'row--selected-inactive'),
     marked && 'row--marked',
     yanked && 'row--yanked',
@@ -242,12 +256,12 @@ export function FileRow({
       >
         {marked ? '☑' : '☐'}
       </span>
-      <span className="row__glyph" style={{ color: colorVarFor(entry) }}>
+      <span className="row__glyph">
         {marked ? '✓' : glyphFor(entry)}
       </span>
       <span className="row__name">
         {entry.name}
-        {tag && <span className="row__tag" style={{ color: colorVarFor(entry) }}>•{tag}</span>}
+        {tag && <span className="row__tag">•{tag}</span>}
       </span>
       <span className="row__meta">
         {entry.kind !== 'dir' && formatSize(entry.size)}
