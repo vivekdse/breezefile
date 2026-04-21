@@ -48,21 +48,30 @@ interface PreviewBodyProps {
 
 function PreviewBody({ entry, tag }: PreviewBodyProps) {
   const kind = classify(entry);
-  const [thumb, setThumb] = useState<string | null>(null);
+  const [imgFailed, setImgFailed] = useState(false);
+  const [text, setText] = useState<
+    { content: string; truncated: boolean; error?: string } | null
+  >(null);
 
-  // Re-fetch thumbnail whenever selection path or mtime changes.
+  // Reset failure flag when selection changes — otherwise a previous
+  // broken image would hide a perfectly good successor.
   useEffect(() => {
-    if (kind !== 'image') {
-      setThumb(null);
+    setImgFailed(false);
+  }, [entry.path, entry.mtimeMs]);
+
+  // Load a short prefix of text-like files (max ~40KB) for inline preview.
+  useEffect(() => {
+    if (kind !== 'text' && kind !== 'sheet') {
+      setText(null);
       return;
     }
     let cancelled = false;
-    fm.thumb(entry.path, 480)
-      .then((p) => {
-        if (!cancelled) setThumb(p);
+    fm.readTextFile(entry.path, 40 * 1024)
+      .then((r) => {
+        if (!cancelled) setText(r);
       })
-      .catch(() => {
-        if (!cancelled) setThumb(null);
+      .catch((err) => {
+        if (!cancelled) setText({ content: '', truncated: false, error: String(err) });
       });
     return () => {
       cancelled = true;
@@ -70,13 +79,42 @@ function PreviewBody({ entry, tag }: PreviewBodyProps) {
   }, [entry.path, entry.mtimeMs, kind]);
 
   const isFav = tag === '*' || tag === 'f';
+  const showImage = kind === 'image' && !imgFailed;
+  const showText = kind === 'text' || kind === 'sheet';
 
   return (
     <section className="preview" aria-label="Preview">
-      {/* Plate — photo or typed-icon placeholder at the same aspect */}
+      {/* Plate — actual image, text excerpt, or typed-icon fallback.
+          Images load directly via file:// so SVG / large photos render at
+          full fidelity (CSP already allows img-src file:). Text-like files
+          show their first ~40KB in a mono excerpt so you don't have to
+          open them to peek at contents. Binary / unsupported kinds keep
+          the typed-icon placeholder so the pane doesn't jump size. */}
       <div className="preview__plate">
-        {kind === 'image' && thumb ? (
-          <img src={`file://${thumb}`} alt="" className="preview__img" />
+        {showImage ? (
+          <img
+            src={fm.fileUrl(entry.path)}
+            alt=""
+            className="preview__img"
+            onError={() => setImgFailed(true)}
+          />
+        ) : showText ? (
+          <div className="preview__text" aria-label={`${kind} file excerpt`}>
+            {text === null ? (
+              <div className="preview__text-empty">Loading…</div>
+            ) : text.error ? (
+              <div className="preview__text-empty">Couldn't read file</div>
+            ) : (
+              <>
+                <pre className="preview__text-pre">{text.content}</pre>
+                {text.truncated && (
+                  <div className="preview__text-trunc">
+                    Showing first 40 KB · file is larger
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         ) : (
           <div
             className={`preview__placeholder preview__placeholder--${kind}`}

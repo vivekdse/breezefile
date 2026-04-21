@@ -248,6 +248,45 @@ export function registerIpc() {
     return thumbnailFor(expandHome(p), size);
   });
 
+  // Read a text-like file for the preview pane. Caps at `maxBytes` (default
+  // 40 KB) to avoid stalling the UI on huge logs / JSON blobs. Returns the
+  // decoded utf8 content plus flags so the renderer can show a "truncated"
+  // hint. Errors (binary, unreadable) surface as { content: '', error }.
+  ipcMain.handle(
+    'fs:readTextFile',
+    async (
+      _e,
+      p: string,
+      maxBytes = 40 * 1024,
+    ): Promise<{ content: string; truncated: boolean; bytes: number; error?: string }> => {
+      const abs = expandHome(p);
+      let fh: import('node:fs/promises').FileHandle | null = null;
+      try {
+        const st = await fs.stat(abs);
+        fh = await fs.open(abs, 'r');
+        const cap = Math.min(st.size, maxBytes);
+        const buf = Buffer.alloc(cap);
+        const { bytesRead } = await fh.read(buf, 0, cap, 0);
+        const slice = buf.subarray(0, bytesRead);
+        const content = slice.toString('utf8');
+        return {
+          content,
+          truncated: st.size > maxBytes,
+          bytes: st.size,
+        };
+      } catch (err) {
+        return {
+          content: '',
+          truncated: false,
+          bytes: 0,
+          error: (err as Error).message,
+        };
+      } finally {
+        await fh?.close().catch(() => {});
+      }
+    },
+  );
+
   ipcMain.handle('editor:bulkRename', async (_e, names: string[]) => {
     const tmp = path.join(os.tmpdir(), `fm-rename-${Date.now()}.txt`);
     await fs.writeFile(tmp, names.join('\n') + '\n', 'utf8');

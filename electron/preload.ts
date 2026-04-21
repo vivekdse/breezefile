@@ -26,6 +26,20 @@ const fm = {
   clipboardWrite: (p: string) => ipcRenderer.invoke('shell:clipboardWrite', p),
   thumb: (p: string, size: number) =>
     ipcRenderer.invoke('thumb:get', p, size) as Promise<string | null>,
+  readTextFile: (p: string, maxBytes?: number) =>
+    ipcRenderer.invoke('fs:readTextFile', p, maxBytes) as Promise<{
+      content: string;
+      truncated: boolean;
+      bytes: number;
+      error?: string;
+    }>,
+  // Encode an absolute path into a safe file:// URL for <img src>. Keeps
+  // the scheme in the renderer (CSP allows img-src file:) without needing
+  // another IPC round-trip per selection.
+  fileUrl: (p: string): string => {
+    const parts = p.split('/').map((seg) => encodeURIComponent(seg));
+    return 'file://' + parts.join('/');
+  },
   bulkRename: (names: string[]) =>
     ipcRenderer.invoke('editor:bulkRename', names) as Promise<string[]>,
   dragStart: (paths: string[]) => ipcRenderer.send('drag:start', paths),

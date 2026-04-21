@@ -25,6 +25,11 @@ type Fm = {
   openWith: (p: string, appName: string) => Promise<void>;
   clipboardWrite: (p: string) => Promise<void>;
   thumb: (p: string, size: number) => Promise<string | null>;
+  readTextFile: (
+    p: string,
+    maxBytes?: number,
+  ) => Promise<{ content: string; truncated: boolean; bytes: number; error?: string }>;
+  fileUrl: (p: string) => string;
   bulkRename: (names: string[]) => Promise<string[]>;
   dragStart: (paths: string[]) => void;
   findFolders: (query: string, limit?: number) => Promise<string[]>;

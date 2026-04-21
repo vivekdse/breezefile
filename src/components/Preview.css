@@ -62,9 +62,58 @@
 .preview__img {
   display: block;
   width: 100%;
+  max-height: 420px;
   height: auto;
+  object-fit: contain;
+  background: var(--panel);
   filter: saturate(1.02) contrast(1.03);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* Text excerpt plate — mono, scrollable, shares the plate's framed feel.
+   Height matches the image plate so switching selections doesn't jostle
+   the layout. */
+.preview__text {
+  aspect-ratio: 4 / 5;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--panel);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) inset;
+  padding: 12px 14px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--panel-ink, var(--ink));
+}
+.preview__text-pre {
+  margin: 0;
+  white-space: pre;
+  tab-size: 2;
+  font: inherit;
+  color: inherit;
+}
+.preview__text-empty {
+  color: var(--muted);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+.preview__text-trunc {
+  position: sticky;
+  bottom: -12px;
+  margin: 8px -14px -12px;
+  padding: 6px 14px;
+  background: var(--chip);
+  color: var(--muted);
+  font-family: var(--font-sans, system-ui);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-top: 1px solid var(--rule-soft);
 }
 
 /* Placeholder plate for non-image kinds — same aspect ratio as an image,
