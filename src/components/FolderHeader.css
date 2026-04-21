@@ -1,0 +1,75 @@
+/*
+ * FolderHeader — editorial header block at the top of the main pane.
+ * Ported from design-assets/inspirations/themes.html .header.
+ *
+ * Sits inside .shell__main above FolderList. The shell already paints the
+ * recessed plate (inner shadow + accent glow); we stay on a transparent
+ * background so that treatment shows through.
+ */
+
+.folder-header {
+  position: relative;
+  z-index: 1;
+  padding: 30px 40px 10px;
+  flex-shrink: 0;
+}
+
+/* Kicker — uppercase, tracked, muted meta line. */
+.folder-header__kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.folder-header__kicker-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.folder-header__sep {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+/* Big Fraunces folder headline. */
+.folder-header__title {
+  font-family: var(--font-serif);
+  font-variation-settings: 'opsz' 144;
+  font-weight: 600;
+  font-size: 58px;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  margin: 6px 0 10px;
+  color: var(--ink);
+  word-break: break-word;
+}
+/* Trailing token — the year / version in "Travel 2026" style — rendered
+   in the theme accent. */
+.folder-header__title-accent {
+  color: var(--accent);
+}
+
+/* Italic-serif dek — a short factual sentence beneath the title.
+   fm-cyd will replace this with a richer breakdown; the structural slot
+   is already here. */
+.folder-header__dek {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 17px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  max-width: 620px;
+  font-feature-settings: 'onum' on;
+  margin: 0;
+}

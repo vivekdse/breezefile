@@ -3,6 +3,7 @@ import { OverlayCtx, type OverlayApi, type RenameMode } from './overlays';
 import { Titlebar } from './components/Titlebar';
 import { Pathbar } from './components/Pathbar';
 import { FolderList } from './components/FolderList';
+import { FolderHeader } from './components/FolderHeader';
 import { Preview } from './components/Preview';
 import { Sidebar } from './components/Sidebar';
 import { Statusbar } from './components/Statusbar';
@@ -99,6 +100,7 @@ function Shell() {
           view per fm-ehb) fills it. MillerColumns remains in the tree for a
           future optional view mode. */}
       <main className="shell__main">
+        <FolderHeader />
         <FolderList />
       </main>
       {/* preview slot — Preview (fm-fda) fills the reserved 340px slot. */}
