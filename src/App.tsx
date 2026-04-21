@@ -8,6 +8,7 @@ import { Tabbar } from './components/Tabbar';
 import { ModeLine } from './components/ModeLine';
 import { Settings } from './components/Settings';
 import { ChipPrompt } from './components/ChipPrompt';
+import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
@@ -77,6 +78,7 @@ function Shell() {
 
   return (
     <OverlayCtx.Provider value={overlayApi}><div className="app">
+      <IconSprite />
       <Titlebar />
       <Tabbar />
       <Pathbar
