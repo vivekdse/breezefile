@@ -5,8 +5,9 @@
 
 :root {
   /* Type */
-  --font-sans: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont,
-    'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Inter Tight', 'Inter', ui-sans-serif, -apple-system,
+    BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Fraunces', 'Iowan Old Style', 'Hoefler Text', Georgia, serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
 
   /* Bumped one step up throughout for better legibility on big monitors. */
@@ -172,6 +173,250 @@
 
   --shadow-1: 0 1px 2px rgba(20, 40, 70, 0.08);
   --shadow-2: 0 8px 24px rgba(20, 40, 70, 0.14);
+}
+
+/* ============================================================
+   Paper-family editorial palettes — ported from design-assets/inspirations/themes.html.
+   These are additive tokens (--bg, --panel, --ink, --accent, --hi, etc.) that
+   coexist with the --bg-0/--fg-1 system above. Components will migrate to the
+   editorial tokens as the mockup-adoption beads land.
+
+   Invariants (enforced by every palette below):
+     - --bg (canvas / center) is noticeably darker than --panel (chrome).
+       Content reads as a framed, recessed plate inside the paper chrome.
+     - --accent is reserved for headline, selection, primary button only.
+       --accent-2 is decorative.
+     - --hi is a tint of --accent, so selection gradients stay on-hue.
+   ============================================================ */
+
+:root,
+:root[data-theme='paper'] {
+  --bg: #ebe3ce;
+  --bg-2: #e4dbc1;
+  --panel: #fbf6ea;
+  --panel-2: #ece4d1;
+  --ink: #1c1814;
+  --ink-2: #3b342a;
+  --muted: #857c6b;
+  --rule: #d9cfb7;
+  --rule-soft: rgba(28, 24, 20, 0.06);
+  --accent: #a3391a;
+  --accent-2: #7a3ea1;
+  --accent-soft: rgba(163, 57, 26, 0.1);
+  --hi: #fdeccf;
+  --chip: #e6dcc4;
+  --hero-tint: #e8b87a;
+  --grain-r: 0.11;
+  --grain-g: 0.09;
+  --grain-b: 0.07;
+  --accent-ink: #fff9ea;
+}
+
+:root[data-theme='pastel'] {
+  --bg: #f1dfd9;
+  --bg-2: #e9d4cd;
+  --panel: #fef8f6;
+  --panel-2: #f0e5e1;
+  --ink: #2e1f24;
+  --ink-2: #4a3a3f;
+  --muted: #9a848a;
+  --rule: #e9d9d6;
+  --rule-soft: rgba(46, 31, 36, 0.07);
+  --accent: #b56b7c;
+  --accent-2: #8a4859;
+  --accent-soft: rgba(181, 107, 124, 0.12);
+  --hi: #f7d9db;
+  --chip: #efdfdc;
+  --hero-tint: #e0a099;
+  --grain-r: 0.16;
+  --grain-g: 0.11;
+  --grain-b: 0.13;
+  --accent-ink: #ffffff;
+}
+
+:root[data-theme='feminism'] {
+  --bg: #e7dde4;
+  --bg-2: #ded3dc;
+  --panel: #f9f5f8;
+  --panel-2: #ebe3eb;
+  --ink: #2a2330;
+  --ink-2: #4a3d52;
+  --muted: #8f819a;
+  --rule: #ddd1de;
+  --rule-soft: rgba(42, 35, 48, 0.07);
+  --accent: #c04673;
+  --accent-2: #8697d6;
+  --accent-soft: rgba(192, 70, 115, 0.1);
+  --hi: #f0c6d3;
+  --chip: #ebdae0;
+  --hero-tint: #ddb7a0;
+  --grain-r: 0.16;
+  --grain-g: 0.13;
+  --grain-b: 0.18;
+  --accent-ink: #ffffff;
+}
+
+:root[data-theme='orchid'] {
+  --bg: #f0cfcb;
+  --bg-2: #e7c0bc;
+  --panel: #fef6f4;
+  --panel-2: #efd9d5;
+  --ink: #2a1a20;
+  --ink-2: #4a2e36;
+  --muted: #8e6d74;
+  --rule: #ebcdca;
+  --rule-soft: rgba(42, 26, 32, 0.08);
+  --accent: #7a1f2f;
+  --accent-2: #c2546a;
+  --accent-soft: rgba(122, 31, 47, 0.1);
+  --hi: #f2b2ac;
+  --chip: #f2cfcb;
+  --hero-tint: #ecb0a2;
+  --grain-r: 0.18;
+  --grain-g: 0.10;
+  --grain-b: 0.12;
+  --accent-ink: #fde4e0;
+}
+
+:root[data-theme='garden'] {
+  --bg: #f2d9cf;
+  --bg-2: #e9cbbf;
+  --panel: #fcf1ed;
+  --panel-2: #e8d7d0;
+  --ink: #1e2a22;
+  --ink-2: #2f4237;
+  --muted: #6e7f72;
+  --rule: #d8c5be;
+  --rule-soft: rgba(30, 42, 34, 0.08);
+  --accent: #2f5a3e;
+  --accent-2: #d87791;
+  --accent-soft: rgba(47, 90, 62, 0.1);
+  --hi: #b5d1bf;
+  --chip: #e8dad5;
+  --hero-tint: #cfa38e;
+  --grain-r: 0.12;
+  --grain-g: 0.14;
+  --grain-b: 0.11;
+  --accent-ink: #fcf1ed;
+}
+
+:root[data-theme='linen'] {
+  --bg: #dcd5c0;
+  --bg-2: #d3cbb2;
+  --panel: #f1ecdf;
+  --panel-2: #e3dccb;
+  --ink: #2f2c25;
+  --ink-2: #4e4a3f;
+  --muted: #857f6f;
+  --rule: #cfc7b3;
+  --rule-soft: rgba(47, 44, 37, 0.08);
+  --accent: #7d8a6e;
+  --accent-2: #a86d6d;
+  --accent-soft: rgba(125, 138, 110, 0.14);
+  --hi: #c8d2b6;
+  --chip: #d9d2bf;
+  --hero-tint: #bfb8a6;
+  --grain-r: 0.18;
+  --grain-g: 0.17;
+  --grain-b: 0.14;
+  --accent-ink: #f1ecdf;
+}
+
+:root[data-theme='sakura'] {
+  --bg: #ecd9da;
+  --bg-2: #e3cbcd;
+  --panel: #fbf4f4;
+  --panel-2: #f5e8e8;
+  --ink: #2b2022;
+  --ink-2: #4a3d40;
+  --muted: #8f7d80;
+  --rule: #ebd9da;
+  --rule-soft: rgba(43, 32, 34, 0.08);
+  --accent: #b26a6a;
+  --accent-2: #4a3d40;
+  --accent-soft: rgba(178, 106, 106, 0.12);
+  --hi: #ecbdbd;
+  --chip: #f0dcdc;
+  --hero-tint: #d89999;
+  --grain-r: 0.17;
+  --grain-g: 0.12;
+  --grain-b: 0.13;
+  --accent-ink: #fff2f3;
+}
+
+/* Dawn — light counterpart to Dusk: peach accent, warm gold, lavender
+   hero-tint, plum ink, with the framed invariant preserved. */
+:root[data-theme='dawn'] {
+  --bg: #ecdfe3;
+  --bg-2: #e1d3d8;
+  --panel: #faf2f2;
+  --panel-2: #efe3e5;
+  --ink: #2b2032;
+  --ink-2: #4a3d45;
+  --muted: #8a757f;
+  --rule: #e3d2d7;
+  --rule-soft: rgba(43, 32, 50, 0.07);
+  --accent: #c85b40;
+  --accent-2: #b8902f;
+  --accent-soft: rgba(200, 91, 64, 0.12);
+  --hi: #fad9cc;
+  --chip: #ece1e3;
+  --hero-tint: #8b5da0;
+  --grain-r: 0.15;
+  --grain-g: 0.10;
+  --grain-b: 0.13;
+  --accent-ink: #fff5ef;
+}
+
+/* Feminism Night — inverted lightness: chrome goes dark plum so the
+   blush canvas pops forward. --panel-ink / --panel-muted keep text
+   legible on the dark chrome while --ink stays dark-on-light. */
+:root[data-theme='feminism-night'] {
+  --bg: #faeff2;
+  --bg-2: #f1e0e6;
+  --panel: #2a1a30;
+  --panel-2: #3a2440;
+  --panel-ink: #f1ddea;
+  --panel-muted: #b098ac;
+  --panel-rule: #4a3150;
+  --ink: #2a1830;
+  --ink-2: #4a2d52;
+  --muted: #8a7086;
+  --rule: #e6d3dc;
+  --rule-soft: rgba(42, 24, 48, 0.07);
+  --accent: #c1378b;
+  --accent-2: #e6c070;
+  --accent-soft: rgba(193, 55, 139, 0.14);
+  --hi: #f7b8d1;
+  --chip: #efdae3;
+  --hero-tint: #d88eab;
+  --grain-r: 0.16;
+  --grain-g: 0.11;
+  --grain-b: 0.14;
+  --accent-ink: #ffffff;
+}
+
+/* Dusk — dark mode. Invariant holds: center still darker than chrome. */
+:root[data-theme='dusk'] {
+  --bg: #150d1c;
+  --bg-2: #1d1424;
+  --panel: #2b2032;
+  --panel-2: #352737;
+  --ink: #f1e4e8;
+  --ink-2: #d6c6cc;
+  --muted: #9a8b94;
+  --rule: rgba(241, 228, 232, 0.10);
+  --rule-soft: rgba(241, 228, 232, 0.06);
+  --accent: #f4b09a;
+  --accent-2: #e6c070;
+  --accent-soft: rgba(244, 176, 154, 0.15);
+  --hi: rgba(244, 176, 154, 0.25);
+  --chip: rgba(241, 228, 232, 0.08);
+  --hero-tint: #b384c4;
+  --grain-r: 0.9;
+  --grain-g: 0.8;
+  --grain-b: 0.85;
+  --accent-ink: #2d1e0a;
 }
 
 /* Respect user's motion preference — collapse all durations to ~instant.

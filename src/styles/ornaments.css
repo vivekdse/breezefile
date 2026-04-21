@@ -1,0 +1,88 @@
+/*
+ * Ornaments — editorial punctuation shared across panes.
+ *
+ * Ported from design-assets/inspirations/themes.html so that FileRow,
+ * Sidebar, Preview, and headers can all reuse the same fleuron marks
+ * and short rules without duplicating CSS. Each ornament consumes
+ * theme tokens (--rule, --accent, --muted) so it restyles automatically
+ * under Dawn/Dusk/Paper/etc.
+ */
+
+/* Full-width ornament: a centered fleuron flanked by fading hairlines.
+   Used between the header block and the file list. */
+.ornament {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 40px 6px;
+  position: relative;
+  z-index: 1;
+  color: var(--muted);
+}
+.ornament::before,
+.ornament::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--rule), transparent);
+}
+.ornament .mark {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+/* Mini rule: short flanking rules around a fleuron.
+   Used in the preview pane under the H2 to separate title from metadata. */
+.mini-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 10px;
+  color: var(--rule);
+}
+.mini-rule::before,
+.mini-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+.mini-rule span {
+  font-family: var(--font-serif);
+  color: var(--accent);
+  font-size: 13px;
+}
+
+/* Crest: a solitary fleuron glyph at the bottom of the sidebar — a soft
+   editorial signature that closes the column. */
+.crest {
+  text-align: center;
+  margin-top: 28px;
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  letter-spacing: 0.4em;
+  opacity: 0.5;
+}
+
+/* Keyboard hints — monospaced chips used in the statusbar and tooltips. */
+kbd {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 10px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* Oldstyle tabular figures — for metadata columns where numbers must
+   align vertically but should still feel editorial (file sizes, dates). */
+.tnum-oldstyle {
+  font-variant-numeric: oldstyle-nums tabular-nums;
+}
