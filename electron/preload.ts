@@ -33,12 +33,17 @@ const fm = {
       bytes: number;
       error?: string;
     }>,
-  // Encode an absolute path into a safe file:// URL for <img src>. Keeps
-  // the scheme in the renderer (CSP allows img-src file:) without needing
-  // another IPC round-trip per selection.
+  // Encode an absolute path into an asset:// URL for <img src>/<video src>.
+  // The renderer is served from http://localhost in dev, which makes
+  // file:// URLs cross-origin and blocked. A custom app-scoped `asset://`
+  // scheme (registered in electron/main.ts) streams file bytes from disk
+  // with proper Content-Type. Path segments are percent-encoded so names
+  // with spaces / unicode / reserved characters survive URL parsing.
   fileUrl: (p: string): string => {
     const parts = p.split('/').map((seg) => encodeURIComponent(seg));
-    return 'file://' + parts.join('/');
+    // Absolute POSIX paths start with '/', so parts[0] === '' — joining
+    // with '/' yields `asset://` + `/Users/…` = `asset:///Users/…`.
+    return 'asset://' + parts.join('/');
   },
   bulkRename: (names: string[]) =>
     ipcRenderer.invoke('editor:bulkRename', names) as Promise<string[]>,

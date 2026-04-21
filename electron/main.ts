@@ -1,5 +1,5 @@
-import { app, BrowserWindow, shell, Menu } from 'electron';
-import { fileURLToPath } from 'node:url';
+import { app, BrowserWindow, shell, Menu, protocol, net } from 'electron';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 
@@ -8,6 +8,57 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname, '..');
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist');
+
+// In dev the renderer is served from http://localhost:<port>, which makes
+// `<img src="file:///…">` a cross-origin request that Electron blocks even
+// when CSP allows `img-src file:`. Register an app-scoped `asset://` scheme
+// so the renderer can load local files through a proper handler with MIME
+// types. Must be registered before app.whenReady.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'asset',
+    privileges: {
+      secure: true,
+      standard: true,
+      stream: true,
+      supportFetchAPI: true,
+      bypassCSP: false,
+    },
+  },
+]);
+
+const MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+  pdf: 'application/pdf',
+  txt: 'text/plain; charset=utf-8',
+  md: 'text/markdown; charset=utf-8',
+  json: 'application/json; charset=utf-8',
+  csv: 'text/csv; charset=utf-8',
+  log: 'text/plain; charset=utf-8',
+  html: 'text/html; charset=utf-8',
+  xml: 'application/xml; charset=utf-8',
+};
+
+function mimeFor(p: string): string {
+  const ext = path.extname(p).slice(1).toLowerCase();
+  return MIME_BY_EXT[ext] ?? 'application/octet-stream';
+}
 
 let win: BrowserWindow | null = null;
 
@@ -42,6 +93,30 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // asset:///<absolute-path> → stream the file from disk. We delegate to
+  // Electron's `net.fetch` with a file:// URL so we get proper range-request
+  // and streaming semantics for large media, then patch Content-Type.
+  protocol.handle('asset', async (req) => {
+    try {
+      const url = new URL(req.url);
+      // pathname on POSIX is already absolute (leading '/'). Decode percent
+      // escapes for spaces / unicode.
+      const abs = decodeURIComponent(url.pathname);
+      if (!path.isAbsolute(abs)) {
+        return new Response('bad path', { status: 400 });
+      }
+      const fileUrl = pathToFileURL(abs).toString();
+      const res = await net.fetch(fileUrl);
+      if (!res.ok) return res;
+      // net.fetch on file:// doesn't always set a useful Content-Type.
+      const headers = new Headers(res.headers);
+      headers.set('Content-Type', mimeFor(abs));
+      return new Response(res.body, { status: res.status, headers });
+    } catch (err) {
+      return new Response(`not found: ${(err as Error).message}`, { status: 404 });
+    }
+  });
+
   registerIpc();
   buildAppMenu();
   createWindow();

@@ -6,7 +6,7 @@
     <!-- CSP: no external origins. Fonts are bundled as woff2 under
          src/styles/fonts/ and declared in src/styles/fonts.css (bead fm-f2y).
          data: allowed for img (file icons / thumbnails). -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: file:; script-src 'self'; connect-src 'self' ws://localhost:* http://localhost:*" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: asset:; media-src 'self' asset:; script-src 'self'; connect-src 'self' asset: ws://localhost:* http://localhost:*" />
     <title>File Manager</title>
   </head>
   <body>
