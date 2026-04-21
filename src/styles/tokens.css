@@ -217,14 +217,14 @@
   --bg-2: #e9d4cd;
   --panel: #fef8f6;
   --panel-2: #f0e5e1;
-  --ink: #2e1f24;
-  --ink-2: #4a3a3f;
-  --muted: #9a848a;
+  --ink: #1f1418;
+  --ink-2: #3a2a2f;
+  --muted: #715b61;
   --rule: #e9d9d6;
   --rule-soft: rgba(46, 31, 36, 0.07);
-  --accent: #b56b7c;
-  --accent-2: #8a4859;
-  --accent-soft: rgba(181, 107, 124, 0.12);
+  --accent: #8a3347;
+  --accent-2: #6e2c3c;
+  --accent-soft: rgba(138, 51, 71, 0.12);
   --hi: #f7d9db;
   --chip: #efdfdc;
   --hero-tint: #e0a099;
@@ -239,14 +239,14 @@
   --bg-2: #ded3dc;
   --panel: #f9f5f8;
   --panel-2: #ebe3eb;
-  --ink: #2a2330;
-  --ink-2: #4a3d52;
-  --muted: #8f819a;
+  --ink: #1c1422;
+  --ink-2: #3a2d42;
+  --muted: #665870;
   --rule: #ddd1de;
   --rule-soft: rgba(42, 35, 48, 0.07);
-  --accent: #c04673;
-  --accent-2: #8697d6;
-  --accent-soft: rgba(192, 70, 115, 0.1);
+  --accent: #932a55;
+  --accent-2: #5d6fb0;
+  --accent-soft: rgba(147, 42, 85, 0.1);
   --hi: #f0c6d3;
   --chip: #ebdae0;
   --hero-tint: #ddb7a0;
@@ -261,9 +261,9 @@
   --bg-2: #e7c0bc;
   --panel: #fef6f4;
   --panel-2: #efd9d5;
-  --ink: #2a1a20;
-  --ink-2: #4a2e36;
-  --muted: #8e6d74;
+  --ink: #1c0f14;
+  --ink-2: #3a2028;
+  --muted: #77555c;
   --rule: #ebcdca;
   --rule-soft: rgba(42, 26, 32, 0.08);
   --accent: #7a1f2f;
@@ -305,14 +305,14 @@
   --bg-2: #d3cbb2;
   --panel: #f1ecdf;
   --panel-2: #e3dccb;
-  --ink: #2f2c25;
+  --ink: #26241e;
   --ink-2: #4e4a3f;
-  --muted: #857f6f;
+  --muted: #5d5848;
   --rule: #cfc7b3;
   --rule-soft: rgba(47, 44, 37, 0.08);
-  --accent: #7d8a6e;
-  --accent-2: #a86d6d;
-  --accent-soft: rgba(125, 138, 110, 0.14);
+  --accent: #4c5840;
+  --accent-2: #7f4848;
+  --accent-soft: rgba(76, 88, 64, 0.14);
   --hi: #c8d2b6;
   --chip: #d9d2bf;
   --hero-tint: #bfb8a6;
@@ -327,14 +327,14 @@
   --bg-2: #e3cbcd;
   --panel: #fbf4f4;
   --panel-2: #f5e8e8;
-  --ink: #2b2022;
-  --ink-2: #4a3d40;
-  --muted: #8f7d80;
+  --ink: #1d1315;
+  --ink-2: #3d2f32;
+  --muted: #69545a;
   --rule: #ebd9da;
   --rule-soft: rgba(43, 32, 34, 0.08);
-  --accent: #b26a6a;
+  --accent: #883a3f;
   --accent-2: #4a3d40;
-  --accent-soft: rgba(178, 106, 106, 0.12);
+  --accent-soft: rgba(136, 58, 63, 0.12);
   --hi: #ecbdbd;
   --chip: #f0dcdc;
   --hero-tint: #d89999;
@@ -356,9 +356,9 @@
   --muted: #8a757f;
   --rule: #e3d2d7;
   --rule-soft: rgba(43, 32, 50, 0.07);
-  --accent: #c85b40;
-  --accent-2: #b8902f;
-  --accent-soft: rgba(200, 91, 64, 0.12);
+  --accent: #9c3a20;
+  --accent-2: #8a6a20;
+  --accent-soft: rgba(156, 58, 32, 0.12);
   --hi: #fad9cc;
   --chip: #ece1e3;
   --hero-tint: #8b5da0;
@@ -384,16 +384,19 @@
   --muted: #8a7086;
   --rule: #e6d3dc;
   --rule-soft: rgba(42, 24, 48, 0.07);
-  --accent: #c1378b;
+  /* Accent is tuned bright — must hit AA on the dark --panel (selection color
+     on chrome rows). That brightness can't also hit AA on the light --bg, so
+     --accent-ink is set dark-on-accent (button label use) to stay AA. */
+  --accent: #e06aac;
   --accent-2: #e6c070;
-  --accent-soft: rgba(193, 55, 139, 0.14);
+  --accent-soft: rgba(224, 106, 172, 0.18);
   --hi: #f7b8d1;
   --chip: #efdae3;
   --hero-tint: #d88eab;
   --grain-r: 0.16;
   --grain-g: 0.11;
   --grain-b: 0.14;
-  --accent-ink: #ffffff;
+  --accent-ink: #2a1830;
 }
 
 /* Dusk — dark mode. Invariant holds: center still darker than chrome. */
