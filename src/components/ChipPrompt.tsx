@@ -72,6 +72,10 @@ type Option = {
   detail?: string;
   available: boolean;
   reason?: string; // shown on hover when unavailable
+  // Extra strings that should match the filter but aren't shown as the label.
+  // Used for natural synonyms: e.g. the "By extension" sort option aliases
+  // 'type', 'kind', 'filetype' so users who think "sort by file type" find it.
+  aliases?: string[];
 };
 
 type VerbDef = {
@@ -315,8 +319,16 @@ const VERBS: VerbDef[] = [
           { id: 'size|desc', label: 'Biggest first', detail: 'file size', available: true },
           { id: 'size|asc', label: 'Smallest first', available: true },
           { id: 'ctime|desc', label: 'Recently created', available: true },
-          { id: 'type|asc', label: 'Folders first', detail: 'group by type', available: true },
-          { id: 'ext|asc', label: 'By extension', detail: '.pdf, .jpg…', available: true },
+          { id: 'type|asc', label: 'Folders first', detail: 'group folders, links, files', available: true },
+          {
+            id: 'ext|asc',
+            label: 'By extension',
+            detail: '.pdf, .jpg… — also: type, kind, filetype',
+            available: true,
+            // Synonyms: most users say "sort by type" or "by file type" when
+            // they mean by extension. Accept all of those as matches.
+            aliases: ['type', 'file type', 'filetype', 'kind', 'extension', 'ext'],
+          },
         ],
       },
     ],
@@ -699,12 +711,15 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
       .map((o) => {
         const label = o.label.toLowerCase();
         const detail = (o.detail ?? '').toLowerCase();
+        // Verb-picker aliases come from the verb catalog; slot-option aliases
+        // come from the option itself (e.g. 'type'/'kind'/'filetype' on the
+        // 'By extension' sort option).
         const aliases = verb === null
           ? (VERBS.find((v) => v.id === o.id)?.aliases ?? []).map((a) => a.toLowerCase())
-          : [];
-        const haystack = label + ' ' + detail;
+          : (o.aliases ?? []).map((a) => a.toLowerCase());
+        const haystack = label + ' ' + detail + ' ' + aliases.join(' ');
 
-        // Multi-token: require every token to appear in label or detail.
+        // Multi-token: require every token to appear in label, detail, or aliases.
         const everyTokenHits = tokens.every((t) => haystack.includes(t));
         if (!everyTokenHits) return { opt: o, score: -1 };
 
