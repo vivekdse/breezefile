@@ -101,18 +101,85 @@ function latestMtimeLabel(entries: Entry[]): string {
   return new Date(latest).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-/** One-line dek — a light factual summary. Richer type-breakdown copy will
- *  live in fm-cyd (metadata summary line). */
+/** Coarse file-type buckets — grouped for prose readability, not mime
+ *  fidelity. Keep in sync with Preview's classify() if fidelity matters;
+ *  here we stay single-pass and allocation-free. */
+type Bucket = 'image' | 'document' | 'sheet' | 'film' | 'audio' | 'code' | 'other';
+
+const EXT_TO_BUCKET: Record<string, Bucket> = {
+  // images
+  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image',
+  bmp: 'image', tif: 'image', tiff: 'image', heic: 'image', avif: 'image', svg: 'image',
+  // documents
+  pdf: 'document', doc: 'document', docx: 'document', rtf: 'document',
+  txt: 'document', md: 'document', pages: 'document',
+  // sheets
+  csv: 'sheet', tsv: 'sheet', xls: 'sheet', xlsx: 'sheet', numbers: 'sheet',
+  // film
+  mov: 'film', mp4: 'film', m4v: 'film', avi: 'film', mkv: 'film', webm: 'film',
+  // audio
+  mp3: 'audio', wav: 'audio', flac: 'audio', m4a: 'audio', ogg: 'audio', aac: 'audio',
+  // code
+  js: 'code', jsx: 'code', ts: 'code', tsx: 'code', py: 'code', rs: 'code',
+  go: 'code', rb: 'code', sh: 'code', html: 'code', css: 'code', json: 'code',
+  yml: 'code', yaml: 'code', toml: 'code', xml: 'code',
+};
+
+const BUCKET_LABEL: Record<Bucket, [string, string]> = {
+  image:    ['image',    'images'],
+  document: ['document', 'documents'],
+  sheet:    ['sheet',    'sheets'],
+  film:     ['film',     'films'],
+  audio:    ['audio',    'audio files'],
+  code:     ['code file','code files'],
+  other:    ['other',    'other'],
+};
+
+/** One-line dek: "N folders · M files — X images, Y documents, Z films".
+ *  Single pass over the already-loaded entries; no recursive stats. */
 function summarize(entries: Entry[]): string {
   if (entries.length === 0) return 'An empty folder.';
+
   let dirs = 0;
   let files = 0;
+  const buckets: Record<Bucket, number> = {
+    image: 0, document: 0, sheet: 0, film: 0, audio: 0, code: 0, other: 0,
+  };
+
   for (const e of entries) {
-    if (e.kind === 'dir') dirs += 1;
-    else files += 1;
+    if (e.kind === 'dir') {
+      dirs += 1;
+      continue;
+    }
+    files += 1;
+    const ext = (e.ext || '').toLowerCase().replace(/^\./, '');
+    const bucket = EXT_TO_BUCKET[ext] ?? 'other';
+    buckets[bucket] += 1;
   }
+
+  // "3 folders · 7 files" lead.
   const dirPart = dirs === 0 ? '' : `${dirs} ${dirs === 1 ? 'folder' : 'folders'}`;
   const filePart = files === 0 ? '' : `${files} ${files === 1 ? 'file' : 'files'}`;
-  if (dirPart && filePart) return `${dirPart}, ${filePart}.`;
-  return `${dirPart || filePart}.`;
+  const lead = [dirPart, filePart].filter(Boolean).join(' · ');
+
+  if (files === 0) return `${lead}.`;
+
+  // Breakdown — skip empty buckets; present in rough semantic priority.
+  const order: Bucket[] = ['image', 'document', 'sheet', 'film', 'audio', 'code', 'other'];
+  const parts: string[] = [];
+  for (const b of order) {
+    const n = buckets[b];
+    if (n === 0) continue;
+    const [one, many] = BUCKET_LABEL[b];
+    parts.push(`${n} ${n === 1 ? one : many}`);
+  }
+  if (parts.length === 0) return `${lead}.`;
+  return `${lead} — ${joinNatural(parts)}.`;
+}
+
+/** "a, b, and c" / "a and b" / "a". No Oxford comma for tight prose. */
+function joinNatural(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? '';
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 }
