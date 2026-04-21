@@ -1,17 +1,30 @@
-/* ChipPrompt — sentence-chip command overlay */
+/*
+ * ChipPrompt — verb-first sentence-chip command palette (invoked by :, !, ⌘K).
+ *
+ * Migrated from legacy --bg-0/--fg-* tokens to editorial tokens so the palette
+ * reads like the rest of the chrome: paper surfaces (--panel), ink typography
+ * (--ink + Fraunces headline / Inter Tight body), accent-tinted selection
+ * (--accent / --accent-soft / --hi), chord pills on --chip, rules via --rule.
+ *
+ * Dark-panel variants (dusk, feminism-night) follow the same
+ * translucent-white-on-dark pattern as Titlebar / Pathbar so the palette
+ * always feels like a themed, framed object — a lift of the paper.
+ */
 
 .chip-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(10, 10, 24, 0.72);
+  /* Scrim tinted from --ink so it reads like the rest of the editorial
+     chrome rather than a generic dark-mode veil. */
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 14vh;
-  z-index: 2000;
-  animation: chipFade 0.14s ease-out;
+  z-index: var(--z-overlay);
+  animation: chipFade var(--motion-hover);
 }
 
 @keyframes chipFade {
@@ -21,14 +34,16 @@
 
 .chip-overlay__box {
   width: min(640px, 92vw);
-  background: var(--bg-1, #1e1e38);
-  border: 1px solid var(--border-2, #2d2d54);
-  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-xl);
   box-shadow:
-    0 24px 80px rgba(0,0,0,0.55),
-    0 0 0 1px rgba(124, 58, 237, 0.12);
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 24px 60px -20px rgba(0, 0, 0, 0.35),
+    0 6px 18px -8px rgba(0, 0, 0, 0.18);
   padding: 22px 24px 18px;
-  animation: chipBoxIn 0.18s ease-out;
+  color: var(--panel-ink, var(--ink));
+  animation: chipBoxIn var(--motion-enter);
 }
 
 @keyframes chipBoxIn {
@@ -50,50 +65,60 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 16px;
-  border-radius: 20px;
-  font-size: 14px;
-  font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif);
-  font-weight: 500;
-  border: 1.5px solid transparent;
-  transition: all 0.2s ease;
+  padding: 6px 16px;
+  border-radius: 100px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  transition: background var(--motion-hover),
+    color var(--motion-hover),
+    border-color var(--motion-hover),
+    box-shadow var(--motion-hover);
   min-width: 80px;
   justify-content: center;
   position: relative;
 }
 
 .chip--placeholder {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: #6272a4;
+  background: var(--chip);
+  border-color: var(--rule);
+  color: var(--muted);
+  font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
 }
 
 .chip--active {
-  background: #7c3aed;
-  border-color: #7c3aed;
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink, #fff);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: -0.005em;
   box-shadow:
-    0 0 18px rgba(124, 58, 237, 0.45),
-    0 2px 8px rgba(0, 0, 0, 0.3);
+    0 0 0 3px var(--accent-soft),
+    0 2px 6px -2px rgba(0, 0, 0, 0.2);
 }
 
 .chip--completed {
-  background: #2a2a4a;
-  border-color: #3d3d6b;
-  color: #e0e0e0;
+  background: var(--hi);
+  border-color: var(--accent-soft);
+  color: var(--accent);
 }
 
 .chip--completed::after {
   content: '✓';
   font-size: 11px;
   margin-left: 4px;
-  color: #7c3aed;
+  color: var(--accent);
+  opacity: 0.75;
 }
 
 .chip__placeholder-caret {
-  opacity: 0.5;
+  opacity: 0.55;
   font-size: 12px;
 }
 
@@ -104,15 +129,18 @@
   gap: 10px;
   margin-bottom: 10px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  transition: border-color 0.15s ease;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: border-color var(--motion-focus-ring),
+    box-shadow var(--motion-focus-ring);
 }
 
 .chip-input-row:focus-within {
-  border-color: rgba(124, 58, 237, 0.4);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent-soft);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05),
+    0 0 0 3px var(--accent-soft);
 }
 
 .chip-input {
@@ -120,22 +148,26 @@
   background: transparent;
   border: 0;
   outline: 0;
-  color: var(--fg-1, #e0e0e0);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 14px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  letter-spacing: -0.005em;
 }
 
 .chip-input::placeholder {
-  color: #6272a4;
+  color: var(--muted);
+  font-family: var(--font-serif);
   font-style: italic;
 }
 
 .chip-slot-label {
+  font-family: var(--font-sans);
   font-size: 10px;
-  letter-spacing: 1.2px;
-  color: #7c3aed;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--accent);
   font-weight: 600;
-  opacity: 0.75;
+  opacity: 0.85;
 }
 
 /* ── Options list ─────────────────────────────────────────── */
@@ -153,20 +185,21 @@
   align-items: center;
   gap: 12px;
   padding: 9px 12px;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--r-md);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
   cursor: pointer;
-  transition: background 0.08s ease;
+  transition: background var(--motion-hover), color var(--motion-hover);
   position: relative;
 }
 
 .chip-option:hover:not(.chip-option--disabled) {
-  background: rgba(124, 58, 237, 0.12);
+  background: var(--accent-soft);
 }
 
 .chip-option--highlighted {
-  background: rgba(124, 58, 237, 0.2) !important;
-  color: #fff;
+  background: var(--hi) !important;
+  color: var(--accent);
 }
 
 .chip-option--highlighted::before {
@@ -176,12 +209,12 @@
   top: 10%;
   bottom: 10%;
   width: 3px;
-  background: #7c3aed;
+  background: var(--accent);
   border-radius: 0 3px 3px 0;
 }
 
 .chip-option--disabled {
-  opacity: 0.38;
+  opacity: 0.42;
   cursor: not-allowed;
 }
 
@@ -190,7 +223,8 @@
 }
 
 .chip-option--empty {
-  color: #6272a4;
+  color: var(--muted);
+  font-family: var(--font-serif);
   font-style: italic;
   justify-content: center;
   cursor: default;
@@ -203,17 +237,25 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: rgba(124, 58, 237, 0.22);
-  color: #b794f6;
+  background: var(--chip);
+  border: 1px solid var(--rule);
+  color: var(--ink-2, var(--ink));
   font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-family: var(--font-mono);
+}
+
+.chip-option--highlighted .chip-badge {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink, #fff);
 }
 
 .chip-option--disabled .chip-badge {
-  background: rgba(255, 255, 255, 0.06);
-  color: #555;
+  background: var(--chip);
+  color: var(--muted);
+  opacity: 0.6;
 }
 
 .chip-option__body {
@@ -225,16 +267,23 @@
 }
 
 .chip-option__label {
-  color: var(--fg-1, #e0e0e0);
+  color: var(--ink);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.chip-option--highlighted .chip-option__label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .chip-option__detail {
-  color: #6272a4;
-  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: var(--fs-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -242,7 +291,7 @@
 
 .chip-option__lock {
   font-size: 14px;
-  color: #666;
+  color: var(--muted);
   flex-shrink: 0;
 }
 
@@ -250,33 +299,35 @@
 .chip-preview {
   margin-top: 12px;
   padding: 10px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 12px;
+  border-top: 1px solid var(--rule);
+  font-size: var(--fs-xs);
   min-height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  transition: color 0.15s ease;
+  transition: color var(--motion-hover);
 }
 
 .chip-preview__text {
-  color: #8b8baf;
+  color: var(--muted);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  letter-spacing: -0.005em;
 }
 
 .chip-preview__reason {
-  color: #f6b74a;
+  color: var(--accent);
   display: flex;
   align-items: center;
   gap: 8px;
+  font-family: var(--font-sans);
   animation: chipShake 0.25s ease-out;
 }
 
 .chip-preview__icon {
   font-size: 14px;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 @keyframes chipShake {
@@ -291,54 +342,104 @@
   justify-content: center;
   gap: 18px;
   margin-top: 10px;
+  font-family: var(--font-sans);
   font-size: 11px;
-  color: #4a4a6a;
+  color: var(--muted);
   flex-wrap: wrap;
 }
 
 .chip-hints kbd {
   display: inline-block;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  background: var(--chip);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
   padding: 1px 6px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-family: var(--font-mono);
   font-size: 10px;
   margin: 0 1px;
-  color: #b8b8cf;
+  color: var(--ink-2, var(--ink));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 1px 0 rgba(0, 0, 0, 0.06);
 }
 
-/* Light theme adjustments */
-[data-theme='light'] .chip-overlay__box {
-  background: #ffffff;
-  border-color: #e0e0e5;
+/* ── Dark-panel variants ──────────────────────────────────────
+   Dusk / Feminism-night use dark chrome panels. Follow the same
+   translucent-white treatment used by Titlebar/Pathbar so inputs,
+   chips, and kbd pills stay readable on --panel dark plum. */
+[data-theme='dusk'] .chip-overlay__box,
+[data-theme='feminism-night'] .chip-overlay__box {
+  color: var(--panel-ink, var(--ink));
+  border-color: var(--panel-rule, var(--rule));
 }
 
-[data-theme='light'] .chip--placeholder {
-  background: #f4f4f7;
-  border-color: #e0e0e5;
-  color: #888;
+[data-theme='dusk'] .chip-input-row,
+[data-theme='feminism-night'] .chip-input-row {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--panel-rule, var(--rule));
 }
 
-[data-theme='light'] .chip--completed {
-  background: #f0f0f5;
-  border-color: #d8d8df;
-  color: #333;
+[data-theme='dusk'] .chip-input,
+[data-theme='feminism-night'] .chip-input {
+  color: var(--panel-ink, var(--ink));
 }
 
-[data-theme='light'] .chip-input-row {
-  background: #f8f8fb;
-  border-color: #e5e5ea;
+[data-theme='dusk'] .chip-input::placeholder,
+[data-theme='feminism-night'] .chip-input::placeholder,
+[data-theme='dusk'] .chip-option--empty,
+[data-theme='feminism-night'] .chip-option--empty {
+  color: var(--panel-muted, var(--muted));
 }
 
-[data-theme='light'] .chip-input {
-  color: #1a1a2e;
+[data-theme='dusk'] .chip--placeholder,
+[data-theme='feminism-night'] .chip--placeholder {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--panel-rule, var(--rule));
+  color: var(--panel-muted, var(--muted));
 }
 
-[data-theme='light'] .chip-option__label {
-  color: #1a1a2e;
+[data-theme='dusk'] .chip--completed,
+[data-theme='feminism-night'] .chip--completed {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  color: var(--accent);
 }
 
-[data-theme='light'] .chip-preview__text {
-  color: #666;
+[data-theme='dusk'] .chip-option__label,
+[data-theme='feminism-night'] .chip-option__label {
+  color: var(--panel-ink, var(--ink));
+}
+
+[data-theme='dusk'] .chip-option__detail,
+[data-theme='feminism-night'] .chip-option__detail {
+  color: var(--panel-muted, var(--muted));
+}
+
+[data-theme='dusk'] .chip-badge,
+[data-theme='feminism-night'] .chip-badge {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--panel-rule, var(--rule));
+  color: var(--panel-ink, var(--ink));
+}
+
+[data-theme='dusk'] .chip-hints,
+[data-theme='feminism-night'] .chip-hints {
+  color: var(--panel-muted, var(--muted));
+}
+
+[data-theme='dusk'] .chip-hints kbd,
+[data-theme='feminism-night'] .chip-hints kbd {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--panel-rule, var(--rule));
+  color: var(--panel-ink, var(--ink));
+  box-shadow: none;
+}
+
+[data-theme='dusk'] .chip-preview,
+[data-theme='feminism-night'] .chip-preview {
+  border-top-color: var(--panel-rule, var(--rule));
+}
+
+[data-theme='dusk'] .chip-preview__text,
+[data-theme='feminism-night'] .chip-preview__text {
+  color: var(--panel-muted, var(--muted));
 }

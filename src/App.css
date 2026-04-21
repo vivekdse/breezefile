@@ -155,18 +155,25 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* Bottom command prompt (`:` / `!` colon-prompt) and its completions popover.
+   Editorial tokens — matches the ChipPrompt palette so both command surfaces
+   feel like one system. The prompt sits on --panel-2 (a half-step recessed
+   sub-band, same recipe as Pathbar) with Inter Tight body and an Fraunces
+   italic placeholder. Completions popover is lifted --panel with --rule. */
 .prompt {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-1) var(--sp-4);
-  background: var(--bg-2);
-  border-top: 1px solid var(--border-2);
-  font-family: var(--font-mono);
+  background: var(--panel-2, var(--panel));
+  border-top: 1px solid var(--panel-rule, var(--rule));
+  color: var(--panel-ink, var(--ink));
+  font-family: var(--font-sans);
 }
 
 .prompt__sigil {
   color: var(--accent);
+  font-family: var(--font-mono);
   font-weight: 600;
 }
 
@@ -175,9 +182,15 @@
   background: transparent;
   border: 0;
   outline: 0;
-  color: var(--fg-1);
+  color: var(--panel-ink, var(--ink));
   font-size: var(--fs-md);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
+  letter-spacing: -0.005em;
+}
+.prompt__input::placeholder {
+  color: var(--panel-muted, var(--muted));
+  font-family: var(--font-serif);
+  font-style: italic;
 }
 
 .prompt--with-completions {
@@ -193,15 +206,18 @@
   list-style: none;
   margin: 0;
   padding: var(--sp-1) 0;
-  background: var(--bg-1);
-  border: 1px solid var(--border-2);
+  background: var(--panel);
+  border: 1px solid var(--rule);
   border-bottom: 0;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--r-md) var(--r-md) 0 0;
   max-height: 320px;
   overflow-y: auto;
   animation: pop 0.12s ease-out;
-  box-shadow: 0 -4px 24px rgba(0,0,0,0.3);
-  z-index: 100;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 -10px 28px -10px rgba(0, 0, 0, 0.22);
+  color: var(--panel-ink, var(--ink));
+  z-index: var(--z-overlay);
 }
 
 .prompt__completion {
@@ -210,33 +226,70 @@
   gap: var(--sp-3);
   padding: 6px var(--sp-4);
   cursor: pointer;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fs-sm);
+  color: var(--panel-ink, var(--ink));
+  transition: background var(--motion-hover), color var(--motion-hover);
 }
 
 .prompt__completion:hover,
 .prompt__completion--selected {
-  background: var(--accent-soft);
+  background: var(--hi);
+  color: var(--accent);
 }
 
 .prompt__completion-cmd {
-  color: var(--fg-1);
+  font-family: var(--font-serif);
+  font-style: italic;
   font-weight: 500;
+  letter-spacing: -0.005em;
   min-width: 140px;
 }
 
 .prompt__completion-desc {
-  color: var(--fg-3);
+  color: var(--muted);
+  font-family: var(--font-sans);
   flex: 1;
+}
+
+.prompt__completion:hover .prompt__completion-desc,
+.prompt__completion--selected .prompt__completion-desc {
+  color: var(--ink-2, var(--ink));
 }
 
 .prompt__completion-chord {
   color: var(--accent);
+  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   padding: 1px 6px;
-  border: 1px solid var(--accent-soft);
-  border-radius: 4px;
-  opacity: 0.7;
+  background: var(--chip);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* Dark-panel variants — keep the colon-prompt / completions legible on
+   dusk & feminism-night (chrome goes dark, like Titlebar/Pathbar). */
+[data-theme='dusk'] .prompt__completions,
+[data-theme='feminism-night'] .prompt__completions {
+  background: var(--panel);
+  border-color: var(--panel-rule, var(--rule));
+  color: var(--panel-ink, var(--ink));
+}
+[data-theme='dusk'] .prompt__completion,
+[data-theme='feminism-night'] .prompt__completion {
+  color: var(--panel-ink, var(--ink));
+}
+[data-theme='dusk'] .prompt__completion-desc,
+[data-theme='feminism-night'] .prompt__completion-desc {
+  color: var(--panel-muted, var(--muted));
+}
+[data-theme='dusk'] .prompt__completion-chord,
+[data-theme='feminism-night'] .prompt__completion-chord {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--panel-rule, var(--rule));
+  box-shadow: none;
 }
 
 @keyframes fade {
