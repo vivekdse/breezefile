@@ -23,7 +23,12 @@ export type IconName =
   | 'film'
   | 'drag'
   | 'open'
-  | 'palette';
+  | 'palette'
+  | 'code'
+  | 'archive'
+  | 'app'
+  | 'link'
+  | 'file';
 
 export const ICON_NAMES: readonly IconName[] = [
   'search',
@@ -44,6 +49,11 @@ export const ICON_NAMES: readonly IconName[] = [
   'drag',
   'open',
   'palette',
+  'code',
+  'archive',
+  'app',
+  'link',
+  'file',
 ] as const;
 
 export function IconSprite() {
@@ -235,6 +245,52 @@ export function IconSprite() {
           <circle cx="11" cy="7" r="1.1" fill="currentColor" />
           <circle cx="16" cy="7.5" r="1.1" fill="currentColor" />
           <circle cx="18" cy="12" r="1.1" fill="currentColor" />
+        </g>
+        <g id="i-code">
+          <path
+            d="m8 8-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+        <g id="i-archive">
+          <rect x="3" y="4" width="18" height="4" rx="1" stroke="currentColor" strokeWidth="1.5" fill="none" />
+          <path
+            d="M4 8v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V8"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinejoin="round"
+          />
+          <path d="M10 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </g>
+        <g id="i-app">
+          <rect x="4" y="4" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+          <rect x="13" y="4" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+          <rect x="4" y="13" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+          <rect x="13" y="13" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+        </g>
+        <g id="i-link">
+          <path
+            d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 1 0-5.7-5.7l-1.5 1.5M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 1 0 5.7 5.7l1.5-1.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+        <g id="i-file">
+          <path
+            d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M15 3v4h4"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinejoin="round"
+          />
         </g>
       </defs>
     </svg>

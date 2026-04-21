@@ -7,9 +7,9 @@
 
 .row {
   display: grid;
-  /* checkbox / glyph / name / meta / chev — close to the mockup's
+  /* checkbox / icon / name / meta / chev — close to the mockup's
      26px|1fr|100px|110px while keeping our 5-slot layout. */
-  grid-template-columns: 18px 22px 1fr auto 14px;
+  grid-template-columns: 18px 18px 1fr auto 14px;
   align-items: center;
   gap: var(--sp-3);
   padding: 10px 12px;
@@ -99,47 +99,71 @@
   color: var(--accent);
 }
 
-/* Glyph — default to muted ink. Per-type tints below pick up a hue
-   without shouting (editorial, not cartoon). */
-.row__glyph {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  text-align: center;
-  line-height: 1;
+/* Icon — small sprite SVG before the name. Default to muted ink; per-type
+   tints below pick up a hue via currentColor (the sprite paths all use
+   stroke="currentColor"), so theme switches stay centralized. */
+.row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   color: var(--ink-2);
   opacity: 0.7;
+  transition: color var(--motion-hover), opacity var(--motion-hover);
 }
-.row.row--folder .row__glyph {
+.row__icon svg {
+  display: block;
+}
+.row__icon-mark {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--accent);
+}
+.row.row--folder .row__icon {
   color: var(--accent);
   opacity: 1;
 }
-.row.row--image .row__glyph {
+.row.row--image .row__icon {
   color: var(--hero-tint);
   opacity: 1;
 }
-.row.row--film .row__glyph {
+.row.row--film .row__icon {
   color: var(--accent-2);
   opacity: 0.95;
 }
-.row.row--code .row__glyph {
+.row.row--music .row__icon {
   color: var(--accent-2);
+  opacity: 0.9;
+}
+.row.row--code .row__icon {
+  color: var(--accent-2);
+  opacity: 0.9;
+}
+.row.row--document .row__icon {
+  color: var(--ink-2);
   opacity: 0.85;
 }
-.row.row--link .row__glyph {
+.row.row--link .row__icon {
   color: var(--accent-2);
   opacity: 0.9;
 }
-.row.row--exec .row__glyph {
+.row.row--exec .row__icon,
+.row.row--app .row__icon {
   color: var(--accent);
-  opacity: 0.9;
+  opacity: 0.95;
 }
-.row.row--archive .row__glyph {
+.row.row--archive .row__icon {
   color: var(--hero-tint);
-  opacity: 0.8;
+  opacity: 0.85;
 }
-.row--selected .row__glyph {
-  color: var(--accent);
+.row:hover .row__icon,
+.row--selected .row__icon {
   opacity: 1;
+}
+.row--selected .row__icon {
+  color: var(--accent);
 }
 
 /* Name — Fraunces, the editorial voice of the row. */

@@ -4,6 +4,7 @@ import { fm } from '../bridge';
 import { formatSize, formatMtime } from '../sort';
 import { useStore } from '../store';
 import { useOverlays } from '../overlays';
+import { Icon, type IconName } from './Icon';
 import './FileRow.css';
 
 type Props = {
@@ -18,54 +19,129 @@ type Props = {
   onToggleMark?: () => void;
 };
 
-function glyphFor(e: Entry): string {
-  if (e.kind === 'dir') return '▸';
-  if (e.kind === 'link') return '↪';
-  if (e.kind === 'exec') return '●';
-  return '·';
-}
-
 /**
- * Per-type row modifier class — drives the glyph tint in FileRow.css.
- * Editorial: different hues for dir / image / film / code / link / exec /
- * archive, with plain entries left at muted ink. CSS owns the colors so
- * theme switching stays centralized.
+ * Single source of truth for an entry's visual "kind" — used to pick both
+ * the row tint class and the sprite icon. Extension groupings mirror the
+ * categories used by Finder's column view so the left-gutter glyph gives
+ * the same at-a-glance signal users expect.
  */
-function typeClassFor(e: Entry): string {
-  if (e.kind === 'dir') return 'row--folder';
-  if (e.kind === 'link') return 'row--link';
-  if (e.kind === 'exec') return 'row--exec';
-  switch (e.ext) {
+type Kind =
+  | 'folder'
+  | 'link'
+  | 'app'
+  | 'image'
+  | 'film'
+  | 'music'
+  | 'archive'
+  | 'code'
+  | 'document'
+  | 'exec'
+  | 'file';
+
+function kindFor(e: Entry): Kind {
+  if (e.kind === 'dir') return 'folder';
+  if (e.kind === 'link') return 'link';
+  const ext = (e.ext ?? '').toLowerCase();
+  if (ext === 'app') return 'app';
+  switch (ext) {
     case 'png':
     case 'jpg':
     case 'jpeg':
     case 'gif':
     case 'webp':
+    case 'bmp':
     case 'svg':
-      return 'row--image';
+    case 'heic':
+    case 'ico':
+      return 'image';
     case 'mp4':
     case 'mov':
+    case 'avi':
     case 'webm':
     case 'mkv':
-    case 'avi':
-      return 'row--film';
-    case 'ts':
-    case 'tsx':
-    case 'js':
-    case 'jsx':
-    case 'json':
-    case 'py':
-    case 'rs':
-    case 'go':
-    case 'md':
-    case 'sh':
-      return 'row--code';
+      return 'film';
+    case 'mp3':
+    case 'm4a':
+    case 'wav':
+    case 'flac':
+    case 'ogg':
+      return 'music';
     case 'zip':
     case 'tar':
     case 'gz':
-      return 'row--archive';
+    case 'tgz':
+    case '7z':
+    case 'rar':
+    case 'bz2':
+      return 'archive';
+    case 'js':
+    case 'ts':
+    case 'tsx':
+    case 'jsx':
+    case 'py':
+    case 'go':
+    case 'rs':
+    case 'rb':
+    case 'sh':
+    case 'java':
+    case 'c':
+    case 'cpp':
+    case 'h':
+    case 'swift':
+    case 'kt':
+      return 'code';
+    case 'md':
+    case 'txt':
+    case 'pdf':
+    case 'doc':
+    case 'docx':
+    case 'csv':
+    case 'json':
+    case 'yaml':
+    case 'yml':
+    case 'toml':
+      return 'document';
     default:
-      return '';
+      return e.kind === 'exec' ? 'exec' : 'file';
+  }
+}
+
+/**
+ * Per-type row modifier class — drives the icon tint in FileRow.css.
+ * Editorial: different hues for dir / image / film / code / link / exec /
+ * archive / music / document / app, with plain files left at muted ink.
+ */
+function typeClassFor(e: Entry): string {
+  const k = kindFor(e);
+  if (k === 'file') return '';
+  return `row--${k}`;
+}
+
+/** Map a kind to its sprite icon name (see src/components/icons.tsx). */
+function iconNameFor(k: Kind): IconName {
+  switch (k) {
+    case 'folder':
+      return 'folder';
+    case 'link':
+      return 'link';
+    case 'app':
+      return 'app';
+    case 'image':
+      return 'image';
+    case 'film':
+      return 'film';
+    case 'music':
+      return 'music';
+    case 'archive':
+      return 'archive';
+    case 'code':
+      return 'code';
+    case 'document':
+      return 'text';
+    case 'exec':
+      return 'app';
+    default:
+      return 'file';
   }
 }
 
@@ -256,8 +332,12 @@ export function FileRow({
       >
         {marked ? '☑' : '☐'}
       </span>
-      <span className="row__glyph">
-        {marked ? '✓' : glyphFor(entry)}
+      <span className="row__icon" aria-hidden>
+        {marked ? (
+          <span className="row__icon-mark">✓</span>
+        ) : (
+          <Icon name={iconNameFor(kindFor(entry))} size={15} />
+        )}
       </span>
       <span className="row__name">
         {entry.name}
