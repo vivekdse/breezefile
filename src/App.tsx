@@ -77,19 +77,38 @@ function Shell() {
   };
 
   return (
-    <OverlayCtx.Provider value={overlayApi}><div className="app">
+    <OverlayCtx.Provider value={overlayApi}><div className="shell">
       <IconSprite />
-      <Titlebar />
-      <Tabbar />
-      <Pathbar
-        path={tab.trail[tab.trail.length - 1]}
-        onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
-      />
-      <main className="app__main">
+      {/* title slot — owned by fm-9w0 */}
+      <div className="shell__title">
+        <Titlebar />
+      </div>
+      {/* chrome slot — Tabbar + Pathbar stack */}
+      <div className="shell__chrome">
+        <Tabbar />
+        <Pathbar
+          path={tab.trail[tab.trail.length - 1]}
+          onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
+        />
+      </div>
+      {/* side slot — owned by fm-4zi (Sidebar). Empty placeholder until then. */}
+      <aside className="shell__side" aria-label="Sidebar">
+        <div className="shell__placeholder" />
+      </aside>
+      {/* main slot — the recessed plate. MillerColumns fills it. */}
+      <main className="shell__main">
         <MillerColumns />
       </main>
-      <ModeLine />
-      <Statusbar />
+      {/* preview slot — owned by fm-fda (Preview). Collapsed to 0 width in
+          v1 (--preview-w: 0). Kept in the DOM so future work flips one var. */}
+      <aside className="shell__preview" aria-label="Preview" aria-hidden="true">
+        <div className="shell__placeholder" />
+      </aside>
+      {/* status slot — ModeLine stacked above Statusbar */}
+      <div className="shell__status">
+        <ModeLine />
+        <Statusbar />
+      </div>
 
       {renaming && (
         <RenameOverlay
