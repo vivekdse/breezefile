@@ -46,27 +46,54 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Paper grain — a faint fractal-noise plate tinted by theme tokens
-   (feColorMatrix reads --grain-r/g/b). Fixed to the viewport so it
-   doesn't scroll; pointer-events:none so it never blocks interaction. */
-body::before {
+/* Paper grain — a faint fractal-noise plate applied to the shell chrome
+   (titlebar, tabbar, pathbar, modeline, statusbar). The center main pane
+   intentionally omits grain so it reads as a recessed plate inside the
+   paper chrome — the whole point of the mockup's framed-content feel.
+   The noise is used as an alpha mask over a flat ink fill, so grain
+   color tracks --grain-r/g/b per theme (CSS vars don't traverse into
+   SVG data URIs, so we tint at the CSS layer instead of feColorMatrix). */
+.titlebar,
+.tabbar,
+.pathbar,
+.modeline,
+.statusbar {
+  position: relative;
+  isolation: isolate;
+}
+.titlebar::before,
+.tabbar::before,
+.pathbar::before,
+.modeline::before,
+.statusbar::before {
   content: '';
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 0;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.15  0 0 0 0 0.12  0 0 0 0 0.13  0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  opacity: 0.75;
+  z-index: -1;
+  background-color: rgb(
+    calc(var(--grain-r, 0.15) * 100%)
+    calc(var(--grain-g, 0.12) * 100%)
+    calc(var(--grain-b, 0.13) * 100%)
+  );
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.4' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.22;
   mix-blend-mode: multiply;
 }
-/* Dark themes invert the blend so grain reads as highlight, not shadow. */
-:root[data-theme='dusk'] body::before {
+/* Dark-chrome themes invert the blend so grain reads as highlight, not shadow. */
+:root[data-theme='dusk'] .titlebar::before,
+:root[data-theme='dusk'] .tabbar::before,
+:root[data-theme='dusk'] .pathbar::before,
+:root[data-theme='dusk'] .modeline::before,
+:root[data-theme='dusk'] .statusbar::before,
+:root[data-theme='feminism-night'] .titlebar::before,
+:root[data-theme='feminism-night'] .tabbar::before,
+:root[data-theme='feminism-night'] .pathbar::before,
+:root[data-theme='feminism-night'] .modeline::before,
+:root[data-theme='feminism-night'] .statusbar::before {
   mix-blend-mode: screen;
-  opacity: 0.3;
-}
-:root[data-theme='feminism-night'] body::before {
-  mix-blend-mode: multiply;
-  opacity: 0.55;
+  opacity: 0.12;
 }
 
 button {
