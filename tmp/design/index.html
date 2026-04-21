@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Command Overlay — Design Explorations</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    background: #0f0f1a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    padding: 60px 40px;
+  }
+  h1 {
+    font-size: 32px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #7c3aed, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle {
+    font-size: 15px;
+    color: #888;
+    margin-bottom: 48px;
+    max-width: 600px;
+    line-height: 1.5;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 24px;
+    max-width: 1200px;
+  }
+  .card {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 16px;
+    padding: 28px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .card:hover {
+    border-color: #7c3aed;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(124, 58, 237, 0.15);
+  }
+  .card__number {
+    font-size: 13px;
+    font-weight: 600;
+    color: #7c3aed;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+  }
+  .card__title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #fff;
+  }
+  .card__desc {
+    font-size: 14px;
+    color: #999;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+  .card__tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: rgba(124, 58, 237, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(124, 58, 237, 0.25);
+  }
+  .brief {
+    margin-top: 48px;
+    padding: 24px;
+    background: #16213e;
+    border-radius: 12px;
+    max-width: 700px;
+  }
+  .brief h2 {
+    font-size: 16px;
+    color: #a78bfa;
+    margin-bottom: 12px;
+  }
+  .brief p {
+    font-size: 14px;
+    color: #999;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<h1>Command Overlay Explorations</h1>
+<p class="subtitle">
+  5 fundamentally different interaction models for a zero-friction command overlay.
+  Each appears as soon as you start typing — no modifier key, no leading character.
+  Goal: non-technical users type at expert speed via natural language + aggressive completion.
+</p>
+
+<div class="grid">
+  <a class="card" href="01-spotlight.html">
+    <div class="card__number">VARIATION 01</div>
+    <div class="card__title">Spotlight</div>
+    <div class="card__desc">
+      Classic centered search bar with fuzzy-matched results list.
+      Categories, descriptions, and chord shortcuts shown inline.
+      The baseline — familiar, proven, minimal learning curve.
+    </div>
+    <div class="card__tags">
+      <span class="tag">fuzzy search</span>
+      <span class="tag">result list</span>
+      <span class="tag">baseline</span>
+    </div>
+  </a>
+
+  <a class="card" href="02-ghost-text.html">
+    <div class="card__number">VARIATION 02</div>
+    <div class="card__title">Ghost Text</div>
+    <div class="card__desc">
+      Thin bottom strip with Copilot-style inline completion.
+      Gray ghost text predicts your intent; Tab to accept.
+      Feels like the computer is reading your mind.
+    </div>
+    <div class="card__tags">
+      <span class="tag">inline prediction</span>
+      <span class="tag">Tab to accept</span>
+      <span class="tag">minimal UI</span>
+    </div>
+  </a>
+
+  <a class="card" href="03-sentence-chips.html">
+    <div class="card__number">VARIATION 03</div>
+    <div class="card__title">Sentence Chips</div>
+    <div class="card__desc">
+      Structured slot-filling with pill-shaped chips.
+      Build a sentence: [Verb] + [Object] + [Destination].
+      Tab advances slots; number keys pick options. Tactile and guided.
+    </div>
+    <div class="card__tags">
+      <span class="tag">slot filling</span>
+      <span class="tag">guided</span>
+      <span class="tag">structured</span>
+    </div>
+  </a>
+
+  <a class="card" href="04-predictive-grid.html">
+    <div class="card__number">VARIATION 04</div>
+    <div class="card__title">Predictive Grid</div>
+    <div class="card__desc">
+      After each word, a 3×3 grid of likely next words appears.
+      Press 1-9 to pick. "Move files to Downloads" in 3 keystrokes.
+      Feels like a game — fast, rewarding, zero typing required.
+    </div>
+    <div class="card__tags">
+      <span class="tag">number keys</span>
+      <span class="tag">zero typing</span>
+      <span class="tag">game-like</span>
+    </div>
+  </a>
+
+  <a class="card" href="05-cascading-columns.html">
+    <div class="card__number">VARIATION 05</div>
+    <div class="card__title">Cascading Columns</div>
+    <div class="card__desc">
+      Miller-column metaphor applied to commands.
+      Same j/k/h/l navigation you already know.
+      If you can browse files, you can browse commands.
+    </div>
+    <div class="card__tags">
+      <span class="tag">miller columns</span>
+      <span class="tag">familiar nav</span>
+      <span class="tag">progressive</span>
+    </div>
+  </a>
+</div>
+
+<div class="brief">
+  <h2>Design Brief</h2>
+  <p>
+    These prototypes explore how a file manager can support both power users (vim chords)
+    and non-technical users (natural language) through a single overlay that appears on first keystroke.
+    Each variation is self-contained HTML — open in any browser. They share a common aesthetic
+    (dark theme, electric violet accent) but differ fundamentally in interaction model.
+  </p>
+</div>
+
+</body>
+</html>

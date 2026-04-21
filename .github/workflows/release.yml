@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -b
+
+      - name: Build renderer + main
+        run: npx vite build
+
+      - name: Package with electron-builder
+        env:
+          # Unsigned distribution — no Apple Developer cert required.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac dmg zip --arm64 --x64 --publish=never
+
+      - name: Compute SHA256 for cask
+        id: shas
+        run: |
+          cd release
+          for f in *.dmg *.zip; do
+            [ -f "$f" ] || continue
+            echo "$f  $(shasum -a 256 "$f" | awk '{print $1}')"
+          done | tee shasums.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.dmg
+            release/*.zip
+            release/shasums.txt
+          generate_release_notes: true

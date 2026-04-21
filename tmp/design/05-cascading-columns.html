@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cascading Columns — Command Overlay Prototype</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a2e;
+    color: #c8c8d4;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+    font-size: 13px;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── File manager background ─────────────────────────── */
+  .fm-chrome {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  .fm-titlebar {
+    height: 36px;
+    background: #0f0f23;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 8px;
+    border-bottom: 1px solid #2a2a4a;
+  }
+  .fm-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .fm-dot.r { background: #ff5f57; }
+  .fm-dot.y { background: #febc2e; }
+  .fm-dot.g { background: #28c840; }
+  .fm-titlebar span {
+    margin-left: 16px;
+    color: #8888aa;
+    font-size: 12px;
+  }
+
+  .fm-path-bar {
+    height: 28px;
+    background: #12122a;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 11px;
+    color: #6a6a8a;
+    border-bottom: 1px solid #2a2a4a;
+  }
+  .fm-path-bar .seg { color: #7c3aed; }
+
+  .fm-columns {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  .fm-col {
+    flex: 1;
+    border-right: 1px solid #2a2a4a;
+    overflow-y: auto;
+    padding: 4px 0;
+    background: #16213e;
+  }
+  .fm-col:last-child { border-right: none; }
+
+  .fm-col .col-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #5a5a7a;
+    padding: 4px 12px 6px;
+  }
+
+  .fm-row {
+    padding: 3px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .fm-row .icon { width: 16px; text-align: center; font-size: 12px; opacity: 0.5; }
+  .fm-row.dir .icon { color: #7c3aed; opacity: 0.8; }
+  .fm-row.selected {
+    background: rgba(124, 58, 237, 0.15);
+    color: #e0e0f0;
+  }
+
+  .fm-statusbar {
+    height: 24px;
+    background: #0f0f23;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    font-size: 11px;
+    color: #5a5a7a;
+    border-top: 1px solid #2a2a4a;
+  }
+
+  /* ── Dimming layer ───────────────────────────────────── */
+  .overlay-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 24, 0.75);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease;
+  }
+  .overlay-backdrop.visible {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  /* ── Command overlay ─────────────────────────────────── */
+  .cmd-overlay {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.96);
+    width: 680px;
+    max-height: 480px;
+    background: #16213e;
+    border: 1px solid #2e2e5a;
+    border-radius: 10px;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(124,58,237,0.15);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease, transform 180ms ease;
+    overflow: hidden;
+  }
+  .cmd-overlay.visible {
+    opacity: 1;
+    pointer-events: all;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  /* Search bar */
+  .cmd-search {
+    padding: 10px 14px;
+    border-bottom: 1px solid #2a2a4a;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cmd-search .prompt { color: #7c3aed; font-weight: bold; }
+  .cmd-search input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: #e0e0f0;
+    font-family: inherit;
+    font-size: 13px;
+    caret-color: #7c3aed;
+  }
+  .cmd-search input::placeholder { color: #5a5a7a; }
+
+  /* Column area */
+  .cmd-columns {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .cmd-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #2a2a4a;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateX(-12px);
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+  .cmd-col:last-child { border-right: none; }
+  .cmd-col.visible {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .cmd-col.active .cmd-col-header { color: #b0b0d0; }
+  .cmd-col.active { border-left: 2px solid #7c3aed; }
+
+  .cmd-col-header {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #4a4a6a;
+    padding: 8px 12px 4px;
+    transition: color 150ms;
+  }
+
+  .cmd-col-items {
+    flex: 1;
+    overflow-y: auto;
+    padding: 2px 0;
+  }
+
+  .cmd-item {
+    padding: 5px 12px;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: background 80ms;
+  }
+  .cmd-item .arrow {
+    width: 12px;
+    font-size: 11px;
+    color: transparent;
+    transition: color 80ms;
+  }
+  .cmd-item.selected .arrow { color: #e0e0f0; }
+  .cmd-item.selected-inactive {
+    background: rgba(124, 58, 237, 0.08);
+    color: #a0a0c0;
+  }
+  .cmd-item.selected-inactive .arrow { color: #7c3aed; }
+  .cmd-item.selected {
+    background: #7c3aed;
+    color: #fff;
+    border-radius: 4px;
+    margin: 0 4px;
+    padding: 5px 8px;
+  }
+  .cmd-item:not(.selected):not(.selected-inactive):hover {
+    background: rgba(124, 58, 237, 0.06);
+  }
+
+  /* Bottom sentence bar */
+  .cmd-sentence {
+    padding: 8px 14px;
+    border-top: 1px solid #2a2a4a;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    min-height: 36px;
+  }
+  .cmd-sentence .text { color: #9090b0; }
+  .cmd-sentence .text em { color: #c8c8e0; font-style: normal; font-weight: 600; }
+  .cmd-sentence .chord {
+    color: #5a5a7a;
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid #3a3a5a;
+    border-radius: 4px;
+    background: rgba(124, 58, 237, 0.06);
+  }
+  .cmd-sentence.ready .text { color: #c8c8e0; }
+  .cmd-sentence.ready {
+    animation: readyPulse 2s ease-in-out infinite;
+  }
+  @keyframes readyPulse {
+    0%, 100% { background: transparent; }
+    50% { background: rgba(124, 58, 237, 0.06); }
+  }
+
+  /* ── Hint bar at bottom ──────────────────────────────── */
+  .hint-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 28px;
+    background: #0f0f23;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    font-size: 11px;
+    color: #5a5a7a;
+    z-index: 300;
+    border-top: 1px solid #2a2a4a;
+  }
+  .hint-bar kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    background: #2a2a4a;
+    border-radius: 3px;
+    color: #8888aa;
+    font-family: inherit;
+    font-size: 10px;
+    margin: 0 2px;
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- File manager background -->
+<div class="fm-chrome">
+  <div class="fm-titlebar">
+    <div class="fm-dot r"></div>
+    <div class="fm-dot y"></div>
+    <div class="fm-dot g"></div>
+    <span>file_manager — ~/Documents</span>
+  </div>
+  <div class="fm-path-bar">
+    <span class="seg">~</span>&nbsp;/&nbsp;<span class="seg">Documents</span>&nbsp;/&nbsp;work
+  </div>
+  <div class="fm-columns">
+    <div class="fm-col">
+      <div class="col-title">Home</div>
+      <div class="fm-row dir"><span class="icon"></span>Documents</div>
+      <div class="fm-row dir selected"><span class="icon"></span>Desktop</div>
+      <div class="fm-row dir"><span class="icon"></span>Downloads</div>
+      <div class="fm-row dir"><span class="icon"></span>Pictures</div>
+      <div class="fm-row dir"><span class="icon"></span>Music</div>
+      <div class="fm-row dir"><span class="icon"></span>Projects</div>
+      <div class="fm-row"><span class="icon"></span>.config</div>
+    </div>
+    <div class="fm-col">
+      <div class="col-title">Documents</div>
+      <div class="fm-row"><span class="icon"></span>report.pdf</div>
+      <div class="fm-row"><span class="icon"></span>notes.md</div>
+      <div class="fm-row"><span class="icon"></span>budget.xlsx</div>
+      <div class="fm-row dir"><span class="icon"></span>photos/</div>
+      <div class="fm-row dir selected"><span class="icon"></span>work/</div>
+    </div>
+    <div class="fm-col">
+      <div class="col-title">work</div>
+      <div class="fm-row dir"><span class="icon"></span>project-alpha/</div>
+      <div class="fm-row dir"><span class="icon"></span>project-beta/</div>
+      <div class="fm-row"><span class="icon"></span>README.md</div>
+    </div>
+  </div>
+  <div class="fm-statusbar">
+    <span>7 items &middot; 2 selected</span>
+    <span>Press <kbd style="background:#2a2a4a;padding:1px 5px;border-radius:3px;color:#8888aa;font-size:10px">:</kbd> for commands</span>
+  </div>
+</div>
+
+<!-- Overlay backdrop -->
+<div class="overlay-backdrop" id="backdrop"></div>
+
+<!-- Command overlay -->
+<div class="cmd-overlay" id="overlay">
+  <div class="cmd-search">
+    <span class="prompt">:</span>
+    <input type="text" id="searchInput" placeholder="type to filter..." autocomplete="off" spellcheck="false">
+  </div>
+  <div class="cmd-columns">
+    <div class="cmd-col visible" id="col0">
+      <div class="cmd-col-header">Action</div>
+      <div class="cmd-col-items" id="col0Items"></div>
+    </div>
+    <div class="cmd-col" id="col1">
+      <div class="cmd-col-header">What</div>
+      <div class="cmd-col-items" id="col1Items"></div>
+    </div>
+    <div class="cmd-col" id="col2">
+      <div class="cmd-col-header">Where / How</div>
+      <div class="cmd-col-items" id="col2Items"></div>
+    </div>
+  </div>
+  <div class="cmd-sentence" id="sentenceBar">
+    <span class="text" id="sentenceText">Select an action...</span>
+    <span class="chord" id="sentenceChord"></span>
+  </div>
+</div>
+
+<!-- Hint bar -->
+<div class="hint-bar" id="hintBar">
+  <span><kbd>:</kbd> open commands</span>
+  <span><kbd>j</kbd><kbd>k</kbd> navigate</span>
+  <span><kbd>h</kbd><kbd>l</kbd> columns</span>
+  <span><kbd>Tab</kbd> advance</span>
+  <span><kbd>Enter</kbd> execute</span>
+  <span><kbd>Esc</kbd> dismiss</span>
+</div>
+
+<script>
+// ── Data model ───────────────────────────────────────────
+const VERBS = [
+  { label: 'Move',    chord: 'dd → pp' },
+  { label: 'Copy',    chord: 'yy → pp' },
+  { label: 'Sort',    chord: ':sort'    },
+  { label: 'Delete',  chord: 'dD'       },
+  { label: 'Rename',  chord: 'cw'       },
+  { label: 'Go to',   chord: 'g?'       },
+  { label: 'Open',    chord: 'Enter'    },
+  { label: 'Create',  chord: ':mk'      },
+  { label: 'View as', chord: ':view'    },
+  { label: 'Show',    chord: ':show'    },
+];
+
+const OBJECTS_BY_VERB = {
+  'Move':    ['these files', 'cursor item', 'all marked', 'report.pdf', 'notes.md', 'budget.xlsx'],
+  'Copy':    ['these files', 'cursor item', 'all marked', 'report.pdf', 'notes.md', 'budget.xlsx'],
+  'Sort':    ['name', 'size', 'modified', 'created', 'type', 'extension'],
+  'Delete':  ['these files', 'cursor item', 'all marked', 'report.pdf', 'notes.md'],
+  'Rename':  ['cursor item', 'all marked', 'report.pdf', 'notes.md'],
+  'Go to':   ['Downloads', 'Desktop', 'Documents', 'Projects', 'Home', 'Bookmarks', 'Recent'],
+  'Open':    ['cursor item', 'report.pdf', 'notes.md', 'budget.xlsx', 'work/', 'photos/'],
+  'Create':  ['folder', 'file'],
+  'View as': ['list', 'grid', 'thumbnails'],
+  'Show':    ['hidden files', 'file info', 'disk usage'],
+};
+
+const TARGETS_BY_VERB_OBJ = {
+  'Move':   ['Downloads', 'Desktop', 'Documents', 'Projects', 'Home', 'Pictures', 'Music', '/tmp'],
+  'Copy':   ['Downloads', 'Desktop', 'Documents', 'Projects', 'Home', 'Pictures', 'Music', '/tmp'],
+  'Sort':   ['ascending', 'descending'],
+};
+
+// Verbs with no third column
+const NO_COL2 = new Set(['Delete', 'Rename', 'Go to', 'Open', 'Create', 'View as', 'Show']);
+
+// ── State ────────────────────────────────────────────────
+let overlayOpen = false;
+let activeCol = 0;      // 0, 1, 2
+let selections = [-1, -1, -1];  // selected index per column
+let filteredVerbs = [...VERBS];
+let filteredCol1 = [];
+let filteredCol2 = [];
+let filterText = '';
+let maxCol = 0;  // how many columns are populated
+
+const $backdrop  = document.getElementById('backdrop');
+const $overlay   = document.getElementById('overlay');
+const $input     = document.getElementById('searchInput');
+const $cols      = [document.getElementById('col0'), document.getElementById('col1'), document.getElementById('col2')];
+const $items     = [document.getElementById('col0Items'), document.getElementById('col1Items'), document.getElementById('col2Items')];
+const $sentence  = document.getElementById('sentenceBar');
+const $sentText  = document.getElementById('sentenceText');
+const $sentChord = document.getElementById('sentenceChord');
+
+// ── Rendering ────────────────────────────────────────────
+function renderCol(colIdx, items, labelFn) {
+  const container = $items[colIdx];
+  container.innerHTML = '';
+  items.forEach((item, i) => {
+    const el = document.createElement('div');
+    el.className = 'cmd-item';
+    const label = labelFn ? labelFn(item) : item;
+    el.innerHTML = `<span class="arrow">▸</span><span>${label}</span>`;
+    // Determine class
+    if (colIdx === activeCol && i === selections[colIdx]) {
+      el.classList.add('selected');
+    } else if (colIdx < activeCol && i === selections[colIdx]) {
+      el.classList.add('selected-inactive');
+    }
+    el.addEventListener('mouseenter', () => {
+      if (colIdx === activeCol) {
+        selections[colIdx] = i;
+        renderAll();
+      }
+    });
+    el.addEventListener('click', () => {
+      selections[colIdx] = i;
+      activeCol = colIdx;
+      advanceColumn();
+    });
+    container.appendChild(el);
+  });
+}
+
+function renderAll() {
+  // Column 0: verbs
+  renderCol(0, filteredVerbs, v => v.label);
+
+  // Column 1: depends on selected verb
+  const verb = getSelectedVerb();
+  if (verb) {
+    const rawItems = OBJECTS_BY_VERB[verb] || [];
+    filteredCol1 = activeCol === 1 && filterText
+      ? rawItems.filter(s => s.toLowerCase().includes(filterText.toLowerCase()))
+      : rawItems;
+    renderCol(1, filteredCol1, s => s);
+    showCol(1);
+  } else {
+    hideCol(1);
+    filteredCol1 = [];
+  }
+
+  // Column 2: depends on verb + object
+  const hasCol2 = verb && !NO_COL2.has(verb);
+  if (hasCol2 && selections[1] >= 0) {
+    const rawItems = TARGETS_BY_VERB_OBJ[verb] || [];
+    filteredCol2 = activeCol === 2 && filterText
+      ? rawItems.filter(s => s.toLowerCase().includes(filterText.toLowerCase()))
+      : rawItems;
+    renderCol(2, filteredCol2, s => s);
+    showCol(2);
+  } else {
+    hideCol(2);
+    filteredCol2 = [];
+  }
+
+  // Active column highlight
+  $cols.forEach((c, i) => {
+    c.classList.toggle('active', i === activeCol);
+  });
+
+  // Update max col
+  maxCol = verb ? (hasCol2 && selections[1] >= 0 ? 2 : 1) : 0;
+
+  // Sentence bar
+  updateSentence();
+
+  // Ensure selected item is visible
+  scrollSelectedIntoView();
+}
+
+function showCol(idx) {
+  if (!$cols[idx].classList.contains('visible')) {
+    // Stagger animation
+    setTimeout(() => $cols[idx].classList.add('visible'), idx * 150);
+  }
+}
+function hideCol(idx) {
+  $cols[idx].classList.remove('visible');
+  $items[idx].innerHTML = '';
+}
+
+function getSelectedVerb() {
+  if (selections[0] < 0 || selections[0] >= filteredVerbs.length) return null;
+  return filteredVerbs[selections[0]].label;
+}
+
+function getSelectedObject() {
+  if (selections[1] < 0 || selections[1] >= filteredCol1.length) return null;
+  return filteredCol1[selections[1]];
+}
+
+function getSelectedTarget() {
+  if (selections[2] < 0 || selections[2] >= filteredCol2.length) return null;
+  return filteredCol2[selections[2]];
+}
+
+function updateSentence() {
+  const verb = getSelectedVerb();
+  const obj = getSelectedObject();
+  const target = getSelectedTarget();
+  const hasCol2 = verb && !NO_COL2.has(verb);
+
+  if (!verb) {
+    $sentText.innerHTML = 'Select an action...';
+    $sentChord.textContent = '';
+    $sentence.classList.remove('ready');
+    return;
+  }
+
+  let parts = [`<em>${verb}</em>`];
+  if (obj) parts.push(`<em>${obj}</em>`);
+  if (target) parts.push(`to <em>${target}</em>`);
+
+  const isComplete = !hasCol2
+    ? obj != null
+    : target != null;
+
+  // Build natural sentence
+  let sentence = parts.join(' ');
+  $sentText.innerHTML = sentence;
+
+  // Chord shortcut
+  const verbData = filteredVerbs[selections[0]];
+  $sentChord.textContent = verbData ? verbData.chord : '';
+
+  $sentence.classList.toggle('ready', isComplete);
+}
+
+function scrollSelectedIntoView() {
+  const container = $items[activeCol];
+  const selected = container.querySelector('.cmd-item.selected');
+  if (selected) {
+    selected.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function getActiveListLength() {
+  if (activeCol === 0) return filteredVerbs.length;
+  if (activeCol === 1) return filteredCol1.length;
+  return filteredCol2.length;
+}
+
+// ── Overlay open/close ───────────────────────────────────
+function openOverlay() {
+  overlayOpen = true;
+  $backdrop.classList.add('visible');
+  $overlay.classList.add('visible');
+  activeCol = 0;
+  selections = [0, -1, -1];
+  filterText = '';
+  $input.value = '';
+  filteredVerbs = [...VERBS];
+  // Show col 0 immediately
+  $cols[0].classList.add('visible');
+  hideCol(1);
+  hideCol(2);
+  renderAll();
+  requestAnimationFrame(() => $input.focus());
+}
+
+function closeOverlay() {
+  overlayOpen = false;
+  $backdrop.classList.remove('visible');
+  $overlay.classList.remove('visible');
+  filterText = '';
+  $input.value = '';
+}
+
+function executeCommand() {
+  const verb = getSelectedVerb();
+  const obj = getSelectedObject();
+  const target = getSelectedTarget();
+  if (!verb) return;
+  // Flash the sentence bar
+  $sentence.style.background = 'rgba(124, 58, 237, 0.3)';
+  setTimeout(() => {
+    $sentence.style.background = '';
+    closeOverlay();
+  }, 350);
+}
+
+// ── Column navigation ────────────────────────────────────
+function advanceColumn() {
+  const verb = getSelectedVerb();
+  if (!verb) return;
+  const hasCol2 = !NO_COL2.has(verb);
+
+  if (activeCol === 0) {
+    // Populate col1
+    activeCol = 1;
+    selections[1] = 0;
+    selections[2] = -1;
+    filterText = '';
+    $input.value = '';
+  } else if (activeCol === 1 && hasCol2) {
+    activeCol = 2;
+    selections[2] = 0;
+    filterText = '';
+    $input.value = '';
+  } else {
+    // Final column — execute
+    executeCommand();
+    return;
+  }
+  renderAll();
+}
+
+function retreatColumn() {
+  if (activeCol > 0) {
+    activeCol--;
+    filterText = '';
+    $input.value = '';
+    renderAll();
+  } else {
+    closeOverlay();
+  }
+}
+
+// ── Smart typing: parse natural language ─────────────────
+function parseNaturalInput(text) {
+  const lower = text.toLowerCase().trim();
+
+  // Try "verb object to target" pattern
+  const fullMatch = lower.match(/^(\w+)\s+(.+?)\s+to\s+(.+)$/);
+  if (fullMatch) {
+    const [, verbStr, objStr, targStr] = fullMatch;
+    const verbIdx = VERBS.findIndex(v => v.label.toLowerCase().startsWith(verbStr));
+    if (verbIdx >= 0) {
+      const verb = VERBS[verbIdx].label;
+      const objs = OBJECTS_BY_VERB[verb] || [];
+      const objIdx = objs.findIndex(o => o.toLowerCase().includes(objStr.trim()));
+      const targets = TARGETS_BY_VERB_OBJ[verb] || [];
+      const targIdx = targets.findIndex(t => t.toLowerCase().includes(targStr.trim()));
+      if (objIdx >= 0) {
+        filteredVerbs = [...VERBS];
+        selections[0] = verbIdx;
+        activeCol = 2;
+        selections[1] = objIdx;
+        if (targIdx >= 0) selections[2] = targIdx; else selections[2] = 0;
+        renderAll();
+        return true;
+      }
+    }
+  }
+
+  // Try "sort newest" → sort + modified + descending
+  if (lower.startsWith('sort') && lower.includes('newest')) {
+    filteredVerbs = [...VERBS];
+    selections[0] = VERBS.findIndex(v => v.label === 'Sort');
+    const objs = OBJECTS_BY_VERB['Sort'];
+    selections[1] = objs.indexOf('modified');
+    const targets = TARGETS_BY_VERB_OBJ['Sort'];
+    selections[2] = targets.indexOf('descending');
+    activeCol = 2;
+    renderAll();
+    return true;
+  }
+
+  // Try verb-only match
+  const verbOnlyIdx = VERBS.findIndex(v => v.label.toLowerCase() === lower);
+  if (verbOnlyIdx >= 0) {
+    filteredVerbs = [...VERBS];
+    selections[0] = verbOnlyIdx;
+    activeCol = 0;
+    advanceColumn();
+    return true;
+  }
+
+  return false;
+}
+
+// ── Filter active column ─────────────────────────────────
+function applyFilter(text) {
+  filterText = text;
+  if (activeCol === 0) {
+    filteredVerbs = VERBS.filter(v => v.label.toLowerCase().includes(text.toLowerCase()));
+    if (filteredVerbs.length > 0) {
+      selections[0] = 0;
+    } else {
+      selections[0] = -1;
+    }
+  }
+  // Col 1 and 2 filtering happens in renderAll via filterText
+  if (activeCol === 1 && filteredCol1.length > 0) selections[1] = 0;
+  if (activeCol === 2 && filteredCol2.length > 0) selections[2] = 0;
+  renderAll();
+}
+
+// ── Key handling ─────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  // Open overlay with ':'
+  if (!overlayOpen) {
+    if (e.key === ':') {
+      e.preventDefault();
+      openOverlay();
+    }
+    return;
+  }
+
+  // Close
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeOverlay();
+    return;
+  }
+
+  // Navigation within column: j/k or arrows
+  if (e.key === 'j' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const len = getActiveListLength();
+    if (len > 0) {
+      selections[activeCol] = (selections[activeCol] + 1) % len;
+      filterText = '';
+      $input.value = '';
+      renderAll();
+    }
+    return;
+  }
+  if (e.key === 'k' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const len = getActiveListLength();
+    if (len > 0) {
+      selections[activeCol] = (selections[activeCol] - 1 + len) % len;
+      filterText = '';
+      $input.value = '';
+      renderAll();
+    }
+    return;
+  }
+
+  // Advance column: l, ArrowRight, Tab
+  if (e.key === 'l' || e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) {
+    e.preventDefault();
+    if (selections[activeCol] >= 0) advanceColumn();
+    return;
+  }
+
+  // Retreat column: h, ArrowLeft, Shift+Tab
+  if (e.key === 'h' || e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) {
+    e.preventDefault();
+    retreatColumn();
+    return;
+  }
+
+  // Enter: advance or execute
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // Try natural language parse first
+    if ($input.value.trim().length > 3) {
+      if (parseNaturalInput($input.value.trim())) {
+        // Check if all columns filled → execute
+        const verb = getSelectedVerb();
+        const hasCol2 = verb && !NO_COL2.has(verb);
+        const isComplete = hasCol2 ? getSelectedTarget() != null : getSelectedObject() != null;
+        if (isComplete) {
+          executeCommand();
+        }
+        return;
+      }
+    }
+    if (selections[activeCol] >= 0) advanceColumn();
+    return;
+  }
+
+  // Backspace with empty input retreats
+  if (e.key === 'Backspace' && $input.value === '') {
+    e.preventDefault();
+    retreatColumn();
+    return;
+  }
+});
+
+// Input filtering (for typed characters)
+$input.addEventListener('input', () => {
+  const val = $input.value;
+  if (val.length === 0) {
+    filterText = '';
+    if (activeCol === 0) filteredVerbs = [...VERBS];
+    renderAll();
+    return;
+  }
+  applyFilter(val);
+});
+
+// Prevent input from capturing nav keys
+$input.addEventListener('keydown', (e) => {
+  const navKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape'];
+  if (navKeys.includes(e.key)) return; // let document handler manage
+  if (['j', 'k', 'h', 'l'].includes(e.key) && $input.value === '') {
+    return; // let doc handler manage when empty
+  }
+  e.stopPropagation(); // let typing happen normally
+});
+
+// ── Auto-demo on load ────────────────────────────────────
+setTimeout(() => openOverlay(), 600);
+
+// Demo sequence: show Move → these files → Downloads
+setTimeout(() => {
+  if (!overlayOpen) return;
+  // Select "Move" (index 0) and advance
+  selections[0] = 0;
+  activeCol = 0;
+  renderAll();
+}, 1200);
+
+setTimeout(() => {
+  if (!overlayOpen) return;
+  advanceColumn(); // move to col1
+}, 2000);
+
+setTimeout(() => {
+  if (!overlayOpen) return;
+  selections[1] = 0; // "these files"
+  renderAll();
+}, 2600);
+
+setTimeout(() => {
+  if (!overlayOpen) return;
+  advanceColumn(); // move to col2
+}, 3400);
+
+setTimeout(() => {
+  if (!overlayOpen) return;
+  selections[2] = 0; // "Downloads"
+  renderAll();
+}, 4000);
+</script>
+</body>
+</html>

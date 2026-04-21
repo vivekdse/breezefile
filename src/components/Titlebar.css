@@ -1,0 +1,41 @@
+.titlebar {
+  height: 44px;
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  align-items: center;
+  background: linear-gradient(to bottom, var(--bg-1), var(--bg-0));
+  border-bottom: 1px solid var(--border-1);
+  position: relative;
+  z-index: var(--z-chrome);
+}
+
+.titlebar__traffic {
+  /* leaves space for macOS hiddenInset traffic lights */
+  height: 100%;
+}
+
+.titlebar__title {
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+
+.titlebar__actions {
+  display: flex;
+  gap: var(--sp-1);
+  padding-right: var(--sp-3);
+}
+
+.titlebar__btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.titlebar__btn:hover {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}

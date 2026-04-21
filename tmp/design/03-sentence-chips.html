@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentence Chips — Command Overlay Prototype</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── Miller columns ── */
+  .miller {
+    display: flex;
+    height: 100vh;
+    padding: 8px;
+    gap: 2px;
+  }
+
+  .column {
+    flex: 1;
+    background: #16213e;
+    border-radius: 6px;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+
+  .column-header {
+    font-size: 10px;
+    color: #6272a4;
+    padding: 6px 12px 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #1a1a2e;
+    margin-bottom: 2px;
+  }
+
+  .entry {
+    padding: 5px 12px;
+    font-size: 13px;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .entry:hover { background: rgba(124, 58, 237, 0.08); }
+  .entry.selected { background: rgba(124, 58, 237, 0.22); color: #fff; }
+  .entry.cursor-item { background: #7c3aed; color: #fff; }
+  .entry .icon { width: 16px; text-align: center; font-size: 14px; flex-shrink: 0; }
+  .entry .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry .meta { font-size: 11px; color: #6272a4; }
+
+  /* selection checkbox */
+  .sel-mark { width: 14px; text-align: center; color: #7c3aed; font-size: 12px; }
+
+  /* ── Overlay ── */
+  .overlay-bg {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 24, 0.72);
+    backdrop-filter: blur(8px);
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-top: 18vh;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+  .overlay-bg.visible {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .overlay {
+    width: 580px;
+    background: #1e1e38;
+    border: 1px solid #2d2d54;
+    border-radius: 14px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(124,58,237,0.12);
+    padding: 20px 24px 18px;
+    transform: translateY(-8px) scale(0.97);
+    transition: transform 0.2s ease, opacity 0.18s ease;
+  }
+  .overlay-bg.visible .overlay {
+    transform: translateY(0) scale(1);
+  }
+
+  /* sentence row */
+  .sentence-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1.5px solid transparent;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    min-width: 80px;
+    justify-content: center;
+    position: relative;
+  }
+
+  .chip.placeholder {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.08);
+    color: #6272a4;
+    font-style: italic;
+  }
+
+  .chip.active {
+    background: #7c3aed;
+    border-color: #7c3aed;
+    color: #fff;
+    box-shadow: 0 0 18px rgba(124,58,237,0.45), 0 2px 8px rgba(0,0,0,0.3);
+  }
+
+  .chip.completed {
+    background: #2a2a4a;
+    border-color: #3d3d6b;
+    color: #e0e0e0;
+  }
+  .chip.completed::after {
+    content: '✓';
+    font-size: 11px;
+    margin-left: 4px;
+    color: #7c3aed;
+  }
+
+  .chip .caret {
+    font-size: 10px;
+    opacity: 0.7;
+  }
+
+  /* bounce animation */
+  @keyframes chipBounce {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+  .chip.bounce { animation: chipBounce 0.25s ease; }
+
+  /* slot columns */
+  .slots-area {
+    display: flex;
+    gap: 12px;
+    min-height: 160px;
+  }
+
+  .slot-col {
+    flex: 1;
+    opacity: 0.3;
+    transition: opacity 0.25s ease;
+  }
+  .slot-col.active { opacity: 1; }
+  .slot-col.done { opacity: 0.6; }
+
+  .slot-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #6272a4;
+    margin-bottom: 6px;
+    padding-left: 4px;
+  }
+
+  .slot-option {
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.12s ease;
+    margin-bottom: 2px;
+  }
+  .slot-option:hover { background: rgba(124, 58, 237, 0.15); }
+  .slot-option.highlighted { background: rgba(124, 58, 237, 0.25); color: #fff; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: rgba(124, 58, 237, 0.25);
+    color: #b794f6;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+
+  .slot-option .opt-text { flex: 1; }
+
+  /* filter input (hidden but captures keys) */
+  .filter-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* sentence preview */
+  .sentence-preview {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    text-align: center;
+    font-size: 12px;
+    color: #6272a4;
+  }
+  .sentence-preview .preview-text {
+    color: #8b8baf;
+    font-style: italic;
+  }
+
+  /* hint bar */
+  .hint-bar {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: #4a4a6a;
+  }
+  .hint-bar kbd {
+    display: inline-block;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: inherit;
+    font-size: 10px;
+    margin: 0 2px;
+  }
+
+  /* status bar */
+  .status-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: #12122a;
+    padding: 5px 16px;
+    font-size: 11px;
+    color: #6272a4;
+    display: flex;
+    justify-content: space-between;
+    z-index: 50;
+  }
+
+  /* typing indicator */
+  .typing-hint {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(124, 58, 237, 0.15);
+    border: 1px solid rgba(124, 58, 237, 0.3);
+    border-radius: 8px;
+    padding: 6px 16px;
+    font-size: 12px;
+    color: #b794f6;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 50;
+  }
+  .typing-hint.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- Miller columns background -->
+<div class="miller" id="miller">
+  <div class="column">
+    <div class="column-header">~ Home</div>
+    <div class="entry"><span class="icon">📁</span><span class="name">Desktop</span></div>
+    <div class="entry cursor-item"><span class="icon">📁</span><span class="name">Documents</span><span class="meta">12 items</span></div>
+    <div class="entry"><span class="icon">📁</span><span class="name">Downloads</span><span class="meta">8 items</span></div>
+    <div class="entry"><span class="icon">📁</span><span class="name">Pictures</span></div>
+    <div class="entry"><span class="icon">📁</span><span class="name">Music</span></div>
+    <div class="entry"><span class="icon">📁</span><span class="name">Projects</span><span class="meta">5 items</span></div>
+    <div class="entry"><span class="icon">📄</span><span class="name">.config</span></div>
+  </div>
+  <div class="column">
+    <div class="column-header">Documents</div>
+    <div class="entry selected"><span class="sel-mark">●</span><span class="icon">📄</span><span class="name">report.pdf</span><span class="meta">2.4 MB</span></div>
+    <div class="entry selected"><span class="sel-mark">●</span><span class="icon">📄</span><span class="name">notes.md</span><span class="meta">12 KB</span></div>
+    <div class="entry selected"><span class="sel-mark">●</span><span class="icon">📄</span><span class="name">budget.xlsx</span><span class="meta">340 KB</span></div>
+    <div class="entry"><span class="sel-mark"></span><span class="icon">📁</span><span class="name">photos</span><span class="meta">23 items</span></div>
+    <div class="entry cursor-item"><span class="sel-mark"></span><span class="icon">📁</span><span class="name">work</span><span class="meta">3 items</span></div>
+  </div>
+  <div class="column">
+    <div class="column-header">work/</div>
+    <div class="entry"><span class="icon">📁</span><span class="name">project-alpha</span><span class="meta">14 items</span></div>
+    <div class="entry"><span class="icon">📁</span><span class="name">project-beta</span><span class="meta">7 items</span></div>
+    <div class="entry"><span class="icon">📄</span><span class="name">README.md</span><span class="meta">1.2 KB</span></div>
+  </div>
+</div>
+
+<!-- Overlay -->
+<div class="overlay-bg" id="overlayBg">
+  <div class="overlay" id="overlay">
+    <div class="sentence-row" id="sentenceRow"></div>
+    <div class="slots-area" id="slotsArea"></div>
+    <div class="sentence-preview">
+      <span class="preview-text" id="previewText">Start typing a command...</span>
+    </div>
+    <div class="hint-bar">
+      <span><kbd>Tab</kbd> next slot</span>
+      <span><kbd>Shift+Tab</kbd> prev slot</span>
+      <span><kbd>1-9</kbd> pick option</span>
+      <span><kbd>Enter</kbd> execute</span>
+      <span><kbd>Esc</kbd> cancel</span>
+    </div>
+  </div>
+</div>
+
+<input class="filter-input" id="filterInput" autocomplete="off" />
+
+<!-- Status bar -->
+<div class="status-bar">
+  <span>~/Documents &nbsp;|&nbsp; 3 selected &nbsp;|&nbsp; 5 items</span>
+  <span>Type to start a command</span>
+</div>
+
+<div class="typing-hint" id="typingHint">Start typing to open command palette...</div>
+
+<script>
+const BADGES = ['❶','❷','❸','❹','❺','❻','❼','❽','❾'];
+
+/* ── Verb templates ── */
+const TEMPLATES = {
+  move: {
+    label: 'Move',
+    slots: [
+      { name: 'Object', options: ['selected (3)', 'report.pdf', 'notes.md', 'budget.xlsx', 'all files'] },
+      { name: 'Destination', options: ['Downloads', 'Desktop', 'Home', 'Projects', 'Pictures', 'work/'] }
+    ],
+    preview: (vals) => `Move ${vals[0] || '...'} → ~/${vals[1] || '...'}`
+  },
+  copy: {
+    label: 'Copy',
+    slots: [
+      { name: 'Object', options: ['selected (3)', 'report.pdf', 'notes.md', 'budget.xlsx', 'all files'] },
+      { name: 'Destination', options: ['Downloads', 'Desktop', 'Home', 'Projects', 'Pictures'] }
+    ],
+    preview: (vals) => `Copy ${vals[0] || '...'} → ~/${vals[1] || '...'}`
+  },
+  sort: {
+    label: 'Sort',
+    slots: [
+      { name: 'By', options: ['name', 'size', 'date modified', 'type', 'date created'] },
+      { name: 'Direction', options: ['ascending', 'descending'] }
+    ],
+    preview: (vals) => `Sort by ${vals[0] || '...'} ${vals[1] || ''}`
+  },
+  delete: {
+    label: 'Delete',
+    slots: [
+      { name: 'Object', options: ['selected (3)', 'report.pdf', 'notes.md', 'budget.xlsx', 'all files'] }
+    ],
+    preview: (vals) => `Delete ${vals[0] || '...'}`
+  },
+  rename: {
+    label: 'Rename',
+    slots: [
+      { name: 'Object', options: ['report.pdf', 'notes.md', 'budget.xlsx', 'work/', 'photos/'] }
+    ],
+    preview: (vals) => `Rename ${vals[0] || '...'}`
+  },
+  open: {
+    label: 'Open',
+    slots: [
+      { name: 'Target', options: ['report.pdf', 'notes.md', 'budget.xlsx', 'work/', 'project-alpha/'] }
+    ],
+    preview: (vals) => `Open ${vals[0] || '...'}`
+  },
+  goto: {
+    label: 'Go to',
+    slots: [
+      { name: 'Destination', options: ['Downloads', 'Desktop', 'Home', 'Projects', 'Pictures', '/', '~/.config'] }
+    ],
+    preview: (vals) => `Go to ~/${vals[0] || '...'}`
+  },
+  view: {
+    label: 'View as',
+    slots: [
+      { name: 'Mode', options: ['list', 'grid', 'thumbnails', 'details'] }
+    ],
+    preview: (vals) => `View as ${vals[0] || '...'}`
+  },
+  create: {
+    label: 'Create',
+    slots: [
+      { name: 'Type', options: ['folder', 'file', 'symlink'] },
+      { name: 'Name', options: ['(type a name)'], isTextInput: true }
+    ],
+    preview: (vals) => `Create ${vals[0] || '...'} "${vals[1] || '...'}"`
+  }
+};
+
+const VERBS = Object.keys(TEMPLATES);
+
+/* ── State ── */
+let overlayOpen = false;
+let activeSlotIdx = -1;      // -1 = verb slot
+let chosenVerb = null;        // key in TEMPLATES
+let slotValues = [];          // values for each slot after verb
+let filterText = '';
+let highlightIdx = 0;
+
+const overlayBg = document.getElementById('overlayBg');
+const sentenceRow = document.getElementById('sentenceRow');
+const slotsArea = document.getElementById('slotsArea');
+const previewText = document.getElementById('previewText');
+const filterInput = document.getElementById('filterInput');
+const typingHint = document.getElementById('typingHint');
+
+/* ── Open / close ── */
+function openOverlay() {
+  overlayOpen = true;
+  activeSlotIdx = -1;
+  chosenVerb = null;
+  slotValues = [];
+  filterText = '';
+  highlightIdx = 0;
+  overlayBg.classList.add('visible');
+  typingHint.classList.remove('visible');
+  render();
+  filterInput.focus();
+}
+
+function closeOverlay() {
+  overlayOpen = false;
+  overlayBg.classList.remove('visible');
+  filterInput.value = '';
+  filterText = '';
+}
+
+function executeCommand() {
+  const tpl = TEMPLATES[chosenVerb];
+  if (!tpl) return;
+  const preview = tpl.preview(slotValues);
+  closeOverlay();
+  showExecution(preview);
+}
+
+function showExecution(text) {
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #7c3aed; color: white; padding: 14px 28px; border-radius: 12px;
+    font-size: 15px; font-family: inherit; z-index: 200;
+    box-shadow: 0 8px 32px rgba(124,58,237,0.5);
+    animation: chipBounce 0.3s ease;
+  `;
+  el.textContent = '✓ ' + text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1800);
+}
+
+/* ── Filtering ── */
+function getFilteredVerbs() {
+  if (!filterText) return VERBS;
+  const q = filterText.toLowerCase();
+  return VERBS.filter(v => {
+    const label = TEMPLATES[v].label.toLowerCase();
+    return label.startsWith(q) || label.includes(q);
+  });
+}
+
+function getFilteredOptions() {
+  if (!chosenVerb || activeSlotIdx < 0) return [];
+  const tpl = TEMPLATES[chosenVerb];
+  if (activeSlotIdx >= tpl.slots.length) return [];
+  const slot = tpl.slots[activeSlotIdx];
+  if (slot.isTextInput) return [];
+  if (!filterText) return slot.options;
+  const q = filterText.toLowerCase();
+  return slot.options.filter(o => o.toLowerCase().includes(q));
+}
+
+/* ── Render ── */
+function render() {
+  renderSentenceRow();
+  renderSlotsArea();
+  renderPreview();
+}
+
+function renderSentenceRow() {
+  sentenceRow.innerHTML = '';
+  const tpl = chosenVerb ? TEMPLATES[chosenVerb] : null;
+
+  // Verb chip
+  const verbChip = document.createElement('div');
+  verbChip.className = 'chip';
+  if (activeSlotIdx === -1) {
+    verbChip.classList.add('active');
+    verbChip.textContent = filterText || 'verb';
+    if (!filterText) verbChip.classList.add('placeholder');
+  } else if (chosenVerb) {
+    verbChip.classList.add('completed');
+    verbChip.textContent = tpl.label;
+  }
+  verbChip.addEventListener('click', () => {
+    activeSlotIdx = -1;
+    filterText = '';
+    highlightIdx = 0;
+    render();
+    filterInput.focus();
+  });
+  sentenceRow.appendChild(verbChip);
+
+  // Slot chips
+  if (tpl) {
+    tpl.slots.forEach((slot, i) => {
+      const chip = document.createElement('div');
+      chip.className = 'chip';
+      if (i === activeSlotIdx) {
+        chip.classList.add('active');
+        if (slot.isTextInput) {
+          chip.textContent = filterText || slot.name;
+          if (!filterText) chip.classList.add('placeholder');
+        } else {
+          chip.textContent = filterText || 'choose...';
+          if (!filterText) chip.classList.add('placeholder');
+        }
+      } else if (slotValues[i] !== undefined) {
+        chip.classList.add('completed');
+        chip.textContent = slotValues[i];
+      } else {
+        chip.classList.add('placeholder');
+        chip.textContent = slot.name;
+      }
+      chip.addEventListener('click', () => {
+        if (i <= (slotValues.length)) {
+          activeSlotIdx = i;
+          filterText = '';
+          highlightIdx = 0;
+          render();
+          filterInput.focus();
+        }
+      });
+      sentenceRow.appendChild(chip);
+    });
+  }
+}
+
+function renderSlotsArea() {
+  slotsArea.innerHTML = '';
+
+  // Verb options column
+  const verbCol = document.createElement('div');
+  verbCol.className = 'slot-col' + (activeSlotIdx === -1 ? ' active' : (chosenVerb ? ' done' : ''));
+  const verbLabel = document.createElement('div');
+  verbLabel.className = 'slot-label';
+  verbLabel.textContent = 'Verb';
+  verbCol.appendChild(verbLabel);
+
+  if (activeSlotIdx === -1) {
+    const filtered = getFilteredVerbs();
+    filtered.forEach((v, i) => {
+      const opt = document.createElement('div');
+      opt.className = 'slot-option' + (i === highlightIdx ? ' highlighted' : '');
+      opt.innerHTML = `<span class="badge">${BADGES[i] || i+1}</span><span class="opt-text">${TEMPLATES[v].label}</span>`;
+      opt.addEventListener('click', () => selectVerb(v));
+      verbCol.appendChild(opt);
+    });
+  } else if (chosenVerb) {
+    const opt = document.createElement('div');
+    opt.className = 'slot-option highlighted';
+    opt.innerHTML = `<span class="badge">✓</span><span class="opt-text">${TEMPLATES[chosenVerb].label}</span>`;
+    verbCol.appendChild(opt);
+  }
+  slotsArea.appendChild(verbCol);
+
+  // Slot option columns
+  if (chosenVerb) {
+    const tpl = TEMPLATES[chosenVerb];
+    tpl.slots.forEach((slot, i) => {
+      const col = document.createElement('div');
+      col.className = 'slot-col' + (i === activeSlotIdx ? ' active' : (slotValues[i] !== undefined ? ' done' : ''));
+
+      const label = document.createElement('div');
+      label.className = 'slot-label';
+      label.textContent = slot.name;
+      col.appendChild(label);
+
+      if (slot.isTextInput && i === activeSlotIdx) {
+        const hint = document.createElement('div');
+        hint.className = 'slot-option highlighted';
+        hint.innerHTML = `<span class="opt-text" style="font-style:italic;color:#b794f6;">${filterText ? '"' + filterText + '"' : 'Type a name...'}</span>`;
+        col.appendChild(hint);
+      } else if (i === activeSlotIdx) {
+        const filtered = getFilteredOptions();
+        filtered.forEach((o, j) => {
+          const opt = document.createElement('div');
+          opt.className = 'slot-option' + (j === highlightIdx ? ' highlighted' : '');
+          opt.innerHTML = `<span class="badge">${BADGES[j] || j+1}</span><span class="opt-text">${o}</span>`;
+          opt.addEventListener('click', () => selectSlotOption(o));
+          col.appendChild(opt);
+        });
+      } else if (slotValues[i] !== undefined) {
+        const opt = document.createElement('div');
+        opt.className = 'slot-option highlighted';
+        opt.innerHTML = `<span class="badge">✓</span><span class="opt-text">${slotValues[i]}</span>`;
+        col.appendChild(opt);
+      } else {
+        slot.options.slice(0, 4).forEach((o, j) => {
+          const opt = document.createElement('div');
+          opt.className = 'slot-option';
+          opt.innerHTML = `<span class="badge" style="opacity:0.4">${BADGES[j]}</span><span class="opt-text" style="opacity:0.5">${o}</span>`;
+          col.appendChild(opt);
+        });
+      }
+      slotsArea.appendChild(col);
+    });
+  }
+}
+
+function renderPreview() {
+  if (!chosenVerb) {
+    previewText.textContent = 'Start typing a verb: move, copy, sort, delete, open...';
+    return;
+  }
+  const tpl = TEMPLATES[chosenVerb];
+  previewText.textContent = tpl.preview(slotValues);
+}
+
+/* ── Selection actions ── */
+function selectVerb(verbKey) {
+  chosenVerb = verbKey;
+  slotValues = [];
+  activeSlotIdx = 0;
+  filterText = '';
+  highlightIdx = 0;
+  bounceActiveChip();
+  render();
+}
+
+function selectSlotOption(value) {
+  slotValues[activeSlotIdx] = value;
+  const tpl = TEMPLATES[chosenVerb];
+  bounceActiveChip();
+  if (activeSlotIdx < tpl.slots.length - 1) {
+    activeSlotIdx++;
+    filterText = '';
+    highlightIdx = 0;
+    render();
+  } else {
+    filterText = '';
+    render();
+    // All slots filled — auto-execute after brief pause
+    setTimeout(executeCommand, 400);
+  }
+}
+
+function advanceSlot() {
+  if (!chosenVerb) return;
+  const tpl = TEMPLATES[chosenVerb];
+
+  // If current slot has text input and there's text, set it
+  if (activeSlotIdx >= 0 && activeSlotIdx < tpl.slots.length) {
+    const slot = tpl.slots[activeSlotIdx];
+    if (slot.isTextInput && filterText) {
+      slotValues[activeSlotIdx] = filterText;
+    }
+  }
+
+  if (activeSlotIdx < tpl.slots.length - 1) {
+    activeSlotIdx++;
+    filterText = '';
+    highlightIdx = 0;
+    render();
+  }
+}
+
+function retreatSlot() {
+  if (activeSlotIdx > 0) {
+    activeSlotIdx--;
+    filterText = '';
+    highlightIdx = 0;
+    render();
+  } else if (activeSlotIdx === 0) {
+    activeSlotIdx = -1;
+    chosenVerb = null;
+    slotValues = [];
+    filterText = '';
+    highlightIdx = 0;
+    render();
+  }
+}
+
+function bounceActiveChip() {
+  const chips = sentenceRow.querySelectorAll('.chip');
+  const idx = activeSlotIdx + 1; // +1 because verb is first
+  if (chips[idx]) {
+    chips[idx].classList.add('bounce');
+    setTimeout(() => chips[idx].classList.remove('bounce'), 300);
+  }
+}
+
+/* ── Keyboard handling ── */
+document.addEventListener('keydown', (e) => {
+  if (!overlayOpen) {
+    // Open overlay on printable key
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      openOverlay();
+      filterText = e.key;
+      highlightIdx = 0;
+      render();
+      e.preventDefault();
+      return;
+    }
+    return;
+  }
+
+  // Overlay is open
+  if (e.key === 'Escape') {
+    closeOverlay();
+    e.preventDefault();
+    return;
+  }
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    if (e.shiftKey) {
+      retreatSlot();
+    } else {
+      // If in verb slot and only one match, select it
+      if (activeSlotIdx === -1) {
+        const fv = getFilteredVerbs();
+        if (fv.length === 1) {
+          selectVerb(fv[0]);
+          return;
+        } else if (fv.length > 0) {
+          selectVerb(fv[highlightIdx] || fv[0]);
+          return;
+        }
+      }
+      // If in a slot and only one option match, select it
+      if (activeSlotIdx >= 0 && chosenVerb) {
+        const tpl = TEMPLATES[chosenVerb];
+        const slot = tpl.slots[activeSlotIdx];
+        if (!slot.isTextInput) {
+          const fo = getFilteredOptions();
+          if (fo.length === 1) {
+            selectSlotOption(fo[0]);
+            return;
+          } else if (fo.length > 0 && highlightIdx < fo.length) {
+            selectSlotOption(fo[highlightIdx]);
+            return;
+          }
+        }
+      }
+      advanceSlot();
+    }
+    return;
+  }
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (activeSlotIdx === -1) {
+      const fv = getFilteredVerbs();
+      if (fv.length > 0) selectVerb(fv[highlightIdx] || fv[0]);
+    } else if (chosenVerb) {
+      const tpl = TEMPLATES[chosenVerb];
+      const slot = tpl.slots[activeSlotIdx];
+      if (slot && slot.isTextInput && filterText) {
+        selectSlotOption(filterText);
+      } else {
+        const fo = getFilteredOptions();
+        if (fo.length > 0 && highlightIdx < fo.length) {
+          selectSlotOption(fo[highlightIdx]);
+        } else if (slotValues.length === tpl.slots.length && slotValues.every(v => v !== undefined)) {
+          executeCommand();
+        }
+      }
+    }
+    return;
+  }
+
+  // Arrow keys
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const max = activeSlotIdx === -1 ? getFilteredVerbs().length : getFilteredOptions().length;
+    highlightIdx = Math.min(highlightIdx + 1, max - 1);
+    render();
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    highlightIdx = Math.max(highlightIdx - 1, 0);
+    render();
+    return;
+  }
+
+  // Number keys for quick select
+  if (e.key >= '1' && e.key <= '9' && !e.metaKey && !e.ctrlKey) {
+    const idx = parseInt(e.key) - 1;
+    if (activeSlotIdx === -1) {
+      const fv = getFilteredVerbs();
+      if (idx < fv.length) { selectVerb(fv[idx]); e.preventDefault(); return; }
+    } else if (chosenVerb) {
+      const tpl = TEMPLATES[chosenVerb];
+      const slot = tpl.slots[activeSlotIdx];
+      if (!slot.isTextInput) {
+        const fo = getFilteredOptions();
+        if (idx < fo.length) { selectSlotOption(fo[idx]); e.preventDefault(); return; }
+      }
+    }
+  }
+
+  // Backspace
+  if (e.key === 'Backspace') {
+    if (filterText.length > 0) {
+      filterText = filterText.slice(0, -1);
+      highlightIdx = 0;
+      render();
+    } else {
+      retreatSlot();
+    }
+    e.preventDefault();
+    return;
+  }
+
+  // Printable character
+  if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    filterText += e.key;
+    highlightIdx = 0;
+
+    // Auto-select verb if only one match
+    if (activeSlotIdx === -1) {
+      const fv = getFilteredVerbs();
+      if (fv.length === 1 && TEMPLATES[fv[0]].label.toLowerCase() === filterText.toLowerCase()) {
+        selectVerb(fv[0]);
+        e.preventDefault();
+        return;
+      }
+    }
+
+    render();
+    e.preventDefault();
+  }
+});
+
+/* ── Show typing hint briefly ── */
+setTimeout(() => { typingHint.classList.add('visible'); }, 800);
+setTimeout(() => { typingHint.classList.remove('visible'); }, 4000);
+
+/* ── Demo: auto-run a move scenario after 1.5s ── */
+function runDemo() {
+  const steps = [
+    { delay: 1500, action: () => { openOverlay(); filterText = 'm'; highlightIdx = 0; render(); } },
+    { delay: 2200, action: () => selectVerb('move') },
+    { delay: 3000, action: () => selectSlotOption('selected (3)') },
+    { delay: 3800, action: () => selectSlotOption('Downloads') },
+    // Then sort demo
+    { delay: 6000, action: () => { openOverlay(); filterText = 's'; highlightIdx = 0; render(); } },
+    { delay: 6700, action: () => selectVerb('sort') },
+    { delay: 7400, action: () => selectSlotOption('date modified') },
+    { delay: 8100, action: () => selectSlotOption('descending') },
+    // Then goto demo
+    { delay: 10200, action: () => { openOverlay(); filterText = 'g'; highlightIdx = 0; render(); } },
+    { delay: 10900, action: () => selectVerb('goto') },
+    { delay: 11600, action: () => selectSlotOption('Projects') },
+  ];
+  steps.forEach(s => setTimeout(s.action, s.delay));
+}
+runDemo();
+</script>
+</body>
+</html>

@@ -1,0 +1,344 @@
+/* ChipPrompt — sentence-chip command overlay */
+
+.chip-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 24, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  z-index: 2000;
+  animation: chipFade 0.14s ease-out;
+}
+
+@keyframes chipFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.chip-overlay__box {
+  width: min(640px, 92vw);
+  background: var(--bg-1, #1e1e38);
+  border: 1px solid var(--border-2, #2d2d54);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 80px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(124, 58, 237, 0.12);
+  padding: 22px 24px 18px;
+  animation: chipBoxIn 0.18s ease-out;
+}
+
+@keyframes chipBoxIn {
+  from { transform: translateY(-8px) scale(0.97); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* ── Sentence row ─────────────────────────────────────────── */
+.chip-sentence {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif);
+  font-weight: 500;
+  border: 1.5px solid transparent;
+  transition: all 0.2s ease;
+  min-width: 80px;
+  justify-content: center;
+  position: relative;
+}
+
+.chip--placeholder {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #6272a4;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.chip--active {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+  box-shadow:
+    0 0 18px rgba(124, 58, 237, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.chip--completed {
+  background: #2a2a4a;
+  border-color: #3d3d6b;
+  color: #e0e0e0;
+}
+
+.chip--completed::after {
+  content: '✓';
+  font-size: 11px;
+  margin-left: 4px;
+  color: #7c3aed;
+}
+
+.chip__placeholder-caret {
+  opacity: 0.5;
+  font-size: 12px;
+}
+
+/* ── Input row ────────────────────────────────────────────── */
+.chip-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  transition: border-color 0.15s ease;
+}
+
+.chip-input-row:focus-within {
+  border-color: rgba(124, 58, 237, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chip-input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--fg-1, #e0e0e0);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 14px;
+}
+
+.chip-input::placeholder {
+  color: #6272a4;
+  font-style: italic;
+}
+
+.chip-slot-label {
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  color: #7c3aed;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+/* ── Options list ─────────────────────────────────────────── */
+.chip-options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.chip-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.08s ease;
+  position: relative;
+}
+
+.chip-option:hover:not(.chip-option--disabled) {
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.chip-option--highlighted {
+  background: rgba(124, 58, 237, 0.2) !important;
+  color: #fff;
+}
+
+.chip-option--highlighted::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10%;
+  bottom: 10%;
+  width: 3px;
+  background: #7c3aed;
+  border-radius: 0 3px 3px 0;
+}
+
+.chip-option--disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.chip-option--disabled .chip-option__label {
+  text-decoration: none;
+}
+
+.chip-option--empty {
+  color: #6272a4;
+  font-style: italic;
+  justify-content: center;
+  cursor: default;
+}
+
+.chip-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(124, 58, 237, 0.22);
+  color: #b794f6;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
+.chip-option--disabled .chip-badge {
+  background: rgba(255, 255, 255, 0.06);
+  color: #555;
+}
+
+.chip-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chip-option__label {
+  color: var(--fg-1, #e0e0e0);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-option__detail {
+  color: #6272a4;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-option__lock {
+  font-size: 14px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+/* ── Preview + reason ─────────────────────────────────────── */
+.chip-preview {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: color 0.15s ease;
+}
+
+.chip-preview__text {
+  color: #8b8baf;
+  font-style: italic;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
+.chip-preview__reason {
+  color: #f6b74a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: chipShake 0.25s ease-out;
+}
+
+.chip-preview__icon {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+@keyframes chipShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+/* ── Hint bar ─────────────────────────────────────────────── */
+.chip-hints {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: #4a4a6a;
+  flex-wrap: wrap;
+}
+
+.chip-hints kbd {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10px;
+  margin: 0 1px;
+  color: #b8b8cf;
+}
+
+/* Light theme adjustments */
+[data-theme='light'] .chip-overlay__box {
+  background: #ffffff;
+  border-color: #e0e0e5;
+}
+
+[data-theme='light'] .chip--placeholder {
+  background: #f4f4f7;
+  border-color: #e0e0e5;
+  color: #888;
+}
+
+[data-theme='light'] .chip--completed {
+  background: #f0f0f5;
+  border-color: #d8d8df;
+  color: #333;
+}
+
+[data-theme='light'] .chip-input-row {
+  background: #f8f8fb;
+  border-color: #e5e5ea;
+}
+
+[data-theme='light'] .chip-input {
+  color: #1a1a2e;
+}
+
+[data-theme='light'] .chip-option__label {
+  color: #1a1a2e;
+}
+
+[data-theme='light'] .chip-preview__text {
+  color: #666;
+}

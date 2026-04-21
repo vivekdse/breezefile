@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Predictive Grid Command Overlay — File Manager Prototype</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── Miller columns ────────────────────────────────── */
+  .miller {
+    display: flex;
+    height: 100vh;
+    gap: 1px;
+    background: #0d0d1a;
+    transition: filter 0.3s ease;
+  }
+  .miller.dimmed { filter: brightness(0.35) blur(1px); }
+
+  .column {
+    flex: 1;
+    background: #16213e;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .column-header {
+    padding: 10px 14px;
+    font-size: 11px;
+    color: #7c3aed;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    border-bottom: 1px solid #1e2d4a;
+    background: #131b30;
+  }
+  .column-items { flex: 1; overflow-y: auto; }
+
+  .item {
+    padding: 8px 14px;
+    font-size: 13px;
+    color: #b0b8d0;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-left: 3px solid transparent;
+  }
+  .item.dir { color: #60a5fa; }
+  .item.dir::before { content: '📁'; font-size: 12px; }
+  .item.file::before { content: '📄'; font-size: 12px; }
+  .item.selected {
+    background: #7c3aed22;
+    border-left-color: #7c3aed;
+    color: #fff;
+  }
+  .item.marked {
+    background: #7c3aed15;
+    color: #c4b5fd;
+  }
+  .item.marked::after {
+    content: '✓';
+    margin-left: auto;
+    color: #7c3aed;
+    font-size: 11px;
+  }
+
+  /* ── Status bar ────────────────────────────────────── */
+  .statusbar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 28px;
+    background: #131b30;
+    border-top: 1px solid #1e2d4a;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    font-size: 11px;
+    color: #6b7280;
+    z-index: 5;
+    justify-content: space-between;
+    transition: opacity 0.3s;
+  }
+  .statusbar.hidden { opacity: 0; pointer-events: none; }
+  .statusbar .hint { color: #7c3aed; }
+
+  /* ── Overlay ───────────────────────────────────────── */
+  .overlay {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(180deg, #0d0d1aee 0%, #1a1a2efc 20%);
+    border-top: 2px solid #7c3aed55;
+    padding: 20px 32px 24px;
+    z-index: 100;
+    transform: translateY(100%);
+    opacity: 0;
+    transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.2s ease;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 -8px 40px #7c3aed18;
+  }
+  .overlay.visible {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  /* ── Sentence bar ──────────────────────────────────── */
+  .sentence-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 18px;
+    min-height: 36px;
+    flex-wrap: wrap;
+  }
+  .sentence-label {
+    font-size: 11px;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-right: 4px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    animation: chipIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @keyframes chipIn {
+    0% { transform: scale(0.5) translateY(20px); opacity: 0; }
+    100% { transform: scale(1) translateY(0); opacity: 1; }
+  }
+  @keyframes chipOut {
+    0% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(0.5) translateY(-10px); opacity: 0; }
+  }
+  .chip.verb   { background: #7c3aed; color: #fff; }
+  .chip.object { background: #8b5cf6; color: #fff; }
+  .chip.dest   { background: #a78bfa; color: #1a1a2e; }
+  .chip.extra  { background: #c4b5fd; color: #1a1a2e; }
+  .separator {
+    color: #4b5563;
+    font-size: 16px;
+    margin: 0 2px;
+  }
+  .cursor-blink {
+    display: inline-block;
+    width: 2px;
+    height: 18px;
+    background: #7c3aed;
+    animation: blink 1s step-end infinite;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  /* ── Filter input (hidden but functional) ──────────── */
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    min-height: 20px;
+  }
+  .filter-text {
+    font-size: 13px;
+    color: #a78bfa;
+    font-style: italic;
+  }
+
+  /* ── Grid ──────────────────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .grid-cell {
+    position: relative;
+    background: #16213e;
+    border: 1px solid #1e2d4a;
+    border-radius: 8px;
+    padding: 12px 14px 12px 42px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #d1d5db;
+    cursor: pointer;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s ease;
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  .grid-cell.shown {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .grid-cell:hover {
+    border-color: #7c3aed;
+    background: #1e2748;
+    box-shadow: 0 0 16px #7c3aed33;
+    transform: scale(1.03);
+  }
+  .grid-cell.pressed {
+    animation: cellPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    background: #7c3aed;
+    color: #fff;
+    border-color: #a78bfa;
+  }
+  @keyframes cellPop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+  .grid-cell .badge {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: #7c3aed;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .grid-cell.hidden-cell {
+    display: none;
+  }
+
+  /* ── Translation line ──────────────────────────────── */
+  .translation {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #4b5563;
+    padding-top: 4px;
+    border-top: 1px solid #1e2d4a22;
+  }
+  .translation .cmd {
+    color: #6b7280;
+    font-family: inherit;
+  }
+  .translation .exec-hint {
+    color: #7c3aed88;
+  }
+
+  /* ── Keystroke counter ─────────────────────────────── */
+  .keystroke-counter {
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    z-index: 200;
+    background: #7c3aed22;
+    border: 1px solid #7c3aed44;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #c4b5fd;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: all 0.3s ease;
+    backdrop-filter: blur(8px);
+  }
+  .keystroke-counter.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .keystroke-counter .count {
+    font-size: 28px;
+    font-weight: 800;
+    color: #7c3aed;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* ── Flash message ─────────────────────────────────── */
+  .flash {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.8);
+    background: #7c3aed;
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 20px 40px;
+    border-radius: 14px;
+    z-index: 300;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 0 60px #7c3aed66;
+  }
+  .flash.visible {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  /* ── Demo controls ─────────────────────────────────── */
+  .demo-controls {
+    position: fixed;
+    top: 14px;
+    left: 20px;
+    z-index: 200;
+    display: flex;
+    gap: 8px;
+  }
+  .demo-btn {
+    background: #16213e;
+    border: 1px solid #1e2d4a;
+    color: #9ca3af;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .demo-btn:hover {
+    border-color: #7c3aed;
+    color: #c4b5fd;
+  }
+  .demo-btn.active {
+    background: #7c3aed22;
+    border-color: #7c3aed;
+    color: #c4b5fd;
+  }
+</style>
+</head>
+<body>
+
+<!-- Miller columns -->
+<div class="miller" id="miller">
+  <div class="column">
+    <div class="column-header">~ Home</div>
+    <div class="column-items">
+      <div class="item dir selected">Documents</div>
+      <div class="item dir">Desktop</div>
+      <div class="item dir">Downloads</div>
+      <div class="item dir">Pictures</div>
+      <div class="item dir">Music</div>
+      <div class="item dir">Projects</div>
+      <div class="item dir">.config</div>
+    </div>
+  </div>
+  <div class="column">
+    <div class="column-header">Documents/</div>
+    <div class="column-items">
+      <div class="item file marked">report.pdf</div>
+      <div class="item file marked">notes.md</div>
+      <div class="item file marked">budget.xlsx</div>
+      <div class="item dir">photos/</div>
+      <div class="item dir selected">work/</div>
+    </div>
+  </div>
+  <div class="column">
+    <div class="column-header">work/</div>
+    <div class="column-items">
+      <div class="item dir">project-alpha/</div>
+      <div class="item dir">project-beta/</div>
+      <div class="item file">README.md</div>
+    </div>
+  </div>
+</div>
+
+<!-- Status bar -->
+<div class="statusbar" id="statusbar">
+  <span>3 marked &nbsp;│&nbsp; 7 items &nbsp;│&nbsp; ~/Documents</span>
+  <span class="hint">Press Space to open command grid</span>
+</div>
+
+<!-- Keystroke counter -->
+<div class="keystroke-counter" id="keystrokeCounter">
+  <span class="count" id="ksCount">0</span> keystrokes
+  <span id="ksLabel"></span>
+</div>
+
+<!-- Overlay -->
+<div class="overlay" id="overlay">
+  <div class="sentence-bar" id="sentenceBar">
+    <span class="sentence-label">Command:</span>
+    <span class="cursor-blink" id="cursor"></span>
+  </div>
+  <div class="filter-row" id="filterRow"></div>
+  <div class="grid" id="grid"></div>
+  <div class="translation" id="translation">
+    <span class="cmd" id="cmdPreview"></span>
+    <span class="exec-hint" id="execHint"></span>
+  </div>
+</div>
+
+<!-- Flash message -->
+<div class="flash" id="flash"></div>
+
+<!-- Demo controls -->
+<div class="demo-controls">
+  <div class="demo-btn" id="demoMove" title="Watch: move files to Downloads in 3 keys">Demo: Move</div>
+  <div class="demo-btn" id="demoSort" title="Watch: sort by newest in 3 keys">Demo: Sort</div>
+  <div class="demo-btn" id="demoType" title="Watch: typing filter override">Demo: Type</div>
+  <div class="demo-btn" id="demoReset">Reset</div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────
+const state = {
+  open: false,
+  sentence: [],       // [{text, type}]
+  filterText: '',
+  keystrokes: 0,
+  currentStep: null,  // reference to current tree node
+  demoRunning: false,
+};
+
+// ── Command tree (predictive paths) ───────────────────
+const TREE = {
+  label: 'root',
+  items: [
+    { key: 1, text: 'Move',   type: 'verb' },
+    { key: 2, text: 'Copy',   type: 'verb' },
+    { key: 3, text: 'Sort',   type: 'verb' },
+    { key: 4, text: 'Delete', type: 'verb' },
+    { key: 5, text: 'Rename', type: 'verb' },
+    { key: 6, text: 'Open',   type: 'verb' },
+    { key: 7, text: 'Go to',  type: 'verb' },
+    { key: 8, text: 'Create', type: 'verb' },
+    { key: 9, text: 'New',    type: 'verb' },
+  ],
+  next: {
+    'Move': {
+      items: [
+        { key: 1, text: 'these files', type: 'object' },
+        { key: 2, text: 'report.pdf',  type: 'object' },
+        { key: 3, text: 'notes.md',    type: 'object' },
+        { key: 4, text: 'budget.xlsx', type: 'object' },
+        { key: 5, text: 'all marked',  type: 'object' },
+        { key: 6, text: '...type',     type: 'object' },
+      ],
+      next: {
+        _default: {
+          items: [
+            { key: 1, text: 'Downloads', type: 'dest' },
+            { key: 2, text: 'Desktop',   type: 'dest' },
+            { key: 3, text: 'Documents', type: 'dest' },
+            { key: 4, text: 'Projects',  type: 'dest' },
+            { key: 5, text: 'Home',      type: 'dest' },
+            { key: 6, text: 'Pictures',  type: 'dest' },
+            { key: 7, text: 'Music',     type: 'dest' },
+            { key: 8, text: 'Trash',     type: 'dest' },
+            { key: 9, text: '...type',   type: 'dest' },
+          ],
+          next: null,
+          execute: (s) => `Moving ${s[1]?.text || 'files'} to ~/${s[2]?.text || 'destination'}`,
+          cmd: (s) => `dd + paste to ~/${s[2]?.text || '...'}`,
+        }
+      }
+    },
+    'Copy': {
+      items: [
+        { key: 1, text: 'these files', type: 'object' },
+        { key: 2, text: 'report.pdf',  type: 'object' },
+        { key: 3, text: 'notes.md',    type: 'object' },
+        { key: 4, text: 'budget.xlsx', type: 'object' },
+        { key: 5, text: 'all marked',  type: 'object' },
+        { key: 6, text: '...type',     type: 'object' },
+      ],
+      next: {
+        _default: {
+          items: [
+            { key: 1, text: 'Downloads', type: 'dest' },
+            { key: 2, text: 'Desktop',   type: 'dest' },
+            { key: 3, text: 'Documents', type: 'dest' },
+            { key: 4, text: 'Projects',  type: 'dest' },
+            { key: 5, text: 'Home',      type: 'dest' },
+            { key: 6, text: '...type',   type: 'dest' },
+          ],
+          next: null,
+          execute: (s) => `Copying ${s[1]?.text || 'files'} to ~/${s[2]?.text || 'destination'}`,
+          cmd: (s) => `yy + paste to ~/${s[2]?.text || '...'}`,
+        }
+      }
+    },
+    'Sort': {
+      items: [
+        { key: 1, text: 'by name',      type: 'object' },
+        { key: 2, text: 'by size',      type: 'object' },
+        { key: 3, text: 'by date',      type: 'object' },
+        { key: 4, text: 'by type',      type: 'object' },
+        { key: 5, text: 'by extension', type: 'object' },
+        { key: 6, text: 'reverse',      type: 'object' },
+      ],
+      next: {
+        'by name': {
+          items: [
+            { key: 1, text: 'A → Z', type: 'extra' },
+            { key: 2, text: 'Z → A', type: 'extra' },
+          ],
+          next: null,
+          execute: (s) => `Sorting ${s[2]?.text || ''}`,
+          cmd: (s) => `:sort name ${s[2]?.text === 'Z → A' ? 'desc' : 'asc'}`,
+        },
+        'by size': {
+          items: [
+            { key: 1, text: 'largest first',  type: 'extra' },
+            { key: 2, text: 'smallest first', type: 'extra' },
+          ],
+          next: null,
+          execute: (s) => `Sorting by size — ${s[2]?.text || ''}`,
+          cmd: (s) => `:sort size ${s[2]?.text === 'smallest first' ? 'asc' : 'desc'}`,
+        },
+        'by date': {
+          items: [
+            { key: 1, text: 'newest first', type: 'extra' },
+            { key: 2, text: 'oldest first', type: 'extra' },
+          ],
+          next: null,
+          execute: (s) => `Sorting by date — ${s[2]?.text || ''}`,
+          cmd: (s) => `:sort mtime ${s[2]?.text === 'oldest first' ? 'asc' : 'desc'}`,
+        },
+        _default: {
+          items: [
+            { key: 1, text: 'ascending',  type: 'extra' },
+            { key: 2, text: 'descending', type: 'extra' },
+          ],
+          next: null,
+          execute: (s) => `Sorting ${s[1]?.text || ''} — ${s[2]?.text || ''}`,
+          cmd: (s) => `:sort ${s[1]?.text?.replace('by ', '') || ''} ${s[2]?.text === 'descending' ? 'desc' : 'asc'}`,
+        },
+      }
+    },
+    'Delete': {
+      items: [
+        { key: 1, text: 'these files',  type: 'object' },
+        { key: 2, text: 'report.pdf',   type: 'object' },
+        { key: 3, text: 'notes.md',     type: 'object' },
+        { key: 4, text: 'all marked',   type: 'object' },
+      ],
+      next: {
+        _default: {
+          items: [
+            { key: 1, text: 'to Trash',    type: 'dest' },
+            { key: 2, text: 'permanently',  type: 'dest' },
+          ],
+          next: null,
+          execute: (s) => `Deleting ${s[1]?.text || 'files'} ${s[2]?.text || ''}`,
+          cmd: (s) => s[2]?.text === 'permanently' ? `:delete!` : `:trash`,
+        }
+      }
+    },
+    'Go to': {
+      items: [
+        { key: 1, text: 'Downloads', type: 'dest' },
+        { key: 2, text: 'Desktop',   type: 'dest' },
+        { key: 3, text: 'Documents', type: 'dest' },
+        { key: 4, text: 'Projects',  type: 'dest' },
+        { key: 5, text: 'Home',      type: 'dest' },
+        { key: 6, text: 'Pictures',  type: 'dest' },
+        { key: 7, text: 'Music',     type: 'dest' },
+        { key: 8, text: '...type',   type: 'dest' },
+      ],
+      next: null,
+      execute: (s) => `Going to ~/${s[1]?.text || ''}`,
+      cmd: (s) => `cd ~/${s[1]?.text || '...'}`,
+    },
+  }
+};
+
+// ── DOM refs ──────────────────────────────────────────
+const $miller    = document.getElementById('miller');
+const $statusbar = document.getElementById('statusbar');
+const $overlay   = document.getElementById('overlay');
+const $sentBar   = document.getElementById('sentenceBar');
+const $filterRow = document.getElementById('filterRow');
+const $grid      = document.getElementById('grid');
+const $cmdPrev   = document.getElementById('cmdPreview');
+const $execHint  = document.getElementById('execHint');
+const $flash     = document.getElementById('flash');
+const $ksCounter = document.getElementById('keystrokeCounter');
+const $ksCount   = document.getElementById('ksCount');
+const $ksLabel   = document.getElementById('ksLabel');
+
+// ── Open / close overlay ─────────────────────────────
+function openOverlay() {
+  state.open = true;
+  state.sentence = [];
+  state.filterText = '';
+  state.keystrokes = 0;
+  state.currentStep = TREE;
+  $miller.classList.add('dimmed');
+  $statusbar.classList.add('hidden');
+  $overlay.classList.add('visible');
+  $ksCounter.classList.add('visible');
+  updateKeystrokeCounter();
+  renderSentence();
+  renderGrid(TREE.items);
+  updateTranslation();
+}
+
+function closeOverlay() {
+  state.open = false;
+  state.filterText = '';
+  $miller.classList.remove('dimmed');
+  $statusbar.classList.remove('hidden');
+  $overlay.classList.remove('visible');
+  $ksCounter.classList.remove('visible');
+}
+
+function resetAll() {
+  closeOverlay();
+  state.demoRunning = false;
+  document.querySelectorAll('.demo-btn').forEach(b => b.classList.remove('active'));
+}
+
+// ── Render sentence bar ──────────────────────────────
+function renderSentence() {
+  $sentBar.innerHTML = '<span class="sentence-label">Command:</span>';
+  state.sentence.forEach((word, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'separator';
+      sep.textContent = '›';
+      $sentBar.appendChild(sep);
+    }
+    const chip = document.createElement('span');
+    chip.className = `chip ${word.type}`;
+    chip.textContent = word.text;
+    $sentBar.appendChild(chip);
+  });
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor-blink';
+  if (state.sentence.length > 0) {
+    const sep = document.createElement('span');
+    sep.className = 'separator';
+    sep.textContent = '›';
+    $sentBar.appendChild(sep);
+  }
+  $sentBar.appendChild(cursor);
+}
+
+// ── Render grid ─────────────────────────────────────
+function renderGrid(items) {
+  $grid.innerHTML = '';
+  items.forEach((item, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'grid-cell';
+    cell.dataset.key = item.key;
+    cell.dataset.text = item.text;
+    cell.dataset.type = item.type;
+    cell.innerHTML = `<span class="badge">${item.key}</span>${item.text}`;
+    $grid.appendChild(cell);
+    // stagger animation
+    setTimeout(() => cell.classList.add('shown'), 40 * i);
+  });
+  $filterRow.innerHTML = '';
+}
+
+function filterGrid(text) {
+  const lower = text.toLowerCase();
+  const cells = $grid.querySelectorAll('.grid-cell');
+  cells.forEach(cell => {
+    const match = cell.dataset.text.toLowerCase().includes(lower);
+    cell.classList.toggle('hidden-cell', !match);
+  });
+  if (text) {
+    $filterRow.innerHTML = `<span class="filter-text">Filter: "${text}" — press number to select, or keep typing</span>`;
+  } else {
+    $filterRow.innerHTML = '';
+  }
+}
+
+// ── Update translation line ─────────────────────────
+function updateTranslation() {
+  const node = resolveCurrentNode();
+  if (node && node.cmd) {
+    $cmdPrev.textContent = '→ will execute: ' + node.cmd(state.sentence);
+    $execHint.textContent = '[⏎]';
+  } else if (state.sentence.length === 0) {
+    $cmdPrev.textContent = 'Type or press a number to begin';
+    $execHint.textContent = '[Esc to close]';
+  } else {
+    $cmdPrev.textContent = 'Building command...';
+    $execHint.textContent = '[Esc to close]';
+  }
+}
+
+// ── Navigate the command tree ───────────────────────
+function resolveCurrentNode() {
+  let node = TREE;
+  for (let i = 0; i < state.sentence.length; i++) {
+    const word = state.sentence[i].text;
+    if (!node.next) return node;
+    node = node.next[word] || node.next._default || null;
+    if (!node) return null;
+  }
+  return node;
+}
+
+function selectItem(key) {
+  const cells = $grid.querySelectorAll('.grid-cell:not(.hidden-cell)');
+  let target = null;
+  cells.forEach(c => {
+    if (parseInt(c.dataset.key) === key) target = c;
+  });
+  if (!target) return;
+
+  state.keystrokes++;
+  updateKeystrokeCounter();
+
+  // Animate press
+  target.classList.add('pressed');
+  setTimeout(() => target.classList.remove('pressed'), 300);
+
+  const text = target.dataset.text;
+  const type = target.dataset.type;
+
+  if (text === '...type') return; // placeholder, do nothing
+
+  // Add to sentence
+  state.sentence.push({ text, type });
+  state.filterText = '';
+  renderSentence();
+
+  // Advance tree
+  const node = resolveCurrentNode();
+  if (node && node.items) {
+    setTimeout(() => {
+      renderGrid(node.items);
+      updateTranslation();
+    }, 200);
+  } else if (node && node.execute) {
+    // Terminal — execute
+    updateTranslation();
+    setTimeout(() => executeCommand(node), 350);
+  } else {
+    // Also terminal
+    const parentNode = resolvePreviousNode();
+    if (parentNode && parentNode.execute) {
+      updateTranslation();
+      setTimeout(() => executeCommand(parentNode), 350);
+    }
+  }
+}
+
+function resolvePreviousNode() {
+  let node = TREE;
+  for (let i = 0; i < state.sentence.length - 1; i++) {
+    const word = state.sentence[i].text;
+    if (!node.next) return node;
+    node = node.next[word] || node.next._default || null;
+    if (!node) return null;
+  }
+  return node;
+}
+
+function executeCommand(node) {
+  const msg = node.execute(state.sentence);
+  showFlash(msg);
+  setTimeout(() => closeOverlay(), 1600);
+}
+
+// ── Flash message ───────────────────────────────────
+function showFlash(msg) {
+  $flash.textContent = msg;
+  $flash.classList.add('visible');
+  setTimeout(() => $flash.classList.remove('visible'), 1400);
+}
+
+// ── Keystroke counter ───────────────────────────────
+function updateKeystrokeCounter() {
+  $ksCount.textContent = state.keystrokes;
+  const parts = state.sentence.map(s => s.text).join(' ');
+  $ksLabel.textContent = parts ? ` to: ${parts}` : '';
+}
+
+// ── Backspace: remove last word ─────────────────────
+function removeLast() {
+  if (state.filterText) {
+    state.filterText = state.filterText.slice(0, -1);
+    filterGrid(state.filterText);
+    return;
+  }
+  if (state.sentence.length === 0) return;
+  state.sentence.pop();
+  state.keystrokes = Math.max(0, state.keystrokes - 1);
+  updateKeystrokeCounter();
+  renderSentence();
+  const node = resolveCurrentNode();
+  if (node && node.items) {
+    renderGrid(node.items);
+  }
+  updateTranslation();
+}
+
+// ── Keyboard handler ────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (state.demoRunning) return;
+
+  if (!state.open) {
+    if (e.key === ' ' || e.key === ':') {
+      e.preventDefault();
+      openOverlay();
+    }
+    return;
+  }
+
+  // Escape
+  if (e.key === 'Escape') {
+    closeOverlay();
+    return;
+  }
+  // Backspace
+  if (e.key === 'Backspace') {
+    e.preventDefault();
+    removeLast();
+    return;
+  }
+  // Enter — execute if possible
+  if (e.key === 'Enter') {
+    const node = resolveCurrentNode();
+    if (node && node.execute) {
+      executeCommand(node);
+    }
+    return;
+  }
+  // Number keys 1-9
+  const num = parseInt(e.key);
+  if (num >= 1 && num <= 9) {
+    e.preventDefault();
+    selectItem(num);
+    return;
+  }
+  // Typing filter
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+    state.filterText += e.key;
+    filterGrid(state.filterText);
+  }
+});
+
+// ── Click handler for grid cells ────────────────────
+$grid.addEventListener('click', (e) => {
+  const cell = e.target.closest('.grid-cell');
+  if (!cell) return;
+  const key = parseInt(cell.dataset.key);
+  if (key) selectItem(key);
+});
+
+// ── Demo: Move files ────────────────────────────────
+async function demoMove() {
+  if (state.demoRunning) return;
+  state.demoRunning = true;
+  resetAll();
+  document.getElementById('demoMove').classList.add('active');
+
+  await sleep(400);
+  openOverlay();
+  await sleep(800);
+
+  // Step 1: press 1 (Move)
+  simulateKeyHighlight(1);
+  await sleep(500);
+  selectItem(1);
+  await sleep(900);
+
+  // Step 2: press 1 (these files)
+  simulateKeyHighlight(1);
+  await sleep(500);
+  selectItem(1);
+  await sleep(900);
+
+  // Step 3: press 1 (Downloads)
+  simulateKeyHighlight(1);
+  await sleep(500);
+  selectItem(1);
+
+  await sleep(2000);
+  state.demoRunning = false;
+  document.getElementById('demoMove').classList.remove('active');
+}
+
+// ── Demo: Sort ──────────────────────────────────────
+async function demoSort() {
+  if (state.demoRunning) return;
+  state.demoRunning = true;
+  resetAll();
+  document.getElementById('demoSort').classList.add('active');
+
+  await sleep(400);
+  openOverlay();
+  await sleep(800);
+
+  // Step 1: press 3 (Sort)
+  simulateKeyHighlight(3);
+  await sleep(500);
+  selectItem(3);
+  await sleep(900);
+
+  // Step 2: press 3 (by date)
+  simulateKeyHighlight(3);
+  await sleep(500);
+  selectItem(3);
+  await sleep(900);
+
+  // Step 3: press 1 (newest first)
+  simulateKeyHighlight(1);
+  await sleep(500);
+  selectItem(1);
+
+  await sleep(2000);
+  state.demoRunning = false;
+  document.getElementById('demoSort').classList.remove('active');
+}
+
+// ── Demo: Type filter ───────────────────────────────
+async function demoType() {
+  if (state.demoRunning) return;
+  state.demoRunning = true;
+  resetAll();
+  document.getElementById('demoType').classList.add('active');
+
+  await sleep(400);
+  openOverlay();
+  await sleep(800);
+
+  // Type "g" to filter → Go to visible
+  state.filterText = 'g';
+  filterGrid('g');
+  await sleep(600);
+  state.filterText = 'go';
+  filterGrid('go');
+  await sleep(600);
+
+  // Select 7 (Go to)
+  simulateKeyHighlight(7);
+  await sleep(400);
+  state.filterText = '';
+  selectItem(7);
+  await sleep(800);
+
+  // Type "d" to filter destinations
+  state.filterText = 'd';
+  filterGrid('d');
+  await sleep(600);
+  state.filterText = 'de';
+  filterGrid('de');
+  await sleep(500);
+
+  // Select 2 (Desktop)
+  simulateKeyHighlight(2);
+  await sleep(400);
+  state.filterText = '';
+  selectItem(2);
+
+  await sleep(2000);
+  state.demoRunning = false;
+  document.getElementById('demoType').classList.remove('active');
+}
+
+// ── Helpers ─────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function simulateKeyHighlight(num) {
+  const cells = $grid.querySelectorAll('.grid-cell:not(.hidden-cell)');
+  cells.forEach(c => {
+    if (parseInt(c.dataset.key) === num) {
+      c.style.borderColor = '#a78bfa';
+      c.style.boxShadow = '0 0 20px #7c3aed55';
+      setTimeout(() => {
+        c.style.borderColor = '';
+        c.style.boxShadow = '';
+      }, 400);
+    }
+  });
+}
+
+// ── Wire up demo buttons ────────────────────────────
+document.getElementById('demoMove').addEventListener('click', demoMove);
+document.getElementById('demoSort').addEventListener('click', demoSort);
+document.getElementById('demoType').addEventListener('click', demoType);
+document.getElementById('demoReset').addEventListener('click', resetAll);
+</script>
+</body>
+</html>

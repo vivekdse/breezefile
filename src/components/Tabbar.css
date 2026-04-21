@@ -1,0 +1,64 @@
+.tabbar {
+  display: flex;
+  gap: 2px;
+  padding: 4px var(--sp-3);
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--border-1);
+  overflow-x: auto;
+}
+
+.tabbar__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px var(--sp-3);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-md);
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  max-width: 220px;
+  transition: background var(--motion-hover),
+    color var(--motion-hover),
+    border-color var(--motion-hover);
+}
+.tabbar__tab:hover {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+.tabbar__tab--active {
+  background: var(--bg-2);
+  color: var(--fg-1);
+  border-color: var(--accent-glow);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.tabbar__num {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  padding: 0 4px;
+  background: var(--bg-3);
+  border-radius: 3px;
+}
+.tabbar__tab--active .tabbar__num {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.tabbar__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.tabbar__close {
+  color: var(--fg-3);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.tabbar__close:hover {
+  background: var(--bg-4);
+  color: var(--err);
+}

@@ -1,0 +1,39 @@
+import type { Entry } from './types';
+
+type Fm = {
+  platform: NodeJS.Platform;
+  versions: NodeJS.ProcessVersions;
+  homedir: () => Promise<string>;
+  readdir: (p: string) => Promise<Entry[]>;
+  stat: (p: string) => Promise<{ size: number; mtimeMs: number; isDir: boolean }>;
+  mkdir: (p: string) => Promise<void>;
+  rename: (from: string, to: string) => Promise<void>;
+  trash: (paths: string[]) => Promise<void>;
+  touch: (p: string) => Promise<void>;
+  paste: (
+    ops: {
+      src: string;
+      dst: string;
+      mode: 'copy' | 'move' | 'symlink' | 'symlinkRel' | 'hardlink';
+      overwrite?: boolean;
+    }[],
+  ) => Promise<void>;
+  reveal: (p: string) => Promise<void>;
+  openTerminal: (cwd: string) => Promise<void>;
+  runCommand: (cwd: string, cmd: string) => Promise<void>;
+  open: (p: string) => Promise<string>;
+  openWith: (p: string, appName: string) => Promise<void>;
+  clipboardWrite: (p: string) => Promise<void>;
+  thumb: (p: string, size: number) => Promise<string | null>;
+  bulkRename: (names: string[]) => Promise<string[]>;
+  dragStart: (paths: string[]) => void;
+  findFolders: (query: string, limit?: number) => Promise<string[]>;
+};
+
+declare global {
+  interface Window {
+    fm: Fm;
+  }
+}
+
+export const fm: Fm = window.fm;

@@ -1,0 +1,20 @@
+.modeline {
+  display: flex;
+  gap: var(--sp-3);
+  padding: 2px var(--sp-4);
+  min-height: 22px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+}
+
+.modeline__pending {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.modeline__status {
+  color: var(--fg-2);
+}

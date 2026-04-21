@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Command Overlay Prototype — File Manager</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --col-bg: #16213e;
+    --col-border: rgba(255,255,255,0.06);
+    --text: #e0e0e0;
+    --text-dim: rgba(255,255,255,0.4);
+    --text-muted: rgba(255,255,255,0.55);
+    --accent: #7c3aed;
+    --accent-glow: rgba(124,58,237,0.35);
+    --select-bg: rgba(124,58,237,0.18);
+    --select-border: rgba(124,58,237,0.4);
+    --overlay-bg: rgba(10,10,26,0.72);
+    --search-bg: rgba(255,255,255,0.08);
+    --result-hover: rgba(124,58,237,0.12);
+    --pill-bg: rgba(255,255,255,0.08);
+    --green: #34d399;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Menlo, monospace;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* === FILE MANAGER LAYOUT === */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+
+  .pathbar {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid var(--col-border);
+    font-size: 13px;
+    color: var(--text-muted);
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .pathbar .sep { color: rgba(255,255,255,0.2); font-size: 11px; }
+  .pathbar .crumb { cursor: default; }
+  .pathbar .crumb:last-child { color: var(--text); font-weight: 500; }
+
+  .miller {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .column {
+    flex: 1;
+    border-right: 1px solid var(--col-border);
+    background: var(--col-bg);
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .column:last-child { border-right: none; }
+
+  .column-header {
+    padding: 6px 14px 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .file-entry {
+    display: flex;
+    align-items: center;
+    padding: 4px 14px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    cursor: default;
+    gap: 8px;
+    height: 28px;
+    border: 1px solid transparent;
+    border-left: none;
+    border-right: none;
+  }
+  .file-entry .icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
+  .file-entry .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-entry.dir .name { color: #60a5fa; }
+  .file-entry.selected {
+    background: var(--select-bg);
+    border-color: var(--select-border);
+    border-radius: 4px;
+    margin: 0 4px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .file-entry.dim { opacity: 0.45; }
+
+  .statusbar {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: rgba(255,255,255,0.03);
+    border-top: 1px solid var(--col-border);
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+  }
+  .statusbar .mode {
+    background: var(--accent);
+    color: white;
+    padding: 1px 8px;
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  /* === OVERLAY === */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 180ms ease-out;
+  }
+  .overlay.active {
+    pointer-events: all;
+    opacity: 1;
+  }
+  .overlay-backdrop {
+    position: absolute;
+    inset: 0;
+    background: var(--overlay-bg);
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  }
+
+  .overlay-content {
+    position: relative;
+    z-index: 1;
+    width: 60%;
+    max-width: 640px;
+    margin-top: 18vh;
+    transform: translateY(-16px);
+    transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease-out;
+    opacity: 0;
+  }
+  .overlay.active .overlay-content {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  .search-bar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    background: var(--search-bg);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 0 20px;
+    height: 56px;
+    box-shadow: 0 0 0 1px rgba(124,58,237,0.15), 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: box-shadow 200ms ease;
+  }
+  .search-bar:focus-within {
+    box-shadow: 0 0 0 2px rgba(124,58,237,0.4), 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .search-bar .search-icon {
+    font-size: 18px;
+    margin-right: 12px;
+    opacity: 0.5;
+    flex-shrink: 0;
+  }
+  .search-bar input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: white;
+    font-size: 17px;
+    font-family: var(--font-ui);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .search-bar input::placeholder { color: rgba(255,255,255,0.3); }
+  .search-bar .hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+  }
+  .search-bar .hint kbd {
+    background: var(--pill-bg);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+  }
+
+  .results {
+    margin-top: 8px;
+    background: rgba(22,33,62,0.92);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    max-height: 380px;
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .results:empty { display: none; }
+
+  .result-category {
+    padding: 10px 16px 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    font-weight: 600;
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+  .result-category:first-child { border-top: none; }
+
+  .result-row {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    height: 44px;
+    cursor: default;
+    transition: background 100ms ease;
+    gap: 12px;
+  }
+  .result-row:hover { background: var(--result-hover); }
+  .result-row.selected {
+    background: rgba(124,58,237,0.22);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .result-row .r-icon {
+    font-size: 16px;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .result-row .r-body { flex: 1; min-width: 0; }
+  .result-row .r-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .result-row .r-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .result-row .r-chord {
+    background: var(--pill-bg);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Flash effect on "execute" */
+  .flash-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(124,58,237,0.15);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 300ms ease;
+  }
+  .flash-overlay.show { opacity: 1; }
+  .flash-text {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--green);
+    font-family: var(--font-mono);
+    letter-spacing: 1px;
+    text-shadow: 0 0 20px rgba(52,211,153,0.5);
+  }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+  /* hint badge in bottom-right */
+  .hint-badge {
+    position: fixed;
+    bottom: 40px;
+    right: 20px;
+    z-index: 10;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    transition: opacity 400ms ease;
+  }
+</style>
+</head>
+<body>
+
+<!-- File Manager Background -->
+<div class="app" id="app">
+  <div class="pathbar">
+    <span class="crumb">~</span>
+    <span class="sep">/</span>
+    <span class="crumb">Documents</span>
+    <span class="sep">/</span>
+    <span class="crumb">work</span>
+  </div>
+  <div class="miller">
+    <!-- Column 1: Home -->
+    <div class="column">
+      <div class="column-header">Home</div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">Desktop</span></div>
+      <div class="file-entry dir selected"><span class="icon">&#128193;</span><span class="name">Documents</span></div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">Downloads</span></div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">Music</span></div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">Pictures</span></div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">Projects</span></div>
+      <div class="file-entry dir dim"><span class="icon">&#128193;</span><span class="name">.config</span></div>
+    </div>
+    <!-- Column 2: Documents -->
+    <div class="column">
+      <div class="column-header">Documents</div>
+      <div class="file-entry"><span class="icon">&#128196;</span><span class="name">report.pdf</span></div>
+      <div class="file-entry"><span class="icon">&#128221;</span><span class="name">notes.md</span></div>
+      <div class="file-entry"><span class="icon">&#128202;</span><span class="name">budget.xlsx</span></div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">photos</span></div>
+      <div class="file-entry dir selected"><span class="icon">&#128193;</span><span class="name">work</span></div>
+    </div>
+    <!-- Column 3: work/ -->
+    <div class="column">
+      <div class="column-header">work</div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">project-alpha</span></div>
+      <div class="file-entry dir"><span class="icon">&#128193;</span><span class="name">project-beta</span></div>
+      <div class="file-entry"><span class="icon">&#128221;</span><span class="name">README.md</span></div>
+    </div>
+  </div>
+  <div class="statusbar">
+    <div><span class="mode">NORMAL</span> &nbsp; 3 items &middot; 2 directories, 1 file</div>
+    <div>work/ &nbsp; 1.2 MB</div>
+  </div>
+</div>
+
+<!-- Command Overlay -->
+<div class="overlay" id="overlay">
+  <div class="overlay-backdrop"></div>
+  <div class="overlay-content">
+    <div class="search-bar">
+      <span class="search-icon">&#9889;</span>
+      <input type="text" id="searchInput" placeholder="Type a command..." autocomplete="off" spellcheck="false">
+      <span class="hint"><kbd>esc</kbd> close &nbsp; <kbd>&darr;</kbd> select</span>
+    </div>
+    <div class="results" id="results"></div>
+  </div>
+</div>
+
+<!-- Flash overlay -->
+<div class="flash-overlay" id="flash">
+  <span class="flash-text">&#10003; Executed!</span>
+</div>
+
+<!-- Hint badge -->
+<div class="hint-badge" id="hintBadge">Just start typing to open commands</div>
+
+<script>
+(function() {
+  // ── Command database ──
+  const commands = [
+    // File Operations
+    { cat: 'File Operations', icon: '&#128203;', name: 'Move selected files',    desc: 'Move marked files to a target directory', chord: 'dd p',  keys: ['move','mv','relocate'] },
+    { cat: 'File Operations', icon: '&#128229;', name: 'Move to Downloads',      desc: 'Move selected files to ~/Downloads',      chord: 'dd gD p', keys: ['move','download'] },
+    { cat: 'File Operations', icon: '&#128187;', name: 'Move to Desktop',        desc: 'Move selected files to ~/Desktop',        chord: 'dd gd p', keys: ['move','desktop'] },
+    { cat: 'File Operations', icon: '&#128465;', name: 'Move to Trash',          desc: 'Send selected files to macOS Trash',      chord: 'dD',     keys: ['delete','trash','remove'] },
+    { cat: 'File Operations', icon: '&#9888;',   name: 'Delete permanently',     desc: 'Permanently delete (no undo!)',           chord: ':delete', keys: ['delete','remove','permanent','destroy'] },
+    { cat: 'File Operations', icon: '&#128194;', name: 'New folder',             desc: 'Create a new directory here',             chord: ':mkdir',  keys: ['new','folder','create','mkdir','directory'] },
+    { cat: 'File Operations', icon: '&#128196;', name: 'New file',               desc: 'Create a new empty file here',            chord: ':touch',  keys: ['new','file','create','touch'] },
+    { cat: 'File Operations', icon: '&#128203;', name: 'Copy files',             desc: 'Yank selected files for pasting',         chord: 'yy',     keys: ['copy','yank','duplicate'] },
+    { cat: 'File Operations', icon: '&#128279;', name: 'Copy path',              desc: 'Copy the full path to clipboard',         chord: 'yp',     keys: ['copy','path','clipboard'] },
+    { cat: 'File Operations', icon: '&#127991;', name: 'Copy name',              desc: 'Copy file name to clipboard',             chord: 'yn',     keys: ['copy','name','clipboard'] },
+    { cat: 'File Operations', icon: '&#9999;',   name: 'Rename',                 desc: 'Rename the current file',                 chord: 'cw',     keys: ['rename','name','change'] },
+    { cat: 'File Operations', icon: '&#128221;', name: 'Bulk rename',            desc: 'Rename multiple files with $EDITOR',      chord: ':bulkrename', keys: ['rename','bulk','batch','mass'] },
+
+    // Navigation
+    { cat: 'Navigation', icon: '&#128229;', name: 'Go to Downloads',  desc: 'Jump to ~/Downloads',        chord: 'gD',  keys: ['go','open','downloads','jump','navigate'] },
+    { cat: 'Navigation', icon: '&#128187;', name: 'Go to Desktop',    desc: 'Jump to ~/Desktop',          chord: 'gd',  keys: ['go','open','desktop','jump','navigate'] },
+    { cat: 'Navigation', icon: '&#127968;', name: 'Go to Home',       desc: 'Jump to ~/',                 chord: 'gh',  keys: ['go','open','home','jump','navigate'] },
+    { cat: 'Navigation', icon: '&#128194;', name: 'Go to Projects',   desc: 'Jump to ~/Projects',         chord: 'gp',  keys: ['go','open','projects','jump','navigate'] },
+
+    // Sort
+    { cat: 'Sort', icon: '&#128292;', name: 'Sort by name',           desc: 'Alphabetical sort',              chord: 'on', keys: ['sort','name','alpha','alphabetical'] },
+    { cat: 'Sort', icon: '&#128197;', name: 'Sort by date modified',  desc: 'Most recent first',              chord: 'om', keys: ['sort','date','modified','time','recent'] },
+    { cat: 'Sort', icon: '&#128200;', name: 'Sort by size',           desc: 'Largest first',                  chord: 'os', keys: ['sort','size','largest','biggest'] },
+    { cat: 'Sort', icon: '&#128196;', name: 'Sort by type',           desc: 'Group by file extension',        chord: 'ot', keys: ['sort','type','extension','kind'] },
+
+    // View
+    { cat: 'View', icon: '&#128466;', name: 'List view',              desc: 'Show files in a detailed list',  chord: 'wl', keys: ['view','list'] },
+    { cat: 'View', icon: '&#128444;', name: 'Grid view',              desc: 'Show file thumbnails in a grid', chord: 'wg', keys: ['view','grid','thumbnail','icon'] },
+    { cat: 'View', icon: '&#128065;', name: 'Show hidden files',      desc: 'Toggle dotfile visibility',      chord: 'zh', keys: ['view','hidden','dotfile','show','toggle'] },
+  ];
+
+  const overlay = document.getElementById('overlay');
+  const input   = document.getElementById('searchInput');
+  const resultsEl = document.getElementById('results');
+  const flashEl = document.getElementById('flash');
+  const hintBadge = document.getElementById('hintBadge');
+
+  let isOpen = false;
+  let selectedIdx = 0;
+  let filtered = [];
+
+  // ── Fuzzy match ──
+  function fuzzyMatch(query, cmd) {
+    const q = query.toLowerCase().trim();
+    if (!q) return 1; // show all with empty query
+    const parts = q.split(/\s+/);
+    let score = 0;
+    const nameL = cmd.name.toLowerCase();
+    const descL = cmd.desc.toLowerCase();
+    const allKeys = cmd.keys.join(' ');
+
+    for (const part of parts) {
+      if (nameL.includes(part))      score += 3;
+      else if (allKeys.includes(part)) score += 2;
+      else if (descL.includes(part))   score += 1;
+      else return 0; // every token must match something
+    }
+    // bonus for exact prefix match on name
+    if (nameL.startsWith(q)) score += 5;
+    return score;
+  }
+
+  function filterCommands(query) {
+    const scored = commands.map(cmd => ({ cmd, score: fuzzyMatch(query, cmd) }))
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score);
+    return scored.map(s => s.cmd);
+  }
+
+  // ── Render results ──
+  function render() {
+    const q = input.value;
+    filtered = filterCommands(q);
+    if (selectedIdx >= filtered.length) selectedIdx = Math.max(0, filtered.length - 1);
+
+    let html = '';
+    let lastCat = '';
+    filtered.forEach((cmd, i) => {
+      if (cmd.cat !== lastCat) {
+        html += `<div class="result-category">${cmd.cat}</div>`;
+        lastCat = cmd.cat;
+      }
+      const sel = i === selectedIdx ? ' selected' : '';
+      html += `<div class="result-row${sel}" data-idx="${i}">
+        <span class="r-icon">${cmd.icon}</span>
+        <div class="r-body">
+          <div class="r-name">${highlight(cmd.name, q)}</div>
+          <div class="r-desc">${cmd.desc}</div>
+        </div>
+        <span class="r-chord">${cmd.chord}</span>
+      </div>`;
+    });
+    resultsEl.innerHTML = html;
+
+    // scroll selected into view
+    const selRow = resultsEl.querySelector('.result-row.selected');
+    if (selRow) selRow.scrollIntoView({ block: 'nearest' });
+  }
+
+  function highlight(text, query) {
+    if (!query.trim()) return text;
+    const parts = query.trim().split(/\s+/);
+    let result = text;
+    for (const part of parts) {
+      const regex = new RegExp(`(${part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
+      result = result.replace(regex, '<span style="color:#a78bfa;font-weight:700">$1</span>');
+    }
+    return result;
+  }
+
+  // ── Open / Close ──
+  function openOverlay() {
+    if (isOpen) return;
+    isOpen = true;
+    overlay.classList.add('active');
+    input.value = '';
+    selectedIdx = 0;
+    render();
+    // defer focus to after transition
+    requestAnimationFrame(() => input.focus());
+    hintBadge.style.opacity = '0';
+  }
+
+  function closeOverlay() {
+    if (!isOpen) return;
+    isOpen = false;
+    overlay.classList.remove('active');
+    input.blur();
+    setTimeout(() => { hintBadge.style.opacity = '1'; }, 600);
+  }
+
+  function executeSelected() {
+    if (!filtered.length) return;
+    const cmd = filtered[selectedIdx];
+    closeOverlay();
+    // Flash
+    flashEl.querySelector('.flash-text').innerHTML = `&#10003; ${cmd.name}`;
+    flashEl.classList.add('show');
+    setTimeout(() => flashEl.classList.remove('show'), 700);
+  }
+
+  // ── Keyboard handling ──
+  document.addEventListener('keydown', function(e) {
+    // When overlay is closed, any printable char opens it
+    if (!isOpen) {
+      // Ignore modifier-only, function keys, and meta combos
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key.length === 1) {
+        openOverlay();
+        // Let the char be typed into the input
+        return;
+      }
+      return;
+    }
+
+    // Overlay is open
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeOverlay();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIdx = Math.min(selectedIdx + 1, filtered.length - 1);
+      render();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIdx = Math.max(selectedIdx - 1, 0);
+      render();
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      executeSelected();
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (filtered.length) {
+        input.value = filtered[selectedIdx].name.toLowerCase();
+        selectedIdx = 0;
+        render();
+      }
+      return;
+    }
+  });
+
+  input.addEventListener('input', function() {
+    selectedIdx = 0;
+    render();
+  });
+
+  // Click on result row
+  resultsEl.addEventListener('click', function(e) {
+    const row = e.target.closest('.result-row');
+    if (!row) return;
+    selectedIdx = parseInt(row.dataset.idx, 10);
+    render();
+    executeSelected();
+  });
+
+  // Click backdrop to close
+  overlay.querySelector('.overlay-backdrop').addEventListener('click', closeOverlay);
+
+  // Show hint badge after a moment
+  setTimeout(() => { hintBadge.style.opacity = '1'; }, 800);
+})();
+</script>
+</body>
+</html>
