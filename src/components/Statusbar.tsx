@@ -1,5 +1,6 @@
 import { useStore } from '../store';
 import { visibleEntries } from '../actions';
+import { formatSize } from '../sort';
 import './Statusbar.css';
 
 export function Statusbar() {
@@ -8,30 +9,68 @@ export function Statusbar() {
 
   const cwd = activeTab.trail[activeTab.trail.length - 1];
   const entries = visibleEntries(state.entriesByPath[cwd], activeTab);
-  const dirs = entries.filter((e) => e.kind === 'dir').length;
-  const files = entries.length - dirs;
-  const marked = Object.keys(activeTab.marks).length;
+  const markedCount = entries.reduce(
+    (n, e) => (activeTab.marks[e.path] ? n + 1 : n),
+    0,
+  );
   const yanked = state.yank.length;
+
+  // Sum sizes: when something is marked we report the selection size;
+  // otherwise the combined size of visible files in this folder.
+  const totalSize = entries.reduce(
+    (sum, e) => sum + (e.kind === 'file' ? e.size : 0),
+    0,
+  );
+  const selectedSize = entries.reduce(
+    (sum, e) =>
+      activeTab.marks[e.path] && e.kind === 'file' ? sum + e.size : sum,
+    0,
+  );
+
+  const mode = state.mode.toUpperCase();
+  const summary =
+    markedCount > 0
+      ? `${markedCount} of ${entries.length} selected · ${formatSize(selectedSize)}`
+      : `${entries.length} items · ${formatSize(totalSize)}`;
+
+  // Keyboard-hint trail — keys relevant to NORMAL browsing.
+  // When a selection exists we surface the drag-out + paste hints instead
+  // of the generic ones, since those are the verbs the user is likely to
+  // reach for next.
+  const hints: Array<{ keys: string[]; label: string }> =
+    markedCount > 0
+      ? [
+          { keys: ['d'], label: 'drag out' },
+          { keys: ['y'], label: 'yank' },
+          { keys: ['p'], label: 'paste' },
+          { keys: [':'], label: 'command' },
+        ]
+      : [
+          { keys: ['⌘K'], label: 'command' },
+          { keys: ['y'], label: 'yank' },
+          { keys: ['space'], label: 'mark' },
+          { keys: ['d'], label: 'drag' },
+          { keys: ['?'], label: 'help' },
+        ];
 
   return (
     <div className="statusbar">
-      <div className="statusbar__left">
-        <span className="statusbar__pill">{state.mode.toUpperCase()}</span>
-        <span className="statusbar__meta">
-          {entries.length} items · {dirs} dirs · {files} files
-          {marked > 0 && ` · ${marked} marked`}
-          {yanked > 0 && ` · ${yanked} in clipboard`}
+      <span className="statusbar__mode">{mode}</span>
+      <span className="statusbar__summary tnum-oldstyle">{summary}</span>
+      {yanked > 0 && (
+        <span className="statusbar__clip tnum-oldstyle">
+          {yanked} in clipboard
         </span>
-      </div>
-      <div className="statusbar__right">
-        <span className="statusbar__hint">
-          <kbd>hjkl</kbd> nav · <kbd>H</kbd>
-          <kbd>L</kbd> history · <kbd>space</kbd> mark · <kbd>yy</kbd>
-          <kbd>pp</kbd> · <kbd>dd</kbd>
-          <kbd>dD</kbd> · <kbd>/</kbd>
-          <kbd>n</kbd>/<kbd>N</kbd> · <kbd>:</kbd> · <kbd>?</kbd> help
+      )}
+      <span className="sp" />
+      {hints.map((h, i) => (
+        <span key={i} className="statusbar__hint">
+          {h.keys.map((k, j) => (
+            <kbd key={j}>{k}</kbd>
+          ))}{' '}
+          {h.label}
         </span>
-      </div>
+      ))}
     </div>
   );
 }

@@ -1,50 +1,54 @@
+/*
+ * Statusbar — editorial footer strip.
+ *
+ * Ported from design-assets/inspirations/themes.html (.statusbar, line ~345):
+ * panel background + rule border, 11px muted text, and a kbd-hint trail
+ * pushed to the right by a flex spacer. The actual <kbd> chip styling lives
+ * in src/styles/ornaments.css so tooltips and other surfaces can share it.
+ */
+
 .statusbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-1) var(--sp-4);
+  gap: 14px;
+  padding: 0 18px;
   min-height: 28px;
-  background: var(--bg-0);
-  border-top: 1px solid var(--border-1);
+  background: var(--panel);
+  border-top: 1px solid var(--panel-rule, var(--rule));
+  font-size: 11px;
+  color: var(--panel-muted, var(--muted));
+}
+
+/* Flex spacer — mirrors the `.sp` span used in the mockup so the right-hand
+   hint trail floats against the far edge regardless of left-hand content. */
+.statusbar .sp {
+  flex: 1;
+}
+
+/* Mode indicator (NORMAL / COMMAND / …). Uppercased, letter-spaced —
+   it reads as a kicker, not a pill, so it sits flush with the summary. */
+.statusbar__mode {
   font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--fg-3);
-}
-
-.statusbar__left,
-.statusbar__right {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-
-.statusbar__pill {
-  padding: 1px var(--sp-2);
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: var(--r-sm);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-}
-
-.statusbar__meta {
-  color: var(--fg-2);
-}
-
-.statusbar__hint {
-  color: var(--fg-3);
-}
-
-.statusbar__hint kbd {
-  display: inline-block;
-  padding: 0 4px;
-  margin: 0 1px;
-  background: var(--bg-2);
-  border: 1px solid var(--border-1);
-  border-bottom-width: 2px;
-  border-radius: 3px;
-  color: var(--fg-2);
   font-size: 10px;
-  font-family: var(--font-mono);
-  line-height: 14px;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* "1 of 10 selected · 4.2 MB" — numbers get the strong --ink tone via
+   oldstyle-nums so they read editorial rather than tabular. */
+.statusbar__summary {
+  color: var(--ink);
+}
+
+.statusbar__clip {
+  color: var(--muted);
+}
+
+/* Each right-hand hint group: small pill + descriptor. */
+.statusbar__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
 }
