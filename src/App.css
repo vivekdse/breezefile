@@ -1,23 +1,24 @@
 /* ------------------------------------------------------------
-   Shell — 3-column editorial grid (per fm-sdz layout decision)
+   Shell — 3-column editorial grid (per fm-sdz layout decision, revised
+   by fm-ehb to Finder-style default).
 
-   The mockup's 3-column shell (sidebar · main · preview) is adopted
-   as the top-level grid. MillerColumns stays in `main` (miller is the
-   product). The `preview` slot is reserved but collapsed to 0 in v1
-   because content preview is deferred — flip --preview-w to 360px
-   when it ships and the layout opens without re-plumbing.
+   The user reviewed the miller-columns prototype and preferred a
+   Finder/Explorer layout: sidebar of key folders · current folder as
+   ONE big list · preview pane on the right. The 3-col shell stays,
+   but `main` now hosts <FolderList> (single-list of cwd) and the
+   `preview` slot is visible at 340px by default.
 
    Slot owners:
      title   → Titlebar     (fm-9w0 styles)
      chrome  → Tabbar+Pathbar
      side    → Sidebar      (fm-4zi styles)
-     main    → MillerColumns (plate / recessed surface lives here)
-     preview → Preview      (fm-fda styles; empty + collapsed in v1)
+     main    → FolderList   (plate / recessed surface lives here)
+     preview → Preview      (fm-fda styles; placeholder until shipped)
      status  → ModeLine+Statusbar (fm-mm8 styles)
 ------------------------------------------------------------ */
 .shell {
   --sidebar-w: 240px;
-  --preview-w: 0px;
+  --preview-w: 340px;
 
   position: relative;
   height: 100vh;
@@ -50,7 +51,6 @@
   min-width: 0;
   overflow: hidden;
   background: var(--panel, var(--bg-1));
-  /* collapsed to 0 in v1 via --preview-w; border only shows when uncollapsed */
   border-left: 1px solid var(--rule, var(--border-1));
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { OverlayCtx, type OverlayApi, type RenameMode } from './overlays';
 import { Titlebar } from './components/Titlebar';
 import { Pathbar } from './components/Pathbar';
-import { MillerColumns } from './components/MillerColumns';
+import { FolderList } from './components/FolderList';
 import { Statusbar } from './components/Statusbar';
 import { Tabbar } from './components/Tabbar';
 import { ModeLine } from './components/ModeLine';
@@ -95,13 +95,16 @@ function Shell() {
       <aside className="shell__side" aria-label="Sidebar">
         <div className="shell__placeholder" />
       </aside>
-      {/* main slot — the recessed plate. MillerColumns fills it. */}
+      {/* main slot — the recessed plate. FolderList (single-list Finder-style
+          view per fm-ehb) fills it. MillerColumns remains in the tree for a
+          future optional view mode. */}
       <main className="shell__main">
-        <MillerColumns />
+        <FolderList />
       </main>
-      {/* preview slot — owned by fm-fda (Preview). Collapsed to 0 width in
-          v1 (--preview-w: 0). Kept in the DOM so future work flips one var. */}
-      <aside className="shell__preview" aria-label="Preview" aria-hidden="true">
+      {/* preview slot — owned by fm-fda (Preview). Visible at 340px per
+          fm-ehb Finder-style default; contents are still a placeholder
+          until the Preview owner ships. */}
+      <aside className="shell__preview" aria-label="Preview">
         <div className="shell__placeholder" />
       </aside>
       {/* status slot — ModeLine stacked above Statusbar */}
