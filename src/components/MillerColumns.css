@@ -44,6 +44,23 @@
   white-space: nowrap;
 }
 
+/* Neutral header checkbox styling — design-system teammate owns final tokens. */
+.col-head__checkbox {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--fg-3);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.8;
+  margin-right: var(--sp-1);
+}
+.col-head__checkbox--checked,
+.col-head__checkbox--indeterminate {
+  color: var(--accent, var(--fg-1));
+  opacity: 1;
+}
+
 .miller__col-name {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -15,6 +15,7 @@ type Props = {
   yanked: boolean;
   onClick?: () => void;
   onDoubleClick?: () => void;
+  onToggleMark?: () => void;
 };
 
 function glyphFor(e: Entry): string {
@@ -64,6 +65,7 @@ export function FileRow({
   yanked,
   onClick,
   onDoubleClick,
+  onToggleMark,
 }: Props) {
   const ref = useRef<HTMLLIElement>(null);
   const { state, activeTab, dispatch, refreshActive } = useStore();
@@ -225,6 +227,21 @@ export function FileRow({
       draggable
       onDragStart={onDragStart}
     >
+      {/* Checkbox affordance for selection. Neutral styling — the design-system
+          teammate will own real tokens/visuals via the row__checkbox class. */}
+      <span
+        className={['row__checkbox', marked && 'row__checkbox--checked'].filter(Boolean).join(' ')}
+        role="checkbox"
+        aria-checked={marked}
+        tabIndex={-1}
+        title="Press space to select"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleMark?.();
+        }}
+      >
+        {marked ? '☑' : '☐'}
+      </span>
       <span className="row__glyph" style={{ color: colorVarFor(entry) }}>
         {marked ? '✓' : glyphFor(entry)}
       </span>

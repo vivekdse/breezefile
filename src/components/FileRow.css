@@ -1,6 +1,6 @@
 .row {
   display: grid;
-  grid-template-columns: 20px 1fr auto auto;
+  grid-template-columns: 18px 20px 1fr auto auto;
   align-items: center;
   gap: var(--sp-2);
   padding: 4px var(--sp-3) 4px var(--sp-4);
@@ -85,6 +85,28 @@
 @keyframes drag-toast-out {
   from { opacity: 1; }
   to   { opacity: 0; transform: translate(-50%, -4px); }
+}
+
+/* Neutral checkbox styling — real visual tokens owned by design-system teammate.
+   The class hooks (row__checkbox, row__checkbox--checked) are stable. */
+.row__checkbox {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  color: var(--fg-3);
+  opacity: 0.5;
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+  transition: opacity var(--motion-hover), color var(--motion-hover);
+}
+.row:hover .row__checkbox,
+.row--marked .row__checkbox,
+.row--selected .row__checkbox {
+  opacity: 1;
+}
+.row__checkbox--checked {
+  color: var(--accent, var(--fg-1));
 }
 
 .row__glyph {

@@ -43,6 +43,26 @@ export function MillerColumns() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSel?.path]);
 
+  const toggleMark = (entry: Entry) => {
+    const marks = { ...activeTab.marks };
+    if (marks[entry.path]) delete marks[entry.path];
+    else marks[entry.path] = true;
+    setTab({ marks });
+  };
+
+  // Master select-all for the active (last) column: if any entry in that
+  // column is unmarked, mark everything; otherwise clear all marks.
+  const toggleSelectAll = (colEntries: Entry[]) => {
+    const allMarked = colEntries.length > 0 && colEntries.every((e) => activeTab.marks[e.path]);
+    const marks = { ...activeTab.marks };
+    if (allMarked) {
+      for (const e of colEntries) delete marks[e.path];
+    } else {
+      for (const e of colEntries) marks[e.path] = true;
+    }
+    setTab({ marks });
+  };
+
   const selectAt = (colIdx: number, entry: Entry) => {
     const newTrail = activeTab.trail.slice(0, colIdx + 1);
     const entries = columns[colIdx].entries;
@@ -68,6 +88,27 @@ export function MillerColumns() {
           data-active={col.colIdx === columns.length - 1}
         >
           <div className="miller__col-head">
+            {col.colIdx === columns.length - 1 && col.entries.length > 0 && (() => {
+              const allMarked = col.entries.every((e) => activeTab.marks[e.path]);
+              const someMarked = !allMarked && col.entries.some((e) => activeTab.marks[e.path]);
+              const glyph = allMarked ? '☑' : someMarked ? '◪' : '☐';
+              return (
+                <span
+                  className={[
+                    'col-head__checkbox',
+                    allMarked && 'col-head__checkbox--checked',
+                    someMarked && 'col-head__checkbox--indeterminate',
+                  ].filter(Boolean).join(' ')}
+                  role="checkbox"
+                  aria-checked={allMarked ? true : someMarked ? 'mixed' : false}
+                  tabIndex={-1}
+                  title="Press shift+space to select all"
+                  onClick={() => toggleSelectAll(col.entries)}
+                >
+                  {glyph}
+                </span>
+              );
+            })()}
             <span className="miller__col-name">{basename(col.path) || '/'}</span>
             <span className="miller__col-meta">{col.entries.length}</span>
           </div>
@@ -94,6 +135,7 @@ export function MillerColumns() {
                   yanked={state.yank.some((y) => y.path === e.path)}
                   onClick={() => selectAt(col.colIdx, e)}
                   onDoubleClick={() => doubleOpen(e)}
+                  onToggleMark={col.colIdx === columns.length - 1 ? () => toggleMark(e) : undefined}
                 />
               ))}
             </ul>

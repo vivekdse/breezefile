@@ -18,7 +18,7 @@ function keyName(e: KeyboardEvent): string {
   if (e.key === 'Escape') return 'Escape';
   if (e.key === 'Backspace') return 'Backspace';
   if (e.key === 'Tab') return 'Tab';
-  if (e.key === ' ') return ' ';
+  if (e.key === ' ') return e.shiftKey ? 'S- ' : ' ';
   if (e.key === 'ArrowDown') return 'ArrowDown';
   if (e.key === 'ArrowUp') return 'ArrowUp';
   if (e.key === 'ArrowLeft') return 'ArrowLeft';
@@ -159,22 +159,37 @@ export function useKeyboard(
         PageUp: () => movePage(-1),
         H: () => goBack(),
         L: () => goForward(),
+        // Verb-first interaction model (fm-zi2): single-letter *action* keys
+        // were removed. Users drive actions via the chip-prompt palette (open
+        // it by typing any letter that isn't motion/selection, or via `:`).
+        // What remains here is pure motion + selection + modal launchers —
+        // keys that are cognitively "where am I" not "what do I do".
+        //   • j/k/h/l & arrows & Enter/Backspace — cursor motion
+        //   • G / C-d / C-u / C-f / C-b / PageUp/Down — bulk motion
+        //   • H / L — history back/forward (motion through time)
+        //   • n / N — repeat last find (motion)
+        //   • / — live find prompt (search-as-motion; documented exception)
+        //   • Space — toggle mark on cursor item (selection)
+        //   • S-Space — toggle select-all in active column (selection)
+        //   • : — open command mode
+        //   • ! — open shell prompt
+        //   • F7 — mkdir (function key, not a letter — escape hatch)
+        //   • C-r — refresh (modified, not single-letter)
+        // Removed letter actions (now reachable via palette): v, f, s, R, a, A, I.
         '/': () => dispatch({ type: 'setMode', mode: 'find', buffer: '' }),
         n: () => repeatFind(+1),
         N: () => repeatFind(-1),
-        f: () => promptQuickFind(),
         ':': () => dispatch({ type: 'setMode', mode: 'command', buffer: '' }),
         '!': () => promptShell(),
-        s: () => fm.openTerminal(tab.trail[lastCol(tab)]),
         ' ': () => toggleMark(),
-        v: () => invertMarks(),
+        'S- ': () => toggleSelectAllCol(),
         F7: () => promptMkdir(),
-        R: () => revealCurrent(),
         'C-r': () => refreshActive(),
-        a: () => promptRenameCurrent('beforeExt'),
-        A: () => promptRenameCurrent('append'),
-        I: () => promptRenameCurrent('prepend'),
       };
+      void invertMarks; // retained helper — palette's 'select' verb uses its logic
+      void promptQuickFind;
+      void revealCurrent; // reachable via 'reveal' verb; helper kept for parity
+      void promptRenameCurrent;
 
       // --- Chord-string → action map (any length) ---
       const chordActions: Record<string, () => void | Promise<void>> = {
@@ -424,6 +439,18 @@ export function useKeyboard(
         else marks[entry.path] = true;
         setTab({ marks });
         moveSelection(+1);
+      }
+      function toggleSelectAllCol() {
+        const entries = getEntries();
+        if (entries.length === 0) return;
+        const allMarked = entries.every((e) => tab.marks[e.path]);
+        const marks = { ...tab.marks };
+        if (allMarked) {
+          for (const e of entries) delete marks[e.path];
+        } else {
+          for (const e of entries) marks[e.path] = true;
+        }
+        setTab({ marks });
       }
       function invertMarks() {
         const entries = getEntries();

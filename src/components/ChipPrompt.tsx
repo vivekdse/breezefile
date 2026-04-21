@@ -1,3 +1,25 @@
+// ────────────────────────────────────────────────────────────────────────────
+// Verb-first command model (fm-zi2)
+//
+// The chip prompt is the *one* way users invoke actions. Every action is
+// a verb (Move, Copy, Sort, Select, Delete, Rename, Go to, View as, …).
+// Verbs have zero-or-more slots, each of which resolves to a pick-list. The
+// sentence chip reads left-to-right: VERB [· SLOT1 · SLOT2 · …] , composed
+// like a natural-language command ("move these → Desktop").
+//
+// Keyboard is motion + selection only (see src/useKeyboard.ts):
+//   • Space / Shift+Space — mark cursor / mark-all (the only single-letter
+//     selection shortcuts)
+//   • j/k/h/l, arrows, n/N — motion
+// Everything else opens this palette (typing any letter pre-fills its filter).
+//
+// Selection is visually expressed via a checkbox on every row and a master
+// select-all checkbox in the column header. The 'Select' verb offers smart
+// filters (all, none, images, documents, by extension, …). Executing 'Select'
+// does NOT close the palette — it resets to the verb picker with the new
+// selection applied, so flows like "select → images → copy → Desktop" chain
+// without extra keystrokes.
+// ────────────────────────────────────────────────────────────────────────────
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { fm } from '../bridge';
@@ -29,6 +51,7 @@ type Ctx = {
 };
 
 type Verb =
+  | 'select'
   | 'move'
   | 'copy'
   | 'paste'
@@ -40,7 +63,8 @@ type Verb =
   | 'view'
   | 'create'
   | 'reveal'
-  | 'showHidden';
+  | 'showHidden'
+  | 'find';
 
 type Option = {
   id: string;
@@ -75,12 +99,130 @@ type ExecApi = {
   openRename: (e: Entry) => void;
   openMkdir: () => void;
   closeOverlay: () => void;
+  // Reset palette to the verb picker without closing — used by the 'Select'
+  // verb to auto-advance into "now what?" for chain flows like select→copy.
+  resetToVerbPick: (status?: string) => void;
 };
 
 // ────────────────────────────────────────────────────────────────────────────
 // Verb catalog. Order matters — it's the default suggestion order.
 // ────────────────────────────────────────────────────────────────────────────
+// Smart selection filters — mapped to predicates on Entry.
+// 'byExt:<ext>' is a dynamic id resolved at execute-time from the live ext list.
+type SelectorId =
+  | 'all'
+  | 'none'
+  | 'invert'
+  | 'images'
+  | 'videos'
+  | 'audio'
+  | 'documents'
+  | 'archives'
+  | 'code'
+  | 'folders'
+  | 'files'
+  | string; // byExt:<ext>
+
+const EXT_GROUPS: Record<string, string[]> = {
+  images: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'svg'],
+  videos: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v'],
+  audio: ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'],
+  documents: ['pdf', 'doc', 'docx', 'txt', 'md', 'rtf', 'pages', 'key', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'numbers'],
+  archives: ['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'dmg'],
+  code: ['ts', 'tsx', 'js', 'jsx', 'json', 'py', 'rs', 'go', 'sh', 'rb', 'java', 'c', 'cpp', 'h', 'hpp', 'css', 'html'],
+};
+
+function entryMatchesSelector(e: Entry, sel: SelectorId): boolean {
+  if (sel === 'all') return true;
+  if (sel === 'none') return false;
+  if (sel === 'folders') return e.kind === 'dir';
+  if (sel === 'files') return e.kind !== 'dir';
+  if (sel.startsWith('byExt:')) return (e.ext ?? '').toLowerCase() === sel.slice(6).toLowerCase();
+  const group = EXT_GROUPS[sel];
+  if (group) return e.kind !== 'dir' && !!e.ext && group.includes(e.ext.toLowerCase());
+  return false;
+}
+
 const VERBS: VerbDef[] = [
+  {
+    id: 'select',
+    label: 'Select',
+    aliases: ['select', 'pick', 'mark', 'choose'],
+    icon: '☑',
+    describe: (c) => `Select files in ${basename(c.cwd) || '/'}`,
+    isAvailable: () => ({ ok: true }),
+    slots: [
+      {
+        label: 'What',
+        getOptions: (c) => {
+          const opts: Option[] = [
+            { id: 'all', label: 'All', detail: `every item in this folder (${c.entries.length})`, available: true },
+            { id: 'none', label: 'None', detail: 'clear current selection', available: true },
+            { id: 'invert', label: 'Invert', detail: 'flip every mark', available: true },
+            { id: 'folders', label: 'Folders', detail: 'directories only', available: true },
+            { id: 'files', label: 'Files', detail: 'non-directories', available: true },
+          ];
+          for (const key of Object.keys(EXT_GROUPS)) {
+            const count = c.entries.filter((e) => entryMatchesSelector(e, key)).length;
+            if (count > 0) {
+              opts.push({
+                id: key,
+                label: key[0].toUpperCase() + key.slice(1),
+                detail: `${count} match${count === 1 ? '' : 'es'}`,
+                available: true,
+              });
+            }
+          }
+          // Dynamic "by extension" options — one per unique ext in this folder.
+          const extCounts = new Map<string, number>();
+          for (const e of c.entries) {
+            if (e.kind !== 'dir' && e.ext) {
+              const k = e.ext.toLowerCase();
+              extCounts.set(k, (extCounts.get(k) ?? 0) + 1);
+            }
+          }
+          const byExt = Array.from(extCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12);
+          for (const [ext, n] of byExt) {
+            opts.push({
+              id: `byExt:${ext}`,
+              label: `.${ext}`,
+              detail: `${n} file${n === 1 ? '' : 's'}`,
+              available: true,
+            });
+          }
+          return opts;
+        },
+      },
+    ],
+    execute: (c, [selector], api) => {
+      // Compute new marks. 'invert' is relative to current state; others are absolute.
+      const currentMarks = c.markedPaths.reduce<Record<string, true>>((acc, p) => {
+        acc[p] = true;
+        return acc;
+      }, {});
+      let newMarks: Record<string, true> = {};
+      if (selector === 'invert') {
+        newMarks = { ...currentMarks };
+        for (const e of c.entries) {
+          if (newMarks[e.path]) delete newMarks[e.path];
+          else newMarks[e.path] = true;
+        }
+      } else if (selector === 'none') {
+        newMarks = {};
+      } else {
+        for (const e of c.entries) {
+          if (entryMatchesSelector(e, selector)) newMarks[e.path] = true;
+        }
+      }
+      api.setTab({ marks: newMarks });
+      const count = Object.keys(newMarks).length;
+      // Auto-advance: don't close — pop back to verb picker so the user can
+      // chain the next action on the new selection (copy, move, delete, …).
+      api.resetToVerbPick(
+        count === 0 ? 'selection cleared' : `selected ${count} item${count === 1 ? '' : 's'} — pick a next action`,
+      );
+    },
+  },
   {
     id: 'move',
     label: 'Move',
@@ -309,6 +451,19 @@ const VERBS: VerbDef[] = [
     execute: (_c, [kind], api) => {
       if (kind === 'folder') api.openMkdir();
       // 'file' intentionally no-op — wire to a touch overlay if/when it exists
+    },
+  },
+  {
+    id: 'find',
+    label: 'Find',
+    aliases: ['find', 'filter', 'search'],
+    icon: '⌕',
+    describe: () => 'Live-filter the current folder',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.dispatch({ type: 'setMode', mode: 'find', buffer: '' });
+      api.closeOverlay();
     },
   },
   {
@@ -646,6 +801,7 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
         onClose();
         return;
       }
+      let suppressClose = false;
       await v.execute(safeCtx, ps, {
         setTab,
         refreshActive,
@@ -658,7 +814,16 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
           onClose();
         },
         closeOverlay: onClose,
+        resetToVerbPick: (status) => {
+          suppressClose = true;
+          setVerb(null);
+          setPicks([]);
+          setFilter('');
+          setHighlightIdx(0);
+          if (status) dispatch({ type: 'setStatus', msg: status });
+        },
       });
+      if (suppressClose) return;
     } catch (err) {
       dispatch({ type: 'setStatus', msg: `${v.label}: ${(err as Error).message}` });
     }
