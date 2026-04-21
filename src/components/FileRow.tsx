@@ -314,6 +314,9 @@ export function FileRow({
     <li
       ref={ref}
       className={cls}
+      /* fm-33l — data-path lets celebratePaths() find a row by its fs path
+         and add .row--celebrated for the bulk-op completion pulse. */
+      data-path={entry.path}
       /* --row-i feeds the staggered fade-in keyframe (FileRow.css → fm-z1f). */
       style={index != null ? ({ ['--row-i' as string]: index } as React.CSSProperties) : undefined}
       onClick={onClick}

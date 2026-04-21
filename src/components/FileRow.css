@@ -90,9 +90,13 @@
 /* Drop settle (fm-9q6) — add .row--dropped for ~400ms after a successful
    drop completes; the one-shot pop confirms the action registered. The
    class is expected to be added then auto-removed by the drop handler. */
-.row--dropped {
+.row--dropped,
+.row--celebrated {
   animation: gpDropSettle var(--dur-med) var(--ease-spring) 1;
 }
+/* fm-33l — .row--celebrated is the bulk-op completion hook. See
+   motion-utils.ts → celebratePaths(). Shares gpDropSettle so the visual
+   vocabulary stays consistent ("this row just did something"). */
 
 /* Directory-load stagger (fm-z1f) — rows fade+rise as readdir populates.
    animation-delay is applied inline via style={{ '--row-i': i }} on each

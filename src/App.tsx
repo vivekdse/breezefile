@@ -16,6 +16,8 @@ import { StoreProvider, useStore } from './store';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
+import { celebratePaths } from './motion-utils';
+import { useOverlayExit } from './useOverlayExit';
 import type { Entry } from './types';
 import './App.css';
 
@@ -122,6 +124,10 @@ function Shell() {
               try {
                 await fm.rename(renaming.entry.path, to);
                 await refreshActive();
+                // fm-33l — pulse the renamed row so the user sees the
+                // change land. celebratePaths is a no-op if the row
+                // hasn't mounted yet (rare race, still safe).
+                requestAnimationFrame(() => celebratePaths([to]));
                 dispatch({ type: 'setStatus', msg: `renamed → ${newName}` });
               } catch (err) {
                 dispatch({
@@ -195,6 +201,7 @@ function RenameOverlay({
   onCommit: (name: string) => void;
 }) {
   const [value, setValue] = useState(entry.name);
+  const { exit, state } = useOverlayExit(onClose);
   const label =
     mode === 'append'
       ? 'Append to name'
@@ -204,7 +211,7 @@ function RenameOverlay({
           ? 'Rename (keep extension)'
           : 'Rename';
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" data-state={state} onClick={exit}>
       <div className="overlay__box" onClick={(e) => e.stopPropagation()}>
         <div className="overlay__label">{label}</div>
         <input
@@ -214,7 +221,7 @@ function RenameOverlay({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') onCommit(value);
-            else if (e.key === 'Escape') onClose();
+            else if (e.key === 'Escape') exit();
           }}
           onFocus={(e) => {
             const el = e.currentTarget;
@@ -249,8 +256,9 @@ function MkdirOverlay({
   onCommit: (name: string) => void;
 }) {
   const [value, setValue] = useState('');
+  const { exit, state } = useOverlayExit(onClose);
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" data-state={state} onClick={exit}>
       <div className="overlay__box" onClick={(e) => e.stopPropagation()}>
         <div className="overlay__label">New folder in {basename(cwd) || '/'}</div>
         <input
@@ -260,7 +268,7 @@ function MkdirOverlay({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') onCommit(value);
-            else if (e.key === 'Escape') onClose();
+            else if (e.key === 'Escape') exit();
           }}
         />
       </div>
@@ -271,6 +279,7 @@ function MkdirOverlay({
 function QuickFindOverlay({ onClose }: { onClose: () => void }) {
   const { state, activeTab, setTab, dispatch } = useStore();
   const [value, setValue] = useState('');
+  const { exit, state: overlayState } = useOverlayExit(onClose);
   if (!activeTab) return null;
   const tab = activeTab;
 
@@ -286,7 +295,7 @@ function QuickFindOverlay({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" data-state={overlayState} onClick={exit}>
       <div className="overlay__box" onClick={(e) => e.stopPropagation()}>
         <div className="overlay__label">Quick find</div>
         <input
@@ -312,9 +321,9 @@ function QuickFindOverlay({ onClose }: { onClose: () => void }) {
                   fm.open(entry.path);
                 }
               }
-              onClose();
+              exit();
             } else if (e.key === 'Escape') {
-              onClose();
+              exit();
             }
           }}
         />
@@ -326,8 +335,9 @@ function QuickFindOverlay({ onClose }: { onClose: () => void }) {
 function ShellOverlay({ cwd, onClose }: { cwd: string; onClose: () => void }) {
   const { dispatch } = useStore();
   const [value, setValue] = useState('');
+  const { exit, state } = useOverlayExit(onClose);
   return (
-    <div className="overlay" onClick={onClose}>
+    <div className="overlay" data-state={state} onClick={exit}>
       <div className="overlay__box" onClick={(e) => e.stopPropagation()}>
         <div className="overlay__label">shell in {basename(cwd) || '/'}</div>
         <input
@@ -347,9 +357,9 @@ function ShellOverlay({ cwd, onClose }: { cwd: string; onClose: () => void }) {
                   msg: `shell failed: ${(err as Error).message}`,
                 });
               }
-              onClose();
+              exit();
             } else if (e.key === 'Escape') {
-              onClose();
+              exit();
             }
           }}
         />

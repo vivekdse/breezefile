@@ -131,6 +131,23 @@
   animation: pop var(--motion-enter);
 }
 
+/* fm-dkv — overlay exit animations. Overlays set data-state="leave" via
+   the useOverlayExit hook (src/useOverlayExit.ts) when the user dismisses
+   them. The hook delays the actual unmount until the exit animation
+   finishes (~180ms) so overlays no longer vanish instantly. */
+.overlay[data-state='leave'] {
+  animation: gpFadeOut var(--motion-exit) forwards;
+  pointer-events: none;
+}
+.overlay[data-state='leave'] .overlay__box {
+  animation: gpPopOut var(--motion-exit) forwards;
+}
+
+@keyframes gpFadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
 .overlay__label {
   color: var(--fg-3);
   font-size: var(--fs-xs);
