@@ -1,0 +1,67 @@
+/*
+ * Self-hosted font faces — Fraunces (variable serif), Inter Tight
+ * (variable sans), JetBrains Mono (mono).
+ *
+ * Why self-hosted: Electron apps run offline. The preceding
+ * fonts.googleapis.com link in index.html only worked while the
+ * machine had network; first-run-offline users would see system
+ * serif/sans fallbacks and the editorial voice would collapse.
+ *
+ * Subset: latin only (U+0000-00FF + basic punctuation/currency).
+ * This is sufficient for English filenames and the vast majority of
+ * western-European filenames. If users need Vietnamese / Cyrillic /
+ * CJK subsets later, add them to src/styles/fonts/ and declare
+ * additional @font-face rules with matching unicode-range.
+ *
+ * Variable axes preserved:
+ *   - Fraunces: opsz 9..144, wght 400..700 (roman), 400..500 (italic)
+ *     → font-variation-settings: "opsz" 144 works for editorial display.
+ *   - Inter Tight: wght 400..600.
+ *
+ * Licenses: all three fonts are SIL OFL 1.1 — see OFL-*.txt in
+ * src/styles/fonts/ next to the woff2 files.
+ */
+
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./fonts/Fraunces-VF-roman.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Fraunces';
+  font-style: italic;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('./fonts/Fraunces-VF-italic.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('./fonts/InterTight-VF.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('./fonts/JetBrainsMono-VF.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
