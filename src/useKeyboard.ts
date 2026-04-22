@@ -101,13 +101,6 @@ export function useKeyboard(
       const k = keyName(e);
 
       // --- <any>-consuming pending chords ---
-      if (pending === 'g' && /^[1-9]$/.test(k)) {
-        e.preventDefault();
-        clearTimer();
-        dispatch({ type: 'selectTab', index: Number(k) - 1 });
-        setPending('');
-        return;
-      }
       if (pending === 'm') {
         e.preventDefault();
         clearTimer();
@@ -161,6 +154,8 @@ export function useKeyboard(
         Enter: () => goRight(),
         Backspace: () => goLeft(),
         G: () => moveSelectionAbs(+Infinity),
+        Home: () => moveSelectionAbs(0),
+        End: () => moveSelectionAbs(+Infinity),
         'C-d': () => movePage(0.5),
         'C-u': () => movePage(-0.5),
         'C-f': () => movePage(1),
@@ -205,63 +200,11 @@ export function useKeyboard(
       // --- Chord-string → action map (any length) ---
       const chordActions: Record<string, () => void | Promise<void>> = {
         // motion
-        gg: () => moveSelectionAbs(0),
-        // quick cd (ranger defaults)
-        gh: () => fm.homedir().then(navigateTo),
-        'g/': () => navigateTo('/'),
-        gr: () => navigateTo('/'),
-        ge: () => navigateTo('/etc'),
-        gu: () => navigateTo('/usr'),
-        gd: () => navigateTo('/dev'),
-        go: () => navigateTo('/opt'),
-        gv: () => navigateTo('/var'),
-        gp: () => navigateTo('/tmp'),
-        gs: () => navigateTo('/srv'),
-        gm: () => navigateTo('/media'),
-        gM: () => navigateTo('/mnt'),
-        // Common ~ shortcuts. Users add their own bindings via the
-        // Settings drawer / bookmarks (m<key> + '<key>) instead of
-        // hardcoding personal paths here.
-        gdoc: () => cdHome('Documents'),
-        gdes: () => cdHome('Desktop'),
-        gdow: () => cdHome('Downloads'),
-        gpic: () => cdHome('Pictures'),
-        gmus: () => cdHome('Music'),
-        gmov: () => cdHome('Movies'),
-        // tabs
-        gn: () => {
-          fm.homedir().then((home) => {
-            dispatch({
-              type: 'newTab',
-              tab: {
-                id: crypto.randomUUID(),
-                trail: [home],
-                selected: { 0: 0 },
-                marks: {},
-                sortKey: 'name',
-                sortReverse: false,
-                showHidden: false,
-                viewMode: 'list',
-                filter: '',
-                history: [],
-                forward: [],
-              },
-            });
-          });
-        },
-        gc: () => dispatch({ type: 'closeTab', index: cur.activeTab }),
-        gw: () => dispatch({ type: 'closeTab', index: cur.activeTab }),
-        gt: () =>
-          dispatch({
-            type: 'selectTab',
-            index: (cur.activeTab + 1) % cur.tabs.length,
-          }),
-        gT: () =>
-          dispatch({
-            type: 'selectTab',
-            index: (cur.activeTab - 1 + cur.tabs.length) % cur.tabs.length,
-          }),
-        ga: () => dispatch({ type: 'restoreTab' }),
+        // Folder navigation, tab management, and "go to top of list" all
+        // moved to the verb prompt (`goto`, `tab`, etc.) when the natural-
+        // language fallback (typing any letter opens the chip prompt with
+        // that letter as the filter) made every g-prefix chord
+        // unreachable. The Home / End keys replace gg / G for top/bottom.
         uq: () => dispatch({ type: 'restoreTab' }),
         // file ops
         yy: () => yankSelection('copy'),
@@ -678,9 +621,6 @@ export function useKeyboard(
           }
         }
         dispatch({ type: 'setStatus', msg: `no match for "${q}"` });
-      }
-      function cdHome(rel: string) {
-        fm.homedir().then((h) => navigateTo(`${h}/${rel}`));
       }
 
       void pathJoin;

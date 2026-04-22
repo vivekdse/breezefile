@@ -14,6 +14,7 @@ import { ChipPrompt } from './components/ChipPrompt';
 import { PasteChip } from './components/PasteChip';
 import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog';
 import { ThemePicker } from './components/ThemePicker';
+import { Welcome, shouldShowWelcome } from './components/Welcome';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
 import { useKeyboard } from './useKeyboard';
@@ -34,6 +35,7 @@ function Shell() {
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState<boolean>(() => shouldShowWelcome());
   // fm-294 — global confirm dialog. Surfaces request a confirm by
   // dispatching `fm:confirm` with a ConfirmRequest payload.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
@@ -237,6 +239,7 @@ function Shell() {
         />
       )}
       {themeOpen && <ThemePicker onClose={() => setThemeOpen(false)} />}
+      {welcomeOpen && <Welcome onClose={() => setWelcomeOpen(false)} />}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       {confirm && (
         <ConfirmDialog
