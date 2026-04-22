@@ -7,7 +7,7 @@ type Props = {
 };
 
 export function Pathbar({ path, onNavigate }: Props) {
-  const { state, setTab, dispatch, activeTab, goBack } = useStore();
+  const { dispatch, activeTab, goBack } = useStore();
   const canGoBack = (activeTab?.history.length ?? 0) > 0;
   const segments = path.split('/').filter(Boolean);
 
@@ -64,35 +64,17 @@ export function Pathbar({ path, onNavigate }: Props) {
         >
           {activeTab?.viewMode === 'grid' ? '⊞' : activeTab?.viewMode === 'preview' ? '▣' : '☰'}
         </button>
-      </div>
-      <div className="pathbar__search">
         <button
           type="button"
-          className="pathbar__search-icon"
-          title="Find (recursive in this folder)"
+          className="pathbar__find"
+          title="Find (⌘F or /)"
           onClick={() => dispatch({ type: 'setMode', mode: 'command', verb: 'goto' })}
           aria-label="Find"
         >
-          ⌕
+          <span className="pathbar__find-icon" aria-hidden>⌕</span>
+          Find
+          <kbd className="pathbar__find-kbd">⌘F</kbd>
         </button>
-        <input
-          className="pathbar__search-input"
-          type="text"
-          placeholder="Filter (Esc to clear)…"
-          spellCheck={false}
-          value={activeTab?.filter ?? ''}
-          onChange={(e) => setTab({ filter: e.target.value })}
-          onFocus={() => dispatch({ type: 'setMode', mode: 'find' })}
-          onBlur={() =>
-            state.mode === 'find' && dispatch({ type: 'setMode', mode: 'normal' })
-          }
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              setTab({ filter: '' });
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-        />
       </div>
     </div>
   );

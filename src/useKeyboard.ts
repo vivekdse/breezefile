@@ -89,8 +89,8 @@ export function useKeyboard(
         return;
       }
 
-      // ⌘F / Ctrl+F → open the 'find' verb (recursive search). ⌘K is the
-      // titlebar's local-filter focus (separate handler in Titlebar.tsx).
+      // ⌘F / Ctrl+F → open the 'goto' verb (recursive find). Same surface
+      // as `/` and the Find button in the Pathbar (fm-63l).
       if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault();
         clearTimer();

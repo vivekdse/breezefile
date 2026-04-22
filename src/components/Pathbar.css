@@ -91,7 +91,8 @@
 }
 .pathbar__back,
 .pathbar__sort,
-.pathbar__view {
+.pathbar__view,
+.pathbar__find {
   padding: 2px var(--sp-2);
   background: var(--chip);
   border: 1px solid var(--rule);
@@ -105,7 +106,8 @@
 }
 .pathbar__back:hover:not(:disabled),
 .pathbar__sort:hover,
-.pathbar__view:hover {
+.pathbar__view:hover,
+.pathbar__find:hover {
   background: var(--hi);
   border-color: var(--accent-soft);
   color: var(--accent);
@@ -115,71 +117,34 @@
   cursor: default;
 }
 
-.pathbar__search {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 4px var(--sp-3);
-  min-width: 220px;
-  background: var(--bg);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition: border-color var(--motion-focus-ring),
-    box-shadow var(--motion-focus-ring);
-}
-.pathbar__search:focus-within {
-  border-color: var(--accent-soft);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05),
-    0 0 0 3px var(--accent-soft);
-}
-
-.pathbar__search-icon {
+.pathbar__find {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  padding: 0;
-  color: var(--muted);
-  font-size: 14px;
-  cursor: pointer;
-  transition: color var(--motion-hover);
+  gap: var(--sp-1, 4px);
 }
-.pathbar__search-icon:hover {
-  color: var(--accent);
+.pathbar__find-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+.pathbar__find-kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--chip, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: var(--sp-1, 4px);
 }
 
-.pathbar__search-input {
-  flex: 1;
-  background: transparent;
-  border: 0;
-  outline: 0;
-  font-size: var(--fs-sm);
-  color: var(--ink);
-}
-.pathbar__search-input::placeholder {
-  color: var(--muted);
-}
-
-/* Dark-panel variants — when chrome goes dark (dusk, plum),
-   the inline search field needs a translucent-white background and a
-   panel-scoped ink color, mirroring Titlebar's treatment. */
-[data-theme='dusk'] .pathbar__search,
-[data-theme='plum'] .pathbar__search {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: var(--panel-rule, var(--rule));
-}
-[data-theme='dusk'] .pathbar__search-input,
-[data-theme='plum'] .pathbar__search-input {
-  color: var(--panel-ink, var(--ink));
-}
 [data-theme='dusk'] .pathbar__back,
 [data-theme='dusk'] .pathbar__sort,
 [data-theme='dusk'] .pathbar__view,
+[data-theme='dusk'] .pathbar__find,
 [data-theme='plum'] .pathbar__back,
 [data-theme='plum'] .pathbar__sort,
-[data-theme='plum'] .pathbar__view {
+[data-theme='plum'] .pathbar__view,
+[data-theme='plum'] .pathbar__find {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
   color: var(--panel-ink, var(--ink));

@@ -260,7 +260,6 @@ function Shell() {
         />
       )}
 
-      {state.mode === 'find' && <FindPrompt />}
       {state.mode === 'command' && (
         <ChipPrompt
           initialFilter={state.modeBuffer}
@@ -540,70 +539,6 @@ function ShellOverlay({ cwd, onClose }: { cwd: string; onClose: () => void }) {
     </div>
   );
 }
-
-function FindPrompt() {
-  const { state, dispatch, setTab, activeTab, openPath } = useStore();
-  if (!activeTab) return null;
-  const tab = activeTab;
-
-  function moveSel(delta: number) {
-    const col = lastCol(tab);
-    const entries = visibleEntries(state.entriesByPath[tab.trail[col]], tab);
-    if (entries.length === 0) return;
-    const cur = tab.selected[col] ?? 0;
-    const next = Math.max(0, Math.min(entries.length - 1, cur + delta));
-    setTab({ selected: { ...tab.selected, [col]: next } });
-  }
-
-  function openSelected() {
-    const col = lastCol(tab);
-    const entries = visibleEntries(state.entriesByPath[tab.trail[col]], tab);
-    const entry = entries[tab.selected[col] ?? 0];
-    if (!entry) return;
-    if (entry.kind === 'dir') {
-      openPath(entry.path);
-      // fresh directory — clear filter so you see everything
-      setTab({ filter: '' });
-      dispatch({ type: 'setModeBuffer', buffer: '' });
-    } else {
-      fm.open(entry.path);
-      dispatch({ type: 'setMode', mode: 'normal' });
-    }
-  }
-
-  return (
-    <div className="prompt">
-      <span className="prompt__sigil">/</span>
-      <input
-        autoFocus
-        className="prompt__input"
-        value={state.modeBuffer}
-        onChange={(e) => {
-          dispatch({ type: 'setModeBuffer', buffer: e.target.value });
-          setTab({ filter: e.target.value });
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            moveSel(+1);
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            moveSel(-1);
-          } else if (e.key === 'Enter') {
-            e.preventDefault();
-            dispatch({ type: 'setLastFind', query: state.modeBuffer });
-            openSelected();
-          } else if (e.key === 'Escape') {
-            setTab({ filter: '' });
-            dispatch({ type: 'setMode', mode: 'normal' });
-          }
-        }}
-        spellCheck={false}
-      />
-    </div>
-  );
-}
-
 
 export function App() {
   return (
