@@ -43,7 +43,7 @@ export function Titlebar() {
     <div className="titlebar drag">
       <div className="titlebar__traffic" aria-hidden />
       <div className="titlebar__brand" aria-label="Breeze File">
-        breeze<em>·</em>file
+        Breeze<em>·</em>File
       </div>
 
       <label className="titlebar__search no-drag" aria-label="Filter current folder">

@@ -42,6 +42,7 @@
     "mac": {
       "category": "public.app-category.utilities",
       "icon": "build/icon.icns",
+      "artifactName": "Breezefile-${version}-${arch}.${ext}",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
