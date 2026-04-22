@@ -24,11 +24,13 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Typecheck
-        run: npx tsc -b
-
-      - name: Build renderer + main
-        run: npx vite build
+      - name: Build (native helper + renderer + main)
+        # `npm run build` chains build:native (Swift sharer helper required
+        # for the Share verb's NSSharingServicePicker), then tsc -b, then
+        # vite build. Keeping this as a single step ensures the native
+        # binary is produced before electron-builder's extraResources
+        # tries to bundle it.
+        run: npm run build
 
       - name: Package with electron-builder
         env:
