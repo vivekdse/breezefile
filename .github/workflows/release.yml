@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
 
+# Default GITHUB_TOKEN is read-only; the upload step needs contents:write
+# to create the release and attach the dmg/zip assets.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-14

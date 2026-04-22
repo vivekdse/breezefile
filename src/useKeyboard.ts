@@ -219,16 +219,15 @@ export function useKeyboard(
         gs: () => navigateTo('/srv'),
         gm: () => navigateTo('/media'),
         gM: () => navigateTo('/mnt'),
-        // user's custom goto (from ~/.config/ranger/rc.conf)
+        // Common ~ shortcuts. Users add their own bindings via the
+        // Settings drawer / bookmarks (m<key> + '<key>) instead of
+        // hardcoding personal paths here.
         gdoc: () => cdHome('Documents'),
         gdes: () => cdHome('Desktop'),
         gdow: () => cdHome('Downloads'),
-        gcli: () => cdHome('Desktop/Prototypes/cline-starter-kit'),
-        gdat: () => cdHome('Documents/Data'),
-        gzid: () => cdHome('Documents/zi_data'),
-        gpda: () => cdHome('Documents/zi_data/Product Data Analysis'),
-        gscr: () => cdHome('Documents/Screenshots'),
-        gacv: () => cdHome('Documents/zi_data/ACV Prediction'),
+        gpic: () => cdHome('Pictures'),
+        gmus: () => cdHome('Music'),
+        gmov: () => cdHome('Movies'),
         // tabs
         gn: () => {
           fm.homedir().then((home) => {
