@@ -67,7 +67,7 @@ const LEGACY_THEME_ALIASES: Record<string, Theme> = {
   sakura: 'rose',
 };
 
-export const DEFAULT_THEME: Theme = 'paper';
+export const DEFAULT_THEME: Theme = 'dusk';
 
 const STORAGE_KEY = 'fm.theme';
 const THEME_IDS = new Set<Theme>(THEMES.map((t) => t.id));
