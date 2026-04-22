@@ -78,6 +78,7 @@ type Verb =
   | 'permissions'
   | 'back'
   | 'forward'
+  | 'up'
   | 'pin'
   | 'unpin'
   | 'switchTab'
@@ -756,6 +757,27 @@ const VERBS: VerbDef[] = [
     slots: [],
     execute: (_c, _p, api) => {
       api.goBack();
+      api.closeOverlay();
+    },
+  },
+  {
+    id: 'up',
+    label: 'Up',
+    aliases: ['up', 'parent', 'go up', 'parent folder', 'enclosing folder', '..'],
+    icon: '↑',
+    describe: (c) => {
+      const parent = dirname(c.cwd);
+      return parent === c.cwd
+        ? 'Already at the filesystem root'
+        : `Go to ${basename(parent) || '/'}`;
+    },
+    isAvailable: (c) =>
+      dirname(c.cwd) !== c.cwd
+        ? { ok: true }
+        : { ok: false, reason: 'Already at the filesystem root' },
+    slots: [],
+    execute: (c, _p, api) => {
+      api.navigateTo(dirname(c.cwd));
       api.closeOverlay();
     },
   },
