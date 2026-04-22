@@ -409,10 +409,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const tab = stateRef.current.tabs[stateRef.current.activeTab];
       if (!tab) return;
       const trail = [...tab.trail, p];
+      const history = [...tab.history, tab.trail];
       dispatch({
         type: 'updateTab',
         index: stateRef.current.activeTab,
-        patch: { trail, selected: { ...tab.selected, [trail.length - 1]: 0 }, marks: {} },
+        patch: {
+          trail,
+          selected: { ...tab.selected, [trail.length - 1]: 0 },
+          marks: {},
+          history,
+          forward: [],
+        },
       });
       dispatch({ type: 'pushRecent', path: p });
       await loadDir(p);

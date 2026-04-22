@@ -411,17 +411,32 @@ export function useKeyboard(
       }
       function goLeft() {
         // marks are scoped to the cwd (fm-pcs) — wipe on any cwd change.
+        // Every trail mutation pushes the prior trail onto history so the
+        // Back button / H undoes it, and clears forward per standard
+        // browser-style back-stack semantics.
         if (tab.trail.length === 1) {
           const parent = dirname(tab.trail[0]);
           if (parent !== tab.trail[0]) {
-            setTab({ trail: [parent], selected: { 0: 0 }, marks: {} });
+            setTab({
+              trail: [parent],
+              selected: { 0: 0 },
+              marks: {},
+              history: [...tab.history, tab.trail],
+              forward: [],
+            });
           }
           return;
         }
         const newTrail = tab.trail.slice(0, -1);
         const newSel = { ...tab.selected };
         delete newSel[tab.trail.length - 1];
-        setTab({ trail: newTrail, selected: newSel, marks: {} });
+        setTab({
+          trail: newTrail,
+          selected: newSel,
+          marks: {},
+          history: [...tab.history, tab.trail],
+          forward: [],
+        });
       }
       function toggleMark() {
         const col = lastCol(tab);
