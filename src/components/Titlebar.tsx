@@ -26,9 +26,9 @@ export function Titlebar() {
   return (
     <div className="titlebar drag">
       <div className="titlebar__traffic" aria-hidden />
-      <div className="titlebar__brand" aria-label="Breeze File — ranger-style file manager for macOS">
+      <div className="titlebar__brand" aria-label="Breeze File — Find:Act. The keyboard-first file manager.">
         <span className="titlebar__brand-name">Breeze<em>·</em>File</span>
-        <span className="titlebar__brand-tag">Ranger-style file manager for macOS.</span>
+        <span className="titlebar__brand-tag">Find:Act. The keyboard-first file manager.</span>
       </div>
 
       <button
