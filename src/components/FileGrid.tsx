@@ -1,7 +1,8 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { Entry } from '../types';
 import { fm } from '../bridge';
 import { beginDragIndicator, kindFor, iconNameFor } from './FileRow';
+import { beginAppDrag, endAppDrag } from '../dragState';
 import { Icon } from './Icon';
 import './FileGrid.css';
 
@@ -13,11 +14,13 @@ type Props = {
   onSelect: (e: Entry) => void;
   onOpen: (e: Entry) => void;
   getDragPaths?: (e: Entry) => string[];
+  variant?: 'grid' | 'preview';
 };
 
-export function FileGrid({ entries, selIdx, activeColumn, marks, onSelect, onOpen, getDragPaths }: Props) {
+export function FileGrid({ entries, selIdx, activeColumn, marks, onSelect, onOpen, getDragPaths, variant = 'grid' }: Props) {
+  const thumbPx = variant === 'preview' ? 256 : 128;
   return (
-    <div className="grid">
+    <div className={variant === 'preview' ? 'grid grid--preview' : 'grid'}>
       {entries.map((e, i) => (
         <GridTile
           key={e.path}
@@ -27,6 +30,7 @@ export function FileGrid({ entries, selIdx, activeColumn, marks, onSelect, onOpe
           onSelect={onSelect}
           onOpen={onOpen}
           getDragPaths={getDragPaths}
+          thumbPx={thumbPx}
         />
       ))}
     </div>
@@ -48,6 +52,7 @@ const GridTile = memo(function GridTile({
   onSelect,
   onOpen,
   getDragPaths,
+  thumbPx,
 }: {
   entry: Entry;
   selected: boolean;
@@ -55,20 +60,28 @@ const GridTile = memo(function GridTile({
   onSelect: (e: Entry) => void;
   onOpen: (e: Entry) => void;
   getDragPaths?: (e: Entry) => string[];
+  thumbPx: number;
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (entry.kind === 'file') {
-      fm.thumb(entry.path, 128).then((p) => {
+      fm.thumb(entry.path, thumbPx).then((p) => {
         if (!cancelled) setThumb(p);
       });
     }
     return () => {
       cancelled = true;
     };
-  }, [entry.path, entry.kind]);
+  }, [entry.path, entry.kind, thumbPx]);
+
+  // fm-wml — mirror FileRow: keep the cursor tile in view on arrow nav.
+  useEffect(() => {
+    if (!selected) return;
+    ref.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [selected]);
 
   const cls = ['tile', selected && 'tile--selected', marked && 'tile--marked']
     .filter(Boolean)
@@ -76,6 +89,7 @@ const GridTile = memo(function GridTile({
 
   return (
     <div
+      ref={ref}
       className={cls}
       onClick={() => onSelect(entry)}
       onDoubleClick={() => onOpen(entry)}
@@ -83,6 +97,8 @@ const GridTile = memo(function GridTile({
       onDragStart={(e) => {
         e.preventDefault();
         const paths = getDragPaths?.(entry) ?? [entry.path];
+        const cwd = entry.path.slice(0, entry.path.lastIndexOf('/'));
+        beginAppDrag(paths, cwd);
         fm.dragStart(paths);
         beginDragIndicator(paths, e.currentTarget as HTMLElement, {
           name: entry.name,
@@ -91,6 +107,7 @@ const GridTile = memo(function GridTile({
           startY: e.clientY,
         });
       }}
+      onDragEnd={() => endAppDrag()}
     >
       <div className="tile__thumb">
         {thumb ? (

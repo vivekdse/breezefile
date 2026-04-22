@@ -77,6 +77,9 @@
   padding: var(--sp-1) 0;
   overflow-y: auto;
   flex: 1;
+  /* fm-wml — keep scrollIntoView({block:'nearest'}) clear of the fixed
+     TipsChip / PasteChip overlays pinned near the bottom of the window. */
+  scroll-padding-block: var(--sp-3) 96px;
 }
 
 .miller__empty {

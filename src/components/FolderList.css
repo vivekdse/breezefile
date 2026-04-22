@@ -48,6 +48,11 @@
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+  /* fm-wml — reserve space so scrollIntoView({block:'nearest'}) on arrow-key
+     navigation never lands a row behind the fixed chip overlays (TipsChip
+     at bottom:50px, PasteChip). Top padding gives a small breathing band
+     under the sticky header. */
+  scroll-padding-block: var(--sp-3) 96px;
 }
 
 .folder-list__empty {
@@ -67,4 +72,7 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
+  /* fm-wml — see matching note on .folder-list__list. Same reservation on
+     the grid/preview body so the grid cursor also stays clear of chips. */
+  scroll-padding-block: var(--sp-3) 96px;
 }
