@@ -98,6 +98,67 @@ export function useKeyboard(
         return;
       }
 
+      // Tab management — platform-standard shortcuts.
+      //   ⌘T / Ctrl+T        — new tab at current cwd
+      //   ⌘W / Ctrl+W        — close active tab
+      //   ⌘⇧T / Ctrl+⇧T      — restore last closed tab
+      //   ⌘1…9 / Ctrl+1…9    — jump to tab N
+      //   Ctrl+Tab / Ctrl+⇧+Tab  — cycle next/prev (works on macOS too)
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === 't' || e.key === 'T')) {
+        e.preventDefault();
+        clearTimer();
+        if (e.shiftKey) {
+          dispatch({ type: 'restoreTab' });
+        } else {
+          const cwd = tab.trail[lastCol(tab)];
+          dispatch({
+            type: 'newTab',
+            tab: {
+              id: crypto.randomUUID(),
+              trail: [cwd],
+              selected: { 0: 0 },
+              marks: {},
+              sortKey: 'name',
+              sortReverse: false,
+              showHidden: false,
+              viewMode: 'list',
+              filter: '',
+              history: [],
+              forward: [],
+            },
+          });
+        }
+        return;
+      }
+      if (mod && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault();
+        clearTimer();
+        if (cur.tabs.length > 1) {
+          dispatch({ type: 'closeTab', index: cur.activeTab });
+        }
+        return;
+      }
+      if (mod && /^[1-9]$/.test(e.key)) {
+        e.preventDefault();
+        clearTimer();
+        const idx = Number(e.key) - 1;
+        if (idx < cur.tabs.length) dispatch({ type: 'selectTab', index: idx });
+        return;
+      }
+      if (e.ctrlKey && e.key === 'Tab') {
+        e.preventDefault();
+        clearTimer();
+        const n = cur.tabs.length;
+        if (n > 1) {
+          const next = e.shiftKey
+            ? (cur.activeTab - 1 + n) % n
+            : (cur.activeTab + 1) % n;
+          dispatch({ type: 'selectTab', index: next });
+        }
+        return;
+      }
+
       const k = keyName(e);
 
       // --- <any>-consuming pending chords ---
@@ -234,6 +295,7 @@ export function useKeyboard(
         zf: () => dispatch({ type: 'setMode', mode: 'find', buffer: '' }),
         wl: () => { setTab({ viewMode: 'list' }); dispatch({ type: 'setStatus', msg: 'view: list' }); },
         wg: () => { setTab({ viewMode: 'grid' }); dispatch({ type: 'setStatus', msg: 'view: grid' }); },
+        wp: () => { setTab({ viewMode: 'preview' }); dispatch({ type: 'setStatus', msg: 'view: preview' }); },
         // sort
         on: () => setSort('name', false),
         os: () => setSort('size', false),
@@ -374,7 +436,7 @@ export function useKeyboard(
       // the computed grid-template-columns. Returns 1 if grid isn't mounted
       // (e.g. list view) so arrow keys fall back to linear motion.
       function gridCols(): number {
-        if (tab.viewMode !== 'grid') return 1;
+        if (tab.viewMode === 'list') return 1;
         const el = document.querySelector<HTMLElement>('.grid');
         if (!el) return 1;
         const tmpl = getComputedStyle(el).gridTemplateColumns;
@@ -394,7 +456,7 @@ export function useKeyboard(
       function gridArrowVert(dir: 1 | -1) {
         const col = lastCol(tab);
         const cur_ = tab.selected[col] ?? 0;
-        const cols = tab.viewMode === 'grid' ? gridCols() : 1;
+        const cols = tab.viewMode === 'list' ? 1 : gridCols();
         if (dir < 0 && cur_ < cols) {
           goLeft();
           return;

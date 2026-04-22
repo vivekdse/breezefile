@@ -89,7 +89,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
           Breeze<em>·</em>File
         </h1>
         <p className="welcome__lede">
-          A keyboard-first file manager. Four ideas to know, then you're set.
+          Find &amp; Act with Keyboard First File Manager. Four ideas to know, then you're set.
         </p>
 
         <ol className="welcome__tips">

@@ -150,7 +150,24 @@ function buildAppMenu() {
         { role: 'togglefullscreen' },
       ],
     },
-    { role: 'windowMenu' },
+    // Custom Window menu — the default 'windowMenu' role binds ⌘W to
+     // "Close Window", which stops the renderer from using ⌘W for "close
+     // tab". We reassign: ⌘W → close tab (handled in useKeyboard.ts),
+     // ⌘⇧W → close window.
+    {
+      role: 'window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
+        ...(isMac
+          ? ([
+              { type: 'separator' },
+              { role: 'front' },
+            ] as Electron.MenuItemConstructorOptions[])
+          : []),
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

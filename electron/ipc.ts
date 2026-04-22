@@ -66,6 +66,53 @@ function expandHome(p: string): string {
   return p;
 }
 
+// Translate raw Node.js fs errors into sentences the UI can surface verbatim.
+// Node messages like "EEXIST: file already exists, mkdir '/…/foo'" leak the
+// syscall + absolute path and don't explain what the user should do. The
+// wrapper keeps the original error as `.cause` for debugging but rethrows
+// something the status bar can show without apology.
+function friendlyFsError(err: unknown, ctx: { op: 'mkdir' | 'rename' | 'touch'; name?: string; target?: string }): Error {
+  const e = err as NodeJS.ErrnoException;
+  const name = ctx.name ?? (ctx.target ? path.basename(ctx.target) : 'item');
+  let msg: string;
+  switch (e.code) {
+    case 'EEXIST':
+      msg = ctx.op === 'mkdir'
+        ? `a folder or file named "${name}" already exists here`
+        : ctx.op === 'touch'
+          ? `a file named "${name}" already exists here`
+          : `"${name}" already exists at the destination`;
+      break;
+    case 'ENOENT':
+      msg = `parent folder doesn't exist`;
+      break;
+    case 'EACCES':
+    case 'EPERM':
+      msg = `permission denied — ${ctx.op === 'mkdir' ? 'this folder is read-only' : 'not allowed to modify this item'}`;
+      break;
+    case 'ENOTEMPTY':
+      msg = `"${name}" is a non-empty folder`;
+      break;
+    case 'EINVAL':
+      msg = `"${name}" contains characters that aren't allowed in a filename`;
+      break;
+    case 'ENAMETOOLONG':
+      msg = `name is too long`;
+      break;
+    case 'ENOSPC':
+      msg = `out of disk space`;
+      break;
+    case 'EROFS':
+      msg = `this location is read-only`;
+      break;
+    default:
+      msg = e.message || String(err);
+  }
+  const out = new Error(msg);
+  (out as Error & { cause?: unknown }).cause = err;
+  return out;
+}
+
 async function readdirEntries(dirpath: string): Promise<Entry[]> {
   const abs = expandHome(dirpath);
   const names = await fs.readdir(abs);
@@ -248,11 +295,40 @@ export function registerIpc() {
   });
 
   ipcMain.handle('fs:mkdir', async (_e, p: string) => {
-    await fs.mkdir(expandHome(p), { recursive: true });
+    // Not recursive — if the folder already exists we want the caller to see
+    // an EEXIST so the user learns why nothing changed. `recursive:true`
+    // silently succeeds on an existing dir, which is how a "New Folder" with
+    // a colliding name previously closed with no feedback.
+    const abs = expandHome(p);
+    try {
+      await fs.mkdir(abs);
+    } catch (err) {
+      throw friendlyFsError(err, { op: 'mkdir', name: path.basename(abs) });
+    }
   });
 
   ipcMain.handle('fs:rename', async (_e, from: string, to: string) => {
-    await fs.rename(expandHome(from), expandHome(to));
+    const src = expandHome(from);
+    const dst = expandHome(to);
+    // POSIX `rename` silently overwrites an existing target (when it's a
+    // file, or — on some filesystems — an empty directory), which in a file
+    // manager looks like "I typed a duplicate name and my original vanished".
+    // Pre-check and refuse with a clear message; a real overwrite should go
+    // through the paste/overwrite flow where the user confirms.
+    if (src !== dst) {
+      try {
+        await fs.lstat(dst);
+        throw friendlyFsError({ code: 'EEXIST' }, { op: 'rename', target: dst });
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code && code !== 'ENOENT') throw err;
+      }
+    }
+    try {
+      await fs.rename(src, dst);
+    } catch (err) {
+      throw friendlyFsError(err, { op: 'rename', target: dst });
+    }
   });
 
   ipcMain.handle('fs:trash', async (_e, paths: string[]) => {
@@ -307,7 +383,11 @@ export function registerIpc() {
     const abs = expandHome(p);
     // `wx` fails if the file already exists — the 'Create file' verb wants
     // that error surfaced rather than silently re-touching an existing file.
-    await fs.writeFile(abs, '', { flag: 'wx' });
+    try {
+      await fs.writeFile(abs, '', { flag: 'wx' });
+    } catch (err) {
+      throw friendlyFsError(err, { op: 'touch', name: path.basename(abs) });
+    }
   });
 
   ipcMain.handle('shell:reveal', (_e, p: string) => {

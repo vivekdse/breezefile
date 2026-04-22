@@ -83,6 +83,37 @@
   --z-chrome: 10;
   --z-overlay: 100;
 
+  /* ------------- Text on surfaces (theme-safe) -------------
+     Why these exist: individual themes define different palette tokens.
+     Dark/Light set --fg-1/--fg-2/--bg-*. Paper-family themes set --ink /
+     --ink-2 / --panel / --panel-2 but DO NOT override --fg-1, so a
+     component that writes `color: var(--fg-1)` on a paper surface gets
+     the dark-theme's light color — light text on light bg. This was the
+     recurring bug.
+
+     Rule: any component rendering text on a surface MUST reference one of
+     these composite tokens — never --fg-1/--ink directly. Each token
+     cascades through every palette a theme might have defined, so the
+     fallback chain produces a readable color no matter which theme
+     loads. When a new theme is added, as long as it defines any member
+     of the chain, the tokens keep working.
+
+       --text-on-panel   text on --panel / --panel-2 (sidebar, modals, chips)
+       --text-on-canvas  text on --bg (main content area, file rows)
+       --text-on-chrome  text on --bg-0 (tabbar, titlebar — chrome stays
+                         dark in paper themes by design, so this always
+                         resolves to the dark-theme light fg)
+       --muted-on-panel  subdued text on --panel (captions, hints)
+       --muted-on-canvas subdued text on --bg (metadata, secondary labels)
+       --rule-on-panel   border/divider on --panel
+  */
+  --text-on-panel:    var(--panel-ink,  var(--ink,     var(--fg-1)));
+  --text-on-canvas:   var(--ink,        var(--fg-1));
+  --text-on-chrome:   var(--fg-1);
+  --muted-on-panel:   var(--panel-muted, var(--muted,  var(--fg-2)));
+  --muted-on-canvas:  var(--muted,      var(--fg-2));
+  --rule-on-panel:    var(--panel-rule, var(--rule,    var(--border-1)));
+
   /* ------------- Default theme: Alpine dusk ------------- */
   /* A twilight mountain lake — pre-dawn indigo sky, glacier teal,
      twilight violet, alpenglow pink. Cold, still, cinematic. */

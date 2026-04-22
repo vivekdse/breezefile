@@ -15,6 +15,8 @@
   background: var(--bg-1);
   border: 1px solid var(--border-1);
   border-radius: var(--r-md);
+  /* The tabbar chrome stays dark across all themes (paper family doesn't
+     override --bg-0/--bg-1), so inactive tabs always need light text. */
   color: var(--fg-2);
   font-size: var(--fs-sm);
   max-width: 220px;
@@ -23,13 +25,14 @@
   /* fm-cpk — tab open animates from zero width + fade. Closing tabs get
      data-closing="true" applied before their React unmount so the
      collapse animation plays; Tabbar.tsx handles the post-transition
-     unmount. The accent underline (::after) transitions when the active
-     class moves between tabs. */
+     unmount.
+
+     Active-state switching is INSTANT — no transition on background/color/
+     border. Transitioning those made the active pill visibly lag behind the
+     file view when the user switched tabs via click or Ctrl+Tab. Only the
+     enter/exit geometry (max-width/opacity/padding/margin) still animates. */
   animation: gpTabOpen var(--dur-slow) var(--ease-emphasis) both;
   transition:
-    background var(--motion-hover),
-    color var(--motion-hover),
-    border-color var(--motion-hover),
     max-width var(--motion-toggle),
     opacity var(--motion-toggle),
     padding var(--motion-toggle),
@@ -57,15 +60,17 @@
   transform: scaleX(0);
   transform-origin: center;
   opacity: 0;
-  transition: transform var(--motion-toggle), opacity var(--motion-toggle);
 }
 .tabbar__tab:hover {
   background: var(--bg-3);
+  /* Inactive tab sits on the dark chrome strip (paper themes don't
+     override --bg-0/--bg-1/--bg-3) so the hover color stays light. Only
+     the active tab's plate needs --ink. */
   color: var(--fg-1);
 }
 .tabbar__tab--active {
   background: var(--bg-2);
-  color: var(--fg-1);
+  color: var(--ink, var(--fg-1));
   border-color: var(--accent-glow);
   box-shadow: 0 0 0 1px var(--accent-soft);
 }
@@ -73,18 +78,10 @@
   transform: scaleX(1);
   opacity: 1;
 }
-
-.tabbar__num {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--fg-3);
-  padding: 0 4px;
-  background: var(--bg-3);
-  border-radius: 3px;
-}
-.tabbar__tab--active .tabbar__num {
-  color: var(--accent);
+.tabbar__tab--drop {
   background: var(--accent-soft);
+  border-color: var(--accent-glow);
+  box-shadow: 0 0 0 1px var(--accent-glow);
 }
 
 .tabbar__label {
@@ -102,4 +99,27 @@
 .tabbar__close:hover {
   background: var(--bg-4);
   color: var(--err);
+}
+
+.tabbar__new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 4px 0;
+  background: transparent;
+  border: 1px dashed var(--border-1);
+  border-radius: var(--r-md);
+  color: var(--fg-3);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  transition:
+    background var(--motion-hover),
+    color var(--motion-hover),
+    border-color var(--motion-hover);
+}
+.tabbar__new:hover {
+  background: var(--bg-3);
+  color: var(--fg-1);
+  border-color: var(--accent-glow);
 }

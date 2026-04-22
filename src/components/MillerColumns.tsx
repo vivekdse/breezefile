@@ -112,7 +112,7 @@ export function MillerColumns() {
             <span className="miller__col-name">{basename(col.path) || '/'}</span>
             <span className="miller__col-meta">{col.entries.length}</span>
           </div>
-          {activeTab.viewMode === 'grid' && col.colIdx === columns.length - 1 ? (
+          {(activeTab.viewMode === 'grid' || activeTab.viewMode === 'preview') && col.colIdx === columns.length - 1 ? (
             <FileGrid
               entries={col.entries}
               selIdx={col.selIdx}
@@ -120,6 +120,7 @@ export function MillerColumns() {
               marks={activeTab.marks}
               onSelect={(e) => selectAt(col.colIdx, e)}
               onOpen={doubleOpen}
+              variant={activeTab.viewMode === 'preview' ? 'preview' : 'grid'}
             />
           ) : (
             <ul className="miller__list">

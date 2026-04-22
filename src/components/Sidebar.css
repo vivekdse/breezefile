@@ -146,6 +146,70 @@ button.sidebar__link:focus-visible {
   margin-top: 2px;
 }
 
+/* ─── Drop target for pinning ──────────────────────────────────────── */
+
+.sidebar__drop {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  padding: 2px;
+  transition: background var(--motion-hover), border-color var(--motion-hover);
+}
+.sidebar__drop--hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-glow);
+}
+
+.sidebar__link--drop {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
+
+.sidebar__pin-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar__unpin {
+  opacity: 0.55;
+  color: var(--muted-on-panel);
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity var(--motion-hover), color var(--motion-hover), background var(--motion-hover);
+}
+button.sidebar__link:hover .sidebar__unpin {
+  opacity: 1;
+}
+.sidebar__unpin:hover {
+  color: var(--err);
+  background: var(--bg-4, var(--chip));
+  opacity: 1;
+}
+
+.sidebar__empty {
+  font-size: 11.5px;
+  color: var(--muted-on-panel);
+  padding: 8px 12px;
+  line-height: 1.5;
+  font-style: italic;
+}
+.sidebar__empty kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--chip, var(--bg-3));
+  color: var(--text-on-panel);
+  border: 1px solid var(--rule-on-panel);
+  font-style: normal;
+}
+
 /* ─── Crest ────────────────────────────────────────────────────────── */
 
 .sidebar__crest {

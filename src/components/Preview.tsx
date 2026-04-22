@@ -28,9 +28,14 @@ export function Preview() {
     return currentEntry(activeTab, entries);
   }, [activeTab, state.entriesByPath]);
 
+  const expanded = activeTab?.viewMode === 'preview';
+
   if (!selected) {
     return (
-      <section className="preview preview--empty" aria-label="Preview">
+      <section
+        className={`preview preview--empty${expanded ? ' preview--expanded' : ''}`}
+        aria-label="Preview"
+      >
         <div className="preview__empty-mark">❦</div>
         <div className="preview__empty-text">Nothing selected.</div>
         <div className="preview__empty-hint">
@@ -40,7 +45,9 @@ export function Preview() {
     );
   }
 
-  return <PreviewBody entry={selected} tag={state.tags[selected.path]} />;
+  return (
+    <PreviewBody entry={selected} tag={state.tags[selected.path]} expanded={expanded} />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -48,9 +55,12 @@ export function Preview() {
 interface PreviewBodyProps {
   entry: Entry;
   tag?: string;
+  /** fm-wq6 — true when viewMode === 'preview' so the pane can drop
+   *  metadata chrome and let the plate claim the full area. */
+  expanded?: boolean;
 }
 
-function PreviewBody({ entry, tag }: PreviewBodyProps) {
+function PreviewBody({ entry, tag, expanded = false }: PreviewBodyProps) {
   const kind = classify(entry);
   const [imgFailed, setImgFailed] = useState(false);
   const [text, setText] = useState<
@@ -105,7 +115,10 @@ function PreviewBody({ entry, tag }: PreviewBodyProps) {
   const showText = kind === 'text' || kind === 'sheet';
 
   return (
-    <section className="preview" aria-label="Preview">
+    <section
+      className={`preview${expanded ? ' preview--expanded' : ''}`}
+      aria-label="Preview"
+    >
       {/* Plate — actual image, text excerpt, or typed-icon fallback.
           Images load directly via file:// so SVG / large photos render at
           full fidelity (CSP already allows img-src file:). Text-like files

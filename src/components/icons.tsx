@@ -17,6 +17,7 @@ export type IconName =
   | 'drive'
   | 'usb'
   | 'folder'
+  | 'pin'
   | 'image'
   | 'text'
   | 'sheet'
@@ -42,6 +43,7 @@ export const ICON_NAMES: readonly IconName[] = [
   'drive',
   'usb',
   'folder',
+  'pin',
   'image',
   'text',
   'sheet',
@@ -167,6 +169,31 @@ export function IconSprite() {
             fill="none"
             strokeLinejoin="round"
           />
+        </g>
+        <g id="i-pin">
+          {/* Pushpin: top cap, tapered body, bottom point, needle. Tilted 30°
+              so it reads as a pin rather than a trophy. */}
+          <g transform="rotate(30 12 12)">
+            <path
+              d="M10 3h4v4l2 3h-8l2-3z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              fill="none"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M12 10v6"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+            <path
+              d="M8 10h8"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </g>
         </g>
         <g id="i-image">
           <rect x="3" y="5" width="18" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="none" />

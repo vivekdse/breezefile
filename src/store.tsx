@@ -108,6 +108,7 @@ const DEFAULT_KEYBINDS: Keybinds = {
   'hidden': 'zh',
   'view.list': 'wl',
   'view.grid': 'wg',
+  'view.preview': 'wp',
   'theme': 'zT',
   // --- bookmarks / tags ---
   'bookmark.set': 'm<k>',
@@ -129,6 +130,7 @@ type Persisted = {
   keybinds: Keybinds;
   theme: 'dark' | 'light';
   recents: string[]; // LRU of recently-visited folders, most recent first
+  pinned: string[]; // user-pinned folder paths shown in sidebar Favorites
 };
 
 const RECENTS_CAP = 30;
@@ -168,7 +170,9 @@ type Action =
   | { type: 'setTheme'; theme: 'dark' | 'light' }
   | { type: 'setLastFind'; query: string }
   | { type: 'restoreTab' }
-  | { type: 'pushRecent'; path: string };
+  | { type: 'pushRecent'; path: string }
+  | { type: 'pinFolder'; path: string }
+  | { type: 'unpinFolder'; path: string };
 
 function makeTab(path: string): Tab {
   return {
@@ -194,6 +198,7 @@ const initialState: State = {
   keybinds: DEFAULT_KEYBINDS,
   theme: 'dark',
   recents: [],
+  pinned: [],
   entriesByPath: {},
   yank: [],
   statusMsg: '',
@@ -279,6 +284,14 @@ function reducer(s: State, a: Action): State {
       if (clean.length > RECENTS_CAP) clean.length = RECENTS_CAP;
       return { ...s, recents: clean };
     }
+    case 'pinFolder': {
+      const pinned = s.pinned ?? [];
+      if (pinned.includes(a.path)) return s;
+      return { ...s, pinned: [...pinned, a.path] };
+    }
+    case 'unpinFolder': {
+      return { ...s, pinned: (s.pinned ?? []).filter((p) => p !== a.path) };
+    }
   }
 }
 
@@ -313,7 +326,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           activeTab?: unknown;
         };
         // Drop any legacy `tabs`/`activeTab` fields from older builds.
-        const { bookmarks, tags, keybinds, theme, recents } = parsed as Partial<Persisted>;
+        const { bookmarks, tags, keybinds, theme, recents, pinned } = parsed as Partial<Persisted>;
         dispatch({
           type: 'hydrate',
           state: {
@@ -322,6 +335,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(keybinds ? { keybinds } : {}),
             ...(theme ? { theme } : {}),
             ...(recents ? { recents } : {}),
+            ...(pinned ? { pinned } : {}),
           } as Partial<Persisted>,
         });
       } catch {
@@ -341,9 +355,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       keybinds: state.keybinds,
       theme: state.theme,
       recents: state.recents,
+      pinned: state.pinned,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
-  }, [state.bookmarks, state.tags, state.keybinds, state.theme, state.recents]);
+  }, [state.bookmarks, state.tags, state.keybinds, state.theme, state.recents, state.pinned]);
 
   // Apply theme on html root
   useEffect(() => {

@@ -127,3 +127,20 @@
   color: var(--accent);
   font-weight: 600;
 }
+
+/* Preview variant — larger thumbnails dominate, filename compressed to a
+   single narrow line below. Tiles themselves are wider so the preview gets
+   more pixels; the caption shrinks to stay out of the way. */
+.grid--preview {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-4);
+}
+.grid--preview .tile__thumb {
+  aspect-ratio: 4 / 3;
+}
+.grid--preview .tile__name {
+  font-size: 10px;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  opacity: 0.75;
+}

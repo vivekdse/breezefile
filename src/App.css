@@ -34,6 +34,14 @@
   color: var(--ink, var(--fg-1));
 }
 
+/* fm-wq6 — preview mode reshapes the shell: sidebar collapses to 0,
+   preview claims ~2/3 of the viewport, folder list takes the rest.
+   Triggered by data-view="preview" on .shell (set in App.tsx). */
+.shell[data-view="preview"] {
+  --sidebar-w: 0px;
+  grid-template-columns: 0px 1fr 2fr;
+}
+
 .shell__title   { grid-area: title;   min-width: 0; }
 .shell__chrome  { grid-area: chrome;  min-width: 0; }
 .shell__status  { grid-area: status;  min-width: 0; }
@@ -170,6 +178,18 @@
 .overlay__input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.overlay__input--error {
+  border-color: var(--danger, #d94a4a);
+  box-shadow: 0 0 0 3px rgba(217, 74, 74, 0.22);
+}
+/* Inline validation message under the overlay input — used when mkdir /
+   touch / rename fail so the user sees why without losing what they typed. */
+.overlay__error {
+  color: var(--danger, #d94a4a);
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+  margin-top: calc(-1 * var(--sp-1));
 }
 
 /* Bottom command prompt (`:` / `!` colon-prompt) and its completions popover.

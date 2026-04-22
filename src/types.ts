@@ -12,7 +12,7 @@ export type Entry = {
 };
 
 export type SortKey = 'name' | 'size' | 'mtime' | 'ctime' | 'ext' | 'type';
-export type ViewMode = 'list' | 'grid';
+export type ViewMode = 'list' | 'grid' | 'preview';
 
 export type Tab = {
   id: string;

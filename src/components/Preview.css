@@ -302,3 +302,63 @@
 .preview__link:hover {
   color: var(--panel-ink, var(--ink));
 }
+
+/* ─── Expanded mode (fm-wq6) ───────────────────────────────────────────
+   When viewMode === 'preview' the pane is the star of the layout. Drop
+   the title / metadata / tags chrome, let the plate fill the area, and
+   keep only the action buttons at the bottom. Text fills the plate;
+   images and icons are centered. */
+.preview--expanded {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 16px 14px;
+  overflow: hidden;
+}
+.preview--expanded .preview__kind,
+.preview--expanded .preview__title,
+.preview--expanded .mini-rule,
+.preview--expanded .preview__dl,
+.preview--expanded .preview__tags,
+.preview--expanded .preview__cap {
+  display: none;
+}
+.preview--expanded .preview__plate {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+.preview--expanded .preview__plate::before {
+  inset: 6px;
+}
+/* Text preview fills the plate instead of forcing a 4:5 card. */
+.preview--expanded .preview__text {
+  aspect-ratio: auto;
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  font-size: 13px;
+  padding: 16px 18px;
+}
+/* Images: full-size but centered — no ceiling beyond the pane. */
+.preview--expanded .preview__img {
+  max-height: none;
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+  align-self: center;
+}
+/* Icon/placeholder: scale up and center; drop the 4:5 lock. */
+.preview--expanded .preview__placeholder {
+  aspect-ratio: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.preview--expanded .preview__actions {
+  margin-top: 12px;
+  flex: 0 0 auto;
+}
+.preview--expanded .preview__sub-actions {
+  flex: 0 0 auto;
+}

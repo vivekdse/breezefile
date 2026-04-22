@@ -145,7 +145,7 @@ function Shell() {
   };
 
   return (
-    <OverlayCtx.Provider value={overlayApi}><div className="shell">
+    <OverlayCtx.Provider value={overlayApi}><div className="shell" data-view={tab.viewMode}>
       <IconSprite />
       {/* title slot — owned by fm-9w0 */}
       <div className="shell__title">
@@ -159,8 +159,10 @@ function Shell() {
           onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
         />
       </div>
-      {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot. */}
-      <Sidebar />
+      {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot.
+          Hidden in preview mode (fm-wq6) so the preview pane can claim
+          the real estate. */}
+      {tab.viewMode !== 'preview' && <Sidebar />}
       {/* main slot — the recessed plate. FolderList (single-list Finder-style
           view per fm-ehb) fills it. MillerColumns remains in the tree for a
           future optional view mode. */}
@@ -197,23 +199,17 @@ function Shell() {
           mode={renaming.mode}
           onClose={() => setRenaming(null)}
           onCommit={async (newName) => {
-            if (newName && newName !== renaming.entry.name) {
-              const to = pathJoin(dirname(renaming.entry.path), newName);
-              try {
-                await fm.rename(renaming.entry.path, to);
-                await refreshActive();
-                // fm-33l — pulse the renamed row so the user sees the
-                // change land. celebratePaths is a no-op if the row
-                // hasn't mounted yet (rare race, still safe).
-                requestAnimationFrame(() => celebratePaths([to]));
-                dispatch({ type: 'setStatus', msg: `renamed → ${newName}` });
-              } catch (err) {
-                dispatch({
-                  type: 'setStatus',
-                  msg: `rename failed: ${(err as Error).message}`,
-                });
-              }
+            if (!newName || newName === renaming.entry.name) {
+              setRenaming(null);
+              return;
             }
+            const to = pathJoin(dirname(renaming.entry.path), newName);
+            // Let the overlay surface errors inline — rethrow so it stays
+            // open and the user can fix the name without retyping.
+            await fm.rename(renaming.entry.path, to);
+            await refreshActive();
+            requestAnimationFrame(() => celebratePaths([to]));
+            dispatch({ type: 'setStatus', msg: `renamed → ${newName}` });
             setRenaming(null);
           }}
         />
@@ -224,19 +220,11 @@ function Shell() {
           cwd={tab.trail[tab.trail.length - 1]}
           onClose={() => setMkdirOpen(false)}
           onCommit={async (name) => {
-            if (name) {
-              try {
-                await fm.mkdir(pathJoin(tab.trail[tab.trail.length - 1], name));
-                await refreshActive();
-                focusEntryByName(name);
-                dispatch({ type: 'setStatus', msg: `created ${name}/` });
-              } catch (err) {
-                dispatch({
-                  type: 'setStatus',
-                  msg: `mkdir failed: ${(err as Error).message}`,
-                });
-              }
-            }
+            if (!name) { setMkdirOpen(false); return; }
+            await fm.mkdir(pathJoin(tab.trail[tab.trail.length - 1], name));
+            await refreshActive();
+            focusEntryByName(name);
+            dispatch({ type: 'setStatus', msg: `created ${name}/` });
             setMkdirOpen(false);
           }}
         />
@@ -247,21 +235,13 @@ function Shell() {
           cwd={tab.trail[tab.trail.length - 1]}
           onClose={() => setTouchOpen(false)}
           onCommit={async (name) => {
-            if (name) {
-              const to = pathJoin(tab.trail[tab.trail.length - 1], name);
-              try {
-                await fm.touch(to);
-                await refreshActive();
-                focusEntryByName(name);
-                requestAnimationFrame(() => celebratePaths([to]));
-                dispatch({ type: 'setStatus', msg: `created ${name}` });
-              } catch (err) {
-                dispatch({
-                  type: 'setStatus',
-                  msg: `touch failed: ${(err as Error).message}`,
-                });
-              }
-            }
+            if (!name) { setTouchOpen(false); return; }
+            const to = pathJoin(tab.trail[tab.trail.length - 1], name);
+            await fm.touch(to);
+            await refreshActive();
+            focusEntryByName(name);
+            requestAnimationFrame(() => celebratePaths([to]));
+            dispatch({ type: 'setStatus', msg: `created ${name}` });
             setTouchOpen(false);
           }}
         />
@@ -315,10 +295,23 @@ function RenameOverlay({
   entry: Entry;
   mode: RenameMode;
   onClose: () => void;
-  onCommit: (name: string) => void;
+  onCommit: (name: string) => Promise<void>;
 }) {
   const [value, setValue] = useState(entry.name);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const { exit, state } = useOverlayExit(onClose);
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onCommit(value);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
   const label =
     mode === 'append'
       ? 'Append to name'
@@ -333,11 +326,12 @@ function RenameOverlay({
         <div className="overlay__label">{label}</div>
         <input
           autoFocus
-          className="overlay__input"
+          className={error ? 'overlay__input overlay__input--error' : 'overlay__input'}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          disabled={busy}
+          onChange={(e) => { setValue(e.target.value); if (error) setError(null); }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') onCommit(value);
+            if (e.key === 'Enter') submit();
             else if (e.key === 'Escape') exit();
           }}
           onFocus={(e) => {
@@ -358,6 +352,7 @@ function RenameOverlay({
             }
           }}
         />
+        {error && <div className="overlay__error">{error}</div>}
       </div>
     </div>
   );
@@ -370,24 +365,39 @@ function MkdirOverlay({
 }: {
   cwd: string;
   onClose: () => void;
-  onCommit: (name: string) => void;
+  onCommit: (name: string) => Promise<void>;
 }) {
   const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const { exit, state } = useOverlayExit(onClose);
+  const submit = async () => {
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onCommit(value);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
   return (
     <div className="overlay" data-state={state} onClick={exit}>
       <div className="overlay__box" onClick={(e) => e.stopPropagation()}>
         <div className="overlay__label">New folder in {basename(cwd) || '/'}</div>
         <input
           autoFocus
-          className="overlay__input"
+          className={error ? 'overlay__input overlay__input--error' : 'overlay__input'}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          disabled={busy}
+          onChange={(e) => { setValue(e.target.value); if (error) setError(null); }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') onCommit(value);
+            if (e.key === 'Enter') submit();
             else if (e.key === 'Escape') exit();
           }}
         />
+        {error && <div className="overlay__error">{error}</div>}
       </div>
     </div>
   );
@@ -400,25 +410,40 @@ function TouchOverlay({
 }: {
   cwd: string;
   onClose: () => void;
-  onCommit: (name: string) => void;
+  onCommit: (name: string) => Promise<void>;
 }) {
   const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const { exit, state } = useOverlayExit(onClose);
+  const submit = async () => {
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onCommit(value);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  };
   return (
     <div className="overlay" data-state={state} onClick={exit}>
       <div className="overlay__box" onClick={(e) => e.stopPropagation()}>
         <div className="overlay__label">New file in {basename(cwd) || '/'}</div>
         <input
           autoFocus
-          className="overlay__input"
+          className={error ? 'overlay__input overlay__input--error' : 'overlay__input'}
           value={value}
+          disabled={busy}
           placeholder="untitled.txt"
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => { setValue(e.target.value); if (error) setError(null); }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') onCommit(value);
+            if (e.key === 'Enter') submit();
             else if (e.key === 'Escape') exit();
           }}
         />
+        {error && <div className="overlay__error">{error}</div>}
       </div>
     </div>
   );

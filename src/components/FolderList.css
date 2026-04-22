@@ -55,6 +55,13 @@
   scroll-padding-block: var(--sp-3) 96px;
 }
 
+/* fm-wq6 — preview mode renders a name-only list so the preview pane
+   can dominate. Hide size/mtime and the trailing chevron. */
+.folder-list__list[data-compact='true'] .row__meta,
+.folder-list__list[data-compact='true'] .row__chev {
+  display: none;
+}
+
 .folder-list__empty {
   padding: var(--sp-3) var(--sp-4);
   color: var(--fg-dim);

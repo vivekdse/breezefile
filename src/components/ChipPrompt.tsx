@@ -49,6 +49,9 @@ type Ctx = {
   bookmarks: Record<string, string>;
   homedir: string;
   recents: string[];
+  pinned: string[];
+  tabs: Array<{ index: number; id: string; cwd: string; label: string; active: boolean }>;
+  canRestoreTab: boolean;
   searchResults: string[]; // async Spotlight hits for current query
   localSubdirs: string[]; // BFS subdirectories under cwd (depth ~3)
   historyLen: number; // tab back-history depth
@@ -74,7 +77,13 @@ type Verb =
   | 'tips'
   | 'permissions'
   | 'back'
-  | 'forward';
+  | 'forward'
+  | 'pin'
+  | 'unpin'
+  | 'switchTab'
+  | 'newTab'
+  | 'closeTab'
+  | 'restoreTab';
 
 type Option = {
   id: string;
@@ -455,6 +464,145 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    id: 'pin',
+    label: 'Pin to sidebar',
+    aliases: ['pin', 'favorite', 'bookmark sidebar', 'add to sidebar'],
+    icon: '★',
+    describe: (c) => {
+      const cursorIsDir = c.cursor?.kind === 'dir';
+      const defaultLabel = cursorIsDir ? c.cursor!.name : basename(c.cwd) || '/';
+      return `Pin ${defaultLabel} to sidebar Favorites`;
+    },
+    isAvailable: () => ({ ok: true }),
+    slots: [
+      {
+        label: 'Which folder',
+        getOptions: (c) => {
+          const opts = destinationOptions(c, true);
+          const pinnedSet = new Set(c.pinned);
+          return opts
+            .filter((o) => {
+              const p = resolveDestination(c, o.id);
+              return p ? !pinnedSet.has(p) : true;
+            });
+        },
+      },
+    ],
+    execute: (c, [dest], api) => {
+      const target = resolveDestination(c, dest);
+      if (!target) return;
+      api.dispatch({ type: 'pinFolder', path: target });
+      api.dispatch({ type: 'setStatus', msg: `pinned ${basename(target) || target}` });
+    },
+  },
+  {
+    id: 'unpin',
+    label: 'Unpin from sidebar',
+    aliases: ['unpin', 'remove pin', 'remove favorite'],
+    icon: '☆',
+    describe: () => 'Remove a pinned folder from the sidebar',
+    isAvailable: (c) => {
+      if ((c.pinned?.length ?? 0) === 0) return { ok: false, reason: 'No pinned folders yet' };
+      return { ok: true };
+    },
+    slots: [
+      {
+        label: 'Which pin',
+        getOptions: (c) =>
+          (c.pinned ?? []).map((p) => ({
+            id: p,
+            label: basename(p) || p,
+            detail: prettyPath(p, c.homedir),
+            available: true,
+          })),
+      },
+    ],
+    execute: (_c, [path], api) => {
+      api.dispatch({ type: 'unpinFolder', path });
+      api.dispatch({ type: 'setStatus', msg: `unpinned ${basename(path) || path}` });
+    },
+  },
+  {
+    id: 'switchTab',
+    label: 'Switch tab',
+    aliases: ['switch tab', 'go to tab', 'tab', 'jump to tab'],
+    icon: '⇄',
+    describe: () => 'Jump to another open tab',
+    isAvailable: (c) =>
+      c.tabs.length > 1 ? { ok: true } : { ok: false, reason: 'Only one tab open' },
+    slots: [
+      {
+        label: 'Tab',
+        getOptions: (c) =>
+          c.tabs
+            .filter((t) => !t.active)
+            .map((t) => ({
+              id: String(t.index),
+              label: t.label,
+              detail: prettyPath(t.cwd, c.homedir),
+              available: true,
+            })),
+      },
+    ],
+    execute: (_c, [idx], api) => {
+      api.dispatch({ type: 'selectTab', index: Number(idx) });
+    },
+  },
+  {
+    id: 'newTab',
+    label: 'New tab',
+    aliases: ['new tab', 'open tab', 'add tab'],
+    icon: '+',
+    describe: (c) => `Open a new tab at ${basename(c.cwd) || '/'}`,
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (c, _p, api) => {
+      api.dispatch({
+        type: 'newTab',
+        tab: {
+          id: crypto.randomUUID(),
+          trail: [c.cwd],
+          selected: { 0: 0 },
+          marks: {},
+          sortKey: 'name',
+          sortReverse: false,
+          showHidden: false,
+          viewMode: 'list',
+          filter: '',
+          history: [],
+          forward: [],
+        },
+      });
+    },
+  },
+  {
+    id: 'closeTab',
+    label: 'Close tab',
+    aliases: ['close tab', 'remove tab', 'kill tab'],
+    icon: '×',
+    describe: (c) => `Close ${c.tabs.find((t) => t.active)?.label ?? 'this tab'}`,
+    isAvailable: (c) =>
+      c.tabs.length > 1 ? { ok: true } : { ok: false, reason: "Can't close the last tab" },
+    slots: [],
+    execute: (c, _p, api) => {
+      const active = c.tabs.find((t) => t.active);
+      if (active) api.dispatch({ type: 'closeTab', index: active.index });
+    },
+  },
+  {
+    id: 'restoreTab',
+    label: 'Restore closed tab',
+    aliases: ['restore tab', 'reopen tab', 'undo close'],
+    icon: '↺',
+    describe: () => 'Re-open the most recently closed tab',
+    isAvailable: (c) =>
+      c.canRestoreTab ? { ok: true } : { ok: false, reason: 'No recently closed tab' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.dispatch({ type: 'restoreTab' });
+    },
+  },
+  {
     id: 'open',
     label: 'Open',
     aliases: ['open', 'launch'],
@@ -499,11 +647,12 @@ const VERBS: VerbDef[] = [
         getOptions: () => [
           { id: 'list', label: 'List', detail: 'compact rows', available: true },
           { id: 'grid', label: 'Grid', detail: 'thumbnails', available: true },
+          { id: 'preview', label: 'Preview', detail: 'large thumbnails', available: true },
         ],
       },
     ],
     execute: (_c, [mode], api) => {
-      api.setTab({ viewMode: mode as 'list' | 'grid' });
+      api.setTab({ viewMode: mode as 'list' | 'grid' | 'preview' });
       api.dispatch({ type: 'setStatus', msg: `view: ${mode}` });
     },
   },
@@ -795,7 +944,9 @@ export function ChipPrompt({
     const slotIdx = verb ? picks.length : -1;
     const activeSlot = verb && slotIdx < verb.slots.length ? verb.slots[slotIdx] : null;
     const isDestinationSlot =
-      activeSlot?.label === 'Where' || activeSlot?.label === 'Destination';
+      activeSlot?.label === 'Where' ||
+      activeSlot?.label === 'Destination' ||
+      activeSlot?.label === 'Which folder';
     if (!isDestinationSlot || filter.trim().length < 2) {
       setSearchResults((prev) => (prev.length === 0 ? prev : []));
       return;
@@ -823,7 +974,9 @@ export function ChipPrompt({
     const slotIdx = verb ? picks.length : -1;
     const activeSlot = verb && slotIdx < verb.slots.length ? verb.slots[slotIdx] : null;
     const isDestinationSlot =
-      activeSlot?.label === 'Where' || activeSlot?.label === 'Destination';
+      activeSlot?.label === 'Where' ||
+      activeSlot?.label === 'Destination' ||
+      activeSlot?.label === 'Which folder';
     if (!isDestinationSlot || !activeTab) {
       setLocalSubdirs((prev) => (prev.length === 0 ? prev : []));
       return;
@@ -874,12 +1027,21 @@ export function ChipPrompt({
       bookmarks: state.bookmarks,
       homedir,
       recents: state.recents ?? [],
+      pinned: state.pinned ?? [],
+      tabs: state.tabs.map((t, i) => ({
+        index: i,
+        id: t.id,
+        cwd: t.trail[t.trail.length - 1],
+        label: basename(t.trail[t.trail.length - 1]) || '/',
+        active: i === state.activeTab,
+      })),
+      canRestoreTab: !!state.lastClosedTab,
       searchResults,
       localSubdirs,
       historyLen: activeTab.history.length,
       forwardLen: activeTab.forward.length,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, homedir, searchResults, localSubdirs]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, localSubdirs]);
 
   if (!activeTab || !ctx) return null;
 

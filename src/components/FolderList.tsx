@@ -256,7 +256,7 @@ export function FolderList() {
           forces a remount when the user toggles grid↔list, which makes
           the receiving side animate in (via gpPopIn on .folder-list__body). */}
       {tab.viewMode === 'grid' ? (
-        <div key="grid" className="folder-list__body">
+        <div key={tab.viewMode} className="folder-list__body">
           <FileGrid
             entries={entries}
             selIdx={selIdx}
@@ -265,10 +265,11 @@ export function FolderList() {
             onSelect={selectAt}
             onOpen={doubleOpen}
             getDragPaths={getDragPaths}
+            variant="grid"
           />
         </div>
       ) : (
-        <ul key="list" className="folder-list__list folder-list__body">
+        <ul key={tab.viewMode} className="folder-list__list folder-list__body" data-compact={tab.viewMode === 'preview' ? 'true' : undefined}>
           {entries.length === 0 && (
             <li className="folder-list__empty">
               empty folder — type <kbd>create</kbd> to add one, or <kbd>←</kbd> to go back

@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef } from 'react';
 import type { Entry } from '../types';
 import { fm } from '../bridge';
+import { beginAppDrag, endAppDrag } from '../dragState';
 import { formatSize, formatMtime } from '../sort';
 import { Icon, type IconName } from './Icon';
 import './FileRow.css';
@@ -217,6 +218,8 @@ function FileRowInner({
       onDragStart={(e) => {
         e.preventDefault();
         const paths = getDragPaths?.(entry) ?? [entry.path];
+        const cwd = entry.path.slice(0, entry.path.lastIndexOf('/'));
+        beginAppDrag(paths, cwd);
         fm.dragStart(paths);
         beginDragIndicator(paths, e.currentTarget as HTMLElement, {
           name: entry.name,
@@ -225,6 +228,7 @@ function FileRowInner({
           startY: e.clientY,
         });
       }}
+      onDragEnd={() => endAppDrag()}
     >
       {/* Selection checkbox — single, prominent indicator of marked state.
           Uses a CSS-painted box (not a Unicode glyph) so the filled state can
