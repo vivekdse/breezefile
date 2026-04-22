@@ -11,3 +11,9 @@ output
 .beads/dolt-access.lock
 .beads/last-touched
 .beads/dolt
+
+# Agent / assistant context — keep local; not part of the published repo.
+CLAUDE.md
+AGENTS.md
+tmp/
+design-assets/inspirations/
