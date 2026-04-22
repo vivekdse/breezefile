@@ -9,34 +9,39 @@
 
 .tile {
   display: grid;
+  grid-template-rows: auto auto;
   gap: var(--sp-1);
   padding: var(--sp-2);
   border-radius: var(--r-md);
-  transition: background var(--motion-hover), transform var(--motion-hover);
+  border: 1px solid transparent;
+  align-self: start;
+  transition: background var(--motion-hover), border-color var(--motion-hover);
   cursor: default;
 }
 .tile:hover {
-  background: var(--bg-3);
+  background: var(--panel-2);
 }
 .tile--selected {
-  background: var(--sel-bg);
-  box-shadow: inset 0 0 0 1px var(--accent-glow);
+  background: linear-gradient(180deg, var(--hi), var(--accent-soft));
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 0 3px var(--accent-soft);
 }
 .tile--marked {
-  outline: 2px solid var(--ok);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 .tile--dragging {
   opacity: 0.5;
   background: var(--accent-soft) !important;
-  box-shadow: inset 0 0 0 1px var(--accent);
+  border-color: var(--accent);
 }
 
 .tile__thumb {
   aspect-ratio: 1 / 1;
-  background: var(--bg-1);
-  border: 1px solid var(--border-1);
+  background: var(--panel);
+  border: 1px solid var(--rule);
   border-radius: var(--r-sm);
   display: grid;
   place-items: center;
@@ -51,20 +56,60 @@
      grid flashes rectangles as they resolve. */
   animation: gpRowFadeIn var(--dur-med) var(--ease-out) both;
 }
+/* Fallback plate (no thumbnail): editorial typed icon at center with a
+   small ext chip in the top-right corner. Per-kind color comes from
+   .tile__icon--<kind> so the plate reads at a glance. Filename lives
+   below the plate (see .tile__name) so the icon stays iconic. */
 .tile__icon {
-  font-family: var(--font-mono);
-  font-size: 22px;
-  color: var(--fg-2);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  color: var(--muted);
 }
-.tile__icon[data-kind='dir'] {
-  color: var(--type-dir);
+.tile__icon--folder    { color: var(--accent); }
+.tile__icon--image     { color: var(--hero-tint, var(--accent)); }
+.tile__icon--film      { color: var(--accent-2, var(--accent)); }
+.tile__icon--music     { color: var(--accent-2, var(--accent)); }
+.tile__icon--code      { color: var(--accent); opacity: 0.85; }
+.tile__icon--document  { color: var(--ink-2, var(--ink)); opacity: 0.7; }
+.tile__icon--archive   { color: var(--ink-2, var(--ink)); opacity: 0.7; }
+.tile__icon--app       { color: var(--accent); }
+.tile__icon--link      { color: var(--muted); }
+.tile__icon--exec      { color: var(--accent-2, var(--accent)); }
+
+/* Tiny ext chip in the corner of the plate — letter-spaced, muted, never
+   for folders (redundant). */
+.tile__ext {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--chip);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid var(--rule);
 }
 
 .tile__name {
   font-size: var(--fs-xs);
   text-align: center;
-  white-space: nowrap;
+  color: var(--ink);
+  line-height: 1.25;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--fg-1);
+}
+.tile--selected .tile__name {
+  color: var(--accent);
+  font-weight: 600;
 }

@@ -70,21 +70,30 @@ function PreviewBody({ entry, tag }: PreviewBodyProps) {
   }, [entry.path, entry.mtimeMs]);
 
   // Load a short prefix of text-like files (max ~40KB) for inline preview.
+  // Debounce: rapid arrow-key navigation causes a selection storm; without
+  // debouncing every intermediate row fires an IPC read, the queue backs
+  // up, and cursor movement feels sluggish. 150 ms is long enough to skip
+  // nearly all intermediate reads and short enough to feel instant when
+  // the user stops on a file.
   useEffect(() => {
     if (kind !== 'text' && kind !== 'sheet') {
       setText(null);
       return;
     }
     let cancelled = false;
-    fm.readTextFile(entry.path, 40 * 1024)
-      .then((r) => {
-        if (!cancelled) setText(r);
-      })
-      .catch((err) => {
-        if (!cancelled) setText({ content: '', truncated: false, error: String(err) });
-      });
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      fm.readTextFile(entry.path, 40 * 1024)
+        .then((r) => {
+          if (!cancelled) setText(r);
+        })
+        .catch((err) => {
+          if (!cancelled) setText({ content: '', truncated: false, error: String(err) });
+        });
+    }, 150);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [entry.path, entry.mtimeMs, kind]);
 
@@ -255,19 +264,22 @@ const KIND_LABEL: Record<Kind, string> = {
 };
 
 const IMAGE_EXT = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.heic', '.avif',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'heic', 'avif', 'svg', 'ico',
 ]);
-const FILM_EXT = new Set(['.mov', '.mp4', '.m4v', '.avi', '.mkv', '.webm']);
-const AUDIO_EXT = new Set(['.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac']);
-const SHEET_EXT = new Set(['.csv', '.tsv', '.xlsx', '.xls', '.numbers']);
+const FILM_EXT = new Set(['mov', 'mp4', 'm4v', 'avi', 'mkv', 'webm']);
+const AUDIO_EXT = new Set(['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac']);
+const SHEET_EXT = new Set(['csv', 'tsv', 'xlsx', 'xls', 'numbers']);
 const TEXT_EXT = new Set([
-  '.md', '.txt', '.json', '.yml', '.yaml', '.js', '.ts', '.tsx', '.jsx',
-  '.py', '.rs', '.go', '.rb', '.sh', '.html', '.css', '.xml', '.toml',
+  'md', 'txt', 'log', 'json', 'yml', 'yaml', 'js', 'ts', 'tsx', 'jsx', 'mjs', 'cjs',
+  'py', 'rs', 'go', 'rb', 'sh', 'zsh', 'bash', 'html', 'css', 'scss', 'xml', 'toml',
+  'conf', 'ini', 'env',
 ]);
 
 function classify(e: Entry): Kind {
   if (e.kind === 'dir') return 'dir';
-  const ext = (e.ext || '').toLowerCase();
+  // entry.ext from the bridge has no leading dot (e.g. "jpg"); normalize
+  // defensively in case a caller passes ".jpg".
+  const ext = (e.ext || '').toLowerCase().replace(/^\./, '');
   if (IMAGE_EXT.has(ext)) return 'image';
   if (FILM_EXT.has(ext)) return 'film';
   if (AUDIO_EXT.has(ext)) return 'audio';

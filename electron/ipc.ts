@@ -188,6 +188,7 @@ export function registerIpc() {
     const win = BrowserWindow.getFocusedWindow();
     const opts: Electron.OpenDialogOptions = {
       title: 'Choose an Application',
+      buttonLabel: 'Choose',
       defaultPath: '/Applications',
       properties: ['openFile', 'treatPackageAsDirectory'],
       filters: process.platform === 'darwin'

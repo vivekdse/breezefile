@@ -19,7 +19,7 @@ export interface OpenWithDialogProps {
  * / --rule) to match the rest of the chrome.
  */
 export function OpenWithDialog({ filePath, ext, appPath, onClose }: OpenWithDialogProps) {
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(Boolean(ext));
   const appName = appPath.split('/').pop()?.replace(/\.app$/, '') || appPath;
   const extLabel = ext ? `.${ext}` : '';
 

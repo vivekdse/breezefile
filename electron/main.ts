@@ -1,5 +1,6 @@
-import { app, BrowserWindow, shell, Menu, protocol, net } from 'electron';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { app, BrowserWindow, shell, Menu, protocol } from 'electron';
+import { fileURLToPath } from 'node:url';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 
@@ -87,6 +88,7 @@ function createWindow() {
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
+    win.webContents.openDevTools({ mode: 'detach' });
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'));
   }
@@ -99,20 +101,18 @@ app.whenReady().then(() => {
   protocol.handle('asset', async (req) => {
     try {
       const url = new URL(req.url);
-      // pathname on POSIX is already absolute (leading '/'). Decode percent
-      // escapes for spaces / unicode.
       const abs = decodeURIComponent(url.pathname);
       if (!path.isAbsolute(abs)) {
+        console.warn('[asset] rejected non-absolute path:', abs);
         return new Response('bad path', { status: 400 });
       }
-      const fileUrl = pathToFileURL(abs).toString();
-      const res = await net.fetch(fileUrl);
-      if (!res.ok) return res;
-      // net.fetch on file:// doesn't always set a useful Content-Type.
-      const headers = new Headers(res.headers);
-      headers.set('Content-Type', mimeFor(abs));
-      return new Response(res.body, { status: res.status, headers });
+      const bytes = await fs.readFile(abs);
+      return new Response(bytes, {
+        status: 200,
+        headers: { 'Content-Type': mimeFor(abs) },
+      });
     } catch (err) {
+      console.warn('[asset] read failed:', req.url, (err as Error).message);
       return new Response(`not found: ${(err as Error).message}`, { status: 404 });
     }
   });

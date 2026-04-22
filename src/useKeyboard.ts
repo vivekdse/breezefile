@@ -141,13 +141,13 @@ export function useKeyboard(
       // --- Single-key (non-chord) actions ---
       const actions: Record<string, () => void | Promise<void>> = {
         j: () => moveSelection(+1),
-        ArrowDown: () => moveSelection(+1),
+        ArrowDown: () => gridArrowVert(+1),
         k: () => moveSelection(-1),
-        ArrowUp: () => moveSelection(-1),
+        ArrowUp: () => gridArrowVert(-1),
         h: () => goLeft(),
-        ArrowLeft: () => goLeft(),
+        ArrowLeft: () => gridArrowHoriz(-1),
         l: () => goRight(),
-        ArrowRight: () => goRight(),
+        ArrowRight: () => gridArrowHoriz(+1),
         Enter: () => goRight(),
         Backspace: () => goLeft(),
         G: () => moveSelectionAbs(+Infinity),
@@ -409,6 +409,41 @@ export function useKeyboard(
         const rows = Math.round(20 * Math.abs(mult)) * Math.sign(mult);
         moveSelection(rows);
       }
+      // Count visible column tracks in the current grid view by reading
+      // the computed grid-template-columns. Returns 1 if grid isn't mounted
+      // (e.g. list view) so arrow keys fall back to linear motion.
+      function gridCols(): number {
+        if (tab.viewMode !== 'grid') return 1;
+        const el = document.querySelector<HTMLElement>('.grid');
+        if (!el) return 1;
+        const tmpl = getComputedStyle(el).gridTemplateColumns;
+        const n = tmpl.split(' ').filter((s) => s.trim().length > 0).length;
+        return Math.max(1, n);
+      }
+      // Arrow keys always navigate the view (grid: prev/next tile in the
+      // row; list: prev/next entry). Entering a folder is Enter / double-
+      // click only; parent is Backspace (or h / ArrowUp on first grid row).
+      function gridArrowHoriz(dir: 1 | -1) {
+        moveSelection(dir);
+      }
+      // In grid view, up/down step by one row (gridCols entries). If up on
+      // the first row (selected < cols), go to parent folder so the arrow
+      // acts like list-view "left". In list view, behave as ±1.
+      function gridArrowVert(dir: 1 | -1) {
+        if (tab.viewMode !== 'grid') {
+          moveSelection(dir);
+          return;
+        }
+        const col = lastCol(tab);
+        const cur_ = tab.selected[col] ?? 0;
+        const cols = gridCols();
+        if (dir < 0 && cur_ < cols) {
+          goLeft();
+          return;
+        }
+        moveSelection(dir * cols);
+      }
+
       function goRight() {
         const entries = getEntries();
         const entry = entries[tab.selected[lastCol(tab)] ?? 0];

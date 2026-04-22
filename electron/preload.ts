@@ -44,10 +44,12 @@ const fm = {
   // with proper Content-Type. Path segments are percent-encoded so names
   // with spaces / unicode / reserved characters survive URL parsing.
   fileUrl: (p: string): string => {
+    // Standard schemes require a host, so we use a fixed sentinel host
+    // `local`; otherwise Chromium promotes the first path segment to the
+    // host (and lowercases it), turning `/Users/...` into `asset://users/...`
+    // which 404s when the handler tries to read case-sensitive paths.
     const parts = p.split('/').map((seg) => encodeURIComponent(seg));
-    // Absolute POSIX paths start with '/', so parts[0] === '' — joining
-    // with '/' yields `asset://` + `/Users/…` = `asset:///Users/…`.
-    return 'asset://' + parts.join('/');
+    return 'asset://local' + parts.join('/');
   },
   bulkRename: (names: string[]) =>
     ipcRenderer.invoke('editor:bulkRename', names) as Promise<string[]>,
