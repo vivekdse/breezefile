@@ -7,7 +7,8 @@ type Props = {
 };
 
 export function Pathbar({ path, onNavigate }: Props) {
-  const { state, setTab, dispatch, activeTab } = useStore();
+  const { state, setTab, dispatch, activeTab, goBack } = useStore();
+  const canGoBack = (activeTab?.history.length ?? 0) > 0;
   const segments = path.split('/').filter(Boolean);
 
   function navTo(i: number) {
@@ -38,6 +39,16 @@ export function Pathbar({ path, onNavigate }: Props) {
       <div className="pathbar__meta">
         <button
           type="button"
+          className="pathbar__back"
+          title={canGoBack ? 'Back to previous folder' : 'No previous folder'}
+          onClick={goBack}
+          disabled={!canGoBack}
+          aria-label="Back"
+        >
+          ← back
+        </button>
+        <button
+          type="button"
           className="pathbar__sort"
           title="Change sort"
           onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: 'sort' })}
@@ -59,7 +70,7 @@ export function Pathbar({ path, onNavigate }: Props) {
           type="button"
           className="pathbar__search-icon"
           title="Find (recursive in this folder)"
-          onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: 'find' })}
+          onClick={() => dispatch({ type: 'setMode', mode: 'command', verb: 'goto' })}
           aria-label="Find"
         >
           ⌕

@@ -94,7 +94,7 @@ export function useKeyboard(
       if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault();
         clearTimer();
-        dispatch({ type: 'setMode', mode: 'command', buffer: 'find' });
+        dispatch({ type: 'setMode', mode: 'command', verb: 'goto' });
         return;
       }
 
@@ -182,7 +182,7 @@ export function useKeyboard(
         //   • C-r — refresh (modified, not single-letter)
         // Removed letter actions (now reachable via palette): v, f, s, R, a, A, I.
         // / opens the recursive find verb in the chip prompt (matches ⌘F).
-        '/': () => dispatch({ type: 'setMode', mode: 'command', buffer: 'find' }),
+        '/': () => dispatch({ type: 'setMode', mode: 'command', verb: 'goto' }),
         n: () => repeatFind(+1),
         N: () => repeatFind(-1),
         ':': () => dispatch({ type: 'setMode', mode: 'command', buffer: '' }),

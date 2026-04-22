@@ -261,6 +261,7 @@ function Shell() {
       {state.mode === 'command' && (
         <ChipPrompt
           initialFilter={state.modeBuffer}
+          initialVerbId={state.modeVerb}
           onClose={() => dispatch({ type: 'setMode', mode: 'normal' })}
         />
       )}

@@ -132,6 +132,7 @@ type State = Persisted & {
   statusMsg: string;
   mode: 'normal' | 'find' | 'command' | 'quickfind';
   modeBuffer: string;
+  modeVerb: string; // optional pre-selected verb id when entering 'command' mode
   pending: string; // multi-key buffer for vim-style chords
   lastFind: string; // for n/N repeat
   lastClosedTab: Tab | null; // for ga "restore tab"
@@ -148,7 +149,7 @@ type Action =
   | { type: 'selectTab'; index: number }
   | { type: 'setYank'; yank: YankEntry[] }
   | { type: 'setStatus'; msg: string }
-  | { type: 'setMode'; mode: State['mode']; buffer?: string }
+  | { type: 'setMode'; mode: State['mode']; buffer?: string; verb?: string }
   | { type: 'setModeBuffer'; buffer: string }
   | { type: 'setPending'; pending: string }
   | { type: 'setBookmark'; key: string; path: string }
@@ -189,6 +190,7 @@ const initialState: State = {
   statusMsg: '',
   mode: 'normal',
   modeBuffer: '',
+  modeVerb: '',
   pending: '',
   lastFind: '',
   lastClosedTab: null,
@@ -238,7 +240,7 @@ function reducer(s: State, a: Action): State {
     case 'setStatus':
       return { ...s, statusMsg: a.msg };
     case 'setMode':
-      return { ...s, mode: a.mode, modeBuffer: a.buffer ?? '' };
+      return { ...s, mode: a.mode, modeBuffer: a.buffer ?? '', modeVerb: a.verb ?? '' };
     case 'setModeBuffer':
       return { ...s, modeBuffer: a.buffer };
     case 'setPending':

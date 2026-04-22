@@ -89,6 +89,7 @@
   font-size: var(--fs-xs);
   margin-right: var(--sp-2);
 }
+.pathbar__back,
 .pathbar__sort,
 .pathbar__view {
   padding: 2px var(--sp-2);
@@ -102,11 +103,16 @@
   transition: background var(--motion-hover), border-color var(--motion-hover),
     color var(--motion-hover);
 }
+.pathbar__back:hover:not(:disabled),
 .pathbar__sort:hover,
 .pathbar__view:hover {
   background: var(--hi);
   border-color: var(--accent-soft);
   color: var(--accent);
+}
+.pathbar__back:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .pathbar__search {
@@ -168,8 +174,10 @@
 [data-theme='plum'] .pathbar__search-input {
   color: var(--panel-ink, var(--ink));
 }
+[data-theme='dusk'] .pathbar__back,
 [data-theme='dusk'] .pathbar__sort,
 [data-theme='dusk'] .pathbar__view,
+[data-theme='plum'] .pathbar__back,
 [data-theme='plum'] .pathbar__sort,
 [data-theme='plum'] .pathbar__view {
   background: rgba(255, 255, 255, 0.06);

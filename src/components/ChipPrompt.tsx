@@ -51,6 +51,8 @@ type Ctx = {
   recents: string[];
   searchResults: string[]; // async Spotlight hits for current query
   localSubdirs: string[]; // BFS subdirectories under cwd (depth ~3)
+  historyLen: number; // tab back-history depth
+  forwardLen: number; // tab forward-history depth
 };
 
 type Verb =
@@ -69,7 +71,9 @@ type Verb =
   | 'showHidden'
   | 'theme'
   | 'help'
-  | 'permissions';
+  | 'permissions'
+  | 'back'
+  | 'forward';
 
 type Option = {
   id: string;
@@ -104,6 +108,8 @@ type ExecApi = {
   setTab: (patch: any) => void;
   refreshActive: () => Promise<void>;
   navigateTo: (p: string) => void;
+  goBack: () => void;
+  goForward: () => void;
   dispatch: (a: any) => void;
   openRename: (e: Entry) => void;
   openMkdir: () => void;
@@ -561,6 +567,38 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    id: 'back',
+    label: 'Back',
+    aliases: ['back', 'previous', 'undo navigation', 'history back', 'go back'],
+    icon: '←',
+    describe: () => 'Go to the previous folder in this tab',
+    isAvailable: (c) =>
+      c.historyLen > 0
+        ? { ok: true }
+        : { ok: false, reason: 'No previous folder in this tab' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.goBack();
+      api.closeOverlay();
+    },
+  },
+  {
+    id: 'forward',
+    label: 'Forward',
+    aliases: ['forward', 'redo navigation', 'history forward', 'go forward'],
+    icon: '→',
+    describe: () => 'Replay a back-step in this tab',
+    isAvailable: (c) =>
+      c.forwardLen > 0
+        ? { ok: true }
+        : { ok: false, reason: 'No forward step to replay' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.goForward();
+      api.closeOverlay();
+    },
+  },
+  {
     id: 'permissions',
     label: 'Permissions',
     aliases: ['permissions', 'permission', 'access', 'privacy', 'tcc', 'allow', 'grant'],
@@ -691,9 +729,19 @@ function resolveDestination(c: Ctx, destId: string): string | null {
 // ────────────────────────────────────────────────────────────────────────────
 // The overlay component
 // ────────────────────────────────────────────────────────────────────────────
-export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => void; initialFilter?: string }) {
-  const { state, dispatch, activeTab, setTab, refreshActive, navigateTo } = useStore();
-  const [verb, setVerb] = useState<VerbDef | null>(null);
+export function ChipPrompt({
+  onClose,
+  initialFilter = '',
+  initialVerbId = '',
+}: {
+  onClose: () => void;
+  initialFilter?: string;
+  initialVerbId?: string;
+}) {
+  const { state, dispatch, activeTab, setTab, refreshActive, navigateTo, goBack, goForward } = useStore();
+  const [verb, setVerb] = useState<VerbDef | null>(
+    () => VERBS.find((v) => v.id === initialVerbId) ?? null,
+  );
   const [picks, setPicks] = useState<string[]>([]); // slot values
   const [filter, setFilter] = useState(initialFilter);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -800,6 +848,8 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
       recents: state.recents ?? [],
       searchResults,
       localSubdirs,
+      historyLen: activeTab.history.length,
+      forwardLen: activeTab.forward.length,
     };
   }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, homedir, searchResults, localSubdirs]);
 
@@ -897,6 +947,22 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
     if (highlightIdx >= matches.length) setHighlightIdx(0);
   }, [matches.length, highlightIdx]);
 
+  // Natural-language fallthrough: when the user types something that doesn't
+  // match any verb, drop into the 'Go to / Find' verb and treat the typed
+  // text as the find query. This means typing a folder name (or any phrase)
+  // from the normal view "just searches" — no verb needed.
+  useEffect(() => {
+    if (verb !== null) return;
+    if (!filter) return;
+    if (matches.length > 0) return;
+    const goto = VERBS.find((v) => v.id === 'goto');
+    if (!goto) return;
+    setVerb(goto);
+    setPicks([]);
+    setHighlightIdx(0);
+    // keep filter — it becomes the destination search query
+  }, [filter, matches.length, verb]);
+
   function pickOption(opt: Option) {
     if (!opt.available) {
       setHoverReason(opt.reason ?? 'Not available right now');
@@ -985,6 +1051,8 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
         setTab,
         refreshActive,
         navigateTo,
+        goBack,
+        goForward,
         dispatch,
         openRename: (e) => setOpenRename(e),
         openMkdir: () => {
