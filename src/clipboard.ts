@@ -37,13 +37,19 @@ export async function runPaste({
     return;
   }
   try {
-    await fm.paste(yank.map((y) => ({ src: y.path, dst: cwd, mode: y.mode, overwrite })));
+    const { renamed } = await fm.paste(
+      yank.map((y) => ({ src: y.path, dst: cwd, mode: y.mode, overwrite })),
+    );
     // Move clears the clipboard (the originals are gone); copy persists so
     // the user can drop the same files in multiple places.
     const mode = yank[0].mode;
     if (mode === 'move') dispatch({ type: 'setYank', yank: [] });
     await refreshActive();
-    dispatch({ type: 'setStatus', msg: `pasted ${yank.length} item${yank.length === 1 ? '' : 's'}` });
+    const suffix = renamed > 0 ? ` (${renamed} renamed to avoid collision)` : '';
+    dispatch({
+      type: 'setStatus',
+      msg: `pasted ${yank.length} item${yank.length === 1 ? '' : 's'}${suffix}`,
+    });
     // Celebrate the just-pasted rows + broadcast so the PasteChip can
     // flip to its success state and self-dismiss. rAF waits for the
     // next paint so the new rows are in the DOM before we pulse them.

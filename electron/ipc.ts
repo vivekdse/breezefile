@@ -347,10 +347,13 @@ export function registerIpc() {
         overwrite?: boolean;
       }[],
     ) => {
+      let renamed = 0;
       for (const op of ops) {
+        const originalTarget = path.join(op.dst, path.basename(op.src));
         let target = op.overwrite
-          ? path.join(op.dst, path.basename(op.src))
+          ? originalTarget
           : await uniquePaste(op.dst, path.basename(op.src));
+        if (!op.overwrite && target !== originalTarget) renamed += 1;
         if (op.overwrite) {
           try {
             await fs.rm(target, { recursive: true, force: true });
@@ -377,6 +380,7 @@ export function registerIpc() {
           await copyRecursive(op.src, target);
         }
       }
+      return { renamed };
     },
   );
 

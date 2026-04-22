@@ -83,12 +83,13 @@ export function FolderList() {
     async function doPasteInto(dst: string) {
       if (state.yank.length === 0) return;
       try {
-        await fm.paste(
+        const { renamed } = await fm.paste(
           state.yank.map((y) => ({ src: y.path, dst, mode: y.mode })),
         );
         if (state.yank[0].mode === 'move') dispatch({ type: 'setYank', yank: [] });
         await refreshActive();
-        dispatch({ type: 'setStatus', msg: `pasted ${state.yank.length} into ${dst.split('/').pop() || '/'}` });
+        const suffix = renamed > 0 ? ` (${renamed} renamed)` : '';
+        dispatch({ type: 'setStatus', msg: `pasted ${state.yank.length} into ${dst.split('/').pop() || '/'}${suffix}` });
       } catch (err) {
         dispatch({ type: 'setStatus', msg: `paste failed: ${(err as Error).message}` });
       }
@@ -141,10 +142,25 @@ export function FolderList() {
         submenu: ['Visual Studio Code', 'TextEdit', 'Preview', 'QuickLook', 'Finder'].map(
           (appName) => ({
             label: appName,
-            action: () => {
-              if (appName === 'QuickLook') fm.runCommand(cwd, `qlmanage -p "${entry.path.replace(/"/g, '\\"')}" >/dev/null 2>&1 &`);
-              else if (appName === 'Finder') fm.openWith(entry.path, 'Finder');
-              else fm.openWith(entry.path, appName);
+            action: async () => {
+              try {
+                if (appName === 'QuickLook') {
+                  await fm.runCommand(
+                    cwd,
+                    `qlmanage -p "${entry.path.replace(/"/g, '\\"')}" >/dev/null 2>&1 &`,
+                  );
+                } else if (appName === 'Finder') {
+                  await fm.openWith(entry.path, 'Finder');
+                } else {
+                  await fm.openWith(entry.path, appName);
+                }
+                dispatch({ type: 'setStatus', msg: `opened in ${appName}` });
+              } catch (err) {
+                dispatch({
+                  type: 'setStatus',
+                  msg: `${appName} failed: ${(err as Error).message}`,
+                });
+              }
             },
           }),
         ),
@@ -174,8 +190,20 @@ export function FolderList() {
       { label: 'Duplicate', action: duplicate },
       { label: 'Rename…', action: () => overlays.requestRename(entry, 'full') },
       { separator: true },
-      { label: 'Copy Path', action: () => fm.clipboardWrite(entry.path) },
-      { label: 'Copy Name', action: () => fm.clipboardWrite(entry.name) },
+      {
+        label: 'Copy Path',
+        action: () => {
+          void fm.clipboardWrite(entry.path);
+          dispatch({ type: 'setStatus', msg: `copied path: ${entry.name}` });
+        },
+      },
+      {
+        label: 'Copy Name',
+        action: () => {
+          void fm.clipboardWrite(entry.name);
+          dispatch({ type: 'setStatus', msg: `copied name: ${entry.name}` });
+        },
+      },
       { label: 'New Folder Here…', action: () => overlays.requestMkdir() },
       { separator: true },
       ...(entry.kind === 'dir'
@@ -194,8 +222,13 @@ export function FolderList() {
       {
         label: 'Move to Trash',
         action: async () => {
-          await fm.trash([entry.path]);
-          await refreshActive();
+          try {
+            await fm.trash([entry.path]);
+            await refreshActive();
+            dispatch({ type: 'setStatus', msg: `trashed ${entry.name}` });
+          } catch (err) {
+            dispatch({ type: 'setStatus', msg: `trash failed: ${(err as Error).message}` });
+          }
         },
       },
     ];

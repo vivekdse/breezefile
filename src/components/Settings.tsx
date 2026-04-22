@@ -25,8 +25,18 @@ export function Settings({ onClose }: Props) {
     setDefaultTerminal(next);
     try {
       await fm.setDefaultTerminal(next);
-    } catch {
+      dispatch({
+        type: 'setStatus',
+        msg: next
+          ? `default terminal: ${next.replace(/\.app$/, '')}`
+          : 'terminal: ask every time',
+      });
+    } catch (err) {
       // Non-fatal: the UI state already reflects intent.
+      dispatch({
+        type: 'setStatus',
+        msg: `save failed: ${(err as Error).message}`,
+      });
     }
   }
 

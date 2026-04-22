@@ -17,7 +17,7 @@ type Fm = {
       mode: 'copy' | 'move' | 'symlink' | 'symlinkRel' | 'hardlink';
       overwrite?: boolean;
     }[],
-  ) => Promise<void>;
+  ) => Promise<{ renamed: number }>;
   reveal: (p: string) => Promise<void>;
   openTerminal: (cwd: string) => Promise<void>;
   listTerminals: () => Promise<string[]>;

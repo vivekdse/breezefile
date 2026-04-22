@@ -61,6 +61,7 @@ interface PreviewBodyProps {
 }
 
 function PreviewBody({ entry, tag, expanded = false }: PreviewBodyProps) {
+  const { dispatch } = useStore();
   const kind = classify(entry);
   const [imgFailed, setImgFailed] = useState(false);
   const [text, setText] = useState<
@@ -210,7 +211,10 @@ function PreviewBody({ entry, tag, expanded = false }: PreviewBodyProps) {
         <button
           type="button"
           className="preview__btn preview__btn--primary"
-          onClick={() => fm.clipboardWrite(entry.path)}
+          onClick={() => {
+            void fm.clipboardWrite(entry.path);
+            dispatch({ type: 'setStatus', msg: `copied path: ${entry.name}` });
+          }}
           title="Copy file path to clipboard"
         >
           <Icon name="drag" size={14} />

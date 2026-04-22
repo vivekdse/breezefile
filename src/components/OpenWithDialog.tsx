@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { fm } from '../bridge';
+import { useStore } from '../store';
 import './OpenWithDialog.css';
 
 export interface OpenWithDialogProps {
@@ -19,16 +20,30 @@ export interface OpenWithDialogProps {
  * / --rule) to match the rest of the chrome.
  */
 export function OpenWithDialog({ filePath, ext, appPath, onClose }: OpenWithDialogProps) {
+  const { dispatch } = useStore();
   const [remember, setRemember] = useState(Boolean(ext));
   const appName = appPath.split('/').pop()?.replace(/\.app$/, '') || appPath;
   const extLabel = ext ? `.${ext}` : '';
 
   async function handleConfirm() {
+    let bound = false;
     try {
       if (remember && ext) {
         await fm.setBinding(ext, appPath);
+        bound = true;
       }
       await fm.open(filePath, appPath);
+      dispatch({
+        type: 'setStatus',
+        msg: bound
+          ? `opened in ${appName} — .${ext} now bound to ${appName}`
+          : `opened in ${appName}`,
+      });
+    } catch (err) {
+      dispatch({
+        type: 'setStatus',
+        msg: `open with ${appName} failed: ${(err as Error).message}`,
+      });
     } finally {
       onClose();
     }

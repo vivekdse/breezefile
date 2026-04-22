@@ -43,7 +43,11 @@ export async function dropIntoFolder(
   targetFolder: string,
   sourceCwd: string,
   copy: boolean,
-  fm: { paste: (ops: Array<{ src: string; dst: string; mode: 'copy' | 'move' }>) => Promise<void> },
+  fm: {
+    paste: (
+      ops: Array<{ src: string; dst: string; mode: 'copy' | 'move' }>,
+    ) => Promise<{ renamed: number }>;
+  },
 ): Promise<string> {
   if (paths.length === 0) return '';
   if (targetFolder === sourceCwd) {

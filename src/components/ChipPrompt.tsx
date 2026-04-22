@@ -863,10 +863,20 @@ const VERBS: VerbDef[] = [
       const cx = Math.round(window.outerWidth / 2) + (window.screenX || 0);
       const cy = Math.round(window.outerHeight / 3) + (window.screenY || 0);
       const anchor = { x: cx - 8, y: cy - 8, w: 16, h: 16 };
-      void fm.share(sources, anchor).catch((err: unknown) => {
-        const msg = (err as Error)?.message ?? String(err);
-        api.dispatch({ type: 'setStatus', msg: `share failed: ${msg}` });
-      });
+      void fm.share(sources, anchor).then(
+        () => {
+          // The native helper exits cleanly on both "service completed" and
+          // "picker dismissed without a pick". We can't distinguish the two
+          // without extending the helper's stdout protocol, so settle for a
+          // neutral confirmation that at minimum tells the user the picker
+          // has closed and we're back to idle.
+          api.dispatch({ type: 'setStatus', msg: 'share closed' });
+        },
+        (err: unknown) => {
+          const msg = (err as Error)?.message ?? String(err);
+          api.dispatch({ type: 'setStatus', msg: `share failed: ${msg}` });
+        },
+      );
       api.dispatch({ type: 'setStatus', msg: `sharing ${sources.length} item${sources.length === 1 ? '' : 's'}…` });
       api.closeOverlay();
     },
