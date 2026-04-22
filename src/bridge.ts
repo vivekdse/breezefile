@@ -43,6 +43,13 @@ type Fm = {
     query: string,
     limit?: number,
   ) => Promise<Array<{ path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' }>>;
+  checkUpdate: () => Promise<{
+    tag: string;
+    version: string;
+    url: string;
+    body: string;
+    publishedAt: string | null;
+  } | null>;
 };
 
 declare global {

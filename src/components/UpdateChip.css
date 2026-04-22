@@ -1,0 +1,117 @@
+/* Update notification chip — bottom-left, deliberately quieter than
+   PasteChip (this is informational, not actionable in-app). */
+
+.update-chip {
+  position: fixed;
+  left: 16px;
+  bottom: 44px;
+  z-index: 900;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  animation: update-chip-in 280ms var(--ease-out, ease-out) both;
+}
+
+@keyframes update-chip-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.update-chip__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.update-chip__version {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 2px;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color var(--motion-hover), color var(--motion-hover);
+}
+.update-chip__version:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent-soft);
+}
+
+.update-chip__cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background var(--motion-hover), border-color var(--motion-hover);
+}
+.update-chip__cmd code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-2, var(--ink));
+}
+.update-chip__cmd:hover {
+  background: var(--hi);
+  border-color: var(--accent-soft);
+}
+.update-chip__cmd--copied {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.update-chip__copy-hint {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.update-chip__cmd--copied .update-chip__copy-hint {
+  color: var(--accent);
+}
+
+.update-chip__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.update-chip__dismiss:hover {
+  background: var(--rule);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-chip { animation: none; }
+}

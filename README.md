@@ -45,6 +45,17 @@ brew install --cask breezefile
 The cask strips the macOS quarantine bit, so Gatekeeper won't block the
 unsigned app on first launch.
 
+### Updating
+
+```sh
+brew upgrade --cask breezefile     # upgrade Breeze File only
+brew upgrade                        # upgrade everything brew manages
+```
+
+Breeze File also surfaces a quiet "update available" pill in the
+bottom-left when a new release lands (checked once a day against the
+GitHub Releases API), with the upgrade command one click away.
+
 ### Direct DMG
 
 Grab `Breezefile-<version>-arm64.dmg` (Apple Silicon) or

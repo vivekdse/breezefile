@@ -15,6 +15,7 @@ import { PasteChip } from './components/PasteChip';
 import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog';
 import { ThemePicker } from './components/ThemePicker';
 import { Welcome, shouldShowWelcome } from './components/Welcome';
+import { UpdateChip } from './components/UpdateChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
 import { useKeyboard } from './useKeyboard';
@@ -143,6 +144,11 @@ function Shell() {
           staged files via Copy / Move verbs or yy / dd chords. Renders above
           the main content but below modals. */}
       <PasteChip />
+
+      {/* Update available — fetches GitHub Releases on a 24h cadence and
+          shows a quiet bottom-left pill when a newer version is out.
+          User upgrades via `brew upgrade --cask breezefile` (copy button). */}
+      <UpdateChip />
 
       {renaming && (
         <RenameOverlay

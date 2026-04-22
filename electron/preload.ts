@@ -62,6 +62,14 @@ const fm = {
     ipcRenderer.invoke('fs:findEntries', roots, query, limit) as Promise<
       Array<{ path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' }>
     >,
+  checkUpdate: () =>
+    ipcRenderer.invoke('app:checkUpdate') as Promise<{
+      tag: string;
+      version: string;
+      url: string;
+      body: string;
+      publishedAt: string | null;
+    } | null>,
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

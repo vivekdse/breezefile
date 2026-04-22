@@ -658,6 +658,45 @@ export function registerIpc() {
       // Don't let a failed drag kill the main process.
     }
   });
+
+  // app:checkUpdate — fetch the latest release from GitHub and return the
+  // tag/version + release URL + body. Done in main (not renderer) so the
+  // renderer's strict CSP doesn't have to whitelist external origins.
+  // Returns null on any failure (offline, rate-limited, repo missing) so
+  // the caller can fail silently and try again later.
+  ipcMain.handle('app:checkUpdate', async () => {
+    try {
+      const res = await fetch(
+        'https://api.github.com/repos/vivekdse/breezefile/releases/latest',
+        {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'Breeze-File-update-check',
+          },
+          // 5s timeout via AbortController so a slow network doesn't
+          // hang the IPC.
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        tag_name?: string;
+        html_url?: string;
+        body?: string;
+        published_at?: string;
+      };
+      if (!json.tag_name || !json.html_url) return null;
+      return {
+        tag: json.tag_name,                       // "v0.1.2"
+        version: json.tag_name.replace(/^v/, ''), // "0.1.2"
+        url: json.html_url,
+        body: json.body ?? '',
+        publishedAt: json.published_at ?? null,
+      };
+    } catch {
+      return null;
+    }
+  });
 }
 
 export function focusedWindow(): BrowserWindow | null {
