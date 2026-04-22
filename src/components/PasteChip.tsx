@@ -117,7 +117,7 @@ export function PasteChip() {
       window.dispatchEvent(
         new CustomEvent('fm:confirm', {
           detail: {
-            title: `Move ${yank.length} file${yank.length === 1 ? '' : 's'}?`,
+            title: `Move ${yank.length} item${yank.length === 1 ? '' : 's'}?`,
             body,
             confirmLabel: 'Move',
             destructive: false,

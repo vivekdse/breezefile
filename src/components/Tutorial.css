@@ -1,0 +1,186 @@
+/* Tutorial chip — bottom-right, same family as TipsChip but a touch
+   bigger to fit a step title + multi-line body + skip button. */
+
+.tutorial-chip {
+  position: fixed;
+  right: 18px;
+  bottom: 50px;
+  z-index: 870; /* above TipsChip */
+  width: 320px;
+  max-width: calc(100vw - 36px);
+  background: var(--panel);
+  border: 1.5px solid var(--accent);
+  border-left-width: 4px;
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.20),
+    0 0 0 4px var(--accent-soft);
+  animation: tutorial-chip-in 320ms var(--ease-out, ease-out) both;
+}
+
+@keyframes tutorial-chip-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tutorial-chip__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.tutorial-chip__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  line-height: 1;
+}
+
+.tutorial-chip__close {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.tutorial-chip__close:hover {
+  background: var(--rule);
+  color: var(--ink);
+}
+
+.tutorial-chip__title {
+  font-weight: 600;
+  margin: 4px 0 4px;
+  color: var(--ink);
+}
+
+.tutorial-chip__body {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.tutorial-chip__body kbd {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 5px;
+  padding: 2px 7px;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  margin: 0 2px;
+}
+
+.tutorial-chip__body em {
+  font-style: italic;
+  color: var(--ink);
+}
+
+.tutorial-chip__actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tutorial-chip__skip {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color var(--motion-hover), border-color var(--motion-hover);
+}
+.tutorial-chip__skip:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+.tutorial-chip__next {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: filter var(--motion-hover);
+}
+.tutorial-chip__next:hover {
+  filter: brightness(1.08);
+}
+.tutorial-chip__next:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+.tutorial-chip__flash {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 4px;
+  color: var(--accent);
+  font-weight: 700;
+  animation: tutorial-flash-in 240ms cubic-bezier(0.2, 0.9, 0.3, 1.4) both;
+}
+
+.tutorial-chip__flash-burst {
+  font-size: 22px;
+  display: inline-block;
+  animation: tutorial-burst 800ms ease-out both;
+  transform-origin: center;
+}
+
+.tutorial-chip__flash-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+@keyframes tutorial-flash-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes tutorial-burst {
+  0%   { transform: scale(0.4) rotate(-30deg); opacity: 0; }
+  40%  { transform: scale(1.4) rotate(20deg);  opacity: 1; }
+  70%  { transform: scale(1.0) rotate(0deg);   opacity: 1; }
+  100% { transform: scale(1.0) rotate(0deg);   opacity: 1; }
+}
+
+/* TipsChip steps out of the way while the tutorial is mounted so the
+   two surfaces never stack at the same corner. */
+body.tutorial-active .tips-chip {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-chip,
+  .tutorial-chip__flash {
+    animation: none;
+  }
+}

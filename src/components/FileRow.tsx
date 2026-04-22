@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import type { Entry } from '../types';
 import { fm } from '../bridge';
 import { formatSize, formatMtime } from '../sort';
@@ -178,6 +178,15 @@ function FileRowInner({
   getDragPaths,
 }: Props) {
   const ref = useRef<HTMLLIElement>(null);
+
+  // Keep the cursor row in view — covers keyboard nav and programmatic
+  // moves like focusEntryByName after mkdir/touch.
+  useEffect(() => {
+    if (!selected || !activeColumn) return;
+    const el = ref.current;
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [selected, activeColumn]);
 
   const cls = [
     'row',

@@ -269,7 +269,11 @@ export function FolderList() {
         </div>
       ) : (
         <ul key="list" className="folder-list__list folder-list__body">
-          {entries.length === 0 && <li className="folder-list__empty">empty</li>}
+          {entries.length === 0 && (
+            <li className="folder-list__empty">
+              empty folder — type <kbd>create</kbd> to add one, or <kbd>←</kbd> to go back
+            </li>
+          )}
           {entries.map((e, j) => (
             <FileRow
               key={e.path}

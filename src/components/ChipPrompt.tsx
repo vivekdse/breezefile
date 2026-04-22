@@ -70,7 +70,8 @@ type Verb =
   | 'reveal'
   | 'showHidden'
   | 'theme'
-  | 'help'
+  | 'tutorial'
+  | 'tips'
   | 'permissions'
   | 'back'
   | 'forward';
@@ -235,7 +236,9 @@ const VERBS: VerbDef[] = [
       // Auto-advance: don't close — pop back to verb picker so the user can
       // chain the next action on the new selection (copy, move, delete, …).
       api.resetToVerbPick(
-        count === 0 ? 'selection cleared' : `selected ${count} item${count === 1 ? '' : 's'} — pick a next action`,
+        count === 0
+          ? 'selection cleared'
+          : `selected ${count} — space to add, d to drag, y to yank`,
       );
     },
   },
@@ -246,7 +249,7 @@ const VERBS: VerbDef[] = [
     icon: '→',
     describe: (c) =>
       c.markedPaths.length > 0
-        ? `Move ${c.markedPaths.length} file(s) to…`
+        ? `Move ${c.markedPaths.length} item${c.markedPaths.length === 1 ? '' : 's'} to…`
         : `Move ${c.cursor?.name ?? 'item'} to…`,
     isAvailable: (c) => {
       if (c.markedPaths.length === 0 && !c.cursor) {
@@ -282,7 +285,7 @@ const VERBS: VerbDef[] = [
     icon: '⧉',
     describe: (c) =>
       c.markedPaths.length > 0
-        ? `Copy ${c.markedPaths.length} file(s) to…`
+        ? `Copy ${c.markedPaths.length} item${c.markedPaths.length === 1 ? '' : 's'} to…`
         : `Copy ${c.cursor?.name ?? 'item'} to…`,
     isAvailable: (c) => {
       if (c.markedPaths.length === 0 && !c.cursor) {
@@ -375,7 +378,7 @@ const VERBS: VerbDef[] = [
     icon: '🗑',
     describe: (c) =>
       c.markedPaths.length > 0
-        ? `Move ${c.markedPaths.length} file(s) to trash`
+        ? `Move ${c.markedPaths.length} item${c.markedPaths.length === 1 ? '' : 's'} to trash`
         : `Move ${c.cursor?.name ?? 'item'} to trash`,
     isAvailable: (c) => {
       if (c.markedPaths.length === 0 && !c.cursor) {
@@ -388,7 +391,7 @@ const VERBS: VerbDef[] = [
       const sources = implicitSources(c);
       if (sources.length === 0) return;
       const names = sources.map((p) => basename(p));
-      const noun = sources.length === 1 ? `“${names[0]}”` : `${sources.length} files`;
+      const noun = sources.length === 1 ? `“${names[0]}”` : `${sources.length} items`;
       window.dispatchEvent(
         new CustomEvent('fm:confirm', {
           detail: {
@@ -533,11 +536,9 @@ const VERBS: VerbDef[] = [
     describe: () => 'Toggle dotfile visibility (.DS_Store, .git, …)',
     isAvailable: () => ({ ok: true }),
     slots: [],
-    execute: (_c, _p, api) => {
-      // toggle via state read — setTab patch uses functional update pattern via dispatch
-      // Since setTab only takes a plain patch, we need the current value; pass it through.
-      api.dispatch({ type: 'setStatus', msg: 'toggled hidden files' });
-      // Actual toggle is handled at call-site by inspecting current tab in execute wrapper.
+    execute: () => {
+      // No-op: toggle needs the current tab value, so the wrapper at the
+      // call site handles it directly (see special case for showHidden).
     },
   },
   {
@@ -554,16 +555,43 @@ const VERBS: VerbDef[] = [
     },
   },
   {
-    id: 'help',
-    label: 'Help',
-    aliases: ['help', 'tour', 'guide', 'how', 'how to', 'tutorial', 'intro', 'onboarding'],
+    id: 'tutorial',
+    label: 'Tutorial',
+    aliases: [
+      'tutorial',
+      'help',
+      'tour',
+      'guide',
+      'how',
+      'how to',
+      'walkthrough',
+      'practice',
+      'learn',
+      'teach',
+      'lessons',
+      'intro',
+      'onboarding',
+    ],
     icon: '?',
-    describe: () => 'Walk through the basics in a few slides',
+    describe: () => 'Walk through the basics step by step',
     isAvailable: () => ({ ok: true }),
     slots: [],
     execute: (_c, _p, api) => {
       api.closeOverlay();
-      window.dispatchEvent(new CustomEvent('fm:openHelp'));
+      window.dispatchEvent(new CustomEvent('fm:openTutorial'));
+    },
+  },
+  {
+    id: 'tips',
+    label: 'Tips',
+    aliases: ['tips', 'tip', 'hints', 'hint'],
+    icon: '✦',
+    describe: () => 'Toggle the rotating tips chip',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:toggleTips'));
     },
   },
   {
@@ -1023,7 +1051,7 @@ export function ChipPrompt({
           window.dispatchEvent(
             new CustomEvent('fm:confirm', {
               detail: {
-                title: `Move ${yank.length} file${yank.length === 1 ? '' : 's'}?`,
+                title: `Move ${yank.length} item${yank.length === 1 ? '' : 's'}?`,
                 body,
                 confirmLabel: 'Move',
                 destructive: false,

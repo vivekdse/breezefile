@@ -502,7 +502,7 @@ export function useKeyboard(
         };
         const text = paths.map(transform).join('\n');
         fm.clipboardWrite(text);
-        dispatch({ type: 'setStatus', msg: `copied ${kind} of ${paths.length} item(s)` });
+        dispatch({ type: 'setStatus', msg: `copied ${kind} of ${paths.length} item${paths.length === 1 ? '' : 's'}` });
       }
       async function paste(overwrite: boolean) {
         const dst = colPath();
@@ -521,7 +521,7 @@ export function useKeyboard(
           window.dispatchEvent(
             new CustomEvent('fm:confirm', {
               detail: {
-                title: `Move ${yank.length} file${yank.length === 1 ? '' : 's'}?`,
+                title: `Move ${yank.length} item${yank.length === 1 ? '' : 's'}?`,
                 body,
                 confirmLabel: 'Move',
                 destructive: false,
@@ -565,7 +565,7 @@ export function useKeyboard(
         // delete-verb payload so dD / dF show the same dialog as the
         // 'delete' verb in the chip prompt.
         const names = paths.map((p) => basename(p));
-        const noun = paths.length === 1 ? `“${names[0]}”` : `${paths.length} files`;
+        const noun = paths.length === 1 ? `“${names[0]}”` : `${paths.length} items`;
         const head = names.slice(0, 5);
         const more = names.length > 5 ? names.length - 5 : 0;
         const detail =

@@ -17,8 +17,8 @@ import { ThemePicker } from './components/ThemePicker';
 import { Welcome, shouldShowWelcome } from './components/Welcome';
 import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
-import { HelpTour } from './components/HelpTour';
-import { TipsChip } from './components/TipsChip';
+import { Tutorial } from './components/Tutorial';
+import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
 import { useKeyboard } from './useKeyboard';
@@ -31,7 +31,7 @@ import './App.css';
 
 
 function Shell() {
-  const { state, activeTab, refreshActive, dispatch, setTab } = useStore();
+  const { state, activeTab, refreshActive, dispatch, setTab, focusEntryByName } = useStore();
   const [renaming, setRenaming] = useState<{ entry: Entry; mode: RenameMode } | null>(null);
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [touchOpen, setTouchOpen] = useState(false);
@@ -41,7 +41,8 @@ function Shell() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState<boolean>(() => shouldShowWelcome());
   const [privacyHelpOpen, setPrivacyHelpOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [tutorialNonce, setTutorialNonce] = useState(0);
   // fm-294 — global confirm dialog. Surfaces request a confirm by
   // dispatching `fm:confirm` with a ConfirmRequest payload.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
@@ -88,8 +89,26 @@ function Shell() {
     function onPrivacyHelp() {
       setPrivacyHelpOpen(true);
     }
-    function onHelp() {
-      setHelpOpen(true);
+    function onTutorial() {
+      // Always start from step 1 when explicitly opened — picking it up
+      // mid-flow on a new launch is fine, but a re-launch via the verb
+      // means the user wants to take it again.
+      try {
+        localStorage.removeItem('fm.tutorial.step');
+        localStorage.removeItem('fm.tutorial.done');
+      } catch {
+        /* noop */
+      }
+      setTutorialOpen(true);
+      setTutorialNonce((n) => n + 1);
+    }
+    function onToggleTips() {
+      const next = !isTipsEnabled();
+      setTipsEnabled(next);
+      dispatch({
+        type: 'setStatus',
+        msg: next ? 'tips on' : 'tips off — type tips to bring them back',
+      });
     }
     function onConfirm(e: Event) {
       const detail = (e as CustomEvent).detail as ConfirmRequest | undefined;
@@ -100,7 +119,8 @@ function Shell() {
     window.addEventListener('fm:openTouch', onTouch);
     window.addEventListener('fm:openTheme', onTheme);
     window.addEventListener('fm:openPrivacyHelp', onPrivacyHelp);
-    window.addEventListener('fm:openHelp', onHelp);
+    window.addEventListener('fm:openTutorial', onTutorial);
+    window.addEventListener('fm:toggleTips', onToggleTips);
     window.addEventListener('fm:confirm', onConfirm);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
@@ -108,7 +128,8 @@ function Shell() {
       window.removeEventListener('fm:openTouch', onTouch);
       window.removeEventListener('fm:openTheme', onTheme);
       window.removeEventListener('fm:openPrivacyHelp', onPrivacyHelp);
-      window.removeEventListener('fm:openHelp', onHelp);
+      window.removeEventListener('fm:openTutorial', onTutorial);
+      window.removeEventListener('fm:toggleTips', onToggleTips);
       window.removeEventListener('fm:confirm', onConfirm);
     };
   }, [activeTab, state.entriesByPath]);
@@ -207,6 +228,7 @@ function Shell() {
               try {
                 await fm.mkdir(pathJoin(tab.trail[tab.trail.length - 1], name));
                 await refreshActive();
+                focusEntryByName(name);
                 dispatch({ type: 'setStatus', msg: `created ${name}/` });
               } catch (err) {
                 dispatch({
@@ -230,6 +252,7 @@ function Shell() {
               try {
                 await fm.touch(to);
                 await refreshActive();
+                focusEntryByName(name);
                 requestAnimationFrame(() => celebratePaths([to]));
                 dispatch({ type: 'setStatus', msg: `created ${name}` });
               } catch (err) {
@@ -268,7 +291,9 @@ function Shell() {
       {themeOpen && <ThemePicker onClose={() => setThemeOpen(false)} />}
       {welcomeOpen && <Welcome onClose={() => setWelcomeOpen(false)} />}
       {privacyHelpOpen && <PrivacyHelpDialog onClose={() => setPrivacyHelpOpen(false)} />}
-      {helpOpen && <HelpTour onClose={() => setHelpOpen(false)} />}
+      {tutorialOpen && (
+        <Tutorial key={tutorialNonce} onClose={() => setTutorialOpen(false)} />
+      )}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       {confirm && (
         <ConfirmDialog

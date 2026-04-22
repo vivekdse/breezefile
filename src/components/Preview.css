@@ -38,6 +38,14 @@
   font-size: 12px;
   letter-spacing: 0.04em;
 }
+.preview__empty-hint {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.75;
+  text-align: center;
+  max-width: 28ch;
+  line-height: 1.45;
+}
 
 /* ─── Plate: framed photo area ─────────────────────────────────────── */
 

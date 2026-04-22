@@ -32,6 +32,8 @@ export function markWelcomeSeen(): void {
   } catch {
     /* localStorage unavailable — best-effort only */
   }
+  // Let other floating UI (tips, tutorial) know they can show now.
+  window.dispatchEvent(new CustomEvent('fm:welcomeDismissed'));
 }
 
 /** Expose a way to re-trigger the card (e.g. from Settings → Help). */
@@ -158,15 +160,28 @@ export function Welcome({ onClose }: { onClose: () => void }) {
           <span className="welcome__hint">
             Drag rows out to Slack, Gmail, Finder — that's the killer feature.
           </span>
-          <button
-            type="button"
-            className="welcome__btn"
-            onClick={dismiss}
-            autoFocus
-          >
-            Got it
-            <kbd className="welcome__btn-kbd">↵</kbd>
-          </button>
+          <div className="welcome__footer-btns">
+            <button
+              type="button"
+              className="welcome__btn welcome__btn--ghost"
+              onClick={() => {
+                markWelcomeSeen();
+                exit();
+                window.dispatchEvent(new CustomEvent('fm:openTutorial'));
+              }}
+            >
+              Try the tutorial
+            </button>
+            <button
+              type="button"
+              className="welcome__btn"
+              onClick={dismiss}
+              autoFocus
+            >
+              Got it
+              <kbd className="welcome__btn-kbd">↵</kbd>
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -9,8 +9,17 @@ import {
 } from 'react';
 import type { Bookmarks, Entry, Keybinds, Tab, Tags, YankEntry } from './types';
 import { fm } from './bridge';
+import { visibleEntries } from './actions';
 
 const STORAGE_KEY = 'fm-state-v1';
+
+// Track which paths have already triggered the privacy help dialog so a
+// protected folder doesn't re-open it on every revisit.
+const shownPrivacyFor = new Set<string>();
+
+function isPermissionError(msg: string): boolean {
+  return /EACCES|EPERM|operation not permitted|permission denied/i.test(msg);
+}
 
 // Ranger-compatible defaults (rc.conf). Where ranger has overlapping terms
 // we prefer muscle memory: `om` mtime, `ot` type, `or` toggle-reverse, etc.
@@ -284,6 +293,7 @@ type Ctx = {
   navigateTo: (p: string) => void;
   goBack: () => void;
   goForward: () => void;
+  focusEntryByName: (name: string) => void;
 };
 
 const StoreCtx = createContext<Ctx | null>(null);
@@ -348,7 +358,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'setEntries', path: p, entries });
       return entries;
     } catch (err) {
-      dispatch({ type: 'setStatus', msg: `error reading ${p}: ${(err as Error).message}` });
+      const msg = (err as Error).message ?? String(err);
+      if (isPermissionError(msg)) {
+        dispatch({
+          type: 'setStatus',
+          msg: `macOS is blocking access to ${p}. Grant folder access and try again.`,
+        });
+        // Surface the dialog once per path per session — otherwise revisiting
+        // a protected folder would re-open the modal every navigation.
+        if (!shownPrivacyFor.has(p)) {
+          shownPrivacyFor.add(p);
+          window.dispatchEvent(new CustomEvent('fm:openPrivacyHelp'));
+        }
+      } else {
+        dispatch({ type: 'setStatus', msg: `error reading ${p}: ${msg}` });
+      }
       dispatch({ type: 'setEntries', path: p, entries: [] });
       return [];
     }
@@ -362,6 +386,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   function setTab(patch: Partial<Tab>) {
     dispatch({ type: 'updateTab', index: stateRef.current.activeTab, patch });
+  }
+
+  // Move the cursor to the entry matching `name` in the current cwd.
+  // Used after mkdir/touch so the new thing is immediately actionable —
+  // Enter opens the new folder, etc.
+  //
+  // Race note: when this is called right after `await refreshActive()`,
+  // React may not have re-rendered yet, so stateRef can still hold the
+  // pre-create entries. We retry across a couple of animation frames
+  // before giving up.
+  function focusEntryByName(name: string, retriesLeft = 5) {
+    const tab = stateRef.current.tabs[stateRef.current.activeTab];
+    if (!tab) return;
+    const col = tab.trail.length - 1;
+    const cwd = tab.trail[col];
+    const entries = visibleEntries(stateRef.current.entriesByPath[cwd] ?? [], tab);
+    const idx = entries.findIndex((e) => e.name === name);
+    if (idx < 0) {
+      if (retriesLeft > 0) {
+        requestAnimationFrame(() => focusEntryByName(name, retriesLeft - 1));
+      }
+      return;
+    }
+    dispatch({
+      type: 'updateTab',
+      index: stateRef.current.activeTab,
+      patch: { selected: { ...tab.selected, [col]: idx } },
+    });
   }
 
   function navigateTo(p: string) {
@@ -449,6 +501,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       navigateTo,
       goBack,
       goForward,
+      focusEntryByName,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state, activeTab],

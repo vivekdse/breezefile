@@ -32,7 +32,10 @@ export function Preview() {
     return (
       <section className="preview preview--empty" aria-label="Preview">
         <div className="preview__empty-mark">❦</div>
-        <div className="preview__empty-text">No selection</div>
+        <div className="preview__empty-text">Nothing selected.</div>
+        <div className="preview__empty-hint">
+          Arrow keys to browse · space to mark · drag any row out to Slack, Gmail, or Finder.
+        </div>
       </section>
     );
   }
@@ -122,13 +125,15 @@ function PreviewBody({ entry, tag }: PreviewBodyProps) {
             {text === null ? (
               <div className="preview__text-empty">Loading…</div>
             ) : text.error ? (
-              <div className="preview__text-empty">Couldn't read file</div>
+              <div className="preview__text-empty">
+                Couldn't read file. Check permissions or try Reveal in Finder.
+              </div>
             ) : (
               <>
                 <pre className="preview__text-pre">{text.content}</pre>
                 {text.truncated && (
                   <div className="preview__text-trunc">
-                    Showing first 40 KB · file is larger
+                    Truncated at 40 KB. Open in an editor for the full file.
                   </div>
                 )}
               </>
