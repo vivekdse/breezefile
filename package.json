@@ -7,7 +7,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build:native": "node -e \"if(process.platform==='darwin'){require('child_process').execSync('make -C native/sharer',{stdio:'inherit'})}else{console.log('build:native: skipped on '+process.platform)}\"",
+    "build": "npm run build:native && tsc -b && vite build",
     "start": "npm run dev",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"
@@ -41,6 +42,12 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
+      "extraResources": [
+        {
+          "from": "native/sharer/sharer",
+          "to": "sharer"
+        }
+      ],
       "icon": "build/icon.icns",
       "artifactName": "Breezefile-${version}-${arch}.${ext}",
       "hardenedRuntime": false,
