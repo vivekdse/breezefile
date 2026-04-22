@@ -58,49 +58,56 @@
   white-space: nowrap;
 }
 
-/* Search pill — looks like a field, acts like the tab filter. */
-.titlebar__search {
+/* Search button — opens the recursive Find prompt. Replaces the dead
+   local-filter pill (fm-31d). Shaped like a field so it still reads as
+   a search affordance, but it's a button: one click → Find overlay. */
+.titlebar__search-btn {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--bg);
-  padding: 5px 12px;
+  padding: 6px 12px;
   border-radius: 8px;
+  font-family: var(--font-sans);
   font-size: 12px;
   color: var(--muted);
-  min-width: 260px;
-  max-width: 360px;
-  flex: 0 1 320px;
   border: 1px solid var(--rule);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
-.titlebar__search:focus-within {
+.titlebar__search-btn:hover {
+  border-color: var(--accent-soft);
+  color: var(--ink);
+}
+.titlebar__search-btn:focus-visible {
+  outline: none;
   border-color: var(--accent-soft);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 3px var(--accent-soft);
 }
-.titlebar__search svg {
+.titlebar__search-btn svg {
   color: var(--muted);
   flex-shrink: 0;
 }
-.titlebar__search-input {
+.titlebar__search-label {
   flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: var(--font-sans);
-  font-size: 12px;
-  color: var(--ink);
-}
-.titlebar__search-input::placeholder {
-  color: var(--muted);
+  text-align: left;
 }
 
-/* Dark-panel variant — mockup special-case for plum. */
-[data-theme='plum'] .titlebar__search,
-[data-theme='dusk'] .titlebar__search {
+.titlebar__kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--chip, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* Dark-panel variant — mockup special-case for plum/dusk. */
+[data-theme='plum'] .titlebar__search-btn,
+[data-theme='dusk'] .titlebar__search-btn {
   background: rgba(255, 255, 255, 0.06);
   color: var(--panel-muted, var(--muted));
   border-color: var(--panel-rule, var(--rule));

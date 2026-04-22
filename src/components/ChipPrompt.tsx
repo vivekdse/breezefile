@@ -68,6 +68,7 @@ type Verb =
   | 'reveal'
   | 'showHidden'
   | 'theme'
+  | 'help'
   | 'permissions';
 
 type Option = {
@@ -544,6 +545,19 @@ const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openTheme'));
+    },
+  },
+  {
+    id: 'help',
+    label: 'Help',
+    aliases: ['help', 'tour', 'guide', 'how', 'how to', 'tutorial', 'intro', 'onboarding'],
+    icon: '?',
+    describe: () => 'Walk through the basics in a few slides',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openHelp'));
     },
   },
   {

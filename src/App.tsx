@@ -17,6 +17,7 @@ import { ThemePicker } from './components/ThemePicker';
 import { Welcome, shouldShowWelcome } from './components/Welcome';
 import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
+import { HelpTour } from './components/HelpTour';
 import { TipsChip } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
@@ -40,6 +41,7 @@ function Shell() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState<boolean>(() => shouldShowWelcome());
   const [privacyHelpOpen, setPrivacyHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   // fm-294 — global confirm dialog. Surfaces request a confirm by
   // dispatching `fm:confirm` with a ConfirmRequest payload.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
@@ -86,6 +88,9 @@ function Shell() {
     function onPrivacyHelp() {
       setPrivacyHelpOpen(true);
     }
+    function onHelp() {
+      setHelpOpen(true);
+    }
     function onConfirm(e: Event) {
       const detail = (e as CustomEvent).detail as ConfirmRequest | undefined;
       if (detail) setConfirm(detail);
@@ -95,6 +100,7 @@ function Shell() {
     window.addEventListener('fm:openTouch', onTouch);
     window.addEventListener('fm:openTheme', onTheme);
     window.addEventListener('fm:openPrivacyHelp', onPrivacyHelp);
+    window.addEventListener('fm:openHelp', onHelp);
     window.addEventListener('fm:confirm', onConfirm);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
@@ -102,6 +108,7 @@ function Shell() {
       window.removeEventListener('fm:openTouch', onTouch);
       window.removeEventListener('fm:openTheme', onTheme);
       window.removeEventListener('fm:openPrivacyHelp', onPrivacyHelp);
+      window.removeEventListener('fm:openHelp', onHelp);
       window.removeEventListener('fm:confirm', onConfirm);
     };
   }, [activeTab, state.entriesByPath]);
@@ -260,6 +267,7 @@ function Shell() {
       {themeOpen && <ThemePicker onClose={() => setThemeOpen(false)} />}
       {welcomeOpen && <Welcome onClose={() => setWelcomeOpen(false)} />}
       {privacyHelpOpen && <PrivacyHelpDialog onClose={() => setPrivacyHelpOpen(false)} />}
+      {helpOpen && <HelpTour onClose={() => setHelpOpen(false)} />}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       {confirm && (
         <ConfirmDialog

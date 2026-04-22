@@ -6,6 +6,13 @@ import { registerIpc } from './ipc';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// package.json's `name` is the npm-style slug "file-manager"; Electron
+// reads that for app.getName() in dev (before the bundle is built) and
+// the default `role: 'appMenu'` uses it for the About / Hide / Quit
+// labels. Force the display name so the menu says "Breeze File"
+// everywhere, dev and packaged alike.
+app.setName('Breeze File');
+
 process.env.APP_ROOT = path.join(__dirname, '..');
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist');

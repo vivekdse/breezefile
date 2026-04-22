@@ -1,0 +1,160 @@
+/*
+ * HelpTour — slide-based walkthrough. Visually echoes Welcome.css so
+ * the two overlays feel like the same family.
+ */
+
+.help-overlay {
+  align-items: center;
+  justify-content: center;
+}
+
+.help {
+  position: relative;
+  width: min(520px, 92vw);
+  background: var(--panel);
+  color: var(--panel-ink, var(--ink));
+  border: 1px solid var(--panel-rule, var(--rule));
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  padding: 28px 32px 22px;
+  text-align: center;
+  font-family: var(--font-sans);
+}
+
+.help__close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.help__close:hover {
+  color: var(--ink);
+  background: var(--chip, rgba(0, 0, 0, 0.04));
+}
+
+.help__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.help__glyph {
+  font-family: var(--font-serif);
+  font-size: 52px;
+  line-height: 1;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.help__title {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 10px;
+}
+
+.help__body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 0 4px 22px;
+  min-height: 3.1em;
+}
+
+.help__body kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--chip, rgba(0, 0, 0, 0.05));
+  border: 1px solid var(--rule);
+  color: var(--ink);
+}
+
+.help__dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.help__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: none;
+  background: var(--rule);
+  cursor: pointer;
+  padding: 0;
+  transition: background 140ms ease, transform 140ms ease;
+}
+.help__dot:hover {
+  background: var(--muted);
+}
+.help__dot--on {
+  background: var(--accent);
+  transform: scale(1.2);
+}
+
+.help__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.help__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  cursor: pointer;
+  transition: filter 120ms ease, background 120ms ease;
+}
+.help__btn:hover {
+  filter: brightness(1.06);
+}
+.help__btn--ghost {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--rule);
+}
+.help__btn--ghost:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.help__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.help__btn-kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--on-accent, #fff);
+  opacity: 0.75;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  padding: 1px 4px;
+  line-height: 1;
+}

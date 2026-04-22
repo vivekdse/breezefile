@@ -1,43 +1,27 @@
 /*
  * Titlebar — editorial chrome across the top of the window.
  *
- * Two lanes (left → right):
+ * Lanes (left → right):
  *   1. Traffic-light gutter (macOS hiddenInset) + brand wordmark
- *      "breeze·file" in Fraunces italic, accent-colored middle dot.
- *   2. Search pill — wired to the active tab's `filter` so the titlebar
- *      search and the `/` find-prompt are the same surface. ⌘K focuses
- *      it from anywhere.
+ *      "breeze·file" with a short tagline in Fraunces italic.
+ *   2. Search button — opens the recursive Find prompt. The old local-
+ *      filter pill was removed (fm-31d) because it didn't actually
+ *      filter anything; the verb system is the one true entry point.
  *
- * The old "Restyle" button was removed in fm-5cv — palette switching is
- * now a typeable verb in the chip prompt ("theme"), which opens the
- * shared ThemePicker modal.
+ * Palette switching lives in the 'theme' verb (fm-5cv).
  */
 
-import { useEffect, useRef } from 'react';
 import { Icon } from './Icon';
 import { useStore } from '../store';
 import './Titlebar.css';
 
 export function Titlebar() {
-  const { activeTab, setTab } = useStore();
-  const searchRef = useRef<HTMLInputElement | null>(null);
+  const { dispatch } = useStore();
 
-  // ⌘K / Ctrl+K → focus the local-filter pill (current folder only).
-  // ⌘F is reserved for the recursive-find verb (handled in useKeyboard.ts).
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  const filter = activeTab?.filter ?? '';
+  function openFind() {
+    // Same surface as ⌘F / `/` — recursive find prompt.
+    dispatch({ type: 'setMode', mode: 'find', buffer: '' });
+  }
 
   return (
     <div className="titlebar drag">
@@ -47,25 +31,17 @@ export function Titlebar() {
         <span className="titlebar__brand-tag">Your Keyboard Friendly File Manager</span>
       </div>
 
-      <label className="titlebar__search no-drag" aria-label="Filter current folder">
+      <button
+        type="button"
+        className="titlebar__search-btn no-drag"
+        onClick={openFind}
+        aria-label="Search files (⌘F)"
+        title="Search files (⌘F)"
+      >
         <Icon name="search" size={14} />
-        <input
-          ref={searchRef}
-          className="titlebar__search-input"
-          type="text"
-          spellCheck={false}
-          placeholder="filter this folder"
-          value={filter}
-          onChange={(e) => setTab({ filter: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              setTab({ filter: '' });
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-        />
-        <kbd className="titlebar__kbd">⌘K</kbd>
-      </label>
+        <span className="titlebar__search-label">Search</span>
+        <kbd className="titlebar__kbd">⌘F</kbd>
+      </button>
     </div>
   );
 }
