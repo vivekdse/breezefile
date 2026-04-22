@@ -13,6 +13,7 @@
  */
 
 import { useEffect } from 'react';
+import { fm } from '../bridge';
 import { useOverlayExit } from '../useOverlayExit';
 import './Welcome.css';
 
@@ -126,6 +127,22 @@ export function Welcome({ onClose }: { onClose: () => void }) {
             </div>
           </li>
         </ol>
+
+        <div className="welcome__perms">
+          <div className="welcome__perms-text">
+            <strong>Folder access:</strong> macOS may ask permission per
+            folder. To grant once, open <em>Privacy &amp; Security</em>{' '}
+            below, then click <em>Files and Folders</em> (or{' '}
+            <em>Full Disk Access</em> for everything).
+          </div>
+          <button
+            type="button"
+            className="welcome__btn welcome__btn--ghost"
+            onClick={() => void fm.openPrivacyPane('files')}
+          >
+            Open Privacy & Security
+          </button>
+        </div>
 
         <div className="welcome__footer">
           <span className="welcome__hint">

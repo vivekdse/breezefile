@@ -62,6 +62,8 @@ const fm = {
     ipcRenderer.invoke('fs:findEntries', roots, query, limit) as Promise<
       Array<{ path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' }>
     >,
+  openPrivacyPane: (pane?: 'files' | 'fullDisk') =>
+    ipcRenderer.invoke('shell:openPrivacyPane', pane) as Promise<void>,
   checkUpdate: () =>
     ipcRenderer.invoke('app:checkUpdate') as Promise<{
       tag: string;

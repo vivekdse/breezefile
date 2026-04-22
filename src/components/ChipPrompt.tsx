@@ -67,7 +67,8 @@ type Verb =
   | 'create'
   | 'reveal'
   | 'showHidden'
-  | 'theme';
+  | 'theme'
+  | 'permissions';
 
 type Option = {
   id: string;
@@ -543,6 +544,22 @@ const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openTheme'));
+    },
+  },
+  {
+    id: 'permissions',
+    label: 'Permissions',
+    aliases: ['permissions', 'permission', 'access', 'privacy', 'tcc', 'allow', 'grant'],
+    icon: '⎕',
+    describe: () => 'Open System Settings → Privacy & Security',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: async (_c, _p, api) => {
+      await fm.openPrivacyPane('files');
+      api.dispatch({
+        type: 'setStatus',
+        msg: 'opened Privacy & Security — click "Files and Folders" or "Full Disk Access"',
+      });
     },
   },
 ];

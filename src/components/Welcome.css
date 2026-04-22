@@ -111,12 +111,45 @@
   letter-spacing: 0.02em;
 }
 
+.welcome__perms {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+  padding: 12px 14px;
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.welcome__perms-text { flex: 1; }
+.welcome__perms-text strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.welcome__btn--ghost {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--rule);
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+.welcome__btn--ghost:hover {
+  background: var(--hi);
+  border-color: var(--accent);
+  filter: none;
+}
+
 .welcome__footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  margin-top: 8px;
+  margin-top: 16px;
   padding-top: 18px;
   border-top: 1px solid var(--rule);
 }

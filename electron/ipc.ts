@@ -332,6 +332,24 @@ export function registerIpc() {
     });
   });
 
+  // app:openPrivacyPane — deep-link into macOS System Settings → Privacy.
+  // For unsigned apps, TCC won't always remember per-folder grants, so giving
+  // users a one-click way into "Files and Folders" (per-folder list) or
+  // "Full Disk Access" (the nuclear allow-everything switch) is the cheapest
+  // permission UX without app signing.
+  ipcMain.handle('shell:openPrivacyPane', async (_e, pane: 'files' | 'fullDisk' = 'files') => {
+    if (process.platform !== 'darwin') return;
+    // System Settings (macOS Ventura 13+) silently ignores the legacy
+    // ?Privacy_FilesAndFolders fragment and lands on General. The most
+    // reliable target is the Privacy & Security pane itself; from there
+    // the user clicks "Files and Folders" or "Full Disk Access" — both
+    // listed in the same column, one tap away. Using `osascript` to
+    // navigate the sub-pane is brittle across macOS versions, so we
+    // settle for a one-extra-click experience that always works.
+    void pane; // accepted for future direct-deep-linking; currently both go to top of Privacy
+    await shell.openExternal('x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension');
+  });
+
   ipcMain.handle('shell:open', async (_e, p: string) => {
     return shell.openPath(expandHome(p));
   });

@@ -43,6 +43,7 @@ type Fm = {
     query: string,
     limit?: number,
   ) => Promise<Array<{ path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' }>>;
+  openPrivacyPane: (pane?: 'files' | 'fullDisk') => Promise<void>;
   checkUpdate: () => Promise<{
     tag: string;
     version: string;
