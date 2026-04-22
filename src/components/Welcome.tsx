@@ -13,7 +13,6 @@
  */
 
 import { useEffect } from 'react';
-import { fm } from '../bridge';
 import { useOverlayExit } from '../useOverlayExit';
 import './Welcome.css';
 
@@ -74,6 +73,15 @@ export function Welcome({ onClose }: { onClose: () => void }) {
         aria-labelledby="welcome-title"
         onClick={(e) => e.stopPropagation()}
       >
+        <button
+          type="button"
+          className="welcome__close"
+          onClick={dismiss}
+          aria-label="Close"
+          title="Close (Esc)"
+        >
+          ×
+        </button>
         <div className="welcome__eyebrow">Welcome to</div>
         <h1 id="welcome-title" className="welcome__title">
           Breeze<em>·</em>File
@@ -138,9 +146,11 @@ export function Welcome({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             className="welcome__btn welcome__btn--ghost"
-            onClick={() => void fm.openPrivacyPane('files')}
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('fm:openPrivacyHelp'));
+            }}
           >
-            Open Privacy & Security
+            How to grant access
           </button>
         </div>
 

@@ -112,6 +112,15 @@ export function ConfirmDialog({
         aria-labelledby="confirm-title"
         onClick={(e) => e.stopPropagation()}
       >
+        <button
+          type="button"
+          className="confirm__close"
+          onClick={exit}
+          aria-label="Close"
+          title="Close (Esc)"
+        >
+          ×
+        </button>
         <div id="confirm-title" className="confirm__title">{title}</div>
         {body && <div className="confirm__body">{body}</div>}
         <div className="confirm__actions">

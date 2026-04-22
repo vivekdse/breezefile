@@ -42,8 +42,9 @@ export function Titlebar() {
   return (
     <div className="titlebar drag">
       <div className="titlebar__traffic" aria-hidden />
-      <div className="titlebar__brand" aria-label="Breeze File">
-        Breeze<em>·</em>File
+      <div className="titlebar__brand" aria-label="Breeze File — Your Keyboard Friendly File Manager">
+        <span className="titlebar__brand-name">Breeze<em>·</em>File</span>
+        <span className="titlebar__brand-tag">Your Keyboard Friendly File Manager</span>
       </div>
 
       <label className="titlebar__search no-drag" aria-label="Filter current folder">

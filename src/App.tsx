@@ -16,6 +16,8 @@ import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog';
 import { ThemePicker } from './components/ThemePicker';
 import { Welcome, shouldShowWelcome } from './components/Welcome';
 import { UpdateChip } from './components/UpdateChip';
+import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
+import { TipsChip } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
 import { useKeyboard } from './useKeyboard';
@@ -37,6 +39,7 @@ function Shell() {
   const [shellOpen, setShellOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState<boolean>(() => shouldShowWelcome());
+  const [privacyHelpOpen, setPrivacyHelpOpen] = useState(false);
   // fm-294 — global confirm dialog. Surfaces request a confirm by
   // dispatching `fm:confirm` with a ConfirmRequest payload.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
@@ -80,6 +83,9 @@ function Shell() {
     function onTheme() {
       setThemeOpen(true);
     }
+    function onPrivacyHelp() {
+      setPrivacyHelpOpen(true);
+    }
     function onConfirm(e: Event) {
       const detail = (e as CustomEvent).detail as ConfirmRequest | undefined;
       if (detail) setConfirm(detail);
@@ -88,12 +94,14 @@ function Shell() {
     window.addEventListener('fm:openMkdir', onMkdir);
     window.addEventListener('fm:openTouch', onTouch);
     window.addEventListener('fm:openTheme', onTheme);
+    window.addEventListener('fm:openPrivacyHelp', onPrivacyHelp);
     window.addEventListener('fm:confirm', onConfirm);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
       window.removeEventListener('fm:openTouch', onTouch);
       window.removeEventListener('fm:openTheme', onTheme);
+      window.removeEventListener('fm:openPrivacyHelp', onPrivacyHelp);
       window.removeEventListener('fm:confirm', onConfirm);
     };
   }, [activeTab, state.entriesByPath]);
@@ -149,6 +157,11 @@ function Shell() {
           shows a quiet bottom-left pill when a newer version is out.
           User upgrades via `brew upgrade --cask breezefile` (copy button). */}
       <UpdateChip />
+
+      {/* Rotating "did you know" tips in the bottom-right. Helps first-
+          time users discover the verb prompt without an in-your-face
+          tutorial. Dismissible forever. */}
+      <TipsChip />
 
       {renaming && (
         <RenameOverlay
@@ -246,6 +259,7 @@ function Shell() {
       )}
       {themeOpen && <ThemePicker onClose={() => setThemeOpen(false)} />}
       {welcomeOpen && <Welcome onClose={() => setWelcomeOpen(false)} />}
+      {privacyHelpOpen && <PrivacyHelpDialog onClose={() => setPrivacyHelpOpen(false)} />}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
       {confirm && (
         <ConfirmDialog

@@ -3,9 +3,32 @@
 
 .confirm {
   /* Slightly tighter than the input overlays — this is read, not typed. */
+  position: relative;
   min-width: 380px;
   max-width: 480px;
   gap: var(--sp-3);
+}
+
+.confirm__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.confirm__close:hover {
+  background: var(--rule);
+  color: var(--ink);
 }
 
 .confirm__title {

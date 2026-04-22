@@ -6,6 +6,7 @@
    + accent-tinted ring, not just a text underline. */
 
 .theme-picker {
+  position: relative;        /* anchor for the absolute close button */
   background: var(--panel);
   border: 1px solid var(--rule);
   border-radius: 16px;
@@ -17,6 +18,28 @@
     0 6px 16px -8px rgba(0, 0, 0, 0.18);
   color: var(--ink);
   animation: theme-picker-in var(--motion-enter);
+}
+
+.theme-picker__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.theme-picker__close:hover {
+  background: var(--rule);
+  color: var(--ink);
 }
 
 @keyframes theme-picker-in {

@@ -520,10 +520,10 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'showHidden',
-    label: 'Show hidden files',
-    aliases: ['hidden', 'dotfiles', 'show hidden'],
+    label: 'Show / Hide hidden files',
+    aliases: ['hidden', 'dotfiles', 'show hidden', 'hide hidden', 'toggle hidden'],
     icon: '◐',
-    describe: () => 'Toggle hidden files',
+    describe: () => 'Toggle dotfile visibility (.DS_Store, .git, …)',
     isAvailable: () => ({ ok: true }),
     slots: [],
     execute: (_c, _p, api) => {
@@ -551,15 +551,12 @@ const VERBS: VerbDef[] = [
     label: 'Permissions',
     aliases: ['permissions', 'permission', 'access', 'privacy', 'tcc', 'allow', 'grant'],
     icon: '⎕',
-    describe: () => 'Open System Settings → Privacy & Security',
+    describe: () => 'How to grant folder access in System Settings',
     isAvailable: () => ({ ok: true }),
     slots: [],
-    execute: async (_c, _p, api) => {
-      await fm.openPrivacyPane('files');
-      api.dispatch({
-        type: 'setStatus',
-        msg: 'opened Privacy & Security — click "Files and Folders" or "Full Disk Access"',
-      });
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openPrivacyHelp'));
     },
   },
 ];
@@ -1028,6 +1025,12 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
     }
     if (e.key === 'Enter') {
       e.preventDefault();
+      e.stopPropagation();
+      // Native event would otherwise keep bubbling to window after we
+      // unmount and the next overlay (ThemePicker, etc.) mounts —
+      // catching its freshly-attached listener and immediately
+      // re-triggering an action there.
+      (e.nativeEvent as KeyboardEvent).stopImmediatePropagation?.();
       const opt = matches[highlightIdx];
       if (opt) pickOption(opt);
       return;
@@ -1122,7 +1125,7 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
             spellCheck={false}
           />
           <span className="chip-slot-label">
-            {verb === null ? 'ACTION' : activeSlot?.label.toUpperCase() ?? ''}
+            {verb === null ? 'SELECT ACTION' : activeSlot?.label.toUpperCase() ?? ''}
           </span>
         </div>
 

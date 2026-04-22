@@ -26,22 +26,36 @@
   flex-shrink: 0;
 }
 
-/* Brand wordmark — Fraunces italic, accent middle-dot as the "logo". */
+/* Brand wordmark — Fraunces italic name + a small Inter tagline so first-
+   time users immediately see what the app is for. */
 .titlebar__brand {
   margin-left: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  user-select: none;
+}
+.titlebar__brand-name {
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 500;
   font-size: 18px;
   letter-spacing: -0.01em;
   color: var(--ink);
-  user-select: none;
 }
-.titlebar__brand em {
+.titlebar__brand-name em {
   color: var(--accent);
   font-style: normal;
   font-weight: 600;
   padding: 0 1px;
+}
+.titlebar__brand-tag {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  white-space: nowrap;
 }
 
 /* Search pill — looks like a field, acts like the tab filter. */
