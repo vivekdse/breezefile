@@ -36,6 +36,15 @@ import type { Entry, SortKey } from '../types';
 import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
 import './ChipPrompt.css';
 
+// One-shot lazy probe for the native Share helper binary. Verbs'
+// isAvailable() runs synchronously, but shareHelperAvailable() is async, so
+// on first invocation we kick off the probe and optimistically show the
+// verb; subsequent calls read the resolved value. The worst case is a
+// single "share failed: helper not found" status message on the very first
+// activation in dev.
+let shareHelperProbed = false;
+let shareHelperAvailable: boolean | null = null;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Context gathered once per overlay render — drives verb availability and
 // the object/destination options.
@@ -75,6 +84,7 @@ type Verb =
   | 'view'
   | 'create'
   | 'reveal'
+  | 'share'
   | 'showHidden'
   | 'theme'
   | 'tutorial'
@@ -805,6 +815,60 @@ const VERBS: VerbDef[] = [
           msg: `terminal failed: ${(err as Error).message}`,
         });
       }
+    },
+  },
+  {
+    // fm-wvf — native macOS share sheet (NSSharingServicePicker). Covers
+    // AirDrop, Messages, Mail, Notes, Reminders, and third-party share
+    // extensions. AppleScript can't reach AirDrop or extensions, so we
+    // ship a tiny Swift helper binary (see native/sharer/) and shell out
+    // to it. If the binary isn't present (dev mode where `make -C
+    // native/sharer` hasn't been run), the verb disables with a reason
+    // rather than silently failing.
+    id: 'share',
+    label: 'Share',
+    aliases: ['share', 'send'],
+    icon: '↗',
+    describe: (c) => {
+      const n = c.markedPaths.length || (c.cursor ? 1 : 0);
+      if (n === 0) return 'Share files via macOS share sheet';
+      const name = c.markedPaths.length > 0
+        ? `${n} item${n === 1 ? '' : 's'}`
+        : c.cursor!.name;
+      return `Share ${name} (AirDrop, Mail, Messages, …)`;
+    },
+    isAvailable: (c) => {
+      if (c.markedPaths.length === 0 && !c.cursor) {
+        return { ok: false, reason: 'Select files first (press space) or put the cursor on one' };
+      }
+      // Kick off a lazy one-shot probe so subsequent calls see the result.
+      if (!shareHelperProbed) {
+        shareHelperProbed = true;
+        void fm.shareHelperAvailable().then((v) => { shareHelperAvailable = v; });
+      }
+      if (shareHelperAvailable === false) {
+        return { ok: false, reason: 'Run `make -C native/sharer` to enable Share' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    execute: (c, _p, api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      // v1 anchor: center of the viewport, upper third. The chip prompt
+      // doesn't have a DOM handle to the originating FileRow or Pathbar
+      // button, so we punt on precise anchoring until we plumb an anchor
+      // rect through the palette context. Follow-up: pass the triggering
+      // element's bounding rect via ExecApi.
+      const cx = Math.round(window.outerWidth / 2) + (window.screenX || 0);
+      const cy = Math.round(window.outerHeight / 3) + (window.screenY || 0);
+      const anchor = { x: cx - 8, y: cy - 8, w: 16, h: 16 };
+      void fm.share(sources, anchor).catch((err: unknown) => {
+        const msg = (err as Error)?.message ?? String(err);
+        api.dispatch({ type: 'setStatus', msg: `share failed: ${msg}` });
+      });
+      api.dispatch({ type: 'setStatus', msg: `sharing ${sources.length} item${sources.length === 1 ? '' : 's'}…` });
+      api.closeOverlay();
     },
   },
   {

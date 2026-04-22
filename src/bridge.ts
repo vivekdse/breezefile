@@ -33,6 +33,11 @@ type Fm = {
   setBinding: (ext: string, appPath: string) => Promise<void>;
   clearBinding: (ext: string) => Promise<void>;
   clipboardWrite: (p: string) => Promise<void>;
+  share: (
+    paths: string[],
+    anchor: { x: number; y: number; w: number; h: number },
+  ) => Promise<void>;
+  shareHelperAvailable: () => Promise<boolean>;
   thumb: (p: string, size: number) => Promise<string | null>;
   readTextFile: (
     p: string,

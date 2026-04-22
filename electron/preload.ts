@@ -37,6 +37,10 @@ const fm = {
   setBinding: (ext: string, appPath: string) => ipcRenderer.invoke('bindings:set', ext, appPath),
   clearBinding: (ext: string) => ipcRenderer.invoke('bindings:clear', ext),
   clipboardWrite: (p: string) => ipcRenderer.invoke('shell:clipboardWrite', p),
+  share: (paths: string[], anchor: { x: number; y: number; w: number; h: number }) =>
+    ipcRenderer.invoke('shell:share', { paths, anchor }) as Promise<void>,
+  shareHelperAvailable: () =>
+    ipcRenderer.invoke('shell:shareHelperAvailable') as Promise<boolean>,
   thumb: (p: string, size: number) =>
     ipcRenderer.invoke('thumb:get', p, size) as Promise<string | null>,
   readTextFile: (p: string, maxBytes?: number) =>

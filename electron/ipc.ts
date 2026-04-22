@@ -3,6 +3,7 @@ import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
@@ -737,6 +738,76 @@ end tell`;
       });
     });
   });
+
+  // Resolve the bundled `sharer` Swift helper. In a packaged Electron app
+  // `extraResources` lands under `process.resourcesPath`; in dev we run
+  // straight from the repo. Returns null if the binary doesn't exist (e.g.
+  // developer hasn't run `make -C native/sharer` yet) so the renderer can
+  // disable the Share verb with a clear reason.
+  function sharerPath(): string | null {
+    const candidates = app.isPackaged
+      ? [path.join(process.resourcesPath, 'sharer')]
+      : [
+          path.join(app.getAppPath(), 'native', 'sharer', 'sharer'),
+          path.join(process.cwd(), 'native', 'sharer', 'sharer'),
+        ];
+    for (const c of candidates) {
+      try {
+        if (existsSync(c)) return c;
+      } catch {
+        /* next */
+      }
+    }
+    return null;
+  }
+
+  ipcMain.handle('shell:shareHelperAvailable', () => {
+    if (process.platform !== 'darwin') return false;
+    return sharerPath() !== null;
+  });
+
+  // shell:share — invoke the macOS native share sheet (NSSharingServicePicker)
+  // anchored at a screen rect the renderer computed from the originating DOM
+  // element. Spawns detached so the picker's lifetime isn't tied to this
+  // IPC call (which returns as soon as the helper is launched).
+  //
+  // Design note: AirDrop + third-party share extensions are only reachable
+  // via the native picker — AppleScript can only hit Mail/Messages/Notes.
+  // That's why we ship a tiny Swift helper rather than shelling out to osa.
+  ipcMain.handle(
+    'shell:share',
+    async (
+      _e,
+      opts: { paths: string[]; anchor: { x: number; y: number; w: number; h: number } },
+    ) => {
+      const bin = sharerPath();
+      if (!bin) {
+        const err = new Error('Native share helper not found. Run `make -C native/sharer`.');
+        (err as Error & { helperMissing?: boolean }).helperMissing = true;
+        throw err;
+      }
+      const { x, y, w, h } = opts.anchor;
+      const paths = (opts.paths ?? []).map(expandHome);
+      if (paths.length === 0) throw new Error('share: no paths');
+      const args = [String(Math.round(x)), String(Math.round(y)), String(Math.round(w)), String(Math.round(h)), ...paths];
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile(bin, args, { shell: false }, (err) => {
+          // execFile's callback fires on exit. We still resolve promptly
+          // below via 'spawn' so the renderer isn't blocked on user choice;
+          // this callback just swallows errors after the picker closes.
+          if (err && !child.killed) {
+            // Non-zero exit after resolve — ignore.
+          }
+        });
+        child.on('error', reject);
+        child.on('spawn', () => {
+          // Detach so quitting the main app doesn't close the picker.
+          child.unref();
+          resolve();
+        });
+      });
+    },
+  );
 
   ipcMain.handle('shell:clipboardWrite', (_e, p: string) => {
     // Writes a file reference to clipboard (macOS NSPasteboard file URL)
