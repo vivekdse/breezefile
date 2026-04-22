@@ -17,6 +17,7 @@ import { ThemePicker } from './components/ThemePicker';
 import { Welcome, shouldShowWelcome } from './components/Welcome';
 import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
+import { OpenWithDialog } from './components/OpenWithDialog';
 import { Tutorial } from './components/Tutorial';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
@@ -46,6 +47,13 @@ function Shell() {
   // fm-294 — global confirm dialog. Surfaces request a confirm by
   // dispatching `fm:confirm` with a ConfirmRequest payload.
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  // fm-pg0 — Open With surface. The chip verb dispatches `fm:openWith`
+  // with the target path; we run the native app picker here, then mount
+  // OpenWithDialog so the user can confirm + optionally bind the app as
+  // the default for this extension. Null when no flow is active.
+  const [openWith, setOpenWith] = useState<{ path: string; ext?: string; appPath: string } | null>(
+    null,
+  );
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -114,6 +122,19 @@ function Shell() {
       const detail = (e as CustomEvent).detail as ConfirmRequest | undefined;
       if (detail) setConfirm(detail);
     }
+    async function onOpenWith(e: Event) {
+      const detail = (e as CustomEvent).detail as { path: string; ext?: string } | undefined;
+      if (!detail?.path) return;
+      try {
+        const picked = await fm.pickApplication();
+        if (picked) setOpenWith({ path: detail.path, ext: detail.ext, appPath: picked });
+      } catch (err) {
+        dispatch({
+          type: 'setStatus',
+          msg: `open with failed: ${(err as Error).message}`,
+        });
+      }
+    }
     window.addEventListener('fm:openRename', onRename);
     window.addEventListener('fm:openMkdir', onMkdir);
     window.addEventListener('fm:openTouch', onTouch);
@@ -122,6 +143,7 @@ function Shell() {
     window.addEventListener('fm:openTutorial', onTutorial);
     window.addEventListener('fm:toggleTips', onToggleTips);
     window.addEventListener('fm:confirm', onConfirm);
+    window.addEventListener('fm:openWith', onOpenWith);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -131,6 +153,7 @@ function Shell() {
       window.removeEventListener('fm:openTutorial', onTutorial);
       window.removeEventListener('fm:toggleTips', onToggleTips);
       window.removeEventListener('fm:confirm', onConfirm);
+      window.removeEventListener('fm:openWith', onOpenWith);
     };
   }, [activeTab, state.entriesByPath]);
 
@@ -278,6 +301,14 @@ function Shell() {
         <ConfirmDialog
           {...confirm}
           onClose={() => setConfirm(null)}
+        />
+      )}
+      {openWith && (
+        <OpenWithDialog
+          filePath={openWith.path}
+          ext={openWith.ext}
+          appPath={openWith.appPath}
+          onClose={() => setOpenWith(null)}
         />
       )}
     </div>

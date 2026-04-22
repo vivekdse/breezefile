@@ -86,7 +86,9 @@ type Verb =
   | 'closeTab'
   | 'restoreTab'
   | 'compress'
-  | 'extract';
+  | 'extract'
+  | 'copy-path'
+  | 'open-with';
 
 type Option = {
   id: string;
@@ -622,6 +624,66 @@ const VERBS: VerbDef[] = [
         void fm.open(c.cursor.path);
         api.closeOverlay();
       }
+    },
+  },
+  {
+    id: 'copy-path',
+    label: 'Copy path',
+    aliases: ['copy-path', 'copypath', 'path', 'cpp'],
+    icon: '⧉',
+    describe: (c) => {
+      const count = c.markedPaths.length;
+      if (count > 1) return `Copy ${count} paths to clipboard`;
+      const name = count === 1 ? basename(c.markedPaths[0]) : c.cursor?.name ?? 'item';
+      return `Copy path of ${name} to clipboard`;
+    },
+    isAvailable: (c) => {
+      if (c.markedPaths.length === 0 && !c.cursor) {
+        return { ok: false, reason: 'Put cursor on a file or select some first' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    // Plain-text path(s) on the system clipboard — newline-joined when
+    // there's more than one marked item. Complements the drag-out path
+    // (native FS drag) and the context-menu "Copy path" entry: a single
+    // discoverable verb works when users don't know the right modifier
+    // or are already in the chip flow for another action.
+    execute: (c, _p, api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      const payload = sources.join('\n');
+      void fm.clipboardWrite(payload);
+      api.dispatch({
+        type: 'setStatus',
+        msg: sources.length === 1 ? 'copied 1 path' : `copied ${sources.length} paths`,
+      });
+      api.closeOverlay();
+    },
+  },
+  {
+    id: 'open-with',
+    label: 'Open With…',
+    aliases: ['open-with', 'openwith', 'ow'],
+    icon: '⎋',
+    describe: (c) => `Open ${c.cursor?.name ?? 'item'} with another app…`,
+    isAvailable: (c) => {
+      if (!c.cursor) return { ok: false, reason: 'Put the cursor on a file first' };
+      return { ok: true };
+    },
+    slots: [],
+    // Surfaces the existing OpenWithDialog (the confirm-and-remember
+    // modal from Preview) from the chip prompt. Always targets the
+    // cursor — multi-item "open with" makes little sense since the user
+    // picks a single app. If a selection exists, the cursor still wins
+    // so the action is predictable.
+    execute: (c, _p, api) => {
+      if (!c.cursor) return;
+      const { path, ext } = c.cursor;
+      api.closeOverlay();
+      window.dispatchEvent(
+        new CustomEvent('fm:openWith', { detail: { path, ext } }),
+      );
     },
   },
   {
