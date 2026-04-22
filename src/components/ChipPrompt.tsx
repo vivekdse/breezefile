@@ -56,6 +56,10 @@ type Ctx = {
   localSubdirs: string[]; // BFS subdirectories under cwd (depth ~3)
   historyLen: number; // tab back-history depth
   forwardLen: number; // tab forward-history depth
+  // Terminal selection state (fm-2du). Loaded lazily on mount; drives the
+  // Open Terminal verb's conditional 'Which terminal' slot.
+  defaultTerminal: string | null;
+  installedTerminals: string[];
 };
 
 type Verb =
@@ -84,7 +88,8 @@ type Verb =
   | 'switchTab'
   | 'newTab'
   | 'closeTab'
-  | 'restoreTab';
+  | 'restoreTab'
+  | 'openTerminal';
 
 type Option = {
   id: string;
@@ -636,6 +641,108 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    // fm-2du: Open Terminal here. Two-layer selection — on first use we
+    // detect installed terminals and ask the user to pick one; after that
+    // the pref is persisted so subsequent invocations skip the chooser.
+    // The slot only materializes when there's no saved pref and more than
+    // one terminal is installed. One-terminal installs auto-select.
+    id: 'openTerminal',
+    label: 'Open Terminal here',
+    aliases: ['open-terminal', 'terminal', 'term', 'shell', 'cli'],
+    icon: '$_',
+    describe: (c) => {
+      if (c.defaultTerminal) {
+        const nice = c.defaultTerminal.replace(/\.app$/, '');
+        return `Open ${nice} at ${basename(c.cwd) || '/'}`;
+      }
+      return `Open a terminal at ${basename(c.cwd) || '/'}`;
+    },
+    isAvailable: () => ({ ok: true }),
+    slots: [
+      {
+        label: 'Which terminal',
+        getOptions: (c) => {
+          // If the user already picked a default, skip straight to execute:
+          // returning an empty option list would block, so we synthesize a
+          // single 'use-default' option that the execute branch recognises.
+          // Auto-select the single installed terminal the first time too.
+          if (c.defaultTerminal) {
+            const nice = c.defaultTerminal.replace(/\.app$/, '');
+            return [
+              {
+                id: `use:${c.defaultTerminal}`,
+                label: nice,
+                detail: 'your default — change in Settings',
+                available: true,
+              },
+            ];
+          }
+          if (c.installedTerminals.length === 0) {
+            return [
+              {
+                id: 'none',
+                label: 'No supported terminal found',
+                detail: 'install iTerm, WezTerm, Warp, Ghostty, Alacritty, or kitty',
+                available: false,
+                reason: 'No supported terminal detected in /Applications',
+              },
+            ];
+          }
+          if (c.installedTerminals.length === 1) {
+            const only = c.installedTerminals[0];
+            const nice = only.replace(/\.app$/, '');
+            return [
+              {
+                id: `pickAndRemember:${only}`,
+                label: nice,
+                detail: 'only one installed — will remember as default',
+                available: true,
+              },
+            ];
+          }
+          return c.installedTerminals.map((bundle) => ({
+            id: `pickAndRemember:${bundle}`,
+            label: bundle.replace(/\.app$/, ''),
+            detail: 'set as default (change later in Settings)',
+            available: true,
+          }));
+        },
+      },
+    ],
+    execute: async (c, [choice], api) => {
+      let bundle: string | null = null;
+      let remember = false;
+      if (choice?.startsWith('use:')) {
+        bundle = choice.slice(4);
+      } else if (choice?.startsWith('pickAndRemember:')) {
+        bundle = choice.slice('pickAndRemember:'.length);
+        remember = true;
+      }
+      if (!bundle) return;
+      if (remember) {
+        try {
+          await fm.setDefaultTerminal(bundle);
+        } catch {
+          // Non-fatal: launch still proceeds even if we fail to persist.
+        }
+      }
+      try {
+        await fm.openTerminal(c.cwd);
+        api.dispatch({
+          type: 'setStatus',
+          msg: remember
+            ? `opened ${bundle.replace(/\.app$/, '')} (saved as default)`
+            : `opened ${bundle.replace(/\.app$/, '')}`,
+        });
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `terminal failed: ${(err as Error).message}`,
+        });
+      }
+    },
+  },
+  {
     id: 'view',
     label: 'View as',
     aliases: ['view', 'display', 'layout'],
@@ -948,6 +1055,8 @@ export function ChipPrompt({
   const [hoverReason, setHoverReason] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [localSubdirs, setLocalSubdirs] = useState<string[]>([]);
+  const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
+  const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
   const searchTokenRef = useRef(0); // guards against out-of-order resolves
   const subdirsTokenRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -955,6 +1064,10 @@ export function ChipPrompt({
 
   useEffect(() => {
     void fm.homedir().then(setHomedir);
+    // fm-2du: preload detected terminals + saved preference so the Open
+    // Terminal verb can render its slot immediately without an async gap.
+    void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
+    void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
   }, []);
 
   // Fire Spotlight folder search when a destination slot is active and the
@@ -1062,8 +1175,10 @@ export function ChipPrompt({
       localSubdirs,
       historyLen: activeTab.history.length,
       forwardLen: activeTab.forward.length,
+      defaultTerminal,
+      installedTerminals,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, localSubdirs]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, localSubdirs, defaultTerminal, installedTerminals]);
 
   if (!activeTab || !ctx) return null;
 

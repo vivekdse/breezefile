@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore, DEFAULT_KEYBINDS } from '../store';
+import { fm } from '../bridge';
 import './Settings.css';
 
 type Props = { onClose: () => void };
@@ -8,6 +9,26 @@ export function Settings({ onClose }: Props) {
   const { state, dispatch } = useStore();
   const [editing, setEditing] = useState<string | null>(null);
   const [draftKey, setDraftKey] = useState('');
+  // fm-2du: default-terminal selection. Source of truth lives in main
+  // (userData/terminal.json), so we fetch on open and write back on change.
+  const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
+  const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
+
+  useEffect(() => {
+    void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
+    void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
+  }, []);
+
+  async function onTerminalChange(value: string) {
+    // Empty string is our sentinel for "Ask every time" — clears the pref.
+    const next = value === '' ? null : value;
+    setDefaultTerminal(next);
+    try {
+      await fm.setDefaultTerminal(next);
+    } catch {
+      // Non-fatal: the UI state already reflects intent.
+    }
+  }
 
   // Group bindings by namespace prefix (nav.*, goto.*, etc.) for ranger-style layout.
   const grouped: Record<string, [string, string][]> = {};
@@ -118,6 +139,35 @@ export function Settings({ onClose }: Props) {
               </ul>
             </div>
           ))}
+        </section>
+
+        <section className="settings__section">
+          <h3 className="settings__section-title">Default terminal</h3>
+          <div className="settings__row">
+            <span className="settings__action">Open Terminal here launches</span>
+            <select
+              className="settings__select"
+              value={defaultTerminal ?? ''}
+              onChange={(e) => void onTerminalChange(e.target.value)}
+            >
+              <option value="">Ask every time</option>
+              {installedTerminals.map((bundle) => (
+                <option key={bundle} value={bundle}>
+                  {bundle.replace(/\.app$/, '')}
+                </option>
+              ))}
+              {defaultTerminal && !installedTerminals.includes(defaultTerminal) && (
+                <option value={defaultTerminal}>
+                  {defaultTerminal.replace(/\.app$/, '')} (not detected)
+                </option>
+              )}
+            </select>
+          </div>
+          {installedTerminals.length === 0 && (
+            <div className="settings__empty">
+              No supported terminals detected in /Applications.
+            </div>
+          )}
         </section>
 
         <section className="settings__section">

@@ -161,6 +161,26 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* fm-2du: default-terminal dropdown. Uses the theme-safe composite
+   token --text-on-panel so text stays legible on every palette
+   (see MEMORY.md: feedback_theme_text_tokens). */
+.settings__select {
+  min-width: 180px;
+  padding: 4px var(--sp-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-sm);
+  color: var(--text-on-panel);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  outline: 0;
+}
+
+.settings__select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .settings__group {
   margin-bottom: var(--sp-4);
 }
