@@ -55,6 +55,17 @@ export function FolderList() {
     ctxRef.current.store.openPath(entry.path);
   }, []);
 
+  // fm-w8x — Drag a marked row → drag every marked path. Drag an unmarked
+  // row → drag just that one. Stable callback (reads via ctxRef) so memo on
+  // FileRow keeps holding.
+  const getDragPaths = useCallback((entry: Entry): string[] => {
+    const t = ctxRef.current.tab;
+    if (!t) return [entry.path];
+    const marked = Object.keys(t.marks);
+    if (marked.length > 1 && t.marks[entry.path]) return marked;
+    return [entry.path];
+  }, []);
+
   // fm-l6a — Context-menu handler was previously built inside FileRow using
   // `useStore()` directly. That subscription was the main perf offender:
   // every reducer dispatch re-rendered every row just so each row's closure
@@ -253,6 +264,7 @@ export function FolderList() {
             marks={tab.marks}
             onSelect={selectAt}
             onOpen={doubleOpen}
+            getDragPaths={getDragPaths}
           />
         </div>
       ) : (
@@ -272,6 +284,7 @@ export function FolderList() {
               onDoubleClick={doubleOpen}
               onToggleMark={toggleMark}
               onContextMenu={onContextMenu}
+              getDragPaths={getDragPaths}
             />
           ))}
         </ul>

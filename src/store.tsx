@@ -369,7 +369,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dispatch({
       type: 'updateTab',
       index: stateRef.current.activeTab,
-      patch: { trail: [p], selected: { 0: 0 }, history, forward: [] },
+      // marks are scoped to the cwd (fm-pcs) — wipe on any cwd change so
+      // a later 'delete' doesn't pull in files the user can no longer see.
+      patch: { trail: [p], selected: { 0: 0 }, history, forward: [], marks: {} },
     });
     dispatch({ type: 'pushRecent', path: p });
   }
@@ -383,7 +385,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dispatch({
       type: 'updateTab',
       index: stateRef.current.activeTab,
-      patch: { trail: prev, selected: { 0: 0 }, history, forward },
+      patch: { trail: prev, selected: { 0: 0 }, history, forward, marks: {} },
     });
   }
 
@@ -395,7 +397,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dispatch({
       type: 'updateTab',
       index: stateRef.current.activeTab,
-      patch: { trail: next, selected: { 0: 0 }, history, forward: rest },
+      patch: { trail: next, selected: { 0: 0 }, history, forward: rest, marks: {} },
     });
   }
 
@@ -408,7 +410,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({
         type: 'updateTab',
         index: stateRef.current.activeTab,
-        patch: { trail, selected: { ...tab.selected, [trail.length - 1]: 0 } },
+        patch: { trail, selected: { ...tab.selected, [trail.length - 1]: 0 }, marks: {} },
       });
       dispatch({ type: 'pushRecent', path: p });
       await loadDir(p);

@@ -287,23 +287,23 @@
 }
 
 /* Dark-panel variants — keep the colon-prompt / completions legible on
-   dusk & feminism-night (chrome goes dark, like Titlebar/Pathbar). */
+   dusk & plum (chrome goes dark, like Titlebar/Pathbar). */
 [data-theme='dusk'] .prompt__completions,
-[data-theme='feminism-night'] .prompt__completions {
+[data-theme='plum'] .prompt__completions {
   background: var(--panel);
   border-color: var(--panel-rule, var(--rule));
   color: var(--panel-ink, var(--ink));
 }
 [data-theme='dusk'] .prompt__completion,
-[data-theme='feminism-night'] .prompt__completion {
+[data-theme='plum'] .prompt__completion {
   color: var(--panel-ink, var(--ink));
 }
 [data-theme='dusk'] .prompt__completion-desc,
-[data-theme='feminism-night'] .prompt__completion-desc {
+[data-theme='plum'] .prompt__completion-desc {
   color: var(--panel-muted, var(--muted));
 }
 [data-theme='dusk'] .prompt__completion-chord,
-[data-theme='feminism-night'] .prompt__completion-chord {
+[data-theme='plum'] .prompt__completion-chord {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
   box-shadow: none;

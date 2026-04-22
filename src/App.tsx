@@ -11,6 +11,9 @@ import { Tabbar } from './components/Tabbar';
 import { ModeLine } from './components/ModeLine';
 import { Settings } from './components/Settings';
 import { ChipPrompt } from './components/ChipPrompt';
+import { PasteChip } from './components/PasteChip';
+import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog';
+import { ThemePicker } from './components/ThemePicker';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
 import { useKeyboard } from './useKeyboard';
@@ -26,9 +29,14 @@ function Shell() {
   const { state, activeTab, refreshActive, dispatch, setTab } = useStore();
   const [renaming, setRenaming] = useState<{ entry: Entry; mode: RenameMode } | null>(null);
   const [mkdirOpen, setMkdirOpen] = useState(false);
+  const [touchOpen, setTouchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+  // fm-294 — global confirm dialog. Surfaces request a confirm by
+  // dispatching `fm:confirm` with a ConfirmRequest payload.
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -63,11 +71,27 @@ function Shell() {
     function onMkdir() {
       setMkdirOpen(true);
     }
+    function onTouch() {
+      setTouchOpen(true);
+    }
+    function onTheme() {
+      setThemeOpen(true);
+    }
+    function onConfirm(e: Event) {
+      const detail = (e as CustomEvent).detail as ConfirmRequest | undefined;
+      if (detail) setConfirm(detail);
+    }
     window.addEventListener('fm:openRename', onRename);
     window.addEventListener('fm:openMkdir', onMkdir);
+    window.addEventListener('fm:openTouch', onTouch);
+    window.addEventListener('fm:openTheme', onTheme);
+    window.addEventListener('fm:confirm', onConfirm);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
+      window.removeEventListener('fm:openTouch', onTouch);
+      window.removeEventListener('fm:openTheme', onTheme);
+      window.removeEventListener('fm:confirm', onConfirm);
     };
   }, [activeTab, state.entriesByPath]);
 
@@ -112,6 +136,11 @@ function Shell() {
         <ModeLine />
         <Statusbar />
       </div>
+
+      {/* Floating paste affordance (fm-3km) — visible whenever the user has
+          staged files via Copy / Move verbs or yy / dd chords. Renders above
+          the main content but below modals. */}
+      <PasteChip />
 
       {renaming && (
         <RenameOverlay
@@ -163,6 +192,30 @@ function Shell() {
         />
       )}
 
+      {touchOpen && (
+        <TouchOverlay
+          cwd={tab.trail[tab.trail.length - 1]}
+          onClose={() => setTouchOpen(false)}
+          onCommit={async (name) => {
+            if (name) {
+              const to = pathJoin(tab.trail[tab.trail.length - 1], name);
+              try {
+                await fm.touch(to);
+                await refreshActive();
+                requestAnimationFrame(() => celebratePaths([to]));
+                dispatch({ type: 'setStatus', msg: `created ${name}` });
+              } catch (err) {
+                dispatch({
+                  type: 'setStatus',
+                  msg: `touch failed: ${(err as Error).message}`,
+                });
+              }
+            }
+            setTouchOpen(false);
+          }}
+        />
+      )}
+
       {quickFindOpen && (
         <QuickFindOverlay
           onClose={() => setQuickFindOpen(false)}
@@ -183,7 +236,14 @@ function Shell() {
           onClose={() => dispatch({ type: 'setMode', mode: 'normal' })}
         />
       )}
+      {themeOpen && <ThemePicker onClose={() => setThemeOpen(false)} />}
       {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      {confirm && (
+        <ConfirmDialog
+          {...confirm}
+          onClose={() => setConfirm(null)}
+        />
+      )}
     </div>
     </OverlayCtx.Provider>
   );
@@ -265,6 +325,37 @@ function MkdirOverlay({
           autoFocus
           className="overlay__input"
           value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onCommit(value);
+            else if (e.key === 'Escape') exit();
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TouchOverlay({
+  cwd,
+  onClose,
+  onCommit,
+}: {
+  cwd: string;
+  onClose: () => void;
+  onCommit: (name: string) => void;
+}) {
+  const [value, setValue] = useState('');
+  const { exit, state } = useOverlayExit(onClose);
+  return (
+    <div className="overlay" data-state={state} onClick={exit}>
+      <div className="overlay__box" onClick={(e) => e.stopPropagation()}>
+        <div className="overlay__label">New file in {basename(cwd) || '/'}</div>
+        <input
+          autoFocus
+          className="overlay__input"
+          value={value}
+          placeholder="untitled.txt"
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') onCommit(value);
@@ -398,16 +489,6 @@ function FindPrompt() {
     }
   }
 
-  function goParent() {
-    if (tab.trail.length > 1) {
-      const newTrail = tab.trail.slice(0, -1);
-      const newSel = { ...tab.selected };
-      delete newSel[tab.trail.length - 1];
-      setTab({ trail: newTrail, selected: newSel, filter: '' });
-      dispatch({ type: 'setModeBuffer', buffer: '' });
-    }
-  }
-
   return (
     <div className="prompt">
       <span className="prompt__sigil">/</span>
@@ -426,20 +507,6 @@ function FindPrompt() {
           } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             moveSel(-1);
-          } else if (e.key === 'ArrowRight') {
-            // Only intercept when cursor is at end of input — otherwise let
-            // the input's caret move as normal.
-            const el = e.currentTarget;
-            if (el.selectionStart === el.value.length) {
-              e.preventDefault();
-              openSelected();
-            }
-          } else if (e.key === 'ArrowLeft') {
-            const el = e.currentTarget;
-            if (el.selectionStart === 0) {
-              e.preventDefault();
-              goParent();
-            }
           } else if (e.key === 'Enter') {
             e.preventDefault();
             dispatch({ type: 'setLastFind', query: state.modeBuffer });

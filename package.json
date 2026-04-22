@@ -29,10 +29,11 @@
     "react-dom": "^19.0.0"
   },
   "build": {
-    "appId": "com.vivek.filemanager",
-    "productName": "File Manager",
+    "appId": "com.vivek.breezefile",
+    "productName": "Breeze File",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist",
@@ -40,6 +41,20 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
+      "icon": "build/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSDocumentsFolderUsageDescription": "Breeze File needs access to your Documents folder to browse and manage files.",
+        "NSDownloadsFolderUsageDescription": "Breeze File needs access to your Downloads folder to browse and manage files.",
+        "NSDesktopFolderUsageDescription": "Breeze File needs access to your Desktop folder to browse and manage files.",
+        "NSRemovableVolumesUsageDescription": "Breeze File needs access to removable volumes (USB drives, SD cards) to browse and manage files.",
+        "NSNetworkVolumesUsageDescription": "Breeze File needs access to network volumes to browse and manage files.",
+        "NSAppleEventsUsageDescription": "Breeze File uses Apple Events to open files in other applications and reveal them in Finder.",
+        "NSSystemAdministrationUsageDescription": "Breeze File needs access to system folders to browse and manage files."
+      },
       "target": [
         { "target": "dmg", "arch": ["arm64", "x64"] },
         { "target": "zip", "arch": ["arm64", "x64"] }

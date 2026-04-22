@@ -32,10 +32,24 @@
   outline-offset: -2px;
 }
 
+/* fm-cxn — match .row--dragging treatment: lifted ghost with a dashed
+   accent ring so the tile reads as a placeholder for files in flight. The
+   floating cursor chip carries the icon + name. */
 .tile--dragging {
-  opacity: 0.5;
+  opacity: 0.4;
   background: var(--accent-soft) !important;
   border-color: var(--accent);
+  outline: 1px dashed var(--accent);
+  outline-offset: -3px;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px -10px var(--accent);
+  animation: gpDragPulse var(--dur-xslow) var(--ease-in-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile--dragging {
+    transform: none;
+    animation: none;
+  }
 }
 
 .tile__thumb {

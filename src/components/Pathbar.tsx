@@ -36,18 +36,34 @@ export function Pathbar({ path, onNavigate }: Props) {
       </div>
       <div className="pathbar__spacer" />
       <div className="pathbar__meta">
-        <span className="pathbar__sort">
+        <button
+          type="button"
+          className="pathbar__sort"
+          title="Change sort"
+          onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: 'sort' })}
+        >
           sort: {activeTab?.sortKey}
           {activeTab?.sortReverse ? '↓' : '↑'}
-        </span>
-        <span className="pathbar__view">
+        </button>
+        <button
+          type="button"
+          className="pathbar__view"
+          title="Change view"
+          onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: 'view' })}
+        >
           {activeTab?.viewMode === 'grid' ? '⊞' : '☰'}
-        </span>
+        </button>
       </div>
       <div className="pathbar__search">
-        <span className="pathbar__search-icon" aria-hidden>
+        <button
+          type="button"
+          className="pathbar__search-icon"
+          title="Find (recursive in this folder)"
+          onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: 'find' })}
+          aria-label="Find"
+        >
           ⌕
-        </span>
+        </button>
         <input
           className="pathbar__search-input"
           type="text"

@@ -37,6 +37,12 @@ type Fm = {
   bulkRename: (names: string[]) => Promise<string[]>;
   dragStart: (paths: string[]) => void;
   findFolders: (query: string, limit?: number) => Promise<string[]>;
+  listSubdirs: (cwd: string, depth?: number, limit?: number) => Promise<string[]>;
+  findEntries: (
+    roots: string[],
+    query: string,
+    limit?: number,
+  ) => Promise<Array<{ path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' }>>;
 };
 
 declare global {

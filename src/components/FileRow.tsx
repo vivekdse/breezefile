@@ -18,6 +18,11 @@ type Props = {
   onDoubleClick?: (entry: Entry) => void;
   onToggleMark?: (entry: Entry) => void;
   onContextMenu?: (entry: Entry, e: React.MouseEvent) => void;
+  /** Returns the full set of paths to drag when this row initiates a drag.
+   *  Used so a marked row drags every marked file (not just itself). The
+   *  callback should be a stable ref (useCallback in the parent) so memo
+   *  on FileRow keeps holding. */
+  getDragPaths?: (entry: Entry) => string[];
 };
 
 /**
@@ -170,6 +175,7 @@ function FileRowInner({
   onDoubleClick,
   onToggleMark,
   onContextMenu,
+  getDragPaths,
 }: Props) {
   const ref = useRef<HTMLLIElement>(null);
 
@@ -201,12 +207,21 @@ function FileRowInner({
       draggable
       onDragStart={(e) => {
         e.preventDefault();
-        fm.dragStart([entry.path]);
-        beginDragIndicator([entry.path], e.currentTarget as HTMLElement);
+        const paths = getDragPaths?.(entry) ?? [entry.path];
+        fm.dragStart(paths);
+        beginDragIndicator(paths, e.currentTarget as HTMLElement, {
+          name: entry.name,
+          iconName: iconNameFor(kindFor(entry)),
+          startX: e.clientX,
+          startY: e.clientY,
+        });
       }}
     >
-      {/* Checkbox affordance for selection. Neutral styling — the design-system
-          teammate will own real tokens/visuals via the row__checkbox class. */}
+      {/* Selection checkbox — single, prominent indicator of marked state.
+          Uses a CSS-painted box (not a Unicode glyph) so the filled state can
+          read as a real selection chip. The file-type icon is intentionally
+          NOT swapped out when marked; row tint + checkbox carry the state,
+          and keeping the icon preserves the at-a-glance kind cue. */}
       <span
         className={['row__checkbox', marked && 'row__checkbox--checked'].filter(Boolean).join(' ')}
         role="checkbox"
@@ -217,15 +232,9 @@ function FileRowInner({
           e.stopPropagation();
           onToggleMark?.(entry);
         }}
-      >
-        {marked ? '☑' : '☐'}
-      </span>
+      />
       <span className="row__icon" aria-hidden>
-        {marked ? (
-          <span className="row__icon-mark">✓</span>
-        ) : (
-          <Icon name={iconNameFor(kindFor(entry))} size={15} />
-        )}
+        <Icon name={iconNameFor(kindFor(entry))} size={15} />
       </span>
       <span className="row__name">
         {entry.name}
@@ -252,31 +261,82 @@ export const FileRow = memo(FileRowInner);
 // (b) our window regains focus (user clicked back after dropping elsewhere),
 // (c) pointerup in our window (drop inside our window), or
 // (d) a generous hard-timeout fallback.
-export function beginDragIndicator(paths: string[], sourceEl: HTMLElement) {
+//
+// fm-cxn — also renders a cursor-following "chip" so the user perceives the
+// files being carried. We have to do this manually because the native drag
+// handoff (`fm.dragStart`) requires `e.preventDefault()` on dragstart, which
+// suppresses the browser's built-in drag-image. The chip is pure DOM (no
+// React state) so pointermove stays cheap. `pointer-events: none` keeps it
+// out of the way of drop targets.
+export type DragChipMeta = {
+  name: string;
+  iconName?: IconName;
+  /** Pointer position at dragstart — used for the chip's first paint so it
+   *  appears under the cursor immediately rather than at (0,0). */
+  startX?: number;
+  startY?: number;
+};
+
+export function beginDragIndicator(
+  paths: string[],
+  sourceEl: HTMLElement,
+  meta?: DragChipMeta,
+) {
   endDragIndicator(); // clear any prior session
 
-  const el = document.createElement('div');
-  el.className = 'drag-toast';
   const count = paths.length;
-  const name = paths[0].split('/').pop() ?? paths[0];
-  el.innerHTML = `
-    <span class="drag-toast__glyph">⇣</span>
-    <span class="drag-toast__text">dragging ${
-      count === 1 ? name : `${count} items`
-    } — drop on Slack, Gmail, Finder…</span>
+  const primaryName =
+    meta?.name ?? paths[0].split('/').pop() ?? paths[0];
+  const iconName: IconName = meta?.iconName ?? 'file';
+
+  // Cursor-following chip. SVG <use href="#i-…"> resolves against the
+  // app-wide IconSprite mounted at the React root.
+  const chip = document.createElement('div');
+  chip.className = 'drag-chip';
+  chip.innerHTML = `
+    <span class="drag-chip__icon" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" focusable="false">
+        <use href="#i-${iconName}"></use>
+      </svg>
+    </span>
+    <span class="drag-chip__name">${escapeHtml(truncate(primaryName, 28))}</span>
+    ${count > 1 ? `<span class="drag-chip__badge">+${count - 1}</span>` : ''}
   `;
-  document.body.appendChild(el);
+  // Initial position — try to use the dragstart pointer so the chip doesn't
+  // flash at the top-left corner before the first pointermove.
+  const initX = meta?.startX ?? -9999;
+  const initY = meta?.startY ?? -9999;
+  chip.style.transform = `translate3d(${initX + 12}px, ${initY + 12}px, 0)`;
+  document.body.appendChild(chip);
+
   sourceEl.classList.add('row--dragging');
   sourceEl.classList.add('tile--dragging'); // harmless on non-tile
 
+  // pointermove handler — uses translate3d so it gets a compositor layer.
+  const onMove = (ev: PointerEvent) => {
+    chip.style.transform = `translate3d(${ev.clientX + 12}px, ${ev.clientY + 12}px, 0)`;
+  };
+  window.addEventListener('pointermove', onMove);
+  // dragover also fires during native drag; pointermove may be paused on
+  // some platforms once the OS-native drag is in flight. Using both keeps
+  // the chip glued to the cursor on macOS.
+  const onDragOver = (ev: DragEvent) => {
+    chip.style.transform = `translate3d(${ev.clientX + 12}px, ${ev.clientY + 12}px, 0)`;
+  };
+  window.addEventListener('dragover', onDragOver);
+
   currentDrag = {
-    toast: el,
+    chip,
     source: sourceEl,
     cleanup: () => {
       sourceEl.classList.remove('row--dragging');
       sourceEl.classList.remove('tile--dragging');
-      el.classList.add('drag-toast--out');
-      window.setTimeout(() => el.remove(), 200);
+      chip.classList.add('drag-chip--out');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('dragover', onDragOver);
+      window.setTimeout(() => {
+        chip.remove();
+      }, 200);
     },
   };
 
@@ -289,7 +349,7 @@ export function beginDragIndicator(paths: string[], sourceEl: HTMLElement) {
 }
 
 type DragSession = {
-  toast: HTMLElement;
+  chip: HTMLElement;
   source: HTMLElement;
   cleanup: () => void;
   timer?: number;
@@ -301,6 +361,20 @@ function endDragIndicator() {
   if (currentDrag.timer != null) window.clearTimeout(currentDrag.timer);
   currentDrag.cleanup();
   currentDrag = null;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + '…';
 }
 
 // --- lightweight context menu impl ---

@@ -186,11 +186,18 @@ export function registerIpc() {
 
   ipcMain.handle('app:pickApplication', async () => {
     const win = BrowserWindow.getFocusedWindow();
+    // NB: do NOT pass `treatPackageAsDirectory` — on macOS that lets the
+    // user double-click an .app and drill INTO its bundle, returning a
+    // path like `/Applications/VS Code.app/Contents/MacOS/Electron`.
+    // `open -a` then routes the file to that nested binary, which is what
+    // the user perceived as "Open With goes into a subfolder of the app".
+    // Without the flag, .app bundles are atomic — selectable but not
+    // enterable — which is exactly what we want here.
     const opts: Electron.OpenDialogOptions = {
       title: 'Choose an Application',
       buttonLabel: 'Choose',
       defaultPath: '/Applications',
-      properties: ['openFile', 'treatPackageAsDirectory'],
+      properties: ['openFile'],
       filters: process.platform === 'darwin'
         ? [{ name: 'Applications', extensions: ['app'] }]
         : undefined,
@@ -199,7 +206,14 @@ export function registerIpc() {
       ? await dialog.showOpenDialog(win, opts)
       : await dialog.showOpenDialog(opts);
     if (res.canceled || res.filePaths.length === 0) return null;
-    return res.filePaths[0];
+    const picked = res.filePaths[0];
+    // Belt-and-suspenders: if somehow a non-.app path slips through (other
+    // platforms, future flag changes), reject so the renderer can surface
+    // a clear error rather than spawning `open -a` against a binary.
+    if (process.platform === 'darwin' && !picked.toLowerCase().endsWith('.app')) {
+      throw new Error('Pick a .app bundle (not a file inside one)');
+    }
+    return picked;
   });
 
   ipcMain.handle('bindings:get', async () => {
@@ -291,13 +305,9 @@ export function registerIpc() {
 
   ipcMain.handle('fs:touch', async (_e, p: string) => {
     const abs = expandHome(p);
-    const now = new Date();
-    try {
-      await fs.utimes(abs, now, now);
-    } catch {
-      const fh = await fs.open(abs, 'a');
-      await fh.close();
-    }
+    // `wx` fails if the file already exists — the 'Create file' verb wants
+    // that error surfaced rather than silently re-touching an existing file.
+    await fs.writeFile(abs, '', { flag: 'wx' });
   });
 
   ipcMain.handle('shell:reveal', (_e, p: string) => {
@@ -475,6 +485,169 @@ export function registerIpc() {
       );
     });
   });
+
+  // Recursive BFS subdir walker for the chip prompt's `goto` slot. Returns
+  // absolute paths of subdirectories under `cwd`, level-by-level. Skips
+  // dotfiles and the usual heavyweight names so a `goto` query in ~ doesn't
+  // wander into node_modules / Library and stall the UI. Each level is
+  // batched with Promise.all so wide trees don't serialize.
+  const SUBDIR_SKIP = new Set([
+    'node_modules', '.git', '.svn', '.hg', '__pycache__',
+    '.pytest_cache', '.mypy_cache', '.ruff_cache',
+    '.venv', 'venv', '.cache', '.Trash', 'Library',
+    'DerivedData', '.next', '.nuxt', 'target', 'dist', 'build',
+    '.npm', '.yarn', '.pnpm-store', '.cargo', '.rustup',
+  ]);
+
+  ipcMain.handle(
+    'fs:listSubdirs',
+    async (_e, cwd: string, depth = 3, limit = 120): Promise<string[]> => {
+      const root = expandHome(cwd);
+      const out: string[] = [];
+      let frontier: string[] = [root];
+      for (let level = 0; level < depth && frontier.length > 0 && out.length < limit; level++) {
+        const results = await Promise.all(
+          frontier.map(async (dir) => {
+            try {
+              const ents = await fs.readdir(dir, { withFileTypes: true });
+              const subs: string[] = [];
+              for (const ent of ents) {
+                if (!ent.isDirectory()) continue;
+                if (ent.name.startsWith('.')) continue;
+                if (SUBDIR_SKIP.has(ent.name)) continue;
+                subs.push(path.join(dir, ent.name));
+              }
+              return subs;
+            } catch {
+              return [];
+            }
+          }),
+        );
+        const next: string[] = [];
+        outer: for (const subs of results) {
+          for (const s of subs) {
+            if (out.length >= limit) break outer;
+            out.push(s);
+            next.push(s);
+          }
+        }
+        frontier = next;
+      }
+      return out;
+    },
+  );
+
+  // Recursive entry search for the Find overlay (fm-8wf). Walks the given
+  // root(s) BFS, capping depth + count, then broadens via Spotlight under
+  // $HOME for hits outside the local subtree. Returns files AND folders,
+  // tagged so the renderer can label results "in this folder" / "subfolder"
+  // / "elsewhere". Substring match is on basename only (case-insensitive)
+  // to avoid noisy path-segment matches.
+  const FIND_SKIP = new Set([
+    '.git', 'node_modules', '__pycache__', '.Trash', 'Library',
+    'dist', 'build', 'target', '.next', '.cache', '.venv', 'venv',
+    '.pytest_cache', '.mypy_cache', '.ruff_cache', '.svn', '.hg',
+    '.npm', '.yarn', '.pnpm-store', '.cargo', '.rustup', 'DerivedData',
+  ]);
+
+  type FindHit = { path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' };
+
+  ipcMain.handle(
+    'fs:findEntries',
+    async (_e, roots: string[], query: string, limit = 60): Promise<FindHit[]> => {
+      const q = query.trim().toLowerCase();
+      if (q.length === 0) return [];
+      const out: FindHit[] = [];
+      const seen = new Set<string>();
+
+      // Local BFS — depth ≤ 6, count cap = limit. Skip dotfiles & heavyweights.
+      const MAX_DEPTH = 6;
+      for (const root of roots) {
+        const abs = expandHome(root);
+        let frontier: string[] = [abs];
+        for (let level = 0; level <= MAX_DEPTH && frontier.length > 0 && out.length < limit; level++) {
+          const results = await Promise.all(
+            frontier.map(async (dir) => {
+              try {
+                const ents = await fs.readdir(dir, { withFileTypes: true });
+                const subdirs: string[] = [];
+                const hits: FindHit[] = [];
+                for (const ent of ents) {
+                  if (ent.name.startsWith('.')) continue;
+                  if (FIND_SKIP.has(ent.name)) continue;
+                  const full = path.join(dir, ent.name);
+                  const isDir = ent.isDirectory();
+                  if (ent.name.toLowerCase().includes(q)) {
+                    hits.push({ path: full, name: ent.name, isDir, tier: 'local' });
+                  }
+                  if (isDir) subdirs.push(full);
+                }
+                return { hits, subdirs };
+              } catch {
+                return { hits: [] as FindHit[], subdirs: [] as string[] };
+              }
+            }),
+          );
+          const next: string[] = [];
+          outer: for (const r of results) {
+            for (const h of r.hits) {
+              if (seen.has(h.path)) continue;
+              seen.add(h.path);
+              out.push(h);
+              if (out.length >= limit) break outer;
+            }
+            for (const s of r.subdirs) next.push(s);
+          }
+          frontier = next;
+        }
+        if (out.length >= limit) break;
+      }
+
+      // Broaden with Spotlight if we have headroom (only on darwin).
+      if (out.length < limit && process.platform === 'darwin') {
+        const tokens = q.split(/\s+/).filter((t) => t.length > 0);
+        const nameClauses = tokens
+          .map((t) => `kMDItemDisplayName == "*${t.replace(/"/g, '')}*"c`)
+          .join(' && ');
+        const home = os.homedir();
+        const spotHits = await new Promise<string[]>((resolve) => {
+          execFile(
+            'mdfind',
+            ['-onlyin', home, nameClauses],
+            { maxBuffer: 2 * 1024 * 1024, timeout: 3000 },
+            (err, stdout) => {
+              if (err) { resolve([]); return; }
+              resolve(stdout.split('\n').filter((l) => l.length > 0));
+            },
+          );
+        });
+        for (const p of spotHits) {
+          if (out.length >= limit) break;
+          if (seen.has(p)) continue;
+          // Filter out heavyweight noise paths.
+          const parts = p.split('/');
+          let skip = false;
+          for (const part of parts) {
+            if (FIND_SKIP.has(part)) { skip = true; break; }
+          }
+          if (skip) continue;
+          const name = path.basename(p);
+          if (!name.toLowerCase().includes(q.split(/\s+/)[0])) continue;
+          let isDir = false;
+          try {
+            const st = await fs.lstat(p);
+            isDir = st.isDirectory();
+          } catch {
+            continue;
+          }
+          seen.add(p);
+          out.push({ path: p, name, isDir, tier: 'spotlight' });
+        }
+      }
+
+      return out;
+    },
+  );
 
   ipcMain.on('drag:start', (e, paths: string[]) => {
     if (paths.length === 0) return;

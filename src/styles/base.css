@@ -87,11 +87,11 @@ body {
 :root[data-theme='dusk'] .pathbar::before,
 :root[data-theme='dusk'] .modeline::before,
 :root[data-theme='dusk'] .statusbar::before,
-:root[data-theme='feminism-night'] .titlebar::before,
-:root[data-theme='feminism-night'] .tabbar::before,
-:root[data-theme='feminism-night'] .pathbar::before,
-:root[data-theme='feminism-night'] .modeline::before,
-:root[data-theme='feminism-night'] .statusbar::before {
+:root[data-theme='plum'] .titlebar::before,
+:root[data-theme='plum'] .tabbar::before,
+:root[data-theme='plum'] .pathbar::before,
+:root[data-theme='plum'] .modeline::before,
+:root[data-theme='plum'] .statusbar::before {
   mix-blend-mode: screen;
   opacity: 0.12;
 }

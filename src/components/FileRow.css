@@ -60,12 +60,23 @@
 
 .row--marked {
   background: var(--accent-soft);
+  /* Strong left bar so a marked row reads as 'tagged' from the gutter,
+     even when the row is mid-list and the checkbox is below the fold. */
+  box-shadow: inset 3px 0 0 0 var(--accent);
   /* Soft flash on first mark (fm-7mw) — the chip settles into its
      steady-state background rather than snapping in. */
   animation: gpChipFlash var(--dur-med) var(--ease-out) 1;
 }
+.row--marked .row__name {
+  color: var(--accent);
+  font-weight: 600;
+}
 .row--marked.row--selected {
   background: linear-gradient(180deg, var(--hi), var(--accent-soft));
+  box-shadow:
+    inset 3px 0 0 0 var(--accent),
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 6px 16px -8px var(--accent-soft);
 }
 
 .row--yanked {
@@ -76,15 +87,29 @@
   transition: opacity var(--motion-toggle), font-style var(--motion-toggle);
 }
 
-/* Dragging source (fm-9q6) — slow accent breathing loop instead of a
-   static opacity + bg change. The pulse scans the same accent-soft color
-   as drop targets so the eye reads "this belongs to the drag gesture". */
+/* Dragging source (fm-9q6, fm-cxn) — the row is "lifted off the page"
+   while the file rides the cursor. Stronger than the original 0.55 opacity
+   pulse: the row drops to a faint ghost with a dashed accent border so it
+   reads as "placeholder for files in flight" rather than "selected". The
+   slow gpDragPulse keeps the accent ring breathing. */
 .row--dragging {
-  opacity: 0.55;
+  opacity: 0.4;
   background: var(--accent-soft) !important;
-  box-shadow: inset 0 0 0 1px var(--accent) !important;
-  transition: background var(--motion-select), opacity var(--motion-select);
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 4px 14px -8px var(--accent) !important;
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+  transform: translateY(-1px);
+  transition: background var(--motion-select), opacity var(--motion-select),
+    transform var(--motion-select);
   animation: gpDragPulse var(--dur-xslow) var(--ease-in-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .row--dragging {
+    transform: none;
+    animation: none;
+  }
 }
 
 /* Drop settle (fm-9q6) — add .row--dropped for ~400ms after a successful
@@ -111,26 +136,39 @@
   .row { animation: none; }
 }
 
-/* Checkbox — monochrome-muted when unchecked, on-hue when checked.
-   Class hooks (row__checkbox, row__checkbox--checked) from fm-zi2 remain. */
+/* Checkbox — CSS-painted box. Empty: ghosted square. Checked: filled accent
+   chip with a white check. Always visible (no opacity dance) so the row's
+   selection state reads at-a-glance instead of hiding until hover. */
 .row__checkbox {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  line-height: 1;
-  color: var(--muted);
-  opacity: 0.45;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--rule);
+  background: transparent;
   cursor: pointer;
   user-select: none;
-  text-align: center;
-  transition: opacity var(--motion-hover), color var(--motion-hover);
+  position: relative;
+  transition: border-color var(--motion-hover), background var(--motion-hover);
 }
-.row:hover .row__checkbox,
-.row--marked .row__checkbox,
-.row--selected .row__checkbox {
-  opacity: 1;
+.row:hover .row__checkbox {
+  border-color: var(--muted);
 }
 .row__checkbox--checked {
-  color: var(--accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.row__checkbox--checked::after {
+  content: "";
+  position: absolute;
+  /* white checkmark drawn with two borders to form an L, rotated. */
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(45deg);
 }
 
 /* Icon — small sprite SVG before the name. Default to muted ink; per-type
@@ -148,12 +186,6 @@
 }
 .row__icon svg {
   display: block;
-}
-.row__icon-mark {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  line-height: 1;
-  color: var(--accent);
 }
 .row.row--folder .row__icon {
   color: var(--accent);
@@ -293,6 +325,94 @@
 }
 .drag-toast__text {
   color: var(--ink-2);
+}
+
+/* drag chip (fm-cxn) — follows the cursor for the duration of the drag so
+   the user perceives the files being carried. We position the chip via
+   translate3d on a fixed-positioned element at (0,0); pointer-events:none
+   keeps the OS drag target detection intact. */
+.drag-chip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2100; /* above .drag-toast (z 2000) */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 8px;
+  max-width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.22),
+    0 0 0 4px var(--accent-soft);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  /* translate3d set inline; we transition only opacity/scale on enter+exit
+     so the per-frame transform updates stay cheap. */
+  will-change: transform;
+  animation: drag-chip-in 140ms var(--ease-out, ease-out) both;
+}
+.drag-chip--out {
+  animation: drag-chip-out 160ms var(--ease-out, ease-out) forwards;
+}
+.drag-chip__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: 0 0 22px;
+}
+.drag-chip__icon svg {
+  display: block;
+  stroke: currentColor;
+  fill: none;
+}
+.drag-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--ink);
+  max-width: 200px;
+}
+.drag-chip__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes drag-chip-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes drag-chip-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drag-chip,
+  .drag-chip--out {
+    animation: none;
+  }
 }
 
 @keyframes drag-toast-in {

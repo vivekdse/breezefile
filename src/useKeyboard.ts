@@ -10,6 +10,7 @@ import {
   visibleEntries,
 } from './actions';
 import type { Entry, SortKey, YankMode } from './types';
+import { runPaste } from './clipboard';
 
 // Canonical key name — Ctrl chords prefixed with C-, like ranger's <C-x>.
 function keyName(e: KeyboardEvent): string {
@@ -85,6 +86,15 @@ export function useKeyboard(
 
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      // ⌘F / Ctrl+F → open the 'find' verb (recursive search). ⌘K is the
+      // titlebar's local-filter focus (separate handler in Titlebar.tsx).
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        clearTimer();
+        dispatch({ type: 'setMode', mode: 'command', buffer: 'find' });
         return;
       }
 
@@ -176,7 +186,8 @@ export function useKeyboard(
         //   • F7 — mkdir (function key, not a letter — escape hatch)
         //   • C-r — refresh (modified, not single-letter)
         // Removed letter actions (now reachable via palette): v, f, s, R, a, A, I.
-        '/': () => dispatch({ type: 'setMode', mode: 'find', buffer: '' }),
+        // / opens the recursive find verb in the chip prompt (matches ⌘F).
+        '/': () => dispatch({ type: 'setMode', mode: 'command', buffer: 'find' }),
         n: () => repeatFind(+1),
         N: () => repeatFind(-1),
         ':': () => dispatch({ type: 'setMode', mode: 'command', buffer: '' }),
@@ -258,7 +269,9 @@ export function useKeyboard(
         dd: () => yankSelection('move'),
         dD: () => trashSelection(),
         dF: () => trashSelection(),
-        pp: () => paste(false),
+        // ph = paste here (renamed from pp). 'phl' (hardlink) is also a
+        // valid chord — the engine waits AMBIGUOUS_COMMIT_MS to disambiguate.
+        ph: () => paste(false),
         po: () => paste(true),
         pl: () => pasteLinks('symlink'),
         pL: () => pasteLinks('symlinkRel'),
@@ -305,6 +318,11 @@ export function useKeyboard(
       // without any `:` or modifier. Chord prefix letters (m, d, y, o, w, g,
       // c, p, u, z, t) used to start chord chains; now they open the chip
       // overlay where the same actions live as first-class verbs.
+      //
+      // Exception: when the user has staged files (state.yank), let 'p'
+      // fall through to the chord engine so 'ph' (paste here) still works.
+      // The PasteChip on screen advertises `ph` as the shortcut.
+      const isStagedPasteKey = cur.yank.length > 0 && k === 'p';
       if (
         pending === '' &&
         !e.ctrlKey &&
@@ -312,7 +330,8 @@ export function useKeyboard(
         !e.altKey &&
         k.length === 1 &&
         /^[A-Za-z0-9]$/.test(k) &&
-        !actions[k]
+        !actions[k] &&
+        !isStagedPasteKey
       ) {
         e.preventDefault();
         clearTimer();
@@ -426,17 +445,14 @@ export function useKeyboard(
       function gridArrowHoriz(dir: 1 | -1) {
         moveSelection(dir);
       }
-      // In grid view, up/down step by one row (gridCols entries). If up on
-      // the first row (selected < cols), go to parent folder so the arrow
-      // acts like list-view "left". In list view, behave as ±1.
+      // Arrow keys never OPEN files (Enter does that). But ArrowUp at the
+      // topmost cursor position is treated as "go up a level" — natural
+      // navigation when there's nowhere further to scroll. List view: row 0.
+      // Grid view: any tile in the first row.
       function gridArrowVert(dir: 1 | -1) {
-        if (tab.viewMode !== 'grid') {
-          moveSelection(dir);
-          return;
-        }
         const col = lastCol(tab);
         const cur_ = tab.selected[col] ?? 0;
-        const cols = gridCols();
+        const cols = tab.viewMode === 'grid' ? gridCols() : 1;
         if (dir < 0 && cur_ < cols) {
           goLeft();
           return;
@@ -452,17 +468,18 @@ export function useKeyboard(
         else fm.open(entry.path);
       }
       function goLeft() {
+        // marks are scoped to the cwd (fm-pcs) — wipe on any cwd change.
         if (tab.trail.length === 1) {
           const parent = dirname(tab.trail[0]);
           if (parent !== tab.trail[0]) {
-            setTab({ trail: [parent], selected: { 0: 0 } });
+            setTab({ trail: [parent], selected: { 0: 0 }, marks: {} });
           }
           return;
         }
         const newTrail = tab.trail.slice(0, -1);
         const newSel = { ...tab.selected };
         delete newSel[tab.trail.length - 1];
-        setTab({ trail: newTrail, selected: newSel });
+        setTab({ trail: newTrail, selected: newSel, marks: {} });
       }
       function toggleMark() {
         const col = lastCol(tab);
@@ -532,20 +549,41 @@ export function useKeyboard(
       }
       async function paste(overwrite: boolean) {
         const dst = colPath();
-        if (cur.yank.length === 0) {
-          dispatch({ type: 'setStatus', msg: 'nothing to paste' });
+        const yank = cur.yank;
+        // fm-294 — move is destructive (originals disappear from source).
+        // Confirm before letting pp / po actually run the paste.
+        if (yank.length > 0 && yank[0].mode === 'move') {
+          const names = yank.map((y) => basename(y.path));
+          const head = names.slice(0, 5);
+          const more = names.length > 5 ? names.length - 5 : 0;
+          const detail =
+            head.join(', ') + (more > 0 ? ` and ${more} more` : '');
+          const fromDir = dirname(yank[0].path);
+          const body =
+            `From  ${fromDir}\n  →   ${dst}\n\n${detail}`;
+          window.dispatchEvent(
+            new CustomEvent('fm:confirm', {
+              detail: {
+                title: `Move ${yank.length} file${yank.length === 1 ? '' : 's'}?`,
+                body,
+                confirmLabel: 'Move',
+                destructive: false,
+                confirmShortcuts: ['m'],
+                onConfirm: async () => {
+                  await runPaste({ yank, cwd: dst, overwrite, dispatch, refreshActive });
+                },
+              },
+            }),
+          );
           return;
         }
-        try {
-          await fm.paste(
-            cur.yank.map((y) => ({ src: y.path, dst, mode: y.mode, overwrite })),
-          );
-          if (cur.yank[0].mode === 'move') dispatch({ type: 'setYank', yank: [] });
-          await refreshActive();
-          dispatch({ type: 'setStatus', msg: `pasted ${cur.yank.length} item(s)` });
-        } catch (err) {
-          dispatch({ type: 'setStatus', msg: `paste failed: ${(err as Error).message}` });
-        }
+        await runPaste({
+          yank,
+          cwd: dst,
+          overwrite,
+          dispatch,
+          refreshActive,
+        });
       }
       async function pasteLinks(mode: 'symlink' | 'symlinkRel' | 'hardlink') {
         const dst = colPath();
@@ -563,17 +601,50 @@ export function useKeyboard(
           dispatch({ type: 'setStatus', msg: `link failed: ${(err as Error).message}` });
         }
       }
-      async function trashSelection() {
+      function trashSelection() {
         const paths = selectedPaths();
         if (paths.length === 0) return;
-        try {
-          await fm.trash(paths);
-          setTab({ marks: {} });
-          await refreshActive();
-          dispatch({ type: 'setStatus', msg: `trashed ${paths.length} item(s)` });
-        } catch (err) {
-          dispatch({ type: 'setStatus', msg: `trash failed: ${(err as Error).message}` });
-        }
+        // fm-294 — never delete without confirm. Mirror ChipPrompt's
+        // delete-verb payload so dD / dF show the same dialog as the
+        // 'delete' verb in the chip prompt.
+        const names = paths.map((p) => basename(p));
+        const noun = paths.length === 1 ? `“${names[0]}”` : `${paths.length} files`;
+        const head = names.slice(0, 5);
+        const more = names.length > 5 ? names.length - 5 : 0;
+        const detail =
+          paths.length > 1
+            ? head.join(', ') + (more > 0 ? ` and ${more} more` : '')
+            : '';
+        const body = detail
+          ? `Move ${noun} to the trash. You can restore from Finder.\n${detail}`
+          : `Move ${noun} to the trash. You can restore from Finder.`;
+        window.dispatchEvent(
+          new CustomEvent('fm:confirm', {
+            detail: {
+              title: 'Move to trash?',
+              body,
+              confirmLabel: 'Trash',
+              destructive: true,
+              confirmShortcuts: ['d'],
+              onConfirm: async () => {
+                try {
+                  await fm.trash(paths);
+                  setTab({ marks: {} });
+                  await refreshActive();
+                  dispatch({
+                    type: 'setStatus',
+                    msg: `trashed ${paths.length} item${paths.length === 1 ? '' : 's'}`,
+                  });
+                } catch (err) {
+                  dispatch({
+                    type: 'setStatus',
+                    msg: `trash failed: ${(err as Error).message}`,
+                  });
+                }
+              },
+            },
+          }),
+        );
       }
       function promptRenameCurrent(mode: 'full' | 'beforeExt' | 'append' | 'prepend') {
         const entries = getEntries();

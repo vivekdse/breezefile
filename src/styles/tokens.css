@@ -234,7 +234,7 @@
   --accent-ink: #ffffff;
 }
 
-:root[data-theme='feminism'] {
+:root[data-theme='peony'] {
   --bg: #e7dde4;
   --bg-2: #ded3dc;
   --panel: #f9f5f8;
@@ -256,7 +256,7 @@
   --accent-ink: #ffffff;
 }
 
-:root[data-theme='orchid'] {
+:root[data-theme='clay'] {
   --bg: #f0cfcb;
   --bg-2: #e7c0bc;
   --panel: #fef6f4;
@@ -278,7 +278,7 @@
   --accent-ink: #fde4e0;
 }
 
-:root[data-theme='garden'] {
+:root[data-theme='moss'] {
   --bg: #f2d9cf;
   --bg-2: #e9cbbf;
   --panel: #fcf1ed;
@@ -322,7 +322,7 @@
   --accent-ink: #f1ecdf;
 }
 
-:root[data-theme='sakura'] {
+:root[data-theme='rose'] {
   --bg: #ecd9da;
   --bg-2: #e3cbcd;
   --panel: #fbf4f4;
@@ -371,7 +371,7 @@
 /* Feminism Night — inverted lightness: chrome goes dark plum so the
    blush canvas pops forward. --panel-ink / --panel-muted keep text
    legible on the dark chrome while --ink stays dark-on-light. */
-:root[data-theme='feminism-night'] {
+:root[data-theme='plum'] {
   --bg: #faeff2;
   --bg-2: #f1e0e6;
   --panel: #2a1a30;

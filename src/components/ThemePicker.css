@@ -1,0 +1,117 @@
+/* ThemePicker — modal palette grid (fm-5cv).
+   Visual language matches the old titlebar popover but rendered as a
+   centered overlay panel. Per fm-efh: active swatch label color is
+   adaptive (uses --ink, not --accent) so accent-on-accent-soft never
+   degrades into pink-on-pink. Per fm-312: hover state is a real fill
+   + accent-tinted ring, not just a text underline. */
+
+.theme-picker {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  width: min(440px, 92vw);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 24px 60px -20px rgba(0, 0, 0, 0.36),
+    0 6px 16px -8px rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  animation: theme-picker-in var(--motion-enter);
+}
+
+@keyframes theme-picker-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+.theme-picker__title {
+  margin: 0 0 12px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.theme-picker__title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+.theme-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.theme-picker__sw {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  background: transparent;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+/* fm-312 — clear hover treatment: fill + slight lift + accent tint border. */
+.theme-picker__sw:hover {
+  background: var(--bg);
+  border-color: var(--accent-soft);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px -6px rgba(0, 0, 0, 0.18);
+}
+.theme-picker__sw:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Active = currently-applied palette. fm-efh: keep the label at --ink
+   for guaranteed contrast on every theme; the accent border + check mark
+   carry the "this is the active one" signal. */
+.theme-picker__sw--active {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+
+.theme-picker__sw-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 10px);
+  gap: 3px;
+  flex-shrink: 0;
+}
+.theme-picker__sw-strip i {
+  display: block;
+  height: 26px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.10);
+}
+
+.theme-picker__sw-name {
+  flex: 1;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.005em;
+}
+
+.theme-picker__sw-check {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--accent);
+  font-weight: 700;
+}

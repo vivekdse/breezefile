@@ -1,0 +1,195 @@
+/*
+ * PasteChip — floating paste affordance (fm-3km).
+ *
+ * Sits centered at the bottom of the window above the statusbar while the
+ * user has staged files (via Copy/Move verbs or yy/dd chords). Visual
+ * language borrows from FileRow.css's .drag-chip — same panel + accent +
+ * accent-soft halo — so it reads as part of the same clipboard "act".
+ */
+
+.paste-chip {
+  position: fixed;
+  left: 50%;
+  bottom: 44px; /* sit above the statusbar (~28px) with breathing room */
+  transform: translate(-50%, 0);
+  z-index: 1000; /* above main content; below modals (overlays use 2000+) */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 10px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.22),
+    0 0 0 4px var(--accent-soft);
+  font-family: var(--font-sans);
+  color: var(--ink);
+  animation: paste-chip-in 200ms var(--ease-out, ease-out) both;
+}
+
+.paste-chip--out {
+  animation: paste-chip-out 160ms var(--ease-out, ease-out) forwards;
+}
+
+/* Success state — chip flips to a filled accent pill with a checkmark,
+   message ("Pasted N files"), and a thin progress bar that drains as the
+   auto-dismiss timer counts down. */
+.paste-chip--success {
+  position: fixed;        /* stays positioned by base .paste-chip rule */
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  padding: 8px 16px 10px;
+  gap: 10px;
+  overflow: hidden;       /* clip the progress bar to the pill shape */
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.22),
+    0 0 0 4px var(--accent-soft);
+  animation: paste-chip-success-in 220ms var(--ease-out, ease-out) both;
+}
+
+/* Progress bar at the bottom edge of the pill — drains right→left over
+   the auto-dismiss linger. animation-duration is set inline from the JS
+   constant so the visual matches the timer exactly. */
+.paste-chip__progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.55);
+  transform-origin: left center;
+  animation-name: paste-chip-progress-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  pointer-events: none;
+  border-bottom-left-radius: 999px;
+  border-bottom-right-radius: 999px;
+}
+
+@keyframes paste-chip-progress-drain {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+.paste-chip--success .paste-chip__icon {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+.paste-chip--success .paste-chip__label {
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+@keyframes paste-chip-success-in {
+  0% { transform: translate(-50%, 0) scale(1); }
+  40% { transform: translate(-50%, 0) scale(1.06); }
+  100% { transform: translate(-50%, 0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .paste-chip--success,
+  .paste-chip__progress { animation: none; }
+}
+
+.paste-chip__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 999px;
+  transition: background 120ms var(--ease-out, ease-out);
+}
+
+.paste-chip__action:hover {
+  background: var(--accent-soft);
+}
+
+.paste-chip__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.paste-chip__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  flex: 0 0 22px;
+}
+
+.paste-chip__label {
+  font-feature-settings: 'ss01' on;
+}
+
+.paste-chip__kbd {
+  /* lean on the global kbd styling from ornaments.css; just nudge spacing */
+  margin-left: 2px;
+}
+
+.paste-chip__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms var(--ease-out, ease-out), color 120ms;
+}
+
+.paste-chip__dismiss:hover {
+  background: var(--rule);
+  color: var(--ink);
+}
+
+.paste-chip__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@keyframes paste-chip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes paste-chip-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .paste-chip,
+  .paste-chip--out {
+    animation: none;
+  }
+}

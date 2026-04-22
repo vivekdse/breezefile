@@ -96,6 +96,17 @@
   border: 1px solid var(--rule);
   border-radius: var(--r-sm);
   color: var(--ink-2, var(--ink));
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  transition: background var(--motion-hover), border-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.pathbar__sort:hover,
+.pathbar__view:hover {
+  background: var(--hi);
+  border-color: var(--accent-soft);
+  color: var(--accent);
 }
 
 .pathbar__search {
@@ -118,8 +129,19 @@
 }
 
 .pathbar__search-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
   color: var(--muted);
   font-size: 14px;
+  cursor: pointer;
+  transition: color var(--motion-hover);
+}
+.pathbar__search-icon:hover {
+  color: var(--accent);
 }
 
 .pathbar__search-input {
@@ -134,22 +156,22 @@
   color: var(--muted);
 }
 
-/* Dark-panel variants — when chrome goes dark (dusk, feminism-night),
+/* Dark-panel variants — when chrome goes dark (dusk, plum),
    the inline search field needs a translucent-white background and a
    panel-scoped ink color, mirroring Titlebar's treatment. */
 [data-theme='dusk'] .pathbar__search,
-[data-theme='feminism-night'] .pathbar__search {
+[data-theme='plum'] .pathbar__search {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
 }
 [data-theme='dusk'] .pathbar__search-input,
-[data-theme='feminism-night'] .pathbar__search-input {
+[data-theme='plum'] .pathbar__search-input {
   color: var(--panel-ink, var(--ink));
 }
 [data-theme='dusk'] .pathbar__sort,
 [data-theme='dusk'] .pathbar__view,
-[data-theme='feminism-night'] .pathbar__sort,
-[data-theme='feminism-night'] .pathbar__view {
+[data-theme='plum'] .pathbar__sort,
+[data-theme='plum'] .pathbar__view {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
   color: var(--panel-ink, var(--ink));

@@ -4,7 +4,7 @@
  *
  * All colors flow through theme tokens so Dawn/Dusk/Paper/etc. restyle
  * automatically. Respects --panel-ink for text on chrome where a theme
- * inverts the sidebar luminance (e.g. feminism-night).
+ * inverts the sidebar luminance (e.g. plum).
  */
 
 .sidebar {

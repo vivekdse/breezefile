@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0"   stop-color="#fefaf0"/>
+      <stop offset="0.6" stop-color="#fbf1de"/>
+      <stop offset="1"   stop-color="#f3e2c2"/>
+    </linearGradient>
+    <linearGradient id="fld" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e0795a"/>
+      <stop offset="1" stop-color="#b9492a"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffdf7"/>
+      <stop offset="1" stop-color="#f6ead2"/>
+    </linearGradient>
+    <linearGradient id="paperCurl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5e7c8"/>
+      <stop offset="1" stop-color="#fffdf7"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="14" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.22"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- squircle background -->
+  <rect x="80" y="80" width="864" height="864" rx="200" fill="url(#bg)"/>
+
+  <!-- airy curved breeze strokes, sweeping across the whole canvas -->
+  <g fill="none" stroke="#b9492a" stroke-linecap="round" opacity="0.22">
+    <path d="M 140 760 Q 420 660 720 760 T 920 720" stroke-width="14"/>
+    <path d="M 120 820 Q 380 740 660 820 T 900 800" stroke-width="12"/>
+    <path d="M 160 880 Q 420 820 700 880 T 900 880" stroke-width="10"/>
+  </g>
+
+  <!-- a few light wisps near the top, pulling the eye upward -->
+  <g fill="none" stroke="#b9492a" stroke-linecap="round" opacity="0.18">
+    <path d="M 230 220 Q 360 180 500 220" stroke-width="10"/>
+    <path d="M 300 180 Q 420 150 540 180" stroke-width="8"/>
+  </g>
+
+  <!-- folder, tilted slightly as if floating -->
+  <g transform="translate(520,580) rotate(-5)" filter="url(#soft)">
+    <path d="M -320 -100
+             Q -320 -150 -270 -150
+             L -110 -150
+             Q -86 -150 -70 -130
+             L -38 -90
+             L 280 -90
+             Q 320 -90 320 -50
+             L 320 220
+             Q 320 260 280 260
+             L -280 260
+             Q -320 260 -320 220
+             Z"
+          fill="url(#fld)"/>
+    <path d="M -300 -70 L 300 -70" stroke="#ffffff28" stroke-width="4"/>
+  </g>
+
+  <!-- a single sheet of paper lifting out, curling at the corner (caught by breeze) -->
+  <g transform="translate(560,310) rotate(-12)" filter="url(#soft)">
+    <!-- main sheet -->
+    <path d="M -150 -110
+             L 110 -130
+             Q 150 -132 152 -92
+             L 140 100
+             Q 140 132 110 132
+             L -130 130
+             Q -160 130 -158 90
+             Z"
+          fill="url(#paper)" stroke="#00000018" stroke-width="2"/>
+    <!-- curled top-right corner showing under-side -->
+    <path d="M 60 -125
+             Q 130 -160 152 -90
+             Q 140 -110 90 -100
+             Z"
+          fill="url(#paperCurl)" stroke="#00000020" stroke-width="2"/>
+    <!-- text lines -->
+    <line x1="-110" y1="-50" x2="80"  y2="-58" stroke="#a3391a40" stroke-width="6" stroke-linecap="round"/>
+    <line x1="-110" y1="-10" x2="60"  y2="-18" stroke="#a3391a30" stroke-width="6" stroke-linecap="round"/>
+    <line x1="-110" y1="30"  x2="40"  y2="22"  stroke="#a3391a25" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>

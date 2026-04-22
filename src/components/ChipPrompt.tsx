@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { fm } from '../bridge';
+import { runPaste } from '../clipboard';
 import {
   basename,
   currentEntry,
@@ -32,6 +33,7 @@ import {
   visibleEntries,
 } from '../actions';
 import type { Entry, SortKey } from '../types';
+import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
 import './ChipPrompt.css';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -48,6 +50,7 @@ type Ctx = {
   homedir: string;
   recents: string[];
   searchResults: string[]; // async Spotlight hits for current query
+  localSubdirs: string[]; // BFS subdirectories under cwd (depth ~3)
 };
 
 type Verb =
@@ -64,7 +67,7 @@ type Verb =
   | 'create'
   | 'reveal'
   | 'showHidden'
-  | 'find';
+  | 'theme';
 
 type Option = {
   id: string;
@@ -102,6 +105,7 @@ type ExecApi = {
   dispatch: (a: any) => void;
   openRename: (e: Entry) => void;
   openMkdir: () => void;
+  openTouch: () => void;
   closeOverlay: () => void;
   // Reset palette to the verb picker without closing — used by the 'Select'
   // verb to auto-advance into "now what?" for chain flows like select→copy.
@@ -243,14 +247,24 @@ const VERBS: VerbDef[] = [
       return { ok: true };
     },
     slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c) }],
-    execute: async (c, [dest], api) => {
+    // fm-3km: stage + navigate. The user lands at the destination and a
+    // floating PasteChip prompts them to confirm — they can also keep
+    // navigating into a sub-folder before pasting.
+    execute: (c, [dest], api) => {
       const sources = implicitSources(c);
       const dst = resolveDestination(c, dest);
       if (!dst || sources.length === 0) return;
-      await fm.paste(sources.map((src) => ({ src, dst, mode: 'move' as const })));
+      api.dispatch({
+        type: 'setYank',
+        yank: sources.map((p) => ({ path: p, mode: 'move' as const })),
+      });
       api.setTab({ marks: {} });
-      await api.refreshActive();
-      api.dispatch({ type: 'setStatus', msg: `moved ${sources.length} → ${basename(dst)}` });
+      api.navigateTo(dst);
+      api.dispatch({
+        type: 'setStatus',
+        msg: `staged ${sources.length} to move → ${basename(dst)} · press ph or click Paste`,
+      });
+      api.closeOverlay();
     },
   },
   {
@@ -269,21 +283,35 @@ const VERBS: VerbDef[] = [
       return { ok: true };
     },
     slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c) }],
-    execute: async (c, [dest], api) => {
+    // fm-3km: stage + navigate. Same pattern as Move — the user lands at
+    // the destination, the PasteChip floats above the statusbar, and they
+    // confirm with pp / click. Yank persists across copy paste so they can
+    // drop the same selection in multiple places.
+    execute: (c, [dest], api) => {
       const sources = implicitSources(c);
       const dst = resolveDestination(c, dest);
       if (!dst || sources.length === 0) return;
-      await fm.paste(sources.map((src) => ({ src, dst, mode: 'copy' as const })));
-      await api.refreshActive();
-      api.dispatch({ type: 'setStatus', msg: `copied ${sources.length} → ${basename(dst)}` });
+      api.dispatch({
+        type: 'setYank',
+        yank: sources.map((p) => ({ path: p, mode: 'copy' as const })),
+      });
+      api.navigateTo(dst);
+      api.dispatch({
+        type: 'setStatus',
+        msg: `staged ${sources.length} to copy → ${basename(dst)} · press ph or click Paste`,
+      });
+      api.closeOverlay();
     },
   },
   {
     id: 'paste',
-    label: 'Paste',
-    aliases: ['paste', 'put'],
+    label: 'Paste here',
+    aliases: ['paste', 'paste here', 'put', 'drop', 'place'],
     icon: '↓',
-    describe: (c) => `Paste ${c.yankCount} item(s) here`,
+    describe: (c) =>
+      c.yankCount === 0
+        ? 'Paste (clipboard is empty)'
+        : `Paste ${c.yankCount} item${c.yankCount === 1 ? '' : 's'} here · ph`,
     isAvailable: (c) => {
       if (c.yankCount === 0) {
         return { ok: false, reason: 'Clipboard is empty — copy or cut some files first' };
@@ -291,15 +319,9 @@ const VERBS: VerbDef[] = [
       return { ok: true };
     },
     slots: [],
-    execute: async (_c, _picks, api) => {
-      api.dispatch({ type: 'setStatus', msg: 'pasting…' });
-      // Delegate to existing paste helper by dispatching a status and letting
-      // user invoke pp chord — actually wire directly:
-      // We can't access yank in this closure cleanly; just invoke via keyboard equiv.
-      // Simpler: fire a custom event the store listens for, or just ask user.
-      // For now: call fm.paste with current state.
-      await api.refreshActive();
-    },
+    // Real implementation lives in executeWith()'s special-case for 'paste'
+    // (it needs live yank from the store, which the Ctx snapshot lacks).
+    execute: () => {},
   },
   {
     id: 'sort',
@@ -354,13 +376,43 @@ const VERBS: VerbDef[] = [
       return { ok: true };
     },
     slots: [],
-    execute: async (c, _picks, api) => {
+    execute: (c, _picks, api) => {
       const sources = implicitSources(c);
       if (sources.length === 0) return;
-      await fm.trash(sources);
-      api.setTab({ marks: {} });
-      await api.refreshActive();
-      api.dispatch({ type: 'setStatus', msg: `trashed ${sources.length} item(s)` });
+      const names = sources.map((p) => basename(p));
+      const noun = sources.length === 1 ? `“${names[0]}”` : `${sources.length} files`;
+      window.dispatchEvent(
+        new CustomEvent('fm:confirm', {
+          detail: {
+            title: 'Move to trash?',
+            body: (
+              <>
+                <div>Move {noun} to the trash. You can restore from Finder.</div>
+                {sources.length > 1 && summarizeNamesNode(names)}
+              </>
+            ),
+            confirmLabel: 'Trash',
+            destructive: true,
+            confirmShortcuts: ['d'],
+            onConfirm: async () => {
+              try {
+                await fm.trash(sources);
+                api.setTab({ marks: {} });
+                await api.refreshActive();
+                api.dispatch({
+                  type: 'setStatus',
+                  msg: `trashed ${sources.length} item${sources.length === 1 ? '' : 's'}`,
+                });
+              } catch (err) {
+                api.dispatch({
+                  type: 'setStatus',
+                  msg: `trash failed: ${(err as Error).message}`,
+                });
+              }
+            },
+          },
+        }),
+      );
     },
   },
   {
@@ -380,10 +432,10 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'goto',
-    label: 'Go to',
-    aliases: ['go', 'goto', 'cd', 'navigate', 'open folder'],
+    label: 'Go to / Find',
+    aliases: ['go', 'goto', 'cd', 'navigate', 'open folder', 'find', 'search', 'locate', 'jump'],
     icon: '→',
-    describe: () => 'Go to a folder',
+    describe: () => 'Go to or find a folder (current folder + subfolders first)',
     isAvailable: () => ({ ok: true }),
     slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true) }],
     execute: (c, [dest], api) => {
@@ -462,20 +514,7 @@ const VERBS: VerbDef[] = [
     ],
     execute: (_c, [kind], api) => {
       if (kind === 'folder') api.openMkdir();
-      // 'file' intentionally no-op — wire to a touch overlay if/when it exists
-    },
-  },
-  {
-    id: 'find',
-    label: 'Find',
-    aliases: ['find', 'filter', 'search'],
-    icon: '⌕',
-    describe: () => 'Live-filter the current folder',
-    isAvailable: () => ({ ok: true }),
-    slots: [],
-    execute: (_c, _p, api) => {
-      api.dispatch({ type: 'setMode', mode: 'find', buffer: '' });
-      api.closeOverlay();
+      if (kind === 'file') api.openTouch();
     },
   },
   {
@@ -491,6 +530,19 @@ const VERBS: VerbDef[] = [
       // Since setTab only takes a plain patch, we need the current value; pass it through.
       api.dispatch({ type: 'setStatus', msg: 'toggled hidden files' });
       // Actual toggle is handled at call-site by inspecting current tab in execute wrapper.
+    },
+  },
+  {
+    id: 'theme',
+    label: 'Theme',
+    aliases: ['theme', 'palette', 'color', 'colour', 'restyle', 'skin', 'appearance'],
+    icon: '◐',
+    describe: () => 'Pick a palette',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openTheme'));
     },
   },
 ];
@@ -516,7 +568,38 @@ function destinationOptions(c: Ctx, includeCurrent = false): Option[] {
     opts.push(o);
   };
 
-  // 1) Recents — highest priority, shown first when filter is empty.
+  // 1) Immediate subdirectories of cwd — most relevant for "go to a folder
+  //    I can already see". `into X/` framing carries over from the move/copy
+  //    flows where the action is "drop these into X".
+  const cwdPrefix = c.cwd.endsWith('/') ? c.cwd : c.cwd + '/';
+  const immediate = c.entries.filter((e) => e.kind === 'dir');
+  for (const d of immediate) {
+    push({
+      id: d.path,
+      label: d.name,
+      detail: 'in this folder',
+      available: true,
+    });
+  }
+
+  // 2) Deeper descendants found via BFS (depth ~3). Calculate how many
+  //    levels down each path is from cwd to give the user a rough sense of
+  //    where they're going. Skip any that are already in the immediate set.
+  for (const p of c.localSubdirs) {
+    if (seen.has(p)) continue;
+    const rel = p.startsWith(cwdPrefix) ? p.slice(cwdPrefix.length) : p;
+    const depth = rel.split('/').length;
+    push({
+      id: p,
+      label: basename(p) || p,
+      detail: depth <= 1
+        ? 'in this folder'
+        : `${depth} levels down · ${rel}`,
+      available: true,
+    });
+  }
+
+  // 3) Recents
   for (const p of c.recents.slice(0, 8)) {
     push({
       id: p,
@@ -526,7 +609,7 @@ function destinationOptions(c: Ctx, includeCurrent = false): Option[] {
     });
   }
 
-  // 2) Home-relative common folders
+  // 4) Home-relative common folders
   const commonSubdirs = ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Projects'];
   for (const d of commonSubdirs) {
     push({
@@ -541,7 +624,7 @@ function destinationOptions(c: Ctx, includeCurrent = false): Option[] {
     push({ id: c.cwd, label: `current folder`, detail: prettyPath(c.cwd, c.homedir), available: true });
   }
 
-  // 3) Bookmarks
+  // 5) Bookmarks
   for (const [key, path] of Object.entries(c.bookmarks)) {
     push({
       id: path,
@@ -551,19 +634,9 @@ function destinationOptions(c: Ctx, includeCurrent = false): Option[] {
     });
   }
 
-  // 4) Immediate subdirectories (for "move into X")
-  const subdirs = c.entries.filter((e) => e.kind === 'dir').slice(0, 6);
-  for (const d of subdirs) {
-    push({
-      id: d.path,
-      label: `into ${d.name}/`,
-      detail: 'subfolder here',
-      available: true,
-    });
-  }
-
-  // 5) Async Spotlight search results — appended last; the match scorer
-  //    will pull relevant ones up when the user is filtering.
+  // 6) Async Spotlight search results — last; demoted so a downstream `docs`
+  //    folder beats a Spotlight hit on `Documentation`. The scorer preserves
+  //    this order when scores tie.
   for (const p of c.searchResults) {
     push({
       id: p,
@@ -599,7 +672,9 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
   const [homedir, setHomedir] = useState('');
   const [hoverReason, setHoverReason] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [localSubdirs, setLocalSubdirs] = useState<string[]>([]);
   const searchTokenRef = useRef(0); // guards against out-of-order resolves
+  const subdirsTokenRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const [openRename, setOpenRename] = useState<Entry | null>(null);
 
@@ -636,6 +711,31 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, verb, picks.length]);
 
+  // Load local descendants (BFS, depth ~3) when a destination slot is active.
+  // Fires once per (verb, slot, cwd) — independent of the typed filter, so
+  // the user sees deep folders the moment the slot opens. Out-of-order
+  // resolves are dropped via a token guard.
+  useEffect(() => {
+    const slotIdx = verb ? picks.length : -1;
+    const activeSlot = verb && slotIdx < verb.slots.length ? verb.slots[slotIdx] : null;
+    const isDestinationSlot =
+      activeSlot?.label === 'Where' || activeSlot?.label === 'Destination';
+    if (!isDestinationSlot || !activeTab) {
+      setLocalSubdirs((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    const cwd = activeTab.trail[lastCol(activeTab)];
+    const token = ++subdirsTokenRef.current;
+    void fm.listSubdirs(cwd, 3, 120).then((paths) => {
+      if (subdirsTokenRef.current !== token) return;
+      setLocalSubdirs(paths);
+    }).catch(() => {
+      if (subdirsTokenRef.current !== token) return;
+      setLocalSubdirs((prev) => (prev.length === 0 ? prev : []));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verb, picks.length, activeTab]);
+
   // Sync with initialFilter whenever the overlay is (re)opened with a new
   // pre-filled query. StrictMode's double-mount and any React timing weirdness
   // can otherwise leave the filter state at '' even though we passed 'g'.
@@ -671,8 +771,9 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
       homedir,
       recents: state.recents ?? [],
       searchResults,
+      localSubdirs,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, homedir, searchResults]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, homedir, searchResults, localSubdirs]);
 
   if (!activeTab || !ctx) return null;
 
@@ -746,6 +847,14 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
         // folder" doesn't beat "Webinars" on a "webinar" query).
         score -= Math.min(10, Math.floor(label.length / 20));
 
+        // Source tier bias: local children/descendants outrank recents,
+        // bookmarks, and especially Spotlight when scores are otherwise
+        // close. Read off the detail string we already author in
+        // destinationOptions — keeps the scorer source-agnostic.
+        if (detail.includes('in this folder')) score += 25;
+        else if (detail.includes('levels down')) score += 20;
+        else if (detail.includes('· spotlight')) score -= 15;
+
         return { opt: o, score };
       })
       .filter((s) => s.score >= 0);
@@ -793,19 +902,46 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
     const safeCtx = ctx;
     const safeTab = activeTab;
     try {
-      // Special-case paste: need live yank from store
+      // Special-case paste: need live yank from store. Mirrors PasteChip's
+      // doPaste so the verb and the floating chip behave identically:
+      // confirm before a destructive move; clear yank on copy success too,
+      // since the user explicitly invoked Paste here.
       if (v.id === 'paste') {
-        const dst = safeCtx.cwd;
-        if (state.yank.length === 0) {
+        const cwd = safeCtx.cwd;
+        const yank = state.yank;
+        if (yank.length === 0) {
           dispatch({ type: 'setStatus', msg: 'nothing to paste' });
           onClose();
           return;
         }
-        await fm.paste(state.yank.map((y) => ({ src: y.path, dst, mode: y.mode })));
-        if (state.yank[0].mode === 'move') dispatch({ type: 'setYank', yank: [] });
-        await refreshActive();
-        dispatch({ type: 'setStatus', msg: `pasted ${state.yank.length} item(s)` });
-        onClose();
+        const finish = async () => {
+          await runPaste({ yank, cwd, dispatch, refreshActive });
+          if (yank[0].mode !== 'move') dispatch({ type: 'setYank', yank: [] });
+          onClose();
+        };
+        if (yank[0].mode === 'move') {
+          const names = yank.map((y) => basename(y.path));
+          const head = names.slice(0, 5);
+          const more = names.length > 5 ? names.length - 5 : 0;
+          const detail = head.join(', ') + (more > 0 ? ` and ${more} more` : '');
+          const fromDir = dirname(yank[0].path);
+          const body = `From  ${fromDir}\n  →   ${cwd}\n\n${detail}`;
+          window.dispatchEvent(
+            new CustomEvent('fm:confirm', {
+              detail: {
+                title: `Move ${yank.length} file${yank.length === 1 ? '' : 's'}?`,
+                body,
+                confirmLabel: 'Move',
+                destructive: false,
+                confirmShortcuts: ['m'],
+                onConfirm: finish,
+              },
+            }),
+          );
+          onClose();
+          return;
+        }
+        await finish();
         return;
       }
       // Special-case showHidden (needs current value)
@@ -826,6 +962,10 @@ export function ChipPrompt({ onClose, initialFilter = '' }: { onClose: () => voi
         openMkdir: () => {
           // Fire status and close; App.tsx owns the mkdir overlay — emit an event
           window.dispatchEvent(new CustomEvent('fm:openMkdir'));
+          onClose();
+        },
+        openTouch: () => {
+          window.dispatchEvent(new CustomEvent('fm:openTouch'));
           onClose();
         },
         closeOverlay: onClose,

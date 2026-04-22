@@ -56,6 +56,12 @@ const fm = {
   dragStart: (paths: string[]) => ipcRenderer.send('drag:start', paths),
   findFolders: (query: string, limit?: number) =>
     ipcRenderer.invoke('search:folders', query, limit) as Promise<string[]>,
+  listSubdirs: (cwd: string, depth?: number, limit?: number) =>
+    ipcRenderer.invoke('fs:listSubdirs', cwd, depth, limit) as Promise<string[]>,
+  findEntries: (roots: string[], query: string, limit?: number) =>
+    ipcRenderer.invoke('fs:findEntries', roots, query, limit) as Promise<
+      Array<{ path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' }>
+    >,
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

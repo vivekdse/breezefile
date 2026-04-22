@@ -6,7 +6,7 @@
  * (--ink + Fraunces headline / Inter Tight body), accent-tinted selection
  * (--accent / --accent-soft / --hi), chord pills on --chip, rules via --rule.
  *
- * Dark-panel variants (dusk, feminism-night) follow the same
+ * Dark-panel variants (dusk, plum) follow the same
  * translucent-white-on-dark pattern as Titlebar / Pathbar so the palette
  * always feels like a themed, framed object — a lift of the paper.
  */
@@ -367,67 +367,67 @@
    translucent-white treatment used by Titlebar/Pathbar so inputs,
    chips, and kbd pills stay readable on --panel dark plum. */
 [data-theme='dusk'] .chip-overlay__box,
-[data-theme='feminism-night'] .chip-overlay__box {
+[data-theme='plum'] .chip-overlay__box {
   color: var(--panel-ink, var(--ink));
   border-color: var(--panel-rule, var(--rule));
 }
 
 [data-theme='dusk'] .chip-input-row,
-[data-theme='feminism-night'] .chip-input-row {
+[data-theme='plum'] .chip-input-row {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
 }
 
 [data-theme='dusk'] .chip-input,
-[data-theme='feminism-night'] .chip-input {
+[data-theme='plum'] .chip-input {
   color: var(--panel-ink, var(--ink));
 }
 
 [data-theme='dusk'] .chip-input::placeholder,
-[data-theme='feminism-night'] .chip-input::placeholder,
+[data-theme='plum'] .chip-input::placeholder,
 [data-theme='dusk'] .chip-option--empty,
-[data-theme='feminism-night'] .chip-option--empty {
+[data-theme='plum'] .chip-option--empty {
   color: var(--panel-muted, var(--muted));
 }
 
 [data-theme='dusk'] .chip--placeholder,
-[data-theme='feminism-night'] .chip--placeholder {
+[data-theme='plum'] .chip--placeholder {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
   color: var(--panel-muted, var(--muted));
 }
 
 [data-theme='dusk'] .chip--completed,
-[data-theme='feminism-night'] .chip--completed {
+[data-theme='plum'] .chip--completed {
   background: var(--accent-soft);
   border-color: var(--accent-soft);
   color: var(--accent);
 }
 
 [data-theme='dusk'] .chip-option__label,
-[data-theme='feminism-night'] .chip-option__label {
+[data-theme='plum'] .chip-option__label {
   color: var(--panel-ink, var(--ink));
 }
 
 [data-theme='dusk'] .chip-option__detail,
-[data-theme='feminism-night'] .chip-option__detail {
+[data-theme='plum'] .chip-option__detail {
   color: var(--panel-muted, var(--muted));
 }
 
 [data-theme='dusk'] .chip-badge,
-[data-theme='feminism-night'] .chip-badge {
+[data-theme='plum'] .chip-badge {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
   color: var(--panel-ink, var(--ink));
 }
 
 [data-theme='dusk'] .chip-hints,
-[data-theme='feminism-night'] .chip-hints {
+[data-theme='plum'] .chip-hints {
   color: var(--panel-muted, var(--muted));
 }
 
 [data-theme='dusk'] .chip-hints kbd,
-[data-theme='feminism-night'] .chip-hints kbd {
+[data-theme='plum'] .chip-hints kbd {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--panel-rule, var(--rule));
   color: var(--panel-ink, var(--ink));
@@ -435,11 +435,11 @@
 }
 
 [data-theme='dusk'] .chip-preview,
-[data-theme='feminism-night'] .chip-preview {
+[data-theme='plum'] .chip-preview {
   border-top-color: var(--panel-rule, var(--rule));
 }
 
 [data-theme='dusk'] .chip-preview__text,
-[data-theme='feminism-night'] .chip-preview__text {
+[data-theme='plum'] .chip-preview__text {
   color: var(--panel-muted, var(--muted));
 }

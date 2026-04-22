@@ -12,9 +12,10 @@ type Props = {
   marks: Record<string, true>;
   onSelect: (e: Entry) => void;
   onOpen: (e: Entry) => void;
+  getDragPaths?: (e: Entry) => string[];
 };
 
-export function FileGrid({ entries, selIdx, activeColumn, marks, onSelect, onOpen }: Props) {
+export function FileGrid({ entries, selIdx, activeColumn, marks, onSelect, onOpen, getDragPaths }: Props) {
   return (
     <div className="grid">
       {entries.map((e, i) => (
@@ -25,6 +26,7 @@ export function FileGrid({ entries, selIdx, activeColumn, marks, onSelect, onOpe
           marked={!!marks[e.path]}
           onSelect={onSelect}
           onOpen={onOpen}
+          getDragPaths={getDragPaths}
         />
       ))}
     </div>
@@ -45,12 +47,14 @@ const GridTile = memo(function GridTile({
   marked,
   onSelect,
   onOpen,
+  getDragPaths,
 }: {
   entry: Entry;
   selected: boolean;
   marked: boolean;
   onSelect: (e: Entry) => void;
   onOpen: (e: Entry) => void;
+  getDragPaths?: (e: Entry) => string[];
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
 
@@ -78,8 +82,14 @@ const GridTile = memo(function GridTile({
       draggable
       onDragStart={(e) => {
         e.preventDefault();
-        fm.dragStart([entry.path]);
-        beginDragIndicator([entry.path], e.currentTarget as HTMLElement);
+        const paths = getDragPaths?.(entry) ?? [entry.path];
+        fm.dragStart(paths);
+        beginDragIndicator(paths, e.currentTarget as HTMLElement, {
+          name: entry.name,
+          iconName: iconNameFor(kindFor(entry)),
+          startX: e.clientX,
+          startY: e.clientY,
+        });
       }}
     >
       <div className="tile__thumb">
