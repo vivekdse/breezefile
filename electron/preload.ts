@@ -21,6 +21,10 @@ const fm = {
   reveal: (p: string) => ipcRenderer.invoke('shell:reveal', p),
   openTerminal: (cwd: string) => ipcRenderer.invoke('shell:openTerminal', cwd),
   runCommand: (cwd: string, cmd: string) => ipcRenderer.invoke('shell:runCommand', cwd, cmd),
+  compress: (sources: string[], cwd: string) =>
+    ipcRenderer.invoke('shell:compress', sources, cwd) as Promise<string>,
+  extract: (archives: string[], cwd: string) =>
+    ipcRenderer.invoke('shell:extract', archives, cwd) as Promise<string[]>,
   open: (p: string, appPath?: string) => ipcRenderer.invoke('app:open', p, appPath),
   openWith: (p: string, appName: string) => ipcRenderer.invoke('shell:openWith', p, appName),
   pickApplication: () => ipcRenderer.invoke('app:pickApplication') as Promise<string | null>,

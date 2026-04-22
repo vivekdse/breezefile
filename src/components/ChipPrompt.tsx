@@ -84,7 +84,9 @@ type Verb =
   | 'switchTab'
   | 'newTab'
   | 'closeTab'
-  | 'restoreTab';
+  | 'restoreTab'
+  | 'compress'
+  | 'extract';
 
 type Option = {
   id: string;
@@ -125,6 +127,7 @@ type ExecApi = {
   openRename: (e: Entry) => void;
   openMkdir: () => void;
   openTouch: () => void;
+  focusEntryByName: (name: string) => void;
   closeOverlay: () => void;
   // Reset palette to the verb picker without closing — used by the 'Select'
   // verb to auto-advance into "now what?" for chain flows like select→copy.
@@ -810,7 +813,123 @@ const VERBS: VerbDef[] = [
       window.dispatchEvent(new CustomEvent('fm:openPrivacyHelp'));
     },
   },
+  {
+    id: 'compress',
+    label: 'Compress',
+    aliases: ['compress', 'zip', 'archive'],
+    icon: '🗜',
+    describe: (c) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return 'Zip selection or cursor item';
+      if (sources.length === 1) return `Zip ${basename(sources[0])} → .zip`;
+      return `Zip ${sources.length} items → Archive.zip`;
+    },
+    isAvailable: (c) => {
+      if (c.markedPaths.length === 0 && !c.cursor) {
+        return { ok: false, reason: 'Select files first or put the cursor on one' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    execute: async (c, _p, api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      api.dispatch({ type: 'setStatus', msg: `compressing ${sources.length} item${sources.length === 1 ? '' : 's'}…` });
+      try {
+        const dest = await fm.compress(sources, c.cwd);
+        api.setTab({ marks: {} });
+        await api.refreshActive();
+        api.focusEntryByName(basename(dest));
+        api.dispatch({
+          type: 'setStatus',
+          msg: `Compressed ${sources.length} item${sources.length === 1 ? '' : 's'} → ${basename(dest)}`,
+        });
+      } catch (err) {
+        api.dispatch({ type: 'setStatus', msg: `compress failed: ${(err as Error).message}` });
+      }
+    },
+  },
+  {
+    id: 'extract',
+    label: 'Extract',
+    aliases: ['extract', 'unzip', 'unarchive'],
+    icon: '📂',
+    describe: (c) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return 'Extract archive to sibling folder';
+      if (sources.length === 1) return `Extract ${basename(sources[0])}`;
+      return `Extract ${sources.length} archives`;
+    },
+    isAvailable: (c) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return { ok: false, reason: 'Cursor on an archive first' };
+      for (const p of sources) {
+        if (!isArchivePath(p)) return { ok: false, reason: 'Cursor on an archive first' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    execute: async (c, _p, api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      api.dispatch({
+        type: 'setStatus',
+        msg: `extracting ${sources.length} archive${sources.length === 1 ? '' : 's'}…`,
+      });
+      try {
+        const dests = await fm.extract(sources, c.cwd);
+        api.setTab({ marks: {} });
+        await api.refreshActive();
+        // If the (first) destination is in this cwd, focus it. For multi-
+        // select extracts the first hit is good enough; user can press 'n'
+        // to cycle if needed. dmg mount points live under /Volumes and
+        // won't match this cwd — that's fine, the status bar surfaces them.
+        const first = dests[0];
+        if (first && dirname(first) === c.cwd) {
+          api.focusEntryByName(basename(first));
+        }
+        if (sources.length === 1) {
+          // For .dmg the dest is the mount point under /Volumes.
+          const single = dests[0] ?? '';
+          const isMount = single.startsWith('/Volumes/');
+          api.dispatch({
+            type: 'setStatus',
+            msg: isMount
+              ? `Mounted → ${single}`
+              : `Extracted → ${basename(single)}`,
+          });
+        } else {
+          api.dispatch({
+            type: 'setStatus',
+            msg: `Extracted ${sources.length} archives`,
+          });
+        }
+      } catch (err) {
+        api.dispatch({ type: 'setStatus', msg: `extract failed: ${(err as Error).message}` });
+      }
+    },
+  },
 ];
+
+// Recognized archive extensions for the Extract verb's availability guard.
+// Mirrors the format table in electron/ipc.ts `archiveKind` — keep in sync.
+const ARCHIVE_EXTS = [
+  '.zip',
+  '.tar',
+  '.tar.gz',
+  '.tgz',
+  '.tar.bz2',
+  '.tbz2',
+  '.tar.xz',
+  '.txz',
+  '.7z',
+  '.rar',
+  '.dmg',
+];
+function isArchivePath(p: string): boolean {
+  const lower = p.toLowerCase();
+  return ARCHIVE_EXTS.some((ext) => lower.endsWith(ext));
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Option resolvers shared across verbs
@@ -937,7 +1056,7 @@ export function ChipPrompt({
   initialFilter?: string;
   initialVerbId?: string;
 }) {
-  const { state, dispatch, activeTab, setTab, refreshActive, navigateTo, goBack, goForward } = useStore();
+  const { state, dispatch, activeTab, setTab, refreshActive, navigateTo, goBack, goForward, focusEntryByName } = useStore();
   const [verb, setVerb] = useState<VerbDef | null>(
     () => VERBS.find((v) => v.id === initialVerbId) ?? null,
   );
@@ -1276,6 +1395,7 @@ export function ChipPrompt({
           window.dispatchEvent(new CustomEvent('fm:openTouch'));
           onClose();
         },
+        focusEntryByName,
         closeOverlay: onClose,
         resetToVerbPick: (status) => {
           suppressClose = true;

@@ -412,6 +412,177 @@ export function registerIpc() {
     });
   });
 
+  // ─── Compress / Extract ──────────────────────────────────────────────
+  // Rationale: the verbs must never shell-concat paths (filenames can carry
+  // spaces, quotes, even newlines). Every external tool is invoked with an
+  // explicit argv array via execFile so the OS passes paths untouched.
+  async function uniqueSiblingPath(candidate: string): Promise<string> {
+    // Collision policy: " 2", " 3", … suffix on the stem. Matches the bead
+    // spec and mirrors Finder's duplicate-naming style more closely than
+    // the paren form used by uniquePaste (internal copy/move).
+    try {
+      await fs.access(candidate);
+    } catch {
+      return candidate;
+    }
+    const dir = path.dirname(candidate);
+    const base = path.basename(candidate);
+    // Split off final extension only (e.g. "Archive.zip" → "Archive"+".zip";
+    // "foo.tar.gz" → "foo.tar"+".gz"). For the compress path this is fine
+    // because callers pass a single-extension name. Extract uses this for
+    // destination folders which have no extension at all.
+    const dotIdx = base.lastIndexOf('.');
+    const stem = dotIdx > 0 ? base.slice(0, dotIdx) : base;
+    const ext = dotIdx > 0 ? base.slice(dotIdx) : '';
+    for (let i = 2; i < 1000; i++) {
+      const next = path.join(dir, `${stem} ${i}${ext}`);
+      try {
+        await fs.access(next);
+      } catch {
+        return next;
+      }
+    }
+    throw new Error('too many collisions');
+  }
+
+  function runTool(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+          const e = err as NodeJS.ErrnoException;
+          if (e.code === 'ENOENT') {
+            reject(new Error(`${cmd} not found on PATH`));
+            return;
+          }
+          reject(new Error(stderr?.toString().trim() || err.message));
+          return;
+        }
+        resolve({ stdout: stdout?.toString() ?? '', stderr: stderr?.toString() ?? '' });
+      });
+    });
+  }
+
+  ipcMain.handle(
+    'shell:compress',
+    async (_e, sources: string[], cwd: string): Promise<string> => {
+      if (!sources || sources.length === 0) throw new Error('nothing to compress');
+      const absSources = sources.map(expandHome);
+      const absCwd = expandHome(cwd);
+      const baseName =
+        absSources.length === 1
+          ? `${path.basename(absSources[0])}.zip`
+          : 'Archive.zip';
+      const dest = await uniqueSiblingPath(path.join(absCwd, baseName));
+      // `ditto -c -k --sequesterRsrc --keepParent` preserves HFS metadata
+      // (resource forks, xattrs) and keeps the selected item's folder name
+      // at the archive root — the behavior macOS's Finder "Compress" uses.
+      await runTool('ditto', [
+        '-c',
+        '-k',
+        '--sequesterRsrc',
+        '--keepParent',
+        ...absSources,
+        dest,
+      ]);
+      return dest;
+    },
+  );
+
+  // Archive detection is basename-based (no magic-number sniffing): matches
+  // the renderer's `isAvailable` guard and keeps the IPC boundary simple.
+  function archiveKind(p: string): 'zip' | 'tar' | '7z' | 'rar' | 'dmg' | null {
+    const lower = p.toLowerCase();
+    if (lower.endsWith('.zip')) return 'zip';
+    if (
+      lower.endsWith('.tar') ||
+      lower.endsWith('.tar.gz') ||
+      lower.endsWith('.tgz') ||
+      lower.endsWith('.tar.bz2') ||
+      lower.endsWith('.tbz2') ||
+      lower.endsWith('.tar.xz') ||
+      lower.endsWith('.txz')
+    )
+      return 'tar';
+    if (lower.endsWith('.7z')) return '7z';
+    if (lower.endsWith('.rar')) return 'rar';
+    if (lower.endsWith('.dmg')) return 'dmg';
+    return null;
+  }
+
+  // Strip the final extension (and an inner .tar for compound tarballs) to
+  // derive the destination folder name. Sibling of the archive, not a child
+  // of cwd, because a user might extract something selected from a pin or
+  // Spotlight result that doesn't live in cwd.
+  function archiveStem(p: string): string {
+    const base = path.basename(p);
+    const lower = base.toLowerCase();
+    for (const compound of ['.tar.gz', '.tar.bz2', '.tar.xz']) {
+      if (lower.endsWith(compound)) return base.slice(0, base.length - compound.length);
+    }
+    const dot = base.lastIndexOf('.');
+    return dot > 0 ? base.slice(0, dot) : base;
+  }
+
+  ipcMain.handle(
+    'shell:extract',
+    async (_e, archives: string[], _cwd: string): Promise<string[]> => {
+      if (!archives || archives.length === 0) throw new Error('nothing to extract');
+      const out: string[] = [];
+      for (const raw of archives) {
+        const src = expandHome(raw);
+        const kind = archiveKind(src);
+        if (!kind) throw new Error(`not a recognized archive: ${path.basename(src)}`);
+        if (kind === 'dmg') {
+          // hdiutil attach prints a 3-column tab-separated table; the last
+          // row's 3rd column is the mount point (e.g. "/Volumes/Foo").
+          const { stdout } = await runTool('hdiutil', ['attach', '-plist', src]);
+          // Parse minimal plist — look for <string>/Volumes/...</string>.
+          const m = stdout.match(/<string>(\/Volumes\/[^<]+)<\/string>/);
+          const mount = m ? m[1] : '';
+          if (!mount) throw new Error(`mounted but could not parse mount point`);
+          out.push(mount);
+          continue;
+        }
+        const parentDir = path.dirname(src);
+        const stem = archiveStem(src);
+        const destDir = await uniqueSiblingPath(path.join(parentDir, stem));
+        await fs.mkdir(destDir, { recursive: true });
+        try {
+          if (kind === 'zip') {
+            await runTool('ditto', ['-x', '-k', src, destDir]);
+          } else if (kind === 'tar') {
+            await runTool('tar', ['-xf', src, '-C', destDir]);
+          } else if (kind === '7z') {
+            try {
+              await runTool('7zz', ['x', `-o${destDir}`, '-y', src]);
+            } catch (err) {
+              if ((err as Error).message.includes('not found on PATH')) {
+                throw new Error('Install 7-Zip (brew install sevenzip)');
+              }
+              throw err;
+            }
+          } else if (kind === 'rar') {
+            try {
+              await runTool('unar', ['-o', destDir, src]);
+            } catch (err) {
+              if ((err as Error).message.includes('not found on PATH')) {
+                throw new Error('Install unar (brew install unar)');
+              }
+              throw err;
+            }
+          }
+        } catch (err) {
+          // Clean up the empty dest folder we just created so a failed
+          // extract doesn't pollute the sidebar with a phantom directory.
+          await fs.rm(destDir, { recursive: true, force: true }).catch(() => {});
+          throw err;
+        }
+        out.push(destDir);
+      }
+      return out;
+    },
+  );
+
   // app:openPrivacyPane — deep-link into macOS System Settings → Privacy.
   // For unsigned apps, TCC won't always remember per-folder grants, so giving
   // users a one-click way into "Files and Folders" (per-folder list) or
