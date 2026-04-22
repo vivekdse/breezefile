@@ -1,9 +1,7 @@
-import { useRef } from 'react';
+import { memo, useRef } from 'react';
 import type { Entry } from '../types';
 import { fm } from '../bridge';
 import { formatSize, formatMtime } from '../sort';
-import { useStore } from '../store';
-import { useOverlays } from '../overlays';
 import { Icon, type IconName } from './Icon';
 import './FileRow.css';
 
@@ -16,9 +14,10 @@ type Props = {
   yanked: boolean;
   /** Zero-based row position — wires into the staggered fade-in (fm-z1f). */
   index?: number;
-  onClick?: () => void;
-  onDoubleClick?: () => void;
-  onToggleMark?: () => void;
+  onClick?: (entry: Entry) => void;
+  onDoubleClick?: (entry: Entry) => void;
+  onToggleMark?: (entry: Entry) => void;
+  onContextMenu?: (entry: Entry, e: React.MouseEvent) => void;
 };
 
 /**
@@ -27,7 +26,7 @@ type Props = {
  * categories used by Finder's column view so the left-gutter glyph gives
  * the same at-a-glance signal users expect.
  */
-type Kind =
+export type Kind =
   | 'folder'
   | 'link'
   | 'app'
@@ -40,7 +39,7 @@ type Kind =
   | 'exec'
   | 'file';
 
-function kindFor(e: Entry): Kind {
+export function kindFor(e: Entry): Kind {
   if (e.kind === 'dir') return 'folder';
   if (e.kind === 'link') return 'link';
   const ext = (e.ext ?? '').toLowerCase();
@@ -120,7 +119,7 @@ function typeClassFor(e: Entry): string {
 }
 
 /** Map a kind to its sprite icon name (see src/components/icons.tsx). */
-function iconNameFor(k: Kind): IconName {
+export function iconNameFor(k: Kind): IconName {
   switch (k) {
     case 'folder':
       return 'folder';
@@ -147,7 +146,19 @@ function iconNameFor(k: Kind): IconName {
   }
 }
 
-export function FileRow({
+/**
+ * fm-l6a — Dumb, memoizable row. Does NOT subscribe to the store.
+ *
+ * Previously this component called `useStore()` inside render, so every
+ * reducer dispatch (including selection-moves) re-rendered every visible
+ * row. On large folders (Downloads with hundreds of items) that made
+ * arrow-key navigation visibly laggy. The context-menu handler — the
+ * only reason we needed the store down here — is now built in FolderList
+ * and passed in as a stable prop. Combined with React.memo below, a
+ * selection change now only re-renders the two rows whose `selected`
+ * prop actually flipped.
+ */
+function FileRowInner({
   entry,
   selected,
   activeColumn,
@@ -158,10 +169,9 @@ export function FileRow({
   onClick,
   onDoubleClick,
   onToggleMark,
+  onContextMenu,
 }: Props) {
   const ref = useRef<HTMLLIElement>(null);
-  const { state, activeTab, dispatch, refreshActive } = useStore();
-  const overlays = useOverlays();
 
   const cls = [
     'row',
@@ -173,143 +183,6 @@ export function FileRow({
     .filter(Boolean)
     .join(' ');
 
-  function onContextMenu(e: React.MouseEvent) {
-    e.preventDefault();
-
-    const parentDir = entry.path.slice(0, entry.path.lastIndexOf('/')) || '/';
-    const baseName = entry.path.slice(entry.path.lastIndexOf('/') + 1);
-    const hasClipboard = state.yank.length > 0;
-    const cwd = activeTab?.trail[activeTab.trail.length - 1] ?? parentDir;
-
-    async function doPasteInto(dst: string) {
-      if (state.yank.length === 0) return;
-      try {
-        await fm.paste(
-          state.yank.map((y) => ({ src: y.path, dst, mode: y.mode })),
-        );
-        if (state.yank[0].mode === 'move') dispatch({ type: 'setYank', yank: [] });
-        await refreshActive();
-        dispatch({ type: 'setStatus', msg: `pasted ${state.yank.length} into ${dst.split('/').pop() || '/'}` });
-      } catch (err) {
-        dispatch({ type: 'setStatus', msg: `paste failed: ${(err as Error).message}` });
-      }
-    }
-
-    async function duplicate() {
-      const parsed = baseName.includes('.') ? [baseName.slice(0, baseName.lastIndexOf('.')), baseName.slice(baseName.lastIndexOf('.'))] : [baseName, ''];
-      const [stem, ext] = parsed;
-      let i = 1;
-      // fm.paste handles uniqueness automatically when we do a copy into the same dir.
-      try {
-        await fm.paste([{ src: entry.path, dst: parentDir, mode: 'copy' }]);
-        await refreshActive();
-        dispatch({ type: 'setStatus', msg: `duplicated ${entry.name}` });
-      } catch (err) {
-        dispatch({ type: 'setStatus', msg: `duplicate failed: ${(err as Error).message}` });
-      }
-      void stem; void ext; void i;
-    }
-
-    const items: MenuItem[] = [
-      { label: 'Open', action: () => { fm.open(entry.path); } },
-      ...(entry.kind === 'dir'
-        ? [
-            {
-              label: 'Open in New Tab',
-              action: () => {
-                dispatch({
-                  type: 'newTab',
-                  tab: {
-                    id: crypto.randomUUID(),
-                    trail: [entry.path],
-                    selected: { 0: 0 },
-                    marks: {},
-                    sortKey: 'name',
-                    sortReverse: false,
-                    showHidden: false,
-                    viewMode: 'list',
-                    filter: '',
-                    history: [],
-                    forward: [],
-                  },
-                });
-              },
-            } as MenuItem,
-          ]
-        : []),
-      {
-        label: 'Open With…',
-        submenu: ['Visual Studio Code', 'TextEdit', 'Preview', 'QuickLook', 'Finder'].map(
-          (appName) => ({
-            label: appName,
-            action: () => {
-              if (appName === 'QuickLook') fm.runCommand(cwd, `qlmanage -p "${entry.path.replace(/"/g, '\\"')}" >/dev/null 2>&1 &`);
-              else if (appName === 'Finder') fm.openWith(entry.path, 'Finder');
-              else fm.openWith(entry.path, appName);
-            },
-          }),
-        ),
-      },
-      { label: 'Reveal in Finder', action: () => fm.reveal(entry.path) },
-      { separator: true },
-      {
-        label: 'Cut',
-        action: () => {
-          dispatch({ type: 'setYank', yank: [{ path: entry.path, mode: 'move' }] });
-          dispatch({ type: 'setStatus', msg: `cut ${entry.name}` });
-        },
-      },
-      {
-        label: 'Copy',
-        action: () => {
-          dispatch({ type: 'setYank', yank: [{ path: entry.path, mode: 'copy' }] });
-          dispatch({ type: 'setStatus', msg: `copied ${entry.name}` });
-        },
-      },
-      ...(hasClipboard && entry.kind === 'dir'
-        ? [{ label: `Paste into ${entry.name}`, action: () => doPasteInto(entry.path) } as MenuItem]
-        : []),
-      ...(hasClipboard
-        ? [{ label: 'Paste here', action: () => doPasteInto(parentDir) } as MenuItem]
-        : []),
-      { label: 'Duplicate', action: duplicate },
-      { label: 'Rename…', action: () => overlays.requestRename(entry, 'full') },
-      { separator: true },
-      { label: 'Copy Path', action: () => fm.clipboardWrite(entry.path) },
-      { label: 'Copy Name', action: () => fm.clipboardWrite(entry.name) },
-      { label: 'New Folder Here…', action: () => overlays.requestMkdir() },
-      { separator: true },
-      ...(entry.kind === 'dir'
-        ? [
-            {
-              label: 'Bookmark this Folder…',
-              action: () => {
-                const key = prompt('Bind to key (single char):');
-                if (key && key.length === 1) {
-                  dispatch({ type: 'setBookmark', key, path: entry.path });
-                }
-              },
-            } as MenuItem,
-          ]
-        : []),
-      {
-        label: 'Move to Trash',
-        action: async () => {
-          await fm.trash([entry.path]);
-          await refreshActive();
-        },
-      },
-    ];
-
-    showContextMenu(e.clientX, e.clientY, items);
-  }
-
-  function onDragStart(e: React.DragEvent) {
-    e.preventDefault();
-    fm.dragStart([entry.path]);
-    beginDragIndicator([entry.path], e.currentTarget as HTMLElement);
-  }
-
   return (
     <li
       ref={ref}
@@ -319,11 +192,18 @@ export function FileRow({
       data-path={entry.path}
       /* --row-i feeds the staggered fade-in keyframe (FileRow.css → fm-z1f). */
       style={index != null ? ({ ['--row-i' as string]: index } as React.CSSProperties) : undefined}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
-      onContextMenu={onContextMenu}
+      onClick={onClick ? () => onClick(entry) : undefined}
+      onDoubleClick={onDoubleClick ? () => onDoubleClick(entry) : undefined}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.(entry, e);
+      }}
       draggable
-      onDragStart={onDragStart}
+      onDragStart={(e) => {
+        e.preventDefault();
+        fm.dragStart([entry.path]);
+        beginDragIndicator([entry.path], e.currentTarget as HTMLElement);
+      }}
     >
       {/* Checkbox affordance for selection. Neutral styling — the design-system
           teammate will own real tokens/visuals via the row__checkbox class. */}
@@ -335,7 +215,7 @@ export function FileRow({
         title="Press space to select"
         onClick={(e) => {
           e.stopPropagation();
-          onToggleMark?.();
+          onToggleMark?.(entry);
         }}
       >
         {marked ? '☑' : '☐'}
@@ -363,6 +243,8 @@ export function FileRow({
     </li>
   );
 }
+
+export const FileRow = memo(FileRowInner);
 
 // --- drag indicator ---
 // Keeps a toast + source-row highlight visible for the whole drag session.
@@ -422,12 +304,12 @@ function endDragIndicator() {
 }
 
 // --- lightweight context menu impl ---
-type MenuItem =
+export type MenuItem =
   | { label: string; action: () => void | Promise<void> }
   | { label: string; submenu: MenuItem[] }
   | { separator: true };
 
-function showContextMenu(x: number, y: number, items: MenuItem[]) {
+export function showContextMenu(x: number, y: number, items: MenuItem[]) {
   const existing = document.querySelector('.ctx-menu');
   if (existing) existing.remove();
   const el = document.createElement('div');

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { Entry } from '../types';
 import { fm } from '../bridge';
-import { beginDragIndicator } from './FileRow';
+import { beginDragIndicator, kindFor, iconNameFor } from './FileRow';
+import { Icon } from './Icon';
 import './FileGrid.css';
 
 type Props = {
@@ -22,26 +23,34 @@ export function FileGrid({ entries, selIdx, activeColumn, marks, onSelect, onOpe
           entry={e}
           selected={i === selIdx && activeColumn}
           marked={!!marks[e.path]}
-          onClick={() => onSelect(e)}
-          onDoubleClick={() => onOpen(e)}
+          onSelect={onSelect}
+          onOpen={onOpen}
         />
       ))}
     </div>
   );
 }
 
-function GridTile({
+/**
+ * fm-l6a — Memoized tile. Props are all primitives or stable refs (parent
+ * uses useCallback for onSelect/onOpen), so a selection-only state change
+ * only re-renders the two tiles whose `selected` flipped, not all of them.
+ * Previously the inline `() => onSelect(e)` arrows churned every render,
+ * defeating any downstream memoization; we now pass the stable parent
+ * callbacks straight through and call them with the entry internally.
+ */
+const GridTile = memo(function GridTile({
   entry,
   selected,
   marked,
-  onClick,
-  onDoubleClick,
+  onSelect,
+  onOpen,
 }: {
   entry: Entry;
   selected: boolean;
   marked: boolean;
-  onClick: () => void;
-  onDoubleClick: () => void;
+  onSelect: (e: Entry) => void;
+  onOpen: (e: Entry) => void;
 }) {
   const [thumb, setThumb] = useState<string | null>(null);
 
@@ -64,8 +73,8 @@ function GridTile({
   return (
     <div
       className={cls}
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
+      onClick={() => onSelect(entry)}
+      onDoubleClick={() => onOpen(entry)}
       draggable
       onDragStart={(e) => {
         e.preventDefault();
@@ -75,14 +84,20 @@ function GridTile({
     >
       <div className="tile__thumb">
         {thumb ? (
-          <img src={`file://${thumb}`} alt="" />
+          <img src={fm.fileUrl(thumb)} alt="" />
         ) : (
-          <div className="tile__icon" data-kind={entry.kind}>
-            {entry.kind === 'dir' ? '▸' : entry.ext?.toUpperCase().slice(0, 3) || '·'}
+          <div
+            className={`tile__icon tile__icon--${kindFor(entry)}`}
+            aria-hidden="true"
+          >
+            {entry.ext && entry.kind !== 'dir' && (
+              <span className="tile__ext">{entry.ext.toUpperCase()}</span>
+            )}
+            <Icon name={iconNameFor(kindFor(entry))} size={56} />
           </div>
         )}
       </div>
       <div className="tile__name">{entry.name}</div>
     </div>
   );
-}
+});
