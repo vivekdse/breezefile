@@ -20,6 +20,11 @@ const fm = {
   ) => ipcRenderer.invoke('fs:paste', ops),
   reveal: (p: string) => ipcRenderer.invoke('shell:reveal', p),
   openTerminal: (cwd: string) => ipcRenderer.invoke('shell:openTerminal', cwd),
+  listTerminals: () => ipcRenderer.invoke('shell:listTerminals') as Promise<string[]>,
+  getDefaultTerminal: () =>
+    ipcRenderer.invoke('shell:getDefaultTerminal') as Promise<string | null>,
+  setDefaultTerminal: (bundle: string | null) =>
+    ipcRenderer.invoke('shell:setDefaultTerminal', bundle) as Promise<void>,
   runCommand: (cwd: string, cmd: string) => ipcRenderer.invoke('shell:runCommand', cwd, cmd),
   compress: (sources: string[], cwd: string) =>
     ipcRenderer.invoke('shell:compress', sources, cwd) as Promise<string>,

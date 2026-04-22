@@ -394,14 +394,138 @@ export function registerIpc() {
     shell.showItemInFolder(expandHome(p));
   });
 
-  ipcMain.handle('shell:openTerminal', (_e, cwd: string) => {
-    const abs = expandHome(cwd);
+  // ─── Terminal selection (fm-2du) ───────────────────────────────────
+  // Users pick a terminal once; we persist it next to openwith.json.
+  // Detection scans /Applications and ~/Applications for known bundles.
+  // The launch branches per bundle use execFile/spawn with arg arrays,
+  // never shell concatenation — paths routinely contain spaces.
+  const KNOWN_TERMINALS = [
+    'Terminal.app',
+    'iTerm.app',
+    'WezTerm.app',
+    'Warp.app',
+    'Ghostty.app',
+    'Alacritty.app',
+    'kitty.app',
+  ];
+
+  function terminalPrefPath(): string {
+    return path.join(app.getPath('userData'), 'terminal.json');
+  }
+  async function loadTerminalPref(): Promise<string | null> {
+    try {
+      const raw = await fs.readFile(terminalPrefPath(), 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.bundle === 'string') return parsed.bundle;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  async function saveTerminalPref(bundle: string | null): Promise<void> {
+    const p = terminalPrefPath();
+    await fs.mkdir(path.dirname(p), { recursive: true });
+    if (bundle === null) {
+      await fs.writeFile(p, JSON.stringify({ bundle: null }, null, 2), 'utf8');
+    } else {
+      await fs.writeFile(p, JSON.stringify({ bundle }, null, 2), 'utf8');
+    }
+  }
+
+  async function detectTerminals(): Promise<string[]> {
+    if (process.platform !== 'darwin') return [];
+    const roots = ['/Applications', path.join(os.homedir(), 'Applications')];
+    const found = new Set<string>();
+    for (const root of roots) {
+      try {
+        const names = await fs.readdir(root);
+        for (const n of names) {
+          if (KNOWN_TERMINALS.includes(n)) found.add(n);
+        }
+      } catch {
+        // root may not exist
+      }
+    }
+    // Preserve KNOWN_TERMINALS order for stable UI.
+    return KNOWN_TERMINALS.filter((t) => found.has(t));
+  }
+
+  function launchTerminal(bundle: string, abs: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      execFile('open', ['-a', 'Terminal', abs], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
+      const done = (err: Error | null) => (err ? reject(err) : resolve());
+      switch (bundle) {
+        case 'Terminal.app':
+          execFile('open', ['-a', 'Terminal', abs], done);
+          return;
+        case 'iTerm.app': {
+          // AppleScript: new window, then cd into the target folder. Using
+          // `tell application "iTerm"` opens a window if none exists and
+          // returns to an existing session otherwise.
+          const escaped = abs.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          const script = `tell application "iTerm"
+  activate
+  set newWindow to (create window with default profile)
+  tell current session of newWindow
+    write text "cd \\"${escaped}\\" && clear"
+  end tell
+end tell`;
+          execFile('osascript', ['-e', script], done);
+          return;
+        }
+        case 'WezTerm.app':
+          spawn('wezterm', ['start', '--cwd', abs], { stdio: 'ignore', detached: true })
+            .on('error', reject)
+            .on('spawn', () => resolve());
+          return;
+        case 'Warp.app':
+          execFile('open', ['-a', 'Warp', abs], done);
+          return;
+        case 'Ghostty.app':
+          execFile(
+            'open',
+            ['-na', 'Ghostty', '--args', `--working-directory=${abs}`],
+            done,
+          );
+          return;
+        case 'Alacritty.app':
+          spawn('alacritty', ['--working-directory', abs], { stdio: 'ignore', detached: true })
+            .on('error', reject)
+            .on('spawn', () => resolve());
+          return;
+        case 'kitty.app':
+          spawn('kitty', ['--directory', abs], { stdio: 'ignore', detached: true })
+            .on('error', reject)
+            .on('spawn', () => resolve());
+          return;
+        default:
+          // Fallback to `open -a <Bundle>` for anything unknown.
+          execFile('open', ['-a', bundle.replace(/\.app$/, ''), abs], done);
+      }
     });
+  }
+
+  ipcMain.handle('shell:listTerminals', async (): Promise<string[]> => {
+    return detectTerminals();
+  });
+
+  ipcMain.handle('shell:getDefaultTerminal', async (): Promise<string | null> => {
+    return loadTerminalPref();
+  });
+
+  ipcMain.handle('shell:setDefaultTerminal', async (_e, bundle: string | null) => {
+    await saveTerminalPref(bundle);
+  });
+
+  ipcMain.handle('shell:openTerminal', async (_e, cwd: string) => {
+    const abs = expandHome(cwd);
+    const pref = await loadTerminalPref();
+    if (!pref) {
+      // Structured error so the renderer can open the chooser.
+      const err = new Error('needsSelection');
+      (err as Error & { needsSelection?: boolean }).needsSelection = true;
+      throw err;
+    }
+    await launchTerminal(pref, abs);
   });
 
   ipcMain.handle('shell:runCommand', async (_e, cwd: string, cmd: string) => {
