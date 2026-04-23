@@ -89,6 +89,11 @@ const fm = {
       body: string;
       publishedAt: string | null;
     } | null>,
+  upgrade: () =>
+    ipcRenderer.invoke('app:upgrade') as Promise<{
+      ok: boolean;
+      mode: 'inline' | 'terminal';
+    }>,
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

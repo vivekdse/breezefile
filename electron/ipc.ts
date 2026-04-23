@@ -1165,6 +1165,44 @@ end tell`;
   // renderer's strict CSP doesn't have to whitelist external origins.
   // Returns null on any failure (offline, rate-limited, repo missing) so
   // the caller can fail silently and try again later.
+  // app:upgrade — run `brew upgrade --cask breezefile` on the user's behalf.
+  // brew needs the running .app bundle out of the way before it can replace
+  // it, so we spawn the upgrade detached (with a self-relaunch at the end)
+  // and then quit. If brew isn't at a known path, fall back to Terminal.app
+  // where the user's login shell will resolve brew from their PATH.
+  ipcMain.handle('app:upgrade', async () => {
+    const brewPaths = ['/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
+    const brew = brewPaths.find((p) => existsSync(p)) ?? null;
+    const appName = 'Breeze File';
+    // `|| open -a` so we relaunch even if brew says "already up to date".
+    const cmd = brew
+      ? `${brew} upgrade --cask breezefile; open -a ${JSON.stringify(appName)}`
+      : null;
+
+    try {
+      if (cmd) {
+        spawn('/bin/bash', ['-lc', cmd], {
+          stdio: 'ignore',
+          detached: true,
+        }).unref();
+      } else {
+        // Terminal fallback: user sees progress and can type sudo password.
+        const script = `tell application "Terminal"
+  activate
+  do script "brew upgrade --cask breezefile && open -a ${appName}"
+end tell`;
+        spawn('osascript', ['-e', script], { stdio: 'ignore', detached: true }).unref();
+      }
+    } catch {
+      return { ok: false, mode: brew ? 'inline' : 'terminal' } as const;
+    }
+
+    // Give the spawned shell a beat to start before we quit, so brew can
+    // see the running .app exit cleanly rather than racing our teardown.
+    setTimeout(() => app.quit(), 600);
+    return { ok: true, mode: brew ? 'inline' : 'terminal' } as const;
+  });
+
   ipcMain.handle('app:checkUpdate', async () => {
     try {
       const res = await fetch(

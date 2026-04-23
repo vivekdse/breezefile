@@ -55,42 +55,25 @@
   text-decoration-color: var(--accent-soft);
 }
 
-.update-chip__cmd {
+.update-chip__go {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  border: 1px solid var(--rule);
-  background: var(--bg);
-  color: var(--ink);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
   font: inherit;
+  font-weight: 600;
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 3px 12px;
   cursor: pointer;
-  transition: background var(--motion-hover), border-color var(--motion-hover);
+  transition: filter var(--motion-hover), opacity var(--motion-hover);
 }
-.update-chip__cmd code {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--ink-2, var(--ink));
+.update-chip__go:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
-.update-chip__cmd:hover {
-  background: var(--hi);
-  border-color: var(--accent-soft);
-}
-.update-chip__cmd--copied {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-.update-chip__copy-hint {
-  font-family: var(--font-sans);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.update-chip__cmd--copied .update-chip__copy-hint {
-  color: var(--accent);
+.update-chip__go:disabled {
+  opacity: 0.7;
+  cursor: progress;
 }
 
 .update-chip__dismiss {

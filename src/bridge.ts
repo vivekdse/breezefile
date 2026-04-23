@@ -62,6 +62,7 @@ type Fm = {
     body: string;
     publishedAt: string | null;
   } | null>;
+  upgrade: () => Promise<{ ok: boolean; mode: 'inline' | 'terminal' }>;
 };
 
 declare global {

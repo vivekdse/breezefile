@@ -23,3 +23,7 @@ design-assets/desktop-view-inspirations/
 
 # Compiled Swift helper — built on demand via `make -C native/sharer`.
 native/sharer/sharer
+
+# Local secrets (PATs, tokens). Never commit.
+.env
+.env.local

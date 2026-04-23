@@ -13,6 +13,11 @@ permissions:
 jobs:
   build:
     runs-on: macos-14
+    # Hoist the tap PAT to job-level env so the tap-update step can gate
+    # itself on its presence via `if: env.HOMEBREW_TAP_TOKEN != ''` (GH
+    # Actions can't reference `secrets.*` directly inside `if`).
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,3 +60,42 @@ jobs:
             release/*.zip
             release/shasums.txt
           generate_release_notes: true
+
+      # Keep the Homebrew tap cask in lockstep with this release so that
+      # `brew upgrade --cask breezefile` picks up the new version the moment
+      # the GitHub release goes live (which is also when UpdateChip starts
+      # nudging users about it). Requires a repo secret HOMEBREW_TAP_TOKEN
+      # — a fine-grained PAT with Contents: Write on vivekdse/homebrew-tap.
+      - name: Update Homebrew tap cask
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARM_DMG="release/Breezefile-${VERSION}-arm64.dmg"
+          X64_DMG="release/Breezefile-${VERSION}-x64.dmg"
+          ARM_SHA=$(shasum -a 256 "$ARM_DMG" | awk '{print $1}')
+          X64_SHA=$(shasum -a 256 "$X64_DMG" | awk '{print $1}')
+
+          TAP_DIR="$RUNNER_TEMP/homebrew-tap"
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/vivekdse/homebrew-tap.git" \
+            "$TAP_DIR"
+
+          CASK="$TAP_DIR/Casks/breezefile.rb"
+          mkdir -p "$(dirname "$CASK")"
+          sed \
+            -e "s|VERSION|${VERSION}|g" \
+            -e "s|ARM64SHA|${ARM_SHA}|g" \
+            -e "s|X64SHA|${X64_SHA}|g" \
+            packaging/breezefile.rb.template > "$CASK"
+
+          cd "$TAP_DIR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/breezefile.rb
+          if git diff --cached --quiet; then
+            echo "Cask already up to date."
+            exit 0
+          fi
+          git commit -m "breezefile ${VERSION}"
+          git push origin HEAD

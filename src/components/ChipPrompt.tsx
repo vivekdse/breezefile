@@ -1337,6 +1337,20 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    id: 'upgrade',
+    label: 'Upgrade',
+    aliases: ['upgrade', 'update', 'brew upgrade', 'check for updates', 'new version'],
+    icon: '↑',
+    describe: () => 'Run brew upgrade --cask breezefile and relaunch',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      api.dispatch({ type: 'setStatus', msg: 'Upgrading — the app will relaunch when done…' });
+      void fm.upgrade();
+    },
+  },
+  {
     id: 'compress',
     label: 'Compress',
     aliases: ['compress', 'zip', 'archive'],

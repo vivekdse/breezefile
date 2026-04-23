@@ -42,6 +42,49 @@
   background: var(--chip, rgba(0, 0, 0, 0.04));
 }
 
+.help__update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: -6px -6px 16px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--text-on-panel);
+  text-align: left;
+}
+.help__update-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.help__update-text {
+  flex: 1;
+}
+.help__update-btn {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 3px 12px;
+  cursor: pointer;
+  transition: filter var(--motion-hover), opacity var(--motion-hover);
+}
+.help__update-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.help__update-btn:disabled { opacity: 0.7; cursor: progress; }
+
 .help__eyebrow {
   font-size: 11px;
   font-weight: 600;

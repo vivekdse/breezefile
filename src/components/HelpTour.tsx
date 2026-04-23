@@ -13,7 +13,23 @@
 
 import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
+import { fm } from '../bridge';
 import './HelpTour.css';
+
+declare const __APP_VERSION__: string;
+
+function cmpVersion(a: string, b: string): number {
+  const norm = (v: string) =>
+    v.replace(/^v/, '').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+  const A = norm(a);
+  const B = norm(b);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const da = A[i] ?? 0;
+    const db = B[i] ?? 0;
+    if (da !== db) return da - db;
+  }
+  return 0;
+}
 
 type VerbItem = { name: string; chord?: string; what: string };
 type CatalogSlide = {
@@ -142,6 +158,7 @@ const SLIDES: Slide[] = [
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
       { name: 'settings', chord: '?', what: 'view & rebind keys' },
       { name: 'permissions', what: 'see which protected folders Breeze can read; grant any still missing' },
+      { name: 'upgrade', what: ':upgrade runs brew upgrade --cask breezefile and relaunches' },
     ],
   },
 ];
@@ -149,8 +166,38 @@ const SLIDES: Slide[] = [
 export function HelpTour({ onClose }: { onClose: () => void }) {
   const { exit, state } = useOverlayExit(onClose);
   const [i, setI] = useState(0);
+  const [pendingUpdate, setPendingUpdate] = useState<{ tag: string } | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
 
   const isLast = i === SLIDES.length - 1;
+
+  // Second-chance nudge: if a newer release exists on GitHub, surface it
+  // at the top of the help dialog. UpdateChip also shows this, but users
+  // who dismissed it (or haven't seen it yet) land here when they open
+  // Help — a natural place to discover the :upgrade verb too.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fm.checkUpdate();
+        if (cancelled || !r) return;
+        if (cmpVersion(r.version, __APP_VERSION__) > 0) {
+          setPendingUpdate({ tag: r.tag });
+        }
+      } catch {
+        /* network blip — no banner */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function runUpgrade() {
+    if (upgrading) return;
+    setUpgrading(true);
+    void fm.upgrade();
+  }
 
   function next() {
     if (isLast) exit();
@@ -203,6 +250,23 @@ export function HelpTour({ onClose }: { onClose: () => void }) {
         >
           ×
         </button>
+
+        {pendingUpdate && (
+          <div className="help__update" role="status">
+            <span className="help__update-icon" aria-hidden>↑</span>
+            <span className="help__update-text">
+              Update <b>{pendingUpdate.tag}</b> available
+            </span>
+            <button
+              type="button"
+              className="help__update-btn"
+              onClick={runUpgrade}
+              disabled={upgrading}
+            >
+              {upgrading ? 'Upgrading…' : 'Update now'}
+            </button>
+          </div>
+        )}
 
         <div className="help__eyebrow">
           Help · {i + 1} of {SLIDES.length}

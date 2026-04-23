@@ -3,14 +3,14 @@
  *
  * Polls the GitHub Releases API on mount + every 24 hours via the
  * `fm.checkUpdate` IPC (CSP blocks direct external fetch from the
- * renderer; see electron/ipc.ts → 'app:checkUpdate'). When the latest
- * release tag is newer than the running app version, surfaces a small
- * pill in the bottom-left:
- *
- *   ↑  Update v0.1.2 available  brew upgrade --cask breezefile  ×
+ * renderer; see electron/ipc.ts → 'app:checkUpdate'). When a newer
+ * release tag is found, surfaces a pill in the bottom-left with an
+ * "Update now" button that hands off to `fm.upgrade()` — brew in-place
+ * when available, Terminal.app fallback otherwise. The app quits after
+ * the handoff so brew can replace the .app bundle; the spawned shell
+ * relaunches Breeze File on success.
  *
  * Click the version → opens the release page in the browser.
- * Click the brew command → copies it to the clipboard.
  * Click ×    → dismisses for that specific version (a future, even
  *              newer release will still surface).
  */
@@ -23,7 +23,28 @@ declare const __APP_VERSION__: string;
 
 const STORAGE_KEY = 'fm.updateDismissed';
 const RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 h
-const BREW_CMD = 'brew upgrade --cask breezefile';
+// Dismiss is intentionally non-permanent: if the user still hasn't upgraded
+// after a week, resurface the chip. The `:upgrade` verb is the permanent
+// escape hatch for users who want to run it on demand instead.
+const DISMISS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+type Dismissal = { version: string; until: number };
+
+function readDismissal(): Dismissal | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Dismissal>;
+    if (typeof parsed.version === 'string' && typeof parsed.until === 'number') {
+      return { version: parsed.version, until: parsed.until };
+    }
+    return null;
+  } catch {
+    // Legacy plain-string format or malformed JSON — treat as not dismissed
+    // so the user gets a fresh nudge. Worst case: one extra chip impression.
+    return null;
+  }
+}
 
 type LatestRelease = {
   tag: string;
@@ -48,14 +69,8 @@ function cmpVersion(a: string, b: string): number {
 
 export function UpdateChip() {
   const [latest, setLatest] = useState<LatestRelease | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [dismissedVersion, setDismissedVersion] = useState<string>(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) ?? '';
-    } catch {
-      return '';
-    }
-  });
+  const [upgrading, setUpgrading] = useState(false);
+  const [dismissal, setDismissal] = useState<Dismissal | null>(() => readDismissal());
 
   useEffect(() => {
     let cancelled = false;
@@ -79,25 +94,37 @@ export function UpdateChip() {
   }, []);
 
   if (!latest) return null;
-  if (dismissedVersion === latest.version) return null;
+  if (
+    dismissal &&
+    dismissal.version === latest.version &&
+    dismissal.until > Date.now()
+  ) {
+    return null;
+  }
 
   function dismiss() {
     if (!latest) return;
+    const next: Dismissal = {
+      version: latest.version,
+      until: Date.now() + DISMISS_TTL_MS,
+    };
     try {
-      localStorage.setItem(STORAGE_KEY, latest.version);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch {
       /* noop */
     }
-    setDismissedVersion(latest.version);
+    setDismissal(next);
   }
 
-  async function copyBrewCmd() {
+  async function runUpgrade() {
+    if (upgrading) return;
+    setUpgrading(true);
     try {
-      await navigator.clipboard.writeText(BREW_CMD);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      await fm.upgrade();
+      // On success the main process quits ~600ms later and the spawned
+      // shell relaunches the app. Nothing more to do here.
     } catch {
-      // Clipboard API may be denied — fall through silently.
+      setUpgrading(false);
     }
   }
 
@@ -114,12 +141,12 @@ export function UpdateChip() {
       </button>
       <button
         type="button"
-        className={['update-chip__cmd', copied && 'update-chip__cmd--copied'].filter(Boolean).join(' ')}
-        onClick={copyBrewCmd}
-        title="Copy upgrade command"
+        className="update-chip__go"
+        onClick={runUpgrade}
+        disabled={upgrading}
+        title="Run brew upgrade and relaunch"
       >
-        <code>{BREW_CMD}</code>
-        <span className="update-chip__copy-hint">{copied ? 'copied' : 'copy'}</span>
+        {upgrading ? 'Upgrading…' : 'Update now'}
       </button>
       <button
         type="button"
