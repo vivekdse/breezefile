@@ -1,14 +1,12 @@
 /*
- * Tutorial — interactive walkthrough.
+ * Tutorial — interactive practice.
  *
- * Two intro steps frame the app (you can click like Finder, but the win
- * is keyboard verbs), then five action steps drive the user through a
- * concrete sequence: open Documents, create a folder, open it, create
- * a file, copy it, paste somewhere else. Each action step watches store
- * state and advances only when the user actually performs the action.
- *
- * Manual steps (the intros) advance via a Next button. Auto steps
- * advance via state observation, with a brief celebratory flash.
+ * Pure practice: six short, auto-advancing tasks that walk the user
+ * through navigate → create → open → create → copy → paste. No intro
+ * lecture (the welcome card already framed the product). Each step
+ * watches store state and advances only when the user actually does
+ * the thing, with a brief celebratory flash. Prose is deliberately
+ * terse — a task name and one-line imperative.
  *
  * Visual treatment mirrors the TipsChip — bottom-right, accent border.
  */
@@ -22,7 +20,6 @@ const DONE_KEY = 'fm.tutorial.done';
 const FLASH_MS = 1300;
 
 type StepId =
-  | 'intro'
   | 'gotoTargetFolder'
   | 'createFolder'
   | 'openFolder'
@@ -45,87 +42,65 @@ interface Step {
 
 const STEPS: Step[] = [
   {
-    id: 'intro',
-    title: 'Welcome — two ways to drive',
-    body: (
-      <>
-        You can click around like Finder, and that always works. But the
-        real win is the keyboard: press <em>any letter</em> to open the
-        verb prompt — <kbd>copy</kbd>, <kbd>move</kbd>, <kbd>sort</kbd>,{' '}
-        <kbd>theme</kbd>, <kbd>find</kbd> — type to act. This walkthrough
-        will get you fluent in a minute.
-      </>
-    ),
-    done: '',
-    manual: true,
-  },
-  {
     id: 'gotoTargetFolder',
-    title: (ctx) => `Step 1 — Open ${ctx.target}`,
+    title: (ctx) => `Open ${ctx.target}`,
     body: (ctx) => (
       <>
-        Type <kbd>{ctx.target.toLowerCase()}</kbd> and press{' '}
-        <kbd>Enter</kbd>. The chip ranks current-folder + subfolders +
-        recents above Spotlight, so any folder name works — try your
-        project names later.
+        Type <kbd>{ctx.target.toLowerCase()}</kbd>, press <kbd>Enter</kbd>.
       </>
     ),
-    done: (ctx) => `In ${ctx.target} — nice keystroke.`,
+    done: (ctx) => `In ${ctx.target}.`,
   },
   {
     id: 'createFolder',
-    title: 'Step 2 — Make a practice folder',
+    title: 'Make a folder',
     body: (
       <>
-        Type <kbd>create</kbd>, pick <em>Folder</em>, name it anything
-        (e.g. <kbd>Breeze Practice</kbd>).
+        Type <kbd>create</kbd>, pick <em>Folder</em>, name it.
       </>
     ),
-    done: 'Folder created.',
+    done: 'Made.',
   },
   {
     id: 'openFolder',
-    title: 'Step 3 — Open the new folder',
+    title: 'Open it',
     body: (
       <>
-        Press <kbd>Enter</kbd> on the folder you just made (or
-        double-click).
+        Press <kbd>Enter</kbd> on your new folder.
       </>
     ),
-    done: 'Inside the folder.',
+    done: 'Inside.',
   },
   {
     id: 'createFile',
-    title: 'Step 4 — Drop a file in',
+    title: 'Add a file',
     body: (
       <>
-        Type <kbd>create</kbd>, pick <em>File</em>, name it anything —
-        <kbd>hello.txt</kbd> works.
+        Type <kbd>create</kbd>, pick <em>File</em>, name it.
       </>
     ),
-    done: 'File created.',
+    done: 'Added.',
   },
   {
     id: 'copyFile',
-    title: 'Step 5 — Copy the file',
+    title: 'Copy it',
     body: (
       <>
-        Press <kbd>space</kbd> to mark it, then type <kbd>copy</kbd> and
-        pick a destination outside this folder.
+        <kbd>space</kbd> to mark, then type <kbd>copy</kbd>, pick a
+        destination.
       </>
     ),
-    done: 'Copy staged.',
+    done: 'Staged.',
   },
   {
     id: 'pasteElsewhere',
-    title: 'Step 6 — Paste it',
+    title: 'Paste it',
     body: (
       <>
-        Drill into the destination if you aren't there yet, then type{' '}
-        <kbd>ph</kbd> (paste here) or click the floating chip.
+        In the destination, type <kbd>ph</kbd>.
       </>
     ),
-    done: "You're set. Drag rows out to Slack or Gmail next.",
+    done: "Done — you've got it.",
   },
 ];
 

@@ -141,6 +141,7 @@ const SLIDES: Slide[] = [
       { name: 'shell', chord: '! / s', what: 'run a one-off command in this folder' },
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
       { name: 'settings', chord: '?', what: 'view & rebind keys' },
+      { name: 'permissions', what: 'see which protected folders Breeze can read; grant any still missing' },
     ],
   },
 ];

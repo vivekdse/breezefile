@@ -29,7 +29,8 @@ export type IconName =
   | 'archive'
   | 'app'
   | 'link'
-  | 'file';
+  | 'file'
+  | 'bulb';
 
 export const ICON_NAMES: readonly IconName[] = [
   'search',
@@ -56,6 +57,7 @@ export const ICON_NAMES: readonly IconName[] = [
   'app',
   'link',
   'file',
+  'bulb',
 ] as const;
 
 export function IconSprite() {
@@ -317,6 +319,25 @@ export function IconSprite() {
             strokeWidth="1.5"
             fill="none"
             strokeLinejoin="round"
+          />
+        </g>
+        <g id="i-bulb">
+          {/* Lightbulb — glass envelope + three filament lines + two
+              base ridges + a small "shine" dot at the top. Drawn with
+              strokes so it picks up currentColor like every other icon. */}
+          <path
+            d="M9 18h6 M9.5 20.5h5 M12 3.5v1.2 M5.2 6.6l.9.8 M18.8 6.6l-.9.8"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            fill="none"
+          />
+          <path
+            d="M12 4.8a6 6 0 0 0-3.6 10.8c.6.4 1 1 1 1.7V18h5.2v-.7c0-.7.4-1.3 1-1.7A6 6 0 0 0 12 4.8z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+            fill="none"
           />
         </g>
       </defs>

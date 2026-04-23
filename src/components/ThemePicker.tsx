@@ -5,7 +5,7 @@
  * the highlighted palette; Enter applies; Esc / outside-click / × close.
  */
 import { useEffect, useRef, useState } from 'react';
-import { THEMES, useTheme, type Theme } from '../theme';
+import { THEMES, applyTheme, useTheme, type Theme } from '../theme';
 import { useOverlayExit } from '../useOverlayExit';
 import './ThemePicker.css';
 
@@ -19,6 +19,12 @@ const READY_GUARD_MS = 200;
 
 export function ThemePicker({ onClose }: { onClose: () => void }) {
   const [theme, setTheme] = useTheme();
+  // Live-previewing (arrow-nav or hover) should NOT persist. Only
+  // pick() — the user's explicit commit — goes through setTheme /
+  // chooseTheme. Otherwise scrolling past paper locks it in as the
+  // "chosen" theme, defeating DEFAULT_THEME on future boots.
+  // `preview` just repaints <html data-theme> without touching storage.
+  const preview = (t: Theme) => applyTheme(t);
   const { exit, state } = useOverlayExit(onClose);
 
   // Cursor index for keyboard nav. Start on the currently-applied palette.
@@ -45,10 +51,12 @@ export function ThemePicker({ onClose }: { onClose: () => void }) {
 
   function exitAndRevert() {
     if (!readyRef.current) return;
-    setTheme(initialThemeRef.current);
+    // Transient repaint only — do not persist the revert.
+    preview(initialThemeRef.current);
     exit();
   }
   function pick(t: Theme) {
+    // Explicit commit — persist via chooseTheme (through setTheme).
     setTheme(t);
     exit();
   }
@@ -82,7 +90,7 @@ export function ThemePicker({ onClose }: { onClose: () => void }) {
       e.preventDefault();
       setCursor(next);
       const t = THEMES[next];
-      if (t) setTheme(t.id);
+      if (t) preview(t.id);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

@@ -77,6 +77,10 @@ const fm = {
     >,
   openPrivacyPane: (pane?: 'files' | 'fullDisk') =>
     ipcRenderer.invoke('shell:openPrivacyPane', pane) as Promise<void>,
+  primePermissions: () =>
+    ipcRenderer.invoke('permissions:prime') as Promise<
+      Record<string, 'granted' | 'denied' | 'missing'>
+    >,
   checkUpdate: () =>
     ipcRenderer.invoke('app:checkUpdate') as Promise<{
       tag: string;

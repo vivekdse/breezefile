@@ -717,6 +717,39 @@ end tell`;
   // users a one-click way into "Files and Folders" (per-folder list) or
   // "Full Disk Access" (the nuclear allow-everything switch) is the cheapest
   // permission UX without app signing.
+  // permissions:prime — trigger the per-folder TCC prompts in sequence
+  // so the user sees them with Breeze focused (just after dismissing the
+  // Welcome notice), rather than being surprised later during navigation.
+  // macOS only prompts once per (app, folder); a denial sticks, so the
+  // returned map lets the renderer offer a recovery path if needed.
+  ipcMain.handle('permissions:prime', async () => {
+    const result: Record<string, 'granted' | 'denied' | 'missing'> = {};
+    if (process.platform !== 'darwin') return result;
+    const home = os.homedir();
+    const targets: Array<[string, string]> = [
+      ['desktop', path.join(home, 'Desktop')],
+      ['documents', path.join(home, 'Documents')],
+      ['downloads', path.join(home, 'Downloads')],
+      ['icloud', path.join(home, 'Library/Mobile Documents/com~apple~CloudDocs')],
+    ];
+    // Serialize so macOS shows prompts one at a time in a predictable order.
+    // Use opendir+close (not readdir) — we just need to trigger the TCC
+    // check, not enumerate. readdir on Downloads/Documents/iCloud can take
+    // many seconds (iCloud materializes placeholders), hanging this IPC.
+    for (const [key, dir] of targets) {
+      try {
+        const handle = await fs.opendir(dir);
+        await handle.close();
+        result[key] = 'granted';
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') result[key] = 'missing';
+        else result[key] = 'denied';
+      }
+    }
+    return result;
+  });
+
   ipcMain.handle('shell:openPrivacyPane', async (_e, pane: 'files' | 'fullDisk' = 'files') => {
     if (process.platform !== 'darwin') return;
     // System Settings (macOS Ventura 13+) silently ignores the legacy

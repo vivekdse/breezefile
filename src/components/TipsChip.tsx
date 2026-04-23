@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { shouldShowWelcome } from './Welcome';
+import { Icon } from './Icon';
 import './TipsChip.css';
 
 const ENABLED_KEY = 'fm.tipsEnabled';
@@ -28,7 +29,6 @@ const TIPS: { lead: string; type?: string; tail?: string }[] = [
   { lead: 'Press', type: 'space', tail: 'to mark a file (then type a verb)' },
   { lead: 'Press', type: '⌘F', tail: 'for recursive search' },
   { lead: 'Drag any row out to Slack, Gmail, or Finder' },
-  { lead: 'Confirm prompts accept', type: 'Y / N' },
   { lead: 'Arrow Up on the first row goes to the parent folder' },
   { lead: 'To run this walkthrough again, type', type: 'tutorial' },
   { lead: 'To turn these tips off, type', type: 'tips' },
@@ -52,14 +52,25 @@ export function setTipsEnabled(on: boolean): void {
   window.dispatchEvent(new CustomEvent('fm:tipsToggled'));
 }
 
-export function TipsChip() {
+/**
+ * Props:
+ *   variant='floating' (default) — bottom-right chip, only visible once
+ *     the Welcome card has been dismissed. The regular app experience.
+ *   variant='centered'           — centered pill, for embedding under
+ *     the Welcome card so first-run users get a hint while they read.
+ *     No × close button; no welcome-gone gating.
+ */
+export function TipsChip({ variant = 'floating' }: { variant?: 'floating' | 'centered' } = {}) {
   // Permanent on/off via the `tips` verb. Default on.
   const [enabled, setEnabled] = useState<boolean>(() => isTipsEnabled());
   // Session dismiss — × hides the chip until the next launch but doesn't
-  // touch the persistent enabled flag.
+  // touch the persistent enabled flag. Centered variant has no ×.
   const [hiddenForSession, setHiddenForSession] = useState(false);
-  // Don't show while the Welcome card is up. Watch for its dismissal.
-  const [welcomeGone, setWelcomeGone] = useState<boolean>(() => !shouldShowWelcome());
+  // Floating variant waits for the welcome card to close; centered
+  // variant is shown AS PART OF the welcome card, so it skips the gate.
+  const [welcomeGone, setWelcomeGone] = useState<boolean>(() =>
+    variant === 'centered' ? true : !shouldShowWelcome(),
+  );
   const [idx, setIdx] = useState<number>(() =>
     Math.floor(Math.random() * TIPS.length),
   );
@@ -77,8 +88,9 @@ export function TipsChip() {
     return () => window.removeEventListener('fm:tipsToggled', onToggle);
   }, []);
 
-  // Watch for the Welcome card closing.
+  // Watch for the Welcome card closing. Centered variant never waits.
   useEffect(() => {
+    if (variant === 'centered') return;
     if (welcomeGone) return;
     function check() {
       if (!shouldShowWelcome()) setWelcomeGone(true);
@@ -90,7 +102,7 @@ export function TipsChip() {
       window.removeEventListener('fm:welcomeDismissed', check);
       window.clearInterval(id);
     };
-  }, [welcomeGone]);
+  }, [welcomeGone, variant]);
 
   const visible = enabled && !hiddenForSession && welcomeGone;
 
@@ -106,9 +118,10 @@ export function TipsChip() {
   if (!visible) return null;
   const tip = TIPS[idx];
 
+  const centered = variant === 'centered';
   return (
     <div
-      className="tips-chip"
+      className={'tips-chip' + (centered ? ' tips-chip--centered' : '')}
       role="status"
       aria-label="Tip"
       onMouseEnter={() => {
@@ -119,7 +132,7 @@ export function TipsChip() {
       }}
     >
       <span className="tips-chip__icon" aria-hidden>
-        Tip
+        <Icon name="bulb" />
       </span>
       <span key={idx} className="tips-chip__text">
         {tip.lead}
@@ -131,15 +144,17 @@ export function TipsChip() {
         )}
         {tip.tail && <> {tip.tail}</>}
       </span>
-      <button
-        type="button"
-        className="tips-chip__dismiss"
-        onClick={() => setHiddenForSession(true)}
-        aria-label="Hide tips for this session"
-        title="Hide for this session — type `tips` to toggle"
-      >
-        ×
-      </button>
+      {!centered && (
+        <button
+          type="button"
+          className="tips-chip__dismiss"
+          onClick={() => setHiddenForSession(true)}
+          aria-label="Hide tips for this session"
+          title="Hide for this session — type `tips` to toggle"
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }

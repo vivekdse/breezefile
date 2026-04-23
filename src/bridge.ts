@@ -54,6 +54,7 @@ type Fm = {
     limit?: number,
   ) => Promise<Array<{ path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' }>>;
   openPrivacyPane: (pane?: 'files' | 'fullDisk') => Promise<void>;
+  primePermissions: () => Promise<Record<string, 'granted' | 'denied' | 'missing'>>;
   checkUpdate: () => Promise<{
     tag: string;
     version: string;

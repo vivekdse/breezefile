@@ -1,30 +1,67 @@
 /*
- * PrivacyHelpDialog — instructional pre-step before deep-linking into
- * macOS System Settings → Privacy & Security.
+ * PrivacyHelpDialog — per-folder permission status + grant trigger.
  *
- * The privacy pane lists ~30 items; first-time users don't know which
- * to tap or what comes next. This dialog walks through it before we
- * hand them off to the OS:
+ * Opened by the `:privacy` / `:permissions` verb. Shows whether Breeze has
+ * been granted access to each TCC-protected location, and re-runs the
+ * prime flow so missing grants prompt the user right now instead of
+ * punting them to System Settings.
  *
- *   1. Open System Settings → Privacy & Security
- *   2. Scroll to Full Disk Access (or Files and Folders)
- *   3. Click + → pick Breeze File from /Applications → toggle on
- *   4. Restart Breeze File
- *
- * "Open Settings" button fires fm.openPrivacyPane and dismisses.
+ * macOS TCC rule that shapes this UI: a folder that was denied once will
+ * NOT re-prompt — it can only be flipped in System Settings. So the
+ * "Open System Settings" fallback only appears if something is denied.
  */
 
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fm } from '../bridge';
 import { useOverlayExit } from '../useOverlayExit';
 import './PrivacyHelpDialog.css';
 
+type Status = 'granted' | 'denied' | 'missing' | 'checking';
+
+const FOLDERS: Array<{ key: string; name: string; path: string }> = [
+  { key: 'desktop', name: 'Desktop', path: '~/Desktop' },
+  { key: 'documents', name: 'Documents', path: '~/Documents' },
+  { key: 'downloads', name: 'Downloads', path: '~/Downloads' },
+  { key: 'icloud', name: 'iCloud Drive', path: '~/Library/Mobile Documents' },
+];
+
+function statusLabel(s: Status): string {
+  switch (s) {
+    case 'granted': return 'Allowed';
+    case 'denied': return 'Denied';
+    case 'missing': return 'Not present';
+    case 'checking': return 'Checking…';
+  }
+}
+
 export function PrivacyHelpDialog({ onClose }: { onClose: () => void }) {
   const { exit, state } = useOverlayExit(onClose);
+  const [statuses, setStatuses] = useState<Record<string, Status>>(() =>
+    Object.fromEntries(FOLDERS.map((f) => [f.key, 'checking'])),
+  );
+  const [busy, setBusy] = useState(false);
+
+  const check = useCallback(async () => {
+    setBusy(true);
+    try {
+      const res = await fm.primePermissions();
+      const next: Record<string, Status> = {};
+      for (const f of FOLDERS) {
+        next[f.key] = (res[f.key] as Status) ?? 'denied';
+      }
+      setStatuses(next);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void check();
+  }, [check]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' || e.key === 'Enter') {
         e.preventDefault();
         exit();
       }
@@ -33,10 +70,14 @@ export function PrivacyHelpDialog({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [exit]);
 
-  async function continueToSettings() {
+  async function openSettings() {
     await fm.openPrivacyPane('files');
-    exit();
   }
+
+  const hasDenied = FOLDERS.some((f) => statuses[f.key] === 'denied');
+  const allGranted = FOLDERS.every(
+    (f) => statuses[f.key] === 'granted' || statuses[f.key] === 'missing',
+  );
 
   return (
     <div className="overlay" data-state={state} onClick={exit}>
@@ -56,56 +97,65 @@ export function PrivacyHelpDialog({ onClose }: { onClose: () => void }) {
         >
           ×
         </button>
-        <div className="privacy-help__eyebrow">Folder access</div>
+        <div className="privacy-help__eyebrow">Privacy</div>
         <h2 id="privacy-help-title" className="privacy-help__title">
-          Granting Full Disk Access
+          {allGranted ? 'All set. Your files stay yours.' : 'Folder access'}
         </h2>
         <p className="privacy-help__lede">
-          macOS won't let unsigned apps read your folders without
-          permission. Easiest fix: grant Breeze File <em>Full Disk Access</em>
-          {' '}once.
+          Breeze File runs locally. macOS asks once per protected folder.
+          Anywhere else in your home folder opens without a prompt.
         </p>
 
-        <ol className="privacy-help__steps">
-          <li>
-            <span className="privacy-help__num">1</span>
-            <div>Click <strong>Continue</strong> below — System Settings opens to <em>Privacy &amp; Security</em>.</div>
-          </li>
-          <li>
-            <span className="privacy-help__num">2</span>
-            <div>Scroll down and click <strong>Full Disk Access</strong>.</div>
-          </li>
-          <li>
-            <span className="privacy-help__num">3</span>
-            <div>Click the <strong>+</strong> button at the bottom of the list, then pick <strong>Breeze File</strong> from <code>/Applications</code>.</div>
-          </li>
-          <li>
-            <span className="privacy-help__num">4</span>
-            <div>Toggle the switch <strong>on</strong>. macOS may ask you to re-launch Breeze File.</div>
-          </li>
-        </ol>
+        <ul className="privacy-help__dirs">
+          {FOLDERS.map((f) => {
+            const s = statuses[f.key];
+            return (
+              <li key={f.key} data-status={s}>
+                <span className="privacy-help__dir-name">{f.name}</span>
+                <span className="privacy-help__dir-path">{f.path}</span>
+                <span className={`privacy-help__badge privacy-help__badge--${s}`}>
+                  {statusLabel(s)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
 
-        <p className="privacy-help__note">
-          Prefer per-folder grants? After step 1, click{' '}
-          <strong>Files and Folders</strong> instead and switch on the
-          folders you want Breeze File to read.
-        </p>
+        {hasDenied && (
+          <p className="privacy-help__note">
+            Denied folders can only be re-enabled in{' '}
+            <em>System Settings → Privacy &amp; Security → Files and Folders</em>.
+            macOS won't re-prompt once a permission has been refused.
+          </p>
+        )}
 
         <div className="privacy-help__actions">
+          {hasDenied && (
+            <button
+              type="button"
+              className="privacy-help__btn"
+              onClick={openSettings}
+              title="Open macOS Privacy & Security settings"
+            >
+              Open System Settings
+            </button>
+          )}
           <button
             type="button"
-            className="privacy-help__btn privacy-help__btn--cancel"
-            onClick={exit}
+            className="privacy-help__btn"
+            onClick={() => void check()}
+            disabled={busy}
+            title="Re-run the permission check; prompts for anything not yet decided"
           >
-            Cancel
+            {busy ? 'Checking…' : 'Re-check'}
           </button>
           <button
             type="button"
             className="privacy-help__btn privacy-help__btn--primary"
-            onClick={continueToSettings}
+            onClick={exit}
             autoFocus
           >
-            Continue to Settings
+            Done
           </button>
         </div>
       </div>

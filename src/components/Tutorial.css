@@ -13,7 +13,7 @@
   border-left-width: 4px;
   border-radius: 12px;
   padding: 12px 14px;
-  color: var(--ink);
+  color: var(--text-on-panel);
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.45;
@@ -39,7 +39,7 @@
   display: inline-flex;
   align-items: center;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -58,24 +58,27 @@
   border: none;
   background: transparent;
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--muted-on-panel);
   font-size: 14px;
   cursor: pointer;
   transition: background var(--motion-hover), color var(--motion-hover);
 }
 .tutorial-chip__close:hover {
   background: var(--rule);
-  color: var(--ink);
+  color: var(--text-on-panel);
 }
 
 .tutorial-chip__title {
   font-weight: 600;
   margin: 4px 0 4px;
-  color: var(--ink);
+  color: var(--text-on-panel);
 }
 
+/* Body copy stays at primary readable weight (not muted) so dark
+   themes don't drop below comfortable contrast — kbd chips and em
+   runs already provide enough visual rhythm. */
 .tutorial-chip__body {
-  color: var(--muted);
+  color: var(--text-on-panel);
   line-height: 1.5;
 }
 
@@ -83,7 +86,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   border-radius: 5px;
   padding: 2px 7px;
   letter-spacing: 0.04em;
@@ -93,7 +96,7 @@
 
 .tutorial-chip__body em {
   font-style: italic;
-  color: var(--ink);
+  color: var(--text-on-panel);
 }
 
 .tutorial-chip__actions {
@@ -105,7 +108,7 @@
 .tutorial-chip__skip {
   background: transparent;
   border: 1px solid var(--rule);
-  color: var(--muted);
+  color: var(--muted-on-panel);
   font-family: var(--font-sans);
   font-size: 11px;
   padding: 4px 10px;
@@ -114,13 +117,13 @@
   transition: color var(--motion-hover), border-color var(--motion-hover);
 }
 .tutorial-chip__skip:hover {
-  color: var(--ink);
+  color: var(--text-on-panel);
   border-color: var(--accent);
 }
 
 .tutorial-chip__next {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   border: none;
   font-family: var(--font-sans);
   font-size: 12px;

@@ -144,6 +144,9 @@ function Shell() {
     function onHelp() {
       setHelpOpen(true);
     }
+    function onWelcome() {
+      setWelcomeOpen(true);
+    }
     async function onOpenWith(e: Event) {
       const detail = (e as CustomEvent).detail as { path: string; ext?: string } | undefined;
       if (!detail?.path) return;
@@ -169,6 +172,7 @@ function Shell() {
     window.addEventListener('fm:newTag', onNewTag);
     window.addEventListener('fm:tagPicker', onTagPicker);
     window.addEventListener('fm:openHelp', onHelp);
+    window.addEventListener('fm:openWelcome', onWelcome);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -182,6 +186,7 @@ function Shell() {
       window.removeEventListener('fm:newTag', onNewTag);
       window.removeEventListener('fm:tagPicker', onTagPicker);
       window.removeEventListener('fm:openHelp', onHelp);
+      window.removeEventListener('fm:openWelcome', onWelcome);
     };
   }, [activeTab, state.entriesByPath]);
 

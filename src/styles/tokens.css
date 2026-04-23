@@ -103,6 +103,11 @@
        --text-on-chrome  text on --bg-0 (tabbar, titlebar — chrome stays
                          dark in paper themes by design, so this always
                          resolves to the dark-theme light fg)
+       --text-on-accent  text on --accent (primary buttons, selected
+                         chips). Each palette tunes --accent-ink for
+                         AA contrast on its specific accent hue, so
+                         always route through this token, never assume
+                         white / #fff / --bg-0.
        --muted-on-panel  subdued text on --panel (captions, hints)
        --muted-on-canvas subdued text on --bg (metadata, secondary labels)
        --rule-on-panel   border/divider on --panel
@@ -110,6 +115,7 @@
   --text-on-panel:    var(--panel-ink,  var(--ink,     var(--fg-1)));
   --text-on-canvas:   var(--ink,        var(--fg-1));
   --text-on-chrome:   var(--fg-1);
+  --text-on-accent:   var(--accent-ink, #ffffff);
   --muted-on-panel:   var(--panel-muted, var(--muted,  var(--fg-2)));
   --muted-on-canvas:  var(--muted,      var(--fg-2));
   --rule-on-panel:    var(--panel-rule, var(--rule,    var(--border-1)));
@@ -254,7 +260,7 @@
   --rule: #e9d9d6;
   --rule-soft: rgba(46, 31, 36, 0.07);
   --accent: #8a3347;
-  --accent-2: #6e2c3c;
+  --accent-2: #5a7c75;  /* muted teal-sage — cool complement to wine accent */
   --accent-soft: rgba(138, 51, 71, 0.12);
   --hi: #f7d9db;
   --chip: #efdfdc;
@@ -364,7 +370,7 @@
   --rule: #ebd9da;
   --rule-soft: rgba(43, 32, 34, 0.08);
   --accent: #883a3f;
-  --accent-2: #4a3d40;
+  --accent-2: #55687a;  /* muted slate blue — cool lift against rose-brown accent */
   --accent-soft: rgba(136, 58, 63, 0.12);
   --hi: #ecbdbd;
   --chip: #f0dcdc;
@@ -442,7 +448,7 @@
   --rule: rgba(241, 228, 232, 0.10);
   --rule-soft: rgba(241, 228, 232, 0.06);
   --accent: #f4b09a;
-  --accent-2: #e6c070;
+  --accent-2: #7fd4c7;  /* glacier teal — cool counterpoint to warm peach accent (echoes the alpine palette) */
   --accent-soft: rgba(244, 176, 154, 0.15);
   --hi: rgba(244, 176, 154, 0.25);
   --chip: rgba(241, 228, 232, 0.08);

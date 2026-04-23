@@ -116,7 +116,8 @@ type Verb =
   | 'tag'
   | 'untag'
   | 'filter'
-  | 'help';
+  | 'help'
+  | 'welcome';
 
 type Option = {
   id: string;
@@ -1206,6 +1207,19 @@ const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openTheme'));
+    },
+  },
+  {
+    id: 'welcome',
+    label: 'Welcome',
+    aliases: ['welcome', 'hello', 'intro-card', 'first-run', 'splash'],
+    icon: '✦',
+    describe: () => 'Re-open the welcome card (dismissed on first run)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openWelcome'));
     },
   },
   {

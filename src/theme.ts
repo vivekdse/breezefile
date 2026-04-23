@@ -40,8 +40,12 @@ export interface ThemeMeta {
   swatch: [string, string, string];
 }
 
-/** Ordered catalog driving the theme picker. */
+/**
+ * Ordered catalog driving the theme picker. Dusk first (default),
+ * Paper second (second most popular), then the rest.
+ */
 export const THEMES: readonly ThemeMeta[] = [
+  { id: 'dusk', label: 'Dusk', swatch: ['#2b2032', '#150d1c', '#f4b09a'] },
   { id: 'paper', label: 'Paper', swatch: ['#fbf6ea', '#ebe3ce', '#a3391a'] },
   { id: 'pastel', label: 'Pastel', swatch: ['#fef8f6', '#f1dfd9', '#b56b7c'] },
   { id: 'peony', label: 'Peony', swatch: ['#f9f5f8', '#e7dde4', '#c04673'] },
@@ -51,7 +55,6 @@ export const THEMES: readonly ThemeMeta[] = [
   { id: 'rose', label: 'Rose', swatch: ['#fbf4f4', '#ecd9da', '#b26a6a'] },
   { id: 'dawn', label: 'Dawn', swatch: ['#faf2f2', '#ecdfe3', '#c85b40'] },
   { id: 'plum', label: 'Plum', swatch: ['#2a1a30', '#faeff2', '#c1378b'] },
-  { id: 'dusk', label: 'Dusk', swatch: ['#2b2032', '#150d1c', '#f4b09a'] },
 ] as const;
 
 /**
@@ -70,6 +73,12 @@ const LEGACY_THEME_ALIASES: Record<string, Theme> = {
 export const DEFAULT_THEME: Theme = 'dusk';
 
 const STORAGE_KEY = 'fm.theme';
+// Presence of this key means the user explicitly picked a theme. Without
+// it, any value in STORAGE_KEY is a stale artifact from an older build
+// (when 'paper' was the default and we persisted the default on boot).
+// We honor stored themes only when the chosen flag is set, so changing
+// DEFAULT_THEME actually takes effect for users who never picked.
+const CHOSEN_KEY = 'fm.theme.chosen';
 const THEME_IDS = new Set<Theme>(THEMES.map((t) => t.id));
 
 function isTheme(x: unknown): x is Theme {
@@ -79,6 +88,8 @@ function isTheme(x: unknown): x is Theme {
 /** Read the stored preference, falling back to DEFAULT_THEME. */
 export function getStoredTheme(): Theme {
   try {
+    const chosen = localStorage.getItem(CHOSEN_KEY) === '1';
+    if (!chosen) return DEFAULT_THEME;
     const raw = localStorage.getItem(STORAGE_KEY);
     if (isTheme(raw)) return raw;
     if (typeof raw === 'string' && raw in LEGACY_THEME_ALIASES) {
@@ -92,16 +103,28 @@ export function getStoredTheme(): Theme {
 }
 
 /**
- * Set data-theme on <html> and persist. Callable outside React —
- * main.tsx invokes this pre-render to eliminate the paper→theme
- * flash on startup. Returns the theme actually applied so callers
- * can render a source-of-truth label without a second read.
+ * Set data-theme on <html>. Callable outside React — main.tsx invokes
+ * this pre-render to eliminate the default→chosen-theme flash on
+ * startup. Does NOT persist: use chooseTheme() for user-initiated
+ * changes, otherwise we'd overwrite the user's pick with the default
+ * on every boot.
  */
 export function applyTheme(theme: Theme): Theme {
   const next = isTheme(theme) ? theme : DEFAULT_THEME;
   document.documentElement.dataset.theme = next;
+  return next;
+}
+
+/**
+ * User picks a theme. Sets the chosen flag (so the pick survives
+ * future boots even when DEFAULT_THEME changes), persists the value,
+ * and applies it.
+ */
+export function chooseTheme(theme: Theme): Theme {
+  const next = applyTheme(theme);
   try {
     localStorage.setItem(STORAGE_KEY, next);
+    localStorage.setItem(CHOSEN_KEY, '1');
   } catch {
     // Persistence failed — palette still applied for this session.
   }
@@ -149,7 +172,7 @@ export function useTheme(): [Theme, (next: Theme) => void] {
   }, [theme]);
 
   const setTheme = (next: Theme) => {
-    const applied = applyTheme(next);
+    const applied = chooseTheme(next);
     setThemeState(applied);
   };
 

@@ -15,7 +15,7 @@
   border: 1.5px solid var(--accent);
   border-left-width: 4px;
   border-radius: 12px;
-  color: var(--ink);
+  color: var(--text-on-panel);
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.4;
@@ -30,26 +30,44 @@
   transform: translateY(-1px);
 }
 
+/* Centered variant — embedded under the Welcome card. Lives in
+   normal document flow (not position: fixed) and centers itself
+   horizontally via margin auto. No hover lift; no × dismiss. */
+.tips-chip--centered {
+  position: static;
+  margin: 20px auto 0;
+  color: var(--text-on-panel);
+  background: var(--panel);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.18),
+    0 0 0 3px var(--accent-soft);
+}
+.tips-chip--centered:hover {
+  transform: none;
+}
+
 @keyframes tips-chip-in {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Round accent disc with a bulb glyph inside. Using --text-on-accent
+   so the icon is always readable against --accent, whatever theme. */
 .tips-chip__icon {
   flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--accent);
-  color: #fff;
-  font-family: var(--font-sans);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 3px 8px;
+  color: var(--text-on-accent);
   border-radius: 999px;
-  line-height: 1;
+  line-height: 0;
+}
+.tips-chip__icon svg {
+  width: 15px;
+  height: 15px;
 }
 
 .tips-chip__text {
@@ -69,7 +87,7 @@
   padding: 2px 7px;
   border-radius: 5px;
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-accent);
   letter-spacing: 0.04em;
   font-weight: 700;
   margin: 0 1px;
@@ -85,14 +103,14 @@
   border: none;
   background: transparent;
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--muted-on-panel);
   font-size: 13px;
   cursor: pointer;
   transition: background var(--motion-hover), color var(--motion-hover);
 }
 .tips-chip__dismiss:hover {
   background: var(--rule);
-  color: var(--ink);
+  color: var(--text-on-panel);
 }
 
 @media (prefers-reduced-motion: reduce) {

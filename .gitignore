@@ -18,6 +18,8 @@ AGENTS.md
 tmp/
 audit/
 design-assets/inspirations/
+design-assets/desktop-view-inspirations/
+.claude/worktrees/
 
 # Compiled Swift helper — built on demand via `make -C native/sharer`.
 native/sharer/sharer
