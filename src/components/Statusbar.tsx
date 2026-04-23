@@ -50,7 +50,6 @@ export function Statusbar() {
           { keys: ['y'], label: 'yank' },
           { keys: ['space'], label: 'mark' },
           { keys: ['d'], label: 'drag' },
-          { keys: ['?'], label: 'help' },
         ];
 
   return (
@@ -71,6 +70,14 @@ export function Statusbar() {
           {h.label}
         </span>
       ))}
+      <button
+        type="button"
+        className="statusbar__help"
+        onClick={() => window.dispatchEvent(new CustomEvent('fm:openHelp'))}
+        title="Open the help tour (slides)"
+      >
+        Help
+      </button>
     </div>
   );
 }

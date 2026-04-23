@@ -115,7 +115,8 @@ type Verb =
   | 'newtag'
   | 'tag'
   | 'untag'
-  | 'filter';
+  | 'filter'
+  | 'help';
 
 type Option = {
   id: string;
@@ -1208,15 +1209,23 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    id: 'help',
+    label: 'Help',
+    aliases: ['help', 'tour', 'guide', 'how', 'how to', 'cheatsheet', 'verbs', 'docs', 'manual'],
+    icon: '?',
+    describe: () => 'Slide tour: value, verbs, and the full verb catalog',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openHelp'));
+    },
+  },
+  {
     id: 'tutorial',
     label: 'Tutorial',
     aliases: [
       'tutorial',
-      'help',
-      'tour',
-      'guide',
-      'how',
-      'how to',
       'walkthrough',
       'practice',
       'learn',
@@ -1225,8 +1234,8 @@ const VERBS: VerbDef[] = [
       'intro',
       'onboarding',
     ],
-    icon: '?',
-    describe: () => 'Walk through the basics step by step',
+    icon: '◎',
+    describe: () => 'Interactive walkthrough — try the basics step by step',
     isAvailable: () => ({ ok: true }),
     slots: [],
     execute: (_c, _p, api) => {

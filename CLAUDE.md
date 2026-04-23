@@ -17,3 +17,6 @@ Work is tracked in beads (`bd list`). Epic: `fm-ubk`. Run `bd ready` to see unbl
 
 ## Origin
 Started 2026-04-21 after discovering that `ripdrag`/`dragon` don't work on macOS and ranger has no drag-out mechanism. A `clipfile` helper (`~/.local/bin/clipfile`) exists as a stopgap that copies files to the clipboard for ⌘V paste into web apps.
+
+## Help system maintenance
+The slide-based help lives in `src/components/HelpTour.tsx`, opened via the `:help` verb or the **Help** button in the Statusbar. **Whenever you ship a new feature or verb, update HelpTour to reflect it** — add a row to the relevant catalog slide (or a new slide if it's a new category). The catalog is the user's reference; a stale catalog erodes trust quickly. Tutorial (`src/components/Tutorial.tsx`) is the interactive walkthrough and is separate; it doesn't need a per-feature update unless the basics change.

@@ -10,10 +10,12 @@
 
 .help {
   position: relative;
-  width: min(520px, 92vw);
+  width: min(620px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
   background: var(--panel);
-  color: var(--panel-ink, var(--ink));
-  border: 1px solid var(--panel-rule, var(--rule));
+  color: var(--text-on-panel);
+  border: 1px solid var(--rule);
   border-radius: 14px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
   padding: 28px 32px 22px;
@@ -75,14 +77,66 @@
   min-height: 3.1em;
 }
 
-.help__body kbd {
+.help__body kbd,
+.help__lede kbd {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--chip, rgba(0, 0, 0, 0.05));
   border: 1px solid var(--rule);
-  color: var(--ink);
+  color: var(--text-on-panel);
+}
+
+/* ---- catalog (verb table) slide ---- */
+.help__lede {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-on-panel);
+  margin: 0 4px 14px;
+  font-style: italic;
+}
+.help__verbs {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.help__verb {
+  display: grid;
+  grid-template-columns: 130px auto 1fr;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--chip, rgba(0, 0, 0, 0.04));
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.help__verb-name {
+  font-family: var(--font-serif, 'Fraunces', serif);
+  font-weight: 600;
+  font-style: italic;
+  color: var(--text-on-panel);
+  font-size: 14px;
+}
+.help__verb-chord {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--panel-2, var(--bg));
+  border: 1px solid var(--rule);
+  color: var(--text-on-panel);
+  white-space: nowrap;
+  justify-self: start;
+}
+.help__verb-what {
+  color: var(--muted-on-panel);
+  font-size: 12px;
 }
 
 .help__dots {

@@ -21,6 +21,7 @@ import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
 import { Tutorial } from './components/Tutorial';
+import { HelpTour } from './components/HelpTour';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
@@ -62,6 +63,9 @@ function Shell() {
   const [newTagOpen, setNewTagOpen] = useState(false);
   // fm-60k — keyboard tag HUD. Opened via `t` (apply) or `T` (filter).
   const [tagPicker, setTagPicker] = useState<'apply' | 'filter' | null>(null);
+  // Slide-based help (HelpTour). Opened by the :help verb or the Help
+  // link in the Statusbar. Distinct from Tutorial (interactive practice).
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -137,6 +141,9 @@ function Shell() {
       const detail = (e as CustomEvent).detail as { mode: 'apply' | 'filter' } | undefined;
       setTagPicker(detail?.mode ?? 'apply');
     }
+    function onHelp() {
+      setHelpOpen(true);
+    }
     async function onOpenWith(e: Event) {
       const detail = (e as CustomEvent).detail as { path: string; ext?: string } | undefined;
       if (!detail?.path) return;
@@ -161,6 +168,7 @@ function Shell() {
     window.addEventListener('fm:openWith', onOpenWith);
     window.addEventListener('fm:newTag', onNewTag);
     window.addEventListener('fm:tagPicker', onTagPicker);
+    window.addEventListener('fm:openHelp', onHelp);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -173,6 +181,7 @@ function Shell() {
       window.removeEventListener('fm:openWith', onOpenWith);
       window.removeEventListener('fm:newTag', onNewTag);
       window.removeEventListener('fm:tagPicker', onTagPicker);
+      window.removeEventListener('fm:openHelp', onHelp);
     };
   }, [activeTab, state.entriesByPath]);
 
@@ -357,6 +366,7 @@ function Shell() {
       {tagPicker && (
         <TagPicker mode={tagPicker} onClose={() => setTagPicker(null)} />
       )}
+      {helpOpen && <HelpTour onClose={() => setHelpOpen(false)} />}
     </div>
     </OverlayCtx.Provider>
   );

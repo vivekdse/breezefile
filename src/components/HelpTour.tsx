@@ -1,77 +1,147 @@
 /*
- * HelpTour — 5-slide carousel that re-introduces the verb system.
+ * HelpTour — slide-based help. Click "Help" in the status bar or run
+ * the `:help` verb. Three sections, eight slides:
  *
- * Welcome (fm-3ck) is one dense card shown on first run; HelpTour is the
- * slower walkthrough — one concept per slide, advanced with ← / → or
- * Enter. Opened on demand by the 'help' verb (fm-8pu), not shown
- * automatically. We want the answer to "how do I use this?" to always
- * be a short, readable tour, not a wall of text.
+ *   1) value — why this app exists
+ *   2) verbs — how the type-to-act model works
+ *   3) catalog — what verbs / chords exist (grouped)
+ *
+ * MAINTENANCE: every time we add a new feature or verb, this file gets
+ * an update. The catalog slides drive directly off the CATALOG constant
+ * below — add a row there and the slide picks it up. See CLAUDE.md.
  */
 
 import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import './HelpTour.css';
 
-type Slide = {
+type VerbItem = { name: string; chord?: string; what: string };
+type CatalogSlide = {
+  kind: 'catalog';
+  glyph: string;
+  title: string;
+  lede: string;
+  verbs: VerbItem[];
+};
+type NarrativeSlide = {
+  kind: 'narrative';
   glyph: string;
   title: string;
   body: React.ReactNode;
 };
+type Slide = CatalogSlide | NarrativeSlide;
 
 const SLIDES: Slide[] = [
   {
+    kind: 'narrative',
     glyph: '✦',
-    title: 'Type to act',
+    title: 'Find files. Move them. Send them.',
     body: (
       <>
-        Breeze File is driven by verbs. Start typing from anywhere —{' '}
-        <kbd>copy</kbd>, <kbd>move</kbd>, <kbd>sort</kbd>, <kbd>find</kbd>,{' '}
-        <kbd>theme</kbd> — the chip prompt fills in the rest.
+        Get anywhere in your files by typing. Then drag any file straight into
+        a Slack message, a Gmail draft, or a web upload field —{' '}
+        <b>no saving, no re-uploading</b>.
       </>
     ),
   },
   {
+    kind: 'narrative',
+    glyph: '⌘',
+    title: 'Type the action you want.',
+    body: (
+      <>
+        Type <kbd>copy</kbd>, <kbd>move</kbd>, <kbd>tag</kbd>, or{' '}
+        <kbd>share</kbd>. A small panel shows your choices. Pick one, hit{' '}
+        <kbd>↵</kbd>. Every action works the same way — nothing to memorize.
+      </>
+    ),
+  },
+  {
+    kind: 'catalog',
+    glyph: '↕',
+    title: 'Navigate & find',
+    lede: 'Move the cursor; jump anywhere; search across folders.',
+    verbs: [
+      { name: 'cursor', chord: 'h j k l', what: 'left / down / up / right (or arrows)' },
+      { name: 'open / parent', chord: '↵ / ⌫', what: 'enter folder / go up' },
+      { name: 'top / bottom', chord: 'gg / G', what: 'first or last row' },
+      { name: 'history', chord: 'H / L', what: 'back / forward' },
+      { name: 'find', chord: '⌘F or /', what: 'recursive search across folders + Spotlight' },
+      { name: 'goto home', chord: 'gh', what: 'jump to ~ (also g/, ge, gu, gd, gp…)' },
+      { name: 'quick find', chord: 'f', what: 'jump to a row by typed prefix' },
+    ],
+  },
+  {
+    kind: 'catalog',
     glyph: '☐',
-    title: 'Space selects',
-    body: (
-      <>
-        <kbd>space</kbd> toggles selection on the highlighted row.{' '}
-        <kbd>shift + space</kbd> selects everything in the folder. Selected
-        rows get a filled checkbox.
-      </>
-    ),
+    title: 'Select & manage files',
+    lede: 'Mark with space, then act. Or run a verb directly on the cursor row.',
+    verbs: [
+      { name: 'mark / all', chord: 'space / ⇧space', what: 'toggle one / select every visible row' },
+      { name: 'select', what: 'smart filters: images, videos, by extension, folders only…' },
+      { name: 'copy / move', what: 'stage files; floating chip follows you to the destination' },
+      { name: 'paste here', chord: 'ph', what: 'commit the staged copy/move (po, pl, phl variants)' },
+      { name: 'rename', chord: 'cw / a / A / I', what: 'whole / before-ext / append / prepend' },
+      { name: 'trash / delete', chord: 'dD / dF', what: 'send to Trash / permanent delete' },
+      { name: 'create', chord: 'F7 or :touch', what: 'new folder / new file' },
+      { name: 'duplicate', what: 'right-click → Duplicate' },
+    ],
   },
   {
-    glyph: '↘',
-    title: 'Copy / Move, then navigate',
-    body: (
-      <>
-        Pick <kbd>copy</kbd> or <kbd>move</kbd>; a floating chip follows you.
-        Drill to the destination folder, then type <kbd>ph</kbd> (paste here)
-        or click the chip. Nothing moves until you confirm.
-      </>
-    ),
-  },
-  {
-    glyph: '⌕',
-    title: 'Find with priority',
-    body: (
-      <>
-        <kbd>⌘F</kbd> or <kbd>/</kbd> opens recursive find. Current folder
-        and subfolders rank first, then recents, bookmarks, and Spotlight.
-      </>
-    ),
-  },
-  {
+    kind: 'catalog',
     glyph: '↗',
-    title: 'Drag out to anything',
-    body: (
-      <>
-        Drag any row — or the selection — out to Slack, Gmail, a browser
-        upload field, Finder. That's the one thing ranger can't do on
-        macOS, and the reason this app exists.
-      </>
-    ),
+    title: 'Open, share, drag out',
+    lede: 'The drag-out is the whole reason this app exists.',
+    verbs: [
+      { name: 'open', chord: '↵', what: 'open with default app' },
+      { name: 'open with…', what: 'pick an app; optionally bind it as default for that extension' },
+      { name: 'drag out', chord: 'd or drag', what: 'drag any row (or selection) to Slack, Gmail, Finder, anywhere' },
+      { name: 'share', what: 'native macOS share sheet (Mail, Messages, AirDrop, …)' },
+      { name: 'copy path', chord: 'yy / yn / yd', what: 'full path / name / parent dir to clipboard' },
+      { name: 'reveal', chord: 'R', what: 'reveal in Finder' },
+      { name: 'open terminal', what: 'launch your default terminal in this folder' },
+    ],
+  },
+  {
+    kind: 'catalog',
+    glyph: '▦',
+    title: 'View & sort',
+    lede: 'Switch how the folder reads, sort by anything, change the look.',
+    verbs: [
+      { name: 'view', chord: 'wl / wg / wp / wt', what: 'list / grid / preview / tag' },
+      { name: 'sort', chord: 'on / os / om / oc / ot / oe', what: 'name / size / mtime / ctime / type / ext (caps for desc, or for reverse)' },
+      { name: 'hidden', chord: 'zh', what: 'show / hide dotfiles' },
+      { name: 'theme', chord: 'zT', what: 'cycle dark/light; or :theme for the full picker' },
+    ],
+  },
+  {
+    kind: 'catalog',
+    glyph: '◐',
+    title: 'Tags — color, group, filter',
+    lede: 'Press wt to enter Tag view. Tags are rules over file metadata.',
+    verbs: [
+      { name: 'tag view', chord: 'wt', what: 'replaces preview with the tag inspector' },
+      { name: 'apply HUD', chord: 't', what: 'in tag view: type to find a tag, ↵ to add or remove on the whole folder' },
+      { name: 'newtag', what: 'create a tag with a rule (extension / size / modified / name) or manual-only' },
+      { name: 'tag / untag', what: 'add or remove a tag from every file in this folder (verb form)' },
+      { name: 'filter', what: 'narrow the folder to files carrying selected tags · Match all / Match any' },
+      { name: 'access keys', what: 'each tag gets a single letter (r=Recent, l=Large, i=Images…) shown in the inspector' },
+    ],
+  },
+  {
+    kind: 'catalog',
+    glyph: '⊞',
+    title: 'Tabs, bookmarks, the rest',
+    lede: 'Live across many folders at once; mark places to return to.',
+    verbs: [
+      { name: 'new tab', chord: 'gn', what: 'open current folder in a new tab' },
+      { name: 'switch / close', chord: 'gt / gT / gw', what: 'next / prev / close · ga restores last closed' },
+      { name: 'bookmark', chord: 'm<k> / \'<k>', what: 'set / jump (m a then \'a)' },
+      { name: 'pin', what: 'pin a folder to the sidebar Favorites' },
+      { name: 'shell', chord: '! / s', what: 'run a one-off command in this folder' },
+      { name: 'compress / extract', what: 'zip a selection · expand an archive' },
+      { name: 'settings', chord: '?', what: 'view & rebind keys' },
+    ],
   },
 ];
 
@@ -134,7 +204,7 @@ export function HelpTour({ onClose }: { onClose: () => void }) {
         </button>
 
         <div className="help__eyebrow">
-          How it works · {i + 1} of {SLIDES.length}
+          Help · {i + 1} of {SLIDES.length}
         </div>
 
         <div className="help__glyph" aria-hidden>
@@ -143,7 +213,23 @@ export function HelpTour({ onClose }: { onClose: () => void }) {
         <h1 id="help-title" className="help__title">
           {slide.title}
         </h1>
-        <p className="help__body">{slide.body}</p>
+
+        {slide.kind === 'narrative' ? (
+          <p className="help__body">{slide.body}</p>
+        ) : (
+          <>
+            <p className="help__lede">{slide.lede}</p>
+            <ul className="help__verbs">
+              {slide.verbs.map((v) => (
+                <li key={v.name + (v.chord ?? '')} className="help__verb">
+                  <span className="help__verb-name">{v.name}</span>
+                  {v.chord && <kbd className="help__verb-chord">{v.chord}</kbd>}
+                  <span className="help__verb-what">{v.what}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
 
         <div className="help__dots" role="tablist" aria-label="Slide">
           {SLIDES.map((_, idx) => (

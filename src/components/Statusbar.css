@@ -52,3 +52,23 @@
   gap: 6px;
   color: var(--muted);
 }
+
+/* Clickable Help affordance — opens HelpTour (slide-based help). */
+.statusbar__help {
+  margin-left: 12px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 100px;
+  padding: 2px 12px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.statusbar__help:hover {
+  background: var(--accent);
+  color: #fff9ea;
+  border-color: var(--accent);
+}
