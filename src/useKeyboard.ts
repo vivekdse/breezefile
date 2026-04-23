@@ -34,7 +34,10 @@ function keyName(e: KeyboardEvent): string {
 // <any>-consuming chords. When pending matches one of these, the next
 // keystroke is the argument (bookmark letter, tag char, etc.), not a
 // lookup into chordActions. Keep in sync with handler below.
-const ANY_PREFIXES = ["'", '`', 'm', 'um', 't'];
+// fm-60k — `t` and `T` no longer consume an arg; they open the keyboard
+// TagPicker instead. Kept off ANY_PREFIXES so they fire as single-key
+// actions in the actions table below.
+const ANY_PREFIXES = ["'", '`', 'm', 'um'];
 
 // Prefixes that aren't themselves actions but need to be reachable so the
 // <any>-consuming handlers above can fire.
@@ -124,6 +127,8 @@ export function useKeyboard(
               showHidden: false,
               viewMode: 'list',
               filter: '',
+              tagViz: [],
+              tagFilter: { mode: 'off', ids: [] },
               history: [],
               forward: [],
             },
@@ -190,17 +195,6 @@ export function useKeyboard(
         setPending('');
         return;
       }
-      if (pending === 't') {
-        e.preventDefault();
-        clearTimer();
-        const entries = visibleEntries(cur.entriesByPath[tab.trail[lastCol(tab)]], tab);
-        const entry = currentEntry(tab, entries);
-        if (entry) {
-          dispatch({ type: 'setTag', path: entry.path, tag: k === ' ' ? null : k });
-        }
-        setPending('');
-        return;
-      }
 
       // --- Single-key (non-chord) actions ---
       const actions: Record<string, () => void | Promise<void>> = {
@@ -249,6 +243,20 @@ export function useKeyboard(
         ':': () => dispatch({ type: 'setMode', mode: 'command', buffer: '' }),
         '!': () => promptShell(),
         ' ': () => toggleMark(),
+        // fm-60k — `t` opens the apply HUD, but ONLY in tag view. Outside
+        // tag view we let `t` fall through so users typing toward a folder
+        // name like `tasks/` or `todo/` aren't intercepted, and so the
+        // chip palette pre-fills "t" — surfacing the `tag` and `filter`
+        // verbs so people can discover what tagging is.
+        ...(tab.viewMode === 'tag'
+          ? {
+              t: () => {
+                window.dispatchEvent(
+                  new CustomEvent('fm:tagPicker', { detail: { mode: 'apply' } }),
+                );
+              },
+            }
+          : {}),
         'S- ': () => toggleSelectAllCol(),
         F7: () => promptMkdir(),
         'C-r': () => refreshActive(),
@@ -296,6 +304,7 @@ export function useKeyboard(
         wl: () => { setTab({ viewMode: 'list' }); dispatch({ type: 'setStatus', msg: 'view: list' }); },
         wg: () => { setTab({ viewMode: 'grid' }); dispatch({ type: 'setStatus', msg: 'view: grid' }); },
         wp: () => { setTab({ viewMode: 'preview' }); dispatch({ type: 'setStatus', msg: 'view: preview' }); },
+        wt: () => { setTab({ viewMode: 'tag' }); dispatch({ type: 'setStatus', msg: 'view: tag' }); },
         // sort
         on: () => setSort('name', false),
         os: () => setSort('size', false),

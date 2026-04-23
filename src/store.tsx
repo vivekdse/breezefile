@@ -7,7 +7,16 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import type { Bookmarks, Entry, Keybinds, Tab, Tags, YankEntry } from './types';
+import type {
+  Bookmarks,
+  CustomTag,
+  Entry,
+  Keybinds,
+  Tab,
+  TagPaths,
+  Tags,
+  YankEntry,
+} from './types';
 import { fm } from './bridge';
 import { visibleEntries } from './actions';
 
@@ -109,6 +118,7 @@ const DEFAULT_KEYBINDS: Keybinds = {
   'view.list': 'wl',
   'view.grid': 'wg',
   'view.preview': 'wp',
+  'view.tag': 'wt',
   'theme': 'zT',
   // --- bookmarks / tags ---
   'bookmark.set': 'm<k>',
@@ -131,6 +141,11 @@ type Persisted = {
   theme: 'dark' | 'light';
   recents: string[]; // LRU of recently-visited folders, most recent first
   pinned: string[]; // user-pinned folder paths shown in sidebar Favorites
+  // fm-60k — user-authored tags (manual-only v1) and the path lists they
+  // were applied to. tagPaths is keyed by tag id; covers both custom and
+  // seeded tags (a built-in like 'recent' can also receive manual pins).
+  customTags: CustomTag[];
+  tagPaths: TagPaths;
 };
 
 const RECENTS_CAP = 30;
@@ -172,7 +187,12 @@ type Action =
   | { type: 'restoreTab' }
   | { type: 'pushRecent'; path: string }
   | { type: 'pinFolder'; path: string }
-  | { type: 'unpinFolder'; path: string };
+  | { type: 'unpinFolder'; path: string }
+  | { type: 'createCustomTag'; tag: CustomTag }
+  | { type: 'deleteCustomTag'; id: string }
+  | { type: 'applyTag'; id: string; paths: string[] }
+  | { type: 'untagPaths'; id: string; paths: string[] }
+  | { type: 'addTagViz'; id: string };
 
 function makeTab(path: string): Tab {
   return {
@@ -185,6 +205,8 @@ function makeTab(path: string): Tab {
     showHidden: false,
     viewMode: 'list',
     filter: '',
+    tagViz: [],
+    tagFilter: { mode: 'off', ids: [] },
     history: [],
     forward: [],
   };
@@ -199,6 +221,8 @@ const initialState: State = {
   theme: 'dark',
   recents: [],
   pinned: [],
+  customTags: [],
+  tagPaths: {},
   entriesByPath: {},
   yank: [],
   statusMsg: '',
@@ -292,6 +316,35 @@ function reducer(s: State, a: Action): State {
     case 'unpinFolder': {
       return { ...s, pinned: (s.pinned ?? []).filter((p) => p !== a.path) };
     }
+    case 'createCustomTag':
+      return { ...s, customTags: [...s.customTags, a.tag] };
+    case 'deleteCustomTag': {
+      const customTags = s.customTags.filter((t) => t.id !== a.id);
+      const tagPaths = { ...s.tagPaths };
+      delete tagPaths[a.id];
+      return { ...s, customTags, tagPaths };
+    }
+    case 'applyTag': {
+      const existing = s.tagPaths[a.id] ?? [];
+      const merged = Array.from(new Set([...existing, ...a.paths]));
+      return { ...s, tagPaths: { ...s.tagPaths, [a.id]: merged } };
+    }
+    case 'untagPaths': {
+      const existing = s.tagPaths[a.id] ?? [];
+      const drop = new Set(a.paths);
+      const next = existing.filter((p) => !drop.has(p));
+      const tagPaths = { ...s.tagPaths };
+      if (next.length === 0) delete tagPaths[a.id];
+      else tagPaths[a.id] = next;
+      return { ...s, tagPaths };
+    }
+    case 'addTagViz': {
+      const tabs = s.tabs.slice();
+      const t = tabs[s.activeTab];
+      if (!t || t.tagViz.includes(a.id)) return s;
+      tabs[s.activeTab] = { ...t, tagViz: [...t.tagViz, a.id] };
+      return { ...s, tabs };
+    }
   }
 }
 
@@ -326,7 +379,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           activeTab?: unknown;
         };
         // Drop any legacy `tabs`/`activeTab` fields from older builds.
-        const { bookmarks, tags, keybinds, theme, recents, pinned } = parsed as Partial<Persisted>;
+        const { bookmarks, tags, keybinds, theme, recents, pinned, customTags, tagPaths } =
+          parsed as Partial<Persisted>;
         dispatch({
           type: 'hydrate',
           state: {
@@ -336,6 +390,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(theme ? { theme } : {}),
             ...(recents ? { recents } : {}),
             ...(pinned ? { pinned } : {}),
+            ...(customTags ? { customTags } : {}),
+            ...(tagPaths ? { tagPaths } : {}),
           } as Partial<Persisted>,
         });
       } catch {
@@ -356,9 +412,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       theme: state.theme,
       recents: state.recents,
       pinned: state.pinned,
+      customTags: state.customTags,
+      tagPaths: state.tagPaths,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
-  }, [state.bookmarks, state.tags, state.keybinds, state.theme, state.recents, state.pinned]);
+  }, [
+    state.bookmarks,
+    state.tags,
+    state.keybinds,
+    state.theme,
+    state.recents,
+    state.pinned,
+    state.customTags,
+    state.tagPaths,
+  ]);
 
   // Apply theme on html root
   useEffect(() => {

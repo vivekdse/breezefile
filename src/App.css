@@ -192,6 +192,103 @@
   margin-top: calc(-1 * var(--sp-1));
 }
 
+/* fm-60k — color-swatch picker for the New Tag overlay. */
+.overlay__box--tag {
+  min-width: 380px;
+}
+.overlay__palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.overlay__swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.overlay__swatch:hover {
+  transform: scale(1.08);
+}
+.overlay__swatch--on {
+  box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px currentColor;
+}
+.overlay__hint {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  margin-top: 4px;
+}
+.overlay__hint kbd {
+  font-family: var(--font-mono);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--fg-1);
+  font-size: 10px;
+  margin: 0 2px;
+}
+
+/* fm-60k — criterion picker rows in the New Tag overlay. */
+.tagform__divider {
+  margin-top: 6px;
+  border-top: 1px dotted var(--border-1);
+  padding-top: 10px;
+}
+.tagform__select {
+  font-family: inherit;
+  cursor: pointer;
+}
+.tagform__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tagform__num {
+  width: 110px;
+}
+.tagform__unit {
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+.tagform__pill {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  color: var(--fg-1);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  padding: 5px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+}
+.tagform__pill--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff9ea;
+  font-weight: 600;
+}
+.tagform__hint-line {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  font-style: italic;
+}
+.tagform__hint-line kbd {
+  font-family: var(--font-mono);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--fg-1);
+  font-size: 10px;
+  margin: 0 2px;
+  font-style: normal;
+}
+
 /* Bottom command prompt (`:` / `!` colon-prompt) and its completions popover.
    Editorial tokens — matches the ChipPrompt palette so both command surfaces
    feel like one system. The prompt sits on --panel-2 (a half-step recessed

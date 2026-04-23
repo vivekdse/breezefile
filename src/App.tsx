@@ -5,6 +5,8 @@ import { Pathbar } from './components/Pathbar';
 import { FolderList } from './components/FolderList';
 import { FolderHeader } from './components/FolderHeader';
 import { Preview } from './components/Preview';
+import { TagInspector } from './components/TagInspector';
+import { TagPicker } from './components/TagPicker';
 import { Sidebar } from './components/Sidebar';
 import { Statusbar } from './components/Statusbar';
 import { Tabbar } from './components/Tabbar';
@@ -27,7 +29,8 @@ import { fm } from './bridge';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
-import type { Entry } from './types';
+import type { CustomTagCriterion, Entry } from './types';
+import { TAG_PALETTE, assignTagKey, newTagId } from './tags';
 import './App.css';
 
 
@@ -54,6 +57,11 @@ function Shell() {
   const [openWith, setOpenWith] = useState<{ path: string; ext?: string; appPath: string } | null>(
     null,
   );
+  // fm-60k — Create-tag overlay. Opened via the 'newtag' verb or the
+  // "+ New tag" button in the TagInspector pane.
+  const [newTagOpen, setNewTagOpen] = useState(false);
+  // fm-60k — keyboard tag HUD. Opened via `t` (apply) or `T` (filter).
+  const [tagPicker, setTagPicker] = useState<'apply' | 'filter' | null>(null);
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -122,6 +130,13 @@ function Shell() {
       const detail = (e as CustomEvent).detail as ConfirmRequest | undefined;
       if (detail) setConfirm(detail);
     }
+    function onNewTag() {
+      setNewTagOpen(true);
+    }
+    function onTagPicker(e: Event) {
+      const detail = (e as CustomEvent).detail as { mode: 'apply' | 'filter' } | undefined;
+      setTagPicker(detail?.mode ?? 'apply');
+    }
     async function onOpenWith(e: Event) {
       const detail = (e as CustomEvent).detail as { path: string; ext?: string } | undefined;
       if (!detail?.path) return;
@@ -144,6 +159,8 @@ function Shell() {
     window.addEventListener('fm:toggleTips', onToggleTips);
     window.addEventListener('fm:confirm', onConfirm);
     window.addEventListener('fm:openWith', onOpenWith);
+    window.addEventListener('fm:newTag', onNewTag);
+    window.addEventListener('fm:tagPicker', onTagPicker);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -154,6 +171,8 @@ function Shell() {
       window.removeEventListener('fm:toggleTips', onToggleTips);
       window.removeEventListener('fm:confirm', onConfirm);
       window.removeEventListener('fm:openWith', onOpenWith);
+      window.removeEventListener('fm:newTag', onNewTag);
+      window.removeEventListener('fm:tagPicker', onTagPicker);
     };
   }, [activeTab, state.entriesByPath]);
 
@@ -193,8 +212,11 @@ function Shell() {
         <FolderHeader />
         <FolderList />
       </main>
-      {/* preview slot — Preview (fm-fda) fills the reserved 340px slot. */}
-      <Preview />
+      {/* preview slot — Preview (fm-fda) fills the reserved 340px slot.
+          In tag view (fm-uns) the slot hosts TagInspector instead, so the
+          user can browse, toggle, and combine tags without leaving the file
+          list. */}
+      {tab.viewMode === 'tag' ? <TagInspector /> : <Preview />}
       {/* status slot — ModeLine stacked above Statusbar */}
       <div className="shell__status">
         <ModeLine />
@@ -311,8 +333,273 @@ function Shell() {
           onClose={() => setOpenWith(null)}
         />
       )}
+      {newTagOpen && (
+        <CreateTagOverlay
+          onClose={() => setNewTagOpen(false)}
+          onCommit={(name, color, criterion) => {
+            const id = newTagId(name);
+            const taken = new Set<string>();
+            for (const t of state.customTags) if (t.key) taken.add(t.key);
+            const key = assignTagKey(name, taken);
+            dispatch({
+              type: 'createCustomTag',
+              tag: { id, name: name.trim(), color, criterion, key, createdAt: Date.now() },
+            });
+            dispatch({ type: 'addTagViz', id });
+            dispatch({
+              type: 'setStatus',
+              msg: `tag created: ${name}${key ? ` (key: ${key})` : ''}`,
+            });
+            setNewTagOpen(false);
+          }}
+        />
+      )}
+      {tagPicker && (
+        <TagPicker mode={tagPicker} onClose={() => setTagPicker(null)} />
+      )}
     </div>
     </OverlayCtx.Provider>
+  );
+}
+
+type CriterionField =
+  | 'manual'
+  | 'extIn'
+  | 'sizeOver'
+  | 'sizeUnder'
+  | 'modifiedWithin'
+  | 'modifiedBefore'
+  | 'nameContains'
+  | 'nameMatches'
+  | 'kindIs';
+
+const CRITERION_LABELS: Record<CriterionField, string> = {
+  manual: 'No rule — apply manually',
+  extIn: 'Extension is one of…',
+  sizeOver: 'Size larger than…',
+  sizeUnder: 'Size smaller than…',
+  modifiedWithin: 'Modified within…',
+  modifiedBefore: 'Modified more than…',
+  nameContains: 'Name contains…',
+  nameMatches: 'Name matches regex…',
+  kindIs: 'Kind is…',
+};
+
+function CreateTagOverlay({
+  onClose,
+  onCommit,
+}: {
+  onClose: () => void;
+  onCommit: (name: string, color: string, criterion?: CustomTagCriterion) => void;
+}) {
+  const [name, setName] = useState('');
+  const [colorIdx, setColorIdx] = useState(0);
+  const [field, setField] = useState<CriterionField>('extIn');
+  // One generic value buffer per field type; we read whatever's relevant
+  // for the chosen field at submit time. Separate state to avoid stomping
+  // on the user's typed values when they switch field momentarily.
+  const [extValue, setExtValue] = useState('');
+  const [sizeValue, setSizeValue] = useState('');
+  const [daysValue, setDaysValue] = useState('');
+  const [textValue, setTextValue] = useState('');
+  const [kindValue, setKindValue] = useState<'dir' | 'file'>('file');
+  const { exit, state } = useOverlayExit(onClose);
+
+  function buildCriterion(): CustomTagCriterion | undefined {
+    switch (field) {
+      case 'manual':
+        return undefined;
+      case 'extIn': {
+        const values = extValue
+          .split(/[,\s]+/)
+          .map((v) => v.trim().toLowerCase().replace(/^\./, ''))
+          .filter(Boolean);
+        return values.length > 0 ? { field: 'extIn', values } : undefined;
+      }
+      case 'sizeOver': {
+        const mb = Number(sizeValue);
+        return Number.isFinite(mb) && mb > 0 ? { field: 'sizeOver', mb } : undefined;
+      }
+      case 'sizeUnder': {
+        const mb = Number(sizeValue);
+        return Number.isFinite(mb) && mb > 0 ? { field: 'sizeUnder', mb } : undefined;
+      }
+      case 'modifiedWithin': {
+        const days = Number(daysValue);
+        return Number.isFinite(days) && days > 0 ? { field: 'modifiedWithin', days } : undefined;
+      }
+      case 'modifiedBefore': {
+        const days = Number(daysValue);
+        return Number.isFinite(days) && days > 0 ? { field: 'modifiedBefore', days } : undefined;
+      }
+      case 'nameContains':
+        return textValue.trim() ? { field: 'nameContains', text: textValue.trim() } : undefined;
+      case 'nameMatches':
+        return textValue.trim() ? { field: 'nameMatches', pattern: textValue.trim() } : undefined;
+      case 'kindIs':
+        return { field: 'kindIs', value: kindValue };
+    }
+  }
+
+  const submit = () => {
+    if (!name.trim()) return;
+    const crit = buildCriterion();
+    if (field !== 'manual' && !crit) return; // need a value for non-manual rules
+    onCommit(name, TAG_PALETTE[colorIdx].color, crit);
+  };
+
+  const valueInput = (() => {
+    switch (field) {
+      case 'manual':
+        return (
+          <div className="tagform__hint-line">
+            Files won't be tagged automatically. Use <kbd>tag</kbd> to add them.
+          </div>
+        );
+      case 'extIn':
+        return (
+          <input
+            className="overlay__input"
+            value={extValue}
+            placeholder="pdf, jpg, mov"
+            onChange={(e) => setExtValue(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+        );
+      case 'sizeOver':
+      case 'sizeUnder':
+        return (
+          <div className="tagform__row">
+            <input
+              className="overlay__input tagform__num"
+              type="number"
+              min={0}
+              step="0.1"
+              value={sizeValue}
+              placeholder="4"
+              onChange={(e) => setSizeValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
+            <span className="tagform__unit">MB</span>
+          </div>
+        );
+      case 'modifiedWithin':
+      case 'modifiedBefore':
+        return (
+          <div className="tagform__row">
+            <input
+              className="overlay__input tagform__num"
+              type="number"
+              min={0}
+              step="1"
+              value={daysValue}
+              placeholder="7"
+              onChange={(e) => setDaysValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+            />
+            <span className="tagform__unit">days</span>
+          </div>
+        );
+      case 'nameContains':
+        return (
+          <input
+            className="overlay__input"
+            value={textValue}
+            placeholder="screenshot"
+            onChange={(e) => setTextValue(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+        );
+      case 'nameMatches':
+        return (
+          <input
+            className="overlay__input"
+            value={textValue}
+            placeholder="^IMG_\\d+"
+            onChange={(e) => setTextValue(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+        );
+      case 'kindIs':
+        return (
+          <div className="tagform__row" role="radiogroup" aria-label="Kind">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={kindValue === 'file'}
+              className={`tagform__pill${kindValue === 'file' ? ' tagform__pill--on' : ''}`}
+              onClick={() => setKindValue('file')}
+            >
+              File
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={kindValue === 'dir'}
+              className={`tagform__pill${kindValue === 'dir' ? ' tagform__pill--on' : ''}`}
+              onClick={() => setKindValue('dir')}
+            >
+              Folder
+            </button>
+          </div>
+        );
+    }
+  })();
+
+  return (
+    <div className="overlay" data-state={state} onClick={exit}>
+      <div className="overlay__box overlay__box--tag" onClick={(e) => e.stopPropagation()}>
+        <div className="overlay__label">New tag</div>
+        <input
+          autoFocus
+          className="overlay__input"
+          value={name}
+          placeholder="e.g. heavy-pdfs, this-week, screenshots"
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+            else if (e.key === 'Escape') exit();
+          }}
+        />
+        <div className="overlay__palette" role="radiogroup" aria-label="Tag color">
+          {TAG_PALETTE.map((c, i) => (
+            <button
+              key={c.id}
+              type="button"
+              role="radio"
+              aria-checked={colorIdx === i}
+              aria-label={c.name}
+              className={[
+                'overlay__swatch',
+                colorIdx === i && 'overlay__swatch--on',
+              ].filter(Boolean).join(' ')}
+              style={{ background: c.color }}
+              onClick={() => setColorIdx(i)}
+              title={c.name}
+            />
+          ))}
+        </div>
+
+        <div className="overlay__label tagform__divider">Rule</div>
+        <select
+          className="overlay__input tagform__select"
+          value={field}
+          onChange={(e) => setField(e.target.value as CriterionField)}
+        >
+          {(Object.keys(CRITERION_LABELS) as CriterionField[]).map((f) => (
+            <option key={f} value={f}>
+              {CRITERION_LABELS[f]}
+            </option>
+          ))}
+        </select>
+        {valueInput}
+
+        <div className="overlay__hint">
+          Combine tags with <b>Match all</b> / <b>Match any</b> in the inspector to
+          build complex filters. Enter to create · Esc to cancel.
+        </div>
+      </div>
+    </div>
   );
 }
 

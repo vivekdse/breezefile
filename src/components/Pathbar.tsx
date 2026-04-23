@@ -62,7 +62,13 @@ export function Pathbar({ path, onNavigate }: Props) {
           title="Change view"
           onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: 'view' })}
         >
-          {activeTab?.viewMode === 'grid' ? '⊞' : activeTab?.viewMode === 'preview' ? '▣' : '☰'}
+          {activeTab?.viewMode === 'grid'
+            ? '⊞'
+            : activeTab?.viewMode === 'preview'
+              ? '▣'
+              : activeTab?.viewMode === 'tag'
+                ? '◐'
+                : '☰'}
         </button>
         <button
           type="button"

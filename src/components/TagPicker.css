@@ -1,0 +1,285 @@
+/*
+ * TagPicker — keyboard-first tag HUD (fm-60k).
+ *
+ * Theming: uses the paper-family tokens (--panel, --bg, --rule, --accent,
+ * --chip, --hi) and the composite text tokens (--text-on-panel,
+ * --muted-on-panel) so every active palette renders cohesively rather
+ * than dropping the hardcoded dark fallbacks of --bg-1/--fg-1.
+ */
+
+.tagpicker {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 24, 20, 0.18);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  z-index: var(--z-overlay);
+  animation: fade var(--motion-enter);
+}
+
+.tagpicker[data-state='leave'] {
+  animation: gpFadeOut var(--motion-exit) forwards;
+  pointer-events: none;
+}
+.tagpicker[data-state='leave'] .tagpicker__box {
+  animation: gpPopOut var(--motion-exit) forwards;
+}
+
+.tagpicker__box {
+  background: var(--panel);
+  color: var(--text-on-panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: 0 18px 36px -18px rgba(28, 24, 20, 0.35),
+    0 4px 10px -4px rgba(28, 24, 20, 0.18);
+  width: 420px;
+  overflow: hidden;
+  animation: pop var(--motion-enter);
+}
+
+/* ---- header ---- */
+
+.tagpicker__head {
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel-2);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.tagpicker__eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tagpicker__targets {
+  font-size: 12px;
+  color: var(--muted-on-panel);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- applied chips strip ---- */
+
+.tagpicker__strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  font-size: 11px;
+  align-items: center;
+}
+.tagpicker__strip-label {
+  color: var(--muted-on-panel);
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.tagpicker__strip-empty {
+  color: var(--muted-on-panel);
+  font-style: italic;
+}
+.tagpicker__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--chip);
+  border: 1px solid var(--rule);
+  border-radius: 100px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--text-on-panel);
+  font-weight: 500;
+}
+.tagpicker__chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset;
+}
+
+/* ---- input ---- */
+
+.tagpicker__inputrow {
+  padding: 12px 14px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+}
+.tagpicker__input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  color: var(--text-on-canvas);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: 0;
+  transition: border-color var(--motion-focus-ring), box-shadow var(--motion-focus-ring);
+}
+.tagpicker__input::placeholder {
+  color: var(--muted-on-canvas);
+  font-style: italic;
+}
+.tagpicker__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ---- list ---- */
+
+.tagpicker__list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 44vh;
+  overflow: auto;
+  background: var(--panel);
+}
+
+.tagpicker__empty {
+  padding: 16px 18px;
+  color: var(--muted-on-panel);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.tagpicker__item {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-on-panel);
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.tagpicker__item--hl {
+  background: var(--hi);
+}
+
+.tagpicker__item--flash {
+  animation: tagpicker-flash 700ms ease-out;
+}
+@keyframes tagpicker-flash {
+  0%   { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+
+.tagpicker__item--create {
+  border-top: 1px dashed var(--rule);
+  margin-top: 4px;
+  padding-top: 10px;
+  color: var(--muted-on-panel);
+  font-style: italic;
+}
+.tagpicker__item--create em {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 600;
+}
+.tagpicker__plus {
+  text-align: center;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ---- dot ---- */
+
+.tagpicker__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+/* ---- name ---- */
+
+.tagpicker__name {
+  font-family: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-on-panel);
+}
+
+/* ---- verb hints ---- */
+
+.tagpicker__verb {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid transparent;
+  background: var(--chip);
+  color: var(--muted-on-panel);
+}
+.tagpicker__verb--add {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+.tagpicker__verb--remove {
+  color: #8a3a36;
+  border-color: rgba(138, 58, 54, 0.18);
+  background: rgba(138, 58, 54, 0.08);
+}
+.tagpicker__verb--rule {
+  color: var(--muted-on-panel);
+  font-style: italic;
+  background: transparent;
+}
+
+.tagpicker__item--hl .tagpicker__verb--add {
+  background: var(--accent);
+  color: #fff9ea;
+  border-color: var(--accent);
+}
+.tagpicker__item--hl .tagpicker__verb--remove {
+  background: #8a3a36;
+  color: #fff9ea;
+  border-color: #8a3a36;
+}
+
+.tagpicker__sub {
+  font-size: 10.5px;
+  color: var(--muted-on-panel);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tagpicker__hint-small {
+  font-size: 10.5px;
+  color: var(--muted-on-panel);
+  font-style: normal;
+}
+
+/* ---- footer ---- */
+
+.tagpicker__foot {
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--rule);
+  font-size: 11px;
+  color: var(--muted-on-panel);
+  background: var(--panel-2);
+}
+
+.tagpicker__foot kbd {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--text-on-panel);
+  font-size: 10px;
+  margin: 0 2px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04) inset;
+}

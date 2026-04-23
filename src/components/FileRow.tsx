@@ -12,6 +12,10 @@ type Props = {
   activeColumn: boolean;
   marked: boolean;
   tag?: string;
+  /** fm-uns — colors of active tag rules that match this row. Rendered as
+   *  a stacked vertical band in the row's left gutter. Empty/undefined
+   *  means no decoration. */
+  tagColors?: string[];
   yanked: boolean;
   /** Zero-based row position — wires into the staggered fade-in (fm-z1f). */
   index?: number;
@@ -170,6 +174,7 @@ function FileRowInner({
   activeColumn,
   marked,
   tag,
+  tagColors,
   yanked,
   index,
   onClick,
@@ -230,6 +235,13 @@ function FileRowInner({
       }}
       onDragEnd={() => endAppDrag()}
     >
+      {tagColors && tagColors.length > 0 && (
+        <span className="row__tagband" aria-hidden>
+          {tagColors.map((c, i) => (
+            <span key={i} style={{ background: c }} />
+          ))}
+        </span>
+      )}
       {/* Selection checkbox — single, prominent indicator of marked state.
           Uses a CSS-painted box (not a Unicode glyph) so the filled state can
           read as a real selection chip. The file-type icon is intentionally

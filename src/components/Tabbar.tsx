@@ -30,6 +30,8 @@ export function Tabbar() {
         showHidden: false,
         viewMode: 'list',
         filter: '',
+        tagViz: [],
+        tagFilter: { mode: 'off', ids: [] },
         history: [],
         forward: [],
       },

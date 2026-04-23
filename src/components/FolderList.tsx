@@ -6,6 +6,7 @@ import { FileRow, showContextMenu, type MenuItem } from './FileRow';
 import { FileGrid } from './FileGrid';
 import { fm } from '../bridge';
 import type { Entry } from '../types';
+import { entryMatchesFilter, findTag, tagMatchesEntry } from '../tags';
 import './FolderList.css';
 
 /**
@@ -129,6 +130,8 @@ export function FolderList() {
                     showHidden: false,
                     viewMode: 'list',
                     filter: '',
+                    tagViz: [],
+                    tagFilter: { mode: 'off', ids: [] },
                     history: [],
                     forward: [],
                   },
@@ -240,8 +243,20 @@ export function FolderList() {
   const tab = activeTab;
   const col = lastCol(tab);
   const cwd = tab.trail[col];
-  const entries = visibleEntries(state.entriesByPath[cwd], tab);
+  const allEntries = visibleEntries(state.entriesByPath[cwd], tab);
+  // fm-uns — tag-combination filter narrows the visible list. When the
+  // filter is off, this is a no-op and entries === allEntries.
+  const entries =
+    tab.tagFilter.mode !== 'off' && tab.tagFilter.ids.length > 0
+      ? allEntries.filter((e) =>
+          entryMatchesFilter(e, tab.tagFilter, state.customTags, state.tagPaths),
+        )
+      : allEntries;
   const selIdx = tab.selected[col] ?? 0;
+  // Resolve active tag defs once per render so each row lookup is cheap.
+  const vizTags = tab.tagViz
+    .map((id) => findTag(id, state.customTags))
+    .filter((t): t is NonNullable<typeof t> => !!t);
 
   // Keep the ref fresh so the stable callbacks above see current data.
   ctxRef.current = { store, overlays, tab, col, entries };
@@ -308,23 +323,29 @@ export function FolderList() {
               empty folder — type <kbd>create</kbd> to add one, or <kbd>←</kbd> to go back
             </li>
           )}
-          {entries.map((e, j) => (
-            <FileRow
-              key={e.path}
-              entry={e}
-              index={j}
-              selected={selIdx === j}
-              activeColumn={true}
-              marked={!!tab.marks[e.path]}
-              tag={state.tags[e.path]}
-              yanked={state.yank.some((y) => y.path === e.path)}
-              onClick={selectAt}
-              onDoubleClick={doubleOpen}
-              onToggleMark={toggleMark}
-              onContextMenu={onContextMenu}
-              getDragPaths={getDragPaths}
-            />
-          ))}
+          {entries.map((e, j) => {
+            const tagColors = vizTags
+              .filter((t) => tagMatchesEntry(t, e, state.tagPaths[t.id]))
+              .map((t) => t.color);
+            return (
+              <FileRow
+                key={e.path}
+                entry={e}
+                index={j}
+                selected={selIdx === j}
+                activeColumn={true}
+                marked={!!tab.marks[e.path]}
+                tag={state.tags[e.path]}
+                tagColors={tagColors.length > 0 ? tagColors : undefined}
+                yanked={state.yank.some((y) => y.path === e.path)}
+                onClick={selectAt}
+                onDoubleClick={doubleOpen}
+                onToggleMark={toggleMark}
+                onContextMenu={onContextMenu}
+                getDragPaths={getDragPaths}
+              />
+            );
+          })}
         </ul>
       )}
     </div>

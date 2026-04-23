@@ -32,7 +32,8 @@ import {
   pathJoin,
   visibleEntries,
 } from '../actions';
-import type { Entry, SortKey } from '../types';
+import type { CustomTag, Entry, SortKey, TagFilter, TagPaths } from '../types';
+import { getAllTags } from '../tags';
 import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
 import './ChipPrompt.css';
 
@@ -69,6 +70,13 @@ type Ctx = {
   // Open Terminal verb's conditional 'Which terminal' slot.
   defaultTerminal: string | null;
   installedTerminals: string[];
+  // fm-60k — tag state surfaced to the chip palette so the tag/untag/newtag
+  // verbs can compose options without reaching back into the store.
+  customTags: CustomTag[];
+  tagPaths: TagPaths;
+  // The active tab's combination filter — when on, tagTargets() falls back
+  // to the filtered-visible set instead of just the focused row.
+  tagFilter: TagFilter;
 };
 
 type Verb =
@@ -103,7 +111,11 @@ type Verb =
   | 'extract'
   | 'copy-path'
   | 'open-with'
-  | 'openTerminal';
+  | 'openTerminal'
+  | 'newtag'
+  | 'tag'
+  | 'untag'
+  | 'filter';
 
 type Option = {
   id: string;
@@ -590,6 +602,8 @@ const VERBS: VerbDef[] = [
           showHidden: false,
           viewMode: 'list',
           filter: '',
+          tagViz: [],
+          tagFilter: { mode: 'off', ids: [] },
           history: [],
           forward: [],
         },
@@ -895,12 +909,255 @@ const VERBS: VerbDef[] = [
           { id: 'list', label: 'List', detail: 'compact rows', available: true },
           { id: 'grid', label: 'Grid', detail: 'thumbnails', available: true },
           { id: 'preview', label: 'Preview', detail: 'large thumbnails', available: true },
+          { id: 'tag', label: 'Tags', detail: 'color-code & filter', available: true },
         ],
       },
     ],
     execute: (_c, [mode], api) => {
-      api.setTab({ viewMode: mode as 'list' | 'grid' | 'preview' });
+      api.setTab({ viewMode: mode as 'list' | 'grid' | 'preview' | 'tag' });
       api.dispatch({ type: 'setStatus', msg: `view: ${mode}` });
+    },
+  },
+  // Tag verbs share this target-resolution policy: marks > filtered visible
+  // set (when a tag-combination filter is active) > cursor. This lets the
+  // user narrow the list with the inspector's filter and tag the whole
+  // visible result without manually marking every row.
+  // (Defined as a const so verb closures below can reach it.)
+  // Note: declared inline at the call site via the helper below.
+  {
+    id: 'newtag',
+    label: 'New tag',
+    aliases: ['newtag', 'create tag', 'new tag', 'tag new', 'mktag'],
+    icon: '⊕',
+    describe: () => 'Create a new tag (name + color)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:newTag'));
+      api.closeOverlay();
+    },
+  },
+  {
+    id: 'tag',
+    label: 'Tag',
+    aliases: ['tag', 'apply tag', 'add tag', 'pin'],
+    icon: '◉',
+    describe: (c) => {
+      const n = folderTargets(c).length;
+      return n === 0 ? 'Open a folder first' : `Apply a tag to ${n} files in this folder`;
+    },
+    isAvailable: (c) => {
+      if (folderTargets(c).length === 0) {
+        return { ok: false, reason: 'Open a folder first' };
+      }
+      if (getAllTags(c.customTags).length === 0) {
+        return { ok: false, reason: 'No tags exist — run “new tag” first' };
+      }
+      return { ok: true };
+    },
+    slots: [
+      {
+        label: 'Tag',
+        getOptions: (c) => {
+          const targets = folderTargets(c);
+          return getAllTags(c.customTags).map((t) => {
+            const applied = c.tagPaths[t.id] ?? [];
+            const already = targets.length > 0 && targets.every((p) => applied.includes(p));
+            const hits = targets.filter((p) => applied.includes(p)).length;
+            return {
+              id: t.id,
+              label: t.name,
+              detail: already
+                ? 'every file already carries this tag'
+                : hits > 0
+                  ? `${hits}/${targets.length} already tagged · will tag the rest`
+                  : t.builtin === false
+                    ? `manual — will add ${targets.length} to its list`
+                    : t.description ?? 'built-in rule',
+              available: !already,
+              reason: already ? 'every file already carries this tag' : undefined,
+            };
+          });
+        },
+      },
+    ],
+    execute: (c, [tagId], api) => {
+      const paths = folderTargets(c);
+      if (paths.length === 0 || !tagId) return;
+      api.dispatch({ type: 'applyTag', id: tagId, paths });
+      const tag = getAllTags(c.customTags).find((t) => t.id === tagId);
+      api.dispatch({
+        type: 'setStatus',
+        msg: `tagged ${paths.length} files → ${tag?.name ?? tagId}`,
+      });
+      api.dispatch({ type: 'addTagViz', id: tagId });
+      api.closeOverlay();
+    },
+  },
+  {
+    id: 'filter',
+    label: 'Filter by tag',
+    aliases: ['filter', 'tag filter', 'narrow', 'show only', 'show files', 'limit'],
+    icon: '⌖',
+    describe: (c) => {
+      const f = c.tagFilter;
+      if (f.mode === 'off' || f.ids.length === 0) {
+        return 'Narrow this folder to files matching specific tags';
+      }
+      return `Filter (${f.mode === 'all' ? 'match all' : 'match any'}) of ${f.ids.length} tag${f.ids.length === 1 ? '' : 's'}`;
+    },
+    isAvailable: (c) => {
+      if (getAllTags(c.customTags).length === 0) {
+        return { ok: false, reason: 'No tags exist — run “new tag” first' };
+      }
+      return { ok: true };
+    },
+    slots: [
+      {
+        label: 'Action',
+        getOptions: (c) => {
+          const f = c.tagFilter;
+          const inFilterCount = f.ids.length;
+          const opts: Option[] = [
+            {
+              id: 'add',
+              label: 'Add a tag',
+              detail: 'narrow the list to files carrying this tag',
+              available: true,
+            },
+          ];
+          if (inFilterCount > 0) {
+            opts.push({
+              id: 'remove',
+              label: 'Remove a tag',
+              detail: `${inFilterCount} tag${inFilterCount === 1 ? '' : 's'} currently in filter`,
+              available: true,
+            });
+            opts.push({
+              id: 'mode',
+              label: `Switch match mode (now: ${f.mode === 'all' ? 'match all' : f.mode === 'any' ? 'match any' : 'off'})`,
+              detail: 'all = AND, any = OR',
+              available: true,
+            });
+            opts.push({
+              id: 'clear',
+              label: 'Clear filter',
+              detail: 'show every file again',
+              available: true,
+            });
+          }
+          return opts;
+        },
+      },
+      {
+        label: 'Pick',
+        getOptions: (c, prev) => {
+          const action = prev[0];
+          if (action === 'add') {
+            return getAllTags(c.customTags)
+              .map((t) => ({
+                id: t.id,
+                label: t.name,
+                detail: c.tagFilter.ids.includes(t.id) ? 'already in filter' : t.description ?? '',
+                available: !c.tagFilter.ids.includes(t.id),
+                reason: c.tagFilter.ids.includes(t.id) ? 'already in filter' : undefined,
+              }));
+          }
+          if (action === 'remove') {
+            return c.tagFilter.ids
+              .map((id) => getAllTags(c.customTags).find((t) => t.id === id))
+              .filter((t): t is NonNullable<typeof t> => !!t)
+              .map((t) => ({ id: t.id, label: t.name, detail: 'remove from filter', available: true }));
+          }
+          if (action === 'mode') {
+            return [
+              { id: 'all', label: 'Match all', detail: 'a file must carry every selected tag (AND)', available: true },
+              { id: 'any', label: 'Match any', detail: 'a file must carry at least one selected tag (OR)', available: true },
+              { id: 'off', label: 'Off', detail: 'show every file', available: true },
+            ];
+          }
+          // clear: no second slot needed; surface a confirm-style single option
+          return [{ id: 'confirm', label: 'Clear all filter tags', available: true }];
+        },
+      },
+    ],
+    execute: (c, [action, value], api) => {
+      const f = c.tagFilter;
+      if (action === 'add' && value) {
+        const ids = [...f.ids, value];
+        api.setTab({
+          tagFilter: { mode: f.mode === 'off' ? 'all' : f.mode, ids },
+          // Auto-toggle viz so the user sees the colored band on matching rows.
+        });
+        api.dispatch({ type: 'addTagViz', id: value });
+        const tag = getAllTags(c.customTags).find((t) => t.id === value);
+        api.dispatch({ type: 'setStatus', msg: `filter +${tag?.name ?? value}` });
+      } else if (action === 'remove' && value) {
+        const ids = f.ids.filter((x) => x !== value);
+        api.setTab({
+          tagFilter: { mode: ids.length === 0 ? 'off' : f.mode, ids },
+        });
+        const tag = getAllTags(c.customTags).find((t) => t.id === value);
+        api.dispatch({ type: 'setStatus', msg: `filter −${tag?.name ?? value}` });
+      } else if (action === 'mode' && value) {
+        api.setTab({ tagFilter: { ...f, mode: value as 'all' | 'any' | 'off' } });
+        api.dispatch({ type: 'setStatus', msg: `filter mode: ${value}` });
+      } else if (action === 'clear') {
+        api.setTab({ tagFilter: { mode: 'off', ids: [] } });
+        api.dispatch({ type: 'setStatus', msg: 'filter cleared' });
+      }
+      api.closeOverlay();
+    },
+  },
+  {
+    id: 'untag',
+    label: 'Untag',
+    aliases: ['untag', 'remove tag', 'unpin', 'clear tag'],
+    icon: '⊖',
+    describe: (c) => {
+      const n = folderTargets(c).length;
+      return n === 0 ? 'Nothing to untag' : `Remove a tag from ${n} files in this folder`;
+    },
+    isAvailable: (c) => {
+      const targets = folderTargets(c);
+      if (targets.length === 0) return { ok: false, reason: 'Open a folder first' };
+      const anyTagged = Object.values(c.tagPaths).some((paths) =>
+        paths.some((p) => targets.includes(p)),
+      );
+      if (!anyTagged) return { ok: false, reason: 'No manual tags in this folder' };
+      return { ok: true };
+    },
+    slots: [
+      {
+        label: 'Tag',
+        getOptions: (c) => {
+          const targets = folderTargets(c);
+          return getAllTags(c.customTags)
+            .map((t) => {
+              const applied = c.tagPaths[t.id] ?? [];
+              const hits = targets.filter((p) => applied.includes(p)).length;
+              return {
+                id: t.id,
+                label: t.name,
+                detail: `${hits} of ${targets.length} carry this tag`,
+                available: hits > 0,
+                reason: hits === 0 ? 'no files in this folder carry this tag' : undefined,
+              };
+            })
+            .filter((o) => o.available);
+        },
+      },
+    ],
+    execute: (c, [tagId], api) => {
+      const paths = folderTargets(c);
+      if (paths.length === 0 || !tagId) return;
+      api.dispatch({ type: 'untagPaths', id: tagId, paths });
+      const tag = getAllTags(c.customTags).find((t) => t.id === tagId);
+      api.dispatch({
+        type: 'setStatus',
+        msg: `untagged ${paths.length} files from ${tag?.name ?? tagId}`,
+      });
+      api.closeOverlay();
     },
   },
   {
@@ -1186,6 +1443,14 @@ function implicitSources(c: Ctx): string[] {
   return [];
 }
 
+// fm-60k — tag/untag verbs always target every visible row in the current
+// folder. We deliberately don't infer from marks / cursor / filter; the
+// user's mental model is "this folder" and one consistent answer beats
+// three with hidden precedence rules.
+function folderTargets(c: Ctx): string[] {
+  return c.entries.map((e) => e.path);
+}
+
 function destinationOptions(c: Ctx, includeCurrent = false): Option[] {
   const opts: Option[] = [];
   const seen = new Set<string>();
@@ -1432,8 +1697,11 @@ export function ChipPrompt({
       forwardLen: activeTab.forward.length,
       defaultTerminal,
       installedTerminals,
+      customTags: state.customTags,
+      tagPaths: state.tagPaths,
+      tagFilter: activeTab.tagFilter,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, localSubdirs, defaultTerminal, installedTerminals]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, localSubdirs, defaultTerminal, installedTerminals, state.customTags, state.tagPaths]);
 
   if (!activeTab || !ctx) return null;
 
