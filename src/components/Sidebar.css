@@ -116,6 +116,30 @@ button.sidebar__link:focus-visible {
   padding: 7px 10px;
   font-size: 12.5px;
   color: var(--panel-ink, var(--ink-2));
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  text-align: left;
+  cursor: default;
+  width: 100%;
+  font-family: inherit;
+}
+.sidebar__drive--clickable {
+  cursor: pointer;
+}
+.sidebar__drive--clickable:hover {
+  background: var(--chip);
+}
+.sidebar__drive--active {
+  background: var(--chip);
+  color: var(--panel-ink, var(--ink-1));
+}
+.sidebar__drive--drop {
+  border-color: var(--accent);
+  background: var(--chip);
+}
+.sidebar__drive-bar--empty {
+  background: transparent;
 }
 .sidebar__drive-ico {
   color: var(--panel-muted, var(--muted));

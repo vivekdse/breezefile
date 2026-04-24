@@ -207,6 +207,175 @@ async function thumbnailFor(p: string, size = 128): Promise<string | null> {
   }
 }
 
+// ─── Location helpers (sidebar's "Locations" section) ────────────────
+export type Location = {
+  id: string;
+  label: string;
+  path: string;
+  icon: 'drive' | 'usb' | 'folder';
+  kind: 'boot' | 'external' | 'cloud' | 'icloud';
+  /** 0–100; omitted for cloud providers (no local quota). */
+  usedPct?: number;
+  caption: string;
+};
+
+function fmtBytes(n: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+async function diskStats(p: string): Promise<{ used: number; total: number } | null> {
+  try {
+    // fs.statfs is available in Node 18.15+ / Electron's bundled Node.
+    const s = await (fs as typeof fs & {
+      statfs: (p: string) => Promise<{ bsize: number; blocks: bigint | number; bavail: bigint | number }>;
+    }).statfs(p);
+    const bsize = s.bsize;
+    const blocks = typeof s.blocks === 'bigint' ? Number(s.blocks) : s.blocks;
+    const bavail = typeof s.bavail === 'bigint' ? Number(s.bavail) : s.bavail;
+    const total = blocks * bsize;
+    const free = bavail * bsize;
+    if (!Number.isFinite(total) || total <= 0) return null;
+    return { used: Math.max(0, total - free), total };
+  } catch {
+    return null;
+  }
+}
+
+async function bootLocation(): Promise<Location> {
+  const stats = await diskStats('/');
+  const loc: Location = {
+    id: 'boot',
+    label: 'Macintosh HD',
+    path: '/',
+    icon: 'drive',
+    kind: 'boot',
+    caption: 'Startup disk',
+  };
+  if (stats) {
+    loc.usedPct = Math.round((stats.used / stats.total) * 100);
+    loc.caption = `${fmtBytes(stats.used)} of ${fmtBytes(stats.total)} used`;
+  }
+  return loc;
+}
+
+async function externalLocations(): Promise<Location[]> {
+  if (process.platform !== 'darwin') return [];
+  const out: Location[] = [];
+  let names: string[] = [];
+  try {
+    names = await fs.readdir('/Volumes');
+  } catch {
+    return out;
+  }
+  for (const name of names) {
+    const full = path.join('/Volumes', name);
+    try {
+      const st = await fs.lstat(full);
+      // The boot volume appears as a symlink in /Volumes — skip so it isn't
+      // listed twice (bootLocation already shows it).
+      if (st.isSymbolicLink()) continue;
+      if (!st.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const stats = await diskStats(full);
+    const loc: Location = {
+      id: `vol:${name}`,
+      label: name,
+      path: full,
+      icon: 'usb',
+      kind: 'external',
+      caption: 'External',
+    };
+    if (stats) {
+      loc.usedPct = Math.round((stats.used / stats.total) * 100);
+      loc.caption = `${fmtBytes(stats.used)} of ${fmtBytes(stats.total)} used`;
+    }
+    out.push(loc);
+  }
+  return out;
+}
+
+// CloudStorage directory names follow `<Provider>-<AccountOrId>` (e.g.
+// GoogleDrive-alice@gmail.com, OneDrive-Personal, Dropbox). Map the known
+// providers to human labels; unknown providers fall back to the raw prefix
+// with underscores softened to spaces.
+const CLOUD_PROVIDERS: Record<string, string> = {
+  GoogleDrive: 'Google Drive',
+  OneDrive: 'OneDrive',
+  Dropbox: 'Dropbox',
+  Box: 'Box',
+  iCloud: 'iCloud',
+  pCloud: 'pCloud',
+  MEGA: 'MEGA',
+  ProtonDrive: 'Proton Drive',
+  Creative_Cloud_Files: 'Creative Cloud Files',
+};
+
+function parseCloudName(name: string): { label: string; caption: string } {
+  const dash = name.indexOf('-');
+  const prefix = dash >= 0 ? name.slice(0, dash) : name;
+  const suffix = dash >= 0 ? name.slice(dash + 1) : '';
+  const label = CLOUD_PROVIDERS[prefix] ?? prefix.replace(/_/g, ' ');
+  const caption = suffix ? `Cloud · ${suffix}` : 'Cloud';
+  return { label, caption };
+}
+
+async function cloudLocations(): Promise<Location[]> {
+  const home = os.homedir();
+  const out: Location[] = [];
+
+  const icloud = path.join(home, 'Library/Mobile Documents/com~apple~CloudDocs');
+  try {
+    await fs.access(icloud);
+    out.push({
+      id: 'icloud',
+      label: 'iCloud Drive',
+      path: icloud,
+      icon: 'folder',
+      kind: 'icloud',
+      caption: 'Cloud',
+    });
+  } catch {
+    /* not present */
+  }
+
+  const cs = path.join(home, 'Library/CloudStorage');
+  let names: string[] = [];
+  try {
+    names = await fs.readdir(cs);
+  } catch {
+    return out;
+  }
+  for (const name of names) {
+    if (name.startsWith('.')) continue;
+    const full = path.join(cs, name);
+    try {
+      const st = await fs.lstat(full);
+      if (!st.isDirectory() && !st.isSymbolicLink()) continue;
+    } catch {
+      continue;
+    }
+    const parsed = parseCloudName(name);
+    out.push({
+      id: `cloud:${name}`,
+      label: parsed.label,
+      path: full,
+      icon: 'folder',
+      kind: 'cloud',
+      caption: parsed.caption,
+    });
+  }
+  return out;
+}
+
 export function registerIpc() {
   // Hydrate persisted "Open With" bindings on startup so `app:open` can
   // dispatch to the bound app without an extra async hop on each call.
@@ -288,6 +457,24 @@ export function registerIpc() {
   });
 
   ipcMain.handle('fs:homedir', () => os.homedir());
+
+  // ─── Locations (drive / cloud detection) ───────────────────────────
+  // Enumerates mountable things the sidebar's "Locations" section shows:
+  //   1. boot volume via statfs('/') for real usage
+  //   2. /Volumes/* externals, skipping the boot symlink macOS plants there
+  //   3. ~/Library/CloudStorage/* cloud providers (Google Drive, OneDrive,
+  //      Dropbox, etc.) — names encode "<Provider>-<account>" so we split
+  //      on the first dash to get a readable label + account caption.
+  //   4. iCloud Drive at the canonical com~apple~CloudDocs path.
+  // Cloud providers don't expose quota locally; caption just says "Cloud".
+  ipcMain.handle('fs:listLocations', async (): Promise<Location[]> => {
+    const [boot, ext, cloud] = await Promise.all([
+      bootLocation(),
+      externalLocations(),
+      cloudLocations(),
+    ]);
+    return [boot, ...ext, ...cloud];
+  });
 
   ipcMain.handle('fs:stat', async (_e, p: string) => {
     const abs = expandHome(p);

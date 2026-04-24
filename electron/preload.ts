@@ -4,6 +4,18 @@ const fm = {
   platform: process.platform,
   versions: process.versions,
   homedir: () => ipcRenderer.invoke('fs:homedir') as Promise<string>,
+  listLocations: () =>
+    ipcRenderer.invoke('fs:listLocations') as Promise<
+      Array<{
+        id: string;
+        label: string;
+        path: string;
+        icon: 'drive' | 'usb' | 'folder';
+        kind: 'boot' | 'external' | 'cloud' | 'icloud';
+        usedPct?: number;
+        caption: string;
+      }>
+    >,
   readdir: (p: string) => ipcRenderer.invoke('fs:readdir', p),
   stat: (p: string) => ipcRenderer.invoke('fs:stat', p),
   mkdir: (p: string) => ipcRenderer.invoke('fs:mkdir', p),

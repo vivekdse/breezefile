@@ -4,6 +4,17 @@ type Fm = {
   platform: NodeJS.Platform;
   versions: NodeJS.ProcessVersions;
   homedir: () => Promise<string>;
+  listLocations: () => Promise<
+    Array<{
+      id: string;
+      label: string;
+      path: string;
+      icon: 'drive' | 'usb' | 'folder';
+      kind: 'boot' | 'external' | 'cloud' | 'icloud';
+      usedPct?: number;
+      caption: string;
+    }>
+  >;
   readdir: (p: string) => Promise<Entry[]>;
   stat: (p: string) => Promise<{ size: number; mtimeMs: number; isDir: boolean }>;
   mkdir: (p: string) => Promise<void>;

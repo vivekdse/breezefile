@@ -15,8 +15,8 @@ import './Sidebar.css';
 /**
  * Left sidebar — port of themes.html `.sidebar`:
  *   - Favorites: 7 non-removable seeds (Home/Desktop/...) + user-pinned folders
- *   - Locations (drives with usage progress bars — v1 placeholder, real
- *     hot-plug detection deferred to a follow-up bead)
+ *   - Locations (boot volume, /Volumes externals, cloud providers, iCloud
+ *     Drive — enumerated via fm.listLocations, refreshed on window focus)
  *   - Tags (derived from state.tags — one colored dot per unique char)
  *   - Crest (solitary fleuron anchoring the column)
  *
@@ -48,15 +48,44 @@ const TAG_DOT_COLORS = [
   'var(--accent-2)',
 ] as const;
 
+type Location = {
+  id: string;
+  label: string;
+  path: string;
+  icon: 'drive' | 'usb' | 'folder';
+  kind: 'boot' | 'external' | 'cloud' | 'icloud';
+  usedPct?: number;
+  caption: string;
+};
+
 export function Sidebar() {
   const { state, activeTab, navigateTo, dispatch, refreshActive } = useStore();
   const [home, setHome] = useState<string>('');
   const [dropHover, setDropHover] = useState(false);
   const [rowDrop, setRowDrop] = useState<string | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
 
   // Resolve home once. bridge.fm.homedir is async to cover Windows/Linux later.
   useEffect(() => {
     fm.homedir().then(setHome).catch(() => setHome(''));
+  }, []);
+
+  // Enumerate mountable locations (boot volume, /Volumes externals, cloud
+  // providers, iCloud). Refresh on window focus so plugging a drive or
+  // mounting a DMG while Breeze is in the background picks up on return.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fm.listLocations()
+        .then((l) => { if (!cancelled) setLocations(l); })
+        .catch(() => { if (!cancelled) setLocations([]); });
+    };
+    load();
+    window.addEventListener('focus', load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', load);
+    };
   }, []);
 
   const cwd = useMemo<string>(() => {
@@ -221,9 +250,22 @@ export function Sidebar() {
       </div>
 
       <h4 className="sidebar__section-title">Locations</h4>
-      {/* TODO(fm-followup): real drive detection + hot-plug. For v1 we
-          render a placeholder so the visual anchor exists. */}
-      <DriveRow label="Macintosh HD" icon="drive" usedPct={62} caption="312 GB of 500 GB used" />
+      {locations.map((loc) => (
+        <DriveRow
+          key={loc.id}
+          label={loc.label}
+          icon={loc.icon}
+          usedPct={loc.usedPct}
+          caption={loc.caption}
+          active={cwd === loc.path}
+          onClick={() => onNavigate(loc.path)}
+          onDragOver={onRowDragOver(loc.path)}
+          onDragLeave={onRowDragLeave}
+          onDrop={onRowDrop(loc.path)}
+          isDropTarget={rowDrop === loc.path}
+          title={loc.path}
+        />
+      ))}
 
       {uniqueTags.length > 0 && (
         <>
@@ -250,24 +292,64 @@ export function Sidebar() {
 interface DriveRowProps {
   label: string;
   icon: IconName;
-  /** 0–100 */
-  usedPct: number;
+  /** 0–100; omit for cloud providers where no quota is known. */
+  usedPct?: number;
   caption: string;
+  active?: boolean;
+  isDropTarget?: boolean;
+  onClick?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  title?: string;
 }
 
-function DriveRow({ label, icon, usedPct, caption }: DriveRowProps) {
-  const pct = Math.max(0, Math.min(100, usedPct));
+function DriveRow({
+  label,
+  icon,
+  usedPct,
+  caption,
+  active,
+  isDropTarget,
+  onClick,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  title,
+}: DriveRowProps) {
+  const pct = usedPct == null ? null : Math.max(0, Math.min(100, usedPct));
+  const cls = [
+    'sidebar__drive',
+    active ? 'sidebar__drive--active' : '',
+    isDropTarget ? 'sidebar__drive--drop' : '',
+    onClick ? 'sidebar__drive--clickable' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <div className="sidebar__drive">
+    <button
+      type="button"
+      className={cls}
+      onClick={onClick}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      title={title}
+      disabled={!onClick}
+    >
       <span className="sidebar__ico sidebar__drive-ico">
         <Icon name={icon} size={18} />
       </span>
       <span className="sidebar__drive-label">{label}</span>
-      <div className="sidebar__drive-bar" aria-hidden>
-        <i style={{ width: `${pct}%` }} />
-      </div>
+      {pct !== null ? (
+        <div className="sidebar__drive-bar" aria-hidden>
+          <i style={{ width: `${pct}%` }} />
+        </div>
+      ) : (
+        <div className="sidebar__drive-bar sidebar__drive-bar--empty" aria-hidden />
+      )}
       <div className="sidebar__drive-sub">{caption}</div>
-    </div>
+    </button>
   );
 }
 
