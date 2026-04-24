@@ -278,13 +278,14 @@ const VERBS: VerbDef[] = [
       }
       api.setTab({ marks: newMarks });
       const count = Object.keys(newMarks).length;
-      // Auto-advance: don't close — pop back to verb picker so the user can
-      // chain the next action on the new selection (copy, move, delete, …).
-      api.resetToVerbPick(
-        count === 0
-          ? 'selection cleared'
-          : `selected ${count} — space to add, d to drag, y to yank`,
-      );
+      api.dispatch({
+        type: 'setStatus',
+        msg:
+          count === 0
+            ? 'selection cleared'
+            : `selected ${count} — space to add, d to drag, y to yank`,
+      });
+      api.closeOverlay();
     },
   },
   {
