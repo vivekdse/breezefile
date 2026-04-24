@@ -98,6 +98,7 @@ type Verb =
   | 'tutorial'
   | 'tips'
   | 'permissions'
+  | 'upgrade'
   | 'back'
   | 'forward'
   | 'up'
