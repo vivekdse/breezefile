@@ -77,9 +77,12 @@ jobs:
           X64_SHA=$(shasum -a 256 "$X64_DMG" | awk '{print $1}')
 
           TAP_DIR="$RUNNER_TEMP/homebrew-tap"
-          git clone --depth 1 \
-            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/vivekdse/homebrew-tap.git" \
-            "$TAP_DIR"
+          # Fine-grained PATs need the real owner as the HTTPS username.
+          # The `x-access-token` alias that works for GitHub App installation
+          # tokens (ghs_*) is rejected here. Bearer header auth also fails:
+          # git's smart HTTP expects Basic creds.
+          REMOTE="https://vivekdse:${HOMEBREW_TAP_TOKEN}@github.com/vivekdse/homebrew-tap.git"
+          git clone --depth 1 "$REMOTE" "$TAP_DIR"
 
           CASK="$TAP_DIR/Casks/breezefile.rb"
           mkdir -p "$(dirname "$CASK")"
