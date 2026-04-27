@@ -1,0 +1,17 @@
+{
+  "name": "@breezefile/cli",
+  "version": "0.1.0",
+  "description": "breeze — thin HTTP client for the Breeze File app",
+  "type": "module",
+  "bin": {
+    "breeze": "./breeze.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "breeze.mjs",
+    "README.md"
+  ],
+  "license": "MIT"
+}
