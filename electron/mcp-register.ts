@@ -19,6 +19,7 @@ import {
 import { app } from 'electron';
 
 type ClaudeMcpEntry = {
+  type?: 'stdio';
   command: string;
   args?: string[];
   env?: Record<string, string>;
@@ -30,7 +31,11 @@ type ClaudeSettings = {
 };
 
 function settingsPath(): string {
-  return path.join(os.homedir(), '.claude', 'settings.json');
+  // Claude Code reads MCP config from ~/.claude.json, NOT
+  // ~/.claude/settings.json (settings.json holds permissions/hooks/env
+  // and is loaded separately). Verified empirically: `claude mcp add`
+  // writes to ~/.claude.json and `claude mcp list` reads from there.
+  return path.join(os.homedir(), '.claude.json');
 }
 
 function backupPath(): string {
@@ -102,8 +107,10 @@ export function registerBreezeMcp(): 'written' | 'unchanged' | 'no-mcp' | 'error
   if (!mcpPath) return 'no-mcp';
 
   const desired: ClaudeMcpEntry = {
+    type: 'stdio',
     command: 'node',
     args: [mcpPath],
+    env: {},
   };
 
   const existed = existsSync(settingsPath());
