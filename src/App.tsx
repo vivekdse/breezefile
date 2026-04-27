@@ -23,6 +23,7 @@ import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
 import { TaskDialog, type TaskDialogRequest } from './components/TaskDialog';
 import { TasksPage } from './components/TasksPage';
+import { TaskShell } from './components/TaskShell';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -288,49 +289,72 @@ function Shell() {
     requestMkdir: () => setMkdirOpen(true),
   };
 
+  // fm-a9j — task tabs render an entirely different shell. The Pathbar /
+  // FolderHeader / FolderList chain assumes "this tab is a folder you're
+  // browsing"; a task tab is "this tab is operational, focused on a
+  // task," so we swap in TaskShell. Sidebar stays visible so the user
+  // can pivot between tasks; Preview is hidden because there's nothing
+  // to preview from a task. The terminal pane (when attached) still
+  // takes over via TerminalSplit, identical to folder tabs.
+  const isTaskTab = tab.kind === 'task';
+
   return (
     <OverlayCtx.Provider value={overlayApi}><div
       className="shell"
       data-view={tab.viewMode}
       data-mode={tab.terminal ? 'terminal' : 'files'}
+      data-tab-kind={tab.kind}
     >
       <IconSprite />
       {/* title slot — owned by fm-9w0 */}
       <div className="shell__title">
         <Titlebar />
       </div>
-      {/* chrome slot — Tabbar + Pathbar stack */}
+      {/* chrome slot — Tabbar + (Pathbar | nothing). In task mode the
+          Pathbar would lie about what this tab is "at," so we drop it
+          and let the task header own the top edge of the main pane. */}
       <div className="shell__chrome">
         <Tabbar />
-        <Pathbar
-          path={tab.trail[tab.trail.length - 1]}
-          onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
-        />
+        {!isTaskTab && (
+          <Pathbar
+            path={tab.trail[tab.trail.length - 1]}
+            onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
+          />
+        )}
       </div>
       {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot.
           Hidden in preview mode (fm-wq6) so the preview pane can claim
           the real estate. Hidden in terminal mode (fm-jtu) so the
-          terminal goes full-bleed. */}
+          terminal goes full-bleed. Stays visible in task mode — the
+          tasks list is the user's pivot surface. */}
       {tab.viewMode !== 'preview' && !tab.terminal && <Sidebar />}
-      {/* main slot — the recessed plate. FolderList (single-list Finder-style
-          view per fm-ehb) fills it. MillerColumns remains in the tree for a
-          future optional view mode. */}
+      {/* main slot — folder tabs render the recessed file plate; task
+          tabs render TaskShell (header / actions / folder context).
+          TerminalSplit wraps both so embedded terminals work in either
+          mode. */}
       <main className="shell__main">
         <TerminalSplit
           tab={tab}
           tabIndex={state.activeTab}
           isActive={true}
         >
-          <FolderHeader />
-          <FilterChip />
-          <FolderList />
+          {isTaskTab ? (
+            <TaskShell tabIndex={state.activeTab} />
+          ) : (
+            <>
+              <FolderHeader />
+              <FilterChip />
+              <FolderList />
+            </>
+          )}
         </TerminalSplit>
       </main>
       {/* preview slot — Preview (fm-fda) fills the reserved 340px slot.
           In tag view (fm-uns) the slot hosts TagInspector instead, so the
           user can browse, toggle, and combine tags without leaving the file
-          list. Hidden in terminal mode (fm-jtu). */}
-      {!tab.terminal && (
+          list. Hidden in terminal mode (fm-jtu) and in task mode (no
+          file selected = nothing to preview). */}
+      {!tab.terminal && !isTaskTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
       {/* status slot — ModeLine stacked above Statusbar. Hidden in

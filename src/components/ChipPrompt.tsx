@@ -152,6 +152,11 @@ type VerbDef = {
   // slots after the verb; empty = execute immediately
   slots: SlotDef[];
   execute: (ctx: Ctx, picks: string[], api: ExecApi) => Promise<void> | void;
+  // fm-a9j — when the active tab is a task tab, only verbs that opt in
+  // (or omit this flag) are surfaced. File-management verbs explicitly
+  // set this to false so the prompt in task mode reads as "operate on
+  // the task," not "operate on a folder."
+  availableInTaskMode?: boolean;
 };
 
 type SlotDef = {
@@ -223,6 +228,7 @@ function entryMatchesSelector(e: Entry, sel: SelectorId): boolean {
 const VERBS: VerbDef[] = [
   {
     id: 'select',
+    availableInTaskMode: false,
     label: 'Select',
     aliases: ['select', 'pick', 'mark', 'choose'],
     icon: '☑',
@@ -305,6 +311,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'move',
+    availableInTaskMode: false,
     label: 'Move',
     aliases: ['move', 'mv', 'cut'],
     icon: '→',
@@ -341,6 +348,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'copy',
+    availableInTaskMode: false,
     label: 'Copy',
     aliases: ['copy', 'cp', 'duplicate'],
     icon: '⧉',
@@ -377,6 +385,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'paste',
+    availableInTaskMode: false,
     label: 'Paste here',
     aliases: ['paste', 'paste here', 'put', 'drop', 'place'],
     icon: '↓',
@@ -397,6 +406,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'sort',
+    availableInTaskMode: false,
     label: 'Sort',
     aliases: ['sort', 'order', 'arrange'],
     icon: '↕',
@@ -434,6 +444,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'delete',
+    availableInTaskMode: false,
     label: 'Delete',
     aliases: ['delete', 'trash', 'rm', 'remove'],
     icon: '🗑',
@@ -489,6 +500,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'rename',
+    availableInTaskMode: false,
     label: 'Rename',
     aliases: ['rename', 'rn'],
     icon: '✎',
@@ -504,6 +516,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'goto',
+    availableInTaskMode: false,
     label: 'Go to / Find',
     aliases: ['go', 'goto', 'cd', 'navigate', 'open folder', 'find', 'search', 'locate', 'jump'],
     icon: '→',
@@ -531,6 +544,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'pin',
+    availableInTaskMode: false,
     label: 'Pin to sidebar',
     aliases: ['pin', 'favorite', 'bookmark sidebar', 'add to sidebar'],
     icon: '★',
@@ -563,6 +577,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'unpin',
+    availableInTaskMode: false,
     label: 'Unpin from sidebar',
     aliases: ['unpin', 'remove pin', 'remove favorite'],
     icon: '☆',
@@ -674,6 +689,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'open',
+    availableInTaskMode: false,
     label: 'Open',
     aliases: ['open', 'launch'],
     icon: '↗',
@@ -692,6 +708,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'copy-path',
+    availableInTaskMode: false,
     label: 'Copy path',
     aliases: ['copy-path', 'copypath', 'path', 'cpp'],
     icon: '⧉',
@@ -727,6 +744,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'open-with',
+    availableInTaskMode: false,
     label: 'Open With…',
     aliases: ['open-with', 'openwith', 'ow'],
     icon: '⎋',
@@ -752,6 +770,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'reveal',
+    availableInTaskMode: false,
     label: 'Reveal in Finder',
     aliases: ['reveal', 'finder', 'show in finder'],
     icon: '⎋',
@@ -959,6 +978,7 @@ const VERBS: VerbDef[] = [
     // native/sharer` hasn't been run), the verb disables with a reason
     // rather than silently failing.
     id: 'share',
+    availableInTaskMode: false,
     label: 'Share',
     aliases: ['share', 'send'],
     icon: '↗',
@@ -1016,6 +1036,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'view',
+    availableInTaskMode: false,
     label: 'View as',
     aliases: ['view', 'display', 'layout'],
     icon: '▦',
@@ -1094,6 +1115,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'tag',
+    availableInTaskMode: false,
     label: 'Tag',
     aliases: ['tag', 'apply tag', 'add tag', 'pin'],
     icon: '◉',
@@ -1151,6 +1173,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'filter',
+    availableInTaskMode: false,
     label: 'Filter by tag',
     aliases: ['filter', 'tag filter', 'narrow', 'show only', 'show files', 'limit'],
     icon: '⌖',
@@ -1266,6 +1289,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'untag',
+    availableInTaskMode: false,
     label: 'Untag',
     aliases: ['untag', 'remove tag', 'unpin', 'clear tag'],
     icon: '⊖',
@@ -1317,6 +1341,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'create',
+    availableInTaskMode: false,
     label: 'Create',
     aliases: ['create', 'new', 'mkdir', 'touch'],
     icon: '+',
@@ -1338,6 +1363,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'showHidden',
+    availableInTaskMode: false,
     label: 'Show / Hide hidden files',
     aliases: ['hidden', 'dotfiles', 'show hidden', 'hide hidden', 'toggle hidden'],
     icon: '◐',
@@ -1425,6 +1451,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'back',
+    availableInTaskMode: false,
     label: 'Back',
     aliases: ['back', 'previous', 'undo navigation', 'history back', 'go back'],
     icon: '←',
@@ -1441,6 +1468,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'up',
+    availableInTaskMode: false,
     label: 'Up',
     aliases: ['up', 'parent', 'go up', 'parent folder', 'enclosing folder', '..'],
     icon: '↑',
@@ -1462,6 +1490,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'forward',
+    availableInTaskMode: false,
     label: 'Forward',
     aliases: ['forward', 'redo navigation', 'history forward', 'go forward'],
     icon: '→',
@@ -1505,6 +1534,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'compress',
+    availableInTaskMode: false,
     label: 'Compress',
     aliases: ['compress', 'zip', 'archive'],
     icon: '🗜',
@@ -1541,6 +1571,7 @@ const VERBS: VerbDef[] = [
   },
   {
     id: 'extract',
+    availableInTaskMode: false,
     label: 'Extract',
     aliases: ['extract', 'unzip', 'unarchive'],
     icon: '📂',
@@ -2026,14 +2057,22 @@ export function ChipPrompt({
   // fm-22o — when task management is disabled, drop task-related verbs
   // from the catalog so they don't appear in the chip prompt.
   const tasksEnabled = state.taskManagementEnabled;
+  // fm-a9j — when the active tab is a task tab, hide file-management
+  // verbs so the prompt's verb list matches the shell's intent. The
+  // `availableInTaskMode` flag defaults to true (omitted = visible);
+  // file-management verbs opt out by setting it false.
+  const inTaskMode = activeTab.kind === 'task';
   const effectiveVerbs: VerbDef[] = useMemo(
     () => {
-      const base = tasksEnabled
+      let base = tasksEnabled
         ? VERBS
         : VERBS.filter((v) => v.id !== 'task' && v.id !== 'tasks');
+      if (inTaskMode) {
+        base = base.filter((v) => v.availableInTaskMode !== false);
+      }
       return [...base, ...synthesizeLauncherVerbs(launchers)];
     },
-    [launchers, tasksEnabled],
+    [launchers, tasksEnabled, inTaskMode],
   );
 
   // Build options for current state

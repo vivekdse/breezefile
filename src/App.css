@@ -42,6 +42,15 @@
   grid-template-columns: 0px 1fr 2fr;
 }
 
+/* fm-a9j — task tabs hide the preview slot (no file to preview), so the
+   main area can stretch into that column. Sidebar stays — tasks live
+   there, and a task tab is naturally a "pick what to work on next"
+   surface. */
+.shell[data-tab-kind="task"] {
+  --preview-w: 0px;
+  grid-template-columns: var(--sidebar-w) 1fr 0px;
+}
+
 .shell__title   { grid-area: title;   min-width: 0; }
 .shell__chrome  { grid-area: chrome;  min-width: 0; }
 .shell__status  { grid-area: status;  min-width: 0; }
@@ -125,6 +134,15 @@
   box-shadow: none;
 }
 .shell[data-mode="terminal"] .shell__main::before {
+  display: none;
+}
+/* fm-a9j — task tabs use a flat canvas. The recessed-plate styling
+   reads as "files live in this frame," which mis-frames an operational
+   surface. Drop the inset shadow + radial accent. */
+.shell[data-tab-kind="task"] .shell__main {
+  box-shadow: none;
+}
+.shell[data-tab-kind="task"] .shell__main::before {
   display: none;
 }
 /* The terminal-fullbleed wrapper takes the full main area and lets its
