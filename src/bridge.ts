@@ -102,6 +102,8 @@ type Fm = {
   tasksDelete: (id: string) => Promise<void>;
   tasksCountByFolder: (folder: string) => Promise<number>;
   tasksDbExists: () => Promise<boolean>;
+  // fm-adc — write the per-task sidecar markdown for AI launchers
+  tasksWriteActiveSidecar: (id: string) => Promise<string | null>;
   onTasksChanged: (cb: () => void) => () => void;
 };
 

@@ -11,6 +11,7 @@ import { makeTab, useStore } from '../store';
 import { fm } from '../bridge';
 import { basename } from '../actions';
 import {
+  buildContextPrompt,
   dueTone,
   formatDueLabel,
   getTask,
@@ -129,17 +130,46 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
   };
   const onLaunch = async (l: Launcher) => {
     const cmd = [l.command, ...(l.args ?? [])].join(' ') + '\r';
+    // fm-adc — every launcher exposed via launchersList() is by design an
+    // AI-CLI (Claude/Codex/Gemini/etc.); the bare-shell case is the
+    // separate "Open Terminal" button above. Keep the id !== 'term' guard
+    // anyway in case a future launcher catalog ever adds a non-AI entry.
+    const isAiLauncher = l.id !== 'term';
+    const contextText = isAiLauncher ? buildContextPrompt(task) : '';
+
+    // Fire-and-forget sidecar write. The agent reads it on demand; if the
+    // write fails the launch still proceeds with prompt-injection only.
+    if (isAiLauncher) {
+      void fm.tasksWriteActiveSidecar(task.id).catch(() => {/* logged in main */});
+    }
+
     if (tab.terminal) {
+      // Existing PTY: env is already set, so we can't inject BREEZE_TASK_ID
+      // for this run — but we can still pre-type context after the command
+      // line so the user sees + edits the prompt before submitting.
       fm.termWrite(tab.terminal.ptyId, cmd);
+      if (isAiLauncher && contextText) {
+        // 700ms gives the CLI time to print its banner / draw its input box.
+        setTimeout(() => fm.termWrite(tab.terminal!.ptyId, contextText), 700);
+      }
       dispatch({ type: 'setStatus', msg: `running ${l.label}` });
       return;
     }
     try {
-      const ptyId = await fm.termSpawn({ cwd: folder });
+      const env = isAiLauncher
+        ? { BREEZE_TASK_ID: task.id, BREEZE_TASK_FOLDER: task.folder }
+        : undefined;
+      const ptyId = await fm.termSpawn({ cwd: folder, env });
       dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: folder, label: l.label });
       // Match the chip-prompt path's 220ms delay so the launcher line
       // doesn't land mid prompt-redraw on themed shells (starship/p10k).
       setTimeout(() => fm.termWrite(ptyId, cmd), 220);
+      if (isAiLauncher && contextText) {
+        // ~700ms after the launcher command for the CLI to spin up and
+        // draw its input box. No trailing \r — the user reviews/edits
+        // the pre-typed text and presses Enter themselves.
+        setTimeout(() => fm.termWrite(ptyId, contextText), 700);
+      }
       dispatch({ type: 'setStatus', msg: `opened terminal · ${l.label}` });
     } catch (e) {
       dispatch({ type: 'setStatus', msg: `${l.label} failed: ${(e as Error).message}` });

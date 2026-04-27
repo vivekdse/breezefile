@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { BrowserWindow } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'cancelled';
@@ -324,6 +324,45 @@ function broadcastChange() {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send('tasks:changed');
   }
+}
+
+// fm-adc — sidecar markdown for AI-launcher context. When the user
+// launches an agent from a task tab we drop the full task here so the
+// agent can `cat` it any time (or via the future `breeze` CLI) without
+// us re-stuffing every prompt with metadata. YAML frontmatter keeps the
+// machine fields parseable; the markdown body is what humans + LLMs
+// actually read.
+export function writeActiveTaskSidecar(task: Task): string {
+  const dir = path.join(os.homedir(), '.breezefile', 'active-tasks');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${task.id}.md`);
+  const fm: string[] = [
+    '---',
+    `id: ${task.id}`,
+    `title: ${yamlString(task.title)}`,
+    `status: ${task.status}`,
+    `folder: ${yamlString(task.folder)}`,
+    `ref_folder: ${task.ref_folder == null ? 'null' : yamlString(task.ref_folder)}`,
+    `start_at: ${task.start_at == null ? 'null' : task.start_at}`,
+    `due_at: ${task.due_at == null ? 'null' : task.due_at}`,
+    `pinned: ${task.pinned ? 'true' : 'false'}`,
+    '---',
+    '',
+    `# ${task.title}`,
+    '',
+  ];
+  if (task.notes && task.notes.trim()) {
+    fm.push(task.notes.trimEnd(), '');
+  }
+  writeFileSync(file, fm.join('\n'), 'utf8');
+  return file;
+}
+
+function yamlString(s: string): string {
+  // Quote strings that contain anything that could break a bare scalar.
+  // Cheap and conservative — we'd rather over-quote than emit invalid YAML.
+  if (/^[\w./ -]+$/.test(s) && !/^(true|false|null|yes|no)$/i.test(s)) return s;
+  return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 // For tests / explicit cleanup. Production code never calls this — the

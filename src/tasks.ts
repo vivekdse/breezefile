@@ -70,6 +70,65 @@ export async function getTask(id: string): Promise<Task | null> {
   return fm.tasksGet(id);
 }
 
+// fm-adc — assemble the templated first-message that gets pre-typed into
+// the agent's input box. v1 uses simple field substitution rather than a
+// full templating engine: the field set is small, escaping is a
+// non-issue (this is interactive prompt text, not a shell command), and
+// we want zero new dependencies on the renderer side. The `userTemplate`
+// parameter is a stub for a future Settings hook (fm-fc0 era) — passing
+// undefined falls back to the built-in default.
+export function buildContextPrompt(task: Task, userTemplate?: string): string {
+  if (userTemplate && userTemplate.trim()) {
+    return renderTemplate(userTemplate, task);
+  }
+  const lines: string[] = [];
+  lines.push(`I am working on Breeze task: ${task.title}`);
+  lines.push('');
+  lines.push(`  Folder: ${task.folder}`);
+  if (task.due_at) lines.push(`  Due: ${task.due_at}`);
+  if (task.notes && task.notes.trim()) {
+    // Inline single-line notes; for multi-line, keep as a block under a label
+    // so the agent doesn't read the body as a continuation of the bullet.
+    const notes = task.notes.trim();
+    if (notes.includes('\n')) {
+      lines.push('  Notes:');
+      for (const ln of notes.split('\n')) lines.push(`    ${ln}`);
+    } else {
+      lines.push(`  Notes: ${notes}`);
+    }
+  }
+  lines.push('');
+  lines.push('You can update the task with `breeze task <subcmd>`.');
+  return lines.join('\n');
+}
+
+function renderTemplate(tpl: string, task: Task): string {
+  // Minimal {{field}} + {{#if field}}...{{/if}} substitution. Anything
+  // beyond this should justify a real engine.
+  const fields: Record<string, string | null> = {
+    id: task.id,
+    title: task.title,
+    folder: task.folder,
+    status: task.status,
+    notes: task.notes,
+    due_at: task.due_at,
+    start_at: task.start_at,
+    ref_folder: task.ref_folder,
+  };
+  let out = tpl.replace(
+    /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g,
+    (_m, name: string, body: string) => {
+      const v = fields[name];
+      return v && String(v).trim() ? body : '';
+    },
+  );
+  out = out.replace(/\{\{(\w+)\}\}/g, (_m, name: string) => {
+    const v = fields[name];
+    return v == null ? '' : String(v);
+  });
+  return out;
+}
+
 /** Today's date as 'YYYY-MM-DD' in local time (matches what the DB stores). */
 export function todayISO(): string {
   const d = new Date();

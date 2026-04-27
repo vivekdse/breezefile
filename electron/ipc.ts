@@ -1702,6 +1702,21 @@ end tell`;
   ipcMain.handle('tasks:delete', (_e, id: string) => tasks.deleteTask(id));
   ipcMain.handle('tasks:countByFolder', (_e, folder: string) => tasks.countByFolder(folder));
   ipcMain.handle('tasks:dbExists', () => tasks.dbExists());
+  // fm-adc — drop a YAML-frontmatter+markdown sidecar at
+  // ~/.breezefile/active-tasks/<id>.md so an agent launched on a task tab
+  // can re-read context any time without burning prompt tokens. Failures
+  // here must not block the launch; we log and return null so the caller
+  // can still proceed to PTY spawn + prompt injection.
+  ipcMain.handle('tasks:writeActiveSidecar', (_e, id: string): string | null => {
+    try {
+      const t = tasks.getTask(id);
+      if (!t) return null;
+      return tasks.writeActiveTaskSidecar(t);
+    } catch (err) {
+      console.error('[tasks:writeActiveSidecar] failed:', err);
+      return null;
+    }
+  });
 }
 
 export function focusedWindow(): BrowserWindow | null {

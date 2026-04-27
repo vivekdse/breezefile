@@ -176,6 +176,8 @@ const fm = {
   tasksDelete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
   tasksCountByFolder: (folder: string) => ipcRenderer.invoke('tasks:countByFolder', folder),
   tasksDbExists: () => ipcRenderer.invoke('tasks:dbExists') as Promise<boolean>,
+  tasksWriteActiveSidecar: (id: string) =>
+    ipcRenderer.invoke('tasks:writeActiveSidecar', id) as Promise<string | null>,
   onTasksChanged: (cb: () => void) => {
     const handler = () => cb();
     ipcRenderer.on('tasks:changed', handler);

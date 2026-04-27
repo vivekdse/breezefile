@@ -161,7 +161,7 @@ const SLIDES: Slide[] = [
       { name: 'open-terminal', chord: 'cli', what: 'open an external terminal app (iTerm, Warp, …) at this folder' },
       { name: 'task', what: 'create a task anchored to this folder (title, notes, optional start/due dates)' },
       { name: 'tasks', what: 'open the full task list — filter by status / pinned / due, search, sort, bulk-edit' },
-      { name: 'task tab', what: 'tabs bound to a task swap to a focused shell: prominent header, Open Terminal + Claude/Codex/Gemini buttons, folder muted at the bottom · file-management verbs hidden' },
+      { name: 'task tab', what: 'tabs bound to a task swap to a focused shell: prominent header, Open Terminal + Claude/Codex/Gemini buttons, folder muted at the bottom · file-management verbs hidden · launching an AI from a task tab pre-types the task context into the agent prompt (edit / append / erase, then press Enter), sets BREEZE_TASK_ID, and drops a sidecar at ~/.breezefile/active-tasks/<id>.md' },
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
       { name: 'settings', chord: '?', what: 'view & rebind keys' },
       { name: 'permissions', what: 'see which protected folders Breeze can read; grant any still missing' },
