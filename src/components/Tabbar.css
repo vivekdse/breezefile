@@ -1,10 +1,33 @@
 .tabbar {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: var(--sp-2);
   padding: 4px var(--sp-3);
   background: var(--bg-0);
   border-bottom: 1px solid var(--border-1);
   overflow-x: auto;
+}
+
+/* fm-8by — folder zone takes the natural left side; task zone is pushed
+   to the right by margin-left:auto so the two groups read as separate
+   classes of work. The divider only renders when at least one task tab
+   exists, so a pure-folder tabbar looks identical to before. */
+.tabbar__zone {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.tabbar__zone--task {
+  margin-left: auto;
+}
+.tabbar__divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 2px;
+  background: var(--rule-on-panel, var(--border-1));
+  opacity: 0.6;
+  flex: 0 0 auto;
 }
 
 .tabbar__tab {
@@ -121,5 +144,40 @@
 .tabbar__new:hover {
   background: var(--bg-3);
   color: var(--fg-1);
+  border-color: var(--accent-glow);
+}
+
+/* fm-8by — task tabs read as a different class of object: subtle accent
+   tint, a left-edge accent stripe (operational signal, distinct from the
+   folder icon), and a slightly bolder title. The active/hover/drop states
+   layer on top via the existing rules; we only override what differs. */
+.tabbar__tab--task {
+  background: var(--accent-soft);
+  /* Carve room on the left for the stripe so the label doesn't shift
+     between kinds. */
+  padding-left: calc(var(--sp-3) + 3px);
+}
+.tabbar__tab--task::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+.tabbar__tab--task .tabbar__label {
+  font-family: var(--font-sans, inherit);
+  font-weight: 600;
+  color: var(--text-on-panel, var(--fg-1));
+}
+.tabbar__tab--task:hover {
+  background: var(--accent-soft);
+  filter: brightness(1.08);
+}
+.tabbar__tab--task.tabbar__tab--active {
+  background: var(--accent-soft);
+  filter: brightness(1.12);
   border-color: var(--accent-glow);
 }
