@@ -354,6 +354,21 @@ button.sidebar__link:hover .sidebar__unpin {
   font-size: 11px;
   line-height: 1;
 }
+/* fm-csg — small tab-number badge shown when the task already has an
+   open task tab. Click on the row focuses that tab instead of opening
+   a duplicate; the badge tells the user where to find it. */
+.sidebar__task-tab-badge {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 6px;
+  border-radius: 999px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
 .sidebar__task-title {
   overflow: hidden;
   text-overflow: ellipsis;

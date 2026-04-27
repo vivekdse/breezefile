@@ -197,7 +197,7 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
-      {tasksEnabled && <ActiveTasksSection cwd={cwd} onNavigate={onNavigate} />}
+      {tasksEnabled && <ActiveTasksSection cwd={cwd} />}
 
       <h4 className="sidebar__section-title">Favorites</h4>
       {favoritesWithPath.map((f) => (
@@ -382,15 +382,26 @@ function linkClass(active: boolean): string {
 
 interface ActiveTasksSectionProps {
   cwd: string;
-  onNavigate: (p: string) => void;
 }
 
-function ActiveTasksSection({ cwd, onNavigate }: ActiveTasksSectionProps) {
+function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
+  const { state, dispatch } = useStore();
   const { tasks } = useTasks({ activeOnly: true });
   const [menuFor, setMenuFor] = useState<{ task: Task; x: number; y: number } | null>(null);
 
   const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
   const overflow = Math.max(0, tasks.length - MAX_VISIBLE_TASKS);
+
+  // fm-csg — map taskId → 1-based tab number when an open task tab is
+  // bound to it. Used to render the "active in tab N" indicator and to
+  // make clicks idempotent (focus existing instead of double-creating).
+  const taskTabIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    state.tabs.forEach((t, i) => {
+      if (t.kind === 'task' && t.taskId) m.set(t.taskId, i + 1);
+    });
+    return m;
+  }, [state.tabs]);
 
   const openCreate = () => {
     window.dispatchEvent(
@@ -424,18 +435,32 @@ function ActiveTasksSection({ cwd, onNavigate }: ActiveTasksSectionProps) {
         </div>
       )}
 
-      {visible.map((t) => (
-        <TaskRow
-          key={t.id}
-          task={t}
-          active={cwd === t.folder}
-          onClick={() => onNavigate(t.folder)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setMenuFor({ task: t, x: e.clientX, y: e.clientY });
-          }}
-        />
-      ))}
+      {visible.map((t) => {
+        const tabNumber = taskTabIndex.get(t.id) ?? null;
+        return (
+          <TaskRow
+            key={t.id}
+            task={t}
+            // fm-csg — "active" now means an open task tab exists for
+            // this task somewhere, not "this is the cwd". The cwd-match
+            // signal isn't useful anymore: clicking a task always
+            // opens it in a dedicated task tab.
+            active={tabNumber !== null}
+            tabNumber={tabNumber}
+            onClick={() =>
+              dispatch({
+                type: 'openTaskTab',
+                taskId: t.id,
+                folder: t.folder,
+              })
+            }
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenuFor({ task: t, x: e.clientX, y: e.clientY });
+            }}
+          />
+        );
+      })}
 
       {overflow > 0 && (
         <button
@@ -462,11 +487,14 @@ function ActiveTasksSection({ cwd, onNavigate }: ActiveTasksSectionProps) {
 interface TaskRowProps {
   task: Task;
   active: boolean;
+  /** fm-csg — 1-based tab index of the open task tab bound to this task,
+   *  or null when no task tab exists. Drives the "active in tab N" badge. */
+  tabNumber: number | null;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
-function TaskRow({ task, active, onClick, onContextMenu }: TaskRowProps) {
+function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowProps) {
   const today = todayISO();
   const tone = dueTone(task.due_at, today);
   const cls = [
@@ -484,7 +512,11 @@ function TaskRow({ task, active, onClick, onContextMenu }: TaskRowProps) {
       className={cls}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      title={task.title}
+      title={
+        tabNumber !== null
+          ? `${task.title} · open in tab ${tabNumber}`
+          : task.title
+      }
     >
       <span className="sidebar__task-rail" aria-hidden="true" />
       <span className="sidebar__task-main">
@@ -495,6 +527,14 @@ function TaskRow({ task, active, onClick, onContextMenu }: TaskRowProps) {
             </span>
           )}
           <span className="sidebar__task-title">{task.title}</span>
+          {tabNumber !== null && (
+            <span
+              className="sidebar__task-tab-badge"
+              aria-label={`Open in tab ${tabNumber}`}
+            >
+              {tabNumber}
+            </span>
+          )}
         </span>
         <span className="sidebar__task-meta">
           <span className="sidebar__task-folder">
