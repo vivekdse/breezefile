@@ -179,6 +179,8 @@ type Action =
   | { type: 'updateTab'; index: number; patch: Partial<Tab> }
   | { type: 'replaceTab'; index: number; tab: Tab }
   | { type: 'newTab'; tab: Tab }
+  | { type: 'openTaskTab'; taskId: string; folder: string; focus?: boolean }
+  | { type: 'setTabTaskId'; index: number; taskId: string | null }
   | { type: 'closeTab'; index: number }
   | { type: 'selectTab'; index: number }
   | { type: 'setYank'; yank: YankEntry[] }
@@ -216,9 +218,14 @@ type Action =
       attention: 'idle' | 'busy' | 'bell' | null;
     };
 
-function makeTab(path: string): Tab {
+function makeTab(
+  path: string,
+  opts?: { kind?: 'folder' | 'task'; taskId?: string | null },
+): Tab {
   return {
     id: crypto.randomUUID(),
+    kind: opts?.kind ?? 'folder',
+    taskId: opts?.taskId ?? null,
     trail: [path],
     selected: { 0: 0 },
     marks: {},
@@ -233,6 +240,8 @@ function makeTab(path: string): Tab {
     forward: [],
   };
 }
+
+export { makeTab };
 
 const initialState: State = {
   tabs: [],
@@ -278,6 +287,30 @@ function reducer(s: State, a: Action): State {
     }
     case 'newTab':
       return { ...s, tabs: [...s.tabs, a.tab], activeTab: s.tabs.length };
+    case 'openTaskTab': {
+      // fm-1y1 — open or focus a task tab. If a tab already exists for
+      // this taskId, focus it; otherwise create a new task-kind tab
+      // rooted at the task's folder. Idempotent click-from-sidebar.
+      const existing = s.tabs.findIndex(
+        (t) => t.kind === 'task' && t.taskId === a.taskId,
+      );
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const tab = makeTab(a.folder, { kind: 'task', taskId: a.taskId });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'setTabTaskId': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.index];
+      if (!t) return s;
+      tabs[a.index] = { ...t, taskId: a.taskId };
+      return { ...s, tabs };
+    }
     case 'closeTab': {
       if (s.tabs.length <= 1) return s;
       const closed = s.tabs[a.index];

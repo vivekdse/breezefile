@@ -167,6 +167,8 @@ export function useKeyboard(
             type: 'newTab',
             tab: {
               id: crypto.randomUUID(),
+              kind: 'folder',
+              taskId: null,
               trail: [cwd],
               selected: { 0: 0 },
               marks: {},

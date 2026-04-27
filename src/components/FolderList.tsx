@@ -122,6 +122,8 @@ export function FolderList() {
                   type: 'newTab',
                   tab: {
                     id: crypto.randomUUID(),
+                    kind: 'folder',
+                    taskId: null,
                     trail: [entry.path],
                     selected: { 0: 0 },
                     marks: {},

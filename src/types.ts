@@ -17,8 +17,23 @@ export type ViewMode = 'list' | 'grid' | 'preview' | 'tag';
 export type TagFilterMode = 'off' | 'all' | 'any';
 export type TagFilter = { mode: TagFilterMode; ids: string[] };
 
+// fm-1y1 — tabs come in two kinds. 'folder' is the classic file-browser
+// tab (the only kind before this commit; existing tabs migrate to it).
+// 'task' is bound to a Breeze task and renders a different shell layout
+// (task header prominent, folder de-emphasized, file-management verbs
+// hidden). Both kinds can have a terminal pane attached via tab.terminal.
+export type TabKind = 'folder' | 'task';
+
 export type Tab = {
   id: string;
+  /** fm-1y1 — distinguishes folder tabs from task tabs at every render
+   *  decision point. Defaults to 'folder' on hydrate for back-compat. */
+  kind: TabKind;
+  /** fm-1y1 — set when kind === 'task'. The bound Breeze task id;
+   *  drives the task header, context injection, and the sidebar's
+   *  "active in tab N" indicator. Stable across navigation within
+   *  the tab — clearing means the tab is no longer working on a task. */
+  taskId?: string | null;
   trail: string[]; // absolute paths
   selected: Record<number, number>; // per-column selection index
   marks: Record<string, true>; // paths marked for selection (multi-select)
