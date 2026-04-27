@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { fm } from '../bridge';
 import { basename } from '../actions';
@@ -10,7 +10,11 @@ import {
   hasAppDrag,
 } from '../dragState';
 import { Icon, type IconName } from './Icon';
+import { deleteTask, shiftISO, todayISO, updateTask, useTasks } from '../tasks';
+import type { Task } from '../types';
 import './Sidebar.css';
+
+const MAX_VISIBLE_TASKS = 10;
 
 /**
  * Left sidebar — port of themes.html `.sidebar`:
@@ -183,6 +187,8 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
+      <ActiveTasksSection cwd={cwd} onNavigate={onNavigate} />
+
       <h4 className="sidebar__section-title">Favorites</h4>
       {favoritesWithPath.map((f) => (
         <button
@@ -355,6 +361,232 @@ function DriveRow({
 
 function linkClass(active: boolean): string {
   return active ? 'sidebar__link sidebar__link--active' : 'sidebar__link';
+}
+
+// ---------------------------------------------------------------------------
+// fm-6pk — Active Tasks section.
+//
+// Lives above Favorites because the file manager doubles as a project hub:
+// users want to see what's on their plate without switching tools, and a
+// click should jump them to the folder where that work lives.
+
+interface ActiveTasksSectionProps {
+  cwd: string;
+  onNavigate: (p: string) => void;
+}
+
+function ActiveTasksSection({ cwd, onNavigate }: ActiveTasksSectionProps) {
+  const { tasks } = useTasks({ activeOnly: true });
+  const [menuFor, setMenuFor] = useState<{ task: Task; x: number; y: number } | null>(null);
+
+  const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
+  const overflow = Math.max(0, tasks.length - MAX_VISIBLE_TASKS);
+
+  const openCreate = () => {
+    window.dispatchEvent(
+      new CustomEvent('fm:openTask', {
+        detail: { mode: 'create', defaultFolder: cwd },
+      }),
+    );
+  };
+  const openAllTasks = () => {
+    window.dispatchEvent(new CustomEvent('fm:openTasksPage'));
+  };
+
+  return (
+    <>
+      <h4 className="sidebar__section-title sidebar__section-title--with-action">
+        <span>Active Tasks</span>
+        <button
+          type="button"
+          className="sidebar__section-action"
+          onClick={openCreate}
+          title="Add task in current folder"
+          aria-label="Add task"
+        >
+          +
+        </button>
+      </h4>
+
+      {tasks.length === 0 && (
+        <div className="sidebar__empty" title="Open the chip prompt and type 'task' to add one">
+          No active tasks. Type <kbd>task</kbd> to add one.
+        </div>
+      )}
+
+      {visible.map((t) => (
+        <TaskRow
+          key={t.id}
+          task={t}
+          active={cwd === t.folder}
+          onClick={() => onNavigate(t.folder)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setMenuFor({ task: t, x: e.clientX, y: e.clientY });
+          }}
+        />
+      ))}
+
+      {overflow > 0 && (
+        <button
+          type="button"
+          className="sidebar__see-all"
+          onClick={openAllTasks}
+        >
+          See all ({tasks.length})
+        </button>
+      )}
+
+      {menuFor && (
+        <TaskContextMenu
+          task={menuFor.task}
+          x={menuFor.x}
+          y={menuFor.y}
+          onClose={() => setMenuFor(null)}
+        />
+      )}
+    </>
+  );
+}
+
+interface TaskRowProps {
+  task: Task;
+  active: boolean;
+  onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}
+
+function TaskRow({ task, active, onClick, onContextMenu }: TaskRowProps) {
+  const today = todayISO();
+  const cls = ['sidebar__task', active ? 'sidebar__task--active' : '']
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <button
+      type="button"
+      className={cls}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+      title={task.title}
+    >
+      <span className="sidebar__task-main">
+        <span className="sidebar__task-title-row">
+          {task.pinned && (
+            <span className="sidebar__task-pin" aria-label="Pinned" title="Pinned">
+              ●
+            </span>
+          )}
+          <span className="sidebar__task-title">{task.title}</span>
+        </span>
+        <span className="sidebar__task-folder">{basename(task.folder) || task.folder}</span>
+      </span>
+      {task.due_at && <DueChip due={task.due_at} today={today} />}
+    </button>
+  );
+}
+
+function DueChip({ due, today }: { due: string; today: string }) {
+  if (due < today) {
+    return (
+      <span className="sidebar__due sidebar__due--overdue" title={`Overdue · ${due}`}>
+        overdue
+      </span>
+    );
+  }
+  if (due === today) {
+    return (
+      <span className="sidebar__due sidebar__due--today" title={`Due today · ${due}`}>
+        today
+      </span>
+    );
+  }
+  return (
+    <span className="sidebar__due sidebar__due--future" title={`Due ${due}`}>
+      {formatShortDate(due)}
+    </span>
+  );
+}
+
+function formatShortDate(iso: string): string {
+  // 'YYYY-MM-DD' → 'M/D' for compact display in the sidebar chip.
+  const [, m, d] = iso.split('-');
+  if (!m || !d) return iso;
+  return `${Number(m)}/${Number(d)}`;
+}
+
+interface TaskContextMenuProps {
+  task: Task;
+  x: number;
+  y: number;
+  onClose: () => void;
+}
+
+function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const act = (fn: () => void | Promise<unknown>) => () => {
+    void Promise.resolve(fn()).finally(onClose);
+  };
+
+  const onEdit = act(() => {
+    window.dispatchEvent(
+      new CustomEvent('fm:openTask', { detail: { mode: 'edit', task } }),
+    );
+  });
+  const onDone = act(() => updateTask(task.id, { status: 'done' }));
+  const onTogglePin = act(() => updateTask(task.id, { pinned: !task.pinned }));
+  const onSnooze = act(() => {
+    const base = task.due_at && task.due_at >= todayISO() ? task.due_at : todayISO();
+    return updateTask(task.id, { due_at: shiftISO(base, 1) });
+  });
+  const onDelete = act(() => deleteTask(task.id));
+
+  // Clamp to viewport so the menu doesn't disappear off the right/bottom edge.
+  const style: React.CSSProperties = {
+    left: Math.min(x, window.innerWidth - 200),
+    top: Math.min(y, window.innerHeight - 220),
+  };
+
+  return (
+    <div ref={ref} className="sidebar__ctxmenu" style={style} role="menu">
+      <button type="button" className="sidebar__ctxmenu-item" onClick={onEdit}>
+        Edit
+      </button>
+      <button type="button" className="sidebar__ctxmenu-item" onClick={onDone}>
+        Mark done
+      </button>
+      <button type="button" className="sidebar__ctxmenu-item" onClick={onTogglePin}>
+        {task.pinned ? 'Unpin' : 'Pin'}
+      </button>
+      <button type="button" className="sidebar__ctxmenu-item" onClick={onSnooze}>
+        Snooze (+1 day)
+      </button>
+      <div className="sidebar__ctxmenu-sep" />
+      <button
+        type="button"
+        className="sidebar__ctxmenu-item sidebar__ctxmenu-item--danger"
+        onClick={onDelete}
+      >
+        Delete
+      </button>
+    </div>
+  );
 }
 
 function tagLabel(t: string): string {
