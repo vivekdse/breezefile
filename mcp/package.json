@@ -1,0 +1,19 @@
+{
+  "name": "breeze-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server that exposes the Breeze (file_manager) HTTP API as MCP tools.",
+  "type": "module",
+  "bin": {
+    "breeze-mcp": "./breeze-mcp.mjs"
+  },
+  "files": [
+    "breeze-mcp.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
