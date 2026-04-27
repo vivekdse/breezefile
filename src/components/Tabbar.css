@@ -147,37 +147,43 @@
   border-color: var(--accent-glow);
 }
 
-/* fm-8by — task tabs read as a different class of object: subtle accent
-   tint, a left-edge accent stripe (operational signal, distinct from the
-   folder icon), and a slightly bolder title. The active/hover/drop states
-   layer on top via the existing rules; we only override what differs. */
+/* fm-8by — task tabs read as a different class of object via a left-
+   edge accent stripe + bolder/accent-tinted title. The previous
+   accent-soft full background washed out to black on dark themes;
+   keeping the background neutral and using the stripe + label color
+   as the kind signal works across every theme. */
 .tabbar__tab--task {
-  background: var(--accent-soft);
+  background: transparent;
   /* Carve room on the left for the stripe so the label doesn't shift
      between kinds. */
-  padding-left: calc(var(--sp-3) + 3px);
+  padding-left: calc(var(--sp-3) + 4px);
 }
 .tabbar__tab--task::before {
   content: '';
   position: absolute;
-  left: 0;
+  left: 1px;
   top: 4px;
   bottom: 4px;
   width: 3px;
   background: var(--accent);
-  border-radius: 0 2px 2px 0;
+  border-radius: 2px;
 }
 .tabbar__tab--task .tabbar__label {
   font-family: var(--font-sans, inherit);
   font-weight: 600;
-  color: var(--text-on-panel, var(--fg-1));
+  color: var(--text-on-panel, var(--ink, #ffffff));
+  /* Defensive: if the cascade somehow leaves the label without a
+     concrete color, force visibility against the dark tabbar. */
+  text-shadow: none;
 }
 .tabbar__tab--task:hover {
-  background: var(--accent-soft);
-  filter: brightness(1.08);
+  background: var(--bg-2, rgba(255, 255, 255, 0.04));
 }
 .tabbar__tab--task.tabbar__tab--active {
-  background: var(--accent-soft);
-  filter: brightness(1.12);
-  border-color: var(--accent-glow);
+  /* Active task tab: subtle accent tint that still shows against the
+     dark panel, plus the stripe stays at full intensity. */
+  background: var(--accent-soft, rgba(255, 255, 255, 0.06));
+}
+.tabbar__tab--task.tabbar__tab--active .tabbar__label {
+  color: var(--accent);
 }
