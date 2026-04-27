@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
+import { registerBreezeMcp } from './mcp-register';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -127,6 +128,18 @@ app.whenReady().then(() => {
 
   registerIpc();
   startApiServer();
+  // fm-fc0 — best-effort: register breeze-mcp into ~/.claude/settings.json
+  // on every launch. Idempotent — does nothing if already present and
+  // up-to-date. Failures (file unreadable, no MCP binary) are logged
+  // and ignored; never block app startup.
+  try {
+    const result = registerBreezeMcp();
+    if (result === 'written') {
+      console.log('[mcp-register] added breeze entry to ~/.claude/settings.json');
+    }
+  } catch (e) {
+    console.warn('[mcp-register] failed:', (e as Error).message);
+  }
   buildAppMenu();
   createWindow();
 });
