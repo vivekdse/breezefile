@@ -1,4 +1,4 @@
-import type { Entry } from './types';
+import type { Entry, Task, TaskCreate, TaskFilter, TaskUpdate } from './types';
 
 type Fm = {
   platform: NodeJS.Platform;
@@ -94,6 +94,14 @@ type Fm = {
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;
   launchersRevealConfig: () => Promise<void>;
+  // fm-dhc — task store
+  tasksList: (filter?: TaskFilter) => Promise<Task[]>;
+  tasksGet: (id: string) => Promise<Task | null>;
+  tasksCreate: (input: TaskCreate) => Promise<Task>;
+  tasksUpdate: (id: string, patch: TaskUpdate) => Promise<Task>;
+  tasksDelete: (id: string) => Promise<void>;
+  tasksCountByFolder: (folder: string) => Promise<number>;
+  onTasksChanged: (cb: () => void) => () => void;
 };
 
 export type Launcher = {

@@ -84,3 +84,55 @@ export type CustomTag = {
 // Map of tag id → list of paths the user has explicitly applied that tag to.
 // Covers both seeded and custom tags.
 export type TagPaths = Record<string, string[]>;
+
+// fm-dhc — task store types. Tasks live in ~/.breezefile/tasks.db and are
+// folder-anchored to-dos with optional date-only start/due. Status
+// progresses pending → in_progress → done|cancelled.
+export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'cancelled';
+
+export type Task = {
+  id: string;
+  title: string;
+  notes: string | null;
+  status: TaskStatus;
+  folder: string;
+  ref_folder: string | null;
+  start_at: string | null; // 'YYYY-MM-DD'
+  due_at: string | null;
+  pinned: boolean;
+  created_at: number;
+  updated_at: number;
+  completed_at: number | null;
+};
+
+export type TaskCreate = {
+  title: string;
+  folder: string;
+  notes?: string | null;
+  status?: TaskStatus;
+  ref_folder?: string | null;
+  start_at?: string | null;
+  due_at?: string | null;
+  pinned?: boolean;
+};
+
+export type TaskUpdate = Partial<{
+  title: string;
+  notes: string | null;
+  status: TaskStatus;
+  folder: string;
+  ref_folder: string | null;
+  start_at: string | null;
+  due_at: string | null;
+  pinned: boolean;
+}>;
+
+export type TaskFilter = {
+  status?: TaskStatus | TaskStatus[];
+  folder?: string;
+  pinned?: boolean;
+  search?: string;
+  /** Show tasks with start_at <= today (or null) and not done/cancelled. */
+  activeOnly?: boolean;
+  includeDone?: boolean;
+};

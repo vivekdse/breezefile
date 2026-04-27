@@ -168,6 +168,18 @@ const fm = {
     ipcRenderer.invoke('launchers:configPath') as Promise<string>,
   launchersRevealConfig: () =>
     ipcRenderer.invoke('launchers:revealConfig') as Promise<void>,
+  // ─── Tasks (fm-dhc) ───────────────────────────────────────────────
+  tasksList: (filter?: unknown) => ipcRenderer.invoke('tasks:list', filter),
+  tasksGet: (id: string) => ipcRenderer.invoke('tasks:get', id),
+  tasksCreate: (input: unknown) => ipcRenderer.invoke('tasks:create', input),
+  tasksUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('tasks:update', id, patch),
+  tasksDelete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
+  tasksCountByFolder: (folder: string) => ipcRenderer.invoke('tasks:countByFolder', folder),
+  onTasksChanged: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('tasks:changed', handler);
+    return () => ipcRenderer.off('tasks:changed', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

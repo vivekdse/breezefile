@@ -6,6 +6,8 @@ import { spawn, execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
+import * as tasks from './tasks';
+import type { TaskCreate, TaskFilter, TaskUpdate } from './tasks';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -1620,6 +1622,19 @@ end tell`;
     await loadLaunchers();
     shell.showItemInFolder(p);
   });
+
+  // ─── Tasks (fm-dhc) ────────────────────────────────────────────────
+  // SQLite-backed task store at ~/.breezefile/tasks.db. Reads run on the
+  // main thread (better-sqlite3 is synchronous and fast); writes broadcast
+  // a 'tasks:changed' event to every window so the UI re-pulls.
+  ipcMain.handle('tasks:list', (_e, filter?: TaskFilter) => tasks.listTasks(filter ?? {}));
+  ipcMain.handle('tasks:get', (_e, id: string) => tasks.getTask(id));
+  ipcMain.handle('tasks:create', (_e, input: TaskCreate) => tasks.createTask(input));
+  ipcMain.handle('tasks:update', (_e, id: string, patch: TaskUpdate) =>
+    tasks.updateTask(id, patch),
+  );
+  ipcMain.handle('tasks:delete', (_e, id: string) => tasks.deleteTask(id));
+  ipcMain.handle('tasks:countByFolder', (_e, folder: string) => tasks.countByFolder(folder));
 }
 
 export function focusedWindow(): BrowserWindow | null {
