@@ -18,9 +18,15 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              // node-pty is a native module — its .node binary must be
-              // resolved at runtime from node_modules, not bundled.
-              external: ['@homebridge/node-pty-prebuilt-multiarch', 'electron'],
+              // Native modules — their .node binaries must be resolved
+              // at runtime from node_modules, not bundled into the ESM
+              // main bundle (bundling drags in __filename/require which
+              // aren't defined in ESM and crash on first call).
+              external: [
+                '@homebridge/node-pty-prebuilt-multiarch',
+                'better-sqlite3',
+                'electron',
+              ],
             },
           },
         },
