@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { registerIpc } from './ipc';
+import { startApiServer } from './api-server';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -125,6 +126,7 @@ app.whenReady().then(() => {
   });
 
   registerIpc();
+  startApiServer();
   buildAppMenu();
   createWindow();
 });

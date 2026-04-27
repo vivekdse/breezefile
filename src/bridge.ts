@@ -105,6 +105,18 @@ type Fm = {
   // fm-adc — write the per-task sidecar markdown for AI launchers
   tasksWriteActiveSidecar: (id: string) => Promise<string | null>;
   onTasksChanged: (cb: () => void) => () => void;
+  // fm-9fd — control bridge between the HTTP API server (main) and the
+  // renderer (which owns tab state + navigation). Renderer listens for
+  // control:request events and replies via sendControlReply.
+  onControlRequest: (
+    cb: (req: { reqId: string; kind: string; [k: string]: unknown }) => void,
+  ) => () => void;
+  sendControlReply: (payload: {
+    reqId: string;
+    ok: boolean;
+    result?: unknown;
+    error?: string;
+  }) => void;
 };
 
 export type Launcher = {

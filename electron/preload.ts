@@ -176,6 +176,27 @@ const fm = {
   tasksDelete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
   tasksCountByFolder: (folder: string) => ipcRenderer.invoke('tasks:countByFolder', folder),
   tasksDbExists: () => ipcRenderer.invoke('tasks:dbExists') as Promise<boolean>,
+  // ─── External-API control bridge (fm-9fd) ─────────────────────────
+  // The HTTP server in main delegates app-level commands (navigate,
+  // openTaskTab, launch, listTabs) to the renderer because state.tabs
+  // lives there. Renderer subscribes via onControlRequest, replies with
+  // sendControlReply matched by reqId.
+  onControlRequest: (
+    cb: (req: { reqId: string; kind: string; [k: string]: unknown }) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: { reqId: string; kind: string; [k: string]: unknown },
+    ) => cb(payload);
+    ipcRenderer.on('control:request', handler);
+    return () => ipcRenderer.off('control:request', handler);
+  },
+  sendControlReply: (payload: {
+    reqId: string;
+    ok: boolean;
+    result?: unknown;
+    error?: string;
+  }) => ipcRenderer.send('control:reply', payload),
   tasksWriteActiveSidecar: (id: string) =>
     ipcRenderer.invoke('tasks:writeActiveSidecar', id) as Promise<string | null>,
   onTasksChanged: (cb: () => void) => {

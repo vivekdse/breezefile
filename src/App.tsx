@@ -41,7 +41,7 @@ import './App.css';
 
 
 function Shell() {
-  const { state, activeTab, refreshActive, dispatch, setTab, focusEntryByName } = useStore();
+  const { state, activeTab, refreshActive, dispatch, setTab, focusEntryByName, navigateTo } = useStore();
   const [renaming, setRenaming] = useState<{ entry: Entry; mode: RenameMode } | null>(null);
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [touchOpen, setTouchOpen] = useState(false);
@@ -130,6 +130,78 @@ function Shell() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.activeTab]);
+
+  // fm-9fd — control bridge from the HTTP API server. Main delegates
+  // app-level commands (navigate, openTaskTab, launch, listTabs) here
+  // because state.tabs lives in the renderer. Each request carries a
+  // reqId; we resolve it by sending control:reply.
+  useEffect(() => {
+    const off = fm.onControlRequest(async (req) => {
+      try {
+        let result: unknown = { ok: true };
+        switch (req.kind) {
+          case 'navigate': {
+            const p = req.path as string;
+            if (typeof p !== 'string' || !p) throw new Error('path required');
+            // navigate the active tab via the existing helper
+            await Promise.resolve();
+            window.dispatchEvent(
+              new CustomEvent('fm:apiNavigate', { detail: { path: p } }),
+            );
+            break;
+          }
+          case 'openTaskTab': {
+            const taskId = req.taskId as string;
+            if (!taskId) throw new Error('taskId required');
+            const t = await fm.tasksGet(taskId);
+            if (!t) throw new Error('task not found');
+            dispatch({ type: 'openTaskTab', taskId, folder: t.folder });
+            break;
+          }
+          case 'launch': {
+            // Defer to the same code path as TaskShell launcher buttons via
+            // a window event the shell listens for. Out of scope for v1
+            // initial commit — return 'not implemented' so the CLI surfaces
+            // a clear error rather than hanging.
+            throw new Error('launch via API not implemented in v1');
+          }
+          case 'listTabs': {
+            result = state.tabs.map((t) => ({
+              id: t.id,
+              kind: t.kind,
+              taskId: t.taskId ?? null,
+              cwd: t.trail[t.trail.length - 1] ?? '',
+              terminal: t.terminal ? { ptyId: t.terminal.ptyId } : null,
+            }));
+            break;
+          }
+          default:
+            throw new Error(`unknown control kind: ${req.kind}`);
+        }
+        fm.sendControlReply({ reqId: req.reqId, ok: true, result });
+      } catch (err) {
+        fm.sendControlReply({
+          reqId: req.reqId,
+          ok: false,
+          error: (err as Error).message,
+        });
+      }
+    });
+    return off;
+  }, [dispatch, state.tabs]);
+
+  // Bridge fm:apiNavigate → store.navigateTo so the API navigate command
+  // routes through the same code path as user-driven nav (history, marks,
+  // entries cache). This indirection avoids capturing navigateTo in the
+  // control listener's deps and re-subscribing on every navigation.
+  useEffect(() => {
+    function onApiNav(e: Event) {
+      const p = (e as CustomEvent).detail?.path as string | undefined;
+      if (p) void navigateTo(p);
+    }
+    window.addEventListener('fm:apiNavigate', onApiNav);
+    return () => window.removeEventListener('fm:apiNavigate', onApiNav);
+  }, [navigateTo]);
 
   // Self-heal the permissionsPrimed flag on every launch so the Welcome
   // notice only appears when something is actually needed. primePermissions
