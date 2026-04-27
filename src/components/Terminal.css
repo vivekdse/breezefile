@@ -1,0 +1,66 @@
+/* fm-jtu — terminal pane wrapper. xterm.js renders into the inner div;
+   the wrapper supplies background + padding so the WebGL canvas doesn't
+   bleed up to the splitter handle. */
+.terminal-pane {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, var(--bg-1));
+  border-top: 1px solid var(--rule, var(--border-1));
+}
+
+.terminal-pane__inner {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  padding: 6px 8px 4px 10px;
+  /* Ensure xterm absolute-positioned layers (cursor, selection) anchor
+     to this padded box rather than the wrapper. */
+  position: relative;
+}
+
+/* xterm.js ships a hardcoded `.xterm-viewport { background-color: #000 }`
+   that ignores the theme. On paper/light themes that black band is
+   visible behind the canvas. Override to inherit the panel surface so
+   the terminal reads as a single colored field. .xterm root and
+   .xterm-screen also get the same treatment as a belt-and-braces. */
+.terminal-pane .xterm,
+.terminal-pane .xterm-viewport,
+.terminal-pane .xterm-screen {
+  background-color: var(--panel, var(--bg-1)) !important;
+}
+/* Soften the scroll thumb to match Breeze chrome. */
+.terminal-pane .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+.terminal-pane .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--rule, rgba(127, 127, 127, 0.3));
+  border-radius: 4px;
+}
+
+/* Tab attention badge — small dot rendered in Tabbar after the label
+   when a backgrounded tab's terminal needs attention. Color encodes the
+   urgency: cursor-shown = neutral idle ping, BEL = punchy accent. */
+.tabbar__attn {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--text-muted, #9aa0a6);
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+.tabbar__attn--idle { background: var(--accent, #7aa2f7); }
+.tabbar__attn--bell {
+  background: #f0a868;
+  box-shadow: 0 0 0 2px rgba(240, 168, 104, 0.25);
+  animation: tabbar-attn-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tabbar-attn-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(240, 168, 104, 0.25); }
+  50%      { box-shadow: 0 0 0 5px rgba(240, 168, 104, 0.05); }
+}

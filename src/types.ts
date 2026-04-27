@@ -33,6 +33,17 @@ export type Tab = {
   tagFilter: TagFilter;
   history: string[][]; // back stack of previous trails
   forward: string[][]; // forward stack
+  // fm-jtu — embedded terminal pane state. When `ptyId` is set the tab
+  // is in full-bleed terminal mode (sidebar/preview/status hidden, main
+  // area given over to xterm). `attention` carries the cross-tab
+  // attention signal (fm-fux): 'idle' = waiting for input, 'busy' =
+  // generating, 'bell' = BEL/OSC fired since last focus.
+  terminal?: {
+    ptyId: number;
+    cwd: string;
+    label?: string;
+    attention?: 'idle' | 'busy' | 'bell' | null;
+  };
 };
 
 export type YankMode = 'copy' | 'move' | 'symlink' | 'symlinkRel' | 'hardlink';

@@ -188,6 +188,12 @@ export function useKeyboard(
         e.preventDefault();
         clearTimer();
         if (cur.tabs.length > 1) {
+          // fm-jtu — kill the tab's pty (if any) so the shell doesn't
+          // outlive the tab. Mirrors the close-button path in Tabbar.
+          const t = cur.tabs[cur.activeTab];
+          if (t?.terminal) {
+            void fm.termKill(t.terminal.ptyId).catch(() => {});
+          }
           dispatch({ type: 'closeTab', index: cur.activeTab });
         }
         return;

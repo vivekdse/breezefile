@@ -106,6 +106,68 @@ const fm = {
       ok: boolean;
       mode: 'inline' | 'terminal';
     }>,
+  // ─── Embedded terminal (fm-jtu) ───────────────────────────────────
+  termSpawn: (opts: {
+    cwd: string;
+    cols?: number;
+    rows?: number;
+    shell?: string;
+    args?: string[];
+    env?: Record<string, string>;
+  }) => ipcRenderer.invoke('term:spawn', opts) as Promise<number>,
+  termWrite: (id: number, data: string) => ipcRenderer.send('term:write', id, data),
+  termResize: (id: number, cols: number, rows: number) =>
+    ipcRenderer.send('term:resize', id, cols, rows),
+  termKill: (id: number, signal?: string) =>
+    ipcRenderer.invoke('term:kill', id, signal) as Promise<void>,
+  termStatus: (id: number) =>
+    ipcRenderer.invoke('term:status', id) as Promise<{
+      alive: boolean;
+      pid: number | null;
+    }>,
+  // Subscribe to data/exit events. Returns an unsubscribe fn.
+  onTermData: (cb: (id: number, data: string) => void) => {
+    const handler = (_e: unknown, payload: { id: number; data: string }) =>
+      cb(payload.id, payload.data);
+    ipcRenderer.on('term:data', handler);
+    return () => ipcRenderer.off('term:data', handler);
+  },
+  onTermExit: (
+    cb: (id: number, code: number, signal: string | null) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: { id: number; code: number; signal: string | null },
+    ) => cb(payload.id, payload.code, payload.signal);
+    ipcRenderer.on('term:exit', handler);
+    return () => ipcRenderer.off('term:exit', handler);
+  },
+  // ─── Launchers (fm-g6r) ───────────────────────────────────────────
+  launchersList: () =>
+    ipcRenderer.invoke('launchers:list') as Promise<
+      Array<{
+        id: string;
+        label: string;
+        aliases: string[];
+        command: string;
+        args?: string[];
+        description?: string;
+      }>
+    >,
+  launchersSave: (
+    list: Array<{
+      id: string;
+      label: string;
+      aliases: string[];
+      command: string;
+      args?: string[];
+      description?: string;
+    }>,
+  ) => ipcRenderer.invoke('launchers:save', list) as Promise<void>,
+  launchersConfigPath: () =>
+    ipcRenderer.invoke('launchers:configPath') as Promise<string>,
+  launchersRevealConfig: () =>
+    ipcRenderer.invoke('launchers:revealConfig') as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

@@ -192,7 +192,20 @@ type Action =
   | { type: 'deleteCustomTag'; id: string }
   | { type: 'applyTag'; id: string; paths: string[] }
   | { type: 'untagPaths'; id: string; paths: string[] }
-  | { type: 'addTagViz'; id: string };
+  | { type: 'addTagViz'; id: string }
+  | {
+      type: 'openTerminal';
+      tabIndex: number;
+      ptyId: number;
+      cwd: string;
+      label?: string;
+    }
+  | { type: 'closeTerminal'; tabIndex: number }
+  | {
+      type: 'setTerminalAttention';
+      tabIndex: number;
+      attention: 'idle' | 'busy' | 'bell' | null;
+    };
 
 function makeTab(path: string): Tab {
   return {
@@ -343,6 +356,40 @@ function reducer(s: State, a: Action): State {
       const t = tabs[s.activeTab];
       if (!t || t.tagViz.includes(a.id)) return s;
       tabs[s.activeTab] = { ...t, tagViz: [...t.tagViz, a.id] };
+      return { ...s, tabs };
+    }
+    case 'openTerminal': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t) return s;
+      tabs[a.tabIndex] = {
+        ...t,
+        terminal: {
+          ptyId: a.ptyId,
+          cwd: a.cwd,
+          label: a.label,
+          attention: null,
+        },
+      };
+      return { ...s, tabs };
+    }
+    case 'closeTerminal': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t) return s;
+      const { terminal: _drop, ...rest } = t;
+      void _drop;
+      tabs[a.tabIndex] = rest as typeof t;
+      return { ...s, tabs };
+    }
+    case 'setTerminalAttention': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t || !t.terminal) return s;
+      tabs[a.tabIndex] = {
+        ...t,
+        terminal: { ...t.terminal, attention: a.attention },
+      };
       return { ...s, tabs };
     }
   }

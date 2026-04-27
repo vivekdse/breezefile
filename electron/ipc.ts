@@ -5,6 +5,7 @@ import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import crypto from 'node:crypto';
+import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -1422,6 +1423,202 @@ end tell`;
     } catch {
       return null;
     }
+  });
+
+  // ─── Embedded PTY (fm-jtu) ───────────────────────────────────────────
+  // node-pty lives in the main process; the renderer drives it over IPC.
+  // High-frequency channels (write, resize, data) use ipcRenderer.send /
+  // webContents.send so we never queue a Promise per keystroke. spawn,
+  // status, kill go through invoke because the caller wants a result.
+  type PtyRecord = {
+    proc: import('@homebridge/node-pty-prebuilt-multiarch').IPty;
+    senderId: number;
+    cmd: string;
+  };
+  const ptys = new Map<number, PtyRecord>();
+  let nextPtyId = 1;
+
+  function ptyEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    // Electron sets ELECTRON_RUN_AS_NODE / NODE_OPTIONS that confuse user
+    // shells. Strip them. TERM_PROGRAM lets prompts (oh-my-zsh, starship)
+    // know we're a terminal so they enable rich UI.
+    delete env.ELECTRON_RUN_AS_NODE;
+    delete env.ELECTRON_NO_ATTACH_CONSOLE;
+    env.TERM = env.TERM || 'xterm-256color';
+    env.COLORTERM = env.COLORTERM || 'truecolor';
+    env.TERM_PROGRAM = 'BreezeFile';
+    if (extra) Object.assign(env, extra);
+    return env;
+  }
+
+  function defaultShell(): { file: string; args: string[] } {
+    if (process.platform === 'win32') {
+      return { file: process.env.COMSPEC || 'cmd.exe', args: [] };
+    }
+    const file = process.env.SHELL || '/bin/zsh';
+    // -l so the user's profile loads (PATH from .zshrc/.bash_profile).
+    return { file, args: ['-l'] };
+  }
+
+  ipcMain.handle(
+    'term:spawn',
+    async (
+      e,
+      opts: {
+        cwd: string;
+        cols?: number;
+        rows?: number;
+        shell?: string;
+        args?: string[];
+        env?: Record<string, string>;
+      },
+    ): Promise<number> => {
+      const cwd = expandHome(opts.cwd);
+      const def = defaultShell();
+      const file = opts.shell ?? def.file;
+      const args = opts.args ?? def.args;
+      const cols = Math.max(2, Math.min(opts.cols ?? 80, 1000));
+      const rows = Math.max(2, Math.min(opts.rows ?? 24, 1000));
+      const proc = nodePty.spawn(file, args, {
+        name: 'xterm-256color',
+        cols,
+        rows,
+        cwd,
+        env: ptyEnv(opts.env) as { [key: string]: string },
+      });
+      const id = nextPtyId++;
+      const senderId = e.sender.id;
+      ptys.set(id, { proc, senderId, cmd: file });
+      proc.onData((data) => {
+        const wc = BrowserWindow.fromId(senderId)?.webContents;
+        // sender stays valid even if window is hidden; just guard against
+        // the window being closed mid-stream.
+        if (wc && !wc.isDestroyed()) wc.send('term:data', { id, data });
+      });
+      proc.onExit(({ exitCode, signal }) => {
+        const wc = BrowserWindow.fromId(senderId)?.webContents;
+        if (wc && !wc.isDestroyed()) {
+          wc.send('term:exit', { id, code: exitCode, signal: signal ?? null });
+        }
+        ptys.delete(id);
+      });
+      // Kill orphan PTYs if the renderer process goes away (window reload,
+      // crash). Otherwise the shell keeps the file_manager parent alive.
+      e.sender.once('destroyed', () => {
+        const r = ptys.get(id);
+        if (r) {
+          try { r.proc.kill(); } catch { /* noop */ }
+          ptys.delete(id);
+        }
+      });
+      return id;
+    },
+  );
+
+  ipcMain.on('term:write', (_e, id: number, data: string) => {
+    const r = ptys.get(id);
+    if (!r) return;
+    try { r.proc.write(data); } catch { /* pty may have just exited */ }
+  });
+
+  ipcMain.on('term:resize', (_e, id: number, cols: number, rows: number) => {
+    const r = ptys.get(id);
+    if (!r) return;
+    try {
+      r.proc.resize(Math.max(2, cols), Math.max(2, rows));
+    } catch { /* noop */ }
+  });
+
+  ipcMain.handle('term:status', async (_e, id: number) => {
+    const r = ptys.get(id);
+    if (!r) return { alive: false, pid: null };
+    return { alive: true, pid: r.proc.pid };
+  });
+
+  ipcMain.handle('term:kill', async (_e, id: number, signal?: string) => {
+    const r = ptys.get(id);
+    if (!r) return;
+    try { r.proc.kill(signal); } catch { /* noop */ }
+    ptys.delete(id);
+  });
+
+  // ─── Launchers (fm-g6r) ──────────────────────────────────────────────
+  // User-editable JSON in userData/launchers.json. Each entry maps a verb
+  // alias to a shell-resolvable command + args. The terminal verb consults
+  // this list so :claude / :codex / :gemini open a PTY pre-running that
+  // CLI. Defaults are seeded once on first read.
+  type LauncherDef = {
+    id: string;
+    label: string;
+    aliases: string[];
+    command: string;
+    args?: string[];
+    description?: string;
+  };
+  const DEFAULT_LAUNCHERS: LauncherDef[] = [
+    {
+      id: 'claude',
+      label: 'Claude Code',
+      aliases: ['claude', 'cc'],
+      command: 'claude',
+      description: 'Anthropic Claude Code CLI',
+    },
+    {
+      id: 'codex',
+      label: 'OpenAI Codex',
+      aliases: ['codex'],
+      command: 'codex',
+      description: 'OpenAI Codex CLI',
+    },
+    {
+      id: 'gemini',
+      label: 'Google Gemini',
+      aliases: ['gemini'],
+      command: 'gemini',
+      description: 'Google Gemini CLI',
+    },
+  ];
+
+  function launchersPath(): string {
+    return path.join(app.getPath('userData'), 'launchers.json');
+  }
+  async function loadLaunchers(): Promise<LauncherDef[]> {
+    const p = launchersPath();
+    try {
+      const raw = await fs.readFile(p, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as LauncherDef[];
+      return DEFAULT_LAUNCHERS;
+    } catch {
+      // Seed defaults so the user has a starting point to edit.
+      try {
+        await fs.mkdir(path.dirname(p), { recursive: true });
+        await fs.writeFile(p, JSON.stringify(DEFAULT_LAUNCHERS, null, 2), 'utf8');
+      } catch { /* noop */ }
+      return DEFAULT_LAUNCHERS;
+    }
+  }
+  async function saveLaunchers(list: LauncherDef[]): Promise<void> {
+    const p = launchersPath();
+    await fs.mkdir(path.dirname(p), { recursive: true });
+    await fs.writeFile(p, JSON.stringify(list, null, 2), 'utf8');
+  }
+
+  ipcMain.handle('launchers:list', async (): Promise<LauncherDef[]> => {
+    return loadLaunchers();
+  });
+  ipcMain.handle('launchers:save', async (_e, list: LauncherDef[]) => {
+    await saveLaunchers(list);
+  });
+  ipcMain.handle('launchers:configPath', async (): Promise<string> => {
+    return launchersPath();
+  });
+  ipcMain.handle('launchers:revealConfig', async () => {
+    const p = launchersPath();
+    // Ensure file exists before revealing.
+    await loadLaunchers();
+    shell.showItemInFolder(p);
   });
 }
 

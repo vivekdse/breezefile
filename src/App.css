@@ -100,6 +100,49 @@
   min-height: 0;
 }
 
+/* fm-jtu — terminal full-bleed mode. When the active tab has an embedded
+   terminal pane, sidebar / preview / status bar collapse so the terminal
+   takes the entire main area below the tab + path chrome. Tabbar and
+   Pathbar stay so the user can switch tabs or breadcrumb-navigate
+   without leaving terminal mode. Ctrl+D inside the shell exits the pty,
+   which fires onExit and the file-manager layout snaps back. */
+.shell[data-mode="terminal"] {
+  --sidebar-w: 0px;
+  --preview-w: 0px;
+  grid-template-columns: 0px 1fr 0px;
+  grid-template-rows: 48px auto 1fr;
+  grid-template-areas:
+    "title  title  title"
+    "chrome chrome chrome"
+    "main   main   main";
+}
+/* The recessed-plate styling on shell__main (inset shadow + accent
+   gradient) reads as a frame around the *file plate*; in terminal mode
+   we want a clean full-bleed surface that matches the terminal's own
+   panel background. Override both. */
+.shell[data-mode="terminal"] .shell__main {
+  background: var(--panel, var(--bg-1));
+  box-shadow: none;
+}
+.shell[data-mode="terminal"] .shell__main::before {
+  display: none;
+}
+/* The terminal-fullbleed wrapper takes the full main area and lets its
+   single child (Terminal) stretch to fill. */
+.terminal-fullbleed {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-fullbleed > .terminal-pane {
+  flex: 1 1 auto;
+  /* Drop the panel border that made sense as a split divider — in
+     full-bleed mode the terminal abuts the Pathbar directly. */
+  border-top: none;
+}
+
 /* Placeholder for slots owned by other beads (fm-4zi, fm-fda). Neutral
    styling only — real styling lives in the slot-owner beads. */
 .shell__placeholder {

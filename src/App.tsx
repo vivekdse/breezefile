@@ -23,6 +23,7 @@ import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour } from './components/HelpTour';
+import { TerminalSplit } from './components/TerminalSplit';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
@@ -74,6 +75,51 @@ function Shell() {
     () => setQuickFindOpen(true),
     () => setShellOpen(true),
   );
+
+  // fm-fux — global terminal attention monitor. Every backgrounded tab's
+  // pty keeps streaming data (it's alive in the main process) but no
+  // <Terminal> component is mounted while the tab is inactive. We tap the
+  // raw IPC stream to detect attention markers (cursor-visibility for
+  // generation→idle transitions, BEL/OSC for explicit pings) and update
+  // the badge on the corresponding tab. The active tab's <Terminal> also
+  // reports attention but always clears it, so dispatch from here is gated
+  // on `tabIndex !== state.activeTab`.
+  useEffect(() => {
+    const off = fm.onTermData((id, data) => {
+      const idx = state.tabs.findIndex((t) => t.terminal?.ptyId === id);
+      if (idx < 0 || idx === state.activeTab) return;
+      let next: 'idle' | 'busy' | 'bell' | null | undefined;
+      if (data.includes('\x07') || data.includes('\x1b]9;')) next = 'bell';
+      else if (data.includes('\x1b[?25h')) next = 'idle';
+      else if (data.includes('\x1b[?25l')) next = 'busy';
+      if (next === undefined) return;
+      const cur = state.tabs[idx].terminal?.attention ?? null;
+      // Bell sticks until user focuses the tab; never let a later 'busy'
+      // signal silence a still-unattended bell.
+      if (cur === 'bell' && next !== 'bell') return;
+      if (cur === next) return;
+      dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: next });
+    });
+    return off;
+  }, [state.tabs, state.activeTab, dispatch]);
+
+  // fm-fux — when a tab with a pending attention badge becomes active,
+  // clear the badge. This handles "user just looked at it" without
+  // requiring the Terminal component to remount in time. (The Terminal's
+  // own isActive effect also clears, but switching to a tab whose
+  // terminal is currently scrolled-back-but-visible needs the clear here
+  // too, before the xterm parses any new data.)
+  useEffect(() => {
+    const t = state.tabs[state.activeTab];
+    if (t?.terminal?.attention) {
+      dispatch({
+        type: 'setTerminalAttention',
+        tabIndex: state.activeTab,
+        attention: null,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeTab]);
 
   // Self-heal the permissionsPrimed flag on every launch so the Welcome
   // notice only appears when something is actually needed. primePermissions
@@ -223,7 +269,11 @@ function Shell() {
   };
 
   return (
-    <OverlayCtx.Provider value={overlayApi}><div className="shell" data-view={tab.viewMode}>
+    <OverlayCtx.Provider value={overlayApi}><div
+      className="shell"
+      data-view={tab.viewMode}
+      data-mode={tab.terminal ? 'terminal' : 'files'}
+    >
       <IconSprite />
       {/* title slot — owned by fm-9w0 */}
       <div className="shell__title">
@@ -239,26 +289,38 @@ function Shell() {
       </div>
       {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot.
           Hidden in preview mode (fm-wq6) so the preview pane can claim
-          the real estate. */}
-      {tab.viewMode !== 'preview' && <Sidebar />}
+          the real estate. Hidden in terminal mode (fm-jtu) so the
+          terminal goes full-bleed. */}
+      {tab.viewMode !== 'preview' && !tab.terminal && <Sidebar />}
       {/* main slot — the recessed plate. FolderList (single-list Finder-style
           view per fm-ehb) fills it. MillerColumns remains in the tree for a
           future optional view mode. */}
       <main className="shell__main">
-        <FolderHeader />
-        <FilterChip />
-        <FolderList />
+        <TerminalSplit
+          tab={tab}
+          tabIndex={state.activeTab}
+          isActive={true}
+        >
+          <FolderHeader />
+          <FilterChip />
+          <FolderList />
+        </TerminalSplit>
       </main>
       {/* preview slot — Preview (fm-fda) fills the reserved 340px slot.
           In tag view (fm-uns) the slot hosts TagInspector instead, so the
           user can browse, toggle, and combine tags without leaving the file
-          list. */}
-      {tab.viewMode === 'tag' ? <TagInspector /> : <Preview />}
-      {/* status slot — ModeLine stacked above Statusbar */}
-      <div className="shell__status">
-        <ModeLine />
-        <Statusbar />
-      </div>
+          list. Hidden in terminal mode (fm-jtu). */}
+      {!tab.terminal && (
+        tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
+      )}
+      {/* status slot — ModeLine stacked above Statusbar. Hidden in
+          terminal mode so the terminal pane reaches the bottom edge. */}
+      {!tab.terminal && (
+        <div className="shell__status">
+          <ModeLine />
+          <Statusbar />
+        </div>
+      )}
 
       {/* Floating paste affordance (fm-3km) — visible whenever the user has
           staged files via Copy / Move verbs or yy / dd chords. Renders above
