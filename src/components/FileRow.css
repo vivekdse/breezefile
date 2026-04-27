@@ -276,6 +276,23 @@
   font-size: var(--fs-xs);
   color: var(--muted);
 }
+
+/* Filter-match highlight — paints the matched substring inside .row__name
+   without altering layout. Uses --accent for the text + a soft halo so the
+   span reads as "this is why this row matched" without screaming. */
+.row__match {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.row--selected .row__match {
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
 .row--selected .row__tag {
   color: var(--accent);
   opacity: 0.8;

@@ -41,10 +41,69 @@ export function sortEntries(
   return list;
 }
 
+// Filter + rank entries by how well their name matches the query. Tiers
+// (highest first) — case-sensitive prefix, case-insensitive prefix, word-start
+// match, then plain contiguous substring. Tiebreaker is shorter name (a closer
+// "real" match), then existing alphabetical order. Anything that doesn't
+// contain the query as a contiguous substring is dropped.
 export function applyFilter(entries: Entry[], filter: string): Entry[] {
   if (!filter) return entries;
-  const q = filter.toLowerCase();
-  return entries.filter((e) => e.name.toLowerCase().includes(q));
+  const q = filter.trim();
+  if (!q) return entries;
+  const ql = q.toLowerCase();
+
+  type Scored = { e: Entry; tier: number; len: number };
+  const scored: Scored[] = [];
+  for (const e of entries) {
+    const name = e.name;
+    const nl = name.toLowerCase();
+    if (!nl.includes(ql)) continue;
+    let tier: number;
+    if (name.startsWith(q)) tier = 0;
+    else if (nl.startsWith(ql)) tier = 1;
+    else if (matchesWordStart(nl, ql)) tier = 2;
+    else tier = 3;
+    scored.push({ e, tier, len: name.length });
+  }
+  scored.sort((a, b) => {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.len !== b.len) return a.len - b.len;
+    return a.e.name.localeCompare(b.e.name, undefined, { numeric: true, sensitivity: 'base' });
+  });
+  return scored.map((s) => s.e);
+}
+
+// True if `q` starts a word in `name` — boundaries are start-of-string or any
+// non-alphanumeric char. Matches "NDA - ZoomInfo" for "nda" but not "Sunday".
+function matchesWordStart(name: string, q: string): boolean {
+  let i = 0;
+  while (true) {
+    const idx = name.indexOf(q, i);
+    if (idx < 0) return false;
+    if (idx === 0) return true;
+    const prev = name.charCodeAt(idx - 1);
+    const isWordChar =
+      (prev >= 48 && prev <= 57) || // 0-9
+      (prev >= 65 && prev <= 90) || // A-Z
+      (prev >= 97 && prev <= 122);  // a-z
+    if (!isWordChar) return true;
+    i = idx + 1;
+  }
+}
+
+// Compute the [start, end) span of the matched substring in a name, given the
+// same query that applyFilter accepted. Used by FileRow to highlight which
+// chars caused the match. Returns null if no match (caller should treat as
+// no-highlight). Prefers the earliest case-insensitive substring occurrence —
+// matches the substring that decided inclusion, not necessarily the highest
+// tier (good enough for visual feedback; ranking is already settled).
+export function matchSpan(name: string, filter: string): [number, number] | null {
+  if (!filter) return null;
+  const q = filter.trim();
+  if (!q) return null;
+  const idx = name.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return null;
+  return [idx, idx + q.length];
 }
 
 export function formatSize(bytes: number): string {

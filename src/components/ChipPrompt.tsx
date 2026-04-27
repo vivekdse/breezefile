@@ -62,7 +62,9 @@ type Ctx = {
   pinned: string[];
   tabs: Array<{ index: number; id: string; cwd: string; label: string; active: boolean }>;
   canRestoreTab: boolean;
-  searchResults: string[]; // async Spotlight hits for current query
+  searchResults: string[]; // async Spotlight folder hits for current query
+  searchFiles: Array<{ path: string; name: string; isDir: boolean }>; // file hits for goto
+  searchQuery: string; // raw text in the destination slot — used by goto file pick
   localSubdirs: string[]; // BFS subdirectories under cwd (depth ~3)
   historyLen: number; // tab back-history depth
   forwardLen: number; // tab forward-history depth
@@ -492,10 +494,24 @@ const VERBS: VerbDef[] = [
     label: 'Go to / Find',
     aliases: ['go', 'goto', 'cd', 'navigate', 'open folder', 'find', 'search', 'locate', 'jump'],
     icon: '→',
-    describe: () => 'Go to or find a folder (current folder + subfolders first)',
+    describe: () => 'Go to or find a folder or file (file picks open its parent, filtered)',
     isAvailable: () => ({ ok: true }),
-    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true) }],
+    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true, true) }],
     execute: (c, [dest], api) => {
+      // File pick: navigate to parent, then apply the typed query as a substring
+      // filter on the folder. Surfaces a clearable filter chip so the user sees
+      // and can undo the narrowing.
+      if (dest.startsWith('file:')) {
+        const filePath = dest.slice('file:'.length);
+        const parent = dirnameOf(filePath);
+        const q = c.searchQuery.trim();
+        api.navigateTo(parent);
+        if (q) {
+          api.setTab({ filter: q });
+          api.dispatch({ type: 'setStatus', msg: `filtered to "${q}" — Esc to clear` });
+        }
+        return;
+      }
       const target = resolveDestination(c, dest);
       if (target) api.navigateTo(target);
     },
@@ -1490,7 +1506,7 @@ function folderTargets(c: Ctx): string[] {
   return c.entries.map((e) => e.path);
 }
 
-function destinationOptions(c: Ctx, includeCurrent = false): Option[] {
+function destinationOptions(c: Ctx, includeCurrent = false, includeFiles = false): Option[] {
   const opts: Option[] = [];
   const seen = new Set<string>();
   const push = (o: Option) => {
@@ -1576,7 +1592,29 @@ function destinationOptions(c: Ctx, includeCurrent = false): Option[] {
       available: true,
     });
   }
+  // 7) File hits (goto only). Encoded with a `file:` prefix so resolveDestination
+  //    and the goto execute can distinguish them from folder paths and route the
+  //    pick to "navigate to parent + filter to query". Demoted below folder hits
+  //    because in goto a folder match is usually the intent.
+  if (includeFiles) {
+    for (const f of c.searchFiles) {
+      const id = `file:${f.path}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      opts.push({
+        id,
+        label: f.name,
+        detail: prettyPath(dirnameOf(f.path), c.homedir) + '  ·  file',
+        available: true,
+      });
+    }
+  }
   return opts;
+}
+
+function dirnameOf(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i <= 0 ? '/' : p.slice(0, i);
 }
 
 function prettyPath(p: string, home: string): string {
@@ -1613,6 +1651,7 @@ export function ChipPrompt({
   const [homedir, setHomedir] = useState('');
   const [hoverReason, setHoverReason] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [searchFiles, setSearchFiles] = useState<Array<{ path: string; name: string; isDir: boolean }>>([]);
   const [localSubdirs, setLocalSubdirs] = useState<string[]>([]);
   const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
   const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
@@ -1659,6 +1698,35 @@ export function ChipPrompt({
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, verb, picks.length]);
+
+  // File search for the goto verb — surfaces files anywhere under $HOME so a
+  // typed name jumps to the file's parent folder + filtered to it. Only fires
+  // for the goto verb (move/copy/pin shouldn't accept a file as destination).
+  const fileSearchTokenRef = useRef(0);
+  useEffect(() => {
+    const slotIdx = verb ? picks.length : -1;
+    const activeSlot = verb && slotIdx < verb.slots.length ? verb.slots[slotIdx] : null;
+    const isGotoSlot = verb?.id === 'goto' && activeSlot?.label === 'Where';
+    if (!isGotoSlot || !homedir || filter.trim().length < 2) {
+      setSearchFiles((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    const token = ++fileSearchTokenRef.current;
+    const query = filter.trim();
+    const timer = window.setTimeout(() => {
+      void fm.findEntries([homedir], query, 30).then((hits) => {
+        if (fileSearchTokenRef.current !== token) return;
+        // Files only — folders already come through findFolders / localSubdirs.
+        const files = hits.filter((h) => !h.isDir);
+        setSearchFiles(files);
+      }).catch(() => {
+        if (fileSearchTokenRef.current !== token) return;
+        setSearchFiles((prev) => (prev.length === 0 ? prev : []));
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, verb, picks.length, homedir]);
 
   // Load local descendants (BFS, depth ~3) when a destination slot is active.
   // Fires once per (verb, slot, cwd) — independent of the typed filter, so
@@ -1731,6 +1799,8 @@ export function ChipPrompt({
       })),
       canRestoreTab: !!state.lastClosedTab,
       searchResults,
+      searchFiles,
+      searchQuery: filter,
       localSubdirs,
       historyLen: activeTab.history.length,
       forwardLen: activeTab.forward.length,
@@ -1740,7 +1810,7 @@ export function ChipPrompt({
       tagPaths: state.tagPaths,
       tagFilter: activeTab.tagFilter,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, localSubdirs, defaultTerminal, installedTerminals, state.customTags, state.tagPaths]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, state.customTags, state.tagPaths]);
 
   if (!activeTab || !ctx) return null;
 

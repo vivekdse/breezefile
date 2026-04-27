@@ -343,6 +343,7 @@ export function FolderList() {
                 onToggleMark={toggleMark}
                 onContextMenu={onContextMenu}
                 getDragPaths={getDragPaths}
+                filter={tab.filter}
               />
             );
           })}

@@ -2,7 +2,7 @@ import { memo, useEffect, useRef } from 'react';
 import type { Entry } from '../types';
 import { fm } from '../bridge';
 import { beginAppDrag, endAppDrag } from '../dragState';
-import { formatSize, formatMtime } from '../sort';
+import { formatSize, formatMtime, matchSpan } from '../sort';
 import { Icon, type IconName } from './Icon';
 import './FileRow.css';
 
@@ -19,6 +19,9 @@ type Props = {
   yanked: boolean;
   /** Zero-based row position — wires into the staggered fade-in (fm-z1f). */
   index?: number;
+  /** Active text filter — when set, the matched span in `entry.name` is
+   *  rendered with a highlight so users can see *why* a row matched. */
+  filter?: string;
   onClick?: (entry: Entry) => void;
   onDoubleClick?: (entry: Entry) => void;
   onToggleMark?: (entry: Entry) => void;
@@ -182,6 +185,7 @@ function FileRowInner({
   onToggleMark,
   onContextMenu,
   getDragPaths,
+  filter,
 }: Props) {
   const ref = useRef<HTMLLIElement>(null);
 
@@ -262,7 +266,7 @@ function FileRowInner({
         <Icon name={iconNameFor(kindFor(entry))} size={15} />
       </span>
       <span className="row__name">
-        {entry.name}
+        {renderHighlightedName(entry.name, filter)}
         {tag && <span className="row__tag">•{tag}</span>}
       </span>
       <span className="row__meta">
@@ -275,6 +279,19 @@ function FileRowInner({
         </span>
       )}
     </li>
+  );
+}
+
+function renderHighlightedName(name: string, filter?: string) {
+  const span = matchSpan(name, filter ?? '');
+  if (!span) return name;
+  const [start, end] = span;
+  return (
+    <>
+      {name.slice(0, start)}
+      <mark className="row__match">{name.slice(start, end)}</mark>
+      {name.slice(end)}
+    </>
   );
 }
 

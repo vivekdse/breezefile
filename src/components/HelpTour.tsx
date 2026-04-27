@@ -83,6 +83,7 @@ const SLIDES: Slide[] = [
       { name: 'top / bottom', chord: 'gg / G', what: 'first or last row' },
       { name: 'history', chord: 'H / L', what: 'back / forward' },
       { name: 'find', chord: '⌘F or /', what: 'recursive search across folders + Spotlight' },
+      { name: 'go to / find', what: 'type a folder OR file name in the chip prompt — file picks jump to its parent folder filtered to your query (Esc or ✕ to clear)' },
       { name: 'goto home', chord: 'gh', what: 'jump to ~ (also g/, ge, gu, gd, gp…)' },
       { name: 'quick find', chord: 'f', what: 'jump to a row by typed prefix' },
     ],
