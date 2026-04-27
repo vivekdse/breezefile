@@ -7,6 +7,7 @@ import './styles/tokens.css';
 import './styles/base.css';
 import './styles/ornaments.css';
 import './styles/motion.css';
+import './styles/buttons.css';
 
 // Apply the persisted palette BEFORE React mounts so the first paint is
 // already in the user's chosen theme. Without this, the page would render

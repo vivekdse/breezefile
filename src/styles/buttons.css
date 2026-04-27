@@ -1,0 +1,201 @@
+/* fm-?? — shared button variants. One source of truth so every surface
+   speaks the same visual language; no more per-component button CSS
+   that drifts.
+
+   Usage:
+     <button class="btn btn--primary">Save</button>
+     <button class="btn btn--secondary">Cancel</button>
+     <button class="btn btn--ghost btn--sm">More</button>
+     <button class="btn btn--card"><icon/><label/><sub/></button>
+
+   Variants (visual prominence, low → high):
+     btn--ghost      transparent until hover; for tertiary actions in dense
+                    surfaces where chrome would clutter.
+     btn--secondary  bordered, panel background, ink text; the workhorse
+                    for "another option" alongside a primary action.
+     btn--primary    filled accent, white text; one per surface, the
+                    "what we expect you to do next" action.
+     btn--danger     filled error, white text; destructive actions only.
+     btn--card       vertical multi-line button with icon/label/sub; for
+                    action grids (TaskShell launcher zone, future
+                    project dashboard cards).
+
+   Sizes:
+     btn--sm   compact inline (toolbar, sidebar context menu)
+     btn--md   default — most dialog actions
+     btn--lg   prominent — empty-state CTAs
+
+   Theme contract: every variant resolves --text-* from `--text-on-panel`
+   (the ink color guaranteed to contrast with --panel) and never falls
+   back to a raw --ink/--fg-1 chain. Background uses --panel or --accent
+   directly — both resolved per theme. */
+
+.btn {
+  /* Reset */
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  margin: 0;
+  font: inherit;
+  font-family: var(--font-sans, inherit);
+  cursor: pointer;
+  text-align: center;
+  /* Defaults — overridden by size variants */
+  font-size: var(--fs-sm, 13px);
+  font-weight: 500;
+  line-height: 1.3;
+  padding: 6px 14px;
+  border-radius: var(--r-md, 6px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* Color defaults — variants override; this baseline is enough that
+     even an unstyled `.btn` is readable on any surface. */
+  color: var(--text-on-panel);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Sizes ─────────────────────────────────────────────────────────── */
+.btn--sm {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  line-height: 1.4;
+}
+.btn--md {
+  /* same as base default; opt-in name for explicitness */
+  font-size: var(--fs-sm, 13px);
+  padding: 6px 14px;
+}
+.btn--lg {
+  font-size: var(--fs-md, 14px);
+  padding: 10px 20px;
+  border-radius: var(--r-md, 8px);
+}
+
+/* ── Variants ──────────────────────────────────────────────────────── */
+
+/* Ghost — transparent until hover. */
+.btn--ghost {
+  color: var(--text-on-panel);
+  background: transparent;
+  border-color: transparent;
+}
+.btn--ghost:hover:not(:disabled) {
+  background: var(--bg-2, var(--panel-2));
+}
+
+/* Secondary — bordered, panel background. */
+.btn--secondary {
+  color: var(--text-on-panel);
+  background: var(--panel);
+  border-color: var(--rule-on-panel, var(--rule));
+}
+.btn--secondary:hover:not(:disabled) {
+  background: var(--bg-2, var(--panel-2));
+  border-color: var(--accent-soft, var(--accent));
+}
+
+/* Primary — filled accent, white text. ALWAYS legible because we set
+   color explicitly to white (or near-white) regardless of theme. */
+.btn--primary {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.btn--primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+/* Danger — destructive actions. */
+.btn--danger {
+  color: #ffffff;
+  background: var(--err, #c0392b);
+  border-color: var(--err, #c0392b);
+}
+.btn--danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+/* Card — vertical multi-line button for action grids.
+   Designed to host:
+     <span class="btn__icon">…</span>
+     <span class="btn__label">…</span>
+     <span class="btn__sub">…</span>  (optional)
+   The card hover lifts and tints with --accent-soft so the card feels
+   tactile but still readable; the label color stays --text-on-panel
+   so it never washes out on accent-tinted backgrounds. */
+.btn--card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: var(--sp-4, 16px);
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  color: var(--text-on-panel);
+  text-align: left;
+  min-height: 84px;
+}
+.btn--card:hover:not(:disabled) {
+  background: var(--bg-2, var(--panel-2));
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.18);
+}
+.btn--card .btn__icon {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  line-height: 1;
+}
+.btn--card .btn__label {
+  font-size: var(--fs-md, 14px);
+  font-weight: 600;
+  color: var(--text-on-panel);
+  line-height: 1.2;
+}
+.btn--card .btn__sub {
+  font-size: var(--fs-xs, 11px);
+  color: var(--muted-on-panel, var(--text-on-panel));
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  opacity: 0.85;
+}
+
+/* Card variant: AI launcher cards get a subtle accent tint by default
+   so they read as the operational/agent option in the action zone,
+   distinct from the bare-shell "Open Terminal" card. */
+.btn--card.btn--card-accent {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+.btn--card.btn--card-accent:hover:not(:disabled) {
+  background: var(--accent-soft);
+  filter: brightness(1.04);
+  border-color: var(--accent);
+}

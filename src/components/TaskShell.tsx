@@ -227,26 +227,26 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
       <section className="taskshell__actions" aria-label="Task actions">
         <button
           type="button"
-          className="taskshell__action"
+          className="btn btn--card"
           onClick={onOpenTerminal}
           disabled={!!tab.terminal}
           title={tab.terminal ? 'Terminal already open in this tab' : `Open a shell at ${basename(folder) || '/'}`}
         >
-          <span className="taskshell__action-icon">$_</span>
-          <span className="taskshell__action-label">Open Terminal</span>
-          <span className="taskshell__action-sub">{basename(folder) || '/'}</span>
+          <span className="btn__icon">$_</span>
+          <span className="btn__label">Open Terminal</span>
+          <span className="btn__sub">{basename(folder) || '/'}</span>
         </button>
         {launchers.map((l) => (
           <button
             key={l.id}
             type="button"
-            className="taskshell__action taskshell__action--launcher"
+            className="btn btn--card btn--card-accent"
             onClick={() => onLaunch(l)}
             title={l.description ?? `Run ${l.command}`}
           >
-            <span className="taskshell__action-icon">⚡</span>
-            <span className="taskshell__action-label">{l.label}</span>
-            <span className="taskshell__action-sub">{l.command}</span>
+            <span className="btn__icon">⚡</span>
+            <span className="btn__label">{l.label}</span>
+            <span className="btn__sub">{l.command}</span>
           </button>
         ))}
         {launchers.length === 0 && (
