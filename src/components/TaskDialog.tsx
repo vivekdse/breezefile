@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
-import { createTask, todayISO, updateTask } from '../tasks';
+import { createTask, shiftISO, todayISO, updateTask } from '../tasks';
 import type { Task, TaskStatus } from '../types';
 import './TaskDialog.css';
 
@@ -33,7 +33,11 @@ export function TaskDialog(props: Props) {
     initial?.folder ?? (props.mode === 'create' ? props.defaultFolder : ''),
   );
   const [refFolder, setRefFolder] = useState(initial?.ref_folder ?? '');
-  const [startAt, setStartAt] = useState(initial?.start_at ?? '');
+  // Default start to today on create — most tasks are "active now". Edit
+  // mode preserves whatever was stored (including null).
+  const [startAt, setStartAt] = useState(
+    initial?.start_at ?? (props.mode === 'create' ? todayISO() : ''),
+  );
   const [dueAt, setDueAt] = useState(initial?.due_at ?? '');
   const [status, setStatus] = useState<TaskStatus>(initial?.status ?? 'pending');
   const [pinned, setPinned] = useState(initial?.pinned ?? false);
@@ -175,7 +179,7 @@ export function TaskDialog(props: Props) {
         </label>
 
         <div className="task-dialog__row">
-          <label className="task-dialog__field task-dialog__field--half">
+          <div className="task-dialog__field task-dialog__field--half">
             <span className="task-dialog__label">Start date</span>
             <input
               type="date"
@@ -184,8 +188,9 @@ export function TaskDialog(props: Props) {
               onChange={(e) => setStartAt(e.target.value)}
               max={dueAt || undefined}
             />
-          </label>
-          <label className="task-dialog__field task-dialog__field--half">
+            <DateQuickChips value={startAt} onChange={setStartAt} />
+          </div>
+          <div className="task-dialog__field task-dialog__field--half">
             <span className="task-dialog__label">Due date</span>
             <input
               type="date"
@@ -194,7 +199,8 @@ export function TaskDialog(props: Props) {
               onChange={(e) => setDueAt(e.target.value)}
               min={startAt || undefined}
             />
-          </label>
+            <DateQuickChips value={dueAt} onChange={setDueAt} includeWeekend />
+          </div>
         </div>
 
         <div className="task-dialog__row">
@@ -253,4 +259,66 @@ export function openTaskDialogEvent(req: TaskDialogRequest) {
   window.dispatchEvent(new CustomEvent('fm:openTask', { detail: req }));
 }
 
-void todayISO; // re-exported elsewhere; keep import live for future use
+/** Quick-date chips shown beneath a date input. Each chip is a real
+ *  button so Tab reaches it and Space/Enter activates it — no mouse
+ *  required. The compact set covers the 95% of common adjustments
+ *  ("a couple of days", "next week"); the date picker handles the rest. */
+function DateQuickChips({
+  value,
+  onChange,
+  includeWeekend = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  includeWeekend?: boolean;
+}) {
+  const today = todayISO();
+  const base = value || today;
+
+  const chips: Array<{ label: string; value: string; title?: string }> = [
+    { label: 'Today', value: today },
+    { label: 'Tomorrow', value: shiftISO(today, 1) },
+    { label: '+1w', value: shiftISO(base, 7), title: 'One week from current value' },
+  ];
+  if (includeWeekend) {
+    // For due dates, "end of week" is more useful than another +Nd.
+    const dow = new Date(today + 'T00:00:00').getDay(); // 0=Sun..6=Sat
+    const daysToFri = (5 - dow + 7) % 7 || 7;
+    chips.splice(2, 0, {
+      label: 'Fri',
+      value: shiftISO(today, daysToFri),
+      title: 'This Friday',
+    });
+  }
+
+  return (
+    <div className="task-dialog__date-chips" role="group" aria-label="Quick dates">
+      {chips.map((c) => (
+        <button
+          key={c.label}
+          type="button"
+          className={[
+            'task-dialog__chip',
+            value === c.value ? 'task-dialog__chip--active' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          onClick={() => onChange(c.value)}
+          title={c.title ?? c.value}
+        >
+          {c.label}
+        </button>
+      ))}
+      {value && (
+        <button
+          type="button"
+          className="task-dialog__chip task-dialog__chip--clear"
+          onClick={() => onChange('')}
+          title="Clear date"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+}

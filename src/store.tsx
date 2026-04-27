@@ -146,6 +146,14 @@ type Persisted = {
   // seeded tags (a built-in like 'recent' can also receive manual pins).
   customTags: CustomTag[];
   tagPaths: TagPaths;
+  // fm-22o — opt-in toggle for the task management subsystem. When false
+  // the sidebar Active Tasks section, :task / :tasks verbs, dialog, and
+  // tasks page are all hidden, and ~/.breezefile is never created. The
+  // mental model is PyPI extras: fresh installs get pure file management;
+  // users who want folder-anchored to-dos + agent integration opt in via
+  // Settings. Existing installs that already have a tasks DB are migrated
+  // to true on first launch with this flag (see App.tsx hydrate path).
+  taskManagementEnabled: boolean;
 };
 
 const RECENTS_CAP = 30;
@@ -183,6 +191,7 @@ type Action =
   | { type: 'setTag'; path: string; tag: string | null }
   | { type: 'setKeybinds'; keybinds: Keybinds }
   | { type: 'setTheme'; theme: 'dark' | 'light' }
+  | { type: 'setTaskManagementEnabled'; enabled: boolean }
   | { type: 'setLastFind'; query: string }
   | { type: 'restoreTab' }
   | { type: 'pushRecent'; path: string }
@@ -236,6 +245,7 @@ const initialState: State = {
   pinned: [],
   customTags: [],
   tagPaths: {},
+  taskManagementEnabled: false,
   entriesByPath: {},
   yank: [],
   statusMsg: '',
@@ -313,6 +323,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, keybinds: a.keybinds };
     case 'setTheme':
       return { ...s, theme: a.theme };
+    case 'setTaskManagementEnabled':
+      return { ...s, taskManagementEnabled: a.enabled };
     case 'setLastFind':
       return { ...s, lastFind: a.query };
     case 'pushRecent': {
@@ -426,8 +438,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           activeTab?: unknown;
         };
         // Drop any legacy `tabs`/`activeTab` fields from older builds.
-        const { bookmarks, tags, keybinds, theme, recents, pinned, customTags, tagPaths } =
-          parsed as Partial<Persisted>;
+        const {
+          bookmarks,
+          tags,
+          keybinds,
+          theme,
+          recents,
+          pinned,
+          customTags,
+          tagPaths,
+          taskManagementEnabled,
+        } = parsed as Partial<Persisted>;
         dispatch({
           type: 'hydrate',
           state: {
@@ -439,6 +460,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(pinned ? { pinned } : {}),
             ...(customTags ? { customTags } : {}),
             ...(tagPaths ? { tagPaths } : {}),
+            ...(taskManagementEnabled !== undefined
+              ? { taskManagementEnabled }
+              : {}),
           } as Partial<Persisted>,
         });
       } catch {
@@ -448,6 +472,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     fm.homedir().then((home) => {
       dispatch({ type: 'setHome', home });
     });
+
+    // fm-22o — migration: if the user has a pre-existing tasks DB but
+    // localStorage doesn't carry the flag yet (older build), default
+    // ON so their existing tasks don't disappear behind the new toggle.
+    // Fresh installs see no DB and stay OFF.
+    try {
+      const parsedFlag = raw
+        ? (JSON.parse(raw) as { taskManagementEnabled?: boolean }).taskManagementEnabled
+        : undefined;
+      if (parsedFlag === undefined) {
+        void fm.tasksDbExists().then((exists) => {
+          if (exists) {
+            dispatch({ type: 'setTaskManagementEnabled', enabled: true });
+          }
+        });
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   // Persist — only durable prefs, never tab trails.
@@ -461,6 +504,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       pinned: state.pinned,
       customTags: state.customTags,
       tagPaths: state.tagPaths,
+      taskManagementEnabled: state.taskManagementEnabled,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
   }, [
@@ -472,6 +516,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.pinned,
     state.customTags,
     state.tagPaths,
+    state.taskManagementEnabled,
   ]);
 
   // Apply theme on html root

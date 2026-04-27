@@ -152,6 +152,33 @@ export function Settings({ onClose }: Props) {
         </section>
 
         <section className="settings__section">
+          <h3 className="settings__section-title">Task management</h3>
+          <div className="settings__row">
+            <span className="settings__action">
+              <label className="settings__inline-label">
+                <input
+                  type="checkbox"
+                  checked={state.taskManagementEnabled}
+                  onChange={(e) =>
+                    dispatch({
+                      type: 'setTaskManagementEnabled',
+                      enabled: e.target.checked,
+                    })
+                  }
+                />
+                <span>Enable task management</span>
+              </label>
+            </span>
+            <span className="settings__path settings__hint">
+              Folder-anchored to-dos with optional AI-agent integration.
+              Adds the Active Tasks sidebar section, <kbd>:task</kbd> /{' '}
+              <kbd>:tasks</kbd> verbs, and (later) launchers that pass task
+              context to Claude / Codex / Gemini.
+            </span>
+          </div>
+        </section>
+
+        <section className="settings__section">
           <h3 className="settings__section-title">Default terminal</h3>
           <div className="settings__row">
             <span className="settings__action">Open Terminal here launches</span>

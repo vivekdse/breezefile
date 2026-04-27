@@ -184,10 +184,12 @@ export function Sidebar() {
   };
 
   const pinned = state.pinned ?? [];
+  // fm-22o — gate the entire task subsystem behind the opt-in flag.
+  const tasksEnabled = state.taskManagementEnabled;
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
-      <ActiveTasksSection cwd={cwd} onNavigate={onNavigate} />
+      {tasksEnabled && <ActiveTasksSection cwd={cwd} onNavigate={onNavigate} />}
 
       <h4 className="sidebar__section-title">Favorites</h4>
       {favoritesWithPath.map((f) => (
@@ -458,7 +460,13 @@ interface TaskRowProps {
 
 function TaskRow({ task, active, onClick, onContextMenu }: TaskRowProps) {
   const today = todayISO();
-  const cls = ['sidebar__task', active ? 'sidebar__task--active' : '']
+  const tone = dueTone(task.due_at, today);
+  const cls = [
+    'sidebar__task',
+    active ? 'sidebar__task--active' : '',
+    task.pinned ? 'sidebar__task--pinned' : '',
+    `sidebar__task--${tone}`,
+  ]
     .filter(Boolean)
     .join(' ');
 
@@ -470,49 +478,76 @@ function TaskRow({ task, active, onClick, onContextMenu }: TaskRowProps) {
       onContextMenu={onContextMenu}
       title={task.title}
     >
+      <span className="sidebar__task-rail" aria-hidden="true" />
       <span className="sidebar__task-main">
         <span className="sidebar__task-title-row">
           {task.pinned && (
             <span className="sidebar__task-pin" aria-label="Pinned" title="Pinned">
-              ●
+              ★
             </span>
           )}
           <span className="sidebar__task-title">{task.title}</span>
         </span>
-        <span className="sidebar__task-folder">{basename(task.folder) || task.folder}</span>
+        <span className="sidebar__task-meta">
+          <span className="sidebar__task-folder">
+            {basename(task.folder) || task.folder}
+          </span>
+          {task.due_at && (
+            <>
+              <span className="sidebar__task-meta-sep" aria-hidden="true">
+                ·
+              </span>
+              <span className={`sidebar__task-due sidebar__task-due--${tone}`}>
+                {formatDueLabel(task.due_at, today)}
+              </span>
+            </>
+          )}
+        </span>
       </span>
-      {task.due_at && <DueChip due={task.due_at} today={today} />}
     </button>
   );
 }
 
-function DueChip({ due, today }: { due: string; today: string }) {
-  if (due < today) {
-    return (
-      <span className="sidebar__due sidebar__due--overdue" title={`Overdue · ${due}`}>
-        overdue
-      </span>
-    );
-  }
-  if (due === today) {
-    return (
-      <span className="sidebar__due sidebar__due--today" title={`Due today · ${due}`}>
-        today
-      </span>
-    );
-  }
-  return (
-    <span className="sidebar__due sidebar__due--future" title={`Due ${due}`}>
-      {formatShortDate(due)}
-    </span>
-  );
+type DueTone = 'overdue' | 'today' | 'soon' | 'future' | 'none';
+
+function dueTone(due: string | null, today: string): DueTone {
+  if (!due) return 'none';
+  if (due < today) return 'overdue';
+  if (due === today) return 'today';
+  // "soon" = within the next 3 days
+  const diffDays = daysBetween(today, due);
+  if (diffDays <= 3) return 'soon';
+  return 'future';
 }
 
-function formatShortDate(iso: string): string {
-  // 'YYYY-MM-DD' → 'M/D' for compact display in the sidebar chip.
-  const [, m, d] = iso.split('-');
-  if (!m || !d) return iso;
-  return `${Number(m)}/${Number(d)}`;
+function daysBetween(a: string, b: string): number {
+  const [ay, am, ad] = a.split('-').map(Number);
+  const [by, bm, bd] = b.split('-').map(Number);
+  const da = Date.UTC(ay, am - 1, ad);
+  const db = Date.UTC(by, bm - 1, bd);
+  return Math.round((db - da) / 86_400_000);
+}
+
+function formatDueLabel(due: string, today: string): string {
+  if (due < today) {
+    const days = daysBetween(due, today);
+    return days === 1 ? '1d overdue' : `${days}d overdue`;
+  }
+  if (due === today) return 'today';
+  const days = daysBetween(today, due);
+  if (days === 1) return 'tomorrow';
+  if (days < 7) {
+    // Day-of-week label for proximate dates feels more human than a date.
+    const [y, m, d] = due.split('-').map(Number);
+    const dow = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
+    return dow.toLowerCase();
+  }
+  // 'YYYY-MM-DD' → 'Apr 30' for distant dates.
+  const [y, m, d] = due.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 interface TaskContextMenuProps {

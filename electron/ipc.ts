@@ -1635,6 +1635,7 @@ end tell`;
   );
   ipcMain.handle('tasks:delete', (_e, id: string) => tasks.deleteTask(id));
   ipcMain.handle('tasks:countByFolder', (_e, folder: string) => tasks.countByFolder(folder));
+  ipcMain.handle('tasks:dbExists', () => tasks.dbExists());
 }
 
 export function focusedWindow(): BrowserWindow | null {

@@ -68,6 +68,14 @@ function dbPath(): string {
   return path.join(os.homedir(), '.breezefile', 'tasks.db');
 }
 
+/** Check whether a tasks DB already exists on disk. Used by the
+ *  feature-flag migration: existing installs that have written tasks
+ *  before the flag landed should auto-enable task management on first
+ *  launch with the new build. Does NOT open the DB or create directories. */
+export function dbExists(): boolean {
+  return existsSync(dbPath());
+}
+
 function ensureDir() {
   const dir = path.dirname(dbPath());
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });

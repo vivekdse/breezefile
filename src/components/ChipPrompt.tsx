@@ -2021,9 +2021,17 @@ export function ChipPrompt({
   // fm-g6r — synthesize one VerbDef per user-configured launcher so they
   // surface alongside the static catalog. Each launcher opens (or focuses)
   // the embedded terminal pane and pipes the configured command in.
+  // fm-22o — when task management is disabled, drop task-related verbs
+  // from the catalog so they don't appear in the chip prompt.
+  const tasksEnabled = state.taskManagementEnabled;
   const effectiveVerbs: VerbDef[] = useMemo(
-    () => [...VERBS, ...synthesizeLauncherVerbs(launchers)],
-    [launchers],
+    () => {
+      const base = tasksEnabled
+        ? VERBS
+        : VERBS.filter((v) => v.id !== 'task' && v.id !== 'tasks');
+      return [...base, ...synthesizeLauncherVerbs(launchers)];
+    },
+    [launchers, tasksEnabled],
   );
 
   // Build options for current state

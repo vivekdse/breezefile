@@ -175,6 +175,7 @@ const fm = {
   tasksUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('tasks:update', id, patch),
   tasksDelete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
   tasksCountByFolder: (folder: string) => ipcRenderer.invoke('tasks:countByFolder', folder),
+  tasksDbExists: () => ipcRenderer.invoke('tasks:dbExists') as Promise<boolean>,
   onTasksChanged: (cb: () => void) => {
     const handler = () => cb();
     ipcRenderer.on('tasks:changed', handler);

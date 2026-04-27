@@ -130,6 +130,30 @@
   max-width: 400px;
 }
 
+/* fm-22o — inline checkbox label for boolean settings (e.g. task
+   management toggle). Aligns natively with the action column. */
+.settings__inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+}
+.settings__inline-label input[type='checkbox'] {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.settings__hint {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  white-space: normal;
+  max-width: 480px;
+  text-align: right;
+  line-height: 1.4;
+}
+
 .settings__key kbd,
 .settings__row kbd {
   display: inline-block;

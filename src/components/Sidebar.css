@@ -270,12 +270,18 @@ button.sidebar__link:hover .sidebar__unpin {
   outline-offset: 1px;
 }
 
+/* Task row: a clean two-line item with a left status rail.
+   The rail is a 2px colored bar that encodes urgency (overdue/today/
+   soon) without resorting to loud pills, leaving the title as the
+   primary visual element. Pinned rows get a slightly heavier title
+   and a star glyph. The due indicator is inline muted text — readable
+   but not shouting. */
 .sidebar__task {
+  position: relative;
   display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  grid-template-columns: 1fr;
+  gap: 1px;
+  padding: 7px 10px 7px 14px;
   border-radius: 8px;
   background: none;
   border: none;
@@ -285,6 +291,7 @@ button.sidebar__link:hover .sidebar__unpin {
   font-size: 13px;
   color: var(--text-on-panel);
   cursor: pointer;
+  transition: background var(--motion-hover);
 }
 .sidebar__task:hover {
   background: var(--bg-2, var(--panel-2));
@@ -296,23 +303,55 @@ button.sidebar__link:hover .sidebar__unpin {
 .sidebar__task--active {
   background: var(--chip);
 }
+.sidebar__task--pinned {
+  background: var(--chip);
+}
+.sidebar__task--pinned:hover {
+  background: var(--bg-2, var(--panel-2));
+}
+
+/* Left status rail. Position absolute so the title alignment isn't
+   thrown off when the rail color/width changes between states. */
+.sidebar__task-rail {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+}
+.sidebar__task--overdue .sidebar__task-rail {
+  background: var(--err, #c0392b);
+}
+.sidebar__task--today .sidebar__task-rail {
+  background: var(--accent);
+}
+.sidebar__task--soon .sidebar__task-rail {
+  background: var(--accent-soft);
+}
+.sidebar__task--future .sidebar__task-rail,
+.sidebar__task--none .sidebar__task-rail {
+  background: var(--rule-on-panel, var(--rule));
+  opacity: 0.6;
+}
 
 .sidebar__task-main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 .sidebar__task-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 .sidebar__task-pin {
   flex-shrink: 0;
   color: var(--accent);
-  font-size: 8px;
+  font-size: 11px;
   line-height: 1;
 }
 .sidebar__task-title {
@@ -320,38 +359,49 @@ button.sidebar__link:hover .sidebar__unpin {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+  letter-spacing: -0.005em;
 }
-.sidebar__task-folder {
+.sidebar__task--pinned .sidebar__task-title,
+.sidebar__task--overdue .sidebar__task-title {
+  font-weight: 600;
+}
+
+.sidebar__task-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
   font-size: 11px;
   color: var(--muted-on-panel);
+}
+.sidebar__task-folder {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 1;
 }
-
-.sidebar__due {
+.sidebar__task-meta-sep {
   flex-shrink: 0;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-  border-radius: 999px;
+  opacity: 0.5;
+}
+.sidebar__task-due {
+  flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+}
+.sidebar__task-due--overdue {
+  color: var(--err, #c0392b);
   font-weight: 600;
-  text-transform: uppercase;
 }
-.sidebar__due--overdue {
-  background: var(--err, #c0392b);
-  color: #fff;
-}
-.sidebar__due--today {
-  background: var(--accent-soft);
+.sidebar__task-due--today {
   color: var(--accent);
+  font-weight: 600;
 }
-.sidebar__due--future {
-  background: var(--chip);
+.sidebar__task-due--soon {
+  color: var(--text-on-panel);
+}
+.sidebar__task-due--future,
+.sidebar__task-due--none {
   color: var(--muted-on-panel);
-  text-transform: none;
-  letter-spacing: 0;
 }
 
 .sidebar__see-all {

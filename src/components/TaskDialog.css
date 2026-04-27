@@ -187,3 +187,50 @@
   opacity: 0.9;
   letter-spacing: 0.05em;
 }
+
+/* Quick-date chips beneath date inputs — keyboard-reachable shortcuts
+   for the common cases (Today, Tomorrow, +1w, Friday for due dates).
+   Each chip is a real button so Tab reaches it and Space activates. */
+.task-dialog__date-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.task-dialog__chip {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.4;
+  transition:
+    background var(--motion-hover),
+    border-color var(--motion-hover),
+    color var(--motion-hover),
+    box-shadow var(--motion-focus-ring);
+}
+.task-dialog__chip:hover {
+  background: var(--hi);
+  border-color: var(--accent-soft, var(--rule));
+}
+.task-dialog__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.task-dialog__chip--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.task-dialog__chip--clear {
+  color: var(--muted);
+  padding: 2px 7px;
+  font-size: 13px;
+  line-height: 1;
+}

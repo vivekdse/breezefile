@@ -101,6 +101,7 @@ type Fm = {
   tasksUpdate: (id: string, patch: TaskUpdate) => Promise<Task>;
   tasksDelete: (id: string) => Promise<void>;
   tasksCountByFolder: (folder: string) => Promise<number>;
+  tasksDbExists: () => Promise<boolean>;
   onTasksChanged: (cb: () => void) => () => void;
 };
 
