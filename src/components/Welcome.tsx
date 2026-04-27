@@ -73,6 +73,32 @@ export function Welcome({ onClose }: { onClose: () => void }) {
   // Null = main view. 'tutorial' or 'dismiss' = show permissions
   // notice; the value is the action to run on confirm.
   const [pending, setPending] = useState<PendingAction>(null);
+  // Self-heal: on mount, ask the OS for actual TCC state. primePermissions
+  // runs opendir per folder — already-granted folders return without
+  // re-prompting, so the call is silent when nothing needs the user. Track
+  // the result locally so commit() can skip the notice synchronously even
+  // if localStorage was wiped. If every folder is granted (or missing on
+  // disk), we treat permissions as primed for this session.
+  const [permsResolved, setPermsResolved] = useState<'unknown' | 'primed' | 'needsAction'>(
+    permissionsPrimed() ? 'primed' : 'unknown',
+  );
+  useEffect(() => {
+    if (permsResolved === 'primed') return;
+    let cancelled = false;
+    void window.fm.primePermissions?.().then((res) => {
+      if (cancelled || !res) return;
+      const needed = Object.values(res).some((s) => s !== 'granted' && s !== 'missing');
+      if (needed) {
+        setPermsResolved('needsAction');
+      } else {
+        markPermissionsPrimed();
+        setPermsResolved('primed');
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const isPrimed = () => permsResolved === 'primed' || permissionsPrimed();
 
   // While Welcome is open NO other keyboard shortcut should fire —
   // we listen in capture phase with stopImmediatePropagation so the
@@ -133,12 +159,12 @@ export function Welcome({ onClose }: { onClose: () => void }) {
         e.key === 'Enter' ||
         ((e.key === 't' || e.key === 'T') && !e.metaKey && !e.ctrlKey && !e.altKey);
       if (isTutorialKey) {
-        if (permissionsPrimed()) runPending('tutorial');
+        if (isPrimed()) runPending('tutorial');
         else setPending('tutorial');
         return;
       }
       if (e.key === 'Escape') {
-        if (permissionsPrimed()) runPending('dismiss');
+        if (isPrimed()) runPending('dismiss');
         else setPending('dismiss');
         return;
       }
@@ -146,7 +172,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
     }
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [exit, pending]);
+  }, [exit, pending, permsResolved]);
 
   function confirmNotice() {
     if (!pending) return;
@@ -160,7 +186,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
   }
 
   function commit(action: Exclude<PendingAction, null>) {
-    if (permissionsPrimed()) {
+    if (isPrimed()) {
       markWelcomeSeen();
       exit();
       if (action === 'tutorial') {

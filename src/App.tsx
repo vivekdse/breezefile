@@ -4,6 +4,7 @@ import { Titlebar } from './components/Titlebar';
 import { Pathbar } from './components/Pathbar';
 import { FolderList } from './components/FolderList';
 import { FolderHeader } from './components/FolderHeader';
+import { FilterChip } from './components/FilterChip';
 import { Preview } from './components/Preview';
 import { TagInspector } from './components/TagInspector';
 import { TagPicker } from './components/TagPicker';
@@ -73,6 +74,27 @@ function Shell() {
     () => setQuickFindOpen(true),
     () => setShellOpen(true),
   );
+
+  // Self-heal the permissionsPrimed flag on every launch so the Welcome
+  // notice only appears when something is actually needed. primePermissions
+  // is silent for already-granted folders (opendir succeeds without
+  // re-prompting), so this is a no-op when the OS already has all grants.
+  // If localStorage was wiped between launches but TCC still has them,
+  // we restore the flag without ever showing the notice. Truly first-time
+  // users (no grants yet) hit the existing Welcome flow as before, since
+  // primePermissions returns 'denied' or pending and the flag stays unset.
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    if (localStorage.getItem('fm.permissionsPrimed') === '1') return;
+    void fm.primePermissions().then((res) => {
+      const needsAction = Object.values(res).some(
+        (s) => s !== 'granted' && s !== 'missing',
+      );
+      if (!needsAction) {
+        try { localStorage.setItem('fm.permissionsPrimed', '1'); } catch { /* noop */ }
+      }
+    }).catch(() => { /* noop */ });
+  }, []);
 
   useEffect(() => {
     function h(e: KeyboardEvent) {
@@ -224,6 +246,7 @@ function Shell() {
           future optional view mode. */}
       <main className="shell__main">
         <FolderHeader />
+        <FilterChip />
         <FolderList />
       </main>
       {/* preview slot — Preview (fm-fda) fills the reserved 340px slot.
