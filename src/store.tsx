@@ -254,7 +254,13 @@ const initialState: State = {
   pinned: [],
   customTags: [],
   tagPaths: {},
-  taskManagementEnabled: false,
+  // fm-22o — default ON. The toggle in Settings lets users opt out;
+  // gating discoverability behind a flag-off-by-default created friction
+  // for the primary use case (task-anchored AI workflows). Migration
+  // probe can also turn it ON for installs that already have a tasks DB
+  // but didn't carry the field; the explicit-false path stays available
+  // for users who turn it off in Settings.
+  taskManagementEnabled: true,
   entriesByPath: {},
   yank: [],
   statusMsg: '',
