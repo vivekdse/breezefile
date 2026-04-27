@@ -77,12 +77,14 @@ jobs:
           X64_SHA=$(shasum -a 256 "$X64_DMG" | awk '{print $1}')
 
           TAP_DIR="$RUNNER_TEMP/homebrew-tap"
-          # Fine-grained PATs need the real owner as the HTTPS username.
-          # The `x-access-token` alias that works for GitHub App installation
-          # tokens (ghs_*) is rejected here. Bearer header auth also fails:
-          # git's smart HTTP expects Basic creds.
-          REMOTE="https://vivekdse:${HOMEBREW_TAP_TOKEN}@github.com/vivekdse/homebrew-tap.git"
-          git clone --depth 1 "$REMOTE" "$TAP_DIR"
+          # Auth via Authorization: Bearer header. GitHub rejects URL-embedded
+          # `user:token@` for fine-grained PATs ("Invalid username or token");
+          # the Bearer form is the documented modern path and works for both
+          # classic and fine-grained PATs. We set it via -c on each git
+          # invocation so the token never lives in the cloned repo's config.
+          GIT_AUTH=( -c "http.https://github.com/.extraheader=Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" )
+          git "${GIT_AUTH[@]}" clone --depth 1 \
+            https://github.com/vivekdse/homebrew-tap.git "$TAP_DIR"
 
           CASK="$TAP_DIR/Casks/breezefile.rb"
           mkdir -p "$(dirname "$CASK")"
@@ -101,4 +103,4 @@ jobs:
             exit 0
           fi
           git commit -m "breezefile ${VERSION}"
-          git push origin HEAD
+          git "${GIT_AUTH[@]}" push origin HEAD
