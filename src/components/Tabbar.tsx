@@ -77,14 +77,33 @@ export function Tabbar() {
             onDragOver={onTabDragOver(i)}
             onDragLeave={onTabDragLeave}
             onDrop={onTabDrop(i)}
-            title={cwd}
+            title={
+              t.terminal?.attention
+                ? `${cwd} · terminal needs attention`
+                : cwd
+            }
           >
             <span className="tabbar__label">{label}</span>
+            {/* fm-fux — attention badge. Backgrounded tabs whose terminal
+                emitted a cursor-show / BEL / OSC9 since we last saw them
+                paint a small dot; bell pulses, idle is a steady accent. */}
+            {t.terminal?.attention && (
+              <span
+                className={`tabbar__attn tabbar__attn--${t.terminal.attention}`}
+                aria-label="terminal needs attention"
+              />
+            )}
             {canClose && (
               <span
                 className="tabbar__close"
                 onClick={(e) => {
                   e.stopPropagation();
+                  // fm-jtu — kill the embedded terminal's pty before the
+                  // tab disappears, otherwise the shell stays alive in
+                  // the main process until window close.
+                  if (t.terminal) {
+                    void fm.termKill(t.terminal.ptyId).catch(() => {});
+                  }
                   dispatch({ type: 'closeTab', index: i });
                 }}
               >

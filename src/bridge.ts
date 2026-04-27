@@ -74,6 +74,35 @@ type Fm = {
     publishedAt: string | null;
   } | null>;
   upgrade: () => Promise<{ ok: boolean; mode: 'inline' | 'terminal' }>;
+  termSpawn: (opts: {
+    cwd: string;
+    cols?: number;
+    rows?: number;
+    shell?: string;
+    args?: string[];
+    env?: Record<string, string>;
+  }) => Promise<number>;
+  termWrite: (id: number, data: string) => void;
+  termResize: (id: number, cols: number, rows: number) => void;
+  termKill: (id: number, signal?: string) => Promise<void>;
+  termStatus: (id: number) => Promise<{ alive: boolean; pid: number | null }>;
+  onTermData: (cb: (id: number, data: string) => void) => () => void;
+  onTermExit: (
+    cb: (id: number, code: number, signal: string | null) => void,
+  ) => () => void;
+  launchersList: () => Promise<Launcher[]>;
+  launchersSave: (list: Launcher[]) => Promise<void>;
+  launchersConfigPath: () => Promise<string>;
+  launchersRevealConfig: () => Promise<void>;
+};
+
+export type Launcher = {
+  id: string;
+  label: string;
+  aliases: string[];
+  command: string;
+  args?: string[];
+  description?: string;
 };
 
 declare global {

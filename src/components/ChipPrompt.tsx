@@ -72,6 +72,10 @@ type Ctx = {
   // Open Terminal verb's conditional 'Which terminal' slot.
   defaultTerminal: string | null;
   installedTerminals: string[];
+  // fm-jtu — does the active tab already have an embedded terminal pane?
+  activeTabHasTerminal: boolean;
+  // fm-g6r — user-editable launcher list (claude/codex/gemini, …).
+  launchers: import('../bridge').Launcher[];
   // fm-60k — tag state surfaced to the chip palette so the tag/untag/newtag
   // verbs can compose options without reaching back into the store.
   customTags: CustomTag[];
@@ -115,6 +119,8 @@ type Verb =
   | 'copy-path'
   | 'open-with'
   | 'openTerminal'
+  | 'term'
+  | 'term-close'
   | 'newtag'
   | 'tag'
   | 'untag'
@@ -166,6 +172,11 @@ type ExecApi = {
   // Reset palette to the verb picker without closing — used by the 'Select'
   // verb to auto-advance into "now what?" for chain flows like select→copy.
   resetToVerbPick: (status?: string) => void;
+  // fm-jtu — index of the active tab when the verb fires. Lets terminal
+  // verbs dispatch tab-scoped openTerminal/closeTerminal actions.
+  activeTabIndex: number;
+  // fm-jtu — current terminal state on the active tab, if any.
+  activeTabTerminal?: { ptyId: number };
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -756,8 +767,8 @@ const VERBS: VerbDef[] = [
     // The slot only materializes when there's no saved pref and more than
     // one terminal is installed. One-terminal installs auto-select.
     id: 'openTerminal',
-    label: 'Open Terminal here',
-    aliases: ['open-terminal', 'terminal', 'term', 'shell', 'cli'],
+    label: 'Open external terminal here',
+    aliases: ['open-terminal', 'open-external-terminal', 'cli', 'iterm', 'external-terminal'],
     icon: '$_',
     describe: (c) => {
       if (c.defaultTerminal) {
@@ -849,6 +860,90 @@ const VERBS: VerbDef[] = [
           msg: `terminal failed: ${(err as Error).message}`,
         });
       }
+    },
+  },
+  {
+    // fm-jtu — embedded terminal pane. Splits the active tab and spawns a
+    // shell rooted at the tab's cwd. Re-running on a tab that already has
+    // a terminal is a no-op (focus is moved to the existing pane via the
+    // mount effect on isActive). Use :term-close to dismiss.
+    id: 'term',
+    label: 'Open terminal pane',
+    aliases: ['term', 'terminal', 'shell', 'pty'],
+    icon: '$_',
+    describe: (c) => {
+      if (c.activeTabHasTerminal) return 'Focus the terminal pane in this tab';
+      return `Open a terminal pane at ${basename(c.cwd) || '/'}`;
+    },
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: async (c, _p, api) => {
+      if (api.activeTabTerminal) {
+        api.dispatch({ type: 'setStatus', msg: 'terminal already open' });
+        api.closeOverlay();
+        return;
+      }
+      try {
+        const ptyId = await fm.termSpawn({ cwd: c.cwd });
+        api.dispatch({
+          type: 'openTerminal',
+          tabIndex: api.activeTabIndex,
+          ptyId,
+          cwd: c.cwd,
+        });
+        api.dispatch({ type: 'setStatus', msg: 'terminal opened' });
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `terminal failed: ${(err as Error).message}`,
+        });
+      }
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-8qf — close the embedded terminal in the active tab. Confirms if
+    // the shell still has a foreground process (or anyway, since we don't
+    // peek into the pty's child tree, we always confirm to be safe).
+    id: 'term-close',
+    label: 'Close terminal pane',
+    aliases: ['term-close', 'close-term', 'close-terminal', 'killterm', 'qterm'],
+    icon: '✕',
+    describe: () => 'Close the terminal pane in this tab',
+    isAvailable: (c) => {
+      if (!c.activeTabHasTerminal) {
+        return { ok: false, reason: 'No terminal pane open in this tab — :term to open' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    execute: (_c, _p, api) => {
+      const term = api.activeTabTerminal;
+      if (!term) return;
+      // Surface a confirm — running shells often hold work (interactive
+      // CLIs, partially typed commands, in-progress builds). Yes/no via
+      // the shared ConfirmDialog event so we look like the rest of the
+      // app rather than a one-off window.confirm.
+      api.closeOverlay();
+      window.dispatchEvent(
+        new CustomEvent('fm:confirm', {
+          detail: {
+            title: 'Close terminal?',
+            body:
+              'Any running process in this terminal will be terminated. Continue?',
+            confirmLabel: 'Close',
+            destructive: true,
+            onConfirm: async () => {
+              try { await fm.termKill(term.ptyId); } catch { /* noop */ }
+              api.dispatch({
+                type: 'closeTerminal',
+                tabIndex: api.activeTabIndex,
+              });
+              api.dispatch({ type: 'setStatus', msg: 'terminal closed' });
+            },
+          },
+        }),
+      );
     },
   },
   {
@@ -1481,6 +1576,67 @@ const ARCHIVE_EXTS = [
   '.rar',
   '.dmg',
 ];
+// fm-g6r — turn each user launcher into a chip-prompt verb. Selecting it
+// opens the embedded terminal pane (or focuses the existing one) and types
+// the launcher's command + args, terminated with Enter so it runs in the
+// user's current shell. We pipe through the shell rather than spawning the
+// launcher directly so the user's PATH and aliases apply (e.g. `claude`
+// installed via `npm i -g` resolves through nvm-shimmed PATH).
+function synthesizeLauncherVerbs(
+  launchers: import('../bridge').Launcher[],
+): VerbDef[] {
+  return launchers.map((l) => {
+    const cmdLine = [l.command, ...(l.args ?? [])].join(' ');
+    return {
+      id: ('launcher:' + l.id) as Verb,
+      label: `Open ${l.label}`,
+      aliases: l.aliases,
+      icon: '⚡',
+      describe: (c) =>
+        c.activeTabHasTerminal
+          ? `Run "${cmdLine}" in the terminal`
+          : `Open terminal at ${basename(c.cwd) || '/'} and run "${cmdLine}"`,
+      isAvailable: () => ({ ok: true }),
+      slots: [],
+      execute: async (c, _p, api) => {
+        const cmd = cmdLine + '\r';
+        if (api.activeTabTerminal) {
+          // Reuse the running shell — the user's prompt may have unsaved
+          // state (cd, env) so don't kill it. Type the launcher line.
+          fm.termWrite(api.activeTabTerminal.ptyId, cmd);
+          api.dispatch({ type: 'setStatus', msg: `running ${l.label}` });
+          api.closeOverlay();
+          return;
+        }
+        try {
+          const ptyId = await fm.termSpawn({ cwd: c.cwd });
+          api.dispatch({
+            type: 'openTerminal',
+            tabIndex: api.activeTabIndex,
+            ptyId,
+            cwd: c.cwd,
+            label: l.label,
+          });
+          // The Terminal component takes care of the post-spawn delay
+          // before typing — we duplicate that here since the verb doesn't
+          // own the xterm instance. A 200ms wait clears most shell
+          // greeting / prompt-redraw races (zsh prints the prompt twice
+          // when starship/p10k init runs; typing into the first prompt
+          // sometimes lands inside its title escape).
+          setTimeout(() => fm.termWrite(ptyId, cmd), 220);
+          api.dispatch({ type: 'setStatus', msg: `opened terminal · ${l.label}` });
+        } catch (err) {
+          api.dispatch({
+            type: 'setStatus',
+            msg: `${l.label} failed: ${(err as Error).message}`,
+          });
+        }
+        api.closeOverlay();
+      },
+    };
+  });
+}
+
 function isArchivePath(p: string): boolean {
   const lower = p.toLowerCase();
   return ARCHIVE_EXTS.some((ext) => lower.endsWith(ext));
@@ -1655,6 +1811,7 @@ export function ChipPrompt({
   const [localSubdirs, setLocalSubdirs] = useState<string[]>([]);
   const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
   const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
+  const [launchers, setLaunchers] = useState<import('../bridge').Launcher[]>([]);
   const searchTokenRef = useRef(0); // guards against out-of-order resolves
   const subdirsTokenRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1666,6 +1823,9 @@ export function ChipPrompt({
     // Terminal verb can render its slot immediately without an async gap.
     void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
     void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
+    // fm-g6r — preload the user's launcher list so :claude/:codex/:gemini
+    // surface in the verb picker without a per-frame async fetch.
+    void fm.launchersList().then(setLaunchers).catch(() => {});
   }, []);
 
   // Fire Spotlight folder search when a destination slot is active and the
@@ -1806,11 +1966,13 @@ export function ChipPrompt({
       forwardLen: activeTab.forward.length,
       defaultTerminal,
       installedTerminals,
+      activeTabHasTerminal: !!activeTab.terminal,
+      launchers,
       customTags: state.customTags,
       tagPaths: state.tagPaths,
       tagFilter: activeTab.tagFilter,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, state.customTags, state.tagPaths]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, launchers, state.customTags, state.tagPaths]);
 
   if (!activeTab || !ctx) return null;
 
@@ -1818,10 +1980,18 @@ export function ChipPrompt({
   const slotIdx = verb ? picks.length : -1;
   const activeSlot = verb && slotIdx < verb.slots.length ? verb.slots[slotIdx] : null;
 
+  // fm-g6r — synthesize one VerbDef per user-configured launcher so they
+  // surface alongside the static catalog. Each launcher opens (or focuses)
+  // the embedded terminal pane and pipes the configured command in.
+  const effectiveVerbs: VerbDef[] = useMemo(
+    () => [...VERBS, ...synthesizeLauncherVerbs(launchers)],
+    [launchers],
+  );
+
   // Build options for current state
   const allOptions: Option[] =
     verb === null
-      ? VERBS.map((v) => {
+      ? effectiveVerbs.map((v) => {
           const { ok, reason } = v.isAvailable(ctx);
           return {
             id: v.id,
@@ -1853,7 +2023,7 @@ export function ChipPrompt({
         // come from the option itself (e.g. 'type'/'kind'/'filetype' on the
         // 'By extension' sort option).
         const aliases = verb === null
-          ? (VERBS.find((v) => v.id === o.id)?.aliases ?? []).map((a) => a.toLowerCase())
+          ? (effectiveVerbs.find((v) => v.id === o.id)?.aliases ?? []).map((a) => a.toLowerCase())
           : (o.aliases ?? []).map((a) => a.toLowerCase());
         const haystack = label + ' ' + detail + ' ' + aliases.join(' ');
 
@@ -1928,7 +2098,7 @@ export function ChipPrompt({
       return;
     }
     if (verb === null) {
-      const v = VERBS.find((x) => x.id === opt.id);
+      const v = effectiveVerbs.find((x) => x.id === opt.id);
       if (!v) return;
       setVerb(v);
       setPicks([]);
@@ -2013,6 +2183,10 @@ export function ChipPrompt({
         goBack,
         goForward,
         dispatch,
+        activeTabIndex: state.activeTab,
+        activeTabTerminal: safeTab.terminal
+          ? { ptyId: safeTab.terminal.ptyId }
+          : undefined,
         openRename: (e) => setOpenRename(e),
         openMkdir: () => {
           // Fire status and close; App.tsx owns the mkdir overlay — emit an event

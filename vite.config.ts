@@ -15,6 +15,15 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              // node-pty is a native module — its .node binary must be
+              // resolved at runtime from node_modules, not bundled.
+              external: ['@homebridge/node-pty-prebuilt-multiarch', 'electron'],
+            },
+          },
+        },
       },
       preload: {
         input: 'electron/preload.ts',
