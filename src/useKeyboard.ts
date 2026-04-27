@@ -51,6 +51,21 @@ const AMBIGUOUS_COMMIT_MS = 500;
 // Timeout for abandoning an unfinished chord.
 const CHORD_TIMEOUT_MS = 1000;
 
+// Single-letter nav keys (h j k l) double as the first letter of many file
+// names. To let users type names starting with these letters into the chip
+// prompt without losing the first letter, the FIRST press of one of these
+// is buffered for NAV_DEFER_MS — if a second printable letter arrives within
+// that window, the pair opens the chip prompt; otherwise the nav action
+// fires. Held-down (auto-repeat) keystrokes set `event.repeat`, so scrolling
+// with a held `j` runs at full speed.
+const NAV_DEFER = new Set(['h', 'j', 'k', 'l']);
+// Window between keystrokes during which a follow-up letter still hijacks
+// h/j/k/l into the chip prompt instead of firing nav. 500ms covers casual
+// typing; vim-style "tap l to enter" still feels responsive (one beat
+// of perceived latency before the cursor jumps). Held keys bypass this
+// entirely via event.repeat.
+const NAV_DEFER_MS = 500;
+
 export function useKeyboard(
   promptRename: (entry: Entry, mode: 'full' | 'beforeExt' | 'append' | 'prepend') => void,
   promptMkdir: () => void,
@@ -71,6 +86,17 @@ export function useKeyboard(
     dispatch({ type: 'setPending', pending: value });
   }
 
+  // Mirror state.mode synchronously so back-to-back keystrokes don't double-
+  // dispatch setMode while React is still committing the previous update.
+  // Without this, typing "lda" fast enough to outrun render fires two
+  // setMode actions and the chip's modeBuffer becomes just "a".
+  const modeRef = useRef<typeof state.mode>(state.mode);
+  modeRef.current = state.mode;
+  function openCommandMode(buffer: string) {
+    modeRef.current = 'command';
+    dispatch({ type: 'setMode', mode: 'command', buffer });
+  }
+
   // Single outstanding timer for chord commit/clear.
   const timerRef = useRef<number | null>(null);
   function clearTimer() {
@@ -89,6 +115,28 @@ export function useKeyboard(
 
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      // Chip overlay is open but its <input> hasn't claimed focus yet (race
+      // between dispatch → render → mount → autoFocus). Without this guard
+      // the second keystroke runs through this handler and triggers another
+      // setMode buffer=k, overwriting the first letter — typing "nda" with
+      // the chip closed becomes "da" in the input. modeRef is updated
+      // synchronously by openCommandMode so back-to-back keystrokes can't
+      // outrace the React render that mounts ChipPrompt.
+      if (modeRef.current === 'command' || cur.mode === 'command') {
+        return;
+      }
+
+      // Esc clears an active text filter (set via `goto` file-pick or `zf`).
+      // Mirrors the ✕ button on the FilterChip so users have a discoverable
+      // affordance and a keyboard escape hatch.
+      if (e.key === 'Escape' && tab.filter) {
+        e.preventDefault();
+        clearTimer();
+        setTab({ filter: '' });
+        dispatch({ type: 'setStatus', msg: 'filter cleared' });
         return;
       }
 
@@ -227,7 +275,6 @@ export function useKeyboard(
         //   • j/k/h/l & arrows & Enter/Backspace — cursor motion
         //   • G / C-d / C-u / C-f / C-b / PageUp/Down — bulk motion
         //   • H / L — history back/forward (motion through time)
-        //   • n / N — repeat last find (motion)
         //   • / — live find prompt (search-as-motion; documented exception)
         //   • Space — toggle mark on cursor item (selection)
         //   • S-Space — toggle select-all in active column (selection)
@@ -238,8 +285,9 @@ export function useKeyboard(
         // Removed letter actions (now reachable via palette): v, f, s, R, a, A, I.
         // / opens the recursive find verb in the chip prompt (matches ⌘F).
         '/': () => dispatch({ type: 'setMode', mode: 'command', verb: 'goto' }),
-        n: () => repeatFind(+1),
-        N: () => repeatFind(-1),
+        // n / N (repeat-find) were removed so typing names starting with
+        // 'n' opens the chip prompt with that letter as initial filter.
+        // Repeat-find still works inside the live find HUD opened by `/`.
         ':': () => dispatch({ type: 'setMode', mode: 'command', buffer: '' }),
         '!': () => promptShell(),
         ' ': () => toggleMark(),
@@ -348,7 +396,7 @@ export function useKeyboard(
       ) {
         e.preventDefault();
         clearTimer();
-        dispatch({ type: 'setMode', mode: 'command', buffer: k });
+        openCommandMode(k);
         return;
       }
 
@@ -402,8 +450,65 @@ export function useKeyboard(
         return;
       }
 
+      // Case: pending starts with a buffered nav letter (h/j/k/l). The
+      // buffer accumulates taps as a string ("l", "ll", "lll" …) — on
+      // timeout we fire that many actions. Until then:
+      //   • same letter again → extend the buffer (defers nav).
+      //   • different alphanumeric → open the chip prompt with the full
+      //     buffer + new char (so "lda" → chip filter "lda", "lla" → "lla").
+      //   • anything else (Esc, arrows…) → flush buffered nav actions and
+      //     let the key fall through to normal handling.
+      if (pending !== '' && NAV_DEFER.has(pending[0]) && pending.split('').every((c) => c === pending[0])) {
+        const navLetter = pending[0];
+        if (k === navLetter) {
+          e.preventDefault();
+          clearTimer();
+          const next = pending + k;
+          setPending(next);
+          const action = actions[navLetter];
+          timerRef.current = window.setTimeout(() => {
+            if (pendingRef.current === next) {
+              for (let i = 0; i < next.length; i++) action?.();
+              setPending('');
+            }
+            timerRef.current = null;
+          }, NAV_DEFER_MS);
+          return;
+        }
+        if (/^[A-Za-z0-9]$/.test(k)) {
+          e.preventDefault();
+          clearTimer();
+          const buffer = pending + k;
+          setPending('');
+          openCommandMode(buffer);
+          return;
+        }
+        // Non-letter follow-up: flush buffered navs, then let `k` flow on.
+        clearTimer();
+        const action = actions[navLetter];
+        for (let i = 0; i < pending.length; i++) action?.();
+        setPending('');
+      }
+
       // Case: no match. If pending was empty, try a single-key action.
       if (pending === '' && actions[k]) {
+        // Defer the first press of h/j/k/l so a follow-up letter can open
+        // the chip prompt instead. Held keys (event.repeat=true) bypass
+        // the deferral so vim-style scrolling stays snappy.
+        if (NAV_DEFER.has(k) && !e.repeat) {
+          e.preventDefault();
+          clearTimer();
+          setPending(k);
+          const action = actions[k];
+          timerRef.current = window.setTimeout(() => {
+            if (pendingRef.current === k) {
+              action();
+              setPending('');
+            }
+            timerRef.current = null;
+          }, NAV_DEFER_MS);
+          return;
+        }
         e.preventDefault();
         actions[k]();
         return;
@@ -691,24 +796,6 @@ export function useKeyboard(
         setTab({ sortKey: key, sortReverse: reverse });
         dispatch({ type: 'setStatus', msg: `sort: ${key}${reverse ? ' ↓' : ' ↑'}` });
       }
-      function repeatFind(dir: number) {
-        const q = cur.lastFind;
-        if (!q) return;
-        const entries = getEntries();
-        if (entries.length === 0) return;
-        const cur_ = tab.selected[lastCol(tab)] ?? 0;
-        const needle = q.toLowerCase();
-        const n = entries.length;
-        for (let step = 1; step <= n; step++) {
-          const idx = (cur_ + dir * step + n * 2) % n;
-          if (entries[idx].name.toLowerCase().includes(needle)) {
-            setTab({ selected: { ...tab.selected, [lastCol(tab)]: idx } });
-            return;
-          }
-        }
-        dispatch({ type: 'setStatus', msg: `no match for "${q}"` });
-      }
-
       void pathJoin;
     }
 
