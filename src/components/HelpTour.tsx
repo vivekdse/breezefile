@@ -159,6 +159,8 @@ const SLIDES: Slide[] = [
       { name: 'term', what: 'open an embedded terminal pane rooted at this folder · :term-close to dismiss' },
       { name: 'claude / codex / gemini', what: 'open the terminal pane and launch the AI CLI · backgrounded tabs badge when waiting for input' },
       { name: 'open-terminal', chord: 'cli', what: 'open an external terminal app (iTerm, Warp, …) at this folder' },
+      { name: 'task', what: 'create a task anchored to this folder (title, notes, optional start/due dates)' },
+      { name: 'tasks', what: 'open the full task list — filter by status / pinned / due, search, sort, bulk-edit' },
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
       { name: 'settings', chord: '?', what: 'view & rebind keys' },
       { name: 'permissions', what: 'see which protected folders Breeze can read; grant any still missing' },

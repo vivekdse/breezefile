@@ -22,6 +22,7 @@ import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
 import { TaskDialog, type TaskDialogRequest } from './components/TaskDialog';
+import { TasksPage } from './components/TasksPage';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -72,6 +73,10 @@ function Shell() {
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskDialogRequest | null>(null);
+  // fm-kaa — full-screen tasks list. Opened via the `tasks` verb or the
+  // (future) sidebar "See all" link. Sits below ConfirmDialog so the
+  // bulk-delete confirm renders on top.
+  const [tasksPageOpen, setTasksPageOpen] = useState(false);
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -223,6 +228,9 @@ function Shell() {
       const detail = (e as CustomEvent).detail as TaskDialogRequest | undefined;
       if (detail) setTaskDialog(detail);
     }
+    function onOpenTasksPage() {
+      setTasksPageOpen(true);
+    }
     async function onOpenWith(e: Event) {
       const detail = (e as CustomEvent).detail as { path: string; ext?: string } | undefined;
       if (!detail?.path) return;
@@ -250,6 +258,7 @@ function Shell() {
     window.addEventListener('fm:openHelp', onHelp);
     window.addEventListener('fm:openWelcome', onWelcome);
     window.addEventListener('fm:openTask', onOpenTask);
+    window.addEventListener('fm:openTasksPage', onOpenTasksPage);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -265,6 +274,7 @@ function Shell() {
       window.removeEventListener('fm:openHelp', onHelp);
       window.removeEventListener('fm:openWelcome', onWelcome);
       window.removeEventListener('fm:openTask', onOpenTask);
+      window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
     };
   }, [activeTab, state.entriesByPath]);
 
@@ -467,6 +477,9 @@ function Shell() {
         <TagPicker mode={tagPicker} onClose={() => setTagPicker(null)} />
       )}
       {helpOpen && <HelpTour onClose={() => setHelpOpen(false)} />}
+      {tasksPageOpen && (
+        <TasksPage onClose={() => setTasksPageOpen(false)} />
+      )}
       {taskDialog && (
         <TaskDialog
           {...taskDialog}

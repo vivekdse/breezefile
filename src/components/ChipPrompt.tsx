@@ -127,7 +127,8 @@ type Verb =
   | 'filter'
   | 'help'
   | 'welcome'
-  | 'task';
+  | 'task'
+  | 'tasks';
 
 type Option = {
   id: string;
@@ -1070,6 +1071,23 @@ const VERBS: VerbDef[] = [
         }),
       );
       api.closeOverlay();
+    },
+  },
+  {
+    // fm-kaa — full-screen tasks page. Distinct from `task` (singular,
+    // create) so the chip prompt disambiguates intent: "task" makes one,
+    // "tasks" shows all of them with filter/search/bulk-ops. The verb is
+    // the entry point until the sidebar's "See all" link lands.
+    id: 'tasks',
+    label: 'All tasks',
+    aliases: ['tasks', 'all tasks', 'task list', 'tasklist'],
+    icon: '☰',
+    describe: () => 'Open the full task list with filters, search, bulk ops',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openTasksPage'));
     },
   },
   {
