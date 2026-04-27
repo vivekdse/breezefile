@@ -103,6 +103,17 @@ export type Launcher = {
   command: string;
   args?: string[];
   description?: string;
+  // fm-e66 — named flag combinations layered on top of `args`. When a
+  // launcher has variants the chip-prompt verb gains a "Mode" slot so the
+  // user picks the modifier (e.g. claude --continue, claude
+  // --dangerously-skip-permissions) without typing it. Bare = no extra
+  // flags. Absent = no slot, behave exactly as before.
+  variants?: Array<{
+    id: string;
+    label: string;
+    args?: string[];
+    description?: string;
+  }>;
 };
 
 declare global {

@@ -1548,6 +1548,12 @@ end tell`;
   // alias to a shell-resolvable command + args. The terminal verb consults
   // this list so :claude / :codex / :gemini open a PTY pre-running that
   // CLI. Defaults are seeded once on first read.
+  type LauncherVariant = {
+    id: string;
+    label: string;
+    args?: string[];
+    description?: string;
+  };
   type LauncherDef = {
     id: string;
     label: string;
@@ -1555,7 +1561,13 @@ end tell`;
     command: string;
     args?: string[];
     description?: string;
+    // fm-e66 — named flag combinations layered atop `args`.
+    variants?: LauncherVariant[];
   };
+  // fm-e66 — defaults seed the common modifier modes for each AI CLI.
+  // Real users don't run `claude` once and forget; they run it three ways
+  // (fresh, resume, yolo) depending on context. Variants let one launcher
+  // capture all common modes instead of forcing three launcher entries.
   const DEFAULT_LAUNCHERS: LauncherDef[] = [
     {
       id: 'claude',
@@ -1563,6 +1575,20 @@ end tell`;
       aliases: ['claude', 'cc'],
       command: 'claude',
       description: 'Anthropic Claude Code CLI',
+      variants: [
+        {
+          id: 'continue',
+          label: 'Continue',
+          args: ['--continue'],
+          description: 'Resume the most recent session in this folder',
+        },
+        {
+          id: 'unsafe',
+          label: 'Skip permissions',
+          args: ['--dangerously-skip-permissions'],
+          description: 'Bypass tool permission prompts (yolo)',
+        },
+      ],
     },
     {
       id: 'codex',
@@ -1570,6 +1596,14 @@ end tell`;
       aliases: ['codex'],
       command: 'codex',
       description: 'OpenAI Codex CLI',
+      variants: [
+        {
+          id: 'continue',
+          label: 'Continue',
+          args: ['--continue'],
+          description: 'Resume the most recent session',
+        },
+      ],
     },
     {
       id: 'gemini',
@@ -1580,6 +1614,28 @@ end tell`;
     },
   ];
 
+  // fm-e66 — old launcher configs (pre-variants) get the default variants
+  // injected on read so existing users get the new picker without losing
+  // their custom commands/aliases. We only inject for ids we know about
+  // (claude/codex/gemini); user-added launchers stay variant-less unless
+  // the user adds variants by hand. Save back so the file on disk reflects
+  // the migration — keeps subsequent reads fast and lets the user inspect
+  // the seeded variants in launchers.json.
+  function migrateLaunchers(list: LauncherDef[]): {
+    list: LauncherDef[];
+    changed: boolean;
+  } {
+    let changed = false;
+    const next = list.map((l) => {
+      if (l.variants !== undefined) return l;
+      const seed = DEFAULT_LAUNCHERS.find((d) => d.id === l.id);
+      if (!seed || !seed.variants) return l;
+      changed = true;
+      return { ...l, variants: seed.variants };
+    });
+    return { list: next, changed };
+  }
+
   function launchersPath(): string {
     return path.join(app.getPath('userData'), 'launchers.json');
   }
@@ -1588,7 +1644,17 @@ end tell`;
     try {
       const raw = await fs.readFile(p, 'utf8');
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as LauncherDef[];
+      if (Array.isArray(parsed)) {
+        const { list, changed } = migrateLaunchers(parsed as LauncherDef[]);
+        if (changed) {
+          // Persist the migration so the user sees the seeded variants in
+          // launchers.json next time they open the file.
+          try {
+            await fs.writeFile(p, JSON.stringify(list, null, 2), 'utf8');
+          } catch { /* noop */ }
+        }
+        return list;
+      }
       return DEFAULT_LAUNCHERS;
     } catch {
       // Seed defaults so the user has a starting point to edit.

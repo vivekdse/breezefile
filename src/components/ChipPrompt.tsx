@@ -1586,7 +1586,54 @@ function synthesizeLauncherVerbs(
   launchers: import('../bridge').Launcher[],
 ): VerbDef[] {
   return launchers.map((l) => {
-    const cmdLine = [l.command, ...(l.args ?? [])].join(' ');
+    const baseArgs = l.args ?? [];
+    const baseCmdLine = [l.command, ...baseArgs].join(' ');
+    const variants = l.variants ?? [];
+    const hasVariants = variants.length > 0;
+
+    // fm-e66 — when a launcher declares variants, the verb gains a "Mode"
+    // slot. Bare is always first (so Enter at the picker = unmodified
+    // command). Each option's detail surfaces a single-character shortcut
+    // (the first letter of the label) — the chip-prompt's typing-to-filter
+    // narrows on it, so "B / C / S"-style hints map to one keystroke.
+    const modeOptions: Option[] = hasVariants
+      ? [
+          {
+            id: '__bare__',
+            label: 'Bare',
+            detail: 'B · ' + baseCmdLine,
+            available: true,
+          },
+          ...variants.map<Option>((v) => {
+            const shortcut = (v.label[0] ?? v.id[0] ?? '?').toUpperCase();
+            const fullCmd = [
+              l.command,
+              ...baseArgs,
+              ...(v.args ?? []),
+            ].join(' ');
+            return {
+              id: v.id,
+              label: v.label,
+              detail: `${shortcut} · ${v.description ?? fullCmd}`,
+              available: true,
+              aliases: v.args ?? [],
+            };
+          }),
+        ]
+      : [];
+
+    function cmdLineFor(variantId?: string): string {
+      if (!variantId || variantId === '__bare__') return baseCmdLine;
+      const v = variants.find((x) => x.id === variantId);
+      if (!v) return baseCmdLine;
+      return [l.command, ...baseArgs, ...(v.args ?? [])].join(' ');
+    }
+    function labelFor(variantId?: string): string {
+      if (!variantId || variantId === '__bare__') return l.label;
+      const v = variants.find((x) => x.id === variantId);
+      return v ? `${l.label} · ${v.label}` : l.label;
+    }
+
     return {
       id: ('launcher:' + l.id) as Verb,
       label: `Open ${l.label}`,
@@ -1594,17 +1641,22 @@ function synthesizeLauncherVerbs(
       icon: '⚡',
       describe: (c) =>
         c.activeTabHasTerminal
-          ? `Run "${cmdLine}" in the terminal`
-          : `Open terminal at ${basename(c.cwd) || '/'} and run "${cmdLine}"`,
+          ? `Run "${baseCmdLine}" in the terminal`
+          : `Open terminal at ${basename(c.cwd) || '/'} and run "${baseCmdLine}"`,
       isAvailable: () => ({ ok: true }),
-      slots: [],
-      execute: async (c, _p, api) => {
+      slots: hasVariants
+        ? [{ label: 'Mode', getOptions: () => modeOptions }]
+        : [],
+      execute: async (c, picks, api) => {
+        const variantId = hasVariants ? picks[0] : undefined;
+        const cmdLine = cmdLineFor(variantId);
+        const displayLabel = labelFor(variantId);
         const cmd = cmdLine + '\r';
         if (api.activeTabTerminal) {
           // Reuse the running shell — the user's prompt may have unsaved
           // state (cd, env) so don't kill it. Type the launcher line.
           fm.termWrite(api.activeTabTerminal.ptyId, cmd);
-          api.dispatch({ type: 'setStatus', msg: `running ${l.label}` });
+          api.dispatch({ type: 'setStatus', msg: `running ${displayLabel}` });
           api.closeOverlay();
           return;
         }
@@ -1615,7 +1667,7 @@ function synthesizeLauncherVerbs(
             tabIndex: api.activeTabIndex,
             ptyId,
             cwd: c.cwd,
-            label: l.label,
+            label: displayLabel,
           });
           // The Terminal component takes care of the post-spawn delay
           // before typing — we duplicate that here since the verb doesn't
@@ -1624,11 +1676,11 @@ function synthesizeLauncherVerbs(
           // when starship/p10k init runs; typing into the first prompt
           // sometimes lands inside its title escape).
           setTimeout(() => fm.termWrite(ptyId, cmd), 220);
-          api.dispatch({ type: 'setStatus', msg: `opened terminal · ${l.label}` });
+          api.dispatch({ type: 'setStatus', msg: `opened terminal · ${displayLabel}` });
         } catch (err) {
           api.dispatch({
             type: 'setStatus',
-            msg: `${l.label} failed: ${(err as Error).message}`,
+            msg: `${displayLabel} failed: ${(err as Error).message}`,
           });
         }
         api.closeOverlay();
