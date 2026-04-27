@@ -21,6 +21,7 @@ import { Welcome, shouldShowWelcome } from './components/Welcome';
 import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
+import { TaskDialog, type TaskDialogRequest } from './components/TaskDialog';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -68,6 +69,9 @@ function Shell() {
   // Slide-based help (HelpTour). Opened by the :help verb or the Help
   // link in the Statusbar. Distinct from Tutorial (interactive practice).
   const [helpOpen, setHelpOpen] = useState(false);
+  // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
+  // keybind, or programmatically from the (future) sidebar/page.
+  const [taskDialog, setTaskDialog] = useState<TaskDialogRequest | null>(null);
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -215,6 +219,10 @@ function Shell() {
     function onWelcome() {
       setWelcomeOpen(true);
     }
+    function onOpenTask(e: Event) {
+      const detail = (e as CustomEvent).detail as TaskDialogRequest | undefined;
+      if (detail) setTaskDialog(detail);
+    }
     async function onOpenWith(e: Event) {
       const detail = (e as CustomEvent).detail as { path: string; ext?: string } | undefined;
       if (!detail?.path) return;
@@ -241,6 +249,7 @@ function Shell() {
     window.addEventListener('fm:tagPicker', onTagPicker);
     window.addEventListener('fm:openHelp', onHelp);
     window.addEventListener('fm:openWelcome', onWelcome);
+    window.addEventListener('fm:openTask', onOpenTask);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -255,6 +264,7 @@ function Shell() {
       window.removeEventListener('fm:tagPicker', onTagPicker);
       window.removeEventListener('fm:openHelp', onHelp);
       window.removeEventListener('fm:openWelcome', onWelcome);
+      window.removeEventListener('fm:openTask', onOpenTask);
     };
   }, [activeTab, state.entriesByPath]);
 
@@ -457,6 +467,12 @@ function Shell() {
         <TagPicker mode={tagPicker} onClose={() => setTagPicker(null)} />
       )}
       {helpOpen && <HelpTour onClose={() => setHelpOpen(false)} />}
+      {taskDialog && (
+        <TaskDialog
+          {...taskDialog}
+          onClose={() => setTaskDialog(null)}
+        />
+      )}
     </div>
     </OverlayCtx.Provider>
   );

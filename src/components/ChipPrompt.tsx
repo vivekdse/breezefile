@@ -126,7 +126,8 @@ type Verb =
   | 'untag'
   | 'filter'
   | 'help'
-  | 'welcome';
+  | 'welcome'
+  | 'task';
 
 type Option = {
   id: string;
@@ -1049,6 +1050,25 @@ const VERBS: VerbDef[] = [
     slots: [],
     execute: (_c, _p, api) => {
       window.dispatchEvent(new CustomEvent('fm:newTag'));
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-nmt — task create/edit. Quick-add defaults to the current tab's
+    // cwd; the dialog itself accepts an explicit folder override.
+    id: 'task',
+    label: 'New task',
+    aliases: ['task', 'todo', 'new task', 'add task', 'mktask'],
+    icon: '✓',
+    describe: (c) => `Create a task in ${basename(c.cwd) || '/'}`,
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (c, _p, api) => {
+      window.dispatchEvent(
+        new CustomEvent('fm:openTask', {
+          detail: { mode: 'create', defaultFolder: c.cwd },
+        }),
+      );
       api.closeOverlay();
     },
   },

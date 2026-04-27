@@ -1,0 +1,189 @@
+/* fm-nmt — task create/edit dialog. Reuses .overlay base from App.css. */
+
+.task-dialog {
+  position: relative;
+  min-width: 460px;
+  max-width: 560px;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+}
+
+.task-dialog__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.task-dialog__close:hover {
+  background: var(--rule);
+  color: var(--ink);
+}
+
+.task-dialog__title {
+  font-family: var(--font-serif, var(--font-sans));
+  font-weight: 600;
+  font-size: var(--fs-lg, 18px);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin-right: 28px; /* leave room for close button */
+}
+
+.task-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-dialog__field--half {
+  flex: 1;
+}
+
+.task-dialog__row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-end;
+}
+
+.task-dialog__label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.task-dialog__input,
+.task-dialog__textarea {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  transition:
+    border-color var(--motion-hover),
+    box-shadow var(--motion-focus-ring);
+}
+
+.task-dialog__input--mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.task-dialog__textarea {
+  resize: vertical;
+  min-height: 60px;
+  font-family: var(--font-sans);
+}
+
+.task-dialog__input:focus-visible,
+.task-dialog__textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(0, 0, 0, 0.10));
+}
+
+.task-dialog__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+  cursor: pointer;
+  align-self: flex-end;
+  padding: 6px 0;
+}
+
+.task-dialog__error {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  background: var(--accent-soft, rgba(255, 0, 0, 0.05));
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+}
+
+.task-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.task-dialog__btn {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition:
+    background var(--motion-hover),
+    border-color var(--motion-hover),
+    transform var(--motion-hover),
+    box-shadow var(--motion-focus-ring);
+}
+
+.task-dialog__btn:hover:not(:disabled) {
+  background: var(--hi);
+}
+
+.task-dialog__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.task-dialog__btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  transform: translateY(-1px);
+}
+
+.task-dialog__btn--cancel {
+  background: var(--panel);
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+.task-dialog__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.task-dialog__btn--primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.task-dialog__btn__kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.22);
+  color: inherit;
+  opacity: 0.9;
+  letter-spacing: 0.05em;
+}
