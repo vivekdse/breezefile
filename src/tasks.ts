@@ -93,3 +93,49 @@ function todayISOFromDate(d: Date): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+// fm-a9j — due-date display helpers, hoisted out of Sidebar.tsx so the
+// task-mode shell uses the same vocabulary. One source of truth means a
+// task that says "tomorrow" in the sidebar reads "tomorrow" in the header.
+
+export type DueTone = 'overdue' | 'today' | 'soon' | 'future' | 'none';
+
+export function dueTone(due: string | null, today: string = todayISO()): DueTone {
+  if (!due) return 'none';
+  if (due < today) return 'overdue';
+  if (due === today) return 'today';
+  // "soon" = within the next 3 days
+  const diffDays = daysBetween(today, due);
+  if (diffDays <= 3) return 'soon';
+  return 'future';
+}
+
+export function daysBetween(a: string, b: string): number {
+  const [ay, am, ad] = a.split('-').map(Number);
+  const [by, bm, bd] = b.split('-').map(Number);
+  const da = Date.UTC(ay, am - 1, ad);
+  const db = Date.UTC(by, bm - 1, bd);
+  return Math.round((db - da) / 86_400_000);
+}
+
+export function formatDueLabel(due: string, today: string = todayISO()): string {
+  if (due < today) {
+    const days = daysBetween(due, today);
+    return days === 1 ? '1d overdue' : `${days}d overdue`;
+  }
+  if (due === today) return 'today';
+  const days = daysBetween(today, due);
+  if (days === 1) return 'tomorrow';
+  if (days < 7) {
+    // Day-of-week label for proximate dates feels more human than a date.
+    const [y, m, d] = due.split('-').map(Number);
+    const dow = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
+    return dow.toLowerCase();
+  }
+  // 'YYYY-MM-DD' → 'Apr 30' for distant dates.
+  const [y, m, d] = due.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+}

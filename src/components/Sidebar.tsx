@@ -10,7 +10,15 @@ import {
   hasAppDrag,
 } from '../dragState';
 import { Icon, type IconName } from './Icon';
-import { deleteTask, shiftISO, todayISO, updateTask, useTasks } from '../tasks';
+import {
+  deleteTask,
+  dueTone,
+  formatDueLabel,
+  shiftISO,
+  todayISO,
+  updateTask,
+  useTasks,
+} from '../tasks';
 import type { Task } from '../types';
 import './Sidebar.css';
 
@@ -506,48 +514,6 @@ function TaskRow({ task, active, onClick, onContextMenu }: TaskRowProps) {
       </span>
     </button>
   );
-}
-
-type DueTone = 'overdue' | 'today' | 'soon' | 'future' | 'none';
-
-function dueTone(due: string | null, today: string): DueTone {
-  if (!due) return 'none';
-  if (due < today) return 'overdue';
-  if (due === today) return 'today';
-  // "soon" = within the next 3 days
-  const diffDays = daysBetween(today, due);
-  if (diffDays <= 3) return 'soon';
-  return 'future';
-}
-
-function daysBetween(a: string, b: string): number {
-  const [ay, am, ad] = a.split('-').map(Number);
-  const [by, bm, bd] = b.split('-').map(Number);
-  const da = Date.UTC(ay, am - 1, ad);
-  const db = Date.UTC(by, bm - 1, bd);
-  return Math.round((db - da) / 86_400_000);
-}
-
-function formatDueLabel(due: string, today: string): string {
-  if (due < today) {
-    const days = daysBetween(due, today);
-    return days === 1 ? '1d overdue' : `${days}d overdue`;
-  }
-  if (due === today) return 'today';
-  const days = daysBetween(today, due);
-  if (days === 1) return 'tomorrow';
-  if (days < 7) {
-    // Day-of-week label for proximate dates feels more human than a date.
-    const [y, m, d] = due.split('-').map(Number);
-    const dow = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
-    return dow.toLowerCase();
-  }
-  // 'YYYY-MM-DD' → 'Apr 30' for distant dates.
-  const [y, m, d] = due.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
 }
 
 interface TaskContextMenuProps {

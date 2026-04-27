@@ -1,0 +1,331 @@
+/* fm-a9j — Task-mode shell.
+ * Three vertical zones: prominent header → action grid → muted folder row.
+ * The whole component fills shell__main; it relies on the parent's flex
+ * column to let the action grid breathe and the folder row stay pinned.
+ */
+
+.taskshell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: var(--sp-5, 20px) var(--sp-6, 28px);
+  gap: var(--sp-5, 20px);
+  background: var(--bg, var(--canvas));
+  color: var(--text-on-canvas);
+  overflow: auto;
+}
+
+.taskshell--empty {
+  align-items: center;
+  justify-content: center;
+}
+.taskshell__empty-msg {
+  color: var(--muted-on-canvas, var(--text-on-canvas));
+  font-size: var(--fs-md, 14px);
+}
+.taskshell__empty-actions {
+  display: flex;
+  gap: var(--sp-3, 12px);
+}
+
+/* ---- header --------------------------------------------------------- */
+
+.taskshell__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3, 12px);
+  padding: var(--sp-5, 20px) var(--sp-5, 20px) var(--sp-4, 16px);
+  background: var(--panel, var(--panel-1));
+  color: var(--text-on-panel);
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  border-radius: 12px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+.taskshell[data-status="done"] .taskshell__header,
+.taskshell[data-status="cancelled"] .taskshell__header {
+  opacity: 0.78;
+}
+
+.taskshell__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3, 12px);
+  min-width: 0;
+}
+
+.taskshell__title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--fs-2xl, 22px);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-on-panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.taskshell[data-status="done"] .taskshell__title,
+.taskshell[data-status="cancelled"] .taskshell__title {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.taskshell__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  flex-shrink: 0;
+}
+
+.taskshell__icon-btn,
+.taskshell__btn {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  background: var(--panel-2, var(--panel));
+  color: var(--text-on-panel);
+  padding: 6px 12px;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.taskshell__icon-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+.taskshell__icon-btn:hover,
+.taskshell__btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.taskshell__icon-btn:focus-visible,
+.taskshell__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.taskshell__btn--primary {
+  background: var(--accent-soft, var(--panel-2));
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.taskshell__btn--primary:hover {
+  background: var(--accent);
+  color: var(--on-accent, white);
+}
+
+/* ---- meta row (status pill + due chip + start + pin) --------------- */
+
+.taskshell__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+}
+
+.taskshell__status {
+  font-size: var(--fs-xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 3px 10px;
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  background: var(--panel-2, var(--panel));
+  color: var(--text-on-panel);
+}
+.taskshell__status--in_progress {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.taskshell__status--done {
+  opacity: 0.7;
+}
+.taskshell__status--cancelled {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.taskshell__due,
+.taskshell__start,
+.taskshell__pin {
+  font-size: var(--fs-xs, 11px);
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 3px 10px;
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  color: var(--text-on-panel);
+  background: transparent;
+}
+.taskshell__due--overdue {
+  color: var(--danger, #c0392b);
+  border-color: var(--danger, #c0392b);
+}
+.taskshell__due--today {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.taskshell__due--soon {
+  color: var(--warn, var(--accent-2, var(--accent)));
+  border-color: var(--warn, var(--accent-2, var(--accent)));
+}
+.taskshell__pin {
+  color: var(--accent-2, var(--accent));
+  border-color: var(--accent-2, var(--accent));
+}
+
+/* ---- notes preview ------------------------------------------------- */
+
+.taskshell__notes {
+  font-size: var(--fs-sm, 13px);
+  line-height: 1.5;
+  color: var(--text-on-panel);
+  background: var(--panel-2, transparent);
+  border: 1px dashed var(--rule-on-panel, var(--rule));
+  border-radius: 8px;
+  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+  white-space: pre-wrap;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  outline: none;
+}
+.taskshell__notes--expanded {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+.taskshell__notes:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* ---- action zone --------------------------------------------------- */
+
+.taskshell__actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-3, 12px);
+  flex: 1 1 auto;
+  align-content: start;
+}
+
+.taskshell__action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--sp-4, 16px) var(--sp-4, 16px);
+  border-radius: 10px;
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  background: var(--panel, var(--panel-1));
+  color: var(--text-on-panel);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  font: inherit;
+}
+.taskshell__action:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.2);
+}
+.taskshell__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.taskshell__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.taskshell__action-icon {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.taskshell__action-label {
+  font-size: var(--fs-md, 14px);
+  font-weight: 600;
+  color: var(--text-on-panel);
+}
+.taskshell__action-sub {
+  font-size: var(--fs-xs, 11px);
+  color: var(--muted-on-panel, var(--text-on-panel));
+  opacity: 0.75;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.taskshell__action-empty {
+  grid-column: 1 / -1;
+  font-size: var(--fs-sm, 13px);
+  color: var(--muted-on-canvas, var(--text-on-canvas));
+  padding: var(--sp-4, 16px);
+  border: 1px dashed var(--rule, var(--rule-on-canvas));
+  border-radius: 10px;
+  text-align: center;
+}
+
+/* ---- folder context (de-emphasized) -------------------------------- */
+
+.taskshell__folder {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+  border-top: 1px solid var(--rule, var(--rule-on-canvas));
+  font-size: var(--fs-xs, 11px);
+  color: var(--muted-on-canvas, var(--text-on-canvas));
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+.taskshell__folder-icon {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.taskshell__folder-label {
+  flex: 1 1 auto;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.taskshell__folder-btn {
+  font: inherit;
+  font-size: var(--fs-xs, 11px);
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid var(--rule, var(--rule-on-canvas));
+  background: transparent;
+  color: var(--muted-on-canvas, var(--text-on-canvas));
+  padding: 4px 10px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.taskshell__folder-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.taskshell__folder-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
