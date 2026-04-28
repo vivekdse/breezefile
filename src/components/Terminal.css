@@ -41,26 +41,47 @@
   border-radius: 4px;
 }
 
-/* Tab attention badge — small dot rendered in Tabbar after the label
-   when a backgrounded tab's terminal needs attention. Color encodes the
-   urgency: cursor-shown = neutral idle ping, BEL = punchy accent. */
+/* fm-9mh — Tab attention badge. Three visual states encode the embedded
+   terminal's state for backgrounded tabs:
+
+   - busy  (GENERATING): steady, muted dot. The launcher is working; no
+     urgency, just a hint that something is in flight.
+   - idle  (ATTENTION):  pulsing accent dot, finite ~5s burst, then steady.
+     This is the "Claude Code is done / waiting for permission" signal —
+     the one users actually need to act on. Animation auto-stops so a
+     long-ignored tab doesn't strobe forever.
+   - bell  (ATTENTION):  urgent warm pulse, infinite. Reserved for explicit
+     BEL / OSC9 pings, which the launcher chose to send precisely because
+     they want eyes on the tab right now. */
 .tabbar__attn {
   display: inline-block;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   margin-left: 6px;
   border-radius: 50%;
   background: var(--text-muted, #9aa0a6);
   vertical-align: middle;
   flex: 0 0 auto;
 }
-.tabbar__attn--idle { background: var(--accent, #7aa2f7); }
+.tabbar__attn--busy {
+  background: var(--text-muted, #9aa0a6);
+  opacity: 0.7;
+}
+.tabbar__attn--idle {
+  background: var(--accent, #7aa2f7);
+  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.25);
+  animation: tabbar-attn-pulse-accent 1.4s ease-in-out 4 forwards;
+}
 .tabbar__attn--bell {
   background: #f0a868;
   box-shadow: 0 0 0 2px rgba(240, 168, 104, 0.25);
-  animation: tabbar-attn-pulse 1.6s ease-in-out infinite;
+  animation: tabbar-attn-pulse-bell 1.6s ease-in-out infinite;
 }
-@keyframes tabbar-attn-pulse {
+@keyframes tabbar-attn-pulse-accent {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.25); }
+  50%      { box-shadow: 0 0 0 6px rgba(122, 162, 247, 0.05); }
+}
+@keyframes tabbar-attn-pulse-bell {
   0%, 100% { box-shadow: 0 0 0 2px rgba(240, 168, 104, 0.25); }
-  50%      { box-shadow: 0 0 0 5px rgba(240, 168, 104, 0.05); }
+  50%      { box-shadow: 0 0 0 6px rgba(240, 168, 104, 0.05); }
 }

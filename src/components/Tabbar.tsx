@@ -78,8 +78,12 @@ export function Tabbar() {
             onDragLeave={onTabDragLeave}
             onDrop={onTabDrop(i)}
             title={
-              t.terminal?.attention
-                ? `${cwd} · terminal needs attention`
+              t.terminal?.attention === 'busy'
+                ? `${cwd} · terminal working…`
+                : t.terminal?.attention === 'idle'
+                ? `${cwd} · terminal waiting for input`
+                : t.terminal?.attention === 'bell'
+                ? `${cwd} · terminal alert`
                 : cwd
             }
           >
