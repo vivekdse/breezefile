@@ -72,7 +72,7 @@ export function Tabbar() {
         return (
           <button
             key={t.id}
-            className={`tabbar__tab ${active ? 'tabbar__tab--active' : ''} ${isDropTarget ? 'tabbar__tab--drop' : ''}`}
+            className={`tabbar__tab ${active ? 'tabbar__tab--active' : ''} ${isDropTarget ? 'tabbar__tab--drop' : ''} ${t.terminal?.attention ? `tabbar__tab--attn-${t.terminal.attention}` : ''}`}
             onClick={() => dispatch({ type: 'selectTab', index: i })}
             onDragOver={onTabDragOver(i)}
             onDragLeave={onTabDragLeave}
