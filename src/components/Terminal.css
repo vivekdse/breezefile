@@ -64,22 +64,22 @@
   flex: 0 0 auto;
 }
 .tabbar__attn--busy {
-  /* GENERATING — green = "go / running". */
+  /* GENERATING — green = "go / running". Pulses continuously while the
+     hook signal says claude is working. */
   background: #34c759;
-  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.25);
+  animation: tabbar-attn-pulse-go 1.4s ease-in-out infinite;
 }
-.tabbar__attn--idle {
-  /* ATTENTION — red = "stop / needs you". Finite pulse so the badge
-     doesn't strobe forever on a long-ignored tab. */
-  background: #ff3b30;
-  box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.3);
-  animation: tabbar-attn-pulse-stop 1.4s ease-in-out 4 forwards;
-}
+.tabbar__attn--idle,
 .tabbar__attn--bell {
-  /* Explicit ping — same red, but pulses indefinitely until visited. */
+  /* WAITING / ALERT — red = "stop / needs you". Pulses continuously so
+     the eye can find it across the tabbar even when the tab is far off
+     to the side. */
   background: #ff3b30;
-  box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.3);
   animation: tabbar-attn-pulse-stop 1.4s ease-in-out infinite;
+}
+@keyframes tabbar-attn-pulse-go {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.3); }
+  50%      { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.06); }
 }
 @keyframes tabbar-attn-pulse-stop {
   0%, 100% { box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.3); }

@@ -90,11 +90,11 @@ function Shell() {
   // streaming data; we tap the raw IPC stream to drive the green/red tab
   // tint independent of which tab the user is viewing.
   //
-  // Detection is *activity-based* rather than cursor-based: many CLIs
-  // (Claude Code among them) stream output without toggling cursor
-  // visibility, so `\x1b[?25l/h` codes alone produce no green tint at
-  // all. Instead: any data → busy + reset a quiet-timer; quiet-timer
-  // expires → idle. BEL/OSC9 still wins as a sticky bell.
+  // Primary signal is the main-process foreground poller (fm-z7v,
+  // term:fg): busy = shell has any descendant, idle = bare prompt.
+  // term:data is kept only for BEL/OSC9 bell detection; it can't
+  // drive busy/idle because fm-81n showed it goes silent under heavy
+  // TUI streaming (Claude Code).
   //
   // Subscription lifecycle: we subscribe ONCE on mount and read mutable
   // state through refs. Earlier versions put `state.tabs` in the effect
@@ -102,10 +102,6 @@ function Shell() {
   // and during rapid streaming that meant data events fired between
   // unsubscribe and resubscribe, getting dropped on the floor. The
   // visible symptom was "no logs during Claude streaming."
-  const quietTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(
-    new Map(),
-  );
-  const QUIET_MS = 2500;
   // Live refs the once-mounted handler reads. Updating these on every
   // render keeps the closure current without triggering a re-subscribe.
   const tabsRef = useRef(state.tabs);
@@ -149,48 +145,23 @@ function Shell() {
       }
     };
 
-    const off = fm.onTermData((id, data) => {
+    // term:data BEL/OSC9 detection was removed: Claude's TUI emits BEL
+    // bytes on every redraw, which clobbered the hook-driven busy state
+    // with a sticky 'bell'. Busy/idle now comes purely from Claude Code
+    // hooks (fm-z7v, term:fg).
+    const offFg = fm.onTermFg((id, busy) => {
       const tabs = tabsRef.current;
       const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
       if (idx < 0) return;
       const cur = tabs[idx].terminal?.attention ?? null;
-
-      // Bell wins outright and sticks until activation clears it.
-      if (data.includes('\x07') || data.includes('\x1b]9;')) {
-        const t = quietTimersRef.current.get(id);
-        if (t) clearTimeout(t);
-        quietTimersRef.current.delete(id);
-        if (cur !== 'bell') {
-          dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'bell' });
-          maybeNotify(idx, cur, 'bell');
-        }
-        return;
-      }
-      if (cur === 'bell') return;
-
-      // Activity-based detection: any data = busy, (re)arm a quiet timer
-      // that flips to idle after QUIET_MS of silence. Pure timing is the
-      // only signal that doesn't lie — cursor-visibility codes and
-      // "Churned for" appear on every TUI redraw, not just on completion.
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.debug(
-          `[attn] pty=${id} bytes=${data.length} cur=${cur} → busy`,
-        );
-      }
-      if (cur !== 'busy') {
+      if (busy && cur !== 'busy') {
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
-      }
-      const prevTimer = quietTimersRef.current.get(id);
-      if (prevTimer) clearTimeout(prevTimer);
-      const timer = setTimeout(() => {
-        quietTimersRef.current.delete(id);
+      } else if (!busy && cur !== 'idle') {
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
-        maybeNotify(idx, 'busy', 'idle');
-      }, QUIET_MS);
-      quietTimersRef.current.set(id, timer);
+        maybeNotify(idx, cur, 'idle');
+      }
     });
-    return off;
+    return () => { offFg(); };
     // Subscribe ONCE on mount. State is read through refs so the handler
     // sees current values without triggering re-subscription. Earlier
     // versions re-subscribed on every dispatch and dropped the events

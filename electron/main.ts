@@ -5,6 +5,7 @@ import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
 import { registerBreezeMcp } from './mcp-register';
+import { registerBreezeHooks } from './hooks-register';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -146,6 +147,17 @@ app.whenReady().then(() => {
     }
   } catch (e) {
     console.warn('[mcp-register] failed:', (e as Error).message);
+  }
+  // fm-z7v — register UserPromptSubmit/Stop hooks so Claude Code reports
+  // working/idle state per pty. Idempotent; failures are logged and
+  // ignored.
+  try {
+    const result = registerBreezeHooks();
+    if (result === 'written') {
+      console.log('[hooks-register] updated ~/.claude/settings.json');
+    }
+  } catch (e) {
+    console.warn('[hooks-register] failed:', (e as Error).message);
   }
   // fm-c2w — dock badge IPC. Renderer passes a string ('' clears, '!' or
   // a count for active attention). On non-darwin, app.dock is undefined

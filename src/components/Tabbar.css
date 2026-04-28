@@ -213,7 +213,6 @@
   color: var(--accent);
 }
 
-/* Terminal-attention state is conveyed by the dot badge alone
-   (.tabbar__attn--busy/idle/bell). Earlier iterations also tinted the
-   whole tab green/red, but the wash hurt readability — esp. in paper
-   themes — and the dot already reads at a glance. */
+/* Terminal-attention state is shown via the dot badge
+   (.tabbar__attn--busy/idle/bell — see Terminal.css). The wash on the
+   whole tab was tried earlier but hurt readability; we keep it dot-only. */

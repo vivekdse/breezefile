@@ -142,6 +142,17 @@ const fm = {
     ipcRenderer.on('term:exit', handler);
     return () => ipcRenderer.off('term:exit', handler);
   },
+  // fm-z7v — process-tree foreground transitions for tab busy/idle tint.
+  onTermFg: (
+    cb: (id: number, busy: boolean, comm: string | null) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: { id: number; busy: boolean; comm: string | null },
+    ) => cb(payload.id, payload.busy, payload.comm);
+    ipcRenderer.on('term:fg', handler);
+    return () => ipcRenderer.off('term:fg', handler);
+  },
   // ─── Launchers (fm-g6r) ───────────────────────────────────────────
   launchersList: () =>
     ipcRenderer.invoke('launchers:list') as Promise<

@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, BrowserWindow, clipboard, nativeImage, dialog } from 'electron';
+import { ipcMain, shell, app, BrowserWindow, webContents, clipboard, nativeImage, dialog } from 'electron';
 import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -377,6 +377,18 @@ async function cloudLocations(): Promise<Location[]> {
     });
   }
   return out;
+}
+
+// fm-z7v — bridge from api-server (Claude Code hook receiver) to the
+// renderer. The pty registry lives inside registerIpc's closure; the
+// IPC setup phase calls registerFgDispatcher() to install the routing
+// callback, and the api-server calls dispatchTerminalFg() to fire it.
+let _fgDispatcher: ((ptyId: number, busy: boolean) => void) | null = null;
+function registerFgDispatcher(cb: (ptyId: number, busy: boolean) => void) {
+  _fgDispatcher = cb;
+}
+export function dispatchTerminalFg(ptyId: number, busy: boolean) {
+  _fgDispatcher?.(ptyId, busy);
 }
 
 export function registerIpc() {
@@ -1482,14 +1494,19 @@ end tell`;
       const args = opts.args ?? def.args;
       const cols = Math.max(2, Math.min(opts.cols ?? 80, 1000));
       const rows = Math.max(2, Math.min(opts.rows ?? 24, 1000));
+      const id = nextPtyId++;
+      // BREEZE_PTY_ID lets Claude Code hooks (fm-z7v) tell us which tab
+      // a UserPromptSubmit/Stop event belongs to. Set before spawn so it
+      // propagates into the shell and any child it execs.
       const proc = nodePty.spawn(file, args, {
         name: 'xterm-256color',
         cols,
         rows,
         cwd,
-        env: ptyEnv(opts.env) as { [key: string]: string },
+        env: ptyEnv({ ...opts.env, BREEZE_PTY_ID: String(id) }) as {
+          [key: string]: string;
+        },
       });
-      const id = nextPtyId++;
       const senderId = e.sender.id;
       ptys.set(id, { proc, senderId, cmd: file });
       proc.onData((data) => {
@@ -1543,6 +1560,23 @@ end tell`;
     if (!r) return;
     try { r.proc.kill(signal); } catch { /* noop */ }
     ptys.delete(id);
+  });
+
+  // fm-z7v — busy/idle signal comes from Claude Code hooks
+  // (UserPromptSubmit → busy, Stop/StopFailure → idle), routed through
+  // the api-server and dispatched here as 'term:fg' keyed by ptyId.
+  // The api-server calls dispatchTerminalFg() directly.
+  registerFgDispatcher((id, busy) => {
+    const rec = ptys.get(id);
+    if (!rec) return;
+    // senderId is a webContents id (from e.sender.id at spawn time);
+    // webContents.fromId is the correct lookup. The term:data path uses
+    // BrowserWindow.fromId by historical accident — both work in the
+    // single-window case but the webContents form is the right API.
+    const wc = webContents.fromId(rec.senderId);
+    if (wc && !wc.isDestroyed()) {
+      wc.send('term:fg', { id, busy, comm: null });
+    }
   });
 
   // ─── Launchers (fm-g6r) ──────────────────────────────────────────────

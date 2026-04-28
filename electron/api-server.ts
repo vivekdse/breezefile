@@ -20,6 +20,7 @@ import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskUpdate } from './tasks';
+import { dispatchTerminalFg } from './ipc';
 
 const API_FILE_DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(API_FILE_DIR, 'api.json');
@@ -230,6 +231,22 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       });
       return sendJson(res, 200, { ok: true });
     }
+    // fm-z7v — Claude Code hooks POST here to flip a tab green/red.
+    // Body: {pty_id: number, state: 'busy' | 'idle'}. pty_id comes from
+    // $BREEZE_PTY_ID, an env var the file_manager injects at pty spawn,
+    // so this binds the event to exactly the originating tab regardless
+    // of how many concurrent claude sessions are running.
+    if (p === '/claude-state' && m === 'POST') {
+      const body = await readJson<{ pty_id?: number | string; state?: string }>(req);
+      const ptyId = Number(body.pty_id);
+      const state = body.state;
+      if (!Number.isFinite(ptyId) || (state !== 'busy' && state !== 'idle')) {
+        throw Object.assign(new Error('pty_id and state required'), { status: 400 });
+      }
+      dispatchTerminalFg(ptyId, state === 'busy');
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (p === '/app/tabs' && m === 'GET') {
       const result = await controlRenderer<unknown>({ kind: 'listTabs' });
       return sendJson(res, 200, result);

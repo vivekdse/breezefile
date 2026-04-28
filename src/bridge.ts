@@ -90,6 +90,9 @@ type Fm = {
   onTermExit: (
     cb: (id: number, code: number, signal: string | null) => void,
   ) => () => void;
+  onTermFg: (
+    cb: (id: number, busy: boolean, comm: string | null) => void,
+  ) => () => void;
   launchersList: () => Promise<Launcher[]>;
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;
