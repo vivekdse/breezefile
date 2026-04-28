@@ -94,6 +94,8 @@ type Fm = {
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;
   launchersRevealConfig: () => Promise<void>;
+  setDockBadge: (text: string) => Promise<void>;
+  onAppFocus: (cb: (focused: boolean) => void) => () => void;
 };
 
 export type Launcher = {

@@ -181,6 +181,34 @@ export function Settings({ onClose }: Props) {
         </section>
 
         <section className="settings__section">
+          <h3 className="settings__section-title">Notifications</h3>
+          <div className="settings__row">
+            <span className="settings__action">
+              System notification when a backgrounded tab needs attention
+            </span>
+            <input
+              type="checkbox"
+              checked={state.notifyOnAttention}
+              onChange={(e) =>
+                dispatch({ type: 'setNotifyOnAttention', value: e.target.checked })
+              }
+            />
+          </div>
+          <div className="settings__row">
+            <span className="settings__action">
+              Play sound with attention notifications
+            </span>
+            <input
+              type="checkbox"
+              checked={state.soundOnAttention}
+              onChange={(e) =>
+                dispatch({ type: 'setSoundOnAttention', value: e.target.checked })
+              }
+            />
+          </div>
+        </section>
+
+        <section className="settings__section">
           <h3 className="settings__section-title">Bookmarks</h3>
           <ul className="settings__list">
             {Object.entries(state.bookmarks).length === 0 && (

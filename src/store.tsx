@@ -146,6 +146,12 @@ type Persisted = {
   // seeded tags (a built-in like 'recent' can also receive manual pins).
   customTags: CustomTag[];
   tagPaths: TagPaths;
+  // fm-c2w — system notification when a backgrounded tab's terminal
+  // demands attention (cursor reappears or BEL/OSC9). Default ON since
+  // it's the differentiator over tmux/iTerm. Sound separate and OFF by
+  // default — the visual + dock badge is plenty unless the user opts in.
+  notifyOnAttention: boolean;
+  soundOnAttention: boolean;
 };
 
 const RECENTS_CAP = 30;
@@ -193,6 +199,8 @@ type Action =
   | { type: 'applyTag'; id: string; paths: string[] }
   | { type: 'untagPaths'; id: string; paths: string[] }
   | { type: 'addTagViz'; id: string }
+  | { type: 'setNotifyOnAttention'; value: boolean }
+  | { type: 'setSoundOnAttention'; value: boolean }
   | {
       type: 'openTerminal';
       tabIndex: number;
@@ -236,6 +244,8 @@ const initialState: State = {
   pinned: [],
   customTags: [],
   tagPaths: {},
+  notifyOnAttention: true,
+  soundOnAttention: false,
   entriesByPath: {},
   yank: [],
   statusMsg: '',
@@ -351,6 +361,10 @@ function reducer(s: State, a: Action): State {
       else tagPaths[a.id] = next;
       return { ...s, tagPaths };
     }
+    case 'setNotifyOnAttention':
+      return { ...s, notifyOnAttention: a.value };
+    case 'setSoundOnAttention':
+      return { ...s, soundOnAttention: a.value };
     case 'addTagViz': {
       const tabs = s.tabs.slice();
       const t = tabs[s.activeTab];
@@ -426,8 +440,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           activeTab?: unknown;
         };
         // Drop any legacy `tabs`/`activeTab` fields from older builds.
-        const { bookmarks, tags, keybinds, theme, recents, pinned, customTags, tagPaths } =
-          parsed as Partial<Persisted>;
+        const {
+          bookmarks,
+          tags,
+          keybinds,
+          theme,
+          recents,
+          pinned,
+          customTags,
+          tagPaths,
+          notifyOnAttention,
+          soundOnAttention,
+        } = parsed as Partial<Persisted>;
         dispatch({
           type: 'hydrate',
           state: {
@@ -439,6 +463,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(pinned ? { pinned } : {}),
             ...(customTags ? { customTags } : {}),
             ...(tagPaths ? { tagPaths } : {}),
+            ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
+            ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
           } as Partial<Persisted>,
         });
       } catch {
@@ -461,6 +487,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       pinned: state.pinned,
       customTags: state.customTags,
       tagPaths: state.tagPaths,
+      notifyOnAttention: state.notifyOnAttention,
+      soundOnAttention: state.soundOnAttention,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
   }, [
@@ -472,6 +500,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.pinned,
     state.customTags,
     state.tagPaths,
+    state.notifyOnAttention,
+    state.soundOnAttention,
   ]);
 
   // Apply theme on html root

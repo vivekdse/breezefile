@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { OverlayCtx, type OverlayApi, type RenameMode } from './overlays';
 import { Titlebar } from './components/Titlebar';
 import { Pathbar } from './components/Pathbar';
@@ -99,9 +99,72 @@ function Shell() {
       if (cur === 'bell' && next !== 'bell') return;
       if (cur === next) return;
       dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: next });
+
+      // fm-c2w — system notification on rising-edge into ATTENTION
+      // (idle = waiting for input, bell = explicit ping). Fires only
+      // while Breeze is backgrounded; if the user is already looking
+      // at us, the dot in the tab strip is plenty. Notifications are
+      // opt-in via Settings (default ON), sound default OFF.
+      const wasAttention = cur === 'idle' || cur === 'bell';
+      const nowAttention = next === 'idle' || next === 'bell';
+      if (!wasAttention && nowAttention && !appFocusRef.current) {
+        if (state.notifyOnAttention && typeof Notification !== 'undefined') {
+          const tab = state.tabs[idx];
+          const folder = tab.terminal?.cwd
+            ? tab.terminal.cwd.split('/').filter(Boolean).pop() ?? tab.terminal.cwd
+            : 'terminal';
+          const launcher = tab.terminal?.label;
+          const title = launcher
+            ? `${launcher} in ${folder}`
+            : `Terminal in ${folder}`;
+          const body =
+            next === 'bell' ? 'Alert' : 'Waiting for input';
+          try {
+            const n = new Notification(title, {
+              body,
+              silent: !state.soundOnAttention,
+              tag: `fm-attn-${tab.id}`,
+            });
+            // Clicking the notification surfaces Breeze and selects the
+            // tab — the whole point is to skip the alt-tab hunt.
+            n.onclick = () => {
+              window.focus();
+              dispatch({ type: 'selectTab', index: idx });
+            };
+          } catch {
+            /* notifications unavailable / disabled at OS level */
+          }
+        }
+      }
     });
     return off;
-  }, [state.tabs, state.activeTab, dispatch]);
+  }, [state.tabs, state.activeTab, state.notifyOnAttention, state.soundOnAttention, dispatch]);
+
+  // fm-c2w — track window focus from main. Used to gate notifications
+  // (we only raise them when backgrounded) and to decide whether the
+  // dock badge has any reason to exist while focused.
+  const [appFocused, setAppFocused] = useState(true);
+  const appFocusRef = useRef(true);
+  useEffect(() => {
+    appFocusRef.current = appFocused;
+  }, [appFocused]);
+  useEffect(() => {
+    const off = fm.onAppFocus((f) => setAppFocused(f));
+    return off;
+  }, []);
+
+  // fm-c2w — dock badge reflects how many tabs currently demand
+  // attention (idle waiting-for-input or explicit bell). 'busy' is
+  // generating-only and doesn't count — we don't want a badge while
+  // Claude is just thinking. The badge naturally clears as the user
+  // visits each attention tab (fm-fux clears attention on activation).
+  const attentionCount = state.tabs.filter(
+    (t) => t.terminal?.attention === 'idle' || t.terminal?.attention === 'bell',
+  ).length;
+  useEffect(() => {
+    const text = attentionCount === 0 ? '' : String(attentionCount);
+    void fm.setDockBadge(text);
+  }, [attentionCount]);
 
   // fm-fux — when a tab with a pending attention badge becomes active,
   // clear the badge. This handles "user just looked at it" without
