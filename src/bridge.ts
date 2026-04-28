@@ -117,6 +117,9 @@ type Fm = {
     result?: unknown;
     error?: string;
   }) => void;
+  // fm-c2w — app-level attention (dock badge + focus events)
+  setDockBadge: (text: string) => Promise<void>;
+  onAppFocus: (cb: (focused: boolean) => void) => () => void;
 };
 
 export type Launcher = {

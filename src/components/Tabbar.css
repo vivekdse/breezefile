@@ -107,6 +107,30 @@
   box-shadow: 0 0 0 1px var(--accent-glow);
 }
 
+/* fm-4bs — full-tab tint by terminal state. Complements the dot from
+   fm-9mh so peripheral vision can read tab state without hunting for
+   a 7px circle. busy is desaturated (Claude is just working — no
+   action needed); idle is accent-tinted (Claude is waiting for you);
+   bell is warm-tinted (explicit alert). Active tab keeps its own
+   styling but layers a left border so the tint still reads. */
+.tabbar__tab--attn-busy {
+  /* GENERATING — green = "go / running". */
+  background: rgba(52, 199, 89, 0.14);
+  border-color: rgba(52, 199, 89, 0.55);
+}
+.tabbar__tab--attn-idle,
+.tabbar__tab--attn-bell {
+  /* ATTENTION — red = "stop / needs you". */
+  background: rgba(255, 59, 48, 0.18);
+  border-color: rgba(255, 59, 48, 0.65);
+  color: var(--ink, var(--fg-1));
+}
+/* Active-tab override: keep its own background but show a thicker
+   colored left edge so the state still reads at a glance. */
+.tabbar__tab--active.tabbar__tab--attn-busy { box-shadow: inset 3px 0 0 #34c759; }
+.tabbar__tab--active.tabbar__tab--attn-idle,
+.tabbar__tab--active.tabbar__tab--attn-bell { box-shadow: inset 3px 0 0 #ff3b30; }
+
 .tabbar__label {
   overflow: hidden;
   text-overflow: ellipsis;

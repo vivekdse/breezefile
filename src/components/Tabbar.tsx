@@ -98,14 +98,26 @@ export function Tabbar() {
     const active = i === state.activeTab;
     const canClose = state.tabs.length > 1;
     const isDropTarget = dropIdx === i;
+    // fm-4bs — attention class drives the full-tab green/red tint.
+    const attn = t.terminal?.attention;
     const cls = [
       'tabbar__tab',
       isTask ? 'tabbar__tab--task' : 'tabbar__tab--folder',
       active ? 'tabbar__tab--active' : '',
       isDropTarget ? 'tabbar__tab--drop' : '',
+      attn ? `tabbar__tab--attn-${attn}` : '',
     ]
       .filter(Boolean)
       .join(' ');
+    const titleSuffix =
+      attn === 'busy'
+        ? ' · terminal working…'
+        : attn === 'idle'
+          ? ' · terminal waiting for input'
+          : attn === 'bell'
+            ? ' · terminal alert'
+            : '';
+    const baseTitle = isTask ? `${label} — ${cwd}` : cwd;
     return (
       <button
         key={t.id}
@@ -114,13 +126,7 @@ export function Tabbar() {
         onDragOver={onTabDragOver(i)}
         onDragLeave={onTabDragLeave}
         onDrop={onTabDrop(i)}
-        title={
-          t.terminal?.attention
-            ? `${isTask ? label : cwd} · terminal needs attention`
-            : isTask
-              ? `${label} — ${cwd}`
-              : cwd
-        }
+        title={`${baseTitle}${titleSuffix}`}
       >
         <span className="tabbar__label">{label}</span>
         {/* fm-fux — attention badge layers on top of either kind. */}

@@ -204,6 +204,14 @@ const fm = {
     ipcRenderer.on('tasks:changed', handler);
     return () => ipcRenderer.off('tasks:changed', handler);
   },
+  // ─── App-level attention (fm-c2w) ─────────────────────────────────
+  setDockBadge: (text: string) =>
+    ipcRenderer.invoke('app:setDockBadge', text) as Promise<void>,
+  onAppFocus: (cb: (focused: boolean) => void) => {
+    const handler = (_e: unknown, focused: boolean) => cb(focused);
+    ipcRenderer.on('app:focus', handler);
+    return () => ipcRenderer.off('app:focus', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

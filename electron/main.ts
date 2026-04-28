@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, Menu, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, protocol } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -95,6 +95,13 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  // fm-c2w — forward focus/blur to the renderer so the attention layer
+  // can decide whether to raise a system notification (only when we're
+  // backgrounded; if the user is already looking at the window the dot
+  // alone is enough).
+  win.on('focus', () => win?.webContents.send('app:focus', true));
+  win.on('blur', () => win?.webContents.send('app:focus', false));
+
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
     win.webContents.openDevTools({ mode: 'detach' });
@@ -140,6 +147,16 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('[mcp-register] failed:', (e as Error).message);
   }
+  // fm-c2w — dock badge IPC. Renderer passes a string ('' clears, '!' or
+  // a count for active attention). On non-darwin, app.dock is undefined
+  // and we silently no-op.
+  ipcMain.handle('app:setDockBadge', (_e, text: string) => {
+    try {
+      app.dock?.setBadge(text ?? '');
+    } catch {
+      /* ignore platform / runtime errors — badge is best-effort */
+    }
+  });
   buildAppMenu();
   createWindow();
 });

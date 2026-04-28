@@ -157,7 +157,7 @@ const SLIDES: Slide[] = [
       { name: 'pin', what: 'pin a folder to the sidebar Favorites' },
       { name: 'shell', chord: '! / s', what: 'run a one-off command in this folder' },
       { name: 'term', what: 'open an embedded terminal pane rooted at this folder · :term-close to dismiss' },
-      { name: 'claude / codex / gemini', what: 'open the terminal pane and launch the AI CLI · pick a Mode (Bare / Continue / Skip-permissions) when the launcher has variants · backgrounded tabs badge when waiting for input' },
+      { name: 'claude / codex / gemini', what: 'open the terminal pane and launch the AI CLI · pick a Mode (Bare / Continue / Skip-permissions) when the launcher has variants · backgrounded tabs badge when waiting for input · dock badge + system notification when Breeze is in the background (toggles in Settings → Notifications)' },
       { name: 'open-terminal', chord: 'cli', what: 'open an external terminal app (iTerm, Warp, …) at this folder' },
       { name: 'task', what: 'create a task anchored to this folder (title, notes, optional start/due dates)' },
       { name: 'tasks', what: 'open the full task list — filter by status / pinned / due, search, sort, bulk-edit' },

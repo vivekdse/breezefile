@@ -154,6 +154,12 @@ type Persisted = {
   // Settings. Existing installs that already have a tasks DB are migrated
   // to true on first launch with this flag (see App.tsx hydrate path).
   taskManagementEnabled: boolean;
+  // fm-c2w — system notification when a backgrounded tab's terminal
+  // demands attention (cursor reappears or BEL/OSC9). Default ON since
+  // it's the differentiator over tmux/iTerm. Sound separate and OFF by
+  // default — the visual + dock badge is plenty unless the user opts in.
+  notifyOnAttention: boolean;
+  soundOnAttention: boolean;
 };
 
 const RECENTS_CAP = 30;
@@ -204,6 +210,8 @@ type Action =
   | { type: 'applyTag'; id: string; paths: string[] }
   | { type: 'untagPaths'; id: string; paths: string[] }
   | { type: 'addTagViz'; id: string }
+  | { type: 'setNotifyOnAttention'; value: boolean }
+  | { type: 'setSoundOnAttention'; value: boolean }
   | {
       type: 'openTerminal';
       tabIndex: number;
@@ -261,6 +269,8 @@ const initialState: State = {
   // but didn't carry the field; the explicit-false path stays available
   // for users who turn it off in Settings.
   taskManagementEnabled: true,
+  notifyOnAttention: true,
+  soundOnAttention: false,
   entriesByPath: {},
   yank: [],
   statusMsg: '',
@@ -402,6 +412,10 @@ function reducer(s: State, a: Action): State {
       else tagPaths[a.id] = next;
       return { ...s, tagPaths };
     }
+    case 'setNotifyOnAttention':
+      return { ...s, notifyOnAttention: a.value };
+    case 'setSoundOnAttention':
+      return { ...s, soundOnAttention: a.value };
     case 'addTagViz': {
       const tabs = s.tabs.slice();
       const t = tabs[s.activeTab];
@@ -487,6 +501,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           customTags,
           tagPaths,
           taskManagementEnabled,
+          notifyOnAttention,
+          soundOnAttention,
         } = parsed as Partial<Persisted>;
         dispatch({
           type: 'hydrate',
@@ -502,6 +518,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(taskManagementEnabled !== undefined
               ? { taskManagementEnabled }
               : {}),
+            ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
+            ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
           } as Partial<Persisted>,
         });
       } catch {
@@ -544,6 +562,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       customTags: state.customTags,
       tagPaths: state.tagPaths,
       taskManagementEnabled: state.taskManagementEnabled,
+      notifyOnAttention: state.notifyOnAttention,
+      soundOnAttention: state.soundOnAttention,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
   }, [
@@ -556,6 +576,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.customTags,
     state.tagPaths,
     state.taskManagementEnabled,
+    state.notifyOnAttention,
+    state.soundOnAttention,
   ]);
 
   // Apply theme on html root
