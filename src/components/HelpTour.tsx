@@ -153,6 +153,7 @@ const SLIDES: Slide[] = [
     verbs: [
       { name: 'new tab', chord: 'gn', what: 'open current folder in a new tab' },
       { name: 'switch / close', chord: 'gt / gT / gw', what: 'next / prev / close · ga restores last closed' },
+      { name: 'jump to tab N', chord: '⌘1 … ⌘9', what: 'each tab shows its number — folder zone numbered first, then task zone' },
       { name: 'bookmark', chord: 'm<k> / \'<k>', what: 'set / jump (m a then \'a)' },
       { name: 'pin', what: 'pin a folder to the sidebar Favorites' },
       { name: 'shell', chord: '! / s', what: 'run a one-off command in this folder' },

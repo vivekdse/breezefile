@@ -86,7 +86,19 @@ export function Tabbar() {
     else folderTabs.push({ tab, index });
   });
 
-  const renderTab = ({ tab: t, index: i }: { tab: Tab; index: number }) => {
+  const isMac =
+    typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+  const modKey = isMac ? '⌘' : 'Ctrl+';
+
+  const renderTab = ({
+    tab: t,
+    index: i,
+    pos,
+  }: {
+    tab: Tab;
+    index: number;
+    pos: number;
+  }) => {
     const cwd = t.trail[t.trail.length - 1];
     const folderName = basename(cwd) || '/';
     const isTask = t.kind === 'task';
@@ -117,7 +129,9 @@ export function Tabbar() {
           : attn === 'bell'
             ? ' · terminal alert'
             : '';
-    const baseTitle = isTask ? `${label} — ${cwd}` : cwd;
+    const shortcutHint = pos <= 9 ? ` (${modKey}${pos})` : '';
+    const baseTitle =
+      (isTask ? `${label} — ${cwd}` : cwd) + shortcutHint;
     return (
       <button
         key={t.id}
@@ -128,6 +142,11 @@ export function Tabbar() {
         onDrop={onTabDrop(i)}
         title={`${baseTitle}${titleSuffix}`}
       >
+        {pos <= 9 && (
+          <span className="tabbar__num" aria-hidden="true">
+            {pos}
+          </span>
+        )}
         <span className="tabbar__label">{label}</span>
         {/* fm-fux — attention badge layers on top of either kind. */}
         {t.terminal?.attention && (
@@ -160,7 +179,7 @@ export function Tabbar() {
   return (
     <div className="tabbar">
       <div className="tabbar__zone tabbar__zone--folder">
-        {folderTabs.map(renderTab)}
+        {folderTabs.map((entry, n) => renderTab({ ...entry, pos: n + 1 }))}
         <button
           className="tabbar__new"
           onClick={onNewTab}
@@ -178,7 +197,9 @@ export function Tabbar() {
             role="presentation"
           />
           <div className="tabbar__zone tabbar__zone--task">
-            {taskTabs.map(renderTab)}
+            {taskTabs.map((entry, n) =>
+              renderTab({ ...entry, pos: folderTabs.length + n + 1 }),
+            )}
           </div>
         </>
       )}

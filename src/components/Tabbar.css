@@ -114,6 +114,29 @@
   font-family: var(--font-mono);
 }
 
+/* tmux-style position number — sits before the label as a small dimmed
+   prefix so the label still reads as the primary content. The same number
+   binds to ⌘N (folder zone first, then task zone). */
+.tabbar__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  padding: 0 4px;
+  height: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-3);
+  background: var(--bg-3, rgba(255, 255, 255, 0.06));
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.tabbar__tab--active .tabbar__num {
+  color: var(--accent);
+  background: var(--accent-soft, rgba(255, 255, 255, 0.10));
+}
+
 .tabbar__close {
   color: var(--fg-3);
   padding: 0 4px;
@@ -171,9 +194,11 @@
 .tabbar__tab--task .tabbar__label {
   font-family: var(--font-sans, inherit);
   font-weight: 600;
-  color: var(--text-on-panel, var(--ink, #ffffff));
-  /* Defensive: if the cascade somehow leaves the label without a
-     concrete color, force visibility against the dark tabbar. */
+  /* The tabbar chrome stays dark across all themes (paper family doesn't
+     override --bg-0/--bg-1), so the task-tab label needs light text
+     regardless of the theme's --text-on-panel — that token assumes a
+     paper-colored panel, which doesn't apply here. */
+  color: var(--fg-1);
   text-shadow: none;
 }
 .tabbar__tab--task:hover {
@@ -188,27 +213,7 @@
   color: var(--accent);
 }
 
-/* fm-4bs — full-tab tint by terminal state. Lives at the end of the file
-   so it wins by source order on BOTH folder and task tabs (the task-tab
-   rules above set `background: transparent` and would otherwise override
-   the tint on equal specificity). Opacities are deliberately strong —
-   a 14% wash got lost on dark themes. The whole point is glance-able
-   peripheral signal. */
-.tabbar__tab--attn-busy {
-  /* GENERATING — green = "go / running". */
-  background: rgba(52, 199, 89, 0.40) !important;
-  border-color: rgb(52, 199, 89) !important;
-  color: #ffffff !important;
-}
-.tabbar__tab--attn-idle,
-.tabbar__tab--attn-bell {
-  /* ATTENTION — red = "stop / needs you". */
-  background: rgba(255, 59, 48, 0.42) !important;
-  border-color: rgb(255, 59, 48) !important;
-  color: #ffffff !important;
-}
-/* Active tab keeps the same tint (background already wins by source order)
-   plus a thicker colored left edge so the state still reads. */
-.tabbar__tab--active.tabbar__tab--attn-busy { box-shadow: inset 4px 0 0 #34c759 !important; }
-.tabbar__tab--active.tabbar__tab--attn-idle,
-.tabbar__tab--active.tabbar__tab--attn-bell { box-shadow: inset 4px 0 0 #ff3b30 !important; }
+/* Terminal-attention state is conveyed by the dot badge alone
+   (.tabbar__attn--busy/idle/bell). Earlier iterations also tinted the
+   whole tab green/red, but the wash hurt readability — esp. in paper
+   themes — and the dot already reads at a glance. */

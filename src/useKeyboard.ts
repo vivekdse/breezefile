@@ -115,7 +115,20 @@ export function useKeyboard(
 
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-        return;
+        // Tab-management mod-chords must escape focused inputs (notably
+        // xterm's hidden textarea on task tabs — otherwise ⌘1…9 / ⌘T / ⌘W
+        // would only work when a folder tab had focus).
+        const mod = e.metaKey || e.ctrlKey;
+        const isTabChord =
+          mod &&
+          (/^[1-9]$/.test(e.key) ||
+            e.key === 't' ||
+            e.key === 'T' ||
+            e.key === 'w' ||
+            e.key === 'W' ||
+            e.key === 'f' ||
+            e.key === 'F');
+        if (!isTabChord) return;
       }
 
       // Chip overlay is open but its <input> hasn't claimed focus yet (race
@@ -203,8 +216,17 @@ export function useKeyboard(
       if (mod && /^[1-9]$/.test(e.key)) {
         e.preventDefault();
         clearTimer();
-        const idx = Number(e.key) - 1;
-        if (idx < cur.tabs.length) dispatch({ type: 'selectTab', index: idx });
+        // Match Tabbar's visual order: folder zone first, then task zone.
+        // Numbering shown on each tab is 1-based across this combined order.
+        const folderIdx: number[] = [];
+        const taskIdx: number[] = [];
+        cur.tabs.forEach((t, i) =>
+          (t.kind === 'task' ? taskIdx : folderIdx).push(i),
+        );
+        const ordered = [...folderIdx, ...taskIdx];
+        const target = ordered[Number(e.key) - 1];
+        if (target !== undefined)
+          dispatch({ type: 'selectTab', index: target });
         return;
       }
       if (e.ctrlKey && e.key === 'Tab') {

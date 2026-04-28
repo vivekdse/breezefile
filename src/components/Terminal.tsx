@@ -154,6 +154,24 @@ export function Terminal({
     xtermRef.current = term;
     fitRef.current = fit;
 
+    // Let app-level shortcuts pass through to the global keyboard handler
+    // instead of being swallowed by xterm's hidden textarea. Without this,
+    // a focused terminal (esp. on task tabs) eats ⌘1…9, ⌘T, ⌘W, ⌘⇧T.
+    // Returning false tells xterm "don't process this key" — the browser
+    // then dispatches it normally and our window-level listener picks it up.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return true;
+      // ⌘/Ctrl + digit → tab jump
+      if (/^[1-9]$/.test(e.key)) return false;
+      // ⌘/Ctrl + T/W/F (and shift variants for restore-tab)
+      if (e.key === 't' || e.key === 'T') return false;
+      if (e.key === 'w' || e.key === 'W') return false;
+      if (e.key === 'f' || e.key === 'F') return false;
+      return true;
+    });
+
     // Initial fit needs the wrapper to have a size; defer one frame.
     // Focus aggressively so keystrokes go to the pty's hidden textarea
     // instead of being caught by the global useKeyboard handler — that's
