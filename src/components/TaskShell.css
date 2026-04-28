@@ -227,6 +227,56 @@
    Per-component button styles have been removed to avoid drift; only the
    grid container styling remains here. */
 
+/* fm-mph — anchor for the variant-picker popover. The card lives
+   inside this wrapper so the popover can position relative to it
+   without taking it out of grid flow. */
+.taskshell__action-wrap {
+  position: relative;
+  display: flex;
+}
+.taskshell__action-wrap > .btn--card {
+  flex: 1;
+  width: 100%;
+}
+
+.taskshell__variants {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  min-width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.taskshell__variant {
+  /* Override .btn--ghost.btn--sm defaults: each variant row is wider,
+     left-aligned, and shows a label + sub on two lines. */
+  width: 100%;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: var(--fs-sm, 13px);
+  flex-direction: column;
+  gap: 1px;
+}
+.taskshell__variant-label {
+  font-weight: 600;
+  color: var(--text-on-panel);
+}
+.taskshell__variant-sub {
+  font-size: 11px;
+  color: var(--muted-on-panel);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
 .taskshell__action-empty {
   grid-column: 1 / -1;
   font-size: var(--fs-sm, 13px);

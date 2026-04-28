@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { fm } from '../bridge';
 import { runPaste } from '../clipboard';
+import { invokeLauncher } from '../launchers';
 import {
   basename,
   currentEntry,
@@ -184,6 +185,10 @@ type ExecApi = {
   activeTabIndex: number;
   // fm-jtu — current terminal state on the active tab, if any.
   activeTabTerminal?: { ptyId: number };
+  // fm-mph — when the active tab is a task tab, expose its task id so
+  // launcher verbs can inject task context (env + sidecar + pre-typed
+  // prompt) into AI launches the same way TaskShell's action cards do.
+  activeTabTaskId?: string | null;
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1693,18 +1698,6 @@ function synthesizeLauncherVerbs(
         ]
       : [];
 
-    function cmdLineFor(variantId?: string): string {
-      if (!variantId || variantId === '__bare__') return baseCmdLine;
-      const v = variants.find((x) => x.id === variantId);
-      if (!v) return baseCmdLine;
-      return [l.command, ...baseArgs, ...(v.args ?? [])].join(' ');
-    }
-    function labelFor(variantId?: string): string {
-      if (!variantId || variantId === '__bare__') return l.label;
-      const v = variants.find((x) => x.id === variantId);
-      return v ? `${l.label} · ${v.label}` : l.label;
-    }
-
     return {
       id: ('launcher:' + l.id) as Verb,
       label: `Open ${l.label}`,
@@ -1720,40 +1713,29 @@ function synthesizeLauncherVerbs(
         : [],
       execute: async (c, picks, api) => {
         const variantId = hasVariants ? picks[0] : undefined;
-        const cmdLine = cmdLineFor(variantId);
-        const displayLabel = labelFor(variantId);
-        const cmd = cmdLine + '\r';
-        if (api.activeTabTerminal) {
-          // Reuse the running shell — the user's prompt may have unsaved
-          // state (cd, env) so don't kill it. Type the launcher line.
-          fm.termWrite(api.activeTabTerminal.ptyId, cmd);
-          api.dispatch({ type: 'setStatus', msg: `running ${displayLabel}` });
-          api.closeOverlay();
-          return;
-        }
-        try {
-          const ptyId = await fm.termSpawn({ cwd: c.cwd });
-          api.dispatch({
-            type: 'openTerminal',
-            tabIndex: api.activeTabIndex,
-            ptyId,
-            cwd: c.cwd,
-            label: displayLabel,
-          });
-          // The Terminal component takes care of the post-spawn delay
-          // before typing — we duplicate that here since the verb doesn't
-          // own the xterm instance. A 200ms wait clears most shell
-          // greeting / prompt-redraw races (zsh prints the prompt twice
-          // when starship/p10k init runs; typing into the first prompt
-          // sometimes lands inside its title escape).
-          setTimeout(() => fm.termWrite(ptyId, cmd), 220);
-          api.dispatch({ type: 'setStatus', msg: `opened terminal · ${displayLabel}` });
-        } catch (err) {
-          api.dispatch({
-            type: 'setStatus',
-            msg: `${displayLabel} failed: ${(err as Error).message}`,
-          });
-        }
+        // fm-mph — when active tab is a task tab, fetch its task and
+        // pass through to invokeLauncher so the verb path matches the
+        // TaskShell card path (env + sidecar + pre-typed context).
+        // Folder tabs: task is null, no injection.
+        const task = api.activeTabTaskId
+          ? await fm.tasksGet(api.activeTabTaskId)
+          : null;
+        await invokeLauncher({
+          launcher: l,
+          variantId,
+          task,
+          cwd: c.cwd,
+          existingPty: api.activeTabTerminal,
+          onStatus: (msg) => api.dispatch({ type: 'setStatus', msg }),
+          onPtyOpened: ({ ptyId, label, cwd }) =>
+            api.dispatch({
+              type: 'openTerminal',
+              tabIndex: api.activeTabIndex,
+              ptyId,
+              cwd,
+              label,
+            }),
+        });
         api.closeOverlay();
       },
     };
@@ -2326,6 +2308,7 @@ export function ChipPrompt({
         activeTabTerminal: safeTab.terminal
           ? { ptyId: safeTab.terminal.ptyId }
           : undefined,
+        activeTabTaskId: safeTab.kind === 'task' ? (safeTab.taskId ?? null) : null,
         openRename: (e) => setOpenRename(e),
         openMkdir: () => {
           // Fire status and close; App.tsx owns the mkdir overlay — emit an event

@@ -11,13 +11,13 @@ import { makeTab, useStore } from '../store';
 import { fm } from '../bridge';
 import { basename } from '../actions';
 import {
-  buildContextPrompt,
   dueTone,
   formatDueLabel,
   getTask,
   todayISO,
   updateTask,
 } from '../tasks';
+import { invokeLauncher } from '../launchers';
 import type { Launcher } from '../bridge';
 import type { Task } from '../types';
 import './TaskShell.css';
@@ -128,52 +128,33 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
       dispatch({ type: 'setStatus', msg: `terminal failed: ${(e as Error).message}` });
     }
   };
-  const onLaunch = async (l: Launcher) => {
-    const cmd = [l.command, ...(l.args ?? [])].join(' ') + '\r';
-    // fm-adc — every launcher exposed via launchersList() is by design an
-    // AI-CLI (Claude/Codex/Gemini/etc.); the bare-shell case is the
-    // separate "Open Terminal" button above. Keep the id !== 'term' guard
-    // anyway in case a future launcher catalog ever adds a non-AI entry.
-    const isAiLauncher = l.id !== 'term';
-    const contextText = isAiLauncher ? buildContextPrompt(task) : '';
+  // fm-mph — variant picker. When a launcher has variants (claude has
+  // Continue + Skip-permissions per fm-e66), the card click opens this
+  // popover instead of launching directly. Pure local UI state; closed
+  // by selection or Esc / outside-click.
+  const [pickerFor, setPickerFor] = useState<Launcher | null>(null);
 
-    // Fire-and-forget sidecar write. The agent reads it on demand; if the
-    // write fails the launch still proceeds with prompt-injection only.
-    if (isAiLauncher) {
-      void fm.tasksWriteActiveSidecar(task.id).catch(() => {/* logged in main */});
-    }
+  const launch = async (l: Launcher, variantId?: string) => {
+    setPickerFor(null);
+    await invokeLauncher({
+      launcher: l,
+      variantId,
+      task,
+      cwd: folder,
+      existingPty: tab.terminal ? { ptyId: tab.terminal.ptyId } : undefined,
+      onStatus: (msg) => dispatch({ type: 'setStatus', msg }),
+      onPtyOpened: ({ ptyId, label }) =>
+        dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: folder, label }),
+    });
+  };
 
-    if (tab.terminal) {
-      // Existing PTY: env is already set, so we can't inject BREEZE_TASK_ID
-      // for this run — but we can still pre-type context after the command
-      // line so the user sees + edits the prompt before submitting.
-      fm.termWrite(tab.terminal.ptyId, cmd);
-      if (isAiLauncher && contextText) {
-        // 700ms gives the CLI time to print its banner / draw its input box.
-        setTimeout(() => fm.termWrite(tab.terminal!.ptyId, contextText), 700);
-      }
-      dispatch({ type: 'setStatus', msg: `running ${l.label}` });
+  const onLaunch = (l: Launcher) => {
+    const variants = l.variants ?? [];
+    if (variants.length === 0) {
+      void launch(l);
       return;
     }
-    try {
-      const env = isAiLauncher
-        ? { BREEZE_TASK_ID: task.id, BREEZE_TASK_FOLDER: task.folder }
-        : undefined;
-      const ptyId = await fm.termSpawn({ cwd: folder, env });
-      dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: folder, label: l.label });
-      // Match the chip-prompt path's 220ms delay so the launcher line
-      // doesn't land mid prompt-redraw on themed shells (starship/p10k).
-      setTimeout(() => fm.termWrite(ptyId, cmd), 220);
-      if (isAiLauncher && contextText) {
-        // ~700ms after the launcher command for the CLI to spin up and
-        // draw its input box. No trailing \r — the user reviews/edits
-        // the pre-typed text and presses Enter themselves.
-        setTimeout(() => fm.termWrite(ptyId, contextText), 700);
-      }
-      dispatch({ type: 'setStatus', msg: `opened terminal · ${l.label}` });
-    } catch (e) {
-      dispatch({ type: 'setStatus', msg: `${l.label} failed: ${(e as Error).message}` });
-    }
+    setPickerFor(l);
   };
 
   return (
@@ -237,17 +218,29 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
           <span className="btn__sub">{basename(folder) || '/'}</span>
         </button>
         {launchers.map((l) => (
-          <button
-            key={l.id}
-            type="button"
-            className="btn btn--card btn--card-accent"
-            onClick={() => onLaunch(l)}
-            title={l.description ?? `Run ${l.command}`}
-          >
-            <span className="btn__icon">⚡</span>
-            <span className="btn__label">{l.label}</span>
-            <span className="btn__sub">{l.command}</span>
-          </button>
+          <div key={l.id} className="taskshell__action-wrap">
+            <button
+              type="button"
+              className="btn btn--card btn--card-accent"
+              onClick={() => onLaunch(l)}
+              title={l.description ?? `Run ${l.command}`}
+            >
+              <span className="btn__icon">⚡</span>
+              <span className="btn__label">{l.label}</span>
+              <span className="btn__sub">
+                {(l.variants?.length ?? 0) > 0
+                  ? `${l.command} · ${l.variants!.length + 1} modes`
+                  : l.command}
+              </span>
+            </button>
+            {pickerFor?.id === l.id && (
+              <VariantPicker
+                launcher={l}
+                onPick={(variantId) => void launch(l, variantId)}
+                onClose={() => setPickerFor(null)}
+              />
+            )}
+          </div>
         ))}
         {launchers.length === 0 && (
           <div className="taskshell__action-empty">
@@ -294,6 +287,75 @@ function NotesBlock({ notes }: { notes: string }) {
       title={expanded ? 'Click to collapse' : 'Click to expand'}
     >
       {notes}
+    </div>
+  );
+}
+
+// fm-mph — variant picker popover. Anchored relative to the parent
+// .taskshell__action-wrap. Real <button>s so Tab navigates and
+// Enter/Space activates; Esc and outside-click dismiss.
+function VariantPicker({
+  launcher,
+  onPick,
+  onClose,
+}: {
+  launcher: Launcher;
+  onPick: (variantId: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useState<HTMLDivElement | null>(null);
+  const [el, setEl] = ref;
+
+  // Autofocus the first option so Enter immediately picks Bare; Tab
+  // walks the rest. Outside-click and Esc both close.
+  useEffect(() => {
+    const first = el?.querySelector<HTMLButtonElement>('button');
+    first?.focus();
+    function onDoc(e: MouseEvent) {
+      if (!el) return;
+      if (!el.contains(e.target as Node)) onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [el, onClose]);
+
+  const variants = launcher.variants ?? [];
+
+  return (
+    <div ref={setEl} className="taskshell__variants" role="menu">
+      <button
+        type="button"
+        className="btn btn--ghost btn--sm taskshell__variant"
+        onClick={() => onPick('__bare__')}
+        title={`${launcher.command} ${(launcher.args ?? []).join(' ')}`.trim()}
+      >
+        <span className="taskshell__variant-label">Bare</span>
+        <span className="taskshell__variant-sub">no extra flags</span>
+      </button>
+      {variants.map((v) => (
+        <button
+          key={v.id}
+          type="button"
+          className="btn btn--ghost btn--sm taskshell__variant"
+          onClick={() => onPick(v.id)}
+          title={
+            (v.description ?? '') +
+            (v.args && v.args.length ? `  ·  ${v.args.join(' ')}` : '')
+          }
+        >
+          <span className="taskshell__variant-label">{v.label}</span>
+          <span className="taskshell__variant-sub">
+            {v.description ?? (v.args ?? []).join(' ')}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
