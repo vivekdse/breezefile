@@ -64,24 +64,24 @@
   flex: 0 0 auto;
 }
 .tabbar__attn--busy {
-  background: var(--text-muted, #9aa0a6);
-  opacity: 0.7;
+  /* GENERATING — green = "go / running". */
+  background: #34c759;
+  box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.25);
 }
 .tabbar__attn--idle {
-  background: var(--accent, #7aa2f7);
-  box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.25);
-  animation: tabbar-attn-pulse-accent 1.4s ease-in-out 4 forwards;
+  /* ATTENTION — red = "stop / needs you". Finite pulse so the badge
+     doesn't strobe forever on a long-ignored tab. */
+  background: #ff3b30;
+  box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.3);
+  animation: tabbar-attn-pulse-stop 1.4s ease-in-out 4 forwards;
 }
 .tabbar__attn--bell {
-  background: #f0a868;
-  box-shadow: 0 0 0 2px rgba(240, 168, 104, 0.25);
-  animation: tabbar-attn-pulse-bell 1.6s ease-in-out infinite;
+  /* Explicit ping — same red, but pulses indefinitely until visited. */
+  background: #ff3b30;
+  box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.3);
+  animation: tabbar-attn-pulse-stop 1.4s ease-in-out infinite;
 }
-@keyframes tabbar-attn-pulse-accent {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.25); }
-  50%      { box-shadow: 0 0 0 6px rgba(122, 162, 247, 0.05); }
-}
-@keyframes tabbar-attn-pulse-bell {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(240, 168, 104, 0.25); }
-  50%      { box-shadow: 0 0 0 6px rgba(240, 168, 104, 0.05); }
+@keyframes tabbar-attn-pulse-stop {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.3); }
+  50%      { box-shadow: 0 0 0 6px rgba(255, 59, 48, 0.06); }
 }

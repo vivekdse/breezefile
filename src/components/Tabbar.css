@@ -91,24 +91,22 @@
    bell is warm-tinted (explicit alert). Active tab keeps its own
    styling but layers a left border so the tint still reads. */
 .tabbar__tab--attn-busy {
-  background: rgba(154, 160, 166, 0.10);
-  border-color: rgba(154, 160, 166, 0.45);
+  /* GENERATING — green = "go / running". */
+  background: rgba(52, 199, 89, 0.14);
+  border-color: rgba(52, 199, 89, 0.55);
 }
-.tabbar__tab--attn-idle {
-  background: rgba(122, 162, 247, 0.18);
-  border-color: var(--accent-glow, rgba(122, 162, 247, 0.65));
-  color: var(--ink, var(--fg-1));
-}
+.tabbar__tab--attn-idle,
 .tabbar__tab--attn-bell {
-  background: rgba(240, 168, 104, 0.22);
-  border-color: rgba(240, 168, 104, 0.7);
+  /* ATTENTION — red = "stop / needs you". */
+  background: rgba(255, 59, 48, 0.18);
+  border-color: rgba(255, 59, 48, 0.65);
   color: var(--ink, var(--fg-1));
 }
 /* Active-tab override: keep its own background but show a thicker
    colored left edge so the state still reads at a glance. */
-.tabbar__tab--active.tabbar__tab--attn-busy { box-shadow: inset 3px 0 0 rgba(154, 160, 166, 0.7); }
-.tabbar__tab--active.tabbar__tab--attn-idle { box-shadow: inset 3px 0 0 var(--accent, #7aa2f7); }
-.tabbar__tab--active.tabbar__tab--attn-bell { box-shadow: inset 3px 0 0 #f0a868; }
+.tabbar__tab--active.tabbar__tab--attn-busy { box-shadow: inset 3px 0 0 #34c759; }
+.tabbar__tab--active.tabbar__tab--attn-idle,
+.tabbar__tab--active.tabbar__tab--attn-bell { box-shadow: inset 3px 0 0 #ff3b30; }
 
 .tabbar__label {
   overflow: hidden;
