@@ -61,6 +61,10 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
     void fm.launchersList().then(setLaunchers).catch(() => setLaunchers([]));
   }, []);
 
+  // fm-mph — variant picker. Must live above the !task early return so
+  // the hook count stays stable across renders (React Rules of Hooks).
+  const [pickerFor, setPickerFor] = useState<Launcher | null>(null);
+
   const folder = useMemo(() => task?.folder ?? tab?.trail[tab.trail.length - 1] ?? '', [task, tab]);
 
   // Task tab without a bound id (or task was deleted out from under it):
@@ -128,12 +132,6 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
       dispatch({ type: 'setStatus', msg: `terminal failed: ${(e as Error).message}` });
     }
   };
-  // fm-mph — variant picker. When a launcher has variants (claude has
-  // Continue + Skip-permissions per fm-e66), the card click opens this
-  // popover instead of launching directly. Pure local UI state; closed
-  // by selection or Esc / outside-click.
-  const [pickerFor, setPickerFor] = useState<Launcher | null>(null);
-
   const launch = async (l: Launcher, variantId?: string) => {
     setPickerFor(null);
     await invokeLauncher({
