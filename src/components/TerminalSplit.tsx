@@ -1,51 +1,71 @@
-// fm-jtu — terminal mount point for the active tab.
+// fm-jtu — terminal mount point.
 //
-// When the tab has no terminal we render the children as-is (the regular
-// FolderHeader + FilterChip + FolderList stack). When a terminal IS open
-// the children disappear entirely — the whole main area is given over to
-// the terminal. The shell layout (App.css) also collapses sidebar and
-// preview in this mode, so the user effectively gets a full-bleed
-// terminal with only Tabbar + Pathbar above it. Ctrl+D inside the shell
-// exits the pty, which fires onExit → closeTerminal and the file-manager
-// layout snaps back.
+// Persistent terminal layer (tmux-style): we mount a Terminal for *every*
+// tab that has one and only show the active tab's. xterm instances stay
+// alive across tab switches so scrollback is preserved — switching back
+// to a long-running Claude session shows the full history, not just
+// whatever has streamed since you came back.
+//
+// When the active tab has no terminal we hide the whole layer (children
+// render in its place) but keep the inactive-tab terminals mounted
+// underneath. Ctrl+D inside a shell exits the pty, which fires onExit →
+// closeTerminal and the file-manager layout snaps back for that tab.
 import { type ReactNode } from 'react';
 import { Terminal } from './Terminal';
 import { useStore } from '../store';
 import type { Tab } from '../types';
 
 type Props = {
-  tab: Tab;
-  tabIndex: number;
-  isActive: boolean;
-  children: ReactNode; // FolderList + chrome
+  tabs: Tab[];
+  activeIndex: number;
+  /** FolderList / TaskShell etc. — rendered only when the active tab has
+   *  no terminal. Inactive tabs' children are never rendered (they're
+   *  not the visible tab). */
+  children: ReactNode;
 };
 
-export function TerminalSplit({ tab, tabIndex, isActive, children }: Props) {
+export function TerminalSplit({ tabs, activeIndex, children }: Props) {
   const { dispatch } = useStore();
-  const term = tab.terminal;
-
-  if (!term) {
-    return <>{children}</>;
-  }
+  const activeTab = tabs[activeIndex];
+  const activeHasTerm = !!activeTab?.terminal;
 
   return (
-    <div className="terminal-fullbleed">
-      <Terminal
-        // Keying on ptyId means a fresh terminal (after :term-close + :term)
-        // remounts xterm; reusing the same pty preserves the instance.
-        key={term.ptyId}
-        ptyId={term.ptyId}
-        cwd={term.cwd}
-        isActive={isActive}
-        onExit={() => dispatch({ type: 'closeTerminal', tabIndex })}
-        onAttention={(state) =>
-          dispatch({
-            type: 'setTerminalAttention',
-            tabIndex,
-            attention: state,
-          })
-        }
-      />
-    </div>
+    <>
+      <div
+        className="terminal-fullbleed"
+        style={{ display: activeHasTerm ? 'flex' : 'none' }}
+      >
+        {tabs.map((t, i) => {
+          if (!t.terminal) return null;
+          const isActive = i === activeIndex;
+          return (
+            <div
+              key={t.id}
+              className="terminal-layer"
+              style={{ display: isActive ? 'flex' : 'none' }}
+            >
+              <Terminal
+                // Keying on ptyId means a fresh terminal (after :term-close
+                // + :term) remounts xterm; reusing the same pty preserves
+                // the instance — which is the whole point of this layer.
+                key={t.terminal.ptyId}
+                ptyId={t.terminal.ptyId}
+                cwd={t.terminal.cwd}
+                isActive={isActive}
+                onExit={() => dispatch({ type: 'closeTerminal', tabIndex: i })}
+                onAttention={(state) =>
+                  dispatch({
+                    type: 'setTerminalAttention',
+                    tabIndex: i,
+                    attention: state,
+                  })
+                }
+              />
+            </div>
+          );
+        })}
+      </div>
+      {!activeHasTerm && children}
+    </>
   );
 }

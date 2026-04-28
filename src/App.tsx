@@ -86,69 +86,117 @@ function Shell() {
     () => setShellOpen(true),
   );
 
-  // fm-fux — global terminal attention monitor. Every backgrounded tab's
-  // pty keeps streaming data (it's alive in the main process) but no
-  // <Terminal> component is mounted while the tab is inactive. We tap the
-  // raw IPC stream to detect attention markers (cursor-visibility for
-  // generation→idle transitions, BEL/OSC for explicit pings) and update
-  // the badge on the corresponding tab. The active tab's <Terminal> also
-  // reports attention but always clears it, so dispatch from here is gated
-  // on `tabIndex !== state.activeTab`.
-  useEffect(() => {
-    const off = fm.onTermData((id, data) => {
-      const idx = state.tabs.findIndex((t) => t.terminal?.ptyId === id);
-      if (idx < 0 || idx === state.activeTab) return;
-      let next: 'idle' | 'busy' | 'bell' | null | undefined;
-      if (data.includes('\x07') || data.includes('\x1b]9;')) next = 'bell';
-      else if (data.includes('\x1b[?25h')) next = 'idle';
-      else if (data.includes('\x1b[?25l')) next = 'busy';
-      if (next === undefined) return;
-      const cur = state.tabs[idx].terminal?.attention ?? null;
-      // Bell sticks until user focuses the tab; never let a later 'busy'
-      // signal silence a still-unattended bell.
-      if (cur === 'bell' && next !== 'bell') return;
-      if (cur === next) return;
-      dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: next });
+  // fm-fux — global terminal attention monitor. Every tab's pty keeps
+  // streaming data; we tap the raw IPC stream to drive the green/red tab
+  // tint independent of which tab the user is viewing.
+  //
+  // Detection is *activity-based* rather than cursor-based: many CLIs
+  // (Claude Code among them) stream output without toggling cursor
+  // visibility, so `\x1b[?25l/h` codes alone produce no green tint at
+  // all. Instead: any data → busy + reset a quiet-timer; quiet-timer
+  // expires → idle. BEL/OSC9 still wins as a sticky bell.
+  //
+  // Subscription lifecycle: we subscribe ONCE on mount and read mutable
+  // state through refs. Earlier versions put `state.tabs` in the effect
+  // deps, which tore down + re-subscribed on every attention dispatch —
+  // and during rapid streaming that meant data events fired between
+  // unsubscribe and resubscribe, getting dropped on the floor. The
+  // visible symptom was "no logs during Claude streaming."
+  const quietTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  const QUIET_MS = 2500;
+  // Live refs the once-mounted handler reads. Updating these on every
+  // render keeps the closure current without triggering a re-subscribe.
+  const tabsRef = useRef(state.tabs);
+  const notifyOnAttentionRef = useRef(state.notifyOnAttention);
+  const soundOnAttentionRef = useRef(state.soundOnAttention);
+  tabsRef.current = state.tabs;
+  notifyOnAttentionRef.current = state.notifyOnAttention;
+  soundOnAttentionRef.current = state.soundOnAttention;
 
-      // fm-c2w — system notification on rising-edge into ATTENTION
-      // (idle = waiting for input, bell = explicit ping). Fires only
-      // while Breeze is backgrounded; if the user is already looking
-      // at us, the dot in the tab strip is plenty. Notifications are
-      // opt-in via Settings (default ON), sound default OFF.
-      const wasAttention = cur === 'idle' || cur === 'bell';
-      const nowAttention = next === 'idle' || next === 'bell';
-      if (!wasAttention && nowAttention && !appFocusRef.current) {
-        if (state.notifyOnAttention && typeof Notification !== 'undefined') {
-          const tab = state.tabs[idx];
-          const folder = tab.terminal?.cwd
-            ? tab.terminal.cwd.split('/').filter(Boolean).pop() ?? tab.terminal.cwd
-            : 'terminal';
-          const launcher = tab.terminal?.label;
-          const title = launcher
-            ? `${launcher} in ${folder}`
-            : `Terminal in ${folder}`;
-          const body =
-            next === 'bell' ? 'Alert' : 'Waiting for input';
-          try {
-            const n = new Notification(title, {
-              body,
-              silent: !state.soundOnAttention,
-              tag: `fm-attn-${tab.id}`,
-            });
-            // Clicking the notification surfaces Breeze and selects the
-            // tab — the whole point is to skip the alt-tab hunt.
-            n.onclick = () => {
-              window.focus();
-              dispatch({ type: 'selectTab', index: idx });
-            };
-          } catch {
-            /* notifications unavailable / disabled at OS level */
-          }
-        }
+  useEffect(() => {
+    const maybeNotify = (
+      idx: number,
+      from: 'idle' | 'busy' | 'bell' | null,
+      to: 'idle' | 'bell',
+    ) => {
+      const wasAttention = from === 'idle' || from === 'bell';
+      if (wasAttention || appFocusRef.current) return;
+      if (!notifyOnAttentionRef.current || typeof Notification === 'undefined') return;
+      const tab = tabsRef.current[idx];
+      if (!tab) return;
+      const folder = tab.terminal?.cwd
+        ? tab.terminal.cwd.split('/').filter(Boolean).pop() ?? tab.terminal.cwd
+        : 'terminal';
+      const launcher = tab.terminal?.label;
+      const title = launcher
+        ? `${launcher} in ${folder}`
+        : `Terminal in ${folder}`;
+      const body = to === 'bell' ? 'Alert' : 'Waiting for input';
+      try {
+        const n = new Notification(title, {
+          body,
+          silent: !soundOnAttentionRef.current,
+          tag: `fm-attn-${tab.id}`,
+        });
+        n.onclick = () => {
+          window.focus();
+          dispatch({ type: 'selectTab', index: idx });
+        };
+      } catch {
+        /* notifications unavailable / disabled at OS level */
       }
+    };
+
+    const off = fm.onTermData((id, data) => {
+      const tabs = tabsRef.current;
+      const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
+      if (idx < 0) return;
+      const cur = tabs[idx].terminal?.attention ?? null;
+
+      // Bell wins outright and sticks until activation clears it.
+      if (data.includes('\x07') || data.includes('\x1b]9;')) {
+        const t = quietTimersRef.current.get(id);
+        if (t) clearTimeout(t);
+        quietTimersRef.current.delete(id);
+        if (cur !== 'bell') {
+          dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'bell' });
+          maybeNotify(idx, cur, 'bell');
+        }
+        return;
+      }
+      if (cur === 'bell') return;
+
+      // Activity-based detection: any data = busy, (re)arm a quiet timer
+      // that flips to idle after QUIET_MS of silence. Pure timing is the
+      // only signal that doesn't lie — cursor-visibility codes and
+      // "Churned for" appear on every TUI redraw, not just on completion.
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.debug(
+          `[attn] pty=${id} bytes=${data.length} cur=${cur} → busy`,
+        );
+      }
+      if (cur !== 'busy') {
+        dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
+      }
+      const prevTimer = quietTimersRef.current.get(id);
+      if (prevTimer) clearTimeout(prevTimer);
+      const timer = setTimeout(() => {
+        quietTimersRef.current.delete(id);
+        dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
+        maybeNotify(idx, 'busy', 'idle');
+      }, QUIET_MS);
+      quietTimersRef.current.set(id, timer);
     });
     return off;
-  }, [state.tabs, state.activeTab, state.notifyOnAttention, state.soundOnAttention, dispatch]);
+    // Subscribe ONCE on mount. State is read through refs so the handler
+    // sees current values without triggering re-subscription. Earlier
+    // versions re-subscribed on every dispatch and dropped the events
+    // that fired between unsubscribe and resubscribe.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // fm-c2w — track window focus from main. Used to gate notifications
   // (we only raise them when backgrounded) and to decide whether the
@@ -166,25 +214,26 @@ function Shell() {
   // fm-c2w — dock badge reflects how many tabs currently demand
   // attention (idle waiting-for-input or explicit bell). 'busy' is
   // generating-only and doesn't count — we don't want a badge while
-  // Claude is just thinking. The badge naturally clears as the user
-  // visits each attention tab (fm-fux clears attention on activation).
+  // Claude is just thinking. The active tab is excluded: even if its
+  // terminal is idle, the user's eyes are already on it, so no need
+  // to badge the dock.
   const attentionCount = state.tabs.filter(
-    (t) => t.terminal?.attention === 'idle' || t.terminal?.attention === 'bell',
+    (t, i) =>
+      i !== state.activeTab &&
+      (t.terminal?.attention === 'idle' || t.terminal?.attention === 'bell'),
   ).length;
   useEffect(() => {
     const text = attentionCount === 0 ? '' : String(attentionCount);
     void fm.setDockBadge(text);
   }, [attentionCount]);
 
-  // fm-fux — when a tab with a pending attention badge becomes active,
-  // clear the badge. This handles "user just looked at it" without
-  // requiring the Terminal component to remount in time. (The Terminal's
-  // own isActive effect also clears, but switching to a tab whose
-  // terminal is currently scrolled-back-but-visible needs the clear here
-  // too, before the xterm parses any new data.)
+  // Bell is a one-shot "I just pinged you" alert — once you've looked at
+  // the tab, the bell has done its job and should clear. Idle/busy tints
+  // track the live terminal state (cursor visibility) and stay accurate
+  // regardless of which tab is active, so we DON'T clear those here.
   useEffect(() => {
     const t = state.tabs[state.activeTab];
-    if (t?.terminal?.attention) {
+    if (t?.terminal?.attention === 'bell') {
       dispatch({
         type: 'setTerminalAttention',
         tabIndex: state.activeTab,
@@ -469,9 +518,8 @@ function Shell() {
           mode. */}
       <main className="shell__main">
         <TerminalSplit
-          tab={tab}
-          tabIndex={state.activeTab}
-          isActive={true}
+          tabs={state.tabs}
+          activeIndex={state.activeTab}
         >
           {isTaskTab ? (
             <TaskShell tabIndex={state.activeTab} />

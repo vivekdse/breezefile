@@ -180,25 +180,10 @@ export function Terminal({
       }
       if (id !== ptyIdRef.current) return;
       term.write(data);
-      // Attention scan — cheap substring checks. Cursor-visibility is
-      // the primary signal; BEL is a fallback for shells/CLIs that
-      // don't toggle the cursor (e.g. plain `read`).
-      if (data.includes('\x1b[?25l')) {
-        cursorVisibleRef.current = false;
-        reportAttention('busy');
-      }
-      if (data.includes('\x1b[?25h')) {
-        cursorVisibleRef.current = true;
-        reportAttention('idle');
-      }
-      if (data.includes('\x07')) {
-        // BEL beats cursor-shown — a bell after generation is the loud
-        // "I'm done, look at me" signal.
-        reportAttention('bell');
-      }
-      // OSC 9 (terminal notification, used by iTerm): \x1b]9;<text>\x07
-      // Treated as a bell-equivalent.
-      if (data.includes('\x1b]9;')) reportAttention('bell');
+      // Attention detection lives in the global monitor in App.tsx (it
+      // sees data for every tab — active or backgrounded — and uses
+      // activity-based timing rather than cursor-visibility codes,
+      // which Claude Code emits on every streamed chunk).
     });
     exitUnsubRef.current = fm.onTermExit((id, code) => {
       if (id !== ptyIdRef.current) return;
@@ -319,8 +304,6 @@ export function Terminal({
     if (isActive) {
       // Defer one frame so a tab switch + show doesn't race the layout.
       requestAnimationFrame(() => xtermRef.current?.focus());
-      // Active tab clears its own attention state.
-      reportAttention(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
@@ -328,8 +311,10 @@ export function Terminal({
   function reportAttention(state: AttentionState) {
     if (lastAttentionRef.current === state) return;
     lastAttentionRef.current = state;
-    // Only the *backgrounded* tabs need to nag. Active tab clears, never sets.
-    if (isActiveRef.current && state !== null) return;
+    // Active and backgrounded tabs both report — the tint reflects the
+    // terminal's live state (busy/idle), not a "you haven't seen this"
+    // flag. Bell is the exception (cleared on activation by App.tsx),
+    // but reporting it here is still correct.
     onAttention?.(state);
   }
 
