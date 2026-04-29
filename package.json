@@ -1,7 +1,7 @@
 {
   "name": "file-manager",
   "private": true,
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Cross-platform ranger-inspired file manager with native drag-out",
   "main": "dist-electron/main.js",
   "type": "module",

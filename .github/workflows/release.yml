@@ -26,6 +26,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # node-gyp (used by electron-builder when rebuilding native deps
+      # like node-pty) needs distutils, which Python 3.12 removed.
+      # Pin Python 3.11 so the rebuild succeeds on current macos-14
+      # runners (default Python is 3.13+).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install deps
         run: npm ci
 
