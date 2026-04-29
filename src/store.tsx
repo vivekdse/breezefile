@@ -138,7 +138,6 @@ type Persisted = {
   bookmarks: Bookmarks;
   tags: Tags;
   keybinds: Keybinds;
-  theme: 'dark' | 'light';
   recents: string[]; // LRU of recently-visited folders, most recent first
   pinned: string[]; // user-pinned folder paths shown in sidebar Favorites
   // fm-60k — user-authored tags (manual-only v1) and the path lists they
@@ -203,7 +202,6 @@ type Action =
   | { type: 'unsetBookmark'; key: string }
   | { type: 'setTag'; path: string; tag: string | null }
   | { type: 'setKeybinds'; keybinds: Keybinds }
-  | { type: 'setTheme'; theme: 'dark' | 'light' }
   | { type: 'setTaskManagementEnabled'; enabled: boolean }
   | { type: 'setLastFind'; query: string }
   | { type: 'restoreTab' }
@@ -263,7 +261,6 @@ const initialState: State = {
   bookmarks: {},
   tags: {},
   keybinds: DEFAULT_KEYBINDS,
-  theme: 'dark',
   recents: [],
   pinned: [],
   customTags: [],
@@ -276,7 +273,7 @@ const initialState: State = {
   // for users who turn it off in Settings.
   taskManagementEnabled: true,
   notifyOnAttention: true,
-  soundOnAttention: false,
+  soundOnAttention: true,
   useTmux: false,
   entriesByPath: {},
   yank: [],
@@ -377,8 +374,6 @@ function reducer(s: State, a: Action): State {
     }
     case 'setKeybinds':
       return { ...s, keybinds: a.keybinds };
-    case 'setTheme':
-      return { ...s, theme: a.theme };
     case 'setTaskManagementEnabled':
       return { ...s, taskManagementEnabled: a.enabled };
     case 'setLastFind':
@@ -504,7 +499,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           bookmarks,
           tags,
           keybinds,
-          theme,
           recents,
           pinned,
           customTags,
@@ -520,7 +514,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(bookmarks ? { bookmarks } : {}),
             ...(tags ? { tags } : {}),
             ...(keybinds ? { keybinds } : {}),
-            ...(theme ? { theme } : {}),
             ...(recents ? { recents } : {}),
             ...(pinned ? { pinned } : {}),
             ...(customTags ? { customTags } : {}),
@@ -567,7 +560,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       bookmarks: state.bookmarks,
       tags: state.tags,
       keybinds: state.keybinds,
-      theme: state.theme,
       recents: state.recents,
       pinned: state.pinned,
       customTags: state.customTags,
@@ -582,7 +574,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.bookmarks,
     state.tags,
     state.keybinds,
-    state.theme,
     state.recents,
     state.pinned,
     state.customTags,
@@ -592,11 +583,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.soundOnAttention,
     state.useTmux,
   ]);
-
-  // Apply theme on html root
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', state.theme);
-  }, [state.theme]);
 
   const activeTab = state.tabs[state.activeTab];
 

@@ -130,10 +130,13 @@ function Shell() {
         ? `${launcher} in ${folder}`
         : `Terminal in ${folder}`;
       const body = to === 'bell' ? 'Alert' : 'Waiting for input';
+      if (soundOnAttentionRef.current) {
+        void fm.playAttentionSound();
+      }
       try {
         const n = new Notification(title, {
           body,
-          silent: !soundOnAttentionRef.current,
+          silent: true,
           tag: `fm-attn-${tab.id}`,
         });
         n.onclick = () => {

@@ -376,8 +376,7 @@ export function useKeyboard(
         ut: () => clearTagOfCurrent(),
         // view / display
         zh: () => { const h = !tab.showHidden; setTab({ showHidden: h }); dispatch({ type: 'setStatus', msg: h ? 'showing hidden files' : 'hiding hidden files' }); },
-        zT: () =>
-          dispatch({ type: 'setTheme', theme: cur.theme === 'dark' ? 'light' : 'dark' }),
+        zT: () => window.dispatchEvent(new Event('fm:openTheme')),
         zf: () => dispatch({ type: 'setMode', mode: 'find', buffer: '' }),
         wl: () => { setTab({ viewMode: 'list' }); dispatch({ type: 'setStatus', msg: 'view: list' }); },
         wg: () => { setTab({ viewMode: 'grid' }); dispatch({ type: 'setStatus', msg: 'view: grid' }); },

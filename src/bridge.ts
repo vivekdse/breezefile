@@ -122,6 +122,7 @@ type Fm = {
   }) => void;
   // fm-c2w — app-level attention (dock badge + focus events)
   setDockBadge: (text: string) => Promise<void>;
+  playAttentionSound: () => Promise<void>;
   onAppFocus: (cb: (focused: boolean) => void) => () => void;
 };
 

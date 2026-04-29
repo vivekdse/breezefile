@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, Menu, protocol } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
@@ -167,6 +168,17 @@ app.whenReady().then(() => {
       app.dock?.setBadge(text ?? '');
     } catch {
       /* ignore platform / runtime errors — badge is best-effort */
+    }
+  });
+  ipcMain.handle('app:playAttentionSound', () => {
+    if (process.platform !== 'darwin') return;
+    try {
+      spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], {
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+    } catch {
+      /* best-effort — silent if afplay unavailable */
     }
   });
   buildAppMenu();
