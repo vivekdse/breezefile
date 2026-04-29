@@ -9,6 +9,7 @@
 
 import { fm, type Launcher } from './bridge';
 import { buildContextPrompt } from './tasks';
+import { spawnTerminal } from './terminalSpawn';
 import type { Task } from './types';
 
 const BARE_VARIANT_ID = '__bare__';
@@ -22,6 +23,10 @@ export type InvokeLauncherArgs = {
    *  task tab's task; folder-tab launches pass null. */
   task?: Task | null;
   cwd: string;
+  /** tmux session name to use when the user enables tmux-default in
+   *  Settings (fm-hzo). Pass the tab's display label — task title for
+   *  task tabs, basename(cwd) for folder tabs. Ignored when tmux is off. */
+  sessionLabel: string;
   /** When set, write into this PTY instead of spawning a new one.
    *  Existing PTYs can't have new env vars set retroactively, so the
    *  BREEZE_TASK_ID injection is skipped — but context pre-typing
@@ -67,7 +72,16 @@ export function resolveCommandLine(
 }
 
 export async function invokeLauncher(args: InvokeLauncherArgs): Promise<void> {
-  const { launcher, variantId, task, cwd, existingPty, onStatus, onPtyOpened } = args;
+  const {
+    launcher,
+    variantId,
+    task,
+    cwd,
+    sessionLabel,
+    existingPty,
+    onStatus,
+    onPtyOpened,
+  } = args;
   const { commandLine, label } = resolveCommandLine(launcher, variantId);
   const cmd = commandLine + '\r';
 
@@ -103,7 +117,7 @@ export async function invokeLauncher(args: InvokeLauncherArgs): Promise<void> {
     const env = injectContext
       ? { BREEZE_TASK_ID: task!.id, BREEZE_TASK_FOLDER: task!.folder }
       : undefined;
-    const ptyId = await fm.termSpawn({ cwd, env });
+    const ptyId = await spawnTerminal({ cwd, sessionLabel, env });
     onPtyOpened?.({ ptyId, label, cwd });
     // 220ms post-spawn delay: lets the shell finish printing its prompt
     // / running zsh-prompt-init scripts (starship, p10k) before we type

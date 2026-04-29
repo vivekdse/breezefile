@@ -25,6 +25,7 @@ import { useStore } from '../store';
 import { fm } from '../bridge';
 import { runPaste } from '../clipboard';
 import { invokeLauncher } from '../launchers';
+import { spawnTerminal } from '../terminalSpawn';
 import {
   basename,
   currentEntry,
@@ -129,7 +130,8 @@ type Verb =
   | 'help'
   | 'welcome'
   | 'task'
-  | 'tasks';
+  | 'tasks'
+  | 'settings';
 
 type Option = {
   id: string;
@@ -912,7 +914,10 @@ const VERBS: VerbDef[] = [
         return;
       }
       try {
-        const ptyId = await fm.termSpawn({ cwd: c.cwd });
+        const ptyId = await spawnTerminal({
+          cwd: c.cwd,
+          sessionLabel: basename(c.cwd) || c.cwd,
+        });
         api.dispatch({
           type: 'openTerminal',
           tabIndex: api.activeTabIndex,
@@ -1407,6 +1412,26 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    id: 'settings',
+    label: 'Settings',
+    aliases: [
+      'settings',
+      'preferences',
+      'prefs',
+      'config',
+      'options',
+      'configure',
+    ],
+    icon: '⚙',
+    describe: () => 'Open the settings dialog (keybinds, terminal, theme…)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openSettings'));
+    },
+  },
+  {
     id: 'help',
     label: 'Help',
     aliases: ['help', 'tour', 'guide', 'how', 'how to', 'cheatsheet', 'verbs', 'docs', 'manual'],
@@ -1725,6 +1750,7 @@ function synthesizeLauncherVerbs(
           variantId,
           task,
           cwd: c.cwd,
+          sessionLabel: task?.title || basename(c.cwd) || c.cwd,
           existingPty: api.activeTabTerminal,
           onStatus: (msg) => api.dispatch({ type: 'setStatus', msg }),
           onPtyOpened: ({ ptyId, label, cwd }) =>

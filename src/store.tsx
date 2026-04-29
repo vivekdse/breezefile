@@ -160,6 +160,11 @@ type Persisted = {
   // default — the visual + dock badge is plenty unless the user opts in.
   notifyOnAttention: boolean;
   soundOnAttention: boolean;
+  // fm-hzo — when true, terminal spawns wrap in `tmux new-session -A -s
+  // <tab-label>`. Two tabs with the same label share a tmux session;
+  // closing & re-opening a terminal reattaches to the still-running
+  // session. Default OFF — relies on tmux being on PATH.
+  useTmux: boolean;
 };
 
 const RECENTS_CAP = 30;
@@ -212,6 +217,7 @@ type Action =
   | { type: 'addTagViz'; id: string }
   | { type: 'setNotifyOnAttention'; value: boolean }
   | { type: 'setSoundOnAttention'; value: boolean }
+  | { type: 'setUseTmux'; value: boolean }
   | {
       type: 'openTerminal';
       tabIndex: number;
@@ -271,6 +277,7 @@ const initialState: State = {
   taskManagementEnabled: true,
   notifyOnAttention: true,
   soundOnAttention: false,
+  useTmux: false,
   entriesByPath: {},
   yank: [],
   statusMsg: '',
@@ -416,6 +423,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, notifyOnAttention: a.value };
     case 'setSoundOnAttention':
       return { ...s, soundOnAttention: a.value };
+    case 'setUseTmux':
+      return { ...s, useTmux: a.value };
     case 'addTagViz': {
       const tabs = s.tabs.slice();
       const t = tabs[s.activeTab];
@@ -503,6 +512,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           taskManagementEnabled,
           notifyOnAttention,
           soundOnAttention,
+          useTmux,
         } = parsed as Partial<Persisted>;
         dispatch({
           type: 'hydrate',
@@ -520,6 +530,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : {}),
             ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
             ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
+            ...(typeof useTmux === 'boolean' ? { useTmux } : {}),
           } as Partial<Persisted>,
         });
       } catch {
@@ -564,6 +575,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       taskManagementEnabled: state.taskManagementEnabled,
       notifyOnAttention: state.notifyOnAttention,
       soundOnAttention: state.soundOnAttention,
+      useTmux: state.useTmux,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
   }, [
@@ -578,6 +590,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.taskManagementEnabled,
     state.notifyOnAttention,
     state.soundOnAttention,
+    state.useTmux,
   ]);
 
   // Apply theme on html root

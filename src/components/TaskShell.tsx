@@ -18,6 +18,7 @@ import {
   updateTask,
 } from '../tasks';
 import { invokeLauncher } from '../launchers';
+import { spawnTerminal } from '../terminalSpawn';
 import type { Launcher } from '../bridge';
 import type { Task } from '../types';
 import './TaskShell.css';
@@ -125,7 +126,10 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
       return;
     }
     try {
-      const ptyId = await fm.termSpawn({ cwd: folder });
+      const ptyId = await spawnTerminal({
+        cwd: folder,
+        sessionLabel: task?.title || basename(folder),
+      });
       dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: folder });
       dispatch({ type: 'setStatus', msg: 'terminal opened' });
     } catch (e) {
@@ -139,6 +143,7 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
       variantId,
       task,
       cwd: folder,
+      sessionLabel: task?.title || basename(folder),
       existingPty: tab.terminal ? { ptyId: tab.terminal.ptyId } : undefined,
       onStatus: (msg) => dispatch({ type: 'setStatus', msg }),
       onPtyOpened: ({ ptyId, label }) =>

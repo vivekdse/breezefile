@@ -22,6 +22,7 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { fm } from '../bridge';
+import { spawnTerminal } from '../terminalSpawn';
 import './Terminal.css';
 
 export type AttentionState = 'idle' | 'busy' | 'bell' | null;
@@ -39,6 +40,9 @@ type Props = {
   isActive: boolean;
   /** Auto-typed once after spawn — used by launcher verbs (:claude etc.). */
   initialCommand?: string;
+  /** tmux session name (fm-hzo) when the user enables tmux-default. Only
+   *  consulted on the spawn path; reattach (existing ptyId) ignores it. */
+  sessionLabel?: string;
 };
 
 // Build an xterm ITheme from the current document's CSS custom properties.
@@ -93,6 +97,7 @@ export function Terminal({
   onExit,
   isActive,
   initialCommand,
+  sessionLabel,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const xtermRef = useRef<XTerm | null>(null);
@@ -128,6 +133,13 @@ export function Terminal({
       // people use Terminal.app / iTerm by default.
       macOptionIsMeta: true,
       allowProposedApi: true,
+      // Screen-reader mode keeps xterm's helper textarea fully focusable
+      // and surfaces buffer content via ARIA. Side benefit (the actual
+      // reason it's on here): macOS Dictation, voice control, and other
+      // OS text-input services need a real focusable text input to
+      // attach to — the default off-screen aria-hidden textarea gets
+      // skipped. Same approach VS Code's integrated terminal uses.
+      screenReaderMode: true,
       theme: readThemeFromDoc(),
     });
     const fit = new FitAddon();
@@ -230,7 +242,12 @@ export function Terminal({
       const cols = term.cols;
       const rows = term.rows;
       try {
-        const id = await fm.termSpawn({ cwd, cols, rows });
+        const id = await spawnTerminal({
+          cwd,
+          cols,
+          rows,
+          sessionLabel: sessionLabel || cwd.split('/').filter(Boolean).pop() || 'tab',
+        });
         if (cancelled) {
           await fm.termKill(id).catch(() => {});
           return;

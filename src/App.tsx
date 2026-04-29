@@ -387,6 +387,9 @@ function Shell() {
     function onOpenTasksPage() {
       setTasksPageOpen(true);
     }
+    function onOpenSettings() {
+      setSettingsOpen(true);
+    }
     async function onOpenWith(e: Event) {
       const detail = (e as CustomEvent).detail as { path: string; ext?: string } | undefined;
       if (!detail?.path) return;
@@ -415,6 +418,7 @@ function Shell() {
     window.addEventListener('fm:openWelcome', onWelcome);
     window.addEventListener('fm:openTask', onOpenTask);
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
+    window.addEventListener('fm:openSettings', onOpenSettings);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -431,6 +435,7 @@ function Shell() {
       window.removeEventListener('fm:openWelcome', onWelcome);
       window.removeEventListener('fm:openTask', onOpenTask);
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
+      window.removeEventListener('fm:openSettings', onOpenSettings);
     };
   }, [activeTab, state.entriesByPath]);
 
