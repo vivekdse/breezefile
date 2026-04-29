@@ -21,8 +21,11 @@
      viewport on small screens. */
   min-height: min(520px, 80vh);
   max-height: 90vh;
-  background: var(--bg-1);
-  border: 1px solid var(--border-2);
+  /* Theme-safe panel surface: paper themes set --panel; dark/light fall
+     back to --bg-1. Without this fallback chain, paper themes inherit the
+     dark-theme --bg-1 → dark text on dark bg. */
+  background: var(--panel, var(--bg-1));
+  border: 1px solid var(--rule, var(--border-2));
   border-radius: var(--r-lg);
   box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.55),
               0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -48,7 +51,7 @@
   justify-content: space-between;
   align-items: center;
   padding: var(--sp-4) var(--sp-5);
-  border-bottom: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--rule, var(--border-1));
   flex-shrink: 0;
 }
 
@@ -71,7 +74,7 @@
   cursor: pointer;
 }
 .settings__close:hover {
-  background: var(--bg-3);
+  background: var(--panel-2, var(--bg-3));
 }
 
 /* Scrollable accordion column. */
@@ -83,7 +86,7 @@
 }
 
 .settings__section {
-  border-bottom: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--rule, var(--border-1));
   flex-shrink: 0;
 }
 .settings__section:last-child {
@@ -113,7 +116,7 @@
   font-family: inherit;
 }
 .settings__section-head:hover {
-  background: var(--bg-2);
+  background: var(--panel-2, var(--bg-2));
 }
 .settings__section-head:focus-visible {
   outline: 2px solid var(--accent);
@@ -123,7 +126,7 @@
 .settings__section-chevron {
   display: inline-block;
   width: 14px;
-  color: var(--text-muted);
+  color: var(--muted-on-panel);
   font-size: 11px;
   text-align: center;
 }
@@ -160,7 +163,7 @@
 }
 .settings__reset:hover {
   text-decoration: underline;
-  background: var(--bg-2);
+  background: var(--panel-2, var(--bg-2));
 }
 
 .settings__list {
@@ -178,7 +181,7 @@
   border-radius: var(--r-sm);
 }
 .settings__row:hover {
-  background: var(--bg-2);
+  background: var(--panel-2, var(--bg-2));
 }
 
 .settings__action {
@@ -187,10 +190,21 @@
   color: var(--text-on-panel);
 }
 
+.settings__action code,
+.settings__hint code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  padding: 1px 4px;
+  background: var(--chip, var(--bg-2));
+  border: 1px solid var(--rule, var(--border-1));
+  border-radius: 3px;
+  color: var(--text-on-panel);
+}
+
 .settings__path {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  color: var(--text-muted);
+  color: var(--muted-on-panel);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -212,7 +226,7 @@
 .settings__hint {
   font-family: var(--font-sans);
   font-size: var(--fs-xs);
-  color: var(--text-muted);
+  color: var(--muted-on-panel);
   white-space: normal;
   max-width: 320px;
   text-align: right;
@@ -229,8 +243,8 @@
 .settings__row kbd {
   display: inline-block;
   padding: 2px var(--sp-2);
-  background: var(--bg-2);
-  border: 1px solid var(--border-1);
+  background: var(--chip, var(--bg-2));
+  border: 1px solid var(--rule, var(--border-1));
   border-bottom-width: 2px;
   border-radius: 3px;
   color: var(--text-on-panel);
@@ -246,7 +260,7 @@
 .settings__input {
   min-width: 120px;
   padding: 2px var(--sp-2);
-  background: var(--bg-2);
+  background: var(--panel-2, var(--bg-2));
   border: 1px solid var(--accent);
   border-radius: var(--r-sm);
   color: var(--text-on-panel);
@@ -260,8 +274,8 @@
 .settings__select {
   min-width: 180px;
   padding: 4px var(--sp-2);
-  background: var(--bg-2);
-  border: 1px solid var(--border-1);
+  background: var(--panel-2, var(--bg-2));
+  border: 1px solid var(--rule, var(--border-1));
   border-radius: var(--r-sm);
   color: var(--text-on-panel);
   font-family: var(--font-mono);
@@ -284,14 +298,15 @@
   letter-spacing: 0.08em;
   color: var(--accent);
   padding: var(--sp-2) 0 var(--sp-1) 0;
-  border-bottom: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--rule, var(--border-1));
   margin-bottom: var(--sp-1);
   font-family: var(--font-mono);
 }
 
 .settings__empty {
   padding: var(--sp-3);
-  color: var(--text-muted);
+  color: var(--muted-on-panel);
   font-size: var(--fs-sm);
   font-style: italic;
 }
+
