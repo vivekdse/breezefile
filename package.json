@@ -12,6 +12,7 @@
     "start": "npm run dev",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
+    "test": "node --test tests/",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "devDependencies": {
@@ -65,6 +66,10 @@
         {
           "from": "bin/breeze",
           "to": "breeze"
+        },
+        {
+          "from": "bin/breeze.mjs",
+          "to": "breeze.mjs"
         }
       ],
       "icon": "build/icon.icns",

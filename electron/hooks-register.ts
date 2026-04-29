@@ -16,6 +16,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
+import { app } from 'electron';
 import {
   readFileSync,
   writeFileSync,
@@ -113,11 +114,23 @@ const SCRIPT = hookScriptPath();
 const BUSY_CMD = `sh "${SCRIPT}" busy`;
 const IDLE_CMD = `sh "${SCRIPT}" idle`;
 
-// We own any hook entry whose command runs claude-hook.sh — re-register
-// replaces them rather than appending so the behaviour stays idempotent
-// even if we change the command shape.
+// Absolute path to the bundled `breeze` launcher. Used for SessionStart
+// and PreCompact hooks that emit cross-folder task context to Claude
+// Code via `breeze prime`. Matches the resolution pattern in ipc.ts's
+// sharerPath(): packaged → process.resourcesPath; dev → repo bin/.
+function breezeBinPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'breeze')
+    : path.join(app.getAppPath(), 'bin', 'breeze');
+}
+
+// We own any hook entry whose command runs claude-hook.sh OR
+// `breeze prime` — re-register replaces them rather than appending so
+// idempotency holds even when we evolve the command shape (e.g. the
+// breeze launcher path changes between dev and packaged builds).
 function isBreezeHook(h: HookEntry): boolean {
-  return typeof h.command === 'string' && h.command.includes('claude-hook.sh');
+  if (typeof h.command !== 'string') return false;
+  return h.command.includes('claude-hook.sh') || /\bbreeze\b.*\bprime\b/.test(h.command);
 }
 
 function withoutBreezeMatchers(blocks: HookMatcher[] | undefined): HookMatcher[] {
@@ -148,7 +161,13 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' {
   for (const event of Object.keys(oldHooks)) {
     nextHooks[event] = withoutBreezeMatchers(oldHooks[event]);
   }
-  for (const event of ['UserPromptSubmit', 'Stop', 'StopFailure']) {
+  for (const event of [
+    'UserPromptSubmit',
+    'Stop',
+    'StopFailure',
+    'SessionStart',
+    'PreCompact',
+  ]) {
     if (!nextHooks[event]) nextHooks[event] = [];
   }
   nextHooks.UserPromptSubmit.push({
@@ -159,6 +178,20 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' {
   });
   nextHooks.StopFailure.push({
     hooks: [{ type: 'command', command: IDLE_CMD }],
+  });
+
+  // SessionStart + PreCompact run `breeze prime` so Claude gets active
+  // task context at session boot and again after compaction. Path is
+  // absolute (not bare `breeze`) so the hook works even when the user's
+  // shell PATH doesn't include the brew/dev install location.
+  const PRIME_CMD = `"${breezeBinPath()}" prime`;
+  nextHooks.SessionStart.push({
+    matcher: '',
+    hooks: [{ type: 'command', command: PRIME_CMD }],
+  });
+  nextHooks.PreCompact.push({
+    matcher: '',
+    hooks: [{ type: 'command', command: PRIME_CMD }],
   });
 
   if (JSON.stringify(oldHooks) === JSON.stringify(nextHooks)) {
