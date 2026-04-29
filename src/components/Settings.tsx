@@ -352,19 +352,21 @@ function AccordionSection({
     <section
       className={`settings__section ${isOpen ? 'settings__section--open' : ''}`}
     >
-      <button
-        type="button"
-        className="settings__section-head"
-        aria-expanded={isOpen}
-        aria-controls={`settings-section-${id}`}
-        onClick={onToggle}
-      >
-        <span className="settings__section-chevron" aria-hidden="true">
-          {isOpen ? '▾' : '▸'}
-        </span>
-        <h3 className="settings__section-title">{title}</h3>
+      <div className="settings__section-head">
+        <button
+          type="button"
+          className="settings__section-toggle"
+          aria-expanded={isOpen}
+          aria-controls={`settings-section-${id}`}
+          onClick={onToggle}
+        >
+          <span className="settings__section-chevron" aria-hidden="true">
+            {isOpen ? '▾' : '▸'}
+          </span>
+          <h3 className="settings__section-title">{title}</h3>
+        </button>
         {extra && <span className="settings__section-extra">{extra}</span>}
-      </button>
+      </div>
       {isOpen && (
         <div
           id={`settings-section-${id}`}
