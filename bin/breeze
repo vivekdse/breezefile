@@ -1,0 +1,184 @@
+#!/bin/sh
+# breeze — CLI for the Breeze File task system.
+#
+# Talks to the running Breeze File Electron app via its localhost HTTP API
+# (port + bearer token published in ~/.breezefile/api.json on app launch).
+#
+# Subcommands:
+#   prime              Print markdown context for Claude Code SessionStart hook
+#   list [--all]       List pending tasks (or all with --all)
+#   add <title> [--notes <text>] [--folder <path>]
+#                      Create a task. Folder defaults to $PWD.
+#   done <id>          Mark task done
+#   rm   <id>          Delete task
+#
+# All commands silently no-op (exit 0) when the app isn't running, so a
+# SessionStart hook never blocks Claude when Breeze File is closed.
+
+set -e
+
+api="$HOME/.breezefile/api.json"
+[ -f "$api" ] || exit 0
+
+port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$api" | head -n1)
+tok=$(sed  -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$api" | head -n1)
+[ -n "$port" ] && [ -n "$tok" ] || exit 0
+
+base="http://127.0.0.1:$port"
+auth="Authorization: Bearer $tok"
+ct="Content-Type: application/json"
+
+# Reachability check. If the app published api.json but the process is
+# gone (e.g. force-quit), fail silently rather than spew curl errors.
+curl -s -m 1 -H "$auth" "$base/tasks" >/dev/null 2>&1 || exit 0
+
+cmd="${1:-prime}"
+shift 2>/dev/null || true
+
+# Tiny JSON-string escaper for user input. Handles backslash and double
+# quote, which are the two characters that break a quoted JSON string.
+# Newlines pass through as literal \n in the source and are valid in
+# JSON strings only if escaped — callers shouldn't pass raw newlines.
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+case "$cmd" in
+  prime)
+    cat <<'EOF'
+# Breeze: Active Work Context
+
+Breeze tracks active tasks across all sessions and folders. It is the
+"what am I working on right now" layer — high-level intent that may span
+multiple repos, conversations, and days. Each task has an id, title,
+optional notes, and a folder it's anchored to. The folder anchor is how
+context flows: a task created in repo X becomes visible in any future
+session launched from inside X (or any of its subdirectories).
+
+If you were launched from a Breeze task tab, the relevant task has
+already been provided to you in the conversation — use that. Otherwise,
+the section below shows the active tasks anchored to this directory or
+any of its ancestors. Tasks anchored to unrelated folders are hidden
+and can be listed with `breeze list --all`.
+
+When you create a new task with `breeze add`, anchor it to the most
+specific folder that fits — `--folder <path>` (defaults to current dir).
+A clean folder reference makes the task discoverable from the right
+place later without you re-explaining the project context.
+
+EOF
+    pending=$(curl -s -H "$auth" "$base/tasks" \
+      | tr '}' '\n' \
+      | grep -v '"status":"done"' \
+      | grep -v '^[[:space:]]*$' \
+      || true)
+
+    # Filter to tasks whose folder is $PWD or an ancestor of $PWD.
+    # Match rule: "$PWD/" starts with "$folder/" — handles exact match
+    # and descendant match without false-positive sibling matches
+    # (e.g. /foo/bar must not match /foo/barbaz).
+    scoped=""
+    if [ -n "$pending" ]; then
+      pwdslash="${PWD%/}/"
+      scoped=$(printf '%s\n' "$pending" | while IFS= read -r line; do
+        folder=$(printf '%s' "$line" | sed -n 's/.*"folder":"\([^"]*\)".*/\1/p')
+        [ -n "$folder" ] || continue
+        # Match if $PWD == $folder or $PWD is a descendant of $folder.
+        # Trailing slash on both sides prevents /foo/bar matching /foo/barbaz.
+        prefix="${folder%/}/"
+        rest="${pwdslash#$prefix}"
+        [ "$rest" != "$pwdslash" ] && printf '%s\n' "$line"
+      done)
+    fi
+
+    echo "## Active Tasks (anchored to this folder or an ancestor)"
+    if [ -z "$scoped" ]; then
+      echo "_(none for \`$PWD\` — list everything with \`breeze list --all\`,"
+      echo "or create one with \`breeze add \"...\"\` anchored here)_"
+    else
+      printf '%s\n' "$scoped" | while IFS= read -r line; do
+        id=$(   printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+        title=$(printf '%s' "$line" | sed -n 's/.*"title":"\([^"]*\)".*/\1/p')
+        notes=$(printf '%s' "$line" | sed -n 's/.*"notes":"\([^"]*\)".*/\1/p')
+        folder=$(printf '%s' "$line" | sed -n 's/.*"folder":"\([^"]*\)".*/\1/p')
+        [ -n "$id" ] || continue
+        printf -- '- **%s** | %s\n' "$id" "$title"
+        [ -n "$folder" ] && printf '    folder: %s\n' "$folder"
+        [ -n "$notes"  ] && printf '    %s\n'         "$notes"
+      done
+    fi
+
+    if [ -d "./.beads" ]; then
+      cat <<'EOF'
+
+## When working in a beads-enabled repo
+This folder has a `.beads/` directory, so detailed work breakdown likely
+lives in beads issues. Treat breeze tasks as the strategic frame and
+beads issues as the tactical units. Use `bd ready` to find next steps;
+closing beads issues advances the breeze task. No explicit cross-link is
+maintained — infer the relationship from titles, descriptions, and folder.
+EOF
+    fi
+    ;;
+
+  list)
+    all=0
+    [ "${1:-}" = "--all" ] && all=1
+    raw=$(curl -s -H "$auth" "$base/tasks")
+    printf '%s' "$raw" | tr '}' '\n' | while IFS= read -r line; do
+      id=$(   printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+      title=$(printf '%s' "$line" | sed -n 's/.*"title":"\([^"]*\)".*/\1/p')
+      status=$(printf '%s' "$line" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+      [ -n "$id" ] || continue
+      [ "$all" -eq 0 ] && [ "$status" = "done" ] && continue
+      printf '%-36s  %-8s  %s\n' "$id" "$status" "$title"
+    done
+    ;;
+
+  add)
+    title="${1:-}"
+    [ -n "$title" ] || { echo "usage: breeze add <title> [--notes <text>] [--folder <path>]" >&2; exit 2; }
+    shift
+    notes=""
+    folder="$PWD"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --notes)  notes="$2";  shift 2 ;;
+        --folder) folder="$2"; shift 2 ;;
+        *) echo "unknown flag: $1" >&2; exit 2 ;;
+      esac
+    done
+    body=$(printf '{"title":"%s","folder":"%s"' \
+      "$(json_escape "$title")" "$(json_escape "$folder")")
+    [ -n "$notes" ] && body="$body,\"notes\":\"$(json_escape "$notes")\""
+    body="$body}"
+    resp=$(curl -s -X POST -H "$auth" -H "$ct" --data "$body" "$base/tasks")
+    id=$(printf '%s' "$resp" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+    [ -n "$id" ] && echo "$id" || { echo "create failed: $resp" >&2; exit 1; }
+    ;;
+
+  done)
+    id="${1:-}"
+    [ -n "$id" ] || { echo "usage: breeze done <id>" >&2; exit 2; }
+    code=$(curl -s -o /dev/null -w '%{http_code}' \
+      -X PATCH -H "$auth" -H "$ct" --data '{"status":"done"}' \
+      "$base/tasks/$id")
+    [ "$code" = "200" ] || { echo "update failed (HTTP $code)" >&2; exit 1; }
+    ;;
+
+  rm)
+    id="${1:-}"
+    [ -n "$id" ] || { echo "usage: breeze rm <id>" >&2; exit 2; }
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "$auth" "$base/tasks/$id")
+    [ "$code" = "200" ] || { echo "delete failed (HTTP $code)" >&2; exit 1; }
+    ;;
+
+  -h|--help|help)
+    sed -n '2,/^set -e$/p' "$0" | sed 's/^# \{0,1\}//' | sed '/^set -e$/d'
+    ;;
+
+  *)
+    echo "unknown subcommand: $cmd (try: prime, list, add, done, rm)" >&2
+    exit 2
+    ;;
+esac

@@ -61,6 +61,10 @@
         {
           "from": "native/sharer/sharer",
           "to": "sharer"
+        },
+        {
+          "from": "bin/breeze",
+          "to": "breeze"
         }
       ],
       "icon": "build/icon.icns",
