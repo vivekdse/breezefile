@@ -1971,6 +1971,34 @@ function buildTaskVerbs(): VerbDef[] {
       },
     },
     {
+      id: 'edit-task' as Verb,
+      label: 'Edit task',
+      aliases: ['edit', 'edit-task', 'rename', 'modify'],
+      icon: '✎',
+      describe: () => 'Edit the cursor task (or first selected)',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:edit');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'goto-folder' as Verb,
+      label: 'Go to folder',
+      aliases: ['goto-folder', 'goto', 'cd', 'folder', 'browse'],
+      icon: '📂',
+      describe: () => 'Open each selected task’s folder in a new tab',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:goto-folder');
+        api.closeOverlay();
+      },
+    },
+    {
       id: 'select-tasks' as Verb,
       label: 'Select',
       aliases: ['select', 'pick', 'mark'],

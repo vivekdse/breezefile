@@ -270,13 +270,114 @@
 
 .tasks__row {
   display: grid;
-  grid-template-columns: 24px 26px 1fr auto;
+  grid-template-columns: 24px 26px 1fr auto auto;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-5);
   border-bottom: 1px solid var(--rule-on-panel);
   cursor: pointer;
   transition: background 100ms;
+}
+
+/* Per-row action cluster — visible at all times (not hover-revealed) so
+ * the affordances are discoverable. The kebab covers the long tail of
+ * actions that don't earn a dedicated button.
+ */
+.tasks__row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tasks__row-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-on-panel);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tasks__row-btn:hover {
+  background: var(--panel-2);
+  color: var(--text-on-panel);
+  border-color: var(--rule-on-panel);
+}
+.tasks__row-btn--done:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.tasks__row-btn--reopen:hover {
+  color: var(--accent);
+}
+
+/* Status badge, made clickable to cycle status forward. */
+.tasks__status--button {
+  border: 1px solid var(--rule-on-panel);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.tasks__status--button:hover {
+  filter: brightness(1.05);
+  border-color: var(--accent);
+}
+
+/* Kebab popover — matches the legacy ctx-menu styling but with section
+ * headers and a danger row.
+ */
+.tasks__kebab {
+  position: fixed;
+  z-index: var(--z-overlay, 1000);
+  min-width: 220px;
+  max-height: 460px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.tasks__kebab-item {
+  border: none;
+  background: transparent;
+  color: var(--text-on-panel);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.tasks__kebab-item:hover {
+  background: var(--accent-soft);
+}
+.tasks__kebab-item--danger {
+  color: var(--danger, #c0392b);
+}
+.tasks__kebab-item--danger:hover {
+  background: var(--danger, #c0392b);
+  color: #fff;
+}
+.tasks__kebab-section {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-on-panel);
+  padding: 6px 10px 2px;
+}
+.tasks__kebab-sep {
+  height: 1px;
+  background: var(--rule-on-panel);
+  margin: 4px 2px;
 }
 .tasks__row--cursor {
   outline: 2px solid var(--accent);

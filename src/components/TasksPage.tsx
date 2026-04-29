@@ -165,6 +165,16 @@ export function TasksPage() {
     value: string;
   } | null>(null);
 
+  // Per-row kebab menu — anchored to a row's kebab button. Outside-click
+  // dismisses; the menu owns the rest of the actions that don't earn a
+  // dedicated row button.
+  const [kebabFor, setKebabFor] = useState<{
+    task: Task;
+    x: number;
+    y: number;
+  } | null>(null);
+
+
   useEffect(() => {
     const id = window.setTimeout(() => setSearch(searchInput.trim()), 150);
     return () => window.clearTimeout(id);
@@ -305,6 +315,85 @@ export function TasksPage() {
     );
   }
 
+  // ─── per-row single-task action helpers ──────────────────────────────────
+  // Operate on exactly one task — bypass selection. The bulk verb path
+  // remains the way to act on many; row buttons are for quick, focused
+  // moves on the row in front of the user.
+  function setStatus(task: Task, status: TaskStatus) {
+    void updateTask(task.id, { status });
+  }
+  function cycleStatus(task: Task) {
+    const order: TaskStatus[] = ['pending', 'in_progress', 'done', 'cancelled'];
+    const next = order[(order.indexOf(task.status) + 1) % order.length];
+    void updateTask(task.id, { status: next });
+  }
+  function rowOpenInTab(task: Task) {
+    dispatch({ type: 'openTaskTab', taskId: task.id, folder: task.folder });
+  }
+  async function rowOpenTerminal(task: Task) {
+    const tabsSnapshot = stateRef.current.tabs.slice();
+    const existing = tabsSnapshot.findIndex(
+      (tt) => tt.kind === 'task' && tt.taskId === task.id,
+    );
+    const tabIndex = existing >= 0 ? existing : tabsSnapshot.length;
+    dispatch({ type: 'openTaskTab', taskId: task.id, folder: task.folder });
+    if (existing >= 0 && tabsSnapshot[existing].terminal) {
+      dispatch({ type: 'setStatus', msg: 'terminal already open' });
+      return;
+    }
+    try {
+      const ptyId = await spawnTerminal({ cwd: task.folder, sessionLabel: task.title });
+      dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: task.folder });
+    } catch (e) {
+      dispatch({ type: 'setStatus', msg: `terminal failed: ${(e as Error).message}` });
+    }
+  }
+  function rowGotoFolder(task: Task) {
+    // Open the folder in a new folder tab so the task tab (if any) and the
+    // tasks-overview tab both stay alive — the user can pivot back without
+    // losing state.
+    dispatch({
+      type: 'newTab',
+      tab: {
+        id: crypto.randomUUID(),
+        kind: 'folder',
+        taskId: null,
+        trail: [task.folder],
+        selected: { 0: 0 },
+        marks: {},
+        sortKey: 'name',
+        sortReverse: false,
+        showHidden: false,
+        viewMode: 'list',
+        filter: '',
+        tagViz: [],
+        tagFilter: { mode: 'off', ids: [] },
+        history: [],
+        forward: [],
+      },
+    });
+  }
+  function rowDelete(task: Task) {
+    const req: ConfirmRequest = {
+      title: `Delete "${task.title}"?`,
+      body: 'This cannot be undone. The folder itself is not touched.',
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        await deleteTask(task.id);
+        dispatch({ type: 'setStatus', msg: 'task deleted' });
+      },
+    };
+    window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
+  }
+  function rowSetDueQuick(task: Task, value: string | null) {
+    void updateTask(task.id, { due_at: value });
+    dispatch({
+      type: 'setStatus',
+      msg: value === null ? 'cleared due' : `due ${value} · ${task.title}`,
+    });
+  }
+
   function rowClick(e: React.MouseEvent, task: Task) {
     if (e.shiftKey && lastSelectedRef.current) {
       e.preventDefault();
@@ -442,6 +531,28 @@ export function TasksPage() {
           },
         };
         window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
+      },
+      'fm:tasks:edit': () => {
+        const tasks = targetTasks();
+        if (tasks.length === 0) {
+          dispatch({ type: 'setStatus', msg: 'no task targeted' });
+          return;
+        }
+        // Edit dialog handles one task at a time. Multi-select edit would
+        // require a bulk-edit dialog — opt for opening the first one and
+        // hint at the limitation.
+        if (tasks.length > 1) {
+          dispatch({
+            type: 'setStatus',
+            msg: `editing first of ${tasks.length} — edit dialog is single-task`,
+          });
+        }
+        openEdit(tasks[0]);
+      },
+      'fm:tasks:goto-folder': () => {
+        const tasks = targetTasks();
+        if (tasks.length === 0) return;
+        for (const t of tasks) rowGotoFolder(t);
       },
       'fm:tasks:open': () => {
         const tasks = targetTasks();
@@ -1014,12 +1125,103 @@ export function TasksPage() {
                     setCursorId(t.id);
                   }}
                   onClick={(e) => rowClick(e, t)}
+                  onCycleStatus={() => cycleStatus(t)}
+                  onMarkDone={() =>
+                    setStatus(
+                      t,
+                      t.status === 'done' || t.status === 'cancelled'
+                        ? 'pending'
+                        : 'done',
+                    )
+                  }
+                  onEdit={() => openEdit(t)}
+                  onOpenInTab={() => rowOpenInTab(t)}
+                  onKebab={(x, y) => setKebabFor({ task: t, x, y })}
                 />
               ))}
             </div>
           );
         })}
       </div>
+
+      {kebabFor && (
+        <RowKebabMenu
+          task={kebabFor.task}
+          x={kebabFor.x}
+          y={kebabFor.y}
+          onClose={() => setKebabFor(null)}
+          onAction={(action) => {
+            const t = kebabFor.task;
+            setKebabFor(null);
+            switch (action) {
+              case 'edit':
+                openEdit(t);
+                break;
+              case 'open-tab':
+                rowOpenInTab(t);
+                break;
+              case 'open-terminal':
+                void rowOpenTerminal(t);
+                break;
+              case 'mark-pending':
+                setStatus(t, 'pending');
+                break;
+              case 'mark-in-progress':
+                setStatus(t, 'in_progress');
+                break;
+              case 'mark-done':
+                setStatus(t, 'done');
+                break;
+              case 'mark-cancelled':
+                setStatus(t, 'cancelled');
+                break;
+              case 'pin':
+                void updateTask(t.id, { pinned: !t.pinned });
+                break;
+              case 'goto-folder':
+                rowGotoFolder(t);
+                break;
+              case 'due-today':
+                rowSetDueQuick(t, todayISO());
+                break;
+              case 'due-tomorrow': {
+                const d = new Date();
+                d.setDate(d.getDate() + 1);
+                rowSetDueQuick(
+                  t,
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+                );
+                break;
+              }
+              case 'due-friday': {
+                const d = new Date();
+                const offset = (5 - d.getDay() + 7) % 7 || 7;
+                d.setDate(d.getDate() + offset);
+                rowSetDueQuick(
+                  t,
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+                );
+                break;
+              }
+              case 'due-next-week': {
+                const d = new Date();
+                d.setDate(d.getDate() + 7);
+                rowSetDueQuick(
+                  t,
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+                );
+                break;
+              }
+              case 'due-clear':
+                rowSetDueQuick(t, null);
+                break;
+              case 'delete':
+                rowDelete(t);
+                break;
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1030,12 +1232,22 @@ function TaskRow({
   cursor,
   onCheckbox,
   onClick,
+  onCycleStatus,
+  onMarkDone,
+  onEdit,
+  onOpenInTab,
+  onKebab,
 }: {
   task: Task;
   selected: boolean;
   cursor: boolean;
   onCheckbox: () => void;
   onClick: (e: React.MouseEvent) => void;
+  onCycleStatus: () => void;
+  onMarkDone: () => void;
+  onEdit: () => void;
+  onOpenInTab: () => void;
+  onKebab: (x: number, y: number) => void;
 }) {
   const today = todayISO();
   const overdue =
@@ -1044,6 +1256,7 @@ function TaskRow({
     task.status !== 'done' &&
     task.status !== 'cancelled';
   const orphan = isOrphanedLooking(task.folder);
+  const isClosed = task.status === 'done' || task.status === 'cancelled';
 
   return (
     <div
@@ -1053,7 +1266,7 @@ function TaskRow({
         'tasks__row',
         selected && 'tasks__row--selected',
         cursor && 'tasks__row--cursor',
-        (task.status === 'done' || task.status === 'cancelled') && 'tasks__row--muted',
+        isClosed && 'tasks__row--muted',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -1112,9 +1325,183 @@ function TaskRow({
         </div>
       </div>
 
-      <span className={`tasks__status tasks__status--${task.status}`}>
+      <button
+        type="button"
+        className={`tasks__status tasks__status--${task.status} tasks__status--button`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onCycleStatus();
+        }}
+        title="Click to cycle status"
+      >
         {STATUS_LABEL[task.status]}
-      </span>
+      </button>
+
+      <div
+        className="tasks__row-actions"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className={[
+            'tasks__row-btn',
+            isClosed ? 'tasks__row-btn--reopen' : 'tasks__row-btn--done',
+          ].join(' ')}
+          onClick={onMarkDone}
+          title={isClosed ? 'Reopen (back to pending)' : 'Mark done'}
+          aria-label={isClosed ? 'Reopen' : 'Mark done'}
+        >
+          {isClosed ? '↺' : '✓'}
+        </button>
+        <button
+          type="button"
+          className="tasks__row-btn"
+          onClick={onEdit}
+          title="Edit task"
+          aria-label="Edit"
+        >
+          ✎
+        </button>
+        <button
+          type="button"
+          className="tasks__row-btn"
+          onClick={onOpenInTab}
+          title="Open in task tab"
+          aria-label="Open in tab"
+        >
+          ↗
+        </button>
+        <button
+          type="button"
+          className="tasks__row-btn"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            onKebab(r.right, r.bottom);
+          }}
+          title="More actions"
+          aria-label="More"
+          aria-haspopup="menu"
+        >
+          ⋮
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// fm-yi85 — per-row "more actions" popover. Mirrors what the verb prompt
+// can do, but in pointer-friendly form for users who want a discoverable
+// menu without remembering verb names. Each item operates on the single
+// row's task — bulk actions go through the chip prompt against the
+// selection.
+function RowKebabMenu({
+  task,
+  x,
+  y,
+  onClose,
+  onAction,
+}: {
+  task: Task;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onAction: (action: string) => void;
+}) {
+  // Outside-click + Esc dismiss.
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('.tasks__kebab')) return;
+      onClose();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    }
+    window.addEventListener('mousedown', onDoc);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  // Clamp to viewport so the menu doesn't fall off the bottom-right.
+  const style = {
+    left: Math.min(x, window.innerWidth - 240),
+    top: Math.min(y, window.innerHeight - 460),
+  };
+
+  const isClosed = task.status === 'done' || task.status === 'cancelled';
+
+  return (
+    <div className="tasks__kebab" style={style} role="menu">
+      <button className="tasks__kebab-item" onClick={() => onAction('edit')}>
+        Edit…
+      </button>
+      <button className="tasks__kebab-item" onClick={() => onAction('open-tab')}>
+        Open in task tab
+      </button>
+      <button className="tasks__kebab-item" onClick={() => onAction('open-terminal')}>
+        Open terminal
+      </button>
+      <div className="tasks__kebab-sep" />
+      <div className="tasks__kebab-section">Status</div>
+      {task.status !== 'pending' && (
+        <button className="tasks__kebab-item" onClick={() => onAction('mark-pending')}>
+          Pending
+        </button>
+      )}
+      {task.status !== 'in_progress' && (
+        <button className="tasks__kebab-item" onClick={() => onAction('mark-in-progress')}>
+          In progress
+        </button>
+      )}
+      {!isClosed && (
+        <button className="tasks__kebab-item" onClick={() => onAction('mark-done')}>
+          Done
+        </button>
+      )}
+      {task.status !== 'cancelled' && (
+        <button className="tasks__kebab-item" onClick={() => onAction('mark-cancelled')}>
+          Cancelled
+        </button>
+      )}
+      <div className="tasks__kebab-sep" />
+      <div className="tasks__kebab-section">Set due</div>
+      <button className="tasks__kebab-item" onClick={() => onAction('due-today')}>
+        Today
+      </button>
+      <button className="tasks__kebab-item" onClick={() => onAction('due-tomorrow')}>
+        Tomorrow
+      </button>
+      <button className="tasks__kebab-item" onClick={() => onAction('due-friday')}>
+        Friday
+      </button>
+      <button className="tasks__kebab-item" onClick={() => onAction('due-next-week')}>
+        Next week
+      </button>
+      {task.due_at && (
+        <button className="tasks__kebab-item" onClick={() => onAction('due-clear')}>
+          Clear due date
+        </button>
+      )}
+      <div className="tasks__kebab-sep" />
+      <button className="tasks__kebab-item" onClick={() => onAction('pin')}>
+        {task.pinned ? 'Unpin' : 'Pin'}
+      </button>
+      <button className="tasks__kebab-item" onClick={() => onAction('goto-folder')}>
+        Go to folder
+      </button>
+      <div className="tasks__kebab-sep" />
+      <button
+        className="tasks__kebab-item tasks__kebab-item--danger"
+        onClick={() => onAction('delete')}
+      >
+        Delete…
+      </button>
     </div>
   );
 }
