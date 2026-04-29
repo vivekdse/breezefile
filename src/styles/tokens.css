@@ -169,6 +169,33 @@
   --shadow-1: 0 1px 2px rgba(0, 8, 20, 0.5);
   --shadow-2: 0 12px 32px rgba(0, 8, 20, 0.55),
               0 0 0 1px rgba(127, 212, 199, 0.04);
+
+  /* ------------- Terminal ANSI palette (dark-bg defaults) -------------
+     The xterm.js terminal reads these to render ANSI output. Defaults
+     here target a dark --panel (~#1a–#30 luminance). Any theme whose
+     --panel goes light MUST override this whole block (see paper block
+     below). Themes with a distinctive palette (dusk, plum) can also
+     retune individual slots to harmonize.
+
+     Floor for `black` and `bright-black`: ~3:1 contrast against --panel.
+     Hardcoded near-black (#1d1f21) was the bug — invisible on plum/dusk
+     panels. Riff is One Dark, lifted slightly. */
+  --term-black:          #3a3f4b;
+  --term-red:            #e06c75;
+  --term-green:          #98c379;
+  --term-yellow:         #e5c07b;
+  --term-blue:           #61afef;
+  --term-magenta:        #c678dd;
+  --term-cyan:           #56b6c2;
+  --term-white:          #c8ccd4;
+  --term-bright-black:   #5c6370;
+  --term-bright-red:     #ef8a8e;
+  --term-bright-green:   #b6e08a;
+  --term-bright-yellow:  #f7d488;
+  --term-bright-blue:    #7cc4ff;
+  --term-bright-magenta: #d391e8;
+  --term-bright-cyan:    #7adcd8;
+  --term-bright-white:   #f0f4f8;
 }
 
 /* Light theme — Mountain morning mist: the same alpine scene at dawn,
@@ -247,6 +274,28 @@
   --grain-g: 0.09;
   --grain-b: 0.07;
   --accent-ink: #fff9ea;
+
+  /* Terminal ANSI — light-panel overrides. Inherited by every paper-family
+     theme (paper/pastel/peony/clay/moss/linen/rose/dawn) and by the alpine
+     'light' theme since none of them override --panel away from a light
+     surface. Bright-white inverts to dark so apps that emit bright-white
+     for primary text remain readable on a light bg. */
+  --term-black:          #1a1a1a;
+  --term-red:            #c0392b;
+  --term-green:          #2e7d32;
+  --term-yellow:         #8a6d00;
+  --term-blue:           #1565c0;
+  --term-magenta:        #8e24aa;
+  --term-cyan:           #00838f;
+  --term-white:          #5a5a5a;
+  --term-bright-black:   #4a4a4a;
+  --term-bright-red:     #d33b2c;
+  --term-bright-green:   #388e3c;
+  --term-bright-yellow:  #a07000;
+  --term-bright-blue:    #1976d2;
+  --term-bright-magenta: #ab47bc;
+  --term-bright-cyan:    #00acc1;
+  --term-bright-white:   #0e0e0e;
 }
 
 :root[data-theme='pastel'] {
@@ -434,6 +483,26 @@
   --grain-g: 0.11;
   --grain-b: 0.14;
   --accent-ink: #2a1830;
+
+  /* Terminal ANSI — Plum's chrome (--panel #2a1a30) is dark even though
+     the canvas is light. The terminal lives on --panel, so re-assert
+     dark-bg ANSI here, tuned slightly toward the magenta accent. */
+  --term-black:          #9a82a0;
+  --term-red:            #ef8a8e;
+  --term-green:          #a0d088;
+  --term-yellow:         #e6c07b;
+  --term-blue:           #9bb8e8;
+  --term-magenta:        #e06aac;
+  --term-cyan:           #7dd3c8;
+  --term-white:          #d8c6d2;
+  --term-bright-black:   #b89dbe;
+  --term-bright-red:     #ff9da0;
+  --term-bright-green:   #b8dc94;
+  --term-bright-yellow:  #f5d088;
+  --term-bright-blue:    #b8d0f0;
+  --term-bright-magenta: #f7b8d1;
+  --term-bright-cyan:    #a0e0d4;
+  --term-bright-white:   #f5e6f0;
 }
 
 /* Dusk — dark mode. Invariant holds: center still darker than chrome. */
@@ -457,6 +526,29 @@
   --grain-g: 0.8;
   --grain-b: 0.85;
   --accent-ink: #2d1e0a;
+
+  /* Terminal ANSI — Dusk has a warm peach/plum panel. Re-establish
+     dark-bg ANSI (since :root paper block writes light defaults), and
+     retune `black` warmer (so it sits in-palette on the plum panel
+     instead of looking like cold ash) and `blue/cyan` toward the
+     theme's --accent-2 glacier teal so cool ANSI text doesn't clash
+     with the peach accent. */
+  --term-black:          #9a829a;
+  --term-red:            #ef8a8e;
+  --term-green:          #a8d18a;
+  --term-yellow:         #f0c987;
+  --term-blue:           #8fc7e8;
+  --term-magenta:        #d6a8e0;
+  --term-cyan:           #7fd4c7;
+  --term-white:          #d6c6cc;
+  --term-bright-black:   #b89db4;
+  --term-bright-red:     #ff9da0;
+  --term-bright-green:   #c0e09a;
+  --term-bright-yellow:  #ffd9a0;
+  --term-bright-blue:    #b3dcf2;
+  --term-bright-magenta: #e6c0ec;
+  --term-bright-cyan:    #a3e2d8;
+  --term-bright-white:   #f5e8ec;
 }
 
 /* Respect user's motion preference — collapse all durations to ~instant.

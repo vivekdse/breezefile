@@ -61,33 +61,33 @@ function readThemeFromDoc(): ITheme {
   const bg = v('--panel', v('--bg-1', '#161819'));
   const fg = v('--text-on-panel', v('--ink', '#e6e6e6'));
   const accent = v('--accent', '#7aa2f7');
-  const muted = v('--text-muted', v('--fg-2', '#9aa0a6'));
+  // ANSI palette is sourced from CSS tokens (`--term-*`) so each theme
+  // can tune contrast against its --panel and harmonize hues. Defaults
+  // here are the dark-bg One Dark riff defined in tokens.css :root; they
+  // exist only so the terminal still renders if a theme forgets a slot.
   return {
     background: bg,
     foreground: fg,
     cursor: accent,
     cursorAccent: bg,
     selectionBackground: accent + '40',
-    // ANSI defaults — kept consistent across themes so program output
-    // doesn't shift hue when the user toggles dark/light.
-    black: '#1d1f21',
-    red: '#cc6666',
-    green: '#b5bd68',
-    yellow: '#f0c674',
-    blue: '#81a2be',
-    magenta: '#b294bb',
-    cyan: '#8abeb7',
-    white: '#c5c8c6',
-    brightBlack: '#666',
-    brightRed: '#d54e53',
-    brightGreen: '#b9ca4a',
-    brightYellow: '#e7c547',
-    brightBlue: '#7aa6da',
-    brightMagenta: '#c397d8',
-    brightCyan: '#70c0b1',
-    brightWhite: '#eaeaea',
+    black:         v('--term-black',          '#3a3f4b'),
+    red:           v('--term-red',            '#e06c75'),
+    green:         v('--term-green',          '#98c379'),
+    yellow:        v('--term-yellow',         '#e5c07b'),
+    blue:          v('--term-blue',           '#61afef'),
+    magenta:       v('--term-magenta',        '#c678dd'),
+    cyan:          v('--term-cyan',           '#56b6c2'),
+    white:         v('--term-white',          '#c8ccd4'),
+    brightBlack:   v('--term-bright-black',   '#5c6370'),
+    brightRed:     v('--term-bright-red',     '#ef8a8e'),
+    brightGreen:   v('--term-bright-green',   '#b6e08a'),
+    brightYellow:  v('--term-bright-yellow',  '#f7d488'),
+    brightBlue:    v('--term-bright-blue',    '#7cc4ff'),
+    brightMagenta: v('--term-bright-magenta', '#d391e8'),
+    brightCyan:    v('--term-bright-cyan',    '#7adcd8'),
+    brightWhite:   v('--term-bright-white',   '#f0f4f8'),
   };
-  void muted; // reserved for future statusline accents
 }
 
 export function Terminal({
@@ -140,6 +140,13 @@ export function Terminal({
       // attach to — the default off-screen aria-hidden textarea gets
       // skipped. Same approach VS Code's integrated terminal uses.
       screenReaderMode: true,
+      // Auto-lift any rendered glyph to at least this contrast against
+      // the cell bg. Without this, programs that emit truecolor/256-color
+      // sequences (Claude Code's diff output, dim SGR, etc.) bypass our
+      // ANSI palette and can render unreadable dark-on-dark text on
+      // Dusk / Plum panels. xterm.js shifts the fg toward the bg's
+      // inverse luminance to satisfy the floor.
+      minimumContrastRatio: 4.5,
       theme: readThemeFromDoc(),
     });
     const fit = new FitAddon();
