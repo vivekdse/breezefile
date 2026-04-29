@@ -190,6 +190,7 @@ type Action =
   | { type: 'replaceTab'; index: number; tab: Tab }
   | { type: 'newTab'; tab: Tab }
   | { type: 'openTaskTab'; taskId: string; folder: string; focus?: boolean }
+  | { type: 'openTasksTab'; focus?: boolean }
   | { type: 'setTabTaskId'; index: number; taskId: string | null }
   | { type: 'closeTab'; index: number }
   | { type: 'selectTab'; index: number }
@@ -232,7 +233,7 @@ type Action =
 
 function makeTab(
   path: string,
-  opts?: { kind?: 'folder' | 'task'; taskId?: string | null },
+  opts?: { kind?: 'folder' | 'task' | 'tasks'; taskId?: string | null },
 ): Tab {
   return {
     id: crypto.randomUUID(),
@@ -318,6 +319,23 @@ function reducer(s: State, a: Action): State {
         return a.focus !== false ? { ...s, activeTab: existing } : s;
       }
       const tab = makeTab(a.folder, { kind: 'task', taskId: a.taskId });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'openTasksTab': {
+      // fm-yi85 — singleton tasks-overview tab. Focus existing if present;
+      // otherwise spawn one rooted at the active tab's cwd (any path works,
+      // the trail is unused for kind='tasks' rendering).
+      const existing = s.tabs.findIndex((t) => t.kind === 'tasks');
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const seedCwd =
+        s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
+      const tab = makeTab(seedCwd, { kind: 'tasks' });
       return {
         ...s,
         tabs: [...s.tabs, tab],

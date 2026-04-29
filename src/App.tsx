@@ -74,10 +74,9 @@ function Shell() {
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskDialogRequest | null>(null);
-  // fm-kaa — full-screen tasks list. Opened via the `tasks` verb or the
-  // (future) sidebar "See all" link. Sits below ConfirmDialog so the
-  // bulk-delete confirm renders on top.
-  const [tasksPageOpen, setTasksPageOpen] = useState(false);
+  // fm-kaa / fm-yi85 — Tasks overview is now a singleton tab (kind='tasks'),
+  // not a modal. The :tasks verb and the sidebar "See all" link dispatch
+  // openTasksTab; rendering is inline in the main slot.
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -388,7 +387,7 @@ function Shell() {
       if (detail) setTaskDialog(detail);
     }
     function onOpenTasksPage() {
-      setTasksPageOpen(true);
+      dispatch({ type: 'openTasksTab' });
     }
     function onOpenSettings() {
       setSettingsOpen(true);
@@ -460,6 +459,7 @@ function Shell() {
   // to preview from a task. The terminal pane (when attached) still
   // takes over via TerminalSplit, identical to folder tabs.
   const isTaskTab = tab.kind === 'task';
+  const isTasksTab = tab.kind === 'tasks';
 
   return (
     <OverlayCtx.Provider value={overlayApi}><div
@@ -478,7 +478,7 @@ function Shell() {
           and let the task header own the top edge of the main pane. */}
       <div className="shell__chrome">
         <Tabbar />
-        {!isTaskTab && (
+        {!isTaskTab && !isTasksTab && (
           <Pathbar
             path={tab.trail[tab.trail.length - 1]}
             onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
@@ -502,6 +502,8 @@ function Shell() {
         >
           {isTaskTab ? (
             <TaskShell tabIndex={state.activeTab} />
+          ) : isTasksTab ? (
+            <TasksPage />
           ) : (
             <>
               <FolderHeader />
@@ -516,7 +518,7 @@ function Shell() {
           user can browse, toggle, and combine tags without leaving the file
           list. Hidden in terminal mode (fm-jtu) and in task mode (no
           file selected = nothing to preview). */}
-      {!tab.terminal && !isTaskTab && (
+      {!tab.terminal && !isTaskTab && !isTasksTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
       {/* status slot — ModeLine stacked above Statusbar. Hidden in
@@ -663,9 +665,6 @@ function Shell() {
         <TagPicker mode={tagPicker} onClose={() => setTagPicker(null)} />
       )}
       {helpOpen && <HelpTour onClose={() => setHelpOpen(false)} />}
-      {tasksPageOpen && (
-        <TasksPage onClose={() => setTasksPageOpen(false)} />
-      )}
       {taskDialog && (
         <TaskDialog
           {...taskDialog}

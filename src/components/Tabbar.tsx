@@ -82,7 +82,10 @@ export function Tabbar() {
   const folderTabs: Array<{ tab: Tab; index: number }> = [];
   const taskTabs: Array<{ tab: Tab; index: number }> = [];
   state.tabs.forEach((tab, index) => {
-    if (tab.kind === 'task') taskTabs.push({ tab, index });
+    // fm-yi85 — tasks-overview tab lives in the task zone too. The visual
+    // grouping reads as "files on the left, task surfaces on the right",
+    // and the All-tasks tab is the natural pivot point between those.
+    if (tab.kind === 'task' || tab.kind === 'tasks') taskTabs.push({ tab, index });
     else folderTabs.push({ tab, index });
   });
 
@@ -102,11 +105,15 @@ export function Tabbar() {
     const cwd = t.trail[t.trail.length - 1];
     const folderName = basename(cwd) || '/';
     const isTask = t.kind === 'task';
+    const isTasksOverview = t.kind === 'tasks';
     // Defensive: a task tab without a resolvable id/title falls back to
     // the folder basename, then to the literal "Task" — never crash.
-    const label = isTask
-      ? (t.taskId && taskById.get(t.taskId)) || folderName || 'Task'
-      : folderName;
+    // fm-yi85 — tasks-overview tab gets a fixed "All tasks" label.
+    const label = isTasksOverview
+      ? 'All tasks'
+      : isTask
+        ? (t.taskId && taskById.get(t.taskId)) || folderName || 'Task'
+        : folderName;
     const active = i === state.activeTab;
     const canClose = state.tabs.length > 1;
     const isDropTarget = dropIdx === i;
@@ -114,7 +121,11 @@ export function Tabbar() {
     const attn = t.terminal?.attention;
     const cls = [
       'tabbar__tab',
-      isTask ? 'tabbar__tab--task' : 'tabbar__tab--folder',
+      isTasksOverview
+        ? 'tabbar__tab--tasks-overview'
+        : isTask
+          ? 'tabbar__tab--task'
+          : 'tabbar__tab--folder',
       active ? 'tabbar__tab--active' : '',
       isDropTarget ? 'tabbar__tab--drop' : '',
       attn ? `tabbar__tab--attn-${attn}` : '',
@@ -130,8 +141,9 @@ export function Tabbar() {
             ? ' · terminal alert'
             : '';
     const shortcutHint = pos <= 9 ? ` (${modKey}${pos})` : '';
-    const baseTitle =
-      (isTask ? `${label} — ${cwd}` : cwd) + shortcutHint;
+    const baseTitle = isTasksOverview
+      ? 'All tasks' + shortcutHint
+      : (isTask ? `${label} — ${cwd}` : cwd) + shortcutHint;
     return (
       <button
         key={t.id}

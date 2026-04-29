@@ -34,7 +34,7 @@ import {
   pathJoin,
   visibleEntries,
 } from '../actions';
-import type { CustomTag, Entry, SortKey, TagFilter, TagPaths } from '../types';
+import type { CustomTag, Entry, SortKey, TabKind, TagFilter, TagPaths } from '../types';
 import { getAllTags } from '../tags';
 import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
 import './ChipPrompt.css';
@@ -85,6 +85,11 @@ type Ctx = {
   // The active tab's combination filter — when on, tagTargets() falls back
   // to the filtered-visible set instead of just the focused row.
   tagFilter: TagFilter;
+  // fm-yi85 — kind of the active tab. Drives the verb-availability gate
+  // (file verbs hidden on tasks tab; tasks verbs hidden on folder tabs);
+  // also lets the synthesized launcher verbs route into bulk-on-selection
+  // mode when the user is on the Tasks tab.
+  activeTabKind: TabKind;
 };
 
 type Verb =
@@ -160,6 +165,13 @@ type VerbDef = {
   // set this to false so the prompt in task mode reads as "operate on
   // the task," not "operate on a folder."
   availableInTaskMode?: boolean;
+  // fm-yi85 — restrict a verb to specific tab kinds. Absent = visible on
+  // folder tabs (subject to availableInTaskMode for task tabs); present =
+  // verb is ONLY available when the active tab kind is in this set. Used
+  // by the tasks-overview tab to keep file verbs out of the prompt and
+  // gate the new task-bulk verbs (:done, :due, :open, …) on the right
+  // surface.
+  tabKinds?: TabKind[];
 };
 
 type SlotDef = {
@@ -1660,7 +1672,331 @@ const VERBS: VerbDef[] = [
       }
     },
   },
+  // ──────────────────────────────────────────────────────────────────────
+  // fm-yi85 — Tasks-tab verbs. All gated by tabKinds: ['tasks'] so they
+  // appear only when the user is on the singleton Tasks overview tab.
+  // The actual mutation runs in TasksPage's window-event listeners — these
+  // verbs are thin dispatchers that fire fm:tasks:* events with a payload.
+  // Why event-based rather than a shared store slice: TasksPage owns the
+  // selection / cursor / filter state local to itself; verbs shouldn't
+  // need to crawl that state to act, just say "do X to whatever's
+  // selected" and let the page resolve it.
+  // ──────────────────────────────────────────────────────────────────────
+  ...buildTaskVerbs(),
 ];
+
+function buildTaskVerbs(): VerbDef[] {
+  const fire = (name: string, detail?: unknown) =>
+    window.dispatchEvent(new CustomEvent(name, { detail }));
+
+  function dateOptions(): Option[] {
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    const friday = new Date();
+    friday.setDate(today.getDate() + ((5 - today.getDay() + 7) % 7 || 7));
+    const nextWeek = new Date();
+    nextWeek.setDate(today.getDate() + 7);
+    const nextMonth = new Date();
+    nextMonth.setMonth(today.getMonth() + 1);
+    return [
+      { id: iso(today), label: 'Today', detail: iso(today), available: true },
+      { id: iso(tomorrow), label: 'Tomorrow', detail: iso(tomorrow), available: true },
+      { id: iso(friday), label: 'Friday', detail: iso(friday), available: true },
+      { id: iso(nextWeek), label: 'Next week', detail: iso(nextWeek), available: true },
+      { id: iso(nextMonth), label: 'Next month', detail: iso(nextMonth), available: true },
+      { id: '__pick__', label: 'Pick a date…', detail: 'opens inline date picker', available: true },
+      { id: '', label: 'Clear', detail: 'unset', available: true },
+    ];
+  }
+
+  return [
+    {
+      id: 'done' as Verb,
+      label: 'Mark done',
+      aliases: ['done', 'complete', 'finish', 'close'],
+      icon: '✓',
+      describe: () => 'Mark selected tasks as done',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:done');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'reopen' as Verb,
+      label: 'Reopen',
+      aliases: ['reopen', 'pending', 'undone'],
+      icon: '↺',
+      describe: () => 'Set selected tasks back to pending',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:reopen');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'in-progress' as Verb,
+      label: 'In progress',
+      aliases: ['in-progress', 'doing', 'start-work', 'wip', 'active'],
+      icon: '◐',
+      describe: () => 'Mark selected tasks in progress',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:in-progress');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'cancel' as Verb,
+      label: 'Cancel task',
+      aliases: ['cancel', 'cancelled', 'abandon', 'drop'],
+      icon: '⊘',
+      describe: () => 'Mark selected tasks cancelled',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:cancel');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'pin-task' as Verb,
+      label: 'Pin task',
+      aliases: ['pin', 'pin-task', 'star'],
+      icon: '★',
+      describe: () => 'Pin selected tasks',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:pin');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'unpin-task' as Verb,
+      label: 'Unpin task',
+      aliases: ['unpin', 'unpin-task', 'unstar'],
+      icon: '☆',
+      describe: () => 'Unpin selected tasks',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:unpin');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'due' as Verb,
+      label: 'Set due',
+      aliases: ['due', 'due-date', 'when'],
+      icon: '⏰',
+      describe: () => 'Set due date on selected tasks',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [{ label: 'When', getOptions: () => dateOptions() }],
+      execute: (_c, [pick], api) => {
+        if (pick === '__pick__') fire('fm:tasks:due');
+        else fire('fm:tasks:due', { value: pick });
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'start' as Verb,
+      label: 'Set start',
+      aliases: ['start', 'start-date', 'snooze'],
+      icon: '▶',
+      describe: () => 'Set start date on selected tasks',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [{ label: 'When', getOptions: () => dateOptions() }],
+      execute: (_c, [pick], api) => {
+        if (pick === '__pick__') fire('fm:tasks:start');
+        else fire('fm:tasks:start', { value: pick });
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'delete-task' as Verb,
+      label: 'Delete task',
+      aliases: ['delete', 'remove', 'rm', 'trash'],
+      icon: '⌫',
+      describe: () => 'Delete selected tasks (confirms)',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:delete');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'open-task' as Verb,
+      label: 'Open task',
+      aliases: ['open', 'open-task', 'tab', 'go'],
+      icon: '↗',
+      describe: () => 'Open selected tasks in their own task tabs',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:open');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'terminal-tasks' as Verb,
+      label: 'Open terminal',
+      aliases: ['terminal', 'term', 'shell'],
+      icon: '$_',
+      describe: () => 'Open a terminal in each selected task’s folder',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:terminal');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'group' as Verb,
+      label: 'Group by',
+      aliases: ['group', 'groupby', 'organize'],
+      icon: '⊞',
+      describe: () => 'Group the task list',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [
+        {
+          label: 'By',
+          getOptions: () => [
+            { id: 'folder', label: 'Folder', detail: 'group by anchored folder', available: true },
+            { id: 'status', label: 'Status', detail: 'group by status', available: true },
+            { id: 'due', label: 'Due', detail: 'overdue · today · this week · later · none', available: true },
+            { id: 'flat', label: 'Flat', detail: 'no grouping', available: true },
+          ],
+        },
+      ],
+      execute: (_c, [v], api) => {
+        fire('fm:tasks:group', { value: v });
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'sort-tasks' as Verb,
+      label: 'Sort tasks',
+      aliases: ['sort', 'sortby', 'order'],
+      icon: '⇅',
+      describe: () => 'Sort the task list',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [
+        {
+          label: 'By',
+          getOptions: () => [
+            { id: 'due', label: 'Due ↑', detail: 'soonest first', available: true },
+            { id: 'start', label: 'Start ↑', detail: 'soonest first', available: true },
+            { id: 'created', label: 'Created ↓', detail: 'newest first', available: true },
+            { id: 'alpha', label: 'Title A→Z', detail: 'alphabetical', available: true },
+          ],
+        },
+      ],
+      execute: (_c, [v], api) => {
+        fire('fm:tasks:sort', { value: v });
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'filter-tasks' as Verb,
+      label: 'Filter tasks',
+      aliases: ['filter', 'view', 'narrow'],
+      icon: '⌖',
+      describe: () => 'Narrow the task list to a derived view',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [
+        {
+          label: 'View',
+          getOptions: () => [
+            { id: 'all', label: 'All', detail: 'no derived filter', available: true },
+            { id: 'this_week', label: 'Due this week', detail: 'due_at within 7 days', available: true },
+            { id: 'overdue', label: 'Overdue', detail: 'past due, not done', available: true },
+            { id: 'scheduled', label: 'Scheduled', detail: 'start_at in the future', available: true },
+            { id: 'orphaned', label: 'Orphaned', detail: 'folder may not exist', available: true },
+          ],
+        },
+      ],
+      execute: (_c, [v], api) => {
+        fire('fm:tasks:filter', { value: v });
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'show-completed' as Verb,
+      label: 'Show completed',
+      aliases: ['show-completed', 'show-done', 'include-done'],
+      icon: '👁',
+      describe: () => 'Include done and cancelled tasks',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:show-completed');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'hide-completed' as Verb,
+      label: 'Hide completed',
+      aliases: ['hide-completed', 'hide-done', 'exclude-done'],
+      icon: '⊝',
+      describe: () => 'Exclude done and cancelled tasks',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:hide-completed');
+        api.closeOverlay();
+      },
+    },
+    {
+      id: 'select-tasks' as Verb,
+      label: 'Select',
+      aliases: ['select', 'pick', 'mark'],
+      icon: '☑',
+      describe: () => 'Select a subset of visible tasks',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [
+        {
+          label: 'What',
+          getOptions: () => [
+            { id: 'all', label: 'All', detail: 'every visible task', available: true },
+            { id: 'none', label: 'None', detail: 'clear selection', available: true },
+            { id: 'invert', label: 'Invert', detail: 'flip every selection', available: true },
+            { id: 'overdue', label: 'Overdue', detail: 'past due, not done', available: true },
+            { id: 'pinned', label: 'Pinned', detail: 'starred only', available: true },
+          ],
+        },
+      ],
+      execute: (_c, [what], api) => {
+        fire('fm:tasks:select', { what });
+        api.closeOverlay();
+      },
+    },
+  ];
+}
 
 // Recognized archive extensions for the Extract verb's availability guard.
 // Mirrors the format table in electron/ipc.ts `archiveKind` — keep in sync.
@@ -1738,6 +2074,17 @@ function synthesizeLauncherVerbs(
         : [],
       execute: async (c, picks, api) => {
         const variantId = hasVariants ? picks[0] : undefined;
+        // fm-yi85 — on the tasks-overview tab, the active "target" is the
+        // selected task list (or the cursor row) — not a single open
+        // task. Hand off to TasksPage via fm:tasks:launcher so it can
+        // open one task tab per target and invoke the launcher in each.
+        if (c.activeTabKind === 'tasks') {
+          window.dispatchEvent(
+            new CustomEvent('fm:tasks:launcher', { detail: { launcherId: l.id, variantId } }),
+          );
+          api.closeOverlay();
+          return;
+        }
         // fm-mph — when active tab is a task tab, fetch its task and
         // pass through to invokeLauncher so the verb path matches the
         // TaskShell card path (env + sidecar + pre-typed context).
@@ -2102,6 +2449,7 @@ export function ChipPrompt({
       customTags: state.customTags,
       tagPaths: state.tagPaths,
       tagFilter: activeTab.tagFilter,
+      activeTabKind: activeTab.kind,
     };
   }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, launchers, state.customTags, state.tagPaths]);
 
@@ -2122,17 +2470,25 @@ export function ChipPrompt({
   // `availableInTaskMode` flag defaults to true (omitted = visible);
   // file-management verbs opt out by setting it false.
   const inTaskMode = activeTab.kind === 'task';
+  const inTasksTab = activeTab.kind === 'tasks';
   const effectiveVerbs: VerbDef[] = useMemo(
     () => {
       let base = tasksEnabled
         ? VERBS
         : VERBS.filter((v) => v.id !== 'task' && v.id !== 'tasks');
-      if (inTaskMode) {
-        base = base.filter((v) => v.availableInTaskMode !== false);
-      }
+      // fm-yi85 — tabKinds is an allowlist when present. When absent the
+      // verb falls back to availableInTaskMode for tab-kind gating: a verb
+      // okay-in-task-mode is also okay on the tasks-overview tab (settings,
+      // help, switch-tab, etc.), and file-management verbs that opt out of
+      // task mode also opt out of tasks mode.
+      base = base.filter((v) => {
+        if (v.tabKinds) return v.tabKinds.includes(activeTab.kind);
+        if (inTasksTab || inTaskMode) return v.availableInTaskMode !== false;
+        return true;
+      });
       return [...base, ...synthesizeLauncherVerbs(launchers)];
     },
-    [launchers, tasksEnabled, inTaskMode],
+    [launchers, tasksEnabled, inTaskMode, inTasksTab, activeTab.kind],
   );
 
   // Build options for current state

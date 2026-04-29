@@ -1,25 +1,28 @@
-// fm-kaa — Full-screen Tasks page.
+// fm-yi85 — Tasks overview, rendered inline as a singleton tab (kind='tasks').
 //
-// Why: the sidebar's task slot caps at ~10 entries, which is fine for a
-// glanceable "what's next here" view but useless for cross-folder triage,
-// digging through completed work, or doing anything in bulk. This page is
-// the escape hatch — full filter set, search across title+notes, sort,
-// bulk operations. Opened by the `tasks` verb or (eventually) the
-// sidebar's "See all" link.
+// Why inline (was modal kaa): the modal divorced tasks from the chip
+// prompt and side panels. Inline puts tasks on the same footing as folder
+// tabs: the prompt is right there, side panels stay visible, filters
+// persist while the user pivots. The ChipPrompt fires `fm:tasks:*`
+// custom events for verb-driven actions; we listen and act on the
+// current selection (or the cursor row when nothing is selected).
 //
-// Wiring: mounted in App.tsx behind an fm:openTasksPage event, sits at
-// z-index just under --z-overlay so the bulk-delete ConfirmDialog still
-// renders on top of us. SQL filtering for the easy slice (status, folder
-// substring, pinned, search), JS filtering for the derived predicates
-// (overdue, has-due-this-week, scheduled, orphaned).
+// Keyboard model — motion + selection only, no letter-as-verb:
+//   ↑/↓        move cursor
+//   Space      toggle selection on cursor row
+//   Shift+↑/↓  extend selection
+//   Enter      open edit
+//   /          focus search
+//
+// Everything else is a verb in the chip prompt.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useOverlayExit } from '../useOverlayExit';
 import { useStore } from '../store';
+import { fm } from '../bridge';
+import { invokeLauncher } from '../launchers';
+import { spawnTerminal } from '../terminalSpawn';
 import {
-  createTask as _createTask,
   deleteTask,
-  shiftISO,
   todayISO,
   updateTask,
   useTasks,
@@ -28,10 +31,8 @@ import type { ConfirmRequest } from './ConfirmDialog';
 import type { Task, TaskStatus } from '../types';
 import './TasksPage.css';
 
-void _createTask; // referenced in JSDoc above; keep import live
-void shiftISO;
-
 type SortKey = 'due' | 'start' | 'created' | 'alpha';
+type GroupKey = 'folder' | 'status' | 'due' | 'flat';
 type DerivedFilter = 'all' | 'this_week' | 'overdue' | 'scheduled' | 'orphaned';
 
 const ALL_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'done', 'cancelled'];
@@ -49,6 +50,13 @@ const SORT_LABEL: Record<SortKey, string> = {
   alpha: 'Title A→Z',
 };
 
+const GROUP_LABEL: Record<GroupKey, string> = {
+  folder: 'Folder',
+  status: 'Status',
+  due: 'Due',
+  flat: 'Flat',
+};
+
 const DERIVED_LABEL: Record<DerivedFilter, string> = {
   all: 'All',
   this_week: 'Due this week',
@@ -62,21 +70,18 @@ function homeRel(p: string): string {
     typeof window !== 'undefined' && (window as unknown as { fm?: { home?: string } }).fm?.home;
   if (home && p === home) return '~';
   if (home && p.startsWith(home + '/')) return '~' + p.slice(home.length);
-  // basename fallback
   const trimmed = p.replace(/\/+$/, '');
   const slash = trimmed.lastIndexOf('/');
   return slash >= 0 ? trimmed.slice(slash + 1) || '/' : trimmed;
 }
 
 function isOrphanedLooking(folder: string): boolean {
-  // v1: cheap heuristic — fm-7fu will replace this with a real fs.access.
   if (!folder) return true;
   if (folder.includes('/..')) return true;
   if (!folder.startsWith('/') && !folder.startsWith('~')) return true;
   return false;
 }
 
-/** Compare two ISO date strings, with nulls sorting last. */
 function cmpISO(a: string | null, b: string | null): number {
   if (a === b) return 0;
   if (!a) return 1;
@@ -103,11 +108,39 @@ function compareTasks(a: Task, b: Task, sort: SortKey): number {
   }
 }
 
-export function TasksPage({ onClose }: { onClose: () => void }) {
-  const { exit, state } = useOverlayExit(onClose);
-  const { navigateTo, dispatch } = useStore();
+function dueGroupKey(t: Task, today: string): string {
+  if (!t.due_at) return 'No due date';
+  if (t.due_at < today) return 'Overdue';
+  if (t.due_at === today) return 'Today';
+  // 7-day window
+  const d = new Date(today);
+  d.setDate(d.getDate() + 7);
+  const week = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (t.due_at <= week) return 'This week';
+  return 'Later';
+}
 
-  // Filter state
+function groupOrder(group: GroupKey, key: string): number {
+  if (group === 'due') {
+    const order = ['Overdue', 'Today', 'This week', 'Later', 'No due date'];
+    const i = order.indexOf(key);
+    return i < 0 ? 99 : i;
+  }
+  if (group === 'status') {
+    const order: TaskStatus[] = ['in_progress', 'pending', 'done', 'cancelled'];
+    const i = order.indexOf(key as TaskStatus);
+    return i < 0 ? 99 : i;
+  }
+  return 0;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+
+export function TasksPage() {
+  const { state, dispatch } = useStore();
+
+  // Filter / view state — persisted in localStorage so reopening lands on the
+  // user's last view rather than a hard reset.
   const [statuses, setStatuses] = useState<Set<TaskStatus>>(
     () => new Set<TaskStatus>(['pending', 'in_progress']),
   );
@@ -117,31 +150,29 @@ export function TasksPage({ onClose }: { onClose: () => void }) {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('due');
+  const [group, setGroup] = useState<GroupKey>('folder');
   const [showCompleted, setShowCompleted] = useState(false);
 
-  // Bulk-select state
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [cursorId, setCursorId] = useState<string | null>(null);
   const lastSelectedRef = useRef<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  // Context menu state
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; task: Task } | null>(null);
+  // Inline due/start picker state — opened via :due / :start verbs
+  const [datePicker, setDatePicker] = useState<{
+    field: 'due_at' | 'start_at';
+    value: string;
+  } | null>(null);
 
-  // Inline bulk-due picker
-  const [bulkDueOpen, setBulkDueOpen] = useState(false);
-  const [bulkDueValue, setBulkDueValue] = useState('');
-
-  // Debounce search input → search (150ms)
   useEffect(() => {
     const id = window.setTimeout(() => setSearch(searchInput.trim()), 150);
     return () => window.clearTimeout(id);
   }, [searchInput]);
 
-  // SQL slice — leave the derived filters off here; we apply them in-memory.
   const effectiveStatuses = useMemo<TaskStatus[] | undefined>(() => {
     if (statuses.size === 0) return undefined;
     if (showCompleted) return Array.from(statuses);
-    // Strip done/cancelled when "show completed" is off, regardless of
-    // what the user chip-toggled — the dedicated toggle wins.
     const arr = Array.from(statuses).filter((s) => s !== 'done' && s !== 'cancelled');
     return arr.length > 0 ? arr : undefined;
   }, [statuses, showCompleted]);
@@ -164,27 +195,20 @@ export function TasksPage({ onClose }: { onClose: () => void }) {
     const week = (() => {
       const d = new Date();
       d.setDate(d.getDate() + 7);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     })();
 
     const out = rawTasks.filter((t) => {
-      // showCompleted gate — defensive; effectiveStatuses already excludes
-      // when off, but a status set of {} returning everything could leak.
       if (!showCompleted && (t.status === 'done' || t.status === 'cancelled')) return false;
       if (statuses.size > 0 && !statuses.has(t.status)) return false;
       switch (derived) {
         case 'this_week':
           if (!t.due_at) return false;
-          if (t.due_at > week) return false;
-          return true;
+          return t.due_at <= week;
         case 'overdue':
           if (!t.due_at) return false;
           if (t.due_at >= today) return false;
-          if (t.status === 'done' || t.status === 'cancelled') return false;
-          return true;
+          return t.status !== 'done' && t.status !== 'cancelled';
         case 'scheduled':
           if (!t.start_at) return false;
           return t.start_at > today;
@@ -198,10 +222,47 @@ export function TasksPage({ onClose }: { onClose: () => void }) {
     return out.slice().sort((a, b) => compareTasks(a, b, sort));
   }, [rawTasks, statuses, derived, showCompleted, sort]);
 
-  // Drop selection ids that fell out of view so bulk actions stay sane.
+  // Group the filtered list. 'flat' returns one group with empty header.
+  const groups = useMemo(() => {
+    const today = todayISO();
+    const map = new Map<string, Task[]>();
+    for (const t of filtered) {
+      let key = '';
+      switch (group) {
+        case 'folder':
+          key = homeRel(t.folder) || '(no folder)';
+          break;
+        case 'status':
+          key = t.status;
+          break;
+        case 'due':
+          key = dueGroupKey(t, today);
+          break;
+        case 'flat':
+          key = '';
+          break;
+      }
+      const arr = map.get(key);
+      if (arr) arr.push(t);
+      else map.set(key, [t]);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => {
+        const oa = groupOrder(group, a[0]);
+        const ob = groupOrder(group, b[0]);
+        if (oa !== ob) return oa - ob;
+        return a[0].localeCompare(b[0]);
+      })
+      .map(([key, tasks]) => ({ key, tasks }));
+  }, [filtered, group]);
+
+  // Flat order across groups — drives arrow nav.
+  const flatOrder = useMemo(() => groups.flatMap((g) => g.tasks), [groups]);
+
+  // Drop selection ids that fell out of view; re-anchor cursor.
   useEffect(() => {
     setSelected((prev) => {
-      const visible = new Set(filtered.map((t) => t.id));
+      const visible = new Set(flatOrder.map((t) => t.id));
       let changed = false;
       const next = new Set<string>();
       for (const id of prev) {
@@ -210,39 +271,24 @@ export function TasksPage({ onClose }: { onClose: () => void }) {
       }
       return changed ? next : prev;
     });
-  }, [filtered]);
-
-  // Esc closes (only if no menu open)
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (ctxMenu) {
-          setCtxMenu(null);
-          e.preventDefault();
-          return;
-        }
-        if (bulkDueOpen) {
-          setBulkDueOpen(false);
-          e.preventDefault();
-          return;
-        }
-        e.preventDefault();
-        exit();
-      }
+    if (cursorId && !flatOrder.some((t) => t.id === cursorId)) {
+      setCursorId(flatOrder[0]?.id ?? null);
+    } else if (!cursorId && flatOrder.length > 0) {
+      setCursorId(flatOrder[0].id);
     }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [exit, ctxMenu, bulkDueOpen]);
+  }, [flatOrder, cursorId]);
 
-  // Dismiss the context menu on outside click
-  useEffect(() => {
-    if (!ctxMenu) return;
-    function onDoc() {
-      setCtxMenu(null);
-    }
-    window.addEventListener('mousedown', onDoc);
-    return () => window.removeEventListener('mousedown', onDoc);
-  }, [ctxMenu]);
+  // ─── helpers ─────────────────────────────────────────────────────────────
+  const targetIds = (): string[] => {
+    if (selected.size > 0) return Array.from(selected);
+    if (cursorId) return [cursorId];
+    return [];
+  };
+
+  const targetTasks = (): Task[] => {
+    const ids = new Set(targetIds());
+    return flatOrder.filter((t) => ids.has(t.id));
+  };
 
   function toggleStatus(s: TaskStatus) {
     setStatuses((prev) => {
@@ -259,17 +305,10 @@ export function TasksPage({ onClose }: { onClose: () => void }) {
     );
   }
 
-  function gotoFolder(task: Task) {
-    navigateTo(task.folder);
-    exit();
-  }
-
-  // ---- selection helpers ----
   function rowClick(e: React.MouseEvent, task: Task) {
-    // shift-click range; cmd/ctrl-click toggle. Plain click = open edit.
     if (e.shiftKey && lastSelectedRef.current) {
       e.preventDefault();
-      const ids = filtered.map((t) => t.id);
+      const ids = flatOrder.map((t) => t.id);
       const a = ids.indexOf(lastSelectedRef.current);
       const b = ids.indexOf(task.id);
       if (a < 0 || b < 0) return;
@@ -279,441 +318,708 @@ export function TasksPage({ onClose }: { onClose: () => void }) {
         for (let i = lo; i <= hi; i++) next.add(ids[i]);
         return next;
       });
+      setCursorId(task.id);
       return;
     }
     if (e.metaKey || e.ctrlKey) {
       e.preventDefault();
-      setSelected((prev) => {
-        const next = new Set(prev);
-        if (next.has(task.id)) next.delete(task.id);
-        else next.add(task.id);
-        return next;
-      });
+      toggleSelect(task.id);
       lastSelectedRef.current = task.id;
+      setCursorId(task.id);
       return;
     }
     lastSelectedRef.current = task.id;
+    setCursorId(task.id);
     openEdit(task);
   }
 
-  function selectAllVisible() {
-    setSelected(new Set(filtered.map((t) => t.id)));
-  }
-  function clearSelection() {
-    setSelected(new Set());
-  }
-
-  // ---- bulk actions ----
-  async function bulkMarkDone() {
-    const ids = Array.from(selected);
-    await Promise.all(ids.map((id) => updateTask(id, { status: 'done' })));
-    dispatch({ type: 'setStatus', msg: `marked ${ids.length} done` });
-    clearSelection();
-  }
-  async function bulkApplyDue() {
-    if (!bulkDueValue) return;
-    const ids = Array.from(selected);
-    await Promise.all(ids.map((id) => updateTask(id, { due_at: bulkDueValue })));
-    dispatch({ type: 'setStatus', msg: `set due ${bulkDueValue} on ${ids.length} tasks` });
-    setBulkDueOpen(false);
-    setBulkDueValue('');
-    clearSelection();
-  }
-  async function bulkPin(pinned: boolean) {
-    const ids = Array.from(selected);
-    await Promise.all(ids.map((id) => updateTask(id, { pinned })));
-    dispatch({
-      type: 'setStatus',
-      msg: `${pinned ? 'pinned' : 'unpinned'} ${ids.length} tasks`,
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
-    clearSelection();
-  }
-  function bulkDelete() {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    const req: ConfirmRequest = {
-      title: `Delete ${ids.length} task${ids.length === 1 ? '' : 's'}?`,
-      body: 'This cannot be undone. The folders themselves are not touched.',
-      confirmLabel: 'Delete',
-      destructive: true,
-      onConfirm: async () => {
-        await Promise.all(ids.map((id) => deleteTask(id)));
-        dispatch({ type: 'setStatus', msg: `deleted ${ids.length} tasks` });
-        clearSelection();
-      },
-    };
-    window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
   }
 
-  function togglePinSingle(task: Task) {
-    void updateTask(task.id, { pinned: !task.pinned });
-  }
-  function statusCycleSingle(task: Task) {
-    const order: TaskStatus[] = ['pending', 'in_progress', 'done', 'cancelled'];
-    const next = order[(order.indexOf(task.status) + 1) % order.length];
-    void updateTask(task.id, { status: next });
-  }
-  function deleteSingle(task: Task) {
-    const req: ConfirmRequest = {
-      title: `Delete "${task.title}"?`,
-      body: 'This cannot be undone.',
-      confirmLabel: 'Delete',
-      destructive: true,
-      onConfirm: async () => {
-        await deleteTask(task.id);
-        dispatch({ type: 'setStatus', msg: 'task deleted' });
-      },
-    };
-    window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
+  function moveCursor(delta: number, extend: boolean) {
+    if (flatOrder.length === 0) return;
+    const idx = cursorId ? flatOrder.findIndex((t) => t.id === cursorId) : -1;
+    const nextIdx = Math.max(0, Math.min(flatOrder.length - 1, (idx < 0 ? 0 : idx) + delta));
+    const nextTask = flatOrder[nextIdx];
+    if (extend && cursorId) {
+      // Extend selection from anchor through next
+      const a = idx < 0 ? 0 : idx;
+      const b = nextIdx;
+      const [lo, hi] = a < b ? [a, b] : [b, a];
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (let i = lo; i <= hi; i++) next.add(flatOrder[i].id);
+        return next;
+      });
+    }
+    setCursorId(nextTask.id);
+    // Scroll into view
+    requestAnimationFrame(() => {
+      listRef.current
+        ?.querySelector(`[data-task-id="${nextTask.id}"]`)
+        ?.scrollIntoView({ block: 'nearest' });
+    });
   }
 
-  // ---- render ----
-  const allVisibleSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.id));
+  // ─── verb event listeners ────────────────────────────────────────────────
+  const isActive = state.tabs[state.activeTab]?.kind === 'tasks';
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
+  // Latest store state — verb handlers run inside a stable useEffect closure;
+  // we need fresh tabs/activeTab to predict tab indices for sequential
+  // openTaskTab + openTerminal dispatches.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    async function applyToTargets(patch: { [k: string]: unknown }, label: string) {
+      const ids = targetIds();
+      if (ids.length === 0) {
+        dispatch({ type: 'setStatus', msg: 'no task targeted' });
+        return;
+      }
+      await Promise.all(ids.map((id) => updateTask(id, patch as never)));
+      dispatch({ type: 'setStatus', msg: `${label} · ${ids.length} task${ids.length === 1 ? '' : 's'}` });
+      setSelected(new Set());
+    }
+
+    const handlers: Record<string, (detail?: unknown) => void | Promise<void>> = {
+      'fm:tasks:done': () => applyToTargets({ status: 'done' as TaskStatus }, 'marked done'),
+      'fm:tasks:reopen': () => applyToTargets({ status: 'pending' as TaskStatus }, 'reopened'),
+      'fm:tasks:in-progress': () =>
+        applyToTargets({ status: 'in_progress' as TaskStatus }, 'set in-progress'),
+      'fm:tasks:cancel': () =>
+        applyToTargets({ status: 'cancelled' as TaskStatus }, 'cancelled'),
+      'fm:tasks:pin': () => applyToTargets({ pinned: true }, 'pinned'),
+      'fm:tasks:unpin': () => applyToTargets({ pinned: false }, 'unpinned'),
+      'fm:tasks:due': (detail) => {
+        const v = (detail as { value?: string } | undefined)?.value;
+        if (v === undefined) {
+          // open inline picker
+          const todays = todayISO();
+          setDatePicker({ field: 'due_at', value: todays });
+          return;
+        }
+        return applyToTargets(
+          { due_at: v === '' ? null : v },
+          v === '' ? 'cleared due' : `set due ${v}`,
+        );
+      },
+      'fm:tasks:start': (detail) => {
+        const v = (detail as { value?: string } | undefined)?.value;
+        if (v === undefined) {
+          setDatePicker({ field: 'start_at', value: todayISO() });
+          return;
+        }
+        return applyToTargets(
+          { start_at: v === '' ? null : v },
+          v === '' ? 'cleared start' : `set start ${v}`,
+        );
+      },
+      'fm:tasks:delete': () => {
+        const tasks = targetTasks();
+        if (tasks.length === 0) {
+          dispatch({ type: 'setStatus', msg: 'no task targeted' });
+          return;
+        }
+        const req: ConfirmRequest = {
+          title: `Delete ${tasks.length} task${tasks.length === 1 ? '' : 's'}?`,
+          body: 'This cannot be undone. The folders themselves are not touched.',
+          confirmLabel: 'Delete',
+          destructive: true,
+          onConfirm: async () => {
+            await Promise.all(tasks.map((t) => deleteTask(t.id)));
+            dispatch({ type: 'setStatus', msg: `deleted ${tasks.length} tasks` });
+            setSelected(new Set());
+          },
+        };
+        window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
+      },
+      'fm:tasks:open': () => {
+        const tasks = targetTasks();
+        if (tasks.length === 0) return;
+        for (const t of tasks) {
+          dispatch({ type: 'openTaskTab', taskId: t.id, folder: t.folder, focus: false });
+        }
+        // Focus the last one we just opened so the user lands on a real surface.
+        const last = tasks[tasks.length - 1];
+        dispatch({ type: 'openTaskTab', taskId: last.id, folder: last.folder });
+      },
+      'fm:tasks:terminal': async () => {
+        const tasks = targetTasks();
+        if (tasks.length === 0) return;
+        const tabsSnapshot = stateRef.current.tabs.slice();
+        for (const t of tasks) {
+          const existing = tabsSnapshot.findIndex(
+            (tt) => tt.kind === 'task' && tt.taskId === t.id,
+          );
+          const tabIndex = existing >= 0 ? existing : tabsSnapshot.length;
+          if (existing < 0) tabsSnapshot.push({ ...t, kind: 'task' } as never);
+          const isLast = t === tasks[tasks.length - 1];
+          dispatch({
+            type: 'openTaskTab',
+            taskId: t.id,
+            folder: t.folder,
+            focus: isLast,
+          });
+          // Skip if the tab already had a terminal — don't trample state.
+          if (existing >= 0 && tabsSnapshot[existing]?.terminal) {
+            dispatch({ type: 'setStatus', msg: `terminal already open for ${t.title}` });
+            continue;
+          }
+          try {
+            const ptyId = await spawnTerminal({ cwd: t.folder, sessionLabel: t.title });
+            dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: t.folder });
+          } catch (e) {
+            dispatch({ type: 'setStatus', msg: `terminal failed: ${(e as Error).message}` });
+          }
+        }
+      },
+      'fm:tasks:launcher': async (detail) => {
+        const launcherId = (detail as { launcherId?: string } | undefined)?.launcherId;
+        const variantId = (detail as { variantId?: string } | undefined)?.variantId;
+        if (!launcherId) return;
+        const launcher = (await fm.launchersList()).find((l) => l.id === launcherId);
+        if (!launcher) {
+          dispatch({ type: 'setStatus', msg: `launcher not found: ${launcherId}` });
+          return;
+        }
+        const tasks = targetTasks();
+        if (tasks.length === 0) return;
+        // Sequentially open a task tab per target and invoke the launcher
+        // bound to that tab. We predict each tab's index from the current
+        // tabs snapshot — openTaskTab either focuses an existing tab (known
+        // index) or appends (index = current length). Reading the snapshot
+        // afresh per task accounts for tabs we just appended in this loop.
+        const tabsSnapshot = stateRef.current.tabs.slice();
+        for (const t of tasks) {
+          const existing = tabsSnapshot.findIndex(
+            (tt) => tt.kind === 'task' && tt.taskId === t.id,
+          );
+          const tabIndex = existing >= 0 ? existing : tabsSnapshot.length;
+          if (existing < 0) {
+            tabsSnapshot.push({ ...t, kind: 'task' } as never);
+          }
+          // Focus the last one we open; earlier ones stay in the background
+          // so the user can come back to them.
+          const isLast = t === tasks[tasks.length - 1];
+          dispatch({
+            type: 'openTaskTab',
+            taskId: t.id,
+            folder: t.folder,
+            focus: isLast,
+          });
+          await invokeLauncher({
+            launcher,
+            variantId,
+            task: t,
+            cwd: t.folder,
+            sessionLabel: t.title,
+            onStatus: (msg) => dispatch({ type: 'setStatus', msg }),
+            onPtyOpened: ({ ptyId, label, cwd }) =>
+              dispatch({
+                type: 'openTerminal',
+                tabIndex,
+                ptyId,
+                cwd,
+                label,
+              }),
+          });
+        }
+      },
+      'fm:tasks:group': (detail) => {
+        const v = (detail as { value?: GroupKey } | undefined)?.value;
+        if (v && (['folder', 'status', 'due', 'flat'] as GroupKey[]).includes(v)) setGroup(v);
+      },
+      'fm:tasks:sort': (detail) => {
+        const v = (detail as { value?: SortKey } | undefined)?.value;
+        if (v && (['due', 'start', 'created', 'alpha'] as SortKey[]).includes(v)) setSort(v);
+      },
+      'fm:tasks:filter': (detail) => {
+        const v = (detail as { value?: DerivedFilter } | undefined)?.value;
+        if (v && (['all', 'this_week', 'overdue', 'scheduled', 'orphaned'] as DerivedFilter[]).includes(v)) setDerived(v);
+      },
+      'fm:tasks:show-completed': () => setShowCompleted(true),
+      'fm:tasks:hide-completed': () => setShowCompleted(false),
+      'fm:tasks:select': (detail) => {
+        const what = (detail as { what?: string } | undefined)?.what;
+        if (!what) return;
+        if (what === 'all') {
+          setSelected(new Set(flatOrder.map((t) => t.id)));
+        } else if (what === 'none') {
+          setSelected(new Set());
+        } else if (what === 'overdue') {
+          const today = todayISO();
+          setSelected(
+            new Set(
+              flatOrder
+                .filter(
+                  (t) =>
+                    t.due_at &&
+                    t.due_at < today &&
+                    t.status !== 'done' &&
+                    t.status !== 'cancelled',
+                )
+                .map((t) => t.id),
+            ),
+          );
+        } else if (what === 'pinned') {
+          setSelected(new Set(flatOrder.filter((t) => t.pinned).map((t) => t.id)));
+        } else if (what === 'invert') {
+          const all = new Set(flatOrder.map((t) => t.id));
+          const next = new Set<string>();
+          for (const id of all) if (!selected.has(id)) next.add(id);
+          setSelected(next);
+        }
+      },
+    };
+
+    const wrapped: Array<[string, EventListener]> = Object.entries(handlers).map(
+      ([name, fn]) => [name, (e) => void fn((e as CustomEvent).detail)],
+    );
+    for (const [name, fn] of wrapped) window.addEventListener(name, fn);
+    return () => {
+      for (const [name, fn] of wrapped) window.removeEventListener(name, fn);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, flatOrder, selected, cursorId, dispatch]);
+
+  // ─── keyboard ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isActive) return;
+    function onKey(e: KeyboardEvent) {
+      // Don't intercept while typing in the search box / date picker — let
+      // those inputs handle their own keys.
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable;
+
+      if (e.key === '/' && !inField) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (inField) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        moveCursor(1, e.shiftKey);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveCursor(-1, e.shiftKey);
+      } else if (e.key === ' ' && cursorId) {
+        e.preventDefault();
+        toggleSelect(cursorId);
+        lastSelectedRef.current = cursorId;
+      } else if (e.key === 'Enter' && cursorId) {
+        e.preventDefault();
+        const t = flatOrder.find((x) => x.id === cursorId);
+        if (t) openEdit(t);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, flatOrder, cursorId]);
+
+  // ─── digest stats for the header ─────────────────────────────────────────
+  const digest = useMemo(() => {
+    const today = todayISO();
+    const week = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 7);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
+    let overdue = 0;
+    let dueWeek = 0;
+    let orphan = 0;
+    for (const t of rawTasks) {
+      if (t.status === 'done' || t.status === 'cancelled') continue;
+      if (t.due_at && t.due_at < today) overdue++;
+      else if (t.due_at && t.due_at <= week) dueWeek++;
+      if (isOrphanedLooking(t.folder)) orphan++;
+    }
+    return { overdue, dueWeek, orphan };
+  }, [rawTasks]);
+
+  // ─── render ──────────────────────────────────────────────────────────────
+  const allVisibleSelected =
+    flatOrder.length > 0 && flatOrder.every((t) => selected.has(t.id));
   const someSelected = selected.size > 0;
-  const empty = !loading && filtered.length === 0;
+  const empty = !loading && flatOrder.length === 0;
   const emptyEver = !loading && rawTasks.length === 0 && empty;
 
+  function toggleAll() {
+    if (allVisibleSelected) setSelected(new Set());
+    else setSelected(new Set(flatOrder.map((t) => t.id)));
+  }
+
+  function toggleGroupSelection(taskIds: string[]) {
+    const allOn = taskIds.every((id) => selected.has(id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allOn) for (const id of taskIds) next.delete(id);
+      else for (const id of taskIds) next.add(id);
+      return next;
+    });
+  }
+
   return (
-    <div
-      className="tasks-overlay"
-      data-state={state}
-      onClick={(e) => {
-        // Click on backdrop closes; clicks bubbling from the panel are
-        // stopped below.
-        if (e.target === e.currentTarget) exit();
-      }}
-    >
-      <div
-        className="tasks"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tasks-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="tasks__head">
-          <h1 id="tasks-title" className="tasks__title">
-            Tasks
-            <span className="tasks__count">{filtered.length}</span>
-          </h1>
-          <div className="tasks__head-actions">
+    <div className="tasks tasks--inline">
+      <header className="tasks__head">
+        <h1 className="tasks__title">
+          Tasks
+          <span className="tasks__count">{flatOrder.length}</span>
+        </h1>
+        <div className="tasks__digest" role="group" aria-label="Task digest">
+          {digest.overdue > 0 && (
             <button
               type="button"
-              className="tasks__btn"
-              onClick={() =>
-                window.dispatchEvent(
-                  new CustomEvent('fm:openTask', {
-                    detail: { mode: 'create', defaultFolder: '' },
-                  }),
-                )
-              }
-              title="Create a new task"
+              className="tasks__digest-chip tasks__digest-chip--overdue"
+              onClick={() => setDerived('overdue')}
+              title="Show only overdue"
             >
-              + New task
+              {digest.overdue} overdue
             </button>
+          )}
+          {digest.dueWeek > 0 && (
             <button
               type="button"
-              className="tasks__close"
-              onClick={exit}
-              aria-label="Close"
-              title="Close (Esc)"
+              className="tasks__digest-chip"
+              onClick={() => setDerived('this_week')}
+              title="Show due this week"
             >
-              ×
+              {digest.dueWeek} due this week
             </button>
-          </div>
-        </header>
+          )}
+          {digest.orphan > 0 && (
+            <button
+              type="button"
+              className="tasks__digest-chip"
+              onClick={() => setDerived('orphaned')}
+              title="Show orphaned"
+            >
+              {digest.orphan} orphaned
+            </button>
+          )}
+          {digest.overdue === 0 && digest.dueWeek === 0 && digest.orphan === 0 && (
+            <span className="tasks__digest-clear">Nothing pressing.</span>
+          )}
+        </div>
+        <div className="tasks__head-actions">
+          <button
+            type="button"
+            className="tasks__btn"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent('fm:openTask', {
+                  detail: { mode: 'create', defaultFolder: '' },
+                }),
+              )
+            }
+            title="Create a new task"
+          >
+            + New task
+          </button>
+        </div>
+      </header>
 
-        <div className="tasks__filters">
-          <div className="tasks__filter-row">
-            <span className="tasks__filter-label">Status</span>
-            <div className="tasks__chips">
-              {ALL_STATUSES.map((s) => {
-                const dimmed = !showCompleted && (s === 'done' || s === 'cancelled');
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    className={[
-                      'tasks__chip',
-                      statuses.has(s) && 'tasks__chip--on',
-                      dimmed && 'tasks__chip--dim',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    onClick={() => toggleStatus(s)}
-                    title={dimmed ? 'Enable “Show completed” to include' : undefined}
-                  >
-                    {STATUS_LABEL[s]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="tasks__filter-row">
-            <span className="tasks__filter-label">View</span>
-            <div className="tasks__chips">
-              {(Object.keys(DERIVED_LABEL) as DerivedFilter[]).map((d) => (
+      <div className="tasks__filters">
+        <div className="tasks__filter-row">
+          <span className="tasks__filter-label">Status</span>
+          <div className="tasks__chips">
+            {ALL_STATUSES.map((s) => {
+              const dimmed = !showCompleted && (s === 'done' || s === 'cancelled');
+              return (
                 <button
-                  key={d}
+                  key={s}
                   type="button"
                   className={[
                     'tasks__chip',
-                    derived === d && 'tasks__chip--on',
+                    statuses.has(s) && 'tasks__chip--on',
+                    dimmed && 'tasks__chip--dim',
                   ]
                     .filter(Boolean)
                     .join(' ')}
-                  onClick={() => setDerived(d)}
+                  onClick={() => toggleStatus(s)}
+                  title={dimmed ? 'Enable “Show completed” to include' : undefined}
                 >
-                  {DERIVED_LABEL[d]}
+                  {STATUS_LABEL[s]}
                 </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="tasks__filter-row">
-            <span className="tasks__filter-label">Search</span>
-            <input
-              type="text"
-              className="tasks__input"
-              placeholder="Title or notes…"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              spellCheck={false}
-            />
-            <input
-              type="text"
-              className="tasks__input tasks__input--mono"
-              placeholder="Folder substring…"
-              value={folder}
-              onChange={(e) => setFolder(e.target.value)}
-              spellCheck={false}
-            />
-          </div>
-
-          <div className="tasks__filter-row">
-            <label className="tasks__toggle">
-              <input
-                type="checkbox"
-                checked={pinnedOnly}
-                onChange={(e) => setPinnedOnly(e.target.checked)}
-              />
-              <span>Pinned only</span>
-            </label>
-            <label className="tasks__toggle">
-              <input
-                type="checkbox"
-                checked={showCompleted}
-                onChange={(e) => setShowCompleted(e.target.checked)}
-              />
-              <span>Show completed</span>
-            </label>
-            <span className="tasks__filter-spacer" />
-            <span className="tasks__filter-label">Sort</span>
-            <select
-              className="tasks__select"
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-            >
-              {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
-                <option key={k} value={k}>
-                  {SORT_LABEL[k]}
-                </option>
-              ))}
-            </select>
+              );
+            })}
           </div>
         </div>
 
-        {someSelected && (
-          <div className="tasks__bulkbar" role="toolbar" aria-label="Bulk actions">
-            <span className="tasks__bulkbar-count">
-              {selected.size} selected
-            </span>
-            <button type="button" className="tasks__btn" onClick={() => void bulkMarkDone()}>
-              Mark done
-            </button>
-            <div className="tasks__bulkbar-due">
-              {bulkDueOpen ? (
-                <>
-                  <input
-                    type="date"
-                    className="tasks__input tasks__input--inline"
-                    value={bulkDueValue}
-                    onChange={(e) => setBulkDueValue(e.target.value)}
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    className="tasks__btn"
-                    onClick={() => void bulkApplyDue()}
-                    disabled={!bulkDueValue}
-                  >
-                    Apply
-                  </button>
-                  <button
-                    type="button"
-                    className="tasks__btn tasks__btn--ghost"
-                    onClick={() => {
-                      setBulkDueOpen(false);
-                      setBulkDueValue('');
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="tasks__btn"
-                  onClick={() => {
-                    setBulkDueValue(todayISO());
-                    setBulkDueOpen(true);
-                  }}
-                >
-                  Change due…
-                </button>
-              )}
-            </div>
-            <button type="button" className="tasks__btn" onClick={() => void bulkPin(true)}>
-              Pin
-            </button>
-            <button type="button" className="tasks__btn" onClick={() => void bulkPin(false)}>
-              Unpin
-            </button>
-            <button
-              type="button"
-              className="tasks__btn tasks__btn--danger"
-              onClick={bulkDelete}
-            >
-              Delete
-            </button>
-            <span className="tasks__filter-spacer" />
-            <button
-              type="button"
-              className="tasks__btn tasks__btn--ghost"
-              onClick={clearSelection}
-            >
-              Clear
-            </button>
+        <div className="tasks__filter-row">
+          <span className="tasks__filter-label">View</span>
+          <div className="tasks__chips">
+            {(Object.keys(DERIVED_LABEL) as DerivedFilter[]).map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={[
+                  'tasks__chip',
+                  derived === d && 'tasks__chip--on',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => setDerived(d)}
+              >
+                {DERIVED_LABEL[d]}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
 
-        {!someSelected && filtered.length > 0 && (
-          <div className="tasks__bulkbar tasks__bulkbar--quiet">
-            <button
-              type="button"
-              className="tasks__btn tasks__btn--ghost"
-              onClick={selectAllVisible}
-              disabled={allVisibleSelected}
-            >
-              Select all visible
-            </button>
-          </div>
-        )}
+        <div className="tasks__filter-row">
+          <span className="tasks__filter-label">Search</span>
+          <input
+            ref={searchInputRef}
+            type="text"
+            className="tasks__input"
+            placeholder="Title or notes…    ( / to focus )"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            spellCheck={false}
+          />
+          <input
+            type="text"
+            className="tasks__input tasks__input--mono"
+            placeholder="Folder substring…"
+            value={folder}
+            onChange={(e) => setFolder(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
 
-        <div className="tasks__list" role="list">
-          {empty && (
-            <div className="tasks__empty">
-              {emptyEver ? (
-                <>
-                  <div className="tasks__empty-glyph">✓</div>
-                  <div className="tasks__empty-title">No tasks yet</div>
-                  <div className="tasks__empty-body">
-                    Press the <b>+ New task</b> button or run <kbd>:task</kbd> from
-                    the prompt to create your first one.
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="tasks__empty-glyph">∅</div>
-                  <div className="tasks__empty-title">No tasks match these filters</div>
-                  <div className="tasks__empty-body">
-                    Loosen the status chips, clear the search box, or switch to
-                    the <b>All</b> view above.
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {filtered.map((t) => (
-            <TaskRow
-              key={t.id}
-              task={t}
-              selected={selected.has(t.id)}
-              onClick={(e) => rowClick(e, t)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setCtxMenu({ x: e.clientX, y: e.clientY, task: t });
-              }}
-              onGoto={() => gotoFolder(t)}
-              onPin={() => togglePinSingle(t)}
+        <div className="tasks__filter-row">
+          <label className="tasks__toggle">
+            <input
+              type="checkbox"
+              checked={pinnedOnly}
+              onChange={(e) => setPinnedOnly(e.target.checked)}
             />
-          ))}
+            <span>Pinned only</span>
+          </label>
+          <label className="tasks__toggle">
+            <input
+              type="checkbox"
+              checked={showCompleted}
+              onChange={(e) => setShowCompleted(e.target.checked)}
+            />
+            <span>Show completed</span>
+          </label>
+          <span className="tasks__filter-spacer" />
+          <span className="tasks__filter-label">Group</span>
+          <select
+            className="tasks__select"
+            value={group}
+            onChange={(e) => setGroup(e.target.value as GroupKey)}
+          >
+            {(Object.keys(GROUP_LABEL) as GroupKey[]).map((k) => (
+              <option key={k} value={k}>
+                {GROUP_LABEL[k]}
+              </option>
+            ))}
+          </select>
+          <span className="tasks__filter-label">Sort</span>
+          <select
+            className="tasks__select"
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+          >
+            {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
+              <option key={k} value={k}>
+                {SORT_LABEL[k]}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {ctxMenu && (
-        <div
-          className="tasks__ctx"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          role="menu"
-        >
+      <div className="tasks__selectstrip">
+        <label className="tasks__selectstrip-master" title="Select all visible">
+          <input
+            type="checkbox"
+            checked={allVisibleSelected}
+            ref={(el) => {
+              if (el) el.indeterminate = someSelected && !allVisibleSelected;
+            }}
+            onChange={toggleAll}
+          />
+          <span>
+            {someSelected
+              ? `${selected.size} selected`
+              : flatOrder.length > 0
+                ? 'Select all'
+                : 'No tasks'}
+          </span>
+        </label>
+        {someSelected && (
+          <span className="tasks__selectstrip-hint">
+            Type <kbd>:</kbd> for actions —
+            {' '}
+            <code>:done</code> · <code>:due</code> · <code>:claude</code> ·
+            {' '}
+            <code>:open</code> · <code>:delete</code>
+          </span>
+        )}
+        {!someSelected && flatOrder.length > 0 && (
+          <span className="tasks__selectstrip-hint">
+            ↑↓ move · <kbd>Space</kbd> select · <kbd>Enter</kbd> edit ·
+            {' '}
+            <kbd>:</kbd> verbs
+          </span>
+        )}
+      </div>
+
+      {datePicker && (
+        <div className="tasks__datebar" role="dialog" aria-label="Set date">
+          <span>
+            Set <b>{datePicker.field === 'due_at' ? 'due' : 'start'}</b> on
+            {' '}
+            {targetIds().length} task{targetIds().length === 1 ? '' : 's'}:
+          </span>
+          <input
+            type="date"
+            autoFocus
+            value={datePicker.value}
+            onChange={(e) => setDatePicker({ ...datePicker, value: e.target.value })}
+          />
           <button
             type="button"
-            className="tasks__ctx-item"
-            onClick={() => {
-              openEdit(ctxMenu.task);
-              setCtxMenu(null);
+            className="tasks__btn"
+            onClick={async () => {
+              const ids = targetIds();
+              if (ids.length === 0 || !datePicker.value) {
+                setDatePicker(null);
+                return;
+              }
+              await Promise.all(
+                ids.map((id) =>
+                  updateTask(id, { [datePicker.field]: datePicker.value } as never),
+                ),
+              );
+              dispatch({
+                type: 'setStatus',
+                msg: `set ${datePicker.field === 'due_at' ? 'due' : 'start'} ${datePicker.value} · ${ids.length}`,
+              });
+              setDatePicker(null);
+              setSelected(new Set());
             }}
           >
-            Edit…
+            Apply
           </button>
           <button
             type="button"
-            className="tasks__ctx-item"
-            onClick={() => {
-              gotoFolder(ctxMenu.task);
-              setCtxMenu(null);
+            className="tasks__btn tasks__btn--ghost"
+            onClick={async () => {
+              const ids = targetIds();
+              if (ids.length === 0) {
+                setDatePicker(null);
+                return;
+              }
+              await Promise.all(
+                ids.map((id) =>
+                  updateTask(id, { [datePicker.field]: null } as never),
+                ),
+              );
+              dispatch({
+                type: 'setStatus',
+                msg: `cleared ${datePicker.field === 'due_at' ? 'due' : 'start'} · ${ids.length}`,
+              });
+              setDatePicker(null);
+              setSelected(new Set());
             }}
           >
-            Go to folder
+            Clear
           </button>
           <button
             type="button"
-            className="tasks__ctx-item"
-            onClick={() => {
-              statusCycleSingle(ctxMenu.task);
-              setCtxMenu(null);
-            }}
+            className="tasks__btn tasks__btn--ghost"
+            onClick={() => setDatePicker(null)}
           >
-            Cycle status →
-          </button>
-          <button
-            type="button"
-            className="tasks__ctx-item"
-            onClick={() => {
-              togglePinSingle(ctxMenu.task);
-              setCtxMenu(null);
-            }}
-          >
-            {ctxMenu.task.pinned ? 'Unpin' : 'Pin'}
-          </button>
-          <div className="tasks__ctx-sep" />
-          <button
-            type="button"
-            className="tasks__ctx-item tasks__ctx-item--danger"
-            onClick={() => {
-              const task = ctxMenu.task;
-              setCtxMenu(null);
-              deleteSingle(task);
-            }}
-          >
-            Delete…
+            Cancel
           </button>
         </div>
       )}
+
+      <div className="tasks__list" role="list" ref={listRef}>
+        {empty && (
+          <div className="tasks__empty">
+            {emptyEver ? (
+              <>
+                <div className="tasks__empty-glyph">✓</div>
+                <div className="tasks__empty-title">No tasks yet</div>
+                <div className="tasks__empty-body">
+                  Type <kbd>:task</kbd> to add one — or use <b>+ New task</b>.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="tasks__empty-glyph">∅</div>
+                <div className="tasks__empty-title">Nothing matches.</div>
+                <div className="tasks__empty-body">
+                  Drop a filter, switch to <b>All</b>, or clear the search.
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {groups.map(({ key, tasks }) => {
+          const groupAllSelected = tasks.length > 0 && tasks.every((t) => selected.has(t.id));
+          const groupSomeSelected = tasks.some((t) => selected.has(t.id));
+          return (
+            <div key={key || '__flat'} className="tasks__group">
+              {group !== 'flat' && (
+                <div className="tasks__group-head">
+                  <label className="tasks__group-check" title="Select all in group">
+                    <input
+                      type="checkbox"
+                      checked={groupAllSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = groupSomeSelected && !groupAllSelected;
+                      }}
+                      onChange={() => toggleGroupSelection(tasks.map((t) => t.id))}
+                    />
+                  </label>
+                  <span className="tasks__group-title">
+                    {group === 'status' ? STATUS_LABEL[key as TaskStatus] : key}
+                  </span>
+                  <span className="tasks__group-count">{tasks.length}</span>
+                </div>
+              )}
+              {tasks.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  selected={selected.has(t.id)}
+                  cursor={cursorId === t.id}
+                  onCheckbox={() => {
+                    toggleSelect(t.id);
+                    lastSelectedRef.current = t.id;
+                    setCursorId(t.id);
+                  }}
+                  onClick={(e) => rowClick(e, t)}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -721,41 +1027,56 @@ export function TasksPage({ onClose }: { onClose: () => void }) {
 function TaskRow({
   task,
   selected,
+  cursor,
+  onCheckbox,
   onClick,
-  onContextMenu,
-  onGoto,
-  onPin,
 }: {
   task: Task;
   selected: boolean;
+  cursor: boolean;
+  onCheckbox: () => void;
   onClick: (e: React.MouseEvent) => void;
-  onContextMenu: (e: React.MouseEvent) => void;
-  onGoto: () => void;
-  onPin: () => void;
 }) {
   const today = todayISO();
-  const overdue = !!task.due_at && task.due_at < today && task.status !== 'done' && task.status !== 'cancelled';
+  const overdue =
+    !!task.due_at &&
+    task.due_at < today &&
+    task.status !== 'done' &&
+    task.status !== 'cancelled';
   const orphan = isOrphanedLooking(task.folder);
 
   return (
     <div
       role="listitem"
+      data-task-id={task.id}
       className={[
         'tasks__row',
         selected && 'tasks__row--selected',
+        cursor && 'tasks__row--cursor',
         (task.status === 'done' || task.status === 'cancelled') && 'tasks__row--muted',
       ]
         .filter(Boolean)
         .join(' ')}
       onClick={onClick}
-      onContextMenu={onContextMenu}
     >
+      <label
+        className="tasks__row-check"
+        onClick={(e) => e.stopPropagation()}
+        title={selected ? 'Unselect' : 'Select'}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onCheckbox}
+        />
+      </label>
+
       <button
         type="button"
         className={['tasks__pin', task.pinned && 'tasks__pin--on'].filter(Boolean).join(' ')}
         onClick={(e) => {
           e.stopPropagation();
-          onPin();
+          void updateTask(task.id, { pinned: !task.pinned });
         }}
         title={task.pinned ? 'Unpin' : 'Pin'}
         aria-label={task.pinned ? 'Unpin' : 'Pin'}
@@ -794,18 +1115,7 @@ function TaskRow({
       <span className={`tasks__status tasks__status--${task.status}`}>
         {STATUS_LABEL[task.status]}
       </span>
-
-      <button
-        type="button"
-        className="tasks__btn tasks__btn--ghost tasks__row-goto"
-        onClick={(e) => {
-          e.stopPropagation();
-          onGoto();
-        }}
-        title="Navigate to this folder"
-      >
-        Go to folder
-      </button>
     </div>
   );
 }
+

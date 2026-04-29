@@ -37,6 +37,21 @@
   font-family: var(--font-sans);
 }
 
+/* fm-yi85 — inline mode: drop the modal-frame styling and let the page
+ * fill the main slot. Background, no border/shadow, no width cap.
+ */
+.tasks--inline {
+  width: 100%;
+  max-height: none;
+  height: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--canvas, var(--panel));
+  color: var(--text-on-panel);
+}
+
 .tasks__head {
   display: flex;
   align-items: center;
@@ -255,13 +270,148 @@
 
 .tasks__row {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto;
+  grid-template-columns: 24px 26px 1fr auto;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-5);
   border-bottom: 1px solid var(--rule-on-panel);
   cursor: pointer;
   transition: background 100ms;
+}
+.tasks__row--cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
+}
+.tasks__row-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tasks__row-check input { margin: 0; cursor: pointer; }
+
+/* fm-yi85 — header digest row. Lives between title and controls so the
+ * silent "is anything urgent?" question gets answered before the user
+ * scans the list. Each chip is a one-click filter shortcut.
+ */
+.tasks__digest {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  margin: 0 var(--sp-4);
+  flex-wrap: wrap;
+}
+.tasks__digest-chip {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--rule-on-panel);
+  color: var(--text-on-panel);
+  cursor: pointer;
+}
+.tasks__digest-chip:hover {
+  background: var(--accent-soft);
+}
+.tasks__digest-chip--overdue {
+  color: var(--danger, #c0392b);
+  border-color: var(--danger, #c0392b);
+}
+.tasks__digest-clear {
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+  font-style: italic;
+}
+
+/* fm-yi85 — calm status strip replacing the bulk-action toolbar. The
+ * verbs do the work; this just confirms scope and surfaces hints.
+ */
+.tasks__selectstrip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: 1px solid var(--rule-on-panel);
+  background: var(--panel);
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+}
+.tasks__selectstrip-master {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  color: var(--text-on-panel);
+  font-weight: 500;
+}
+.tasks__selectstrip-master input { margin: 0; cursor: pointer; }
+.tasks__selectstrip-hint {
+  flex: 1;
+  text-align: right;
+}
+.tasks__selectstrip-hint kbd {
+  background: var(--panel-2);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.tasks__selectstrip-hint code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--text-on-panel);
+}
+
+/* Inline date picker bar — opens when a :due / :start verb fires
+ * without an explicit date pick. Sits between the strip and the list.
+ */
+.tasks__datebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: 1px solid var(--rule-on-panel);
+  background: var(--accent-soft);
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+}
+.tasks__datebar input[type='date'] {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text-on-panel);
+}
+
+/* Group headers */
+.tasks__group {
+  display: contents;
+}
+.tasks__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--rule-on-panel);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  font-size: var(--fs-sm);
+}
+.tasks__group-check { display: inline-flex; align-items: center; }
+.tasks__group-check input { margin: 0; cursor: pointer; }
+.tasks__group-title {
+  font-weight: 600;
+  color: var(--text-on-panel);
+}
+.tasks__group-count {
+  color: var(--muted-on-panel);
+  font-variant-numeric: tabular-nums;
 }
 .tasks__row:hover {
   background: var(--panel-2);

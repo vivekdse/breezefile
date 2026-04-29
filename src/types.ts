@@ -22,7 +22,11 @@ export type TagFilter = { mode: TagFilterMode; ids: string[] };
 // 'task' is bound to a Breeze task and renders a different shell layout
 // (task header prominent, folder de-emphasized, file-management verbs
 // hidden). Both kinds can have a terminal pane attached via tab.terminal.
-export type TabKind = 'folder' | 'task';
+// fm-yi85 — added 'tasks' kind for the singleton Tasks-overview tab. Replaces
+// the modal All-tasks dialog: inline page that participates in the chip
+// prompt and side-panel ecosystem like any other tab. Tasks-tab-scoped verbs
+// (done, due, claude, etc.) gate on this kind.
+export type TabKind = 'folder' | 'task' | 'tasks';
 
 export type Tab = {
   id: string;
