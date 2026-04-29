@@ -91,7 +91,6 @@ export function Terminal({
   cwd,
   onSpawn,
   onExit,
-  onAttention,
   isActive,
   initialCommand,
 }: Props) {
@@ -106,11 +105,10 @@ export function Terminal({
   const pendingByIdRef = useRef<Map<number, string[]>>(new Map());
   const dataUnsubRef = useRef<(() => void) | null>(null);
   const exitUnsubRef = useRef<(() => void) | null>(null);
-  // Cursor-visibility tracker: many TUIs (claude code, claude, vim, less)
-  // hide the cursor while generating/redrawing and show it while waiting
-  // for input. This is the strongest "needs attention" signal we have.
-  const cursorVisibleRef = useRef<boolean>(true);
-  const lastAttentionRef = useRef<AttentionState>(null);
+  // Per-Terminal attention reporting was removed: tab busy/idle is now
+  // driven globally in App.tsx via Claude Code hooks (fm-z7v) keyed by
+  // ptyId. The onAttention prop is preserved for shape compatibility
+  // but unused.
   const isActiveRef = useRef<boolean>(isActive);
   isActiveRef.current = isActive;
   const initialCmdRef = useRef<string | null>(initialCommand ?? null);
@@ -325,16 +323,6 @@ export function Terminal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
-
-  function reportAttention(state: AttentionState) {
-    if (lastAttentionRef.current === state) return;
-    lastAttentionRef.current = state;
-    // Active and backgrounded tabs both report — the tint reflects the
-    // terminal's live state (busy/idle), not a "you haven't seen this"
-    // flag. Bell is the exception (cleared on activation by App.tsx),
-    // but reporting it here is still correct.
-    onAttention?.(state);
-  }
 
   return (
     <div
