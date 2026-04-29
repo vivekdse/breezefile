@@ -167,6 +167,34 @@
   border-top: none;
 }
 
+/* Responsive collapse — narrow viewports drop the side rails so the
+   center file plate (the only critical surface) keeps usable width.
+   - ≤1100px: hide the Preview (right) panel.
+   - ≤800px:  also hide the Sidebar (left) panel.
+   Explicit modes (preview-zoom view, terminal full-bleed) opt out — the
+   user has chosen those layouts deliberately. Task tabs already hide the
+   preview slot; the small-viewport rule additionally collapses the
+   sidebar so the task surface gets full width. */
+@media (max-width: 1100px) {
+  .shell:not([data-view="preview"]):not([data-mode="terminal"]) {
+    --preview-w: 0px;
+    grid-template-columns: var(--sidebar-w) 1fr 0px;
+  }
+  .shell:not([data-view="preview"]):not([data-mode="terminal"]) .shell__preview {
+    display: none;
+  }
+}
+@media (max-width: 800px) {
+  .shell:not([data-view="preview"]):not([data-mode="terminal"]) {
+    --sidebar-w: 0px;
+    --preview-w: 0px;
+    grid-template-columns: 0px 1fr 0px;
+  }
+  .shell:not([data-view="preview"]):not([data-mode="terminal"]) .shell__side {
+    display: none;
+  }
+}
+
 /* Placeholder for slots owned by other beads (fm-4zi, fm-fda). Neutral
    styling only — real styling lives in the slot-owner beads. */
 .shell__placeholder {
