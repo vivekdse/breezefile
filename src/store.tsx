@@ -5,6 +5,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type ReactNode,
 } from 'react';
 import type {
@@ -502,6 +503,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  // Gate the persist effect until hydration finishes. Without this, on
+  // first render the persist effect closes over `initialState` and writes
+  // useTmux=false / soundOnAttention=false / etc. to localStorage BEFORE
+  // the hydrate dispatch settles — clobbering whatever the user had
+  // saved. Using state (not a ref) here is intentional: the persist
+  // effect's closure captures `hydrated` from render 1 (false) and skips,
+  // and only runs for real on render 2 (after setHydrated(true) settles
+  // alongside the hydrate dispatch). A ref wouldn't give us that gate
+  // because refs mutate synchronously in the same effects pass, so the
+  // persist effect would still see `true` while closing over render-1
+  // state and clobber.
+  const [hydrated, setHydrated] = useState(false);
 
   // Hydrate durable prefs + always open a fresh home tab.
   useEffect(() => {
@@ -570,10 +583,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+    // Mark hydration complete so the persist effect can start writing.
+    setHydrated(true);
   }, []);
 
   // Persist — only durable prefs, never tab trails.
   useEffect(() => {
+    // Skip until hydrate has completed. Otherwise the very first run of
+    // this effect (mount, render 1) closes over initialState and writes
+    // defaults to localStorage, clobbering the saved values that hydrate
+    // is about to read.
+    if (!hydrated) return;
     const toPersist: Persisted = {
       bookmarks: state.bookmarks,
       tags: state.tags,
@@ -600,6 +620,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.notifyOnAttention,
     state.soundOnAttention,
     state.useTmux,
+    hydrated,
   ]);
 
   const activeTab = state.tabs[state.activeTab];
