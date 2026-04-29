@@ -2162,6 +2162,24 @@ export function ChipPrompt({
     const tokens = filter.toLowerCase().split(/\s+/).filter((t) => t.length > 0);
     if (tokens.length === 0) return allOptions;
 
+    // Recency bonus: build a path→rank map from the LRU so the scorer can
+    // boost folders the user actually opens. Without this, a Spotlight hit
+    // with a stronger name match can outrank a folder visited five minutes
+    // ago. Bonus decays linearly with position (rank 0 = +50, rank 8 ≈ +2),
+    // and we look up by the absolute form of the option id so ~-prefixed
+    // common subdirs (Desktop, Documents…) still hit when their absolute
+    // counterpart is in recents.
+    const recents = ctx?.recents ?? [];
+    const home = ctx?.homedir ?? '';
+    const recentRank = new Map<string, number>();
+    for (let i = 0; i < recents.length; i++) recentRank.set(recents[i], i);
+    const absId = (id: string): string => {
+      if (id === '~') return home;
+      if (id.startsWith('~/') && home) return home + id.slice(1);
+      if (id.startsWith('file:')) return id.slice(5);
+      return id;
+    };
+
     const scored = allOptions
       .map((o) => {
         const label = o.label.toLowerCase();
@@ -2208,6 +2226,12 @@ export function ChipPrompt({
         if (detail.includes('in this folder')) score += 25;
         else if (detail.includes('levels down')) score += 20;
         else if (detail.includes('· spotlight')) score -= 15;
+
+        // Recency boost: folders the user has actually opened beat
+        // never-touched name-twins from Spotlight. Decays with position so
+        // last-visited wins ties against an older recent.
+        const rank = recentRank.get(absId(o.id));
+        if (rank !== undefined) score += Math.max(0, 50 - rank * 6);
 
         return { opt: o, score };
       })
