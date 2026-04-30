@@ -240,10 +240,15 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const body = await readJson<{ pty_id?: number | string; state?: string }>(req);
       const ptyId = Number(body.pty_id);
       const state = body.state;
-      if (!Number.isFinite(ptyId) || (state !== 'busy' && state !== 'idle')) {
+      if (
+        !Number.isFinite(ptyId) ||
+        (state !== 'busy' && state !== 'idle' && state !== 'waiting')
+      ) {
         throw Object.assign(new Error('pty_id and state required'), { status: 400 });
       }
-      dispatchTerminalFg(ptyId, state === 'busy');
+      // 'waiting' is a mid-turn attention request — separate from 'idle'
+      // so the renderer can force a banner even on the active tab.
+      dispatchTerminalFg(ptyId, state as 'busy' | 'idle' | 'waiting');
       return sendJson(res, 200, { ok: true });
     }
 

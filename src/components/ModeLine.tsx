@@ -28,7 +28,11 @@ export function ModeLine() {
     }
     setMsg(state.statusMsg);
     setMsgKey((k) => k + 1);
-    const t = window.setTimeout(() => setMsg(null), 3000);
+    // Errors and "failed" messages stick around 3× longer — long enough
+    // for the user to actually read what went wrong instead of catching
+    // a flash and having to reproduce the failure to retry.
+    const isError = /failed|error|denied|refused/i.test(state.statusMsg);
+    const t = window.setTimeout(() => setMsg(null), isError ? 9000 : 3000);
     return () => window.clearTimeout(t);
   }, [state.statusMsg]);
 

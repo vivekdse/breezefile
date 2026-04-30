@@ -383,12 +383,21 @@ async function cloudLocations(): Promise<Location[]> {
 // renderer. The pty registry lives inside registerIpc's closure; the
 // IPC setup phase calls registerFgDispatcher() to install the routing
 // callback, and the api-server calls dispatchTerminalFg() to fire it.
-let _fgDispatcher: ((ptyId: number, busy: boolean) => void) | null = null;
-function registerFgDispatcher(cb: (ptyId: number, busy: boolean) => void) {
+//
+// State values:
+//   'busy'    — UserPromptSubmit (turn in flight)
+//   'idle'    — Stop / StopFailure (turn ended)
+//   'waiting' — Notification (mid-turn permission prompt, idle warning).
+//               Distinct from 'idle' so the renderer can force a banner
+//               on the active tab — permission prompts buried in TUI
+//               output are otherwise easy to miss.
+export type ClaudeFgState = 'busy' | 'idle' | 'waiting';
+let _fgDispatcher: ((ptyId: number, state: ClaudeFgState) => void) | null = null;
+function registerFgDispatcher(cb: (ptyId: number, state: ClaudeFgState) => void) {
   _fgDispatcher = cb;
 }
-export function dispatchTerminalFg(ptyId: number, busy: boolean) {
-  _fgDispatcher?.(ptyId, busy);
+export function dispatchTerminalFg(ptyId: number, state: ClaudeFgState) {
+  _fgDispatcher?.(ptyId, state);
 }
 
 export function registerIpc() {
@@ -1566,7 +1575,7 @@ end tell`;
   // (UserPromptSubmit → busy, Stop/StopFailure → idle), routed through
   // the api-server and dispatched here as 'term:fg' keyed by ptyId.
   // The api-server calls dispatchTerminalFg() directly.
-  registerFgDispatcher((id, busy) => {
+  registerFgDispatcher((id, state) => {
     const rec = ptys.get(id);
     if (!rec) return;
     // senderId is a webContents id (from e.sender.id at spawn time);
@@ -1575,7 +1584,10 @@ end tell`;
     // single-window case but the webContents form is the right API.
     const wc = webContents.fromId(rec.senderId);
     if (wc && !wc.isDestroyed()) {
-      wc.send('term:fg', { id, busy, comm: null });
+      // `busy` retained for legacy preload/renderer compat (pre-waiting).
+      // New `state` carries the full tri-state so renderer can branch on
+      // 'waiting' without inferring from a bool.
+      wc.send('term:fg', { id, busy: state === 'busy', state, comm: null });
     }
   });
 

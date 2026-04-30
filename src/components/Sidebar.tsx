@@ -3,11 +3,12 @@ import { useStore } from '../store';
 import { fm } from '../bridge';
 import { basename } from '../actions';
 import {
-  currentDragPaths,
   currentDragSourceCwd,
+  dragHasAnyPaths,
   dropIntoFolder,
   endAppDrag,
-  hasAppDrag,
+  isExternalDrop,
+  resolveDropPaths,
 } from '../dragState';
 import { Icon, type IconName } from './Icon';
 import {
@@ -126,10 +127,11 @@ export function Sidebar() {
   // (⌥ toggles copy). stopPropagation prevents the section-level pin handler
   // from also firing.
   const onRowDragOver = (targetPath: string) => (e: React.DragEvent) => {
-    if (!hasAppDrag()) return;
+    if (!dragHasAnyPaths(e)) return;
     e.preventDefault();
     e.stopPropagation();
-    e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
+    // External drops always copy (we can't move out of Finder/web).
+    e.dataTransfer.dropEffect = isExternalDrop() ? 'copy' : e.altKey ? 'copy' : 'move';
     setRowDrop(targetPath);
     setDropHover(false);
   };
@@ -141,12 +143,29 @@ export function Sidebar() {
     e.preventDefault();
     e.stopPropagation();
     setRowDrop(null);
-    const paths = currentDragPaths();
+    let paths: string[];
+    try {
+      paths = resolveDropPaths(e);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[drop] resolve failed', err);
+      dispatch({
+        type: 'setStatus',
+        msg: `drop failed: ${(err as Error).message}`,
+      });
+      return;
+    }
+    const external = isExternalDrop();
     const srcCwd = currentDragSourceCwd();
     endAppDrag();
     if (paths.length === 0) return;
-    const msg = await dropIntoFolder(paths, targetPath, srcCwd, e.altKey, fm).catch(
-      (err) => `drop failed: ${(err as Error).message}`,
+    const copy = external || e.altKey;
+    const msg = await dropIntoFolder(paths, targetPath, srcCwd, copy, fm).catch(
+      (err) => {
+        // eslint-disable-next-line no-console
+        console.error('[drop] fs:paste failed', { err, paths, dst: targetPath, copy });
+        return `drop failed: ${(err as Error).message}`;
+      },
     );
     if (msg) dispatch({ type: 'setStatus', msg });
     await refreshActive();
@@ -156,7 +175,7 @@ export function Sidebar() {
   // FileRow/FileGrid strip dataTransfer via preventDefault during OS drag-out,
   // so we read the payload from the shared dragState module instead.
   const onFavoritesDragOver = (e: React.DragEvent) => {
-    if (!hasAppDrag()) return;
+    if (!dragHasAnyPaths(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'link';
     setDropHover(true);
@@ -165,7 +184,18 @@ export function Sidebar() {
   const onFavoritesDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDropHover(false);
-    const paths = currentDragPaths();
+    let paths: string[];
+    try {
+      paths = resolveDropPaths(e);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[drop] resolve failed', err);
+      dispatch({
+        type: 'setStatus',
+        msg: `drop failed: ${(err as Error).message}`,
+      });
+      return;
+    }
     endAppDrag();
     if (paths.length === 0) return;
 

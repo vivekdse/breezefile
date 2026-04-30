@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const fm = {
   platform: process.platform,
@@ -79,6 +79,14 @@ const fm = {
   bulkRename: (names: string[]) =>
     ipcRenderer.invoke('editor:bulkRename', names) as Promise<string[]>,
   dragStart: (paths: string[]) => ipcRenderer.send('drag:start', paths),
+  // Electron 32+ removed the `path` field from renderer File objects; the
+  // sanctioned replacement is webUtils.getPathForFile, which lives in the
+  // preload-side electron module. Expose it so drop targets in the
+  // renderer (e.g. the embedded terminal) can resolve dropped Finder
+  // files to absolute paths.
+  pathForFile: (file: File): string => {
+    try { return webUtils.getPathForFile(file); } catch { return ''; }
+  },
   findFolders: (query: string, limit?: number) =>
     ipcRenderer.invoke('search:folders', query, limit) as Promise<string[]>,
   listSubdirs: (cwd: string, depth?: number, limit?: number) =>
@@ -143,13 +151,26 @@ const fm = {
     return () => ipcRenderer.off('term:exit', handler);
   },
   // fm-z7v — process-tree foreground transitions for tab busy/idle tint.
+  // `state` is the rich tri-state ('busy'|'idle'|'waiting'); 'waiting'
+  // is a mid-turn attention request (Claude permission prompt). `busy`
+  // is kept for older callers that only need the binary signal.
   onTermFg: (
-    cb: (id: number, busy: boolean, comm: string | null) => void,
+    cb: (
+      id: number,
+      busy: boolean,
+      comm: string | null,
+      state?: 'busy' | 'idle' | 'waiting',
+    ) => void,
   ) => {
     const handler = (
       _e: unknown,
-      payload: { id: number; busy: boolean; comm: string | null },
-    ) => cb(payload.id, payload.busy, payload.comm);
+      payload: {
+        id: number;
+        busy: boolean;
+        comm: string | null;
+        state?: 'busy' | 'idle' | 'waiting';
+      },
+    ) => cb(payload.id, payload.busy, payload.comm, payload.state);
     ipcRenderer.on('term:fg', handler);
     return () => ipcRenderer.off('term:fg', handler);
   },

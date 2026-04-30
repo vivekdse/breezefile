@@ -3,11 +3,12 @@ import { useStore } from '../store';
 import { basename } from '../actions';
 import { fm } from '../bridge';
 import {
-  currentDragPaths,
   currentDragSourceCwd,
+  dragHasAnyPaths,
   dropIntoFolder,
   endAppDrag,
-  hasAppDrag,
+  isExternalDrop,
+  resolveDropPaths,
 } from '../dragState';
 import { useTasks } from '../tasks';
 import type { Tab } from '../types';
@@ -53,23 +54,40 @@ export function Tabbar() {
   };
 
   const onTabDragOver = (idx: number) => (e: React.DragEvent) => {
-    if (!hasAppDrag()) return;
+    if (!dragHasAnyPaths(e)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move';
+    e.dataTransfer.dropEffect = isExternalDrop() ? 'copy' : e.altKey ? 'copy' : 'move';
     setDropIdx(idx);
   };
   const onTabDragLeave = () => setDropIdx(null);
   const onTabDrop = (idx: number) => async (e: React.DragEvent) => {
     e.preventDefault();
     setDropIdx(null);
-    const paths = currentDragPaths();
+    let paths: string[];
+    try {
+      paths = resolveDropPaths(e);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[drop] resolve failed', err);
+      dispatch({
+        type: 'setStatus',
+        msg: `drop failed: ${(err as Error).message}`,
+      });
+      return;
+    }
+    const external = isExternalDrop();
     const srcCwd = currentDragSourceCwd();
     endAppDrag();
     const tab = state.tabs[idx];
     if (!tab || paths.length === 0) return;
     const target = tab.trail[tab.trail.length - 1];
-    const msg = await dropIntoFolder(paths, target, srcCwd, e.altKey, fm).catch(
-      (err) => `drop failed: ${(err as Error).message}`,
+    const copy = external || e.altKey;
+    const msg = await dropIntoFolder(paths, target, srcCwd, copy, fm).catch(
+      (err) => {
+        // eslint-disable-next-line no-console
+        console.error('[drop] fs:paste failed', { err, paths, dst: target, copy });
+        return `drop failed: ${(err as Error).message}`;
+      },
     );
     if (msg) dispatch({ type: 'setStatus', msg });
     await refreshActive();

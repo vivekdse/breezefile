@@ -57,6 +57,7 @@ type Fm = {
   fileUrl: (p: string) => string;
   bulkRename: (names: string[]) => Promise<string[]>;
   dragStart: (paths: string[]) => void;
+  pathForFile: (file: File) => string;
   findFolders: (query: string, limit?: number) => Promise<string[]>;
   listSubdirs: (cwd: string, depth?: number, limit?: number) => Promise<string[]>;
   findEntries: (
@@ -91,7 +92,12 @@ type Fm = {
     cb: (id: number, code: number, signal: string | null) => void,
   ) => () => void;
   onTermFg: (
-    cb: (id: number, busy: boolean, comm: string | null) => void,
+    cb: (
+      id: number,
+      busy: boolean,
+      comm: string | null,
+      state?: 'busy' | 'idle' | 'waiting',
+    ) => void,
   ) => () => void;
   launchersList: () => Promise<Launcher[]>;
   launchersSave: (list: Launcher[]) => Promise<void>;

@@ -7,6 +7,14 @@ import { FileGrid } from './FileGrid';
 import { fm } from '../bridge';
 import type { Entry } from '../types';
 import { entryMatchesFilter, findTag, tagMatchesEntry } from '../tags';
+import {
+  currentDragSourceCwd,
+  dragHasAnyPaths,
+  dropIntoFolder,
+  endAppDrag,
+  isExternalDrop,
+  resolveDropPaths,
+} from '../dragState';
 import './FolderList.css';
 
 /**
@@ -280,8 +288,49 @@ export function FolderList() {
   const someMarked = !allMarked && entries.some((e) => tab.marks[e.path]);
   const checkGlyph = allMarked ? '☑' : someMarked ? '◪' : '☐';
 
+  // Drop into current cwd. Accepts both in-app drags (FileRow → other
+  // tab → back into the same view) and external drops from Finder /
+  // browser. External drops are forced to copy because we can't move
+  // files out of the source app. In-app default is move, ⌥ toggles copy
+  // — same convention as the sidebar/tab drop targets.
+  const onCwdDragOver = (e: React.DragEvent) => {
+    if (!dragHasAnyPaths(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = isExternalDrop() ? 'copy' : e.altKey ? 'copy' : 'move';
+  };
+  const onCwdDrop = async (e: React.DragEvent) => {
+    if (!dragHasAnyPaths(e)) return;
+    e.preventDefault();
+    let paths: string[];
+    try {
+      paths = resolveDropPaths(e);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[drop] resolve failed', err);
+      store.dispatch({
+        type: 'setStatus',
+        msg: `drop failed: ${(err as Error).message}`,
+      });
+      return;
+    }
+    const external = isExternalDrop();
+    const srcCwd = currentDragSourceCwd();
+    endAppDrag();
+    if (paths.length === 0) return;
+    const copy = external || e.altKey;
+    const msg = await dropIntoFolder(paths, cwd, srcCwd, copy, fm).catch(
+      (err) => {
+        // eslint-disable-next-line no-console
+        console.error('[drop] fs:paste failed', { err, paths, dst: cwd, copy });
+        return `drop failed: ${(err as Error).message}`;
+      },
+    );
+    if (msg) store.dispatch({ type: 'setStatus', msg });
+    await store.refreshActive();
+  };
+
   return (
-    <div className="folder-list">
+    <div className="folder-list" onDragOver={onCwdDragOver} onDrop={onCwdDrop}>
       <div className="folder-list__head">
         {entries.length > 0 && (
           <span

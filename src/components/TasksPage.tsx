@@ -321,11 +321,33 @@ export function TasksPage() {
   // moves on the row in front of the user.
   function setStatus(task: Task, status: TaskStatus) {
     void updateTask(task.id, { status });
+    // Filter view often hides the row immediately after this change (e.g.
+    // marking done while showCompleted=false). Without a status nudge the
+    // click feels like a no-op — the row just disappears. Toast restores
+    // the cause→effect link.
+    const verbed: Record<TaskStatus, string> = {
+      pending: 'reopened',
+      in_progress: 'set in-progress',
+      done: 'marked done',
+      cancelled: 'cancelled',
+    };
+    dispatch({
+      type: 'setStatus',
+      msg: `${verbed[status]} · ${task.title}${
+        (status === 'done' || status === 'cancelled') && !showCompleted
+          ? ' (toggle “Show completed” to see it)'
+          : ''
+      }`,
+    });
   }
   function cycleStatus(task: Task) {
     const order: TaskStatus[] = ['pending', 'in_progress', 'done', 'cancelled'];
     const next = order[(order.indexOf(task.status) + 1) % order.length];
     void updateTask(task.id, { status: next });
+    dispatch({
+      type: 'setStatus',
+      msg: `${task.title} → ${STATUS_LABEL[next].toLowerCase()}`,
+    });
   }
   function rowOpenInTab(task: Task) {
     dispatch({ type: 'openTaskTab', taskId: task.id, folder: task.folder });

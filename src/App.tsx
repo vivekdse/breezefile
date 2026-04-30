@@ -106,18 +106,30 @@ function Shell() {
   const tabsRef = useRef(state.tabs);
   const notifyOnAttentionRef = useRef(state.notifyOnAttention);
   const soundOnAttentionRef = useRef(state.soundOnAttention);
+  const activeTabIdxRef = useRef(state.activeTab);
   tabsRef.current = state.tabs;
   notifyOnAttentionRef.current = state.notifyOnAttention;
   soundOnAttentionRef.current = state.soundOnAttention;
+  activeTabIdxRef.current = state.activeTab;
 
   useEffect(() => {
     const maybeNotify = (
       idx: number,
       from: 'idle' | 'busy' | 'bell' | null,
       to: 'idle' | 'bell',
+      // `urgent` bypasses the active-tab suppression. Mid-turn Claude
+      // Notification hooks (permission prompts, idle warnings) set this
+      // because they're easy to miss in a stream of TUI output even
+      // when the user is theoretically "looking at" the tab.
+      urgent = false,
     ) => {
       const wasAttention = from === 'idle' || from === 'bell';
-      if (wasAttention || appFocusRef.current) return;
+      if (wasAttention) return;
+      // For non-urgent transitions (end-of-turn Stop), suppress the
+      // banner only when the user is already looking at this exact
+      // tab — they don't need a notification for something on screen.
+      // Urgent (mid-turn Notification) always banners.
+      if (!urgent && appFocusRef.current && activeTabIdxRef.current === idx) return;
       if (!notifyOnAttentionRef.current || typeof Notification === 'undefined') return;
       const tab = tabsRef.current[idx];
       if (!tab) return;
@@ -128,7 +140,12 @@ function Shell() {
       const title = launcher
         ? `${launcher} in ${folder}`
         : `Terminal in ${folder}`;
-      const body = to === 'bell' ? 'Alert' : 'Waiting for input';
+      const body =
+        to === 'bell'
+          ? 'Alert'
+          : urgent
+            ? 'Needs your input'
+            : 'Waiting for input';
       if (soundOnAttentionRef.current) {
         void fm.playAttentionSound();
       }
@@ -151,14 +168,33 @@ function Shell() {
     // bytes on every redraw, which clobbered the hook-driven busy state
     // with a sticky 'bell'. Busy/idle now comes purely from Claude Code
     // hooks (fm-z7v, term:fg).
-    const offFg = fm.onTermFg((id, busy) => {
+    const offFg = fm.onTermFg((id, busy, _comm, state) => {
       const tabs = tabsRef.current;
       const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
       if (idx < 0) return;
       const cur = tabs[idx].terminal?.attention ?? null;
-      if (busy && cur !== 'busy') {
+      // Tri-state from the hook bridge. Older hook scripts that only
+      // know 'busy'/'idle' keep working via the legacy `busy` bool.
+      const effective: 'busy' | 'idle' | 'waiting' =
+        state ?? (busy ? 'busy' : 'idle');
+      if (effective === 'busy' && cur !== 'busy') {
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
-      } else if (!busy && cur !== 'idle') {
+      } else if (effective === 'waiting') {
+        // Mid-turn permission prompt. Force a transition even when the
+        // tab was already showing 'idle' (rare race) so the banner
+        // fires. We pass `urgent` so maybeNotify ignores active-tab
+        // suppression — these are the most miss-able events.
+        if (cur !== 'idle') {
+          dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
+        }
+        // Bypass the wasAttention guard by treating prior state as
+        // null/busy when it was already idle — otherwise repeated
+        // permission prompts in one turn (which we want to surface)
+        // would be eaten.
+        const fromForNotify: 'idle' | 'busy' | 'bell' | null =
+          cur === 'idle' ? 'busy' : cur;
+        maybeNotify(idx, fromForNotify, 'idle', true);
+      } else if (effective === 'idle' && cur !== 'idle') {
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
         maybeNotify(idx, cur, 'idle');
       }

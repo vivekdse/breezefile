@@ -23,7 +23,18 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { fm } from '../bridge';
 import { spawnTerminal } from '../terminalSpawn';
+import { currentDragPaths, hasAppDrag } from '../dragState';
 import './Terminal.css';
+
+// Quote a path for safe paste into a shell / Claude Code / similar TUIs.
+// Single-quoting is preferred — it's the most permissive form and the
+// rules are trivial: wrap in single quotes, escape any embedded single
+// quote with the standard '\'' dance. If the path is plain (no spaces,
+// no shell metacharacters), we leave it bare so users see a normal path.
+function shellQuote(p: string): string {
+  if (/^[A-Za-z0-9_./~:@+\-,=]+$/.test(p)) return p;
+  return `'${p.replace(/'/g, `'\\''`)}'`;
+}
 
 export type AttentionState = 'idle' | 'busy' | 'bell' | null;
 
@@ -348,6 +359,42 @@ export function Terminal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
+  // Drag-drop: dropping files (Finder, web images, in-app FileRow/FileGrid)
+  // pastes their absolute paths into the running pty as a space-joined
+  // shell-quoted list. Lets Claude Code / shells / any TUI receive an
+  // @-reference or filename without the user typing it. We MUST attach
+  // dragenter/dragover handlers that preventDefault() — otherwise the
+  // browser default kicks in and Electron either opens the file in a new
+  // window or no-ops. We pull paths from in-app drag state first (FileRow
+  // strips dataTransfer for native drag-out), then fall back to the
+  // OS-side dataTransfer.files via webUtils.getPathForFile (Electron 32+
+  // removed File.path).
+  const onDragOver = (e: React.DragEvent) => {
+    if (hasAppDrag() || (e.dataTransfer.types || []).includes('Files')) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    const id = ptyIdRef.current;
+    if (id == null) return;
+    let paths: string[] = currentDragPaths();
+    if (paths.length === 0 && e.dataTransfer.files?.length) {
+      paths = Array.from(e.dataTransfer.files)
+        .map((f) => fm.pathForFile(f))
+        .filter(Boolean);
+    }
+    if (paths.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const line = paths.map(shellQuote).join(' ');
+    // Trailing space so the user can keep typing immediately after; no
+    // newline, since they may want to wrap the path in their own command.
+    fm.termWrite(id, line + ' ');
+    xtermRef.current?.focus();
+  };
+
   return (
     <div
       className="terminal-pane"
@@ -355,6 +402,9 @@ export function Terminal({
       // focus on xterm's helper textarea so the user can immediately
       // start typing without having to click the cursor row exactly.
       onMouseDown={() => xtermRef.current?.focus()}
+      onDragOver={onDragOver}
+      onDragEnter={onDragOver}
+      onDrop={onDrop}
     >
       <div className="terminal-pane__inner" ref={wrapRef} />
     </div>

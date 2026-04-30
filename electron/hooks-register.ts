@@ -1,7 +1,10 @@
 // fm-z7v — register Claude Code hooks into ~/.claude/settings.json so
 // every claude session reports busy/idle to the running file_manager
 // over the localhost api-server. UserPromptSubmit → busy, Stop /
-// StopFailure → idle. Hook payload binds to a specific tab via
+// StopFailure / Notification → idle. Notification fires whenever Claude
+// needs the user (permission prompt, idle-input warning) — without it,
+// the tab stays green while Claude is silently waiting for an answer
+// behind a permission dialog. Hook payload binds to a specific tab via
 // $BREEZE_PTY_ID, an env var the pty layer injects at spawn time.
 //
 // Hooks fail silently when BREEZE_PTY_ID is unset (claude run from
@@ -49,12 +52,21 @@ function hookScriptPath(): string {
 
 const HOOK_SCRIPT = `#!/bin/sh
 # fm-z7v — Claude Code hook → file_manager bridge.
-# Argv: $1 = busy|idle. Reads $BREEZE_PTY_ID from env, ~/.breezefile/api.json
-# for port+token. Silently no-ops when either is missing so claude turns
-# never block on a stopped/absent file_manager.
+# Argv: $1 = busy|idle|waiting.
+#   busy    — UserPromptSubmit (turn started)
+#   idle    — Stop / StopFailure (turn ended cleanly or with an error)
+#   waiting — Notification (mid-turn permission prompt or 60s idle warning)
+# 'waiting' is distinct from 'idle' so the renderer can banner mid-turn
+# attention requests even when the user is staring at the Claude tab —
+# end-of-turn Stop signals get the polite "you're already looking at it"
+# suppression, but a permission prompt is easy to miss in a stream of
+# diff output and earns a banner regardless. Reads $BREEZE_PTY_ID from
+# env, ~/.breezefile/api.json for port+token. Silently no-ops when
+# either is missing so claude turns never block on a stopped/absent
+# file_manager.
 set -e
 state="\${1:-}"
-[ "$state" = "busy" ] || [ "$state" = "idle" ] || exit 0
+[ "$state" = "busy" ] || [ "$state" = "idle" ] || [ "$state" = "waiting" ] || exit 0
 [ -n "\${BREEZE_PTY_ID:-}" ] || exit 0
 api="$HOME/.breezefile/api.json"
 [ -f "$api" ] || exit 0
@@ -113,6 +125,7 @@ function writeSettings(s: ClaudeSettings, originalExisted: boolean) {
 const SCRIPT = hookScriptPath();
 const BUSY_CMD = `sh "${SCRIPT}" busy`;
 const IDLE_CMD = `sh "${SCRIPT}" idle`;
+const WAITING_CMD = `sh "${SCRIPT}" waiting`;
 
 // Absolute path to the bundled `breeze` launcher. Used for SessionStart
 // and PreCompact hooks that emit cross-folder task context to Claude
@@ -165,6 +178,7 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' {
     'UserPromptSubmit',
     'Stop',
     'StopFailure',
+    'Notification',
     'SessionStart',
     'PreCompact',
   ]) {
@@ -178,6 +192,16 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' {
   });
   nextHooks.StopFailure.push({
     hooks: [{ type: 'command', command: IDLE_CMD }],
+  });
+  // Notification fires when Claude needs user input mid-turn (permission
+  // prompt, 60s idle warning). We send 'waiting' (not 'idle') so the
+  // renderer can distinguish mid-turn attention requests from end-of-
+  // turn Stop. Both flip the tab red, but 'waiting' bypasses the
+  // "you're already on this tab" banner suppression — permission
+  // prompts get easily lost in scrolling TUI output, so the user wants
+  // the system notification regardless of where they're looking.
+  nextHooks.Notification.push({
+    hooks: [{ type: 'command', command: WAITING_CMD }],
   });
 
   // SessionStart + PreCompact run `breeze prime` so Claude gets active
