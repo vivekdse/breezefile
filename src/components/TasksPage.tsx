@@ -35,6 +35,7 @@ import './TasksPage.css';
 type SortKey = 'due' | 'start' | 'created' | 'alpha';
 type GroupKey = 'folder' | 'status' | 'due' | 'flat';
 type DerivedFilter = 'all' | 'this_week' | 'overdue' | 'scheduled' | 'orphaned';
+type AutoFilter = 'all' | 'auto' | 'manual';
 
 const ALL_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'done', 'cancelled'];
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -65,6 +66,24 @@ const DERIVED_LABEL: Record<DerivedFilter, string> = {
   scheduled: 'Scheduled',
   orphaned: 'Orphaned',
 };
+
+const AUTO_LABEL: Record<AutoFilter, string> = {
+  all: 'All',
+  auto: '⚡ Auto',
+  manual: 'Manual',
+};
+
+function shortDate(iso: string, today: string): string {
+  if (iso === today) return 'today';
+  const d = new Date(iso + 'T00:00:00');
+  const t = new Date(today + 'T00:00:00');
+  const days = Math.round((d.getTime() - t.getTime()) / 86_400_000);
+  if (days === 1) return 'tomorrow';
+  if (days === -1) return 'yesterday';
+  if (days > 1 && days <= 6) return `in ${days}d`;
+  if (days < -1 && days >= -6) return `${-days}d ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 function homeRel(p: string): string {
   const home =
@@ -148,6 +167,7 @@ export function TasksPage() {
   const [folder, setFolder] = useState('');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [derived, setDerived] = useState<DerivedFilter>('all');
+  const [autoFilter, setAutoFilter] = useState<AutoFilter>('all');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('due');
@@ -227,6 +247,8 @@ export function TasksPage() {
         if (!recent) return false;
       }
       if (statuses.size > 0 && !statuses.has(t.status)) return false;
+      if (autoFilter === 'auto' && !t.auto_mode) return false;
+      if (autoFilter === 'manual' && t.auto_mode) return false;
       switch (derived) {
         case 'this_week':
           if (!t.due_at) return false;
@@ -246,7 +268,7 @@ export function TasksPage() {
       }
     });
     return out.slice().sort((a, b) => compareTasks(a, b, sort));
-  }, [rawTasks, statuses, derived, showCompleted, sort]);
+  }, [rawTasks, statuses, derived, autoFilter, showCompleted, sort]);
 
   // Group the filtered list. 'flat' returns one group with empty header.
   const groups = useMemo(() => {
@@ -802,6 +824,18 @@ export function TasksPage() {
     return { overdue, dueWeek, orphan };
   }, [rawTasks]);
 
+  // Detail panel shows the cursor task (or the single selected task when
+  // exactly one is selected and the cursor is elsewhere).
+  const detailTask = useMemo<Task | null>(() => {
+    if (selected.size === 1) {
+      const [only] = Array.from(selected);
+      const t = flatOrder.find((x) => x.id === only);
+      if (t) return t;
+    }
+    if (cursorId) return flatOrder.find((t) => t.id === cursorId) ?? null;
+    return null;
+  }, [selected, cursorId, flatOrder]);
+
   // ─── render ──────────────────────────────────────────────────────────────
   const allVisibleSelected =
     flatOrder.length > 0 && flatOrder.every((t) => selected.has(t.id));
@@ -927,6 +961,32 @@ export function TasksPage() {
                 onClick={() => setDerived(d)}
               >
                 {DERIVED_LABEL[d]}
+              </button>
+            ))}
+          </div>
+          <span className="tasks__filter-divider" aria-hidden="true" />
+          <div className="tasks__chips" role="group" aria-label="Auto-execute filter">
+            {(Object.keys(AUTO_LABEL) as AutoFilter[]).map((a) => (
+              <button
+                key={a}
+                type="button"
+                className={[
+                  'tasks__chip',
+                  autoFilter === a && 'tasks__chip--on',
+                  a === 'auto' && 'tasks__chip--auto',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => setAutoFilter(a)}
+                title={
+                  a === 'auto'
+                    ? 'Only auto-execute tasks'
+                    : a === 'manual'
+                      ? 'Only manual tasks'
+                      : 'All tasks'
+                }
+              >
+                {AUTO_LABEL[a]}
               </button>
             ))}
           </div>
@@ -1105,6 +1165,7 @@ export function TasksPage() {
         </div>
       )}
 
+      <div className="tasks__split">
       <div className="tasks__list" role="list" ref={listRef}>
         {empty && (
           <div className="tasks__empty">
@@ -1155,6 +1216,7 @@ export function TasksPage() {
                 <TaskRow
                   key={t.id}
                   task={t}
+                  hideFolder={group === 'folder'}
                   selected={selected.has(t.id)}
                   cursor={cursorId === t.id}
                   onCheckbox={() => {
@@ -1180,6 +1242,18 @@ export function TasksPage() {
             </div>
           );
         })}
+      </div>
+      <TaskDetailPanel
+        task={detailTask}
+        selectedCount={selected.size}
+        onEdit={() => detailTask && openEdit(detailTask)}
+        onOpenInTab={() => detailTask && rowOpenInTab(detailTask)}
+        onOpenTerminal={() => detailTask && void rowOpenTerminal(detailTask)}
+        onGotoFolder={() => detailTask && rowGotoFolder(detailTask)}
+        onSetStatus={(s) => detailTask && setStatus(detailTask, s)}
+        onTogglePin={() => detailTask && void updateTask(detailTask.id, { pinned: !detailTask.pinned })}
+        onDelete={() => detailTask && rowDelete(detailTask)}
+      />
       </div>
 
       {kebabFor && (
@@ -1266,6 +1340,7 @@ export function TasksPage() {
 
 function TaskRow({
   task,
+  hideFolder,
   selected,
   cursor,
   onCheckbox,
@@ -1277,6 +1352,7 @@ function TaskRow({
   onKebab,
 }: {
   task: Task;
+  hideFolder?: boolean;
   selected: boolean;
   cursor: boolean;
   onCheckbox: () => void;
@@ -1346,11 +1422,13 @@ function TaskRow({
           )}
         </div>
         <div className="tasks__row-sub">
-          <span className="tasks__row-folder" title={task.folder}>
-            {homeRel(task.folder)}
-          </span>
+          {!hideFolder && (
+            <span className="tasks__row-folder" title={task.folder}>
+              {homeRel(task.folder)}
+            </span>
+          )}
           {task.start_at && (
-            <span className="tasks__date">start {task.start_at}</span>
+            <span className="tasks__date">start {shortDate(task.start_at, today)}</span>
           )}
           {task.due_at && (
             <span
@@ -1358,24 +1436,26 @@ function TaskRow({
                 .filter(Boolean)
                 .join(' ')}
             >
-              due {task.due_at}
+              due {shortDate(task.due_at, today)}
             </span>
           )}
           {task.auto_mode && <TaskRunIndicator task={task} />}
         </div>
       </div>
 
-      <button
-        type="button"
-        className={`tasks__status tasks__status--${task.status} tasks__status--button`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onCycleStatus();
-        }}
-        title="Click to cycle status"
-      >
-        {STATUS_LABEL[task.status]}
-      </button>
+      {task.status !== 'pending' && (
+        <button
+          type="button"
+          className={`tasks__status tasks__status--${task.status} tasks__status--button`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCycleStatus();
+          }}
+          title="Click to cycle status"
+        >
+          {STATUS_LABEL[task.status]}
+        </button>
+      )}
 
       <div
         className="tasks__row-actions"
@@ -1543,6 +1623,185 @@ function RowKebabMenu({
         Delete…
       </button>
     </div>
+  );
+}
+
+// Right-pane detail view. Uses the empty space the All Tasks page used to
+// waste, and lets us drop the per-row icon cluster — the same actions
+// live here, anchored to the cursor task.
+function TaskDetailPanel({
+  task,
+  selectedCount,
+  onEdit,
+  onOpenInTab,
+  onOpenTerminal,
+  onGotoFolder,
+  onSetStatus,
+  onTogglePin,
+  onDelete,
+}: {
+  task: Task | null;
+  selectedCount: number;
+  onEdit: () => void;
+  onOpenInTab: () => void;
+  onOpenTerminal: () => void;
+  onGotoFolder: () => void;
+  onSetStatus: (s: TaskStatus) => void;
+  onTogglePin: () => void;
+  onDelete: () => void;
+}) {
+  if (selectedCount > 1) {
+    return (
+      <aside className="tasks__detail tasks__detail--empty">
+        <div className="tasks__detail-empty">
+          <div className="tasks__detail-empty-glyph">⊞</div>
+          <div className="tasks__detail-empty-title">{selectedCount} selected</div>
+          <div className="tasks__detail-empty-body">
+            Type <kbd>:</kbd> to act on the selection — <code>:done</code>,{' '}
+            <code>:due</code>, <code>:claude</code>, <code>:delete</code>.
+          </div>
+        </div>
+      </aside>
+    );
+  }
+  if (!task) {
+    return (
+      <aside className="tasks__detail tasks__detail--empty">
+        <div className="tasks__detail-empty">
+          <div className="tasks__detail-empty-glyph">·</div>
+          <div className="tasks__detail-empty-title">No task selected</div>
+          <div className="tasks__detail-empty-body">
+            Pick a row to see its details. ↑↓ to move, <kbd>Enter</kbd> to edit.
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
+  const today = todayISO();
+  const overdue =
+    !!task.due_at &&
+    task.due_at < today &&
+    task.status !== 'done' &&
+    task.status !== 'cancelled';
+
+  return (
+    <aside className="tasks__detail">
+      <header className="tasks__detail-head">
+        <div className="tasks__detail-status">
+          <TaskStatusDot status={task.status} />
+          <span>{STATUS_LABEL[task.status]}</span>
+          {task.auto_mode && <TaskRunIndicator task={task} />}
+        </div>
+        <button
+          type="button"
+          className={['tasks__pin', task.pinned && 'tasks__pin--on']
+            .filter(Boolean)
+            .join(' ')}
+          onClick={onTogglePin}
+          title={task.pinned ? 'Unpin' : 'Pin'}
+        >
+          {task.pinned ? '★' : '☆'}
+        </button>
+      </header>
+
+      <h2 className="tasks__detail-title">{task.title}</h2>
+
+      <dl className="tasks__detail-meta">
+        <div>
+          <dt>Folder</dt>
+          <dd className="tasks__detail-mono" title={task.folder}>
+            {homeRel(task.folder)}
+          </dd>
+        </div>
+        {task.start_at && (
+          <div>
+            <dt>Start</dt>
+            <dd>{shortDate(task.start_at, today)}</dd>
+          </div>
+        )}
+        {task.due_at && (
+          <div>
+            <dt>Due</dt>
+            <dd className={overdue ? 'tasks__detail-overdue' : undefined}>
+              {shortDate(task.due_at, today)}
+            </dd>
+          </div>
+        )}
+        {task.auto_mode && (
+          <>
+            <div>
+              <dt>Agent</dt>
+              <dd>{task.auto_agent || '—'}</dd>
+            </div>
+            {task.cron && (
+              <div>
+                <dt>Schedule</dt>
+                <dd className="tasks__detail-mono">{task.cron}</dd>
+              </div>
+            )}
+          </>
+        )}
+      </dl>
+
+      {task.notes && (
+        <div className="tasks__detail-notes">
+          <div className="tasks__detail-section">Notes</div>
+          <p>{task.notes}</p>
+        </div>
+      )}
+
+      {task.auto_mode && task.auto_prompt && (
+        <div className="tasks__detail-notes">
+          <div className="tasks__detail-section">Prompt</div>
+          <pre className="tasks__detail-prompt">{task.auto_prompt}</pre>
+        </div>
+      )}
+
+      <div className="tasks__detail-actions">
+        <button type="button" className="tasks__btn" onClick={onEdit}>
+          Edit
+        </button>
+        <button type="button" className="tasks__btn" onClick={onOpenInTab}>
+          Open tab
+        </button>
+        <button type="button" className="tasks__btn" onClick={onOpenTerminal}>
+          Terminal
+        </button>
+        <button type="button" className="tasks__btn" onClick={onGotoFolder}>
+          Go to folder
+        </button>
+      </div>
+
+      <div className="tasks__detail-section tasks__detail-section--spaced">Status</div>
+      <div className="tasks__detail-statusrow">
+        {(['pending', 'in_progress', 'done', 'cancelled'] as TaskStatus[]).map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={[
+              'tasks__chip',
+              task.status === s && 'tasks__chip--on',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+            onClick={() => onSetStatus(s)}
+          >
+            {STATUS_LABEL[s]}
+          </button>
+        ))}
+      </div>
+
+      <div className="tasks__detail-foot">
+        <button
+          type="button"
+          className="tasks__btn tasks__btn--danger"
+          onClick={onDelete}
+        >
+          Delete…
+        </button>
+      </div>
+    </aside>
   );
 }
 

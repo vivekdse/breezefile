@@ -261,11 +261,181 @@
   color: #fff;
 }
 
+/* ---- split: list + detail panel ---- */
+.tasks__split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
 /* ---- list ---- */
 .tasks__list {
   flex: 1;
   overflow: auto;
   padding: var(--sp-2) 0;
+  min-width: 0;
+}
+
+/* ---- detail panel ---- */
+.tasks__detail {
+  width: clamp(320px, 32%, 460px);
+  border-left: 1px solid var(--rule-on-panel);
+  background: var(--panel);
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.tasks__detail--empty {
+  align-items: center;
+  justify-content: center;
+}
+.tasks__detail-empty {
+  text-align: center;
+  color: var(--muted-on-panel);
+  max-width: 280px;
+}
+.tasks__detail-empty-glyph {
+  font-family: var(--font-serif, serif);
+  font-size: 40px;
+  line-height: 1;
+  margin-bottom: var(--sp-2);
+}
+.tasks__detail-empty-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-on-panel);
+  margin-bottom: 4px;
+}
+.tasks__detail-empty-body {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.tasks__detail-empty-body kbd,
+.tasks__detail-empty-body code {
+  background: var(--panel-2);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.tasks__detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.tasks__detail-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+  font-weight: 500;
+}
+.tasks__detail-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text-on-panel);
+  line-height: 1.3;
+  word-break: break-word;
+}
+.tasks__detail-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px var(--sp-3);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.tasks__detail-meta > div {
+  display: contents;
+}
+.tasks__detail-meta dt {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-on-panel);
+  align-self: center;
+}
+.tasks__detail-meta dd {
+  margin: 0;
+  color: var(--text-on-panel);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tasks__detail-mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-xs);
+}
+.tasks__detail-overdue {
+  color: var(--danger, #c0392b);
+  font-weight: 600;
+}
+.tasks__detail-section {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-on-panel);
+  margin-bottom: 4px;
+}
+.tasks__detail-section--spaced {
+  margin-top: var(--sp-2);
+}
+.tasks__detail-notes {
+  border-top: 1px solid var(--rule-on-panel);
+  padding-top: var(--sp-3);
+}
+.tasks__detail-notes p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.tasks__detail-prompt {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-on-panel);
+  background: var(--panel-2);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 6px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow: auto;
+}
+.tasks__detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tasks__detail-statusrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tasks__detail-foot {
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--rule-on-panel);
+}
+
+.tasks__filter-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--rule-on-panel);
+  margin: 0 4px;
+}
+.tasks__chip--auto.tasks__chip--on {
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .tasks__row {
@@ -279,14 +449,21 @@
   transition: background 100ms;
 }
 
-/* Per-row action cluster — visible at all times (not hover-revealed) so
- * the affordances are discoverable. The kebab covers the long tail of
- * actions that don't earn a dedicated button.
+/* Per-row action cluster — quiet by default, revealed on hover or when
+ * the row is the keyboard cursor. The detail panel + kebab cover the
+ * full action set; these are the high-frequency shortcuts.
  */
 .tasks__row-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  opacity: 0;
+  transition: opacity 100ms;
+}
+.tasks__row:hover .tasks__row-actions,
+.tasks__row--cursor .tasks__row-actions,
+.tasks__row--selected .tasks__row-actions {
+  opacity: 1;
 }
 .tasks__row-btn {
   width: 28px;

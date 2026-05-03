@@ -46,7 +46,8 @@
    main area can stretch into that column. Sidebar stays — tasks live
    there, and a task tab is naturally a "pick what to work on next"
    surface. */
-.shell[data-tab-kind="task"] {
+.shell[data-tab-kind="task"],
+.shell[data-tab-kind="tasks"] {
   --preview-w: 0px;
   grid-template-columns: var(--sidebar-w) 1fr 0px;
 }
