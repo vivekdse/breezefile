@@ -103,7 +103,20 @@ export function deriveRunState(task: Task, run: TaskRun | null): RunState {
       label: `${run.error_class ?? 'error'}: ${summary}`,
     };
   }
+  // For recurring tasks, the user cares more about "when does it fire
+  // next" than "when did it last run" — show next_run_at first if set.
+  // For one-shot tasks (cron unset) we keep the "Xm ago" framing since
+  // there is no next fire.
   if (run?.status === 'succeeded') {
+    if (task.cron && task.next_run_at && task.next_run_at > Date.now()) {
+      return {
+        kind: 'idle',
+        short: `next ${relTime(task.next_run_at)}`,
+        label: `Last run succeeded ${relTime(
+          run.finished_at ?? run.started_at ?? Date.now(),
+        )} · next ${new Date(task.next_run_at).toLocaleString()}`,
+      };
+    }
     const when = run.finished_at ?? run.started_at ?? Date.now();
     return {
       kind: 'succeeded',
