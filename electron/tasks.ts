@@ -453,6 +453,15 @@ export function updateTask(id: string, patch: TaskUpdate): Task {
     // else: leave existing schedule alone (e.g. user just edited title).
   }
 
+  // Marking a recurring task done/cancelled means "stop running this." The
+  // scheduler already skips done/cancelled rows so it won't fire, but the
+  // stale next_run_at would still drive the sidebar's "next in Nm" pill —
+  // misleading for a task the user just closed. Clear it unless the caller
+  // explicitly supplied one (e.g. the scheduler rolling forward a cron).
+  if (justCompleted && patch.next_run_at === undefined) {
+    next.next_run_at = null;
+  }
+
   d.prepare(
     `UPDATE tasks SET
        title = @title,

@@ -313,7 +313,8 @@ export function TasksPage() {
           return t.status !== 'done' && t.status !== 'cancelled';
         case 'scheduled':
           if (!t.start_at) return false;
-          return t.start_at > today;
+          if (t.start_at <= today) return false;
+          return t.status !== 'done' && t.status !== 'cancelled';
         case 'orphaned':
           return isTaskOrphaned(t, folderExists);
         case 'all':

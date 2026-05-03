@@ -242,6 +242,16 @@ export function useKeyboard(
         return;
       }
 
+      // Non-folder tabs (task / tasks-overview) own their own keyboard:
+      // TaskShell wires its own handlers, TasksPage handles ↑↓/Enter/[/]/w
+      // for the task list. The folder-browse actions below (j/k/l/Enter →
+      // goRight, etc.) would fire in parallel and operate on the underlying
+      // folder tab's selection — pressing Enter on a task row both opened
+      // the edit dialog AND opened the file under the cursor on the folder
+      // tab the tasks tab covered. Bail after tab-management chords so
+      // ⌘T/⌘W/⌘1-9/⌘Tab still work, but before any browse actions.
+      if (tab.kind !== 'folder') return;
+
       const k = keyName(e);
 
       // --- <any>-consuming pending chords ---
