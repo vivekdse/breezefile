@@ -23,6 +23,7 @@ import {
 } from '../tasks';
 import type { Task } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
+import { shellQuote } from '../shellQuote';
 import './Sidebar.css';
 
 const MAX_VISIBLE_TASKS = 10;
@@ -700,7 +701,11 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
       );
       return;
     }
-    const cmd = `claude --resume ${session}`;
+    // Claude CLI keys session storage by cwd; prepend `cd <task folder>`
+    // so the resume works from any shell.
+    const cmd = task.folder
+      ? `cd ${shellQuote(task.folder)} && claude --resume ${session}`
+      : `claude --resume ${session}`;
     try {
       await navigator.clipboard.writeText(cmd);
       window.dispatchEvent(

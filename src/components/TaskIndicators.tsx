@@ -44,24 +44,28 @@ export function TaskStatusDot({
 
 /** Inline run-state for an auto-executable task. Returns null when
  *  task.auto_mode is false so callers can drop it next to other meta
- *  with no surrounding conditionals. */
+ *  with no surrounding conditionals. When `onClick` is set, renders as
+ *  a button so users can click straight into the run-history dialog. */
 export function TaskRunIndicator({
   task,
   showPill = true,
+  onClick,
 }: {
   task: Task;
   showPill?: boolean;
+  onClick?: () => void;
 }) {
   // Subscribe only when auto is on; null subscriptions are inert.
   const lastRun = useLastRun(task.auto_mode ? task.id : null);
   if (!task.auto_mode) return null;
   const state = deriveRunState(task, lastRun);
 
-  return (
-    <span
-      className={`task-run-indicator task-run-indicator--${state.kind}`}
-      title={state.label}
-    >
+  const className = `task-run-indicator task-run-indicator--${state.kind}${
+    onClick ? ' task-run-indicator--clickable' : ''
+  }`;
+  const title = onClick ? `${state.label} · click for run history` : state.label;
+  const inner = (
+    <>
       <span
         className={`task-run-indicator__glyph task-run-indicator__glyph--${state.kind}`}
         aria-hidden="true"
@@ -71,6 +75,27 @@ export function TaskRunIndicator({
       {showPill && (
         <span className="task-run-indicator__pill">{state.short}</span>
       )}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={className}
+        title={title}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <span className={className} title={title}>
+      {inner}
     </span>
   );
 }

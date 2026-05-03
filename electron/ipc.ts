@@ -1757,6 +1757,10 @@ end tell`;
   ipcMain.handle('tasks:runsList', (_e, taskId: string, limit?: number) =>
     tasks.listRunsForTask(taskId, limit ?? 50),
   );
+  ipcMain.handle('tasks:runsListAll', (_e, limit?: number) =>
+    tasks.listAllRuns(limit ?? 200),
+  );
+  ipcMain.handle('tasks:runsCountByTask', () => tasks.runCountsByTask());
   ipcMain.handle('tasks:lastRun', (_e, taskId: string) => tasks.getLastRun(taskId));
   ipcMain.handle('tasks:runNow', async (_e, taskId: string) => {
     const t = tasks.getTask(taskId);

@@ -76,10 +76,22 @@ class ClaudeAgent implements AgentRunner {
     const stdoutStream = createWriteStream(stdoutPath, { flags: 'a' });
     const stderrStream = createWriteStream(stderrPath, { flags: 'a' });
 
+    // Strip ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN before spawning. The
+    // Claude CLI's auth precedence is env-var > stored OAuth credentials,
+    // so leaking a stale `export ANTHROPIC_API_KEY=…` from the user's
+    // shell rc into Electron causes headless runs to fail with
+    // "Invalid API key" even when the user's interactive subscription
+    // login is healthy. We want headless runs to use the same OAuth
+    // login the user uses interactively, so we drop these vars and let
+    // the CLI fall through to the stored credentials. Caller-supplied
+    // env (input.env) still wins — that's the explicit override path.
+    const baseEnv: NodeJS.ProcessEnv = { ...process.env };
+    delete baseEnv.ANTHROPIC_API_KEY;
+    delete baseEnv.ANTHROPIC_AUTH_TOKEN;
     const child = spawn(CLAUDE_BIN, args, {
       cwd,
       env: {
-        ...process.env,
+        ...baseEnv,
         ...(input.env ?? {}),
         BREEZE_TASK_ID: taskId,
         BREEZE_RUN_ID: runId,

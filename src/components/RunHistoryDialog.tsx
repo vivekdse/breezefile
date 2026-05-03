@@ -8,7 +8,8 @@
 
 import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
-import { useTaskRuns, getTask } from '../tasks';
+import { getTask, runTaskNow, useTaskRuns } from '../tasks';
+import { shellQuote } from '../shellQuote';
 import type { Task, TaskRun } from '../types';
 import './RunHistoryDialog.css';
 
@@ -52,10 +53,17 @@ export function RunHistoryDialog({ taskId, onClose }: Props) {
         >
           ×
         </button>
-        <div id="run-history-title" className="run-history__title">
-          Run history
+        <div className="run-history__head">
+          <div>
+            <div id="run-history-title" className="run-history__title">
+              Run history
+            </div>
+            {task && <div className="run-history__subtitle">{task.title}</div>}
+          </div>
+          {task?.auto_mode && (
+            <RerunButton taskId={taskId} runs={runs} />
+          )}
         </div>
-        {task && <div className="run-history__subtitle">{task.title}</div>}
 
         {runs.length === 0 && (
           <div className="run-history__empty">
@@ -67,7 +75,7 @@ export function RunHistoryDialog({ taskId, onClose }: Props) {
         {runs.length > 0 && (
           <ul className="run-history__list">
             {runs.map((r) => (
-              <RunRow key={r.id} run={r} />
+              <RunRow key={r.id} run={r} folder={task?.folder ?? null} />
             ))}
           </ul>
         )}
@@ -76,7 +84,46 @@ export function RunHistoryDialog({ taskId, onClose }: Props) {
   );
 }
 
-function RunRow({ run }: { run: TaskRun }) {
+function RerunButton({ taskId, runs }: { taskId: string; runs: TaskRun[] }) {
+  const latest = runs[0];
+  const isRunning =
+    latest?.status === 'running' ||
+    latest?.status === 'queued' ||
+    latest?.status === 'retrying';
+  const onClick = async () => {
+    try {
+      await runTaskNow(taskId);
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', { detail: { msg: 'started new run' } }),
+      );
+    } catch (e) {
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', {
+          detail: { msg: `run failed to start: ${(e as Error).message}` },
+        }),
+      );
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="run-history__rerun"
+      onClick={() => void onClick()}
+      disabled={isRunning}
+      title={
+        isRunning
+          ? 'A run is already in progress'
+          : runs.length > 0
+            ? 'Run this task again now'
+            : 'Run this task now'
+      }
+    >
+      {isRunning ? 'Running…' : runs.length > 0 ? 'Rerun' : 'Run now'}
+    </button>
+  );
+}
+
+function RunRow({ run, folder }: { run: TaskRun; folder: string | null }) {
   const start = run.started_at ?? run.scheduled_for;
   const dur =
     run.finished_at && run.started_at
@@ -85,7 +132,13 @@ function RunRow({ run }: { run: TaskRun }) {
 
   const copyResume = async () => {
     if (!run.conversation_id) return;
-    const cmd = `claude --resume ${run.conversation_id}`;
+    // Claude CLI keys session storage by cwd (~/.claude/projects/<encoded-cwd>/),
+    // so a bare `claude --resume <id>` only finds the trace when you happen
+    // to be in the same folder. We prepend `cd` to the task folder so the
+    // pasted command works from anywhere. Quoting handles paths with spaces.
+    const cmd = folder
+      ? `cd ${shellQuote(folder)} && claude --resume ${run.conversation_id}`
+      : `claude --resume ${run.conversation_id}`;
     try {
       await navigator.clipboard.writeText(cmd);
       window.dispatchEvent(

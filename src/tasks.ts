@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { fm } from './bridge';
-import type { Task, TaskCreate, TaskFilter, TaskRun, TaskUpdate } from './types';
+import type { Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskUpdate } from './types';
 
 export function useTasks(filter: TaskFilter = {}): {
   tasks: Task[];
@@ -107,6 +107,55 @@ export function useLastRun(taskId: string | null): TaskRun | null {
     };
   }, [taskId]);
   return run;
+}
+
+/** Hook for the cross-task Runs view. Returns recent runs across all
+ *  tasks (joined with task title + folder), refreshed on any
+ *  task-runs:changed event. */
+export function useAllRuns(limit = 200): TaskRunWithTitle[] {
+  const [runs, setRuns] = useState<TaskRunWithTitle[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fm.tasksRunsListAll(limit);
+        if (!cancelled) setRuns(r);
+      } catch {
+        if (!cancelled) setRuns([]);
+      }
+    };
+    void load();
+    const unsub = fm.onTaskRunsChanged(() => void load());
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [limit]);
+  return runs;
+}
+
+/** Hook for per-task run counts (used to render "N runs" pills on
+ *  TasksPage rows). One IPC call covers every task. */
+export function useRunCounts(): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const c = await fm.tasksRunsCountByTask();
+        if (!cancelled) setCounts(c);
+      } catch {
+        if (!cancelled) setCounts({});
+      }
+    };
+    void load();
+    const unsub = fm.onTaskRunsChanged(() => void load());
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+  return counts;
 }
 
 /** Hook variant for a task's full run list. Re-pulls on any

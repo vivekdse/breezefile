@@ -44,6 +44,34 @@
   margin-bottom: var(--sp-2);
 }
 
+.run-history__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-right: 28px; /* leave space for the close × in the corner */
+}
+
+.run-history__rerun {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.run-history__rerun:hover:not(:disabled) {
+  background: var(--hi);
+  border-color: var(--accent, #268bd2);
+}
+.run-history__rerun:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .run-history__empty {
   padding: var(--sp-3);
   font-size: 12px;

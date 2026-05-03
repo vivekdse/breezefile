@@ -68,3 +68,24 @@
 .task-run-indicator--running   .task-run-indicator__pill { color: #b58900; font-weight: 600; }
 .task-run-indicator--failed    .task-run-indicator__pill { color: #dc322f; font-weight: 600; }
 .task-run-indicator--queued    .task-run-indicator__pill { color: #b58900; }
+
+/* Clickable variant — used in TasksPage rows + detail header so the
+   indicator doubles as the entry point to the run-history dialog. */
+button.task-run-indicator--clickable {
+  appearance: none;
+  border: 0;
+  padding: 1px 4px;
+  margin: 0;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+button.task-run-indicator--clickable:hover {
+  background: var(--hi, rgba(0, 0, 0, 0.08));
+}
+button.task-run-indicator--clickable:focus-visible {
+  outline: 2px solid var(--accent, #268bd2);
+  outline-offset: 1px;
+}

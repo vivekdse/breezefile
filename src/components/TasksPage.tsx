@@ -27,8 +27,10 @@ import {
   deleteTask,
   todayISO,
   updateTask,
+  useRunCounts,
   useTasks,
 } from '../tasks';
+import { RunsView } from './RunsView';
 import type { ConfirmRequest } from './ConfirmDialog';
 import type { Task, TaskStatus } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
@@ -221,6 +223,11 @@ export function TasksPage() {
   const [sort, setSort] = useState<SortKey>('due');
   const [group, setGroup] = useState<GroupKey>('folder');
   const [showCompleted, setShowCompleted] = useState(false);
+  // fm-zf3m — Tasks/Runs toggle. The Runs view is a flat feed of every
+  // recent auto-task run; flipping into it hides the filter row + list
+  // and replaces them with the cross-task RunsView component.
+  const [view, setView] = useState<'tasks' | 'runs'>('tasks');
+  const runCounts = useRunCounts();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cursorId, setCursorId] = useState<string | null>(null);
@@ -1020,6 +1027,41 @@ export function TasksPage() {
           )}
         </div>
         <div className="tasks__head-actions">
+          <div
+            className="tasks__view-toggle"
+            role="tablist"
+            aria-label="Tasks or Runs"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'tasks'}
+              className={[
+                'tasks__view-toggle-btn',
+                view === 'tasks' && 'tasks__view-toggle-btn--on',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() => setView('tasks')}
+            >
+              Tasks
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'runs'}
+              className={[
+                'tasks__view-toggle-btn',
+                view === 'runs' && 'tasks__view-toggle-btn--on',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() => setView('runs')}
+              title="See past auto-task runs across every task"
+            >
+              Runs
+            </button>
+          </div>
           <button
             type="button"
             className="tasks__btn"
@@ -1036,7 +1078,9 @@ export function TasksPage() {
           </button>
         </div>
       </header>
-
+      {view === 'runs' && <RunsView />}
+      {view === 'tasks' && (
+      <>
       <div className="tasks__filters">
         <div className="tasks__filter-row">
           <span className="tasks__filter-label">Status</span>
@@ -1335,6 +1379,7 @@ export function TasksPage() {
                 <TaskRow
                   key={t.id}
                   task={t}
+                  runCount={runCounts[t.id] ?? 0}
                   orphan={isTaskOrphaned(t, folderExists)}
                   hideFolder={group === 'folder'}
                   selected={selected.has(t.id)}
@@ -1375,6 +1420,8 @@ export function TasksPage() {
         onDelete={() => detailTask && rowDelete(detailTask)}
       />
       </div>
+      </>
+      )}
 
       {kebabFor && (
         <RowKebabMenu
@@ -1460,6 +1507,7 @@ export function TasksPage() {
 
 function TaskRow({
   task,
+  runCount,
   hideFolder,
   orphan,
   selected,
@@ -1473,6 +1521,7 @@ function TaskRow({
   onKebab,
 }: {
   task: Task;
+  runCount: number;
   hideFolder?: boolean;
   orphan: boolean;
   selected: boolean;
@@ -1560,7 +1609,35 @@ function TaskRow({
               due {shortDate(task.due_at, today)}
             </span>
           )}
-          {task.auto_mode && <TaskRunIndicator task={task} />}
+          {task.auto_mode && (
+            <TaskRunIndicator
+              task={task}
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('fm:openRunHistory', {
+                    detail: { taskId: task.id },
+                  }),
+                )
+              }
+            />
+          )}
+          {runCount > 0 && (
+            <button
+              type="button"
+              className="tasks__runs-pill"
+              onClick={(e) => {
+                e.stopPropagation();
+                window.dispatchEvent(
+                  new CustomEvent('fm:openRunHistory', {
+                    detail: { taskId: task.id },
+                  }),
+                );
+              }}
+              title={`${runCount} past run${runCount === 1 ? '' : 's'} — click to open history`}
+            >
+              {runCount} run{runCount === 1 ? '' : 's'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1812,7 +1889,18 @@ function TaskDetailPanel({
         <div className="tasks__detail-status">
           <TaskStatusDot status={task.status} />
           <span>{STATUS_LABEL[task.status]}</span>
-          {task.auto_mode && <TaskRunIndicator task={task} />}
+          {task.auto_mode && (
+            <TaskRunIndicator
+              task={task}
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('fm:openRunHistory', {
+                    detail: { taskId: task.id },
+                  }),
+                )
+              }
+            />
+          )}
         </div>
         <button
           type="button"

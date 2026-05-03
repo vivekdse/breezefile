@@ -687,6 +687,41 @@ export function getLastRun(taskId: string): TaskRun | null {
 }
 
 
+/** Recent runs across all tasks, joined with task title + folder so the
+ *  renderer's Runs view can render them without a per-row task fetch.
+ *  Sorted newest-first, capped by `limit`. */
+export function listAllRuns(limit = 100): Array<TaskRun & { task_title: string; task_folder: string }> {
+  const d = open();
+  const rows = d
+    .prepare(
+      `SELECT r.*,
+              t.title  AS __task_title,
+              t.folder AS __task_folder
+         FROM task_runs r
+         LEFT JOIN tasks t ON t.id = r.task_id
+        ORDER BY COALESCE(r.started_at, r.scheduled_for) DESC
+        LIMIT ?`,
+    )
+    .all(limit) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    ...rowToRun(r),
+    task_title: (r.__task_title as string | null) ?? '(deleted task)',
+    task_folder: (r.__task_folder as string | null) ?? '',
+  }));
+}
+
+/** Per-task run counts in one query. Used to render the "N runs" pill
+ *  on TasksPage rows without N+1 IPC calls. */
+export function runCountsByTask(): Record<string, number> {
+  const d = open();
+  const rows = d
+    .prepare(`SELECT task_id, COUNT(*) AS n FROM task_runs GROUP BY task_id`)
+    .all() as Array<{ task_id: string; n: number }>;
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.task_id] = r.n;
+  return out;
+}
+
 /** Mark any queued/running runs as cancelled. Called once on scheduler
  *  startup — these rows are necessarily orphaned because their owning
  *  process is dead. Returns the number of rows touched. */

@@ -239,6 +239,9 @@ const fm = {
   // ─── Task runs (fm-zf3m) ──────────────────────────────────────────
   tasksRunsList: (taskId: string, limit?: number) =>
     ipcRenderer.invoke('tasks:runsList', taskId, limit),
+  tasksRunsListAll: (limit?: number) =>
+    ipcRenderer.invoke('tasks:runsListAll', limit),
+  tasksRunsCountByTask: () => ipcRenderer.invoke('tasks:runsCountByTask'),
   tasksLastRun: (taskId: string) => ipcRenderer.invoke('tasks:lastRun', taskId),
   tasksRunNow: (taskId: string) => ipcRenderer.invoke('tasks:runNow', taskId),
   onTaskRunsChanged: (cb: (taskId: string) => void) => {

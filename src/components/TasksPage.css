@@ -261,6 +261,49 @@
   color: #fff;
 }
 
+/* ---- Tasks ↔ Runs view toggle (fm-zf3m) ---- */
+.tasks__view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.tasks__view-toggle-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-on-panel);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.tasks__view-toggle-btn:hover {
+  background: var(--hi);
+}
+.tasks__view-toggle-btn--on {
+  background: var(--ink);
+  color: var(--panel);
+}
+
+/* ---- "N runs" pill on each row (fm-zf3m) ---- */
+.tasks__runs-pill {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.tasks__runs-pill:hover {
+  background: var(--hi);
+  color: var(--ink);
+  border-color: var(--accent, #268bd2);
+}
+
 /* ---- split: list + detail panel ---- */
 .tasks__split {
   flex: 1;

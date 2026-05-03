@@ -1,4 +1,4 @@
-import type { Entry, Task, TaskCreate, TaskFilter, TaskRun, TaskUpdate } from './types';
+import type { Entry, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskUpdate } from './types';
 
 type Fm = {
   platform: NodeJS.Platform;
@@ -116,6 +116,8 @@ type Fm = {
   onTasksChanged: (cb: () => void) => () => void;
   // fm-zf3m — task runs
   tasksRunsList: (taskId: string, limit?: number) => Promise<TaskRun[]>;
+  tasksRunsListAll: (limit?: number) => Promise<TaskRunWithTitle[]>;
+  tasksRunsCountByTask: () => Promise<Record<string, number>>;
   tasksLastRun: (taskId: string) => Promise<TaskRun | null>;
   tasksRunNow: (taskId: string) => Promise<{ run: TaskRun; result: unknown }>;
   onTaskRunsChanged: (cb: (taskId: string) => void) => () => void;

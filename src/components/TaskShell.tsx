@@ -14,8 +14,11 @@ import {
   dueTone,
   formatDueLabel,
   getTask,
+  runTaskNow,
   todayISO,
   updateTask,
+  useLastRun,
+  useRunCounts,
 } from '../tasks';
 import { invokeLauncher } from '../launchers';
 import { spawnTerminal } from '../terminalSpawn';
@@ -66,6 +69,11 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
   // fm-mph — variant picker. Must live above the !task early return so
   // the hook count stays stable across renders (React Rules of Hooks).
   const [pickerFor, setPickerFor] = useState<Launcher | null>(null);
+  // fm-zf3m — same constraint: these hooks must run on every render
+  // path, including the not-found branch below. The Rerun button uses
+  // lastRun to know whether a run is already in flight.
+  const allRunCounts = useRunCounts();
+  const lastRun = useLastRun(taskId);
 
   const folder = useMemo(() => task?.folder ?? tab?.trail[tab.trail.length - 1] ?? '', [task, tab]);
 
@@ -97,6 +105,31 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
   const today = todayISO();
   const tone = dueTone(task.due_at, today);
   const isClosed = task.status === 'done' || task.status === 'cancelled';
+  const runCount = allRunCounts[task.id] ?? 0;
+  const isRunning =
+    lastRun?.status === 'running' ||
+    lastRun?.status === 'queued' ||
+    lastRun?.status === 'retrying';
+  const openRuns = () =>
+    window.dispatchEvent(
+      new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),
+    );
+  const onRerun = async () => {
+    try {
+      await runTaskNow(task.id);
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', {
+          detail: { msg: `started run for "${task.title}"` },
+        }),
+      );
+    } catch (e) {
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', {
+          detail: { msg: `run failed to start: ${(e as Error).message}` },
+        }),
+      );
+    }
+  };
 
   const onEdit = () => {
     window.dispatchEvent(
@@ -168,9 +201,36 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
           <TaskStatusDot status={task.status} className="taskshell__status-dot" />
           <h1 className="taskshell__title" title={task.title}>{task.title}</h1>
           {task.auto_mode && (
-            <TaskRunIndicator task={task} />
+            <TaskRunIndicator task={task} onClick={openRuns} />
           )}
           <div className="taskshell__header-actions">
+            {task.auto_mode && (
+              <button
+                type="button"
+                className="taskshell__btn"
+                onClick={() => void onRerun()}
+                disabled={isRunning}
+                title={
+                  isRunning
+                    ? 'A run is already in progress for this task'
+                    : runCount > 0
+                      ? 'Run this task again now'
+                      : 'Run this task now'
+                }
+              >
+                {isRunning ? 'Running…' : runCount > 0 ? 'Rerun' : 'Run now'}
+              </button>
+            )}
+            {runCount > 0 && (
+              <button
+                type="button"
+                className="taskshell__btn"
+                onClick={openRuns}
+                title={`See all ${runCount} past run${runCount === 1 ? '' : 's'} for this task`}
+              >
+                View {runCount} run{runCount === 1 ? '' : 's'}
+              </button>
+            )}
             <button
               type="button"
               className="taskshell__icon-btn"

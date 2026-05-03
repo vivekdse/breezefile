@@ -194,6 +194,14 @@ export type TaskRun = {
   exit_code: number | null;
 };
 
+/** TaskRun augmented with its parent task's title + folder, for the
+ *  cross-task Runs view (fm-zf3m). Joined in SQL so the renderer
+ *  doesn't have to fetch each task individually. */
+export type TaskRunWithTitle = TaskRun & {
+  task_title: string;
+  task_folder: string;
+};
+
 export type TaskFilter = {
   status?: TaskStatus | TaskStatus[];
   folder?: string;
