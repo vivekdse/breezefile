@@ -38,6 +38,17 @@ export class AgentNotAvailableError extends Error {
   }
 }
 
+/** Thrown when a second run is requested for a task that already has
+ *  one in flight. The renderer's UI guard catches the common case
+ *  (disabled button), but the API server + scheduler can still race —
+ *  this is the backend's last-line dedupe. */
+export class TaskAlreadyRunningError extends Error {
+  constructor(public taskId: string, public runId: string) {
+    super(`task ${taskId} already has a run in progress (${runId})`);
+    this.name = 'TaskAlreadyRunningError';
+  }
+}
+
 export async function executeTaskRun(
   task: Task,
   opts: ExecuteOptions = {},
@@ -50,6 +61,14 @@ export async function executeTaskRun(
   if (!agentId) throw new AgentNotAvailableError('<none registered>');
   const agent = getAgent(agentId);
   if (!agent) throw new AgentNotAvailableError(agentId);
+
+  // Refuse to start a second concurrent run for the same task. Reusing
+  // an existing row (scheduler retry path) is exempt — that's the same
+  // run continuing, not a new one.
+  if (!opts.existingRunId) {
+    const inflight = tasks.getInflightRun(task.id);
+    if (inflight) throw new TaskAlreadyRunningError(task.id, inflight.id);
+  }
 
   const now = Date.now();
   let run: TaskRun;

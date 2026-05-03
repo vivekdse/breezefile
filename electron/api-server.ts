@@ -21,7 +21,11 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskUpdate } from './tasks';
 import { dispatchTerminalFg } from './ipc';
-import { executeTaskRun, AgentNotAvailableError } from './agents/execute';
+import {
+  AgentNotAvailableError,
+  TaskAlreadyRunningError,
+  executeTaskRun,
+} from './agents/execute';
 
 const API_FILE_DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(API_FILE_DIR, 'api.json');
@@ -222,6 +226,13 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       } catch (e) {
         if (e instanceof AgentNotAvailableError) {
           return sendJson(res, 400, { error: e.message });
+        }
+        if (e instanceof TaskAlreadyRunningError) {
+          return sendJson(res, 409, {
+            error: e.message,
+            taskId: e.taskId,
+            runId: e.runId,
+          });
         }
         throw e;
       }

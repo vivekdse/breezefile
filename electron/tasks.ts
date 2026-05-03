@@ -687,6 +687,24 @@ export function getLastRun(taskId: string): TaskRun | null {
 }
 
 
+/** Most recent in-flight run for a task — i.e. one with status in
+ *  queued/running/retrying. Used as the backend dedupe guard for
+ *  concurrent run-now requests (UI guard alone can race against the
+ *  scheduler / external API hits). Returns null when nothing is live. */
+export function getInflightRun(taskId: string): TaskRun | null {
+  const d = open();
+  const row = d
+    .prepare(
+      `SELECT * FROM task_runs
+        WHERE task_id = @taskId
+          AND status IN ('queued','running','retrying')
+        ORDER BY COALESCE(started_at, scheduled_for) DESC
+        LIMIT 1`,
+    )
+    .get({ taskId }) as Record<string, unknown> | undefined;
+  return row ? rowToRun(row) : null;
+}
+
 /** Recent runs across all tasks, joined with task title + folder so the
  *  renderer's Runs view can render them without a per-row task fetch.
  *  Sorted newest-first, capped by `limit`. */
