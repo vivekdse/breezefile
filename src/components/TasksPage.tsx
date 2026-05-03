@@ -7,12 +7,14 @@
 // custom events for verb-driven actions; we listen and act on the
 // current selection (or the cursor row when nothing is selected).
 //
-// Keyboard model — motion + selection only, no letter-as-verb:
+// Keyboard model — motion + selection + snooze, no letter-as-verb:
 //   ↑/↓        move cursor
 //   Space      toggle selection on cursor row
 //   Shift+↑/↓  extend selection
 //   Enter      open edit
 //   /          focus search
+//   [ / ]      shift due date by ∓1 day on the cursor row (or selection)
+//   w          shift due date by +7 days
 //
 // Everything else is a verb in the chip prompt.
 
@@ -102,6 +104,52 @@ function isOrphanedLooking(folder: string): boolean {
   return false;
 }
 
+// fm-7fu — session-scoped cache of folder existence. We only stat
+// folders that are actually being shown (lazy reconciliation) and
+// remember the result for the rest of the session. Module scope so
+// the cache survives re-renders + filter changes.
+const folderExistsCache = new Map<string, boolean>();
+const folderExistsInflight = new Map<string, Promise<boolean>>();
+
+function probeFolderExists(p: string): Promise<boolean> {
+  const hit = folderExistsCache.get(p);
+  if (hit !== undefined) return Promise.resolve(hit);
+  const inflight = folderExistsInflight.get(p);
+  if (inflight) return inflight;
+  const promise = fm
+    .stat(p)
+    .then(
+      (s) => {
+        const ok = !!s.isDir;
+        folderExistsCache.set(p, ok);
+        return ok;
+      },
+      () => {
+        folderExistsCache.set(p, false);
+        return false;
+      },
+    )
+    .finally(() => folderExistsInflight.delete(p));
+  folderExistsInflight.set(p, promise);
+  return promise;
+}
+
+/** Combine the cheap string heuristic with the cached fs result. The
+ *  heuristic still flags malformed paths immediately; the fs result —
+ *  once available — overrides it (a malformed-looking path that the OS
+ *  resolves is fine; a clean-looking path that doesn't exist is not). */
+function isTaskOrphaned(t: Task, exists: Record<string, boolean>): boolean {
+  if (isOrphanedLooking(t.folder)) return true;
+  return exists[t.folder] === false;
+}
+
+// Add `days` to an ISO 'YYYY-MM-DD' (timezone-naive). Used by snooze.
+function addDays(iso: string, days: number): string {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function cmpISO(a: string | null, b: string | null): number {
   if (a === b) return 0;
   if (!a) return 1;
@@ -179,6 +227,12 @@ export function TasksPage() {
   const lastSelectedRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  // fm-7fu — local mirror of folderExistsCache for visible tasks.
+  // Effect below kicks off probes lazily (only for what's on screen).
+  const [folderExists, setFolderExists] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(folderExistsCache.entries()),
+  );
 
   // Inline due/start picker state — opened via :due / :start verbs
   const [datePicker, setDatePicker] = useState<{
@@ -261,14 +315,14 @@ export function TasksPage() {
           if (!t.start_at) return false;
           return t.start_at > today;
         case 'orphaned':
-          return isOrphanedLooking(t.folder);
+          return isTaskOrphaned(t, folderExists);
         case 'all':
         default:
           return true;
       }
     });
     return out.slice().sort((a, b) => compareTasks(a, b, sort));
-  }, [rawTasks, statuses, derived, autoFilter, showCompleted, sort]);
+  }, [rawTasks, statuses, derived, autoFilter, showCompleted, sort, folderExists]);
 
   // Group the filtered list. 'flat' returns one group with empty header.
   const groups = useMemo(() => {
@@ -306,6 +360,30 @@ export function TasksPage() {
 
   // Flat order across groups — drives arrow nav.
   const flatOrder = useMemo(() => groups.flatMap((g) => g.tasks), [groups]);
+
+  // fm-7fu — lazily reconcile orphaned folders. Only stat folders that
+  // are currently in the visible list, debounce so rapid filter typing
+  // doesn't fire dozens of probes, and stop once we've cached a result.
+  useEffect(() => {
+    const targets: string[] = [];
+    const seen = new Set<string>();
+    for (const t of rawTasks) {
+      if (!t.folder || seen.has(t.folder)) continue;
+      seen.add(t.folder);
+      if (folderExistsCache.has(t.folder)) continue;
+      if (isOrphanedLooking(t.folder)) continue; // string-orphan dominates
+      targets.push(t.folder);
+    }
+    if (targets.length === 0) return;
+    const id = window.setTimeout(() => {
+      for (const p of targets) {
+        void probeFolderExists(p).then((ok) => {
+          setFolderExists((prev) => (prev[p] === ok ? prev : { ...prev, [p]: ok }));
+        });
+      }
+    }, 120);
+    return () => window.clearTimeout(id);
+  }, [rawTasks]);
 
   // Drop selection ids that fell out of view; re-anchor cursor.
   useEffect(() => {
@@ -446,6 +524,37 @@ export function TasksPage() {
     };
     window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
   }
+  // fm-7fu — snooze: shift due_at by N days for the cursor row (or the
+  // whole selection when one exists). Tasks without a due date pick up
+  // "today + N" so the keybind always lands somewhere useful.
+  async function shiftDue(days: number) {
+    const ids = targetIds();
+    if (ids.length === 0) {
+      dispatch({ type: 'setStatus', msg: 'no task targeted' });
+      return;
+    }
+    const today = todayISO();
+    const tasks = flatOrder.filter((t) => ids.includes(t.id));
+    const updates = tasks.map((t) => {
+      const base = t.due_at ?? today;
+      return { id: t.id, due: addDays(base, days) };
+    });
+    await Promise.all(updates.map((u) => updateTask(u.id, { due_at: u.due })));
+    if (updates.length === 1) {
+      const sign = days > 0 ? '+' : '';
+      dispatch({
+        type: 'setStatus',
+        msg: `due ${sign}${days}d → ${updates[0].due} · ${tasks[0].title}`,
+      });
+    } else {
+      const sign = days > 0 ? '+' : '';
+      dispatch({
+        type: 'setStatus',
+        msg: `due ${sign}${days}d · ${updates.length} tasks`,
+      });
+    }
+  }
+
   function rowSetDueQuick(task: Task, value: string | null) {
     void updateTask(task.id, { due_at: value });
     dispatch({
@@ -797,6 +906,15 @@ export function TasksPage() {
         e.preventDefault();
         const t = flatOrder.find((x) => x.id === cursorId);
         if (t) openEdit(t);
+      } else if (e.key === '[') {
+        e.preventDefault();
+        void shiftDue(-1);
+      } else if (e.key === ']') {
+        e.preventDefault();
+        void shiftDue(1);
+      } else if (e.key === 'w') {
+        e.preventDefault();
+        void shiftDue(7);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -819,10 +937,10 @@ export function TasksPage() {
       if (t.status === 'done' || t.status === 'cancelled') continue;
       if (t.due_at && t.due_at < today) overdue++;
       else if (t.due_at && t.due_at <= week) dueWeek++;
-      if (isOrphanedLooking(t.folder)) orphan++;
+      if (isTaskOrphaned(t, folderExists)) orphan++;
     }
     return { overdue, dueWeek, orphan };
-  }, [rawTasks]);
+  }, [rawTasks, folderExists]);
 
   // Detail panel shows the cursor task (or the single selected task when
   // exactly one is selected and the cursor is elsewhere).
@@ -1216,6 +1334,7 @@ export function TasksPage() {
                 <TaskRow
                   key={t.id}
                   task={t}
+                  orphan={isTaskOrphaned(t, folderExists)}
                   hideFolder={group === 'folder'}
                   selected={selected.has(t.id)}
                   cursor={cursorId === t.id}
@@ -1341,6 +1460,7 @@ export function TasksPage() {
 function TaskRow({
   task,
   hideFolder,
+  orphan,
   selected,
   cursor,
   onCheckbox,
@@ -1353,6 +1473,7 @@ function TaskRow({
 }: {
   task: Task;
   hideFolder?: boolean;
+  orphan: boolean;
   selected: boolean;
   cursor: boolean;
   onCheckbox: () => void;
@@ -1369,7 +1490,6 @@ function TaskRow({
     task.due_at < today &&
     task.status !== 'done' &&
     task.status !== 'cancelled';
-  const orphan = isOrphanedLooking(task.folder);
   const isClosed = task.status === 'done' || task.status === 'cancelled';
 
   return (
