@@ -177,6 +177,11 @@ type VerbDef = {
 type SlotDef = {
   label: string; // "What", "Where", "How", "By", "Direction"
   getOptions: (ctx: Ctx, prev: string[]) => Option[];
+  // fm-7d86 — multi-select slot (e.g. AI launcher flags). Space toggles
+  // the highlighted option, Enter commits the joined ids (comma-separated)
+  // as the slot value. Empty selection commits as ''. Single-pick stays
+  // the default to keep destination/mode slots behaving as before.
+  multi?: boolean;
 };
 
 type ExecApi = {
@@ -2056,35 +2061,25 @@ function synthesizeLauncherVerbs(
     const variants = l.variants ?? [];
     const hasVariants = variants.length > 0;
 
-    // fm-e66 — when a launcher declares variants, the verb gains a "Mode"
-    // slot. Bare is always first (so Enter at the picker = unmodified
-    // command). Each option's detail surfaces a single-character shortcut
-    // (the first letter of the label) — the chip-prompt's typing-to-filter
-    // narrows on it, so "B / C / S"-style hints map to one keystroke.
+    // fm-7d86 — variants are independent flags, not mutually-exclusive
+    // modes. The "Flags" slot is multi-select: space toggles each flag,
+    // Enter launches with the union (or bare if none selected). The old
+    // synthesized "Bare" option is gone — empty selection IS bare.
     const modeOptions: Option[] = hasVariants
-      ? [
-          {
-            id: '__bare__',
-            label: 'Bare',
-            detail: 'B · ' + baseCmdLine,
+      ? variants.map<Option>((v) => {
+          const fullCmd = [
+            l.command,
+            ...baseArgs,
+            ...(v.args ?? []),
+          ].join(' ');
+          return {
+            id: v.id,
+            label: v.label,
+            detail: v.description ?? fullCmd,
             available: true,
-          },
-          ...variants.map<Option>((v) => {
-            const shortcut = (v.label[0] ?? v.id[0] ?? '?').toUpperCase();
-            const fullCmd = [
-              l.command,
-              ...baseArgs,
-              ...(v.args ?? []),
-            ].join(' ');
-            return {
-              id: v.id,
-              label: v.label,
-              detail: `${shortcut} · ${v.description ?? fullCmd}`,
-              available: true,
-              aliases: v.args ?? [],
-            };
-          }),
-        ]
+            aliases: v.args ?? [],
+          };
+        })
       : [];
 
     return {
@@ -2098,7 +2093,7 @@ function synthesizeLauncherVerbs(
           : `Open terminal at ${basename(c.cwd) || '/'} and run "${baseCmdLine}"`,
       isAvailable: () => ({ ok: true }),
       slots: hasVariants
-        ? [{ label: 'Mode', getOptions: () => modeOptions }]
+        ? [{ label: 'Flags', getOptions: () => modeOptions, multi: true }]
         : [],
       execute: async (c, picks, api) => {
         const variantId = hasVariants ? picks[0] : undefined;
@@ -2308,6 +2303,10 @@ export function ChipPrompt({
     () => VERBS.find((v) => v.id === initialVerbId) ?? null,
   );
   const [picks, setPicks] = useState<string[]>([]); // slot values
+  // fm-7d86 — multi-select staging: ids the user has toggled on for the
+  // current multi slot. Cleared on slot advance / verb change. Committed
+  // into picks as a comma-joined string when Enter fires.
+  const [multiSelected, setMultiSelected] = useState<Set<string>>(() => new Set());
   const [filter, setFilter] = useState(initialFilter);
   const [highlightIdx, setHighlightIdx] = useState(0);
   const [homedir, setHomedir] = useState('');
@@ -2664,6 +2663,20 @@ export function ChipPrompt({
         void executeWith(v, []);
       }
     } else {
+      // fm-7d86 — in multi-select slots, "picking" toggles selection
+      // rather than advancing. Enter / Tab on Enter handler is what
+      // commits and advances.
+      const slot = verb.slots[picks.length];
+      if (slot?.multi) {
+        setMultiSelected((prev) => {
+          const next = new Set(prev);
+          if (next.has(opt.id)) next.delete(opt.id);
+          else next.add(opt.id);
+          return next;
+        });
+        setFilter('');
+        return;
+      }
       const nextPicks = [...picks, opt.id];
       if (nextPicks.length >= verb.slots.length) {
         void executeWith(verb, nextPicks);
@@ -2672,6 +2685,30 @@ export function ChipPrompt({
         setFilter('');
         setHighlightIdx(0);
       }
+    }
+  }
+
+  // fm-7d86 — commit the current multi-select staging into picks and
+  // either advance to the next slot or execute the verb.
+  function commitMultiSlot() {
+    if (!verb) return;
+    const slot = verb.slots[picks.length];
+    if (!slot?.multi) return;
+    // Preserve the option order (not insertion order) so the command
+    // line reads predictably regardless of toggle sequence.
+    const opts = slot.getOptions(ctx!, picks);
+    const ordered = opts
+      .filter((o) => multiSelected.has(o.id))
+      .map((o) => o.id);
+    const value = ordered.join(',');
+    const nextPicks = [...picks, value];
+    setMultiSelected(new Set());
+    if (nextPicks.length >= verb.slots.length) {
+      void executeWith(verb, nextPicks);
+    } else {
+      setPicks(nextPicks);
+      setFilter('');
+      setHighlightIdx(0);
     }
   }
 
@@ -2782,10 +2819,17 @@ export function ChipPrompt({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRename]);
 
+  // fm-7d86 — true when the currently active slot is a multi-select.
+  const inMultiSlot =
+    !!verb && verb.slots[picks.length]?.multi === true;
+
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Escape') {
       if (filter) {
         setFilter('');
+      } else if (inMultiSlot && multiSelected.size > 0) {
+        // First Esc clears the multi staging; second Esc backs out of the slot.
+        setMultiSelected(new Set());
       } else if (picks.length > 0) {
         setPicks(picks.slice(0, -1));
       } else if (verb) {
@@ -2795,20 +2839,40 @@ export function ChipPrompt({
       }
       return;
     }
+    // fm-7d86 — Space toggles selection on multi slots (only when the
+    // filter is empty, so the user can still type "skip" to narrow).
+    // After toggling, advance to the next option if one exists — keeps
+    // the keyboard hand resting on Space for quick walk-through.
+    if (e.key === ' ' && inMultiSlot && !filter) {
+      e.preventDefault();
+      const opt = matches[highlightIdx];
+      if (opt) {
+        pickOption(opt);
+        if (highlightIdx < matches.length - 1) {
+          setHighlightIdx(highlightIdx + 1);
+        }
+      }
+      return;
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
-      // Native event would otherwise keep bubbling to window after we
-      // unmount and the next overlay (ThemePicker, etc.) mounts —
-      // catching its freshly-attached listener and immediately
-      // re-triggering an action there.
       (e.nativeEvent as KeyboardEvent).stopImmediatePropagation?.();
+      // fm-7d86 — Enter on a multi slot commits the staging (empty = bare).
+      if (inMultiSlot) {
+        commitMultiSlot();
+        return;
+      }
       const opt = matches[highlightIdx];
       if (opt) pickOption(opt);
       return;
     }
     if (e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault();
+      if (inMultiSlot) {
+        commitMultiSlot();
+        return;
+      }
       const opt = matches[highlightIdx];
       if (opt) pickOption(opt);
       return;
@@ -2832,8 +2896,16 @@ export function ChipPrompt({
     }
     if (e.key === 'Backspace' && !filter) {
       e.preventDefault();
-      if (picks.length > 0) setPicks(picks.slice(0, -1));
-      else if (verb) setVerb(null);
+      if (inMultiSlot && multiSelected.size > 0) {
+        // First Backspace clears multi staging; next walks back a slot.
+        setMultiSelected(new Set());
+      } else if (picks.length > 0) {
+        setPicks(picks.slice(0, -1));
+        setMultiSelected(new Set());
+      } else if (verb) {
+        setVerb(null);
+        setMultiSelected(new Set());
+      }
       return;
     }
     // Number keys 1-9 pick directly
@@ -2863,10 +2935,23 @@ export function ChipPrompt({
               !verb ? 'placeholder'
                 : i < picks.length ? 'completed'
                   : i === picks.length ? 'active' : 'placeholder';
+            // fm-7d86 — on the active multi slot, show the live staging
+            // (e.g. "continue + skip") so the chip stays informative
+            // before the user commits with Enter.
+            const isActiveMulti =
+              slotState === 'active' && verb && (verb.slots[i] as SlotDef | undefined)?.multi;
+            const activeMultiLabel = isActiveMulti
+              ? multiSelected.size === 0
+                ? `${s.label.toLowerCase()} (none)`
+                : (verb!.slots[i].getOptions(ctx, picks.slice(0, i))
+                    .filter((o) => multiSelected.has(o.id))
+                    .map((o) => o.label)
+                    .join(' + '))
+              : null;
             const label =
               slotState === 'completed'
                 ? previewSlotValue(verb!, picks, i, ctx)
-                : s.label.toLowerCase();
+                : activeMultiLabel ?? s.label.toLowerCase();
             return (
               <Chip
                 key={i}
@@ -2906,32 +2991,95 @@ export function ChipPrompt({
           {matches.length === 0 && (
             <li className="chip-option chip-option--empty">no matches</li>
           )}
-          {matches.map((opt, i) => (
-            <li
-              key={opt.id}
-              className={[
-                'chip-option',
-                i === highlightIdx ? 'chip-option--highlighted' : '',
-                !opt.available ? 'chip-option--disabled' : '',
-              ].filter(Boolean).join(' ')}
-              onMouseEnter={() => {
-                setHighlightIdx(i);
-                setHoverReason(opt.available ? null : opt.reason ?? null);
-              }}
-              onMouseLeave={() => setHoverReason(null)}
-              onClick={() => pickOption(opt)}
-            >
-              <span className="chip-badge">{i < 9 ? i + 1 : '·'}</span>
-              <span className="chip-option__body">
-                <span className="chip-option__label">{opt.label}</span>
-                {opt.detail && <span className="chip-option__detail">{opt.detail}</span>}
-              </span>
-              {!opt.available && (
-                <span className="chip-option__lock" title={opt.reason}>⊘</span>
-              )}
-            </li>
-          ))}
+          {matches.map((opt, i) => {
+            const checked = inMultiSlot && multiSelected.has(opt.id);
+            return (
+              <li
+                key={opt.id}
+                className={[
+                  'chip-option',
+                  i === highlightIdx ? 'chip-option--highlighted' : '',
+                  !opt.available ? 'chip-option--disabled' : '',
+                  checked ? 'chip-option--checked' : '',
+                ].filter(Boolean).join(' ')}
+                onMouseEnter={() => {
+                  setHighlightIdx(i);
+                  setHoverReason(opt.available ? null : opt.reason ?? null);
+                }}
+                onMouseLeave={() => setHoverReason(null)}
+                onClick={() => pickOption(opt)}
+              >
+                <span
+                  className={`chip-badge${inMultiSlot ? ' chip-badge--checkbox' : ''}`}
+                >
+                  {inMultiSlot ? (checked ? '✓' : '') : i < 9 ? i + 1 : '·'}
+                </span>
+                <span className="chip-option__body">
+                  <span className="chip-option__label">{opt.label}</span>
+                  {opt.detail && <span className="chip-option__detail">{opt.detail}</span>}
+                </span>
+                {!opt.available && (
+                  <span className="chip-option__lock" title={opt.reason}>⊘</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
+
+        {/* fm-7d86 — explicit launch CTA on multi-select slots. Discovers
+            the keyboard shortcut for keyboard users, and gives a clickable
+            button for users who'd rather drive the picker with the mouse. */}
+        {inMultiSlot && (() => {
+          const slotOpts = activeSlot ? activeSlot.getOptions(ctx, picks) : [];
+          const stagedLabels = slotOpts
+            .filter((o) => multiSelected.has(o.id))
+            .map((o) => o.label);
+          const launcher = launchers.find(
+            (l) => verb && verb.id === ('launcher:' + l.id),
+          );
+          const stagedIds = slotOpts
+            .filter((o) => multiSelected.has(o.id))
+            .map((o) => o.id);
+          let cmdLine = '';
+          if (launcher) {
+            const baseArgs = launcher.args ?? [];
+            const allVariants = launcher.variants ?? [];
+            const variantArgs: string[] = [];
+            const seen = new Set<string>();
+            for (const id of stagedIds) {
+              const v = allVariants.find((x) => x.id === id);
+              for (const a of v?.args ?? []) {
+                if (!seen.has(a)) { seen.add(a); variantArgs.push(a); }
+              }
+            }
+            cmdLine = [launcher.command, ...baseArgs, ...variantArgs].join(' ');
+          }
+          const headline =
+            stagedLabels.length === 0
+              ? 'Launch with no flags (bare)'
+              : `Launch with ${stagedLabels.join(' + ')}`;
+          return (
+            <div className="chip-multi-cta">
+              <span className="chip-multi-cta__text">
+                <span className="chip-multi-cta__primary">{headline}</span>
+                {cmdLine && (
+                  <span className="chip-multi-cta__secondary">$ {cmdLine}</span>
+                )}
+              </span>
+              <button
+                type="button"
+                className="chip-multi-cta__btn"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  commitMultiSlot();
+                }}
+              >
+                Launch <kbd>↵</kbd>
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Preview + hover reason */}
         <div className="chip-preview">
@@ -2947,8 +3095,17 @@ export function ChipPrompt({
         {/* Hint bar */}
         <div className="chip-hints">
           <span><kbd>↑↓</kbd> navigate</span>
-          <span><kbd>Tab</kbd> or <kbd>Enter</kbd> pick</span>
-          <span><kbd>1–9</kbd> direct pick</span>
+          {inMultiSlot ? (
+            <>
+              <span><kbd>Space</kbd> toggle</span>
+              <span><kbd>Enter</kbd> launch</span>
+            </>
+          ) : (
+            <>
+              <span><kbd>Tab</kbd> or <kbd>Enter</kbd> pick</span>
+              <span><kbd>1–9</kbd> direct pick</span>
+            </>
+          )}
           <span><kbd>⌫</kbd> back</span>
           <span><kbd>Esc</kbd> close</span>
         </div>
@@ -3004,6 +3161,15 @@ function previewSlotValue(
 ): string {
   const val = picks[i];
   const opts = verb.slots[i].getOptions(ctx, picks.slice(0, i));
+  // fm-7d86 — multi slot values are comma-joined ids; render the union
+  // of labels (or "bare" when nothing was picked).
+  if (verb.slots[i].multi) {
+    if (!val) return 'bare';
+    const ids = val.split(',').filter(Boolean);
+    const labels = ids
+      .map((id) => opts.find((o) => o.id === id)?.label ?? id);
+    return labels.length === 0 ? 'bare' : labels.join(' + ');
+  }
   const match = opts.find((o) => o.id === val);
   return match?.label ?? val;
 }

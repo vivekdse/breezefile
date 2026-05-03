@@ -218,6 +218,92 @@
   cursor: not-allowed;
 }
 
+/* fm-7d86 — multi-select staged item: tinted background + accent badge */
+.chip-option--checked {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.chip-option--checked .chip-badge {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink, #fff);
+}
+
+/* Checkbox-style badge for multi-select slots: square, not circle.
+ * Stacked selector bumps specificity over .chip-badge above. */
+.chip-badge.chip-badge--checkbox {
+  border-radius: 4px;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* fm-7d86 — explicit launch CTA on multi-select slots so the keyboard
+ * shortcut isn't the only way to discover that Enter fires the command. */
+.chip-multi-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 8px 0 0;
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.chip-multi-cta__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chip-multi-cta__primary {
+  color: var(--text-on-panel);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chip-multi-cta__secondary {
+  color: var(--muted-on-panel, var(--text-on-panel));
+  opacity: 0.78;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-multi-cta__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink, #fff);
+  border: 1px solid var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chip-multi-cta__btn:hover { filter: brightness(1.05); }
+.chip-multi-cta__btn:active { transform: translateY(1px); }
+.chip-multi-cta__btn kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--accent-ink, #fff);
+  border: none;
+  box-shadow: none;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .chip-option--disabled .chip-option__label {
   text-decoration: none;
 }
@@ -267,7 +353,7 @@
 }
 
 .chip-option__label {
-  color: var(--ink);
+  color: var(--text-on-panel);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -14,6 +14,16 @@ import type { Task } from './types';
 
 const BARE_VARIANT_ID = '__bare__';
 
+// fm-7d86 — variantId may be a single id (legacy / single-pick) or a
+// comma-joined list (multi-select flag toggles). Empty / __bare__ → bare.
+function parseVariantIds(variantId?: string): string[] {
+  if (!variantId || variantId === BARE_VARIANT_ID) return [];
+  return variantId
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s !== BARE_VARIANT_ID);
+}
+
 export type InvokeLauncherArgs = {
   launcher: Launcher;
   /** Variant id, or '__bare__' / undefined to use base args only. */
@@ -43,8 +53,8 @@ export function resolveCommandLine(
   variantId?: string,
 ): { command: string; args: string[]; commandLine: string; label: string } {
   const baseArgs = launcher.args ?? [];
-  const isBare = !variantId || variantId === BARE_VARIANT_ID;
-  if (isBare) {
+  const ids = parseVariantIds(variantId);
+  if (ids.length === 0) {
     return {
       command: launcher.command,
       args: baseArgs,
@@ -52,9 +62,11 @@ export function resolveCommandLine(
       label: launcher.label,
     };
   }
-  const v = (launcher.variants ?? []).find((x) => x.id === variantId);
-  if (!v) {
-    // Unknown variant — fall back to bare and let the user notice.
+  const all = launcher.variants ?? [];
+  const picked = ids.map((id) => all.find((x) => x.id === id)).filter(Boolean) as NonNullable<
+    typeof all[number]
+  >[];
+  if (picked.length === 0) {
     return {
       command: launcher.command,
       args: baseArgs,
@@ -62,12 +74,24 @@ export function resolveCommandLine(
       label: launcher.label,
     };
   }
-  const fullArgs = [...baseArgs, ...(v.args ?? [])];
+  // Union the variant args, preserving order. Dedupe so a flag toggled
+  // by two variants doesn't appear twice on the command line.
+  const variantArgs: string[] = [];
+  const seen = new Set<string>();
+  for (const v of picked) {
+    for (const a of v.args ?? []) {
+      if (!seen.has(a)) {
+        seen.add(a);
+        variantArgs.push(a);
+      }
+    }
+  }
+  const fullArgs = [...baseArgs, ...variantArgs];
   return {
     command: launcher.command,
     args: fullArgs,
     commandLine: [launcher.command, ...fullArgs].join(' '),
-    label: `${launcher.label} · ${v.label}`,
+    label: `${launcher.label} · ${picked.map((v) => v.label).join(' + ')}`,
   };
 }
 
