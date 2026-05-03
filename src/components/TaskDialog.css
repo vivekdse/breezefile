@@ -280,3 +280,98 @@
   color: var(--muted);
   font-style: italic;
 }
+
+/* fm-hbvg — date input caption: shows the resolved ISO when the user
+   types shorthand like "tom" or "+3d". Red when unparseable. */
+.task-dialog__date-caption {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.task-dialog__date-caption--error {
+  color: var(--accent);
+}
+
+/* fm-26a7 — folder type-ahead. Suggestion list anchors below the input
+   so it doesn't push other fields around as it appears. */
+.task-dialog__folder-field {
+  position: relative;
+}
+.task-dialog__suggestions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  max-height: 200px;
+  overflow-y: auto;
+}
+.task-dialog__suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+}
+.task-dialog__suggestion--active {
+  background: var(--hi);
+}
+.task-dialog__suggestion__num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  width: 14px;
+  text-align: center;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.task-dialog__suggestion__path {
+  font-family: var(--font-mono);
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-dialog__suggestion__src {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex: 0 0 auto;
+}
+
+/* fm-oxkg — recurrence preset chip row. Sits above the fine-tune
+   controls so the common cases are one click away. */
+.task-dialog__preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* fm-oyam — footer shortcut legend. Keep it whisper-quiet so it
+   informs without competing with the form. */
+.task-dialog__shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  padding-top: 4px;
+  border-top: 1px dashed var(--rule);
+  margin-top: 4px;
+}
+.task-dialog__shortcuts kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--canvas);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-right: 3px;
+}

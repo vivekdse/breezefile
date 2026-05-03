@@ -215,6 +215,46 @@ export function shiftISO(iso: string, days: number): string {
   return todayISOFromDate(date);
 }
 
+/** Parse a free-form date string into ISO ('YYYY-MM-DD') or null (empty input).
+ *  Returns `undefined` when the input can't be interpreted. Accepts:
+ *    today / tod / t            tomorrow / tom / tmrw
+ *    +Nd / +Nw / Nd / Nw        eow (Friday this week) / eom (last day this month)
+ *    mon / tue / ... / sun      (next occurrence; today's weekday → 7d out)
+ *    YYYY-MM-DD                 (passed through)
+ *  Designed for the task dialog so users can type "tom" or "+3d" instead
+ *  of clicking a date picker. */
+export function parseDateInput(
+  input: string,
+  today: string = todayISO(),
+): string | null | undefined {
+  const s = input.trim().toLowerCase();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (s === 'today' || s === 'tod' || s === 't') return today;
+  if (s === 'tomorrow' || s === 'tom' || s === 'tmrw') return shiftISO(today, 1);
+  if (s === 'yesterday' || s === 'yes' || s === 'y') return shiftISO(today, -1);
+  const todayDow = new Date(today + 'T00:00:00').getDay(); // 0=Sun..6=Sat
+  if (s === 'eow') return shiftISO(today, ((5 - todayDow + 7) % 7) || 7);
+  if (s === 'eom') {
+    const [y, m] = today.split('-').map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+  }
+  const rel = /^([+-]?)(\d+)\s*([dw])$/.exec(s);
+  if (rel) {
+    const sign = rel[1] === '-' ? -1 : 1;
+    const n = Number(rel[2]) * (rel[3] === 'w' ? 7 : 1);
+    return shiftISO(today, sign * n);
+  }
+  const dow = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const idx = dow.indexOf(s.slice(0, 3));
+  if (idx >= 0) {
+    const delta = ((idx - todayDow + 7) % 7) || 7;
+    return shiftISO(today, delta);
+  }
+  return undefined;
+}
+
 function todayISOFromDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
