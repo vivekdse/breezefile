@@ -21,6 +21,7 @@ import { invokeLauncher } from '../launchers';
 import { spawnTerminal } from '../terminalSpawn';
 import type { Launcher } from '../bridge';
 import type { Task } from '../types';
+import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './TaskShell.css';
 
 const STATUS_LABEL: Record<Task['status'], string> = {
@@ -164,7 +165,11 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
     <div className="taskshell" data-status={task.status}>
       <header className="taskshell__header">
         <div className="taskshell__title-row">
+          <TaskStatusDot status={task.status} className="taskshell__status-dot" />
           <h1 className="taskshell__title" title={task.title}>{task.title}</h1>
+          {task.auto_mode && (
+            <TaskRunIndicator task={task} />
+          )}
           <div className="taskshell__header-actions">
             <button
               type="button"

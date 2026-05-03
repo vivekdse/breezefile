@@ -753,12 +753,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Eagerly load trail entries for active tab
+  // Eagerly load trail entries for active tab.
+  // Parent columns may use the cache (cheap, rarely changes between
+  // hops). The leaf (the folder the user is actually looking at) is
+  // always re-read so external writes — Claude auto-runs, downloads,
+  // other processes — show up on a back-and-forth navigation. A real
+  // folder watcher will obsolete this when it lands.
   useEffect(() => {
     if (!activeTab) return;
-    for (const p of activeTab.trail) {
-      if (!state.entriesByPath[p]) loadDir(p);
+    const trail = activeTab.trail;
+    const leaf = trail[trail.length - 1];
+    for (let i = 0; i < trail.length; i++) {
+      const p = trail[i];
+      const isLeaf = i === trail.length - 1;
+      if (isLeaf || !state.entriesByPath[p]) loadDir(p);
     }
+    // Reference leaf so the linter sees we read it.
+    void leaf;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab?.id, activeTab?.trail.join('|')]);
 

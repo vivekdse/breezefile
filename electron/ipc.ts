@@ -1753,6 +1753,17 @@ end tell`;
   // can re-read context any time without burning prompt tokens. Failures
   // here must not block the launch; we log and return null so the caller
   // can still proceed to PTY spawn + prompt injection.
+  // fm-zf3m — run history + manual run-now from the renderer.
+  ipcMain.handle('tasks:runsList', (_e, taskId: string, limit?: number) =>
+    tasks.listRunsForTask(taskId, limit ?? 50),
+  );
+  ipcMain.handle('tasks:lastRun', (_e, taskId: string) => tasks.getLastRun(taskId));
+  ipcMain.handle('tasks:runNow', async (_e, taskId: string) => {
+    const t = tasks.getTask(taskId);
+    if (!t) throw new Error(`task not found: ${taskId}`);
+    const { executeTaskRun } = await import('./agents/execute');
+    return executeTaskRun(t);
+  });
   ipcMain.handle('tasks:writeActiveSidecar', (_e, id: string): string | null => {
     try {
       const t = tasks.getTask(id);

@@ -22,6 +22,7 @@ import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
 import { TaskDialog, type TaskDialogRequest } from './components/TaskDialog';
+import { RunHistoryDialog } from './components/RunHistoryDialog';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { Tutorial } from './components/Tutorial';
@@ -74,6 +75,8 @@ function Shell() {
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskDialogRequest | null>(null);
+  // fm-zf3m — run history dialog (sidebar context-menu "View run history").
+  const [runHistoryFor, setRunHistoryFor] = useState<string | null>(null);
   // fm-kaa / fm-yi85 — Tasks overview is now a singleton tab (kind='tasks'),
   // not a modal. The :tasks verb and the sidebar "See all" link dispatch
   // openTasksTab; rendering is inline in the main slot.
@@ -422,6 +425,14 @@ function Shell() {
       const detail = (e as CustomEvent).detail as TaskDialogRequest | undefined;
       if (detail) setTaskDialog(detail);
     }
+    function onOpenRunHistory(e: Event) {
+      const detail = (e as CustomEvent).detail as { taskId?: string } | undefined;
+      if (detail?.taskId) setRunHistoryFor(detail.taskId);
+    }
+    function onSetStatus(e: Event) {
+      const detail = (e as CustomEvent).detail as { msg?: string } | undefined;
+      if (detail?.msg) dispatch({ type: 'setStatus', msg: detail.msg });
+    }
     function onOpenTasksPage() {
       dispatch({ type: 'openTasksTab' });
     }
@@ -457,6 +468,8 @@ function Shell() {
     window.addEventListener('fm:openTask', onOpenTask);
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
     window.addEventListener('fm:openSettings', onOpenSettings);
+    window.addEventListener('fm:openRunHistory', onOpenRunHistory);
+    window.addEventListener('fm:setStatus', onSetStatus);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
       window.removeEventListener('fm:openMkdir', onMkdir);
@@ -474,6 +487,8 @@ function Shell() {
       window.removeEventListener('fm:openTask', onOpenTask);
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
       window.removeEventListener('fm:openSettings', onOpenSettings);
+      window.removeEventListener('fm:openRunHistory', onOpenRunHistory);
+      window.removeEventListener('fm:setStatus', onSetStatus);
     };
   }, [activeTab, state.entriesByPath]);
 
@@ -705,6 +720,12 @@ function Shell() {
         <TaskDialog
           {...taskDialog}
           onClose={() => setTaskDialog(null)}
+        />
+      )}
+      {runHistoryFor && (
+        <RunHistoryDialog
+          taskId={runHistoryFor}
+          onClose={() => setRunHistoryFor(null)}
         />
       )}
     </div>

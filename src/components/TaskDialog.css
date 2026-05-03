@@ -234,3 +234,49 @@
   font-size: 13px;
   line-height: 1;
 }
+
+/* fm-zf3m — Auto-execute fieldset. Visually grouped so users perceive
+   "this turns the task into an automation" rather than another form
+   field; collapses tightly when disabled so it doesn't dominate the
+   dialog. */
+.task-dialog__auto {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.task-dialog__auto-legend {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.task-dialog__auto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.task-dialog__auto-row {
+  display: flex;
+  gap: var(--sp-3);
+}
+
+.task-dialog__day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.task-dialog__auto-hint {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}

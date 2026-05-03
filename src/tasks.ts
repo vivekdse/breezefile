@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { fm } from './bridge';
-import type { Task, TaskCreate, TaskFilter, TaskUpdate } from './types';
+import type { Task, TaskCreate, TaskFilter, TaskRun, TaskUpdate } from './types';
 
 export function useTasks(filter: TaskFilter = {}): {
   tasks: Task[];
@@ -68,6 +68,75 @@ export async function deleteTask(id: string): Promise<void> {
 }
 export async function getTask(id: string): Promise<Task | null> {
   return fm.tasksGet(id);
+}
+
+// fm-zf3m — runs API + hooks for the renderer.
+export async function runTaskNow(id: string): Promise<void> {
+  await fm.tasksRunNow(id);
+}
+export async function listTaskRuns(id: string, limit = 50): Promise<TaskRun[]> {
+  return fm.tasksRunsList(id, limit);
+}
+
+/** Subscribe to a task's last run; updates whenever the scheduler or
+ *  manual run-now writes a new run row for that task. Returns null
+ *  when the task has never run. */
+export function useLastRun(taskId: string | null): TaskRun | null {
+  const [run, setRun] = useState<TaskRun | null>(null);
+  useEffect(() => {
+    if (!taskId) {
+      setRun(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fm.tasksLastRun(taskId);
+        if (!cancelled) setRun(r);
+      } catch {
+        if (!cancelled) setRun(null);
+      }
+    };
+    void load();
+    const unsub = fm.onTaskRunsChanged((changedId) => {
+      if (changedId === taskId) void load();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [taskId]);
+  return run;
+}
+
+/** Hook variant for a task's full run list. Re-pulls on any
+ *  task-runs:changed event for that task. */
+export function useTaskRuns(taskId: string | null, limit = 50): TaskRun[] {
+  const [runs, setRuns] = useState<TaskRun[]>([]);
+  useEffect(() => {
+    if (!taskId) {
+      setRuns([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fm.tasksRunsList(taskId, limit);
+        if (!cancelled) setRuns(r);
+      } catch {
+        if (!cancelled) setRuns([]);
+      }
+    };
+    void load();
+    const unsub = fm.onTaskRunsChanged((changedId) => {
+      if (changedId === taskId) void load();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [taskId, limit]);
+  return runs;
 }
 
 // fm-adc — assemble the templated first-message that gets pre-typed into

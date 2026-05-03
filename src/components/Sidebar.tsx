@@ -15,12 +15,14 @@ import {
   deleteTask,
   dueTone,
   formatDueLabel,
+  runTaskNow,
   shiftISO,
   todayISO,
   updateTask,
   useTasks,
 } from '../tasks';
 import type { Task } from '../types';
+import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './Sidebar.css';
 
 const MAX_VISIBLE_TASKS = 10;
@@ -414,10 +416,51 @@ interface ActiveTasksSectionProps {
   cwd: string;
 }
 
+// fm-zf3m — auto-completion window. After an auto task succeeds and
+// flips to status='done' it would normally vanish from this section
+// immediately. Keep it visible for a short grace period so the user
+// sees the success indicator transition from running → succeeded
+// before the row drops off. 5min covers the "I went to grab a coffee"
+// case without polluting the active list long-term.
+const AUTO_DONE_VISIBLE_MS = 5 * 60_000;
+
 function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
   const { state, dispatch } = useStore();
-  const { tasks } = useTasks({ activeOnly: true });
+  // Pull all tasks (not activeOnly) so we can include recently-completed
+  // auto tasks; filter client-side. The list is small in practice.
+  const { tasks: all } = useTasks({});
   const [menuFor, setMenuFor] = useState<{ task: Task; x: number; y: number } | null>(null);
+  // Re-render every 30s so the "5min ago" cutoff actually drops stale
+  // completions off the list without waiting on an unrelated event.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const today = todayISO();
+  const tasks = useMemo(() => {
+    const now = Date.now();
+    return all.filter((t) => {
+      // Active per the existing rule: not done/cancelled, and start_at
+      // hasn't deferred it past today.
+      const active =
+        t.status !== 'done' &&
+        t.status !== 'cancelled' &&
+        (!t.start_at || t.start_at <= today);
+      if (active) return true;
+      // Grace window for auto tasks that just completed.
+      if (
+        t.auto_mode &&
+        t.status === 'done' &&
+        t.completed_at &&
+        now - t.completed_at < AUTO_DONE_VISIBLE_MS
+      ) {
+        return true;
+      }
+      return false;
+    });
+  }, [all, today]);
 
   const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
   const overflow = Math.max(0, tasks.length - MAX_VISIBLE_TASKS);
@@ -532,6 +575,7 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
     active ? 'sidebar__task--active' : '',
     task.pinned ? 'sidebar__task--pinned' : '',
     `sidebar__task--${tone}`,
+    task.auto_mode ? 'sidebar__task--auto' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -551,6 +595,7 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
       <span className="sidebar__task-rail" aria-hidden="true" />
       <span className="sidebar__task-main">
         <span className="sidebar__task-title-row">
+          <TaskStatusDot status={task.status} />
           {task.pinned && (
             <span className="sidebar__task-pin" aria-label="Pinned" title="Pinned">
               ★
@@ -578,6 +623,14 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
               <span className={`sidebar__task-due sidebar__task-due--${tone}`}>
                 {formatDueLabel(task.due_at, today)}
               </span>
+            </>
+          )}
+          {task.auto_mode && (
+            <>
+              <span className="sidebar__task-meta-sep" aria-hidden="true">
+                ·
+              </span>
+              <TaskRunIndicator task={task} />
             </>
           )}
         </span>
@@ -627,6 +680,40 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
     return updateTask(task.id, { due_at: shiftISO(base, 1) });
   });
   const onDelete = act(() => deleteTask(task.id));
+  // fm-zf3m — auto-execute actions. "Run now" uses the same path the
+  // scheduler uses (executeTaskRun via IPC) so it inherits agent
+  // selection, retry classification, and history rows.
+  const onRunNow = act(() => runTaskNow(task.id));
+  const onViewRuns = act(() => {
+    window.dispatchEvent(
+      new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),
+    );
+  });
+  // The trace opener relies on the last run's session_id. We fetch it
+  // lazily when clicked so we don't make a second IPC call per row.
+  const onOpenTrace = act(async () => {
+    const run = await fm.tasksLastRun(task.id);
+    const session = run?.conversation_id;
+    if (!session) {
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', { detail: { msg: 'no session id on last run' } }),
+      );
+      return;
+    }
+    const cmd = `claude --resume ${session}`;
+    try {
+      await navigator.clipboard.writeText(cmd);
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', {
+          detail: { msg: `copied: ${cmd}` },
+        }),
+      );
+    } catch {
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', { detail: { msg: cmd } }),
+      );
+    }
+  });
 
   // Clamp to viewport so the menu doesn't disappear off the right/bottom edge.
   const style: React.CSSProperties = {
@@ -647,6 +734,16 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
       </button>
       <button type="button" className="sidebar__ctxmenu-item" onClick={onSnooze}>
         Snooze (+1 day)
+      </button>
+      <div className="sidebar__ctxmenu-sep" />
+      <button type="button" className="sidebar__ctxmenu-item" onClick={onRunNow}>
+        Run now
+      </button>
+      <button type="button" className="sidebar__ctxmenu-item" onClick={onViewRuns}>
+        View run history
+      </button>
+      <button type="button" className="sidebar__ctxmenu-item" onClick={onOpenTrace}>
+        Copy resume command
       </button>
       <div className="sidebar__ctxmenu-sep" />
       <button

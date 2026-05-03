@@ -1,4 +1,4 @@
-import type { Entry, Task, TaskCreate, TaskFilter, TaskUpdate } from './types';
+import type { Entry, Task, TaskCreate, TaskFilter, TaskRun, TaskUpdate } from './types';
 
 type Fm = {
   platform: NodeJS.Platform;
@@ -114,6 +114,12 @@ type Fm = {
   // fm-adc — write the per-task sidecar markdown for AI launchers
   tasksWriteActiveSidecar: (id: string) => Promise<string | null>;
   onTasksChanged: (cb: () => void) => () => void;
+  // fm-zf3m — task runs
+  tasksRunsList: (taskId: string, limit?: number) => Promise<TaskRun[]>;
+  tasksLastRun: (taskId: string) => Promise<TaskRun | null>;
+  tasksRunNow: (taskId: string) => Promise<{ run: TaskRun; result: unknown }>;
+  onTaskRunsChanged: (cb: (taskId: string) => void) => () => void;
+  onTaskRunFailed: (cb: (payload: { taskId: string; body: string }) => void) => () => void;
   // fm-9fd — control bridge between the HTTP API server (main) and the
   // renderer (which owns tab state + navigation). Renderer listens for
   // control:request events and replies via sendControlReply.

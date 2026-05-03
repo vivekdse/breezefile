@@ -29,6 +29,7 @@ import {
 } from '../tasks';
 import type { ConfirmRequest } from './ConfirmDialog';
 import type { Task, TaskStatus } from '../types';
+import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './TasksPage.css';
 
 type SortKey = 'due' | 'start' | 'created' | 'alpha';
@@ -180,22 +181,28 @@ export function TasksPage() {
     return () => window.clearTimeout(id);
   }, [searchInput]);
 
+  // The explicit chip selection wins regardless of "Show completed" —
+  // if a user clicks the Done chip they want done rows even with the
+  // toggle off. The recent-completion grace window is layered on top
+  // in the client-side filter below.
   const effectiveStatuses = useMemo<TaskStatus[] | undefined>(() => {
     if (statuses.size === 0) return undefined;
-    if (showCompleted) return Array.from(statuses);
-    const arr = Array.from(statuses).filter((s) => s !== 'done' && s !== 'cancelled');
-    return arr.length > 0 ? arr : undefined;
-  }, [statuses, showCompleted]);
+    return Array.from(statuses);
+  }, [statuses]);
 
+  // fm-zf3m — pull done rows from the DB regardless of the toggle so the
+  // client-side "recent completion" pass can surface tasks completed in
+  // the last 24h. The SQL filter still respects explicit status chip
+  // selections via effectiveStatuses.
   const sqlFilter = useMemo(
     () => ({
       status: effectiveStatuses,
       folder: folder.trim() || undefined,
       pinned: pinnedOnly || undefined,
       search: search || undefined,
-      includeDone: showCompleted,
+      includeDone: true,
     }),
-    [effectiveStatuses, folder, pinnedOnly, search, showCompleted],
+    [effectiveStatuses, folder, pinnedOnly, search],
   );
 
   const { tasks: rawTasks, loading } = useTasks(sqlFilter);
@@ -208,8 +215,17 @@ export function TasksPage() {
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     })();
 
+    // fm-zf3m — when "Show completed" is off, still surface tasks
+    // completed within the last 24h so a user who just finished something
+    // (especially an auto-execute one-shot) can find it without learning
+    // about the toggle. Older done/cancelled rows still hide as before.
+    const RECENT_DONE_MS = 24 * 60 * 60 * 1000;
+    const now = Date.now();
     const out = rawTasks.filter((t) => {
-      if (!showCompleted && (t.status === 'done' || t.status === 'cancelled')) return false;
+      if (!showCompleted && (t.status === 'done' || t.status === 'cancelled')) {
+        const recent = t.completed_at && now - t.completed_at < RECENT_DONE_MS;
+        if (!recent) return false;
+      }
       if (statuses.size > 0 && !statuses.has(t.status)) return false;
       switch (derived) {
         case 'this_week':
@@ -1321,7 +1337,8 @@ function TaskRow({
 
       <div className="tasks__row-main">
         <div className="tasks__row-title">
-          {task.title}
+          <TaskStatusDot status={task.status} />
+          <span className="tasks__row-title-text">{task.title}</span>
           {orphan && (
             <span className="tasks__tag tasks__tag--orphan" title="Folder may not exist">
               orphaned
@@ -1344,6 +1361,7 @@ function TaskRow({
               due {task.due_at}
             </span>
           )}
+          {task.auto_mode && <TaskRunIndicator task={task} />}
         </div>
       </div>
 

@@ -21,6 +21,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskUpdate } from './tasks';
 import { dispatchTerminalFg } from './ipc';
+import { executeTaskRun, AgentNotAvailableError } from './agents/execute';
 
 const API_FILE_DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(API_FILE_DIR, 'api.json');
@@ -200,6 +201,47 @@ async function route(req: IncomingMessage, res: ServerResponse) {
         tasks.deleteTask(id);
         return sendJson(res, 200, { ok: true });
       }
+    }
+
+    // fm-zf3m — run a task immediately via its (or default) agent.
+    // Body: { agentId?: string }. Synchronous: replies after the run
+    // completes so the CLI can surface success/failure inline. The
+    // scheduler will use the same executeTaskRun() but with its own
+    // queue; this path is for explicit user-triggered runs.
+    const runMatch = /^\/tasks\/([^/]+)\/run$/.exec(p);
+    if (runMatch && m === 'POST') {
+      const id = decodeURIComponent(runMatch[1]);
+      const t = tasks.getTask(id);
+      if (!t) return send(res, 404, 'not found');
+      const body = await readJson<{ agentId?: string }>(req);
+      try {
+        const { run, result } = await executeTaskRun(t, {
+          agentId: body.agentId,
+        });
+        return sendJson(res, 200, { run, result });
+      } catch (e) {
+        if (e instanceof AgentNotAvailableError) {
+          return sendJson(res, 400, { error: e.message });
+        }
+        throw e;
+      }
+    }
+
+    // fm-zf3m — run history for a task.
+    const runsMatch = /^\/tasks\/([^/]+)\/runs$/.exec(p);
+    if (runsMatch && m === 'GET') {
+      const id = decodeURIComponent(runsMatch[1]);
+      const limit = Number(url.searchParams.get('limit')) || 50;
+      return sendJson(res, 200, tasks.listRunsForTask(id, limit));
+    }
+
+    // fm-zf3m — fetch a single run row (for the trace opener).
+    const oneRunMatch = /^\/runs\/([^/]+)$/.exec(p);
+    if (oneRunMatch && m === 'GET') {
+      const id = decodeURIComponent(oneRunMatch[1]);
+      const r = tasks.getRun(id);
+      if (!r) return send(res, 404, 'not found');
+      return sendJson(res, 200, r);
     }
 
     // app/*

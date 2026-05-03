@@ -4,10 +4,16 @@
 // for create the folder defaults to the active tab's cwd; for edit it is
 // preloaded from the existing task. Cmd-Enter submits, Esc cancels.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { createTask, shiftISO, todayISO, updateTask } from '../tasks';
 import type { Task, TaskStatus } from '../types';
+import {
+  buildCronFromForm,
+  parseCronToForm,
+  describeCron,
+  type RecurrenceKind,
+} from '../recurrence';
 import './TaskDialog.css';
 
 export type TaskDialogRequest =
@@ -42,8 +48,16 @@ export function TaskDialog(props: Props) {
   const [status, setStatus] = useState<TaskStatus>(initial?.status ?? 'pending');
   const [pinned, setPinned] = useState(initial?.pinned ?? false);
 
+  // fm-zf3m — auto-execute fields. The form mirrors a structured
+  // "recurrence kind + time + days" model and compiles to cron on submit.
+  const [autoMode, setAutoMode] = useState(initial?.auto_mode ?? false);
+  const [autoPrompt, setAutoPrompt] = useState(initial?.auto_prompt ?? '');
+  const [recurrence, setRecurrence] = useState(parseCronToForm(initial?.cron ?? null));
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const recurrenceDescription = useMemo(() => describeCron(recurrence), [recurrence]);
 
   const titleRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -66,6 +80,13 @@ export function TaskDialog(props: Props) {
       setError('Due date must be on or after start date');
       return;
     }
+    let cron: string | null;
+    try {
+      cron = autoMode ? buildCronFromForm(recurrence) : null;
+    } catch (e) {
+      setError((e as Error).message);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -78,6 +99,9 @@ export function TaskDialog(props: Props) {
         due_at: dueAt || null,
         status,
         pinned,
+        auto_mode: autoMode,
+        cron,
+        auto_prompt: autoMode && autoPrompt.trim() ? autoPrompt.trim() : null,
       };
       if (props.mode === 'create') {
         await createTask(payload);
@@ -227,6 +251,129 @@ export function TaskDialog(props: Props) {
             <span>Pinned</span>
           </label>
         </div>
+
+        <fieldset className="task-dialog__auto">
+          <legend className="task-dialog__auto-legend">
+            <label className="task-dialog__auto-toggle">
+              <input
+                type="checkbox"
+                checked={autoMode}
+                onChange={(e) => setAutoMode(e.target.checked)}
+              />
+              <span>Auto-execute with Claude</span>
+            </label>
+          </legend>
+
+          {autoMode && (
+            <>
+              <div className="task-dialog__auto-row">
+                <label className="task-dialog__field task-dialog__field--half">
+                  <span className="task-dialog__label">Recurrence</span>
+                  <select
+                    className="task-dialog__input"
+                    value={recurrence.kind}
+                    onChange={(e) =>
+                      setRecurrence({
+                        ...recurrence,
+                        kind: e.target.value as RecurrenceKind,
+                      })
+                    }
+                  >
+                    <option value="once">Run once on save</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekdays">Weekdays (Mon–Fri)</option>
+                    <option value="weekly">Weekly (pick days)</option>
+                    <option value="custom">Custom cron</option>
+                  </select>
+                </label>
+
+                {(recurrence.kind === 'daily' ||
+                  recurrence.kind === 'weekdays' ||
+                  recurrence.kind === 'weekly') && (
+                  <label className="task-dialog__field task-dialog__field--half">
+                    <span className="task-dialog__label">Time (local)</span>
+                    <input
+                      type="time"
+                      className="task-dialog__input"
+                      value={recurrence.time}
+                      onChange={(e) =>
+                        setRecurrence({ ...recurrence, time: e.target.value })
+                      }
+                    />
+                  </label>
+                )}
+              </div>
+
+              {recurrence.kind === 'weekly' && (
+                <div
+                  className="task-dialog__day-chips"
+                  role="group"
+                  aria-label="Days of week"
+                >
+                  {[1, 2, 3, 4, 5, 6, 0].map((d) => {
+                    const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                    const active = recurrence.days.includes(d);
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        className={[
+                          'task-dialog__chip',
+                          active ? 'task-dialog__chip--active' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        onClick={() =>
+                          setRecurrence({
+                            ...recurrence,
+                            days: active
+                              ? recurrence.days.filter((x) => x !== d)
+                              : [...recurrence.days, d],
+                          })
+                        }
+                      >
+                        {labels[d]}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {recurrence.kind === 'custom' && (
+                <label className="task-dialog__field">
+                  <span className="task-dialog__label">
+                    Cron expression (5 fields, local time)
+                  </span>
+                  <input
+                    type="text"
+                    className="task-dialog__input task-dialog__input--mono"
+                    value={recurrence.cron}
+                    onChange={(e) =>
+                      setRecurrence({ ...recurrence, cron: e.target.value })
+                    }
+                    placeholder="e.g. 0 9 * * MON"
+                    spellCheck={false}
+                  />
+                </label>
+              )}
+
+              <div className="task-dialog__auto-hint">{recurrenceDescription}</div>
+
+              <label className="task-dialog__field">
+                <span className="task-dialog__label">
+                  Prompt override (optional)
+                </span>
+                <textarea
+                  className="task-dialog__textarea"
+                  value={autoPrompt ?? ''}
+                  onChange={(e) => setAutoPrompt(e.target.value)}
+                  placeholder="Defaults to the title + notes if empty."
+                  rows={3}
+                />
+              </label>
+            </>
+          )}
+        </fieldset>
 
         {error && <div className="task-dialog__error">{error}</div>}
 

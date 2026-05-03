@@ -419,6 +419,66 @@ button.sidebar__link:hover .sidebar__unpin {
   color: var(--muted-on-panel);
 }
 
+/* fm-zf3m — auto-execute glyph + run-state pill. Glyph sits inline in
+   the title row; pill sits in the meta line so it doesn't crowd the
+   title when multiple states stack (e.g. "due Today · running"). */
+.sidebar__task-auto {
+  flex-shrink: 0;
+  font-size: 10px;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: var(--hi, rgba(0,0,0,0.06));
+  color: var(--muted-on-panel);
+  font-weight: 700;
+  line-height: 1;
+}
+.sidebar__task-auto--running {
+  background: #b58900;
+  color: #fff;
+  animation: sidebar-task-running 1.4s linear infinite;
+}
+.sidebar__task-auto--failed {
+  background: #dc322f;
+  color: #fff;
+}
+.sidebar__task-auto--succeeded {
+  background: #2aa19833;
+  color: #2aa198;
+}
+.sidebar__task-auto--queued {
+  background: #b5890033;
+  color: #b58900;
+}
+
+@keyframes sidebar-task-running {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.sidebar__task-runstate {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+}
+.sidebar__task-runstate--running   { color: #b58900; font-weight: 600; }
+.sidebar__task-runstate--failed    { color: #dc322f; font-weight: 600; }
+.sidebar__task-runstate--succeeded { color: var(--muted-on-panel); }
+.sidebar__task-runstate--queued    { color: #b58900; }
+.sidebar__task-runstate--idle      { color: var(--muted-on-panel); }
+
+/* Subtle row-level treatment for failed runs so the user notices at a
+   glance even without reading the meta pill. */
+.sidebar__task--run-failed .sidebar__task-rail {
+  background: linear-gradient(to bottom, transparent, #dc322f, transparent);
+}
+.sidebar__task--run-running .sidebar__task-rail {
+  background: linear-gradient(to bottom, transparent, #b58900, transparent);
+}
+
 .sidebar__see-all {
   background: none;
   border: none;

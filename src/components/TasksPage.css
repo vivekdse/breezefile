@@ -559,6 +559,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tasks__row-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .tasks__row-sub {
   display: flex;
   align-items: center;

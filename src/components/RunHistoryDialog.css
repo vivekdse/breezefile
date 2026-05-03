@@ -1,0 +1,143 @@
+/* fm-zf3m — Run history dialog. Reuses .overlay base from App.css. */
+
+.run-history {
+  position: relative;
+  min-width: 520px;
+  max-width: 720px;
+  max-height: 70vh;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+}
+
+.run-history__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.run-history__close:hover {
+  background: var(--hi);
+  color: var(--ink);
+}
+
+.run-history__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.run-history__subtitle {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: -4px;
+  margin-bottom: var(--sp-2);
+}
+
+.run-history__empty {
+  padding: var(--sp-3);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  font-style: italic;
+}
+
+.run-history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.run-history__row {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.run-history__row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.run-history__status {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.run-history__status--queued    { background: var(--hi); color: var(--muted); }
+.run-history__status--running   { background: #b58900; color: #fff; }
+.run-history__status--succeeded { background: #2aa198; color: #fff; }
+.run-history__status--failed    { background: #dc322f; color: #fff; }
+.run-history__status--cancelled { background: var(--hi); color: var(--muted); }
+.run-history__status--retrying  { background: #b58900; color: #fff; }
+
+.run-history__when {
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+.run-history__attempt,
+.run-history__duration {
+  color: var(--muted);
+}
+.run-history__copy {
+  margin-left: auto;
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.run-history__copy:hover {
+  background: var(--hi);
+}
+
+.run-history__error {
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(220, 50, 47, 0.08);
+  border-left: 3px solid #dc322f;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.run-history__error-class {
+  font-weight: 600;
+  margin-right: 6px;
+  color: #dc322f;
+}
+
+.run-history__output-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+}

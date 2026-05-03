@@ -119,6 +119,12 @@ export type Task = {
   start_at: string | null; // 'YYYY-MM-DD'
   due_at: string | null;
   pinned: boolean;
+  // fm-zf3m — auto-execute fields (epic).
+  cron: string | null;
+  next_run_at: number | null;
+  auto_mode: boolean;
+  auto_agent: string | null;
+  auto_prompt: string | null;
   created_at: number;
   updated_at: number;
   completed_at: number | null;
@@ -133,6 +139,11 @@ export type TaskCreate = {
   start_at?: string | null;
   due_at?: string | null;
   pinned?: boolean;
+  cron?: string | null;
+  next_run_at?: number | null;
+  auto_mode?: boolean;
+  auto_agent?: string | null;
+  auto_prompt?: string | null;
 };
 
 export type TaskUpdate = Partial<{
@@ -144,7 +155,44 @@ export type TaskUpdate = Partial<{
   start_at: string | null;
   due_at: string | null;
   pinned: boolean;
+  cron: string | null;
+  next_run_at: number | null;
+  auto_mode: boolean;
+  auto_agent: string | null;
+  auto_prompt: string | null;
 }>;
+
+// fm-zf3m — task run history (one row per agent-execution attempt).
+export type TaskRunStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'retrying';
+
+export type TaskRunErrorClass =
+  | 'rate_limit'
+  | 'usage'
+  | 'auth'
+  | 'transient'
+  | 'fatal';
+
+export type TaskRun = {
+  id: string;
+  task_id: string;
+  agent: string;
+  status: TaskRunStatus;
+  attempt: number;
+  scheduled_for: number;
+  started_at: number | null;
+  finished_at: number | null;
+  conversation_id: string | null;
+  output_path: string | null;
+  error_class: TaskRunErrorClass | null;
+  error_message: string | null;
+  exit_code: number | null;
+};
 
 export type TaskFilter = {
   status?: TaskStatus | TaskStatus[];

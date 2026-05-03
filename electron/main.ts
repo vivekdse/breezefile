@@ -5,8 +5,12 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
+import { startScheduler } from './scheduler';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
+// Side-effect import: registers built-in agent runners (Claude) so the
+// scheduler / run-now endpoints can dispatch by id (epic fm-zf3m).
+import './agents';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -137,6 +141,10 @@ app.whenReady().then(() => {
 
   registerIpc();
   startApiServer();
+  // fm-zf3m — auto-executor for tasks with auto_mode=1 / cron set.
+  // Starts after the API server so the scheduler can rely on agent
+  // registration (electron/agents has already been side-effect imported).
+  startScheduler();
   // fm-fc0 — best-effort: register breeze-mcp into ~/.claude/settings.json
   // on every launch. Idempotent — does nothing if already present and
   // up-to-date. Failures (file unreadable, no MCP binary) are logged

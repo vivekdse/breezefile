@@ -51,9 +51,17 @@
 
 .taskshell__title-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--sp-3, 12px);
   min-width: 0;
+}
+
+/* fm-zf3m — status dot pads up a tiny bit so it visually centers
+   against the larger title text. */
+.taskshell__status-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
 }
 
 .taskshell__title {

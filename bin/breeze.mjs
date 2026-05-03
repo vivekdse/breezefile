@@ -26,13 +26,13 @@ function readApi() {
   }
 }
 
-async function call(method, path, body) {
+async function call(method, path, body, timeoutMs = 2000) {
   const api = readApi();
   if (!api) return { ok: false, status: 0, body: null };
   const init = {
     method,
     headers: { Authorization: `Bearer ${api.token}` },
-    signal: AbortSignal.timeout(2000),
+    signal: AbortSignal.timeout(timeoutMs),
   };
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
@@ -135,25 +135,43 @@ async function cmdList(args) {
 async function cmdAdd(args) {
   const title = args.shift();
   if (!title) {
-    process.stderr.write('usage: breeze add <title> [--notes <text>] [--folder <path>]\n');
+    process.stderr.write(
+      'usage: breeze add <title> [--notes <text>] [--folder <path>]\n' +
+      '                  [--auto] [--cron "<expr>"] [--agent <id>] [--prompt <text>]\n',
+    );
     return 2;
   }
   let notes = null;
   let folder = process.cwd();
+  let auto = false;
+  let cron = null;
+  let agent = null;
+  let prompt = null;
   while (args.length) {
     const flag = args.shift();
-    if (flag === '--notes')  notes  = args.shift();
+    if (flag === '--notes')      notes  = args.shift();
     else if (flag === '--folder') folder = args.shift();
+    else if (flag === '--auto')   auto = true;
+    else if (flag === '--cron')   cron = args.shift();
+    else if (flag === '--agent')  agent = args.shift();
+    else if (flag === '--prompt') prompt = args.shift();
     else { process.stderr.write(`unknown flag: ${flag}\n`); return 2; }
   }
   const body = { title, folder };
-  if (notes) body.notes = notes;
+  if (notes)  body.notes = notes;
+  if (auto)   body.auto_mode = true;
+  if (cron)   body.cron = cron;
+  if (agent)  body.auto_agent = agent;
+  if (prompt) body.auto_prompt = prompt;
   const r = await call('POST', '/tasks', body);
   if (!r.ok || !r.body || typeof r.body.id !== 'string') {
     process.stderr.write(`create failed (HTTP ${r.status})\n`);
     return 1;
   }
   process.stdout.write(r.body.id + '\n');
+  if (auto && !cron) {
+    process.stdout.write('(auto-mode set; the scheduler will fire it shortly)\n');
+  }
   return 0;
 }
 
@@ -170,6 +188,88 @@ async function cmdRm(args) {
   if (!id) { process.stderr.write('usage: breeze rm <id>\n'); return 2; }
   const r = await call('DELETE', `/tasks/${encodeURIComponent(id)}`);
   if (!r.ok) { process.stderr.write(`delete failed (HTTP ${r.status})\n`); return 1; }
+  return 0;
+}
+
+// fm-zf3m — run a task right now via its registered agent (Claude in
+// v1). Synchronous from the user's POV: blocks until the agent exits.
+// We give it 30 minutes; agents that take longer should be redesigned.
+async function cmdRunNow(args) {
+  const id = args[0];
+  if (!id) { process.stderr.write('usage: breeze run-now <task-id>\n'); return 2; }
+  let agentId = null;
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === '--agent') agentId = args[++i];
+  }
+  const body = agentId ? { agentId } : {};
+  const r = await call('POST', `/tasks/${encodeURIComponent(id)}/run`, body, 30 * 60 * 1000);
+  if (r.status === 0) {
+    process.stderr.write('Breeze app not running (start it and retry)\n');
+    return 1;
+  }
+  if (!r.ok) {
+    process.stderr.write(`run failed (HTTP ${r.status}): ${JSON.stringify(r.body)}\n`);
+    return 1;
+  }
+  const { run, result } = r.body || {};
+  if (!run || !result) {
+    process.stderr.write('unexpected response shape\n');
+    return 1;
+  }
+  process.stdout.write(`run ${run.id}\n`);
+  process.stdout.write(`status: ${run.status}\n`);
+  if (result.conversationId) {
+    process.stdout.write(`session: ${result.conversationId}\n`);
+    process.stdout.write(`resume:  claude --resume ${result.conversationId}\n`);
+  }
+  if (run.output_path) {
+    process.stdout.write(`logs:    ${run.output_path}\n`);
+  }
+  if (!result.ok) {
+    process.stderr.write(`error (${result.errorClass}): ${result.errorMessage}\n`);
+    return 1;
+  }
+  return 0;
+}
+
+async function cmdRuns(args) {
+  const id = args[0];
+  if (!id) { process.stderr.write('usage: breeze runs <task-id>\n'); return 2; }
+  const r = await call('GET', `/tasks/${encodeURIComponent(id)}/runs`);
+  if (!r.ok || !Array.isArray(r.body)) {
+    process.stderr.write(`fetch failed (HTTP ${r.status})\n`);
+    return 1;
+  }
+  for (const run of r.body) {
+    const when = run.started_at
+      ? new Date(run.started_at).toISOString()
+      : new Date(run.scheduled_for).toISOString() + ' (queued)';
+    const dur = run.finished_at && run.started_at
+      ? `${((run.finished_at - run.started_at) / 1000).toFixed(1)}s`
+      : '—';
+    process.stdout.write(
+      `${run.id}  ${run.status.padEnd(10)}  attempt=${run.attempt}  ${dur.padEnd(8)}  ${when}\n`,
+    );
+    if (run.error_message) {
+      process.stdout.write(`  error (${run.error_class}): ${run.error_message}\n`);
+    }
+  }
+  return 0;
+}
+
+async function cmdTrace(args) {
+  const id = args[0];
+  if (!id) { process.stderr.write('usage: breeze trace <run-id>\n'); return 2; }
+  const r = await call('GET', `/runs/${encodeURIComponent(id)}`);
+  if (!r.ok || !r.body) {
+    process.stderr.write(`fetch failed (HTTP ${r.status})\n`);
+    return 1;
+  }
+  const run = r.body;
+  if (run.output_path) process.stdout.write(`${run.output_path}\n`);
+  if (run.conversation_id) {
+    process.stdout.write(`resume: claude --resume ${run.conversation_id}\n`);
+  }
   return 0;
 }
 
@@ -242,9 +342,16 @@ function help() {
   breeze prime                   Markdown context for Claude Code SessionStart
   breeze list [--all]            Pending tasks (or all with --all)
   breeze add <title> [--notes <text>] [--folder <path>]
-                                 Create a task; folder defaults to \$PWD
+             [--auto] [--cron "<expr>"] [--agent <id>] [--prompt <text>]
+                                 Create a task; folder defaults to \$PWD.
+                                 --auto fires the task once on creation;
+                                 add --cron to recur on a 5-field schedule.
   breeze done <id>               Mark task done
   breeze rm   <id>               Delete task
+  breeze run-now <task-id> [--agent <id>]
+                                 Execute the task immediately via an agent
+  breeze runs <task-id>          List recent run attempts for a task
+  breeze trace <run-id>          Print log path + claude resume command
   breeze install-hooks [--uninstall] [--command=<cmd>]
                                  Wire SessionStart+PreCompact in ~/.claude/settings.json
                                  (idempotent; defaults command to "breeze prime")
@@ -258,6 +365,9 @@ const handlers = {
   add: cmdAdd,
   done: cmdDone,
   rm: cmdRm,
+  'run-now': cmdRunNow,
+  runs: cmdRuns,
+  trace: cmdTrace,
   'install-hooks': cmdInstallHooks,
   help, '-h': help, '--help': help,
 };

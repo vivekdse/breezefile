@@ -236,6 +236,21 @@ const fm = {
     ipcRenderer.on('tasks:changed', handler);
     return () => ipcRenderer.off('tasks:changed', handler);
   },
+  // ─── Task runs (fm-zf3m) ──────────────────────────────────────────
+  tasksRunsList: (taskId: string, limit?: number) =>
+    ipcRenderer.invoke('tasks:runsList', taskId, limit),
+  tasksLastRun: (taskId: string) => ipcRenderer.invoke('tasks:lastRun', taskId),
+  tasksRunNow: (taskId: string) => ipcRenderer.invoke('tasks:runNow', taskId),
+  onTaskRunsChanged: (cb: (taskId: string) => void) => {
+    const handler = (_e: unknown, payload: { taskId: string }) => cb(payload.taskId);
+    ipcRenderer.on('task-runs:changed', handler);
+    return () => ipcRenderer.off('task-runs:changed', handler);
+  },
+  onTaskRunFailed: (cb: (payload: { taskId: string; body: string }) => void) => {
+    const handler = (_e: unknown, p: { taskId: string; body: string }) => cb(p);
+    ipcRenderer.on('task-runs:failed', handler);
+    return () => ipcRenderer.off('task-runs:failed', handler);
+  },
   // ─── App-level attention (fm-c2w) ─────────────────────────────────
   setDockBadge: (text: string) =>
     ipcRenderer.invoke('app:setDockBadge', text) as Promise<void>,
