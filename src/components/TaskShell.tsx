@@ -259,9 +259,15 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
 
       <footer className="taskshell__folder">
         <span className="taskshell__folder-icon" aria-hidden="true">⌘</span>
-        <span className="taskshell__folder-label" title={folder}>
+        <button
+          type="button"
+          className="taskshell__folder-label taskshell__folder-label--btn"
+          onClick={onOpenFolder}
+          disabled={!folder}
+          title={folder ? 'Open this folder in a new tab' : '(no folder)'}
+        >
           {folder || '(no folder)'}
-        </span>
+        </button>
         <button
           type="button"
           className="taskshell__folder-btn"

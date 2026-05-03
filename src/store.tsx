@@ -192,6 +192,7 @@ type Action =
   | { type: 'newTab'; tab: Tab }
   | { type: 'openTaskTab'; taskId: string; folder: string; focus?: boolean }
   | { type: 'openTasksTab'; focus?: boolean }
+  | { type: 'openOrFocusFolderTab'; path: string; focus?: boolean }
   | { type: 'setTabTaskId'; index: number; taskId: string | null }
   | { type: 'closeTab'; index: number }
   | { type: 'selectTab'; index: number }
@@ -337,6 +338,24 @@ function reducer(s: State, a: Action): State {
       const seedCwd =
         s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
       const tab = makeTab(seedCwd, { kind: 'tasks' });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'openOrFocusFolderTab': {
+      // fm-dj5 — open or focus a folder tab for `path`. Match on
+      // trail.last so a tab the user has navigated into still counts as
+      // "the tab for this folder." Used when the active tab is a task
+      // tab (sidebar / footer clicks must not corrupt its bound trail).
+      const existing = s.tabs.findIndex(
+        (t) => t.kind === 'folder' && t.trail[t.trail.length - 1] === a.path,
+      );
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const tab = makeTab(a.path);
       return {
         ...s,
         tabs: [...s.tabs, tab],
@@ -692,6 +711,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   function navigateTo(p: string) {
     const tab = stateRef.current.tabs[stateRef.current.activeTab];
     if (!tab) return;
+    // fm-dj5 — task and tasks-overview tabs aren't browse surfaces; their
+    // trail is bound (to a task's folder) or unused. Mutating it via
+    // sidebar clicks broke the task tab's identity. Route those clicks
+    // to a folder tab instead so the task tab stays put.
+    if (tab.kind !== 'folder') {
+      dispatch({ type: 'openOrFocusFolderTab', path: p });
+      dispatch({ type: 'pushRecent', path: p });
+      return;
+    }
     const history = [...tab.history, tab.trail];
     dispatch({
       type: 'updateTab',
