@@ -139,6 +139,7 @@ export function FolderList() {
                     sortReverse: false,
                     showHidden: false,
                     viewMode: 'list',
+                    foldersFirst: true,
                     filter: '',
                     tagViz: [],
                     tagFilter: { mode: 'off', ids: [] },

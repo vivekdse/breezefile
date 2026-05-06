@@ -123,11 +123,12 @@ const SLIDES: Slide[] = [
     kind: 'catalog',
     glyph: '▦',
     title: 'View & sort',
-    lede: 'Switch how the folder reads, sort by anything, change the look.',
+    lede: 'Switch how the folder reads, sort by anything, change the look. Choices stick — the next time you open this folder, your sort/view/hidden/folders-first settle back to what you last picked here.',
     verbs: [
       { name: 'view', chord: 'wl / wg / wp / wt', what: 'list / grid / preview / tag' },
       { name: 'sort', chord: 'on / os / om / oc / ot / oe', what: 'name / size / mtime / ctime / type / ext (caps for desc, or for reverse)' },
       { name: 'hidden', chord: 'zh', what: 'show / hide dotfiles' },
+      { name: 'folders first', chord: 'zd', what: 'pin folders to the top (default) or interleave with files — turn off in Downloads to see newest items without folders crowding the top' },
       { name: 'theme', chord: 'zT', what: 'cycle dark/light; or :theme for the full picker' },
     ],
   },

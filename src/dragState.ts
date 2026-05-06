@@ -113,11 +113,11 @@ export async function dropIntoFolder(
     return 'already here — use Copy then Paste to duplicate in place';
   }
   const mode: 'copy' | 'move' = copy ? 'copy' : 'move';
-  const ops = paths.map((src) => {
-    const name = src.slice(src.lastIndexOf('/') + 1);
-    const dst = `${targetFolder}/${name}`;
-    return { src, dst, mode };
-  });
+  // The fs:paste handler treats `dst` as the destination *folder* and
+  // appends path.basename(src) itself. Pass the folder, not the full
+  // path — otherwise the filename ends up doubled
+  // (folder/file.html/file.html → ENOENT).
+  const ops = paths.map((src) => ({ src, dst: targetFolder, mode }));
   await fm.paste(ops);
   const verb = copy ? 'copied' : 'moved';
   return `${verb} ${paths.length} item${paths.length === 1 ? '' : 's'} to ${targetFolder.slice(targetFolder.lastIndexOf('/') + 1) || targetFolder}`;

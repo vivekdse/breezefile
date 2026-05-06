@@ -5,12 +5,17 @@ export function sortEntries(
   key: SortKey,
   reverse: boolean,
   showHidden: boolean,
+  foldersFirst: boolean = true,
 ): Entry[] {
   const list = entries.filter((e) => showHidden || !e.isHidden);
   list.sort((a, b) => {
-    // Directories always first
-    if (a.kind === 'dir' && b.kind !== 'dir') return -1;
-    if (b.kind === 'dir' && a.kind !== 'dir') return 1;
+    // fm-k9dg — pin directories to the top when foldersFirst is on
+    // (traditional). Off means dirs interleave with files by the active
+    // sort, which is what you want in Downloads to see newest items.
+    if (foldersFirst) {
+      if (a.kind === 'dir' && b.kind !== 'dir') return -1;
+      if (b.kind === 'dir' && a.kind !== 'dir') return 1;
+    }
     let cmp = 0;
     switch (key) {
       case 'name':

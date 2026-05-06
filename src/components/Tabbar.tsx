@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { basename } from '../actions';
 import { fm } from '../bridge';
@@ -17,6 +17,19 @@ import './Tabbar.css';
 export function Tabbar() {
   const { state, dispatch, activeTab, refreshActive } = useStore();
   const [dropIdx, setDropIdx] = useState<number | null>(null);
+  // fm-b6ki — drag-hover tab activation. While a drag is over an inactive
+  // tab, arm a timer; when it fires, switch to that tab without ending the
+  // drag so the user can drop into the destination's folder pane or terminal.
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverIdx = useRef<number | null>(null);
+  const clearHoverTimer = () => {
+    if (hoverTimer.current) {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+    hoverIdx.current = null;
+  };
+  useEffect(() => () => clearHoverTimer(), []);
 
   // fm-8by — task tab labels resolve via the task store. Pulling all tasks
   // (incl. done) keeps a tab whose task was completed from suddenly losing
@@ -44,6 +57,7 @@ export function Tabbar() {
         sortReverse: false,
         showHidden: false,
         viewMode: 'list',
+        foldersFirst: true,
         filter: '',
         tagViz: [],
         tagFilter: { mode: 'off', ids: [] },
@@ -58,11 +72,26 @@ export function Tabbar() {
     e.preventDefault();
     e.dataTransfer.dropEffect = isExternalDrop() ? 'copy' : e.altKey ? 'copy' : 'move';
     setDropIdx(idx);
+    // Arm hover-activation only for inactive tabs; re-arm if the user moves
+    // to a different tab without leaving the tabbar.
+    if (idx !== state.activeTab && hoverIdx.current !== idx) {
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+      hoverIdx.current = idx;
+      hoverTimer.current = setTimeout(() => {
+        dispatch({ type: 'selectTab', index: idx });
+        hoverTimer.current = null;
+        hoverIdx.current = null;
+      }, 600);
+    }
   };
-  const onTabDragLeave = () => setDropIdx(null);
+  const onTabDragLeave = () => {
+    setDropIdx(null);
+    clearHoverTimer();
+  };
   const onTabDrop = (idx: number) => async (e: React.DragEvent) => {
     e.preventDefault();
     setDropIdx(null);
+    clearHoverTimer();
     let paths: string[];
     try {
       paths = resolveDropPaths(e);

@@ -7,7 +7,10 @@ export function visibleEntries(
   tab: Tab,
 ): Entry[] {
   if (!entries) return [];
-  return applyFilter(sortEntries(entries, tab.sortKey, tab.sortReverse, tab.showHidden), tab.filter);
+  return applyFilter(
+    sortEntries(entries, tab.sortKey, tab.sortReverse, tab.showHidden, tab.foldersFirst ?? true),
+    tab.filter,
+  );
 }
 
 export function lastCol(tab: Tab): number {

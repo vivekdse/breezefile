@@ -12,6 +12,8 @@ import type {
   Bookmarks,
   CustomTag,
   Entry,
+  FolderPrefs,
+  FolderPrefsMap,
   Keybinds,
   Tab,
   TagPaths,
@@ -116,6 +118,9 @@ const DEFAULT_KEYBINDS: Keybinds = {
   'sort.ext.rev': 'oE',
   // --- view ---
   'hidden': 'zh',
+  // fm-k9dg — "directories first" toggle (traditional ON; turn off to
+  // see newest items in Downloads without folders crowding the top).
+  'foldersFirst': 'zd',
   'view.list': 'wl',
   'view.grid': 'wg',
   'view.preview': 'wp',
@@ -165,6 +170,12 @@ type Persisted = {
   // closing & re-opening a terminal reattaches to the still-running
   // session. Default OFF — relies on tmux being on PATH.
   useTmux: boolean;
+  // fm-k9dg — per-folder remembered view preferences. Written only when
+  // the user makes a conscious choice (verb or sticky keybind). Hydrated
+  // onto a tab when its leaf cwd changes. Folders the user never
+  // customized stay absent here, so navigation does not clobber the
+  // tab's current settings.
+  folderPrefs: FolderPrefsMap;
 };
 
 const RECENTS_CAP = 30;
@@ -219,6 +230,8 @@ type Action =
   | { type: 'setNotifyOnAttention'; value: boolean }
   | { type: 'setSoundOnAttention'; value: boolean }
   | { type: 'setUseTmux'; value: boolean }
+  | { type: 'setFolderPref'; path: string; patch: FolderPrefs }
+  | { type: 'clearFolderPref'; path: string }
   | {
       type: 'openTerminal';
       tabIndex: number;
@@ -248,6 +261,7 @@ function makeTab(
     sortReverse: false,
     showHidden: false,
     viewMode: 'list',
+    foldersFirst: true,
     filter: '',
     tagViz: [],
     tagFilter: { mode: 'off', ids: [] },
@@ -278,6 +292,7 @@ const initialState: State = {
   notifyOnAttention: true,
   soundOnAttention: true,
   useTmux: false,
+  folderPrefs: {},
   entriesByPath: {},
   yank: [],
   statusMsg: '',
@@ -458,6 +473,16 @@ function reducer(s: State, a: Action): State {
       return { ...s, soundOnAttention: a.value };
     case 'setUseTmux':
       return { ...s, useTmux: a.value };
+    case 'setFolderPref': {
+      const prev = s.folderPrefs[a.path] ?? {};
+      const merged: FolderPrefs = { ...prev, ...a.patch };
+      return { ...s, folderPrefs: { ...s.folderPrefs, [a.path]: merged } };
+    }
+    case 'clearFolderPref': {
+      const next = { ...s.folderPrefs };
+      delete next[a.path];
+      return { ...s, folderPrefs: next };
+    }
     case 'addTagViz': {
       const tabs = s.tabs.slice();
       const t = tabs[s.activeTab];
@@ -509,6 +534,11 @@ type Ctx = {
   loadDir: (p: string) => Promise<Entry[]>;
   refreshActive: () => Promise<void>;
   setTab: (patch: Partial<Tab>) => void;
+  /** fm-k9dg — apply a sticky patch to the active tab AND record those
+   *  fields as the remembered preference for the tab's current leaf
+   *  cwd. Call this from explicit user actions (verbs, sticky keybinds)
+   *  for {sortKey, sortReverse, viewMode, showHidden, foldersFirst}. */
+  setTabSticky: (patch: FolderPrefs) => void;
   openPath: (p: string) => Promise<void>;
   navigateTo: (p: string) => void;
   goBack: () => void;
@@ -557,6 +587,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           notifyOnAttention,
           soundOnAttention,
           useTmux,
+          folderPrefs,
         } = parsed as Partial<Persisted>;
         dispatch({
           type: 'hydrate',
@@ -574,6 +605,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
             ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
             ...(typeof useTmux === 'boolean' ? { useTmux } : {}),
+            ...(folderPrefs && typeof folderPrefs === 'object' ? { folderPrefs } : {}),
           } as Partial<Persisted>,
         });
       } catch {
@@ -625,6 +657,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       notifyOnAttention: state.notifyOnAttention,
       soundOnAttention: state.soundOnAttention,
       useTmux: state.useTmux,
+      folderPrefs: state.folderPrefs,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
   }, [
@@ -639,6 +672,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.notifyOnAttention,
     state.soundOnAttention,
     state.useTmux,
+    state.folderPrefs,
     hydrated,
   ]);
 
@@ -678,6 +712,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   function setTab(patch: Partial<Tab>) {
     dispatch({ type: 'updateTab', index: stateRef.current.activeTab, patch });
+  }
+
+  function setTabSticky(patch: FolderPrefs) {
+    const tab = stateRef.current.tabs[stateRef.current.activeTab];
+    if (!tab) return;
+    dispatch({
+      type: 'updateTab',
+      index: stateRef.current.activeTab,
+      patch: patch as Partial<Tab>,
+    });
+    // Only folder tabs have a meaningful leaf cwd. Task / tasks-overview
+    // tabs are not browse surfaces, so don't persist a pref for them.
+    if (tab.kind !== 'folder') return;
+    const cwd = tab.trail[tab.trail.length - 1];
+    if (cwd) dispatch({ type: 'setFolderPref', path: cwd, patch });
   }
 
   // Move the cursor to the entry matching `name` in the current cwd.
@@ -781,6 +830,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // fm-k9dg — when the active tab's leaf cwd changes, hydrate the tab
+  // from the saved per-folder pref (if any). Folders the user never
+  // customized leave the tab's current settings alone, so per-tab
+  // overrides still feel sticky as you walk through new directories.
+  useEffect(() => {
+    if (!activeTab) return;
+    if (activeTab.kind !== 'folder') return;
+    const leaf = activeTab.trail[activeTab.trail.length - 1];
+    if (!leaf) return;
+    const pref = state.folderPrefs[leaf];
+    if (!pref) return;
+    const patch: Partial<Tab> = {};
+    if (pref.sortKey !== undefined && pref.sortKey !== activeTab.sortKey) patch.sortKey = pref.sortKey;
+    if (pref.sortReverse !== undefined && pref.sortReverse !== activeTab.sortReverse) patch.sortReverse = pref.sortReverse;
+    if (pref.showHidden !== undefined && pref.showHidden !== activeTab.showHidden) patch.showHidden = pref.showHidden;
+    if (pref.viewMode !== undefined && pref.viewMode !== activeTab.viewMode) patch.viewMode = pref.viewMode;
+    if (pref.foldersFirst !== undefined && pref.foldersFirst !== activeTab.foldersFirst) patch.foldersFirst = pref.foldersFirst;
+    if (Object.keys(patch).length > 0) {
+      dispatch({ type: 'updateTab', index: stateRef.current.activeTab, patch });
+    }
+    // Deps: re-run on tab switch and on leaf change. Don't depend on
+    // folderPrefs — writing a pref shouldn't re-fire and risk thrash.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id, activeTab?.trail.join('|')]);
+
   // Eagerly load trail entries for active tab.
   // Parent columns may use the cache (cheap, rarely changes between
   // hops). The leaf (the folder the user is actually looking at) is
@@ -809,6 +883,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       loadDir,
       refreshActive,
       setTab,
+      setTabSticky,
       openPath,
       navigateTo,
       goBack,

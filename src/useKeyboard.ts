@@ -72,7 +72,7 @@ export function useKeyboard(
   promptQuickFind: () => void,
   promptShell: () => void,
 ) {
-  const { state, dispatch, activeTab, setTab, openPath, refreshActive, navigateTo, goBack, goForward } =
+  const { state, dispatch, activeTab, setTab, setTabSticky, openPath, refreshActive, navigateTo, goBack, goForward } =
     useStore();
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -189,6 +189,7 @@ export function useKeyboard(
               sortReverse: false,
               showHidden: false,
               viewMode: 'list',
+              foldersFirst: true,
               filter: '',
               tagViz: [],
               tagFilter: { mode: 'off', ids: [] },
@@ -385,13 +386,15 @@ export function useKeyboard(
         uv: () => setTab({ marks: {} }),
         ut: () => clearTagOfCurrent(),
         // view / display
-        zh: () => { const h = !tab.showHidden; setTab({ showHidden: h }); dispatch({ type: 'setStatus', msg: h ? 'showing hidden files' : 'hiding hidden files' }); },
+        zh: () => { const h = !tab.showHidden; setTabSticky({ showHidden: h }); dispatch({ type: 'setStatus', msg: h ? 'showing hidden files' : 'hiding hidden files' }); },
         zT: () => void window.dispatchEvent(new Event('fm:openTheme')),
         zf: () => dispatch({ type: 'setMode', mode: 'find', buffer: '' }),
-        wl: () => { setTab({ viewMode: 'list' }); dispatch({ type: 'setStatus', msg: 'view: list' }); },
-        wg: () => { setTab({ viewMode: 'grid' }); dispatch({ type: 'setStatus', msg: 'view: grid' }); },
-        wp: () => { setTab({ viewMode: 'preview' }); dispatch({ type: 'setStatus', msg: 'view: preview' }); },
-        wt: () => { setTab({ viewMode: 'tag' }); dispatch({ type: 'setStatus', msg: 'view: tag' }); },
+        // fm-k9dg — toggle "directories first" for the current folder.
+        zd: () => { const ff = !(tab.foldersFirst ?? true); setTabSticky({ foldersFirst: ff }); dispatch({ type: 'setStatus', msg: ff ? 'folders first' : 'mixed (sort by chosen key only)' }); },
+        wl: () => { setTabSticky({ viewMode: 'list' }); dispatch({ type: 'setStatus', msg: 'view: list' }); },
+        wg: () => { setTabSticky({ viewMode: 'grid' }); dispatch({ type: 'setStatus', msg: 'view: grid' }); },
+        wp: () => { setTabSticky({ viewMode: 'preview' }); dispatch({ type: 'setStatus', msg: 'view: preview' }); },
+        wt: () => { setTabSticky({ viewMode: 'tag' }); dispatch({ type: 'setStatus', msg: 'view: tag' }); },
         // sort
         on: () => setSort('name', false),
         os: () => setSort('size', false),
@@ -405,7 +408,7 @@ export function useKeyboard(
         oC: () => setSort('ctime', true),
         oT: () => setSort('type', true),
         oE: () => setSort('ext', true),
-        or: () => { const rev = !tab.sortReverse; setTab({ sortReverse: rev }); dispatch({ type: 'setStatus', msg: `sort: ${tab.sortKey}${rev ? ' ↓' : ' ↑'}` }); },
+        or: () => { const rev = !tab.sortReverse; setTabSticky({ sortReverse: rev }); dispatch({ type: 'setStatus', msg: `sort: ${tab.sortKey}${rev ? ' ↓' : ' ↑'}` }); },
         // quit
         ZZ: () => window.close(),
         ZQ: () => window.close(),
@@ -832,7 +835,7 @@ export function useKeyboard(
         if (entry) await fm.reveal(entry.path);
       }
       function setSort(key: SortKey, reverse: boolean) {
-        setTab({ sortKey: key, sortReverse: reverse });
+        setTabSticky({ sortKey: key, sortReverse: reverse });
         dispatch({ type: 'setStatus', msg: `sort: ${key}${reverse ? ' ↓' : ' ↑'}` });
       }
       void pathJoin;

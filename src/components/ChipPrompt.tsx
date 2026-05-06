@@ -76,6 +76,9 @@ type Ctx = {
   installedTerminals: string[];
   // fm-jtu — does the active tab already have an embedded terminal pane?
   activeTabHasTerminal: boolean;
+  // fm-jtu — the active tab's terminal handle (when present), so verbs
+  // like closeTab can kill the pty before the tab is removed.
+  activeTabTerminal?: { ptyId: number };
   // fm-g6r — user-editable launcher list (claude/codex/gemini, …).
   launchers: import('../bridge').Launcher[];
   // fm-60k — tag state surfaced to the chip palette so the tag/untag/newtag
@@ -90,6 +93,9 @@ type Ctx = {
   // also lets the synthesized launcher verbs route into bulk-on-selection
   // mode when the user is on the Tasks tab.
   activeTabKind: TabKind;
+  // fm-k9dg — current "directories first" state of the active tab,
+  // surfaced so the foldersFirst verb's describe text reads true.
+  activeTabFoldersFirst: boolean;
 };
 
 type Verb =
@@ -107,6 +113,7 @@ type Verb =
   | 'reveal'
   | 'share'
   | 'showHidden'
+  | 'foldersFirst'
   | 'theme'
   | 'tutorial'
   | 'tips'
@@ -186,6 +193,9 @@ type SlotDef = {
 
 type ExecApi = {
   setTab: (patch: any) => void;
+  /** fm-k9dg — sticky setter: writes the patch to the tab AND records
+   *  the chosen sort/view/hidden/foldersFirst as the per-folder pref. */
+  setTabSticky: (patch: any) => void;
   refreshActive: () => Promise<void>;
   navigateTo: (p: string) => void;
   goBack: () => void;
@@ -462,7 +472,7 @@ const VERBS: VerbDef[] = [
     ],
     execute: (_c, [combined], api) => {
       const [key, dir] = combined.split('|');
-      api.setTab({ sortKey: key as SortKey, sortReverse: dir === 'desc' });
+      api.setTabSticky({ sortKey: key as SortKey, sortReverse: dir === 'desc' });
       api.dispatch({ type: 'setStatus', msg: `sorted: ${key} ${dir === 'desc' ? '↓' : '↑'}` });
     },
   },
@@ -675,6 +685,7 @@ const VERBS: VerbDef[] = [
           sortReverse: false,
           showHidden: false,
           viewMode: 'list',
+          foldersFirst: true,
           filter: '',
           tagViz: [],
           tagFilter: { mode: 'off', ids: [] },
@@ -695,7 +706,11 @@ const VERBS: VerbDef[] = [
     slots: [],
     execute: (c, _p, api) => {
       const active = c.tabs.find((t) => t.active);
-      if (active) api.dispatch({ type: 'closeTab', index: active.index });
+      if (!active) return;
+      if (c.activeTabTerminal) {
+        void fm.termKill(c.activeTabTerminal.ptyId).catch(() => {});
+      }
+      api.dispatch({ type: 'closeTab', index: active.index });
     },
   },
   {
@@ -1081,7 +1096,7 @@ const VERBS: VerbDef[] = [
       },
     ],
     execute: (_c, [mode], api) => {
-      api.setTab({ viewMode: mode as 'list' | 'grid' | 'preview' | 'tag' });
+      api.setTabSticky({ viewMode: mode as 'list' | 'grid' | 'preview' | 'tag' });
       api.dispatch({ type: 'setStatus', msg: `view: ${mode}` });
     },
   },
@@ -1400,6 +1415,29 @@ const VERBS: VerbDef[] = [
     execute: () => {
       // No-op: toggle needs the current tab value, so the wrapper at the
       // call site handles it directly (see special case for showHidden).
+    },
+  },
+  {
+    // fm-k9dg — toggle "directories first". Default ON (traditional);
+    // turning off lets newest-first really mean newest-first in folders
+    // like Downloads where folders crowd the top. Choice is remembered
+    // per folder along with sort/view/hidden.
+    id: 'foldersFirst',
+    availableInTaskMode: false,
+    label: 'Folders first / Mixed',
+    aliases: [
+      'folders first', 'directories first', 'dirs first', 'group folders',
+      'mixed', 'interleave', 'no group', 'unmix folders',
+    ],
+    icon: '◐',
+    describe: (c) =>
+      c.activeTabFoldersFirst
+        ? 'Stop pinning folders to the top — sort by chosen key only'
+        : 'Pin folders to the top of the listing (traditional)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: () => {
+      // Toggle handled at call site (needs current tab value).
     },
   },
   {
@@ -2298,7 +2336,7 @@ export function ChipPrompt({
   initialFilter?: string;
   initialVerbId?: string;
 }) {
-  const { state, dispatch, activeTab, setTab, refreshActive, navigateTo, goBack, goForward, focusEntryByName } = useStore();
+  const { state, dispatch, activeTab, setTab, setTabSticky, refreshActive, navigateTo, goBack, goForward, focusEntryByName } = useStore();
   const [verb, setVerb] = useState<VerbDef | null>(
     () => VERBS.find((v) => v.id === initialVerbId) ?? null,
   );
@@ -2309,6 +2347,12 @@ export function ChipPrompt({
   const [multiSelected, setMultiSelected] = useState<Set<string>>(() => new Set());
   const [filter, setFilter] = useState(initialFilter);
   const [highlightIdx, setHighlightIdx] = useState(0);
+  // fm — keep the highlighted option visible when arrow-keying past the
+  // viewport edge of the options list.
+  const highlightedRef = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    highlightedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [highlightIdx]);
   const [homedir, setHomedir] = useState('');
   const [hoverReason, setHoverReason] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<string[]>([]);
@@ -2472,11 +2516,13 @@ export function ChipPrompt({
       defaultTerminal,
       installedTerminals,
       activeTabHasTerminal: !!activeTab.terminal,
+      activeTabTerminal: activeTab.terminal ? { ptyId: activeTab.terminal.ptyId } : undefined,
       launchers,
       customTags: state.customTags,
       tagPaths: state.tagPaths,
       tagFilter: activeTab.tagFilter,
       activeTabKind: activeTab.kind,
+      activeTabFoldersFirst: activeTab.foldersFirst ?? true,
     };
   }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, launchers, state.customTags, state.tagPaths]);
 
@@ -2762,14 +2808,23 @@ export function ChipPrompt({
       // Special-case showHidden (needs current value)
       if (v.id === 'showHidden') {
         const h = !safeTab.showHidden;
-        setTab({ showHidden: h });
+        setTabSticky({ showHidden: h });
         dispatch({ type: 'setStatus', msg: h ? 'showing hidden files' : 'hiding hidden files' });
+        onClose();
+        return;
+      }
+      // fm-k9dg — toggle "directories first" for the current folder.
+      if (v.id === 'foldersFirst') {
+        const ff = !(safeTab.foldersFirst ?? true);
+        setTabSticky({ foldersFirst: ff });
+        dispatch({ type: 'setStatus', msg: ff ? 'folders first' : 'mixed (sort by chosen key only)' });
         onClose();
         return;
       }
       let suppressClose = false;
       await v.execute(safeCtx, ps, {
         setTab,
+        setTabSticky,
         refreshActive,
         navigateTo,
         goBack,
@@ -2996,6 +3051,7 @@ export function ChipPrompt({
             return (
               <li
                 key={opt.id}
+                ref={i === highlightIdx ? highlightedRef : undefined}
                 className={[
                   'chip-option',
                   i === highlightIdx ? 'chip-option--highlighted' : '',

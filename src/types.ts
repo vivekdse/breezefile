@@ -45,6 +45,10 @@ export type Tab = {
   sortReverse: boolean;
   showHidden: boolean;
   viewMode: ViewMode;
+  /** fm-k9dg — when true (traditional), directories pin to the top of the
+   *  listing regardless of sortKey; when false, dirs and files interleave
+   *  by the active sort. Per-folder via folderPrefs. */
+  foldersFirst: boolean;
   filter: string;
   // fm-uns — tag view: which tag rules color-code rows (visualization only)
   // and an optional tag-combination filter that narrows the visible list.
@@ -67,6 +71,19 @@ export type Tab = {
 
 export type YankMode = 'copy' | 'move' | 'symlink' | 'symlinkRel' | 'hardlink';
 export type YankEntry = { path: string; mode: YankMode };
+
+// fm-k9dg — per-folder remembered view preferences. Keyed by absolute
+// folder path. Only fields the user has consciously set are present;
+// missing fields fall back to the tab's current state (no clobber on
+// folders the user hasn't customized).
+export type FolderPrefs = Partial<{
+  sortKey: SortKey;
+  sortReverse: boolean;
+  showHidden: boolean;
+  viewMode: ViewMode;
+  foldersFirst: boolean;
+}>;
+export type FolderPrefsMap = Record<string, FolderPrefs>;
 
 export type Bookmarks = Record<string, string>; // char -> path
 export type Tags = Record<string, string>; // path -> tag char
