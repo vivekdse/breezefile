@@ -18,22 +18,70 @@
 //     feature. We can promote this to a per-task setting later.
 
 import { spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { TaskRunErrorClass } from '../tasks';
 import type { AgentRunInput, AgentRunResult, AgentRunner } from './types';
 
-const CLAUDE_BIN = 'claude';
+// When the app is launched from Dock / Finder / Spotlight, macOS gives
+// it a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that doesn't
+// include the user's `~/.local/bin`, Homebrew, nvm shims, etc. — so a
+// bare `spawn('claude', …)` fails with ENOENT. Resolve to an absolute
+// path once per process: try common install locations, then fall back
+// to a login-shell `command -v` so the user's profile loads PATH.
+let resolvedBin: Promise<string> | null = null;
+
+function probeWellKnown(): string | null {
+  const candidates = [
+    path.join(os.homedir(), '.local/bin/claude'),
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+    '/usr/bin/claude',
+  ];
+  for (const p of candidates) if (existsSync(p)) return p;
+  return null;
+}
+
+function probeLoginShell(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const c = spawn('/bin/zsh', ['-lc', 'command -v claude'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let out = '';
+    c.stdout.on('data', (b: Buffer) => { out += b.toString('utf8'); });
+    c.on('error', () => resolve(null));
+    c.on('exit', (code) => {
+      const p = out.trim().split('\n').pop() || '';
+      resolve(code === 0 && p && existsSync(p) ? p : null);
+    });
+  });
+}
+
+async function resolveClaudeBin(): Promise<string> {
+  if (resolvedBin) return resolvedBin;
+  resolvedBin = (async () => {
+    const wk = probeWellKnown();
+    if (wk) return wk;
+    const ls = await probeLoginShell();
+    if (ls) return ls;
+    // Last-resort fallback: bare name. Will ENOENT in the bad-PATH
+    // case, but at least preserves the prior behavior in dev.
+    return 'claude';
+  })();
+  return resolvedBin;
+}
 
 class ClaudeAgent implements AgentRunner {
   readonly id = 'claude';
   readonly label = 'Claude Code';
 
   async available(): Promise<boolean> {
+    const bin = await resolveClaudeBin();
     return new Promise((resolve) => {
-      const c = spawn(CLAUDE_BIN, ['--version'], { stdio: 'ignore' });
+      const c = spawn(bin, ['--version'], { stdio: 'ignore' });
       c.on('error', () => resolve(false));
       c.on('exit', (code) => resolve(code === 0));
     });
@@ -41,13 +89,14 @@ class ClaudeAgent implements AgentRunner {
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
     const { prompt, cwd, taskId, runId, outputDir, signal } = input;
+    const bin = await resolveClaudeBin();
     const stdoutPath = path.join(outputDir, 'stream.jsonl');
     const stderrPath = path.join(outputDir, 'stderr.log');
     const metaPath = path.join(outputDir, 'meta.json');
 
     const args = [
       '-p',
-      prompt,
+      buildPreamble(taskId, runId) + prompt,
       '--output-format', 'stream-json',
       '--verbose',
       '--permission-mode', 'acceptEdits',
@@ -61,7 +110,7 @@ class ClaudeAgent implements AgentRunner {
           runId,
           taskId,
           agent: this.id,
-          command: CLAUDE_BIN,
+          command: bin,
           args,
           cwd,
           startedAt: new Date().toISOString(),
@@ -88,7 +137,7 @@ class ClaudeAgent implements AgentRunner {
     const baseEnv: NodeJS.ProcessEnv = { ...process.env };
     delete baseEnv.ANTHROPIC_API_KEY;
     delete baseEnv.ANTHROPIC_AUTH_TOKEN;
-    const child = spawn(CLAUDE_BIN, args, {
+    const child = spawn(bin, args, {
       cwd,
       env: {
         ...baseEnv,
@@ -201,6 +250,31 @@ class ClaudeAgent implements AgentRunner {
       errorMessage: msg,
     };
   }
+}
+
+// Standing instruction prepended to every auto-run prompt. Auto-mode is
+// non-interactive: a denied tool call has no human to escalate to and
+// would otherwise either get silently worked around or cause the agent
+// to thrash. Instead, instruct the agent to file a manual Breeze task
+// naming the exact tool/pattern needed and stop. The user sees that
+// task in their list, reviews it, and adds the pattern to
+// .claude/settings.json. `Bash(breeze *)` must be pre-allowed in
+// project settings so this escape valve isn't itself blocked.
+function buildPreamble(taskId: string, runId: string): string {
+  return [
+    'You are running unattended in Breeze auto-task mode (no human in the loop).',
+    '',
+    'If a tool call is denied by permissions, do NOT retry, work around it,',
+    'or attempt an alternative tool to accomplish the same effect. Instead:',
+    '  1. File a manual Breeze task so the user can see and act on it:',
+    `       breeze add "Permission needed: <tool/pattern>" \\`,
+    `         --notes "Task ${taskId} run ${runId} needed <tool> to <reason>. Add the pattern to .claude/settings.json allow list, then re-run."`,
+    '  2. Stop and exit. The user will grant the permission and re-run.',
+    '',
+    '--- task prompt below ---',
+    '',
+    '',
+  ].join('\n');
 }
 
 type ResultEvent = {
