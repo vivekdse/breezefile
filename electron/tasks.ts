@@ -380,15 +380,18 @@ export function createTask(input: TaskCreate): Task {
   const now = Date.now();
   const id = crypto.randomUUID();
   const status: TaskStatus = input.status ?? 'pending';
-  // fm-zf3m — schedule on creation:
-  //   auto + no cron + no explicit next  → fire now (one-shot run-on-save)
-  //   auto + cron + no explicit next     → first cron fire from now
-  //   explicit next_run_at supplied      → trust the caller
-  //   non-auto                           → null
+  // fm-zf3m / fm-femh — schedule on creation:
+  //   auto + cron, no explicit next         → first cron fire from now
+  //   auto, no cron, no explicit next       → fire now (one-shot run-on-save)
+  //   auto + explicit next_run_at = null    → on-demand (folder tab triggers)
+  //   auto + explicit next_run_at = number  → trust the caller
+  //   non-auto                              → null
+  // The hasOwnProperty check distinguishes "caller passed null on
+  // purpose" (on-demand) from "caller didn't pass anything" (default
+  // to fire-now). Without it, on-demand tasks fire immediately on save.
   const autoMode = input.auto_mode ? 1 : 0;
-  const explicitNext = input.next_run_at ?? null;
-  let nextRunAt: number | null = explicitNext;
-  if (autoMode && explicitNext == null) {
+  let nextRunAt: number | null = input.next_run_at ?? null;
+  if (autoMode && !explicitNextProvided) {
     if (input.cron) {
       try {
         nextRunAt = nextFireFromExpr(input.cron, new Date(now));
