@@ -130,7 +130,9 @@ export function TaskDialog(props: Props) {
   const [folder, setFolder] = useState(
     initial?.folder ?? (props.mode === 'create' ? props.defaultFolder : ''),
   );
-  const [refFolder, setRefFolder] = useState(initial?.ref_folder ?? '');
+  // ref_folder is preserved on edit but no longer surfaced in the form
+  // (fm-femh: streamlined). Keep the value untouched on save.
+  const refFolder = initial?.ref_folder ?? '';
   // Default start to today on create — most tasks are "active now". Edit
   // mode preserves whatever was stored (including null).
   const [startAt, setStartAt] = useState(
@@ -375,32 +377,35 @@ export function TaskDialog(props: Props) {
           />
         </label>
 
-        <FolderField
-          label={
-            isAgent && !onDemand
-              ? 'Folder (required — scheduled run needs an anchor)'
-              : isAgent
-                ? 'Folder (optional — empty means runs in the active folder tab)'
-                : 'Folder (optional)'
-          }
-          value={folder}
-          onChange={setFolder}
-          inputRef={folderRef}
-          suggestions={folderSuggestions}
-        />
+        {/* fm-femh — How is the first decision: it determines what the
+            rest of the form is even about. No fieldset / outline; just a
+            label + chips so it reads as a normal row. */}
+        <div className="task-dialog__field">
+          <span className="task-dialog__label">How</span>
+          <ExecutorChips
+            executors={EXECUTORS}
+            activeId={executor}
+            onPick={(id) => {
+              setExecutor(id);
+              if (id !== 'manual' && !isAgent) setOnDemand(true);
+            }}
+          />
+          {!isAgent && (
+            <div className="task-dialog__auto-hint">
+              A to-do you'll handle yourself. Won't appear in the Run-task picker.
+            </div>
+          )}
+        </div>
 
-        <FolderField
-          label="Reference folder (optional)"
-          value={refFolder}
-          onChange={setRefFolder}
-          suggestions={folderSuggestions}
-        />
-
-        {/* fm-femh — start/due/status/pinned are todo-list concepts; they
-            don't apply to an agent task whose lifecycle is governed by the
-            run history + scheduler. Hide for agent executors. */}
         {!isAgent && (
           <>
+            <FolderField
+              label="Folder (optional)"
+              value={folder}
+              onChange={setFolder}
+              inputRef={folderRef}
+              suggestions={folderSuggestions}
+            />
             <div className="task-dialog__row">
               <DateField
                 label="Start date"
@@ -416,7 +421,6 @@ export function TaskDialog(props: Props) {
                 includeWeekend
               />
             </div>
-
             <div className="task-dialog__row">
               <label className="task-dialog__field task-dialog__field--half">
                 <span className="task-dialog__label">Status</span>
@@ -444,31 +448,10 @@ export function TaskDialog(props: Props) {
           </>
         )}
 
-        <fieldset className="task-dialog__auto">
-          <legend className="task-dialog__auto-legend">
-            <span>How</span>
-          </legend>
-
-          <ExecutorChips
-            executors={EXECUTORS}
-            activeId={executor}
-            onPick={(id) => {
-              setExecutor(id);
-              // Switching to an agent for the first time defaults to
-              // on-demand — closer to what users want than "fire now".
-              if (id !== 'manual' && !isAgent) setOnDemand(true);
-            }}
-          />
-
-          {!isAgent && (
-            <div className="task-dialog__auto-hint">
-              A to-do you'll handle yourself. Won't appear in the Run-task picker.
-            </div>
-          )}
-
-          {isAgent && (
-            <>
-              <div className="task-dialog__auto-when-label">When</div>
+        {isAgent && (
+          <>
+            <div className="task-dialog__field">
+              <span className="task-dialog__label">When</span>
               <PresetChips
                 presets={WHEN_PRESETS}
                 activeId={activeWhenId}
@@ -483,118 +466,127 @@ export function TaskDialog(props: Props) {
               />
               <div className="task-dialog__auto-hint">
                 {onDemand
-                  ? 'Runs only when you click ▶ Run task in a folder tab. Folder is optional — leave empty to run in any folder.'
+                  ? 'Runs only when you click ▶ Run task in a folder tab.'
                   : recurrenceDescription}
               </div>
+            </div>
 
-              {showCustomFineTune && (
-                <div className="task-dialog__auto-row">
+            {showCustomFineTune && (
+              <div className="task-dialog__row">
+                <label className="task-dialog__field task-dialog__field--half">
+                  <span className="task-dialog__label">Recurrence</span>
+                  <select
+                    className="task-dialog__input"
+                    value={recurrence.kind}
+                    onChange={(e) =>
+                      setRecurrence({
+                        ...recurrence,
+                        kind: e.target.value as RecurrenceKind,
+                      })
+                    }
+                  >
+                    <option value="once">Run once on save</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekdays">Weekdays (Mon–Fri)</option>
+                    <option value="weekly">Weekly (pick days)</option>
+                    <option value="custom">Custom cron</option>
+                  </select>
+                </label>
+                {(recurrence.kind === 'daily' ||
+                  recurrence.kind === 'weekdays' ||
+                  recurrence.kind === 'weekly') && (
                   <label className="task-dialog__field task-dialog__field--half">
-                    <span className="task-dialog__label">Recurrence</span>
-                    <select
+                    <span className="task-dialog__label">Time (local)</span>
+                    <input
+                      type="time"
                       className="task-dialog__input"
-                      value={recurrence.kind}
+                      value={recurrence.time}
                       onChange={(e) =>
+                        setRecurrence({ ...recurrence, time: e.target.value })
+                      }
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+
+            {recurrence.kind === 'weekly' && !onDemand && (
+              <div
+                className="task-dialog__day-chips"
+                role="group"
+                aria-label="Days of week"
+              >
+                {[1, 2, 3, 4, 5, 6, 0].map((d) => {
+                  const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                  const active = recurrence.days.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      className={[
+                        'task-dialog__chip',
+                        active ? 'task-dialog__chip--active' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
+                      onClick={() =>
                         setRecurrence({
                           ...recurrence,
-                          kind: e.target.value as RecurrenceKind,
+                          days: active
+                            ? recurrence.days.filter((x) => x !== d)
+                            : [...recurrence.days, d],
                         })
                       }
                     >
-                      <option value="once">Run once on save</option>
-                      <option value="daily">Daily</option>
-                      <option value="weekdays">Weekdays (Mon–Fri)</option>
-                      <option value="weekly">Weekly (pick days)</option>
-                      <option value="custom">Custom cron</option>
-                    </select>
-                  </label>
+                      {labels[d]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-                  {(recurrence.kind === 'daily' ||
-                    recurrence.kind === 'weekdays' ||
-                    recurrence.kind === 'weekly') && (
-                    <label className="task-dialog__field task-dialog__field--half">
-                      <span className="task-dialog__label">Time (local)</span>
-                      <input
-                        type="time"
-                        className="task-dialog__input"
-                        value={recurrence.time}
-                        onChange={(e) =>
-                          setRecurrence({ ...recurrence, time: e.target.value })
-                        }
-                      />
-                    </label>
-                  )}
-                </div>
-              )}
-
-              {recurrence.kind === 'weekly' && (
-                <div
-                  className="task-dialog__day-chips"
-                  role="group"
-                  aria-label="Days of week"
-                >
-                  {[1, 2, 3, 4, 5, 6, 0].map((d) => {
-                    const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                    const active = recurrence.days.includes(d);
-                    return (
-                      <button
-                        key={d}
-                        type="button"
-                        className={[
-                          'task-dialog__chip',
-                          active ? 'task-dialog__chip--active' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        onClick={() =>
-                          setRecurrence({
-                            ...recurrence,
-                            days: active
-                              ? recurrence.days.filter((x) => x !== d)
-                              : [...recurrence.days, d],
-                          })
-                        }
-                      >
-                        {labels[d]}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {recurrence.kind === 'custom' && (
-                <label className="task-dialog__field">
-                  <span className="task-dialog__label">
-                    Cron expression (5 fields, local time)
-                  </span>
-                  <input
-                    type="text"
-                    className="task-dialog__input task-dialog__input--mono"
-                    value={recurrence.cron}
-                    onChange={(e) =>
-                      setRecurrence({ ...recurrence, cron: e.target.value })
-                    }
-                    placeholder="e.g. 0 9 * * MON"
-                    spellCheck={false}
-                  />
-                </label>
-              )}
-
+            {recurrence.kind === 'custom' && !onDemand && (
               <label className="task-dialog__field">
                 <span className="task-dialog__label">
-                  Prompt override (optional)
+                  Cron expression (5 fields, local time)
                 </span>
-                <textarea
-                  className="task-dialog__textarea"
-                  value={autoPrompt ?? ''}
-                  onChange={(e) => setAutoPrompt(e.target.value)}
-                  placeholder="Defaults to the title + notes if empty."
-                  rows={3}
+                <input
+                  type="text"
+                  className="task-dialog__input task-dialog__input--mono"
+                  value={recurrence.cron}
+                  onChange={(e) =>
+                    setRecurrence({ ...recurrence, cron: e.target.value })
+                  }
+                  placeholder="e.g. 0 9 * * MON"
+                  spellCheck={false}
                 />
               </label>
-            </>
-          )}
-        </fieldset>
+            )}
+
+            <FolderField
+              label={
+                onDemand
+                  ? 'Folder (optional — empty runs in the active folder tab)'
+                  : 'Folder (required for scheduled runs)'
+              }
+              value={folder}
+              onChange={setFolder}
+              inputRef={folderRef}
+              suggestions={folderSuggestions}
+            />
+
+            <label className="task-dialog__field">
+              <span className="task-dialog__label">Prompt override (optional)</span>
+              <textarea
+                className="task-dialog__textarea"
+                value={autoPrompt ?? ''}
+                onChange={(e) => setAutoPrompt(e.target.value)}
+                placeholder="Defaults to the title + notes if empty."
+                rows={3}
+              />
+            </label>
+          </>
+        )}
 
         {error && <div className="task-dialog__error">{error}</div>}
 
@@ -602,8 +594,7 @@ export function TaskDialog(props: Props) {
           <span><kbd>⌘↩</kbd> save</span>
           <span><kbd>esc</kbd> close</span>
           <span><kbd>⌘⌥A</kbd> manual/agent</span>
-          <span><kbd>⌘⌥P</kbd> pin</span>
-          <span><kbd>⌘⌥T/N/F/S/D</kbd> jump</span>
+          <span><kbd>⌘⌥T/N</kbd> jump</span>
         </div>
 
         <div className="task-dialog__actions">
