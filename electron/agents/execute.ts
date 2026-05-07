@@ -28,6 +28,13 @@ export type ExecuteOptions = {
    *  with a caller-supplied cwd (e.g. the active folder tab). Required
    *  when the task itself has no folder. Ignored on the scheduler path. */
   overrideCwd?: string;
+  /** fm-femh — set when the user clicked Run (sidebar / task tab /
+   *  Run-task modal). Disables the "one-shot success → mark task done"
+   *  auto-completion: a user manually invoking a task means they want
+   *  it stay reusable (especially on-demand tasks, which fundamentally
+   *  expect to fire many times). The scheduler path leaves this unset
+   *  so that genuine run-once-on-save tasks still complete cleanly. */
+  manualInvocation?: boolean;
 };
 
 export type ExecuteOutcome = {
@@ -180,13 +187,16 @@ export async function executeTaskRun(
     error_message: result.errorMessage ?? null,
   });
 
-  // fm-zf3m — status follow-through:
-  //   one-shot auto + success  → mark task done (user said "do this once",
-  //                              succeeding satisfies that intent)
-  //   recurring auto           → leave status alone (it should recur forever)
-  //   any auto + failure       → leave status alone (lets retry / re-run)
+  // fm-zf3m / fm-femh — status follow-through:
+  //   scheduler one-shot + success  → mark task done (run-once-on-save
+  //                                    semantic: scheduler fired it, the
+  //                                    user said "do this once and stop")
+  //   manual click + success        → leave status alone (user might
+  //                                    re-run; on-demand explicitly so)
+  //   recurring auto                → leave alone (should recur forever)
+  //   any auto + failure            → leave alone (lets retry / re-run)
   // Re-fetch in case the user edited the task mid-run.
-  if (result.ok) {
+  if (result.ok && !opts.manualInvocation) {
     const fresh = tasks.getTask(task.id);
     if (fresh && !fresh.cron && fresh.status !== 'done') {
       tasks.updateTask(task.id, { status: 'done' });

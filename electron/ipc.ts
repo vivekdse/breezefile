@@ -1825,7 +1825,7 @@ end tell`;
     const t = tasks.getTask(taskId);
     if (!t) throw new Error(`task not found: ${taskId}`);
     const { executeTaskRun } = await import('./agents/execute');
-    return executeTaskRun(t);
+    return executeTaskRun(t, { manualInvocation: true });
   });
   // fm-femh — manual run with a caller-supplied cwd. Used by the
   // Run-task modal in folder tabs so a folder-agnostic task (or even
@@ -1835,7 +1835,7 @@ end tell`;
     if (!t) throw new Error(`task not found: ${taskId}`);
     if (!cwd?.trim()) throw new Error('cwd is required');
     const { executeTaskRun } = await import('./agents/execute');
-    return executeTaskRun(t, { overrideCwd: cwd });
+    return executeTaskRun(t, { overrideCwd: cwd, manualInvocation: true });
   });
   // fm-femh — cancel an in-flight run. Returns true when an active run
   // was found for the id and signalled; false if it had already finished.
