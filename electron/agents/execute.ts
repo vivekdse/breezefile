@@ -24,6 +24,10 @@ export type ExecuteOptions = {
   attempt?: number;
   /** External cancellation. The runner will SIGTERM the subprocess. */
   signal?: AbortSignal;
+  /** fm-femh — manual run-now path: override the task's anchored folder
+   *  with a caller-supplied cwd (e.g. the active folder tab). Required
+   *  when the task itself has no folder. Ignored on the scheduler path. */
+  overrideCwd?: string;
 };
 
 export type ExecuteOutcome = {
@@ -96,13 +100,19 @@ export async function executeTaskRun(
   });
 
   const signal = opts.signal ?? new AbortController().signal;
-  const prompt = buildPrompt(task);
+  const effectiveCwd = (opts.overrideCwd?.trim() || task.folder?.trim() || '');
+  if (!effectiveCwd) {
+    throw new Error(
+      `task ${task.id} has no folder and no overrideCwd was supplied`,
+    );
+  }
+  const prompt = buildPrompt(task, effectiveCwd);
 
   let result: AgentRunResult;
   try {
     result = await agent.run({
       prompt,
-      cwd: task.folder,
+      cwd: effectiveCwd,
       taskId: task.id,
       runId: run.id,
       outputDir,
@@ -148,14 +158,14 @@ export async function executeTaskRun(
 /** Compose the prompt the agent sees. Override wins; otherwise we
  *  weave together the task's title + notes + a small context preamble
  *  so the agent knows why it's been invoked unattended. */
-export function buildPrompt(task: Task): string {
+export function buildPrompt(task: Task, cwd: string = task.folder): string {
   if (task.auto_prompt && task.auto_prompt.trim()) {
     return task.auto_prompt.trim();
   }
   const parts: string[] = [];
   parts.push(
     `You are running unattended via Breeze auto-execute. Complete the task` +
-      ` below in the current working directory (${task.folder}). When you` +
+      ` below in the current working directory (${cwd}). When you` +
       ` finish, summarise what you did in your final message.`,
   );
   parts.push('');

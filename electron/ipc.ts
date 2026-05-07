@@ -1289,6 +1289,46 @@ end tell`;
       const out: FindHit[] = [];
       const seen = new Set<string>();
 
+      // Tokenize the query. We match per-token (all tokens must appear in the
+      // name) rather than as one literal substring — otherwise a typed query
+      // like "publish and" misses files named "publish-and-perish.md" because
+      // the hyphen is not a space. Short tokens (≤3 chars like "and", "of")
+      // require a word-boundary match — anything separating word-parts in a
+      // filename (`-`, `_`, `.`, ` `) — so they don't false-positive inside
+      // longer words (e.g. "and" inside "androidpublisher"). Treats CamelCase
+      // boundaries too: an uppercase letter following a lowercase one counts
+      // as a boundary.
+      const tokens = q.split(/\s+/).filter((t) => t.length > 0);
+      const matchesName = (lname: string, oname: string): boolean => {
+        for (const t of tokens) {
+          if (t.length <= 3) {
+            // Word-boundary: token surrounded by non-alphanumerics, OR at
+            // start/end, OR preceded/followed by a CamelCase transition.
+            const idx = (() => {
+              let from = 0;
+              while (from <= lname.length - t.length) {
+                const i = lname.indexOf(t, from);
+                if (i < 0) return -1;
+                const before = i === 0 ? '' : lname[i - 1];
+                const after = i + t.length >= lname.length ? '' : lname[i + t.length];
+                const isWordChar = (ch: string) => /[a-z0-9]/.test(ch);
+                const beforeOk = !before || !isWordChar(before)
+                  || (oname[i - 1] && oname[i] && oname[i - 1] === oname[i - 1].toLowerCase() && oname[i] !== oname[i].toLowerCase());
+                const afterOk = !after || !isWordChar(after)
+                  || (oname[i + t.length - 1] && oname[i + t.length] && oname[i + t.length - 1] === oname[i + t.length - 1].toLowerCase() && oname[i + t.length] !== oname[i + t.length].toLowerCase());
+                if (beforeOk && afterOk) return i;
+                from = i + 1;
+              }
+              return -1;
+            })();
+            if (idx < 0) return false;
+          } else {
+            if (!lname.includes(t)) return false;
+          }
+        }
+        return true;
+      };
+
       // Local BFS — depth ≤ 6, count cap = limit. Skip dotfiles & heavyweights.
       const MAX_DEPTH = 6;
       for (const root of roots) {
@@ -1306,7 +1346,7 @@ end tell`;
                   if (FIND_SKIP.has(ent.name)) continue;
                   const full = path.join(dir, ent.name);
                   const isDir = ent.isDirectory();
-                  if (ent.name.toLowerCase().includes(q)) {
+                  if (matchesName(ent.name.toLowerCase(), ent.name)) {
                     hits.push({ path: full, name: ent.name, isDir, tier: 'local' });
                   }
                   if (isDir) subdirs.push(full);
@@ -1334,7 +1374,6 @@ end tell`;
 
       // Broaden with Spotlight if we have headroom (only on darwin).
       if (out.length < limit && process.platform === 'darwin') {
-        const tokens = q.split(/\s+/).filter((t) => t.length > 0);
         const nameClauses = tokens
           .map((t) => `kMDItemDisplayName == "*${t.replace(/"/g, '')}*"c`)
           .join(' && ');
@@ -1361,7 +1400,10 @@ end tell`;
           }
           if (skip) continue;
           const name = path.basename(p);
-          if (!name.toLowerCase().includes(q.split(/\s+/)[0])) continue;
+          // Apply the same per-token + word-boundary filter as the local BFS:
+          // mdfind matches against extended metadata, so a name-only check
+          // here keeps results focused on the filename the user typed.
+          if (!matchesName(name.toLowerCase(), name)) continue;
           let isDir = false;
           try {
             const st = await fs.lstat(p);
@@ -1784,6 +1826,16 @@ end tell`;
     if (!t) throw new Error(`task not found: ${taskId}`);
     const { executeTaskRun } = await import('./agents/execute');
     return executeTaskRun(t);
+  });
+  // fm-femh — manual run with a caller-supplied cwd. Used by the
+  // Run-task modal in folder tabs so a folder-agnostic task (or even
+  // a folder-anchored one) can execute against the active folder tab.
+  ipcMain.handle('tasks:runNowAt', async (_e, taskId: string, cwd: string) => {
+    const t = tasks.getTask(taskId);
+    if (!t) throw new Error(`task not found: ${taskId}`);
+    if (!cwd?.trim()) throw new Error('cwd is required');
+    const { executeTaskRun } = await import('./agents/execute');
+    return executeTaskRun(t, { overrideCwd: cwd });
   });
   ipcMain.handle('tasks:writeActiveSidecar', (_e, id: string): string | null => {
     try {

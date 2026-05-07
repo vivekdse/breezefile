@@ -65,22 +65,27 @@ const HOOK_SCRIPT = `#!/bin/sh
 # either is missing so claude turns never block on a stopped/absent
 # file_manager.
 set -e
+log="$HOME/.breezefile/claude-hook.log"
+ts=$(date '+%H:%M:%S')
 state="\${1:-}"
-[ "$state" = "busy" ] || [ "$state" = "idle" ] || [ "$state" = "waiting" ] || exit 0
-[ -n "\${BREEZE_PTY_ID:-}" ] || exit 0
+echo "[$ts] argv=$state pty=\${BREEZE_PTY_ID:-<unset>} ppid=$PPID" >>"$log"
+[ "$state" = "busy" ] || [ "$state" = "idle" ] || [ "$state" = "waiting" ] || { echo "  bad state, exit" >>"$log"; exit 0; }
+[ -n "\${BREEZE_PTY_ID:-}" ] || { echo "  pty unset, exit" >>"$log"; exit 0; }
 api="$HOME/.breezefile/api.json"
-[ -f "$api" ] || exit 0
+[ -f "$api" ] || { echo "  api.json missing, exit" >>"$log"; exit 0; }
 # Tiny JSON pluck. The api.json keys are well-known and never contain
 # escape sequences, so a quoted-string regex is safe and avoids a
 # python/jq dependency.
 port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$api" | head -n1)
 tok=$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$api" | head -n1)
-[ -n "$port" ] && [ -n "$tok" ] || exit 0
-curl -s -m 1 -X POST \\
+[ -n "$port" ] && [ -n "$tok" ] || { echo "  port/tok parse failed, exit" >>"$log"; exit 0; }
+echo "  POST pty=$BREEZE_PTY_ID state=$state port=$port" >>"$log"
+http=$(curl -s -m 1 -o /dev/null -w '%{http_code}' -X POST \\
   -H "Authorization: Bearer $tok" \\
   -H "Content-Type: application/json" \\
   --data "{\\"pty_id\\":$BREEZE_PTY_ID,\\"state\\":\\"$state\\"}" \\
-  "http://127.0.0.1:$port/claude-state" >/dev/null 2>&1 || true
+  "http://127.0.0.1:$port/claude-state" 2>>"$log" || echo "curl-fail")
+echo "  http=$http" >>"$log"
 `;
 
 function writeHookScript() {

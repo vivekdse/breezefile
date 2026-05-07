@@ -77,3 +77,27 @@
   font-feature-settings: 'onum' on;
   margin: 0;
 }
+
+/* fm-femh — actions row beneath the dek. Currently just the Run-task
+   button; sized like a discreet inline pill so it doesn't fight the
+   editorial header. */
+.folder-header__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.folder-header__action-btn {
+  font-family: var(--font-sans, system-ui);
+  font-size: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border, rgba(0,0,0,0.18));
+  border-radius: 14px;
+  background: var(--panel, transparent);
+  color: var(--text-on-canvas);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.folder-header__action-btn:hover {
+  background: var(--accent-soft, rgba(74,144,226,0.12));
+  border-color: var(--accent, rgba(74,144,226,0.5));
+}

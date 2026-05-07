@@ -74,6 +74,12 @@ export async function getTask(id: string): Promise<Task | null> {
 export async function runTaskNow(id: string): Promise<void> {
   await fm.tasksRunNow(id);
 }
+// fm-femh — run a task against an explicit cwd (the active folder tab).
+// Used by the Run-task modal so folder-agnostic tasks can be triggered
+// in any folder, and folder-anchored tasks can be reused elsewhere.
+export async function runTaskNowAt(id: string, cwd: string): Promise<void> {
+  await fm.tasksRunNowAt(id, cwd);
+}
 export async function listTaskRuns(id: string, limit = 50): Promise<TaskRun[]> {
   return fm.tasksRunsList(id, limit);
 }

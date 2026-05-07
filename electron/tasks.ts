@@ -353,7 +353,12 @@ export function getTask(id: string): Task | null {
 
 export function createTask(input: TaskCreate): Task {
   if (!input.title?.trim()) throw new Error('title is required');
-  if (!input.folder?.trim()) throw new Error('folder is required');
+  // fm-femh — folder is optional for manual tasks (runnable in any folder
+  // tab via the Run-task modal). Auto-execute still needs an anchor since
+  // the scheduler has no folder context at fire time.
+  if (input.auto_mode && !input.folder?.trim()) {
+    throw new Error('folder is required for auto-execute tasks');
+  }
   if (input.start_at && input.due_at && input.due_at < input.start_at) {
     throw new Error('due date must be on or after start date');
   }
@@ -397,7 +402,7 @@ export function createTask(input: TaskCreate): Task {
     title: input.title.trim(),
     notes: input.notes ?? null,
     status,
-    folder: input.folder,
+    folder: input.folder ?? '',
     ref_folder: input.ref_folder ?? null,
     start_at: input.start_at ?? null,
     due_at: input.due_at ?? null,
@@ -425,7 +430,9 @@ export function updateTask(id: string, patch: TaskUpdate): Task {
     throw new Error('due date must be on or after start date');
   }
   if (!next.title?.trim()) throw new Error('title is required');
-  if (!next.folder?.trim()) throw new Error('folder is required');
+  if (next.auto_mode && !next.folder?.trim()) {
+    throw new Error('folder is required for auto-execute tasks');
+  }
 
   const now = Date.now();
   const justCompleted =

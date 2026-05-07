@@ -554,22 +554,17 @@ const VERBS: VerbDef[] = [
     label: 'Go to / Find',
     aliases: ['go', 'goto', 'cd', 'navigate', 'open folder', 'find', 'search', 'locate', 'jump'],
     icon: '→',
-    describe: () => 'Go to or find a folder or file (file picks open its parent, filtered)',
+    describe: () => 'Go to or find a folder or file (file picks open the file)',
     isAvailable: () => ({ ok: true }),
     slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true, true) }],
     execute: (c, [dest], api) => {
-      // File pick: navigate to parent, then apply the typed query as a substring
-      // filter on the folder. Surfaces a clearable filter chip so the user sees
-      // and can undo the narrowing.
+      // File pick: open the file with its default app. Previously this
+      // navigated to the parent folder + applied a filter chip, but in
+      // practice when the user finds a specific file they want it open,
+      // not its enclosing folder narrowed.
       if (dest.startsWith('file:')) {
         const filePath = dest.slice('file:'.length);
-        const parent = dirnameOf(filePath);
-        const q = c.searchQuery.trim();
-        api.navigateTo(parent);
-        if (q) {
-          api.setTab({ filter: q });
-          api.dispatch({ type: 'setStatus', msg: `filtered to "${q}" — Esc to clear` });
-        }
+        void fm.open(filePath);
         return;
       }
       const target = resolveDestination(c, dest);
@@ -2642,6 +2637,21 @@ export function ChipPrompt({
         // itself ranks higher than one where the match depends on path.
         for (let i = 1; i < tokens.length; i++) {
           if (label.includes(tokens[i])) score += 5;
+        }
+
+        // Contiguity bonus: tokens appearing adjacent in the label (separated
+        // only by space / `-` / `_` / `.`) score much higher than the same
+        // tokens scattered across unrelated words. Without this, a query like
+        // "publish and perish" treats "publish-and-perish.md" the same as
+        // "validate_and_publish_artifact.go" — both have all tokens in the
+        // label, but only the first matches the user's intent.
+        if (tokens.length >= 2) {
+          const contiguous = tokens.join('[\\s\\-_.]+');
+          try {
+            if (new RegExp(contiguous).test(label)) score += 60;
+          } catch {
+            // bad regex tokens — skip
+          }
         }
 
         // Small penalty for very long labels (so "Webinar data shared

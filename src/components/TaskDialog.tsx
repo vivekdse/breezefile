@@ -151,8 +151,10 @@ export function TaskDialog(props: Props) {
       titleRef.current?.focus();
       return;
     }
-    if (!folder.trim()) {
-      setError('Folder is required');
+    // fm-femh — folder is only required for auto-execute. A manual task
+    // with no folder is "runnable in any folder tab" via the Run-task modal.
+    if (autoMode && !folder.trim()) {
+      setError('Folder is required for auto-execute tasks');
       folderRef.current?.focus();
       return;
     }
@@ -300,7 +302,7 @@ export function TaskDialog(props: Props) {
         </label>
 
         <FolderField
-          label="Folder"
+          label={autoMode ? 'Folder' : 'Folder (optional — leave empty to run in any folder)'}
           value={folder}
           onChange={setFolder}
           inputRef={folderRef}
@@ -509,7 +511,7 @@ export function TaskDialog(props: Props) {
             type="button"
             className="task-dialog__btn task-dialog__btn--primary"
             onClick={() => void submit()}
-            disabled={busy || !title.trim() || !folder.trim()}
+            disabled={busy || !title.trim() || (autoMode && !folder.trim())}
           >
             {props.mode === 'create' ? 'Create' : 'Save'}
             <kbd className="task-dialog__btn__kbd">⌘↩</kbd>

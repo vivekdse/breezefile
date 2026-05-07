@@ -23,6 +23,7 @@ import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
 import { TaskDialog, type TaskDialogRequest } from './components/TaskDialog';
 import { RunHistoryDialog } from './components/RunHistoryDialog';
+import { RunTaskModal } from './components/RunTaskModal';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { Tutorial } from './components/Tutorial';
@@ -77,6 +78,8 @@ function Shell() {
   const [taskDialog, setTaskDialog] = useState<TaskDialogRequest | null>(null);
   // fm-zf3m — run history dialog (sidebar context-menu "View run history").
   const [runHistoryFor, setRunHistoryFor] = useState<string | null>(null);
+  // fm-femh — Run-task modal: pick a task to run in the active folder tab.
+  const [runTaskCwd, setRunTaskCwd] = useState<string | null>(null);
   // fm-kaa / fm-yi85 — Tasks overview is now a singleton tab (kind='tasks'),
   // not a modal. The :tasks verb and the sidebar "See all" link dispatch
   // openTasksTab; rendering is inline in the main slot.
@@ -429,6 +432,10 @@ function Shell() {
       const detail = (e as CustomEvent).detail as { taskId?: string } | undefined;
       if (detail?.taskId) setRunHistoryFor(detail.taskId);
     }
+    function onOpenRunTask(e: Event) {
+      const detail = (e as CustomEvent).detail as { cwd?: string } | undefined;
+      if (detail?.cwd) setRunTaskCwd(detail.cwd);
+    }
     function onSetStatus(e: Event) {
       const detail = (e as CustomEvent).detail as { msg?: string } | undefined;
       if (detail?.msg) dispatch({ type: 'setStatus', msg: detail.msg });
@@ -469,6 +476,7 @@ function Shell() {
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
     window.addEventListener('fm:openSettings', onOpenSettings);
     window.addEventListener('fm:openRunHistory', onOpenRunHistory);
+    window.addEventListener('fm:openRunTask', onOpenRunTask);
     window.addEventListener('fm:setStatus', onSetStatus);
     return () => {
       window.removeEventListener('fm:openRename', onRename);
@@ -488,6 +496,7 @@ function Shell() {
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
       window.removeEventListener('fm:openSettings', onOpenSettings);
       window.removeEventListener('fm:openRunHistory', onOpenRunHistory);
+      window.removeEventListener('fm:openRunTask', onOpenRunTask);
       window.removeEventListener('fm:setStatus', onSetStatus);
     };
   }, [activeTab, state.entriesByPath]);
@@ -727,6 +736,9 @@ function Shell() {
           taskId={runHistoryFor}
           onClose={() => setRunHistoryFor(null)}
         />
+      )}
+      {runTaskCwd && (
+        <RunTaskModal cwd={runTaskCwd} onClose={() => setRunTaskCwd(null)} />
       )}
     </div>
     </OverlayCtx.Provider>

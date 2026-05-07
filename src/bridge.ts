@@ -121,6 +121,10 @@ type Fm = {
   tasksRunsCountByTask: () => Promise<Record<string, number>>;
   tasksLastRun: (taskId: string) => Promise<TaskRun | null>;
   tasksRunNow: (taskId: string) => Promise<{ run: TaskRun; result: unknown }>;
+  tasksRunNowAt: (
+    taskId: string,
+    cwd: string,
+  ) => Promise<{ run: TaskRun; result: unknown }>;
   onTaskRunsChanged: (cb: (taskId: string) => void) => () => void;
   onTaskRunFailed: (cb: (payload: { taskId: string; body: string }) => void) => () => void;
   // fm-9fd — control bridge between the HTTP API server (main) and the

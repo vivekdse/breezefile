@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useStore } from '../store';
 import { basename, dirname, lastCol, visibleEntries } from '../actions';
 import type { Entry } from '../types';
+import { openRunTaskModal } from './RunTaskModal';
 import './FolderHeader.css';
 
 /**
@@ -61,6 +62,17 @@ export function FolderHeader() {
       </h1>
 
       <p className="folder-header__dek">{countLine}</p>
+
+      <div className="folder-header__actions">
+        <button
+          type="button"
+          className="folder-header__action-btn"
+          onClick={() => openRunTaskModal(cwd)}
+          title="Run a task in this folder"
+        >
+          ▶ Run task
+        </button>
+      </div>
 
       <div className="ornament" role="presentation">
         <span className="mark">❦</span>
