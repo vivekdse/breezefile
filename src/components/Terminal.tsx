@@ -159,6 +159,17 @@ export function Terminal({
       // inverse luminance to satisfy the floor.
       minimumContrastRatio: 4.5,
       theme: readThemeFromDoc(),
+      // OSC 8 hyperlinks (escape sequences emitted by tools like Claude
+      // CLI to mark clickable URLs in their output) don't go through
+      // WebLinksAddon — that addon only scans plain text. xterm's core
+      // link handler default is window.open(), which the Electron
+      // sandbox blocks ("opener could not be cleared"). Override with
+      // an IPC route to shell.openExternal.
+      linkHandler: {
+        activate: (_event, uri) => {
+          void fm.openUrl(uri);
+        },
+      },
     });
     const fit = new FitAddon();
     const search = new SearchAddon();
