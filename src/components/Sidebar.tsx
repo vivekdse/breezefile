@@ -23,7 +23,7 @@ import {
 } from '../tasks';
 import type { Task } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
-import { shellQuote } from '../shellQuote';
+import { useOpenResumeInTab } from '../openResumeInTab';
 import './Sidebar.css';
 
 const MAX_VISIBLE_TASKS = 10;
@@ -692,6 +692,7 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
   });
   // The trace opener relies on the last run's session_id. We fetch it
   // lazily when clicked so we don't make a second IPC call per row.
+  const openResumeInTab = useOpenResumeInTab();
   const onOpenTrace = act(async () => {
     const run = await fm.tasksLastRun(task.id);
     const session = run?.conversation_id;
@@ -701,23 +702,7 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
       );
       return;
     }
-    // Claude CLI keys session storage by cwd; prepend `cd <task folder>`
-    // so the resume works from any shell.
-    const cmd = task.folder
-      ? `cd ${shellQuote(task.folder)} && claude --resume ${session}`
-      : `claude --resume ${session}`;
-    try {
-      await navigator.clipboard.writeText(cmd);
-      window.dispatchEvent(
-        new CustomEvent('fm:setStatus', {
-          detail: { msg: `copied: ${cmd}` },
-        }),
-      );
-    } catch {
-      window.dispatchEvent(
-        new CustomEvent('fm:setStatus', { detail: { msg: cmd } }),
-      );
-    }
+    await openResumeInTab(task.folder, session, task.title);
   });
 
   // Clamp to viewport so the menu doesn't disappear off the right/bottom edge.
@@ -748,7 +733,7 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
         View run history
       </button>
       <button type="button" className="sidebar__ctxmenu-item" onClick={onOpenTrace}>
-        Copy resume command
+        Open last run in new tab
       </button>
       <div className="sidebar__ctxmenu-sep" />
       <button

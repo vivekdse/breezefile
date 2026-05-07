@@ -96,9 +96,26 @@ function createWindow() {
     },
   });
 
+  // Only forward real external links to the OS. A naive forward calls
+  // shell.openExternal('about:blank') for empty / placeholder anchors
+  // (target="_blank" with an empty/missing href, javascript: links,
+  // markdown placeholders), which produces the macOS "no application
+  // set to open about:blank" dialog. Allowlist the schemes we actually
+  // want to hand off and silently deny everything else.
+  const EXTERNAL_SCHEMES = /^(https?:|mailto:|tel:|x-apple\.|file:)/i;
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (EXTERNAL_SCHEMES.test(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+  // Same guard for in-page navigations (link without target=_blank).
+  // Without this, clicking such a link would navigate the renderer
+  // away from the app shell.
+  win.webContents.on('will-navigate', (e, url) => {
+    // Allow internal dev-server / app-shell navigations. Everything
+    // else is an external link the user clicked from rendered content.
+    if (VITE_DEV_SERVER_URL && url.startsWith(VITE_DEV_SERVER_URL)) return;
+    e.preventDefault();
+    if (EXTERNAL_SCHEMES.test(url)) shell.openExternal(url);
   });
 
   // fm-c2w — forward focus/blur to the renderer so the attention layer

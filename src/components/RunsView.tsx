@@ -7,14 +7,14 @@
 // Each row exposes:
 //   - status pill + when + duration + attempt
 //   - parent task title (clickable — opens that task's RunHistoryDialog)
-//   - "Copy resume" → puts `claude --resume <conversation_id>` on the
-//     clipboard so the user can drop into the headless trace from
-//     their own terminal.
+//   - "Open run" → spawns a new tab with an embedded terminal at the
+//     task folder and auto-runs `claude --resume <conversation_id>`
+//     so the user lands directly in the headless trace inside Breeze.
 
 import { useMemo, useState } from 'react';
 import { useAllRuns } from '../tasks';
 import type { TaskRunWithTitle } from '../types';
-import { shellQuote } from '../shellQuote';
+import { useOpenResumeInTab } from '../openResumeInTab';
 import './RunsView.css';
 
 function homeRel(p: string): string {
@@ -111,6 +111,7 @@ export function RunsView() {
 }
 
 function RunRow({ run }: { run: TaskRunWithTitle }) {
+  const openResumeInTab = useOpenResumeInTab();
   const start = run.started_at ?? run.scheduled_for;
   const dur =
     run.finished_at && run.started_at
@@ -123,24 +124,10 @@ function RunRow({ run }: { run: TaskRunWithTitle }) {
     );
   };
 
-  const copyResume = async (e: React.MouseEvent) => {
+  const onOpenRun = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!run.conversation_id) return;
-    // Claude CLI keys session storage by cwd, so prepend `cd <task folder>`
-    // to make the pasted command work from anywhere.
-    const cmd = run.task_folder
-      ? `cd ${shellQuote(run.task_folder)} && claude --resume ${run.conversation_id}`
-      : `claude --resume ${run.conversation_id}`;
-    try {
-      await navigator.clipboard.writeText(cmd);
-      window.dispatchEvent(
-        new CustomEvent('fm:setStatus', { detail: { msg: `copied: ${cmd}` } }),
-      );
-    } catch {
-      window.dispatchEvent(
-        new CustomEvent('fm:setStatus', { detail: { msg: cmd } }),
-      );
-    }
+    void openResumeInTab(run.task_folder, run.conversation_id, run.task_title);
   };
 
   return (
@@ -178,10 +165,10 @@ function RunRow({ run }: { run: TaskRunWithTitle }) {
           <button
             type="button"
             className="runs-view__copy"
-            onClick={copyResume}
-            title="Copy `claude --resume <id>` to clipboard"
+            onClick={onOpenRun}
+            title="Open this run's trace in a new tab terminal"
           >
-            Copy resume
+            Open run
           </button>
         )}
       </div>

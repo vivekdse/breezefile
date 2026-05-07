@@ -1,15 +1,16 @@
 // fm-zf3m — Run history dialog for an auto-executed task.
 //
 // Lists every run attempt with status, attempt number, timing, and
-// (when present) the conversation id + a "Copy resume" button so the
-// user can drop into the trace in their own terminal. Live: subscribes
-// via useTaskRuns so a fresh run from the scheduler appears without a
-// reopen.
+// (when present) the conversation id + an "Open run" button that
+// spawns a new tab with an embedded terminal at the task folder and
+// auto-runs `claude --resume <id>` so the user lands in the trace
+// inside Breeze. Live: subscribes via useTaskRuns so a fresh run from
+// the scheduler appears without a reopen.
 
 import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { getTask, runTaskNow, useTaskRuns } from '../tasks';
-import { shellQuote } from '../shellQuote';
+import { useOpenResumeInTab } from '../openResumeInTab';
 import type { Task, TaskRun } from '../types';
 import './RunHistoryDialog.css';
 
@@ -124,29 +125,16 @@ function RerunButton({ taskId, runs }: { taskId: string; runs: TaskRun[] }) {
 }
 
 function RunRow({ run, folder }: { run: TaskRun; folder: string | null }) {
+  const openResumeInTab = useOpenResumeInTab();
   const start = run.started_at ?? run.scheduled_for;
   const dur =
     run.finished_at && run.started_at
       ? `${((run.finished_at - run.started_at) / 1000).toFixed(1)}s`
       : null;
 
-  const copyResume = async () => {
+  const onOpenRun = () => {
     if (!run.conversation_id) return;
-    // Claude CLI keys session storage by cwd (~/.claude/projects/<encoded-cwd>/),
-    // so a bare `claude --resume <id>` only finds the trace when you happen
-    // to be in the same folder. We prepend `cd` to the task folder so the
-    // pasted command works from anywhere. Quoting handles paths with spaces.
-    const cmd = folder
-      ? `cd ${shellQuote(folder)} && claude --resume ${run.conversation_id}`
-      : `claude --resume ${run.conversation_id}`;
-    try {
-      await navigator.clipboard.writeText(cmd);
-      window.dispatchEvent(
-        new CustomEvent('fm:setStatus', { detail: { msg: `copied: ${cmd}` } }),
-      );
-    } catch {
-      /* clipboard blocked — silent */
-    }
+    void openResumeInTab(folder, run.conversation_id);
   };
 
   return (
@@ -166,10 +154,10 @@ function RunRow({ run, folder }: { run: TaskRun; folder: string | null }) {
           <button
             type="button"
             className="run-history__copy"
-            onClick={() => void copyResume()}
-            title="Copy `claude --resume <id>` to clipboard"
+            onClick={onOpenRun}
+            title="Open this run's trace in a new tab terminal"
           >
-            Copy resume
+            Open run
           </button>
         )}
       </div>
