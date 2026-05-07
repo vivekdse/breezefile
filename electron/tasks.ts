@@ -353,11 +353,25 @@ export function getTask(id: string): Task | null {
 
 export function createTask(input: TaskCreate): Task {
   if (!input.title?.trim()) throw new Error('title is required');
-  // fm-femh — folder is optional for manual tasks (runnable in any folder
-  // tab via the Run-task modal). Auto-execute still needs an anchor since
-  // the scheduler has no folder context at fire time.
-  if (input.auto_mode && !input.folder?.trim()) {
-    throw new Error('folder is required for auto-execute tasks');
+  // fm-femh — folder is required only for *scheduled* agent runs: the
+  // scheduler has no folder context at fire time, so it needs an anchor.
+  // On-demand agent tasks (auto_mode=true, no cron, next_run_at=null) and
+  // manual tasks both run with a click-time cwd, so folder is optional.
+  const explicitNextProvided = Object.prototype.hasOwnProperty.call(
+    input,
+    'next_run_at',
+  );
+  // On-demand: caller explicitly passes next_run_at=null AND no cron.
+  // Anything else with auto_mode=true ends up scheduled (cron, fire-now
+  // default, or explicit non-null next_run_at).
+  const isOnDemand =
+    input.auto_mode === true &&
+    !input.cron &&
+    explicitNextProvided &&
+    input.next_run_at == null;
+  const willBeScheduled = input.auto_mode === true && !isOnDemand;
+  if (willBeScheduled && !input.folder?.trim()) {
+    throw new Error('folder is required for scheduled agent tasks');
   }
   if (input.start_at && input.due_at && input.due_at < input.start_at) {
     throw new Error('due date must be on or after start date');
@@ -430,8 +444,14 @@ export function updateTask(id: string, patch: TaskUpdate): Task {
     throw new Error('due date must be on or after start date');
   }
   if (!next.title?.trim()) throw new Error('title is required');
-  if (next.auto_mode && !next.folder?.trim()) {
-    throw new Error('folder is required for auto-execute tasks');
+  // fm-femh — same scheduled-vs-on-demand split as createTask. We can use
+  // `next` directly here because the patch has been merged onto `existing`
+  // and updateTask doesn't run the auto-default logic until after this check.
+  const nextIsOnDemand =
+    next.auto_mode === true && !next.cron && next.next_run_at == null;
+  const nextIsScheduled = next.auto_mode === true && !nextIsOnDemand;
+  if (nextIsScheduled && !next.folder?.trim()) {
+    throw new Error('folder is required for scheduled agent tasks');
   }
 
   const now = Date.now();

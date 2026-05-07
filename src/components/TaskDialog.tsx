@@ -396,50 +396,57 @@ export function TaskDialog(props: Props) {
           suggestions={folderSuggestions}
         />
 
-        <div className="task-dialog__row">
-          <DateField
-            label="Start date"
-            value={startAt}
-            onChange={setStartAt}
-            inputRef={startRef}
-          />
-          <DateField
-            label="Due date"
-            value={dueAt}
-            onChange={setDueAt}
-            inputRef={dueRef}
-            includeWeekend
-          />
-        </div>
+        {/* fm-femh — start/due/status/pinned are todo-list concepts; they
+            don't apply to an agent task whose lifecycle is governed by the
+            run history + scheduler. Hide for agent executors. */}
+        {!isAgent && (
+          <>
+            <div className="task-dialog__row">
+              <DateField
+                label="Start date"
+                value={startAt}
+                onChange={setStartAt}
+                inputRef={startRef}
+              />
+              <DateField
+                label="Due date"
+                value={dueAt}
+                onChange={setDueAt}
+                inputRef={dueRef}
+                includeWeekend
+              />
+            </div>
 
-        <div className="task-dialog__row">
-          <label className="task-dialog__field task-dialog__field--half">
-            <span className="task-dialog__label">Status</span>
-            <select
-              className="task-dialog__input"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as TaskStatus)}
-            >
-              {(Object.keys(STATUS_LABELS) as TaskStatus[]).map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="task-dialog__checkbox">
-            <input
-              type="checkbox"
-              checked={pinned}
-              onChange={(e) => setPinned(e.target.checked)}
-            />
-            <span>Pinned</span>
-          </label>
-        </div>
+            <div className="task-dialog__row">
+              <label className="task-dialog__field task-dialog__field--half">
+                <span className="task-dialog__label">Status</span>
+                <select
+                  className="task-dialog__input"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as TaskStatus)}
+                >
+                  {(Object.keys(STATUS_LABELS) as TaskStatus[]).map((s) => (
+                    <option key={s} value={s}>
+                      {STATUS_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="task-dialog__checkbox">
+                <input
+                  type="checkbox"
+                  checked={pinned}
+                  onChange={(e) => setPinned(e.target.checked)}
+                />
+                <span>Pinned</span>
+              </label>
+            </div>
+          </>
+        )}
 
         <fieldset className="task-dialog__auto">
           <legend className="task-dialog__auto-legend">
-            <span>Execute how</span>
+            <span>How</span>
           </legend>
 
           <ExecutorChips
