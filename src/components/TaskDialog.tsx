@@ -34,6 +34,7 @@ import {
   type RecurrenceForm,
   type RecurrenceKind,
 } from '../recurrence';
+import { humanizeError } from '../errorMessages';
 import './TaskDialog.css';
 
 export type TaskDialogRequest =
@@ -244,7 +245,7 @@ export function TaskDialog(props: Props) {
     try {
       cron = isAgent && !onDemand ? buildCronFromForm(recurrence) : null;
     } catch (e) {
-      setError((e as Error).message);
+      setError(humanizeError(e).message);
       return;
     }
     const agentId = EXECUTORS.find((x) => x.id === executor)?.agentId ?? null;
@@ -275,7 +276,7 @@ export function TaskDialog(props: Props) {
       }
       exit();
     } catch (e) {
-      setError((e as Error).message);
+      setError(humanizeError(e).message);
       setBusy(false);
     }
   }

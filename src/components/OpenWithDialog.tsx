@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { fm } from '../bridge';
 import { useStore } from '../store';
+import { formatOpError } from '../errorMessages';
 import './OpenWithDialog.css';
 
 export interface OpenWithDialogProps {
@@ -42,7 +43,7 @@ export function OpenWithDialog({ filePath, ext, appPath, onClose }: OpenWithDial
     } catch (err) {
       dispatch({
         type: 'setStatus',
-        msg: `open with ${appName} failed: ${(err as Error).message}`,
+        msg: formatOpError(`open with ${appName}`, err),
       });
     } finally {
       onClose();

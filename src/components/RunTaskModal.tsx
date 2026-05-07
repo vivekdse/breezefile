@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
+import { formatOpError } from '../errorMessages';
 import { runTaskNowAt, useTasks } from '../tasks';
 import { startTracking, stopTracking } from '../runProgress';
 import type { Task } from '../types';
@@ -80,7 +81,7 @@ export function RunTaskModal({ cwd, onClose }: Props) {
     } catch (e) {
       window.dispatchEvent(
         new CustomEvent('fm:setStatus', {
-          detail: { msg: `run failed: ${(e as Error).message}` },
+          detail: { msg: formatOpError('run', e) },
         }),
       );
     } finally {
@@ -160,11 +161,42 @@ export function RunTaskModal({ cwd, onClose }: Props) {
         {loading ? (
           <div className="run-task__empty">Loading…</div>
         ) : flat.length === 0 ? (
-          <div className="run-task__empty">
-            No agent-executable tasks. Create one with the <code>task</code> verb,
-            pick an executor like Claude Code, and choose <em>On demand</em> if
-            you want it to run only from this picker. Leave folder empty to
-            make it runnable in any folder.
+          <div className="run-task__empty run-task__empty--rich">
+            <div className="run-task__empty-glyph" aria-hidden>·</div>
+            <div className="run-task__empty-title">No tasks ready to run.</div>
+            <div className="run-task__empty-hint">
+              Create a task with an executor like Claude Code to run it from here.
+            </div>
+            <div className="run-task__empty-actions">
+              <button
+                type="button"
+                className="run-task__empty-cta"
+                onClick={() => {
+                  onClose();
+                  window.dispatchEvent(
+                    new CustomEvent('fm:openTask', {
+                      detail: { mode: 'create', defaultFolder: cwd },
+                    }),
+                  );
+                }}
+              >
+                Create a task
+              </button>
+              <button
+                type="button"
+                className="run-task__empty-link"
+                onClick={() => {
+                  onClose();
+                  window.dispatchEvent(
+                    new CustomEvent('fm:openHelp', {
+                      detail: { slide: 'tasks-intro' },
+                    }),
+                  );
+                }}
+              >
+                How tasks work
+              </button>
+            </div>
           </div>
         ) : (
           <ul className="run-task__list" role="listbox">

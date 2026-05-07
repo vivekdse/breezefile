@@ -15,7 +15,61 @@ import {
   isExternalDrop,
   resolveDropPaths,
 } from '../dragState';
+import type { HelpSlideId } from './HelpTour';
+import { formatOpError } from '../errorMessages';
 import './FolderList.css';
+
+type EmptyKind = 'truly-empty' | 'all-hidden' | 'filtered-out';
+
+function FolderEmptyState({ kind }: { kind: EmptyKind }) {
+  let title: string;
+  let hint: React.ReactNode;
+  let helpSlide: HelpSlideId;
+  if (kind === 'filtered-out') {
+    title = 'No files match this filter.';
+    hint = (
+      <>
+        Type <kbd>filter</kbd> to clear the tag filter, or pick a different tag.
+      </>
+    );
+    helpSlide = 'tags';
+  } else if (kind === 'all-hidden') {
+    title = 'Only hidden files here.';
+    hint = (
+      <>
+        Type <kbd>zh</kbd> to show hidden files (dotfiles, system files).
+      </>
+    );
+    helpSlide = 'view-sort';
+  } else {
+    title = 'Empty folder.';
+    hint = (
+      <>
+        Type <kbd>create</kbd> to add a file or folder. <kbd>←</kbd> goes back up.
+      </>
+    );
+    helpSlide = 'select';
+  }
+  function openHelp() {
+    window.dispatchEvent(
+      new CustomEvent('fm:openHelp', { detail: { slide: helpSlide } }),
+    );
+  }
+  return (
+    <div className="folder-list__empty" role="status" aria-live="polite">
+      <div className="folder-list__empty-glyph" aria-hidden>·</div>
+      <div className="folder-list__empty-title">{title}</div>
+      <div className="folder-list__empty-hint">{hint}</div>
+      <button
+        type="button"
+        className="folder-list__empty-help"
+        onClick={openHelp}
+      >
+        Learn more
+      </button>
+    </div>
+  );
+}
 
 /**
  * Finder/Explorer-style single-list view of the current folder.
@@ -100,7 +154,7 @@ export function FolderList() {
         const suffix = renamed > 0 ? ` (${renamed} renamed)` : '';
         dispatch({ type: 'setStatus', msg: `pasted ${state.yank.length} into ${dst.split('/').pop() || '/'}${suffix}` });
       } catch (err) {
-        dispatch({ type: 'setStatus', msg: `paste failed: ${(err as Error).message}` });
+        dispatch({ type: 'setStatus', msg: formatOpError('paste', err) });
       }
     }
 
@@ -114,7 +168,7 @@ export function FolderList() {
         await refreshActive();
         dispatch({ type: 'setStatus', msg: `duplicated ${entry.name}` });
       } catch (err) {
-        dispatch({ type: 'setStatus', msg: `duplicate failed: ${(err as Error).message}` });
+        dispatch({ type: 'setStatus', msg: formatOpError('duplicate', err) });
       }
       void stem; void ext; void i;
     }
@@ -172,7 +226,7 @@ export function FolderList() {
               } catch (err) {
                 dispatch({
                   type: 'setStatus',
-                  msg: `${appName} failed: ${(err as Error).message}`,
+                  msg: formatOpError(appName, err),
                 });
               }
             },
@@ -241,7 +295,7 @@ export function FolderList() {
             await refreshActive();
             dispatch({ type: 'setStatus', msg: `trashed ${entry.name}` });
           } catch (err) {
-            dispatch({ type: 'setStatus', msg: `trash failed: ${(err as Error).message}` });
+            dispatch({ type: 'setStatus', msg: formatOpError('trash', err) });
           }
         },
       },
@@ -254,15 +308,25 @@ export function FolderList() {
   const tab = activeTab;
   const col = lastCol(tab);
   const cwd = tab.trail[col];
+  const rawCount = state.entriesByPath[cwd]?.length ?? 0;
   const allEntries = visibleEntries(state.entriesByPath[cwd], tab);
   // fm-uns — tag-combination filter narrows the visible list. When the
   // filter is off, this is a no-op and entries === allEntries.
-  const entries =
-    tab.tagFilter.mode !== 'off' && tab.tagFilter.ids.length > 0
-      ? allEntries.filter((e) =>
-          entryMatchesFilter(e, tab.tagFilter, state.customTags, state.tagPaths),
-        )
-      : allEntries;
+  const tagFilterActive =
+    tab.tagFilter.mode !== 'off' && tab.tagFilter.ids.length > 0;
+  const entries = tagFilterActive
+    ? allEntries.filter((e) =>
+        entryMatchesFilter(e, tab.tagFilter, state.customTags, state.tagPaths),
+      )
+    : allEntries;
+  const emptyKind: EmptyKind | null =
+    entries.length > 0
+      ? null
+      : tagFilterActive && allEntries.length > 0
+        ? 'filtered-out'
+        : rawCount > 0 && allEntries.length === 0
+          ? 'all-hidden'
+          : 'truly-empty';
   const selIdx = tab.selected[col] ?? 0;
   // Resolve active tag defs once per render so each row lookup is cheap.
   const vizTags = tab.tagViz
@@ -310,7 +374,7 @@ export function FolderList() {
       console.error('[drop] resolve failed', err);
       store.dispatch({
         type: 'setStatus',
-        msg: `drop failed: ${(err as Error).message}`,
+        msg: formatOpError('drop', err),
       });
       return;
     }
@@ -323,7 +387,7 @@ export function FolderList() {
       (err) => {
         // eslint-disable-next-line no-console
         console.error('[drop] fs:paste failed', { err, paths, dst: cwd, copy });
-        return `drop failed: ${(err as Error).message}`;
+        return formatOpError('drop', err);
       },
     );
     if (msg) store.dispatch({ type: 'setStatus', msg });
@@ -357,22 +421,26 @@ export function FolderList() {
           the receiving side animate in (via gpPopIn on .folder-list__body). */}
       {tab.viewMode === 'grid' ? (
         <div key={tab.viewMode} className="folder-list__body">
-          <FileGrid
-            entries={entries}
-            selIdx={selIdx}
-            activeColumn={true}
-            marks={tab.marks}
-            onSelect={selectAt}
-            onOpen={doubleOpen}
-            getDragPaths={getDragPaths}
-            variant="grid"
-          />
+          {emptyKind ? (
+            <FolderEmptyState kind={emptyKind} />
+          ) : (
+            <FileGrid
+              entries={entries}
+              selIdx={selIdx}
+              activeColumn={true}
+              marks={tab.marks}
+              onSelect={selectAt}
+              onOpen={doubleOpen}
+              getDragPaths={getDragPaths}
+              variant="grid"
+            />
+          )}
         </div>
       ) : (
         <ul key={tab.viewMode} className="folder-list__list folder-list__body" data-compact={tab.viewMode === 'preview' ? 'true' : undefined}>
-          {entries.length === 0 && (
-            <li className="folder-list__empty">
-              empty folder — type <kbd>create</kbd> to add one, or <kbd>←</kbd> to go back
+          {emptyKind && (
+            <li>
+              <FolderEmptyState kind={emptyKind} />
             </li>
           )}
           {entries.map((e, j) => {

@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { makeTab, useStore } from '../store';
 import { fm } from '../bridge';
 import { basename } from '../actions';
+import { formatOpError, humanizeError } from '../errorMessages';
 import {
   cancelTaskRun,
   dueTone,
@@ -55,7 +56,7 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
     const load = () => {
       getTask(taskId)
         .then((t) => { if (!cancelled) { setTask(t); setLoadError(null); } })
-        .catch((e) => { if (!cancelled) setLoadError((e as Error).message); });
+        .catch((e) => { if (!cancelled) setLoadError(humanizeError(e).message); });
     };
     load();
     const unsub = fm.onTasksChanged(load);
@@ -126,7 +127,7 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
     } catch (e) {
       window.dispatchEvent(
         new CustomEvent('fm:setStatus', {
-          detail: { msg: `cancel failed: ${(e as Error).message}` },
+          detail: { msg: formatOpError('cancel', e) },
         }),
       );
     }
@@ -142,7 +143,7 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
     } catch (e) {
       window.dispatchEvent(
         new CustomEvent('fm:setStatus', {
-          detail: { msg: `run failed to start: ${(e as Error).message}` },
+          detail: { msg: formatOpError('run start', e) },
         }),
       );
     }
@@ -162,7 +163,7 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
       dispatch({ type: 'setTabTaskId', index: tabIndex, taskId: null });
       dispatch({ type: 'setStatus', msg: `marked done · ${task.title}` });
     } catch (e) {
-      dispatch({ type: 'setStatus', msg: `mark done failed: ${(e as Error).message}` });
+      dispatch({ type: 'setStatus', msg: formatOpError('mark done', e) });
     }
   };
   const onOpenFolder = () => {
@@ -184,7 +185,7 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
       dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: folder });
       dispatch({ type: 'setStatus', msg: 'terminal opened' });
     } catch (e) {
-      dispatch({ type: 'setStatus', msg: `terminal failed: ${(e as Error).message}` });
+      dispatch({ type: 'setStatus', msg: formatOpError('terminal', e) });
     }
   };
   const launch = async (l: Launcher, variantId?: string) => {

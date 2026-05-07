@@ -37,6 +37,7 @@ import {
 import type { CustomTag, Entry, SortKey, TabKind, TagFilter, TagPaths } from '../types';
 import { getAllTags } from '../tags';
 import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
+import { formatOpError } from '../errorMessages';
 import './ChipPrompt.css';
 
 // One-shot lazy probe for the native Share helper binary. Verbs'
@@ -523,7 +524,7 @@ const VERBS: VerbDef[] = [
               } catch (err) {
                 api.dispatch({
                   type: 'setStatus',
-                  msg: `trash failed: ${(err as Error).message}`,
+                  msg: formatOpError('trash', err),
                 });
               }
             },
@@ -914,7 +915,7 @@ const VERBS: VerbDef[] = [
       } catch (err) {
         api.dispatch({
           type: 'setStatus',
-          msg: `terminal failed: ${(err as Error).message}`,
+          msg: formatOpError('terminal', err),
         });
       }
     },
@@ -955,7 +956,7 @@ const VERBS: VerbDef[] = [
       } catch (err) {
         api.dispatch({
           type: 'setStatus',
-          msg: `terminal failed: ${(err as Error).message}`,
+          msg: formatOpError('terminal', err),
         });
       }
       api.closeOverlay();
@@ -1645,7 +1646,7 @@ const VERBS: VerbDef[] = [
           msg: `Compressed ${sources.length} item${sources.length === 1 ? '' : 's'} → ${basename(dest)}`,
         });
       } catch (err) {
-        api.dispatch({ type: 'setStatus', msg: `compress failed: ${(err as Error).message}` });
+        api.dispatch({ type: 'setStatus', msg: formatOpError('compress', err) });
       }
     },
   },
@@ -1706,7 +1707,7 @@ const VERBS: VerbDef[] = [
           });
         }
       } catch (err) {
-        api.dispatch({ type: 'setStatus', msg: `extract failed: ${(err as Error).message}` });
+        api.dispatch({ type: 'setStatus', msg: formatOpError('extract', err) });
       }
     },
   },
@@ -2868,7 +2869,7 @@ export function ChipPrompt({
       });
       if (suppressClose) return;
     } catch (err) {
-      dispatch({ type: 'setStatus', msg: `${v.label}: ${(err as Error).message}` });
+      dispatch({ type: 'setStatus', msg: formatOpError(v.label, err) });
     }
     if (v.id !== 'rename') onClose();
   }

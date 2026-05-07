@@ -11,6 +11,7 @@ import {
   resolveDropPaths,
 } from '../dragState';
 import { useTasks } from '../tasks';
+import { formatOpError } from '../errorMessages';
 import type { Tab } from '../types';
 import './Tabbar.css';
 
@@ -100,7 +101,7 @@ export function Tabbar() {
       console.error('[drop] resolve failed', err);
       dispatch({
         type: 'setStatus',
-        msg: `drop failed: ${(err as Error).message}`,
+        msg: formatOpError('drop', err),
       });
       return;
     }
@@ -115,7 +116,7 @@ export function Tabbar() {
       (err) => {
         // eslint-disable-next-line no-console
         console.error('[drop] fs:paste failed', { err, paths, dst: target, copy });
-        return `drop failed: ${(err as Error).message}`;
+        return formatOpError('drop', err);
       },
     );
     if (msg) dispatch({ type: 'setStatus', msg });

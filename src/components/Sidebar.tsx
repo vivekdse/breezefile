@@ -23,6 +23,7 @@ import {
 } from '../tasks';
 import type { Task } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
+import { formatOpError } from '../errorMessages';
 import { useOpenResumeInTab } from '../openResumeInTab';
 import './Sidebar.css';
 
@@ -154,7 +155,7 @@ export function Sidebar() {
       console.error('[drop] resolve failed', err);
       dispatch({
         type: 'setStatus',
-        msg: `drop failed: ${(err as Error).message}`,
+        msg: formatOpError('drop', err),
       });
       return;
     }
@@ -167,7 +168,7 @@ export function Sidebar() {
       (err) => {
         // eslint-disable-next-line no-console
         console.error('[drop] fs:paste failed', { err, paths, dst: targetPath, copy });
-        return `drop failed: ${(err as Error).message}`;
+        return formatOpError('drop', err);
       },
     );
     if (msg) dispatch({ type: 'setStatus', msg });
@@ -195,7 +196,7 @@ export function Sidebar() {
       console.error('[drop] resolve failed', err);
       dispatch({
         type: 'setStatus',
-        msg: `drop failed: ${(err as Error).message}`,
+        msg: formatOpError('drop', err),
       });
       return;
     }

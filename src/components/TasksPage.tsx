@@ -32,6 +32,7 @@ import {
 } from '../tasks';
 import { RunsView } from './RunsView';
 import type { ConfirmRequest } from './ConfirmDialog';
+import { formatOpError } from '../errorMessages';
 import type { Task, TaskStatus } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './TasksPage.css';
@@ -491,7 +492,7 @@ export function TasksPage() {
       const ptyId = await spawnTerminal({ cwd: task.folder, sessionLabel: task.title });
       dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: task.folder });
     } catch (e) {
-      dispatch({ type: 'setStatus', msg: `terminal failed: ${(e as Error).message}` });
+      dispatch({ type: 'setStatus', msg: formatOpError('terminal', e) });
     }
   }
   function rowGotoFolder(task: Task) {
@@ -768,7 +769,7 @@ export function TasksPage() {
             const ptyId = await spawnTerminal({ cwd: t.folder, sessionLabel: t.title });
             dispatch({ type: 'openTerminal', tabIndex, ptyId, cwd: t.folder });
           } catch (e) {
-            dispatch({ type: 'setStatus', msg: `terminal failed: ${(e as Error).message}` });
+            dispatch({ type: 'setStatus', msg: formatOpError('terminal', e) });
           }
         }
       },

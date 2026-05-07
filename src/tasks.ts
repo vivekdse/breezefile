@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { fm } from './bridge';
+import { humanizeError } from './errorMessages';
 import type { Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskUpdate } from './types';
 
 export function useTasks(filter: TaskFilter = {}): {
@@ -33,7 +34,7 @@ export function useTasks(filter: TaskFilter = {}): {
           setError(null);
         }
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled) setError(humanizeError(e).message);
       } finally {
         if (!cancelled) setLoading(false);
       }

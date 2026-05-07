@@ -21,6 +21,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
+import { humanizeError } from '../errorMessages';
 import { fm } from '../bridge';
 import { spawnTerminal } from '../terminalSpawn';
 import { currentDragPaths, hasAppDrag } from '../dragState';
@@ -313,8 +314,12 @@ export function Terminal({
           }, 60);
         }
       } catch (err) {
+        const friendly = humanizeError(err).message;
         term.writeln(
-          `\r\n\x1b[31m[failed to start shell: ${(err as Error).message}]\x1b[0m`,
+          `\r\n\x1b[31m[shell didn't start — ${friendly}]\x1b[0m`,
+        );
+        term.writeln(
+          `\x1b[2m[check Settings → Terminal, or hover the status line for raw error]\x1b[0m`,
         );
       }
     })();

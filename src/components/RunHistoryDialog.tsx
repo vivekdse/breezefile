@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { getTask, runTaskNow, useTaskRuns } from '../tasks';
 import { useOpenResumeInTab } from '../openResumeInTab';
+import { formatOpError } from '../errorMessages';
 import type { Task, TaskRun } from '../types';
 import './RunHistoryDialog.css';
 
@@ -100,7 +101,7 @@ function RerunButton({ taskId, runs }: { taskId: string; runs: TaskRun[] }) {
     } catch (e) {
       window.dispatchEvent(
         new CustomEvent('fm:setStatus', {
-          detail: { msg: `run failed to start: ${(e as Error).message}` },
+          detail: { msg: formatOpError('run start', e) },
         }),
       );
     }

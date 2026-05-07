@@ -28,11 +28,12 @@ import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { Tutorial } from './components/Tutorial';
-import { HelpTour } from './components/HelpTour';
+import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
+import { formatOpError, humanizeError } from './errorMessages';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
@@ -73,7 +74,7 @@ function Shell() {
   const [tagPicker, setTagPicker] = useState<'apply' | 'filter' | null>(null);
   // Slide-based help (HelpTour). Opened by the :help verb or the Help
   // link in the Statusbar. Distinct from Tutorial (interactive practice).
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState<{ slide?: HelpSlideId } | null>(null);
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskDialogRequest | null>(null);
@@ -419,8 +420,9 @@ function Shell() {
       const detail = (e as CustomEvent).detail as { mode: 'apply' | 'filter' } | undefined;
       setTagPicker(detail?.mode ?? 'apply');
     }
-    function onHelp() {
-      setHelpOpen(true);
+    function onHelp(e: Event) {
+      const detail = (e as CustomEvent).detail as { slide?: HelpSlideId } | undefined;
+      setHelpOpen({ slide: detail?.slide });
     }
     function onWelcome() {
       setWelcomeOpen(true);
@@ -460,7 +462,7 @@ function Shell() {
       } catch (err) {
         dispatch({
           type: 'setStatus',
-          msg: `open with failed: ${(err as Error).message}`,
+          msg: formatOpError('open with', err),
         });
       }
     }
@@ -732,7 +734,12 @@ function Shell() {
       {tagPicker && (
         <TagPicker mode={tagPicker} onClose={() => setTagPicker(null)} />
       )}
-      {helpOpen && <HelpTour onClose={() => setHelpOpen(false)} />}
+      {helpOpen && (
+        <HelpTour
+          initialSlide={helpOpen.slide}
+          onClose={() => setHelpOpen(null)}
+        />
+      )}
       {taskDialog && (
         <TaskDialog
           {...taskDialog}
@@ -1016,7 +1023,7 @@ function RenameOverlay({
     try {
       await onCommit(value);
     } catch (err) {
-      setError((err as Error).message);
+      setError(humanizeError(err).message);
       setBusy(false);
     }
   };
@@ -1086,7 +1093,7 @@ function MkdirOverlay({
     try {
       await onCommit(value);
     } catch (err) {
-      setError((err as Error).message);
+      setError(humanizeError(err).message);
       setBusy(false);
     }
   };
@@ -1131,7 +1138,7 @@ function TouchOverlay({
     try {
       await onCommit(value);
     } catch (err) {
-      setError((err as Error).message);
+      setError(humanizeError(err).message);
       setBusy(false);
     }
   };
@@ -1235,7 +1242,7 @@ function ShellOverlay({ cwd, onClose }: { cwd: string; onClose: () => void }) {
               } catch (err) {
                 dispatch({
                   type: 'setStatus',
-                  msg: `shell failed: ${(err as Error).message}`,
+                  msg: formatOpError('shell', err),
                 });
               }
               exit();

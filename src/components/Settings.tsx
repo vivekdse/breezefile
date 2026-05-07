@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore, DEFAULT_KEYBINDS } from '../store';
 import { fm } from '../bridge';
+import { formatOpError } from '../errorMessages';
 import './Settings.css';
 
 type Props = { onClose: () => void };
@@ -58,7 +59,7 @@ export function Settings({ onClose }: Props) {
     } catch (err) {
       dispatch({
         type: 'setStatus',
-        msg: `save failed: ${(err as Error).message}`,
+        msg: formatOpError('save', err),
       });
     }
   }

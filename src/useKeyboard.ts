@@ -11,6 +11,7 @@ import {
 } from './actions';
 import type { Entry, SortKey, YankMode } from './types';
 import { runPaste } from './clipboard';
+import { formatOpError } from './errorMessages';
 
 // Canonical key name — Ctrl chords prefixed with C-, like ranger's <C-x>.
 function keyName(e: KeyboardEvent): string {
@@ -773,7 +774,7 @@ export function useKeyboard(
           await refreshActive();
           dispatch({ type: 'setStatus', msg: `${mode} × ${picks.length}` });
         } catch (err) {
-          dispatch({ type: 'setStatus', msg: `link failed: ${(err as Error).message}` });
+          dispatch({ type: 'setStatus', msg: formatOpError('link', err) });
         }
       }
       function trashSelection() {
@@ -813,7 +814,7 @@ export function useKeyboard(
                 } catch (err) {
                   dispatch({
                     type: 'setStatus',
-                    msg: `trash failed: ${(err as Error).message}`,
+                    msg: formatOpError('trash', err),
                   });
                 }
               },

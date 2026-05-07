@@ -12,6 +12,7 @@ import {
   type RunEntry,
 } from '../runProgress';
 import { cancelTaskRun } from '../tasks';
+import { formatOpError } from '../errorMessages';
 import './RunProgressBanner.css';
 
 export function RunProgressBanner({ cwd }: { cwd: string }) {
@@ -62,7 +63,7 @@ function RunProgressItem({ entry }: { entry: RunEntry }) {
     } catch (e) {
       window.dispatchEvent(
         new CustomEvent('fm:setStatus', {
-          detail: { msg: `cancel failed: ${(e as Error).message}` },
+          detail: { msg: formatOpError('cancel', e) },
         }),
       );
     } finally {

@@ -8,6 +8,7 @@ import type { Dispatch } from 'react';
 import { fm } from './bridge';
 import { basename } from './actions';
 import { celebratePaths } from './motion-utils';
+import { formatOpError } from './errorMessages';
 import type { YankEntry } from './types';
 
 type PasteDeps = {
@@ -63,7 +64,7 @@ export async function runPaste({
       );
     });
   } catch (err) {
-    dispatch({ type: 'setStatus', msg: `paste failed: ${(err as Error).message}` });
+    dispatch({ type: 'setStatus', msg: formatOpError('paste', err) });
   }
 }
 

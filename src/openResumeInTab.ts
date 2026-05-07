@@ -11,6 +11,7 @@
 import { useStore, makeTab } from './store';
 import { spawnTerminal } from './terminalSpawn';
 import { fm } from './bridge';
+import { formatOpError } from './errorMessages';
 
 function basename(p: string): string {
   const trimmed = p.replace(/\/+$/, '');
@@ -53,7 +54,7 @@ export function useOpenResumeInTab() {
     } catch (err) {
       dispatch({
         type: 'setStatus',
-        msg: `open resume failed: ${(err as Error).message}`,
+        msg: formatOpError('open resume', err),
       });
     }
   };

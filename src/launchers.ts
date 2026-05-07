@@ -8,6 +8,7 @@
 // the launch flow.
 
 import { fm, type Launcher } from './bridge';
+import { formatOpError } from './errorMessages';
 import { buildContextPrompt } from './tasks';
 import { spawnTerminal } from './terminalSpawn';
 import type { Task } from './types';
@@ -156,6 +157,6 @@ export async function invokeLauncher(args: InvokeLauncherArgs): Promise<void> {
     }
     onStatus?.(`opened terminal · ${label}`);
   } catch (err) {
-    onStatus?.(`${label} failed: ${(err as Error).message}`);
+    onStatus?.(formatOpError(label, err));
   }
 }

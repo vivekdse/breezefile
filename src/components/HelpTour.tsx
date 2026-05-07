@@ -1,20 +1,35 @@
 /*
- * HelpTour — slide-based help. Click "Help" in the status bar or run
- * the `:help` verb. Three sections, eight slides:
+ * HelpTour — slide-based help. Click "Help" in the status bar, run
+ * the `:help` verb, or dispatch `fm:openHelp` with an optional
+ * { slide: <id> } payload to land on a specific slide.
  *
- *   1) value — why this app exists
- *   2) verbs — how the type-to-act model works
- *   3) catalog — what verbs / chords exist (grouped)
+ * Slide IDs are stable strings (see SLIDE_INDEX). Use them when wiring
+ * deep-links from empty states or other surfaces:
+ *
+ *   window.dispatchEvent(new CustomEvent('fm:openHelp', { detail: { slide: 'tasks-intro' } }));
  *
  * MAINTENANCE: every time we add a new feature or verb, this file gets
- * an update. The catalog slides drive directly off the CATALOG constant
- * below — add a row there and the slide picks it up. See CLAUDE.md.
+ * an update. Add a row to the right slide's verbs array (or add a new
+ * slide if it's a new category). See CLAUDE.md.
  */
 
 import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { fm } from '../bridge';
 import './HelpTour.css';
+
+export type HelpSlideId =
+  | 'value'
+  | 'verbs'
+  | 'navigate'
+  | 'select'
+  | 'share'
+  | 'view-sort'
+  | 'tags'
+  | 'tasks-intro'
+  | 'tasks'
+  | 'tasks-auto'
+  | 'tabs';
 
 declare const __APP_VERSION__: string;
 
@@ -34,6 +49,8 @@ function cmpVersion(a: string, b: string): number {
 type VerbItem = { name: string; chord?: string; what: string };
 type CatalogSlide = {
   kind: 'catalog';
+  id: HelpSlideId;
+  section: string;
   glyph: string;
   title: string;
   lede: string;
@@ -41,6 +58,8 @@ type CatalogSlide = {
 };
 type NarrativeSlide = {
   kind: 'narrative';
+  id: HelpSlideId;
+  section: string;
   glyph: string;
   title: string;
   body: React.ReactNode;
@@ -50,6 +69,8 @@ type Slide = CatalogSlide | NarrativeSlide;
 const SLIDES: Slide[] = [
   {
     kind: 'narrative',
+    id: 'value',
+    section: 'Welcome',
     glyph: '✦',
     title: 'Find files. Move them. Send them.',
     body: (
@@ -62,6 +83,8 @@ const SLIDES: Slide[] = [
   },
   {
     kind: 'narrative',
+    id: 'verbs',
+    section: 'Welcome',
     glyph: '⌘',
     title: 'Type the action you want.',
     body: (
@@ -74,6 +97,8 @@ const SLIDES: Slide[] = [
   },
   {
     kind: 'catalog',
+    id: 'navigate',
+    section: 'Files',
     glyph: '↕',
     title: 'Navigate & find',
     lede: 'Move the cursor; jump anywhere; search across folders.',
@@ -90,6 +115,8 @@ const SLIDES: Slide[] = [
   },
   {
     kind: 'catalog',
+    id: 'select',
+    section: 'Files',
     glyph: '☐',
     title: 'Select & manage files',
     lede: 'Mark with space, then act. Or run a verb directly on the cursor row.',
@@ -106,6 +133,8 @@ const SLIDES: Slide[] = [
   },
   {
     kind: 'catalog',
+    id: 'share',
+    section: 'Files',
     glyph: '↗',
     title: 'Open, share, drag out',
     lede: 'The drag-out is the whole reason this app exists.',
@@ -121,6 +150,8 @@ const SLIDES: Slide[] = [
   },
   {
     kind: 'catalog',
+    id: 'view-sort',
+    section: 'Files',
     glyph: '▦',
     title: 'View & sort',
     lede: 'Switch how the folder reads, sort by anything, change the look. Choices stick — the next time you open this folder, your sort/view/hidden/folders-first settle back to what you last picked here.',
@@ -134,6 +165,8 @@ const SLIDES: Slide[] = [
   },
   {
     kind: 'catalog',
+    id: 'tags',
+    section: 'Tags',
     glyph: '◐',
     title: 'Tags — color, group, filter',
     lede: 'Press wt to enter Tag view. Tags are rules over file metadata.',
@@ -147,28 +180,64 @@ const SLIDES: Slide[] = [
     ],
   },
   {
-    kind: 'catalog',
+    kind: 'narrative',
+    id: 'tasks-intro',
+    section: 'Tasks',
     glyph: '✓',
-    title: 'Tasks & automation',
-    lede: 'Folder-anchored to-dos. Run them by hand or let agents run them on a schedule.',
+    title: 'Tasks: a list, or an agent that runs it.',
+    body: (
+      <>
+        Tasks are folder-anchored to-dos. Type <kbd>task</kbd> in any folder
+        to add one. Two ways to use them:
+        <br /><br />
+        <b>By hand</b> — keep a list of what you owe each folder. Open the
+        Tasks tab with <kbd>tasks</kbd>, mark them done as you go.
+        <br /><br />
+        <b>On a schedule</b> — flip <b>⚡ Auto</b> on a task and an AI agent
+        (Claude Code today; Codex / Gemini coming) runs it for you when it's
+        due. Every run is logged with status, duration, and a resumable trace.
+        <br /><br />
+        Next two slides: everyday use, then automation.
+      </>
+    ),
+  },
+  {
+    kind: 'catalog',
+    id: 'tasks',
+    section: 'Tasks',
+    glyph: '✓',
+    title: 'Everyday tasks',
+    lede: 'Create, view, and act on tasks. Most days you live in the Tasks tab.',
     verbs: [
-      { name: 'task', what: 'create a task anchored to this folder · keyboard-friendly: dates accept shorthand (today / tom / +3d / fri / eow), folder field has type-ahead over open tabs + recent folders (↑/↓, Enter, ⌥1–9), recurrence is a chip row (Once / Daily 9am / Weekdays 9am / Weekly Mon / Custom), in-dialog hotkeys ⌘⌥A toggles auto-execute, ⌘⌥P pins, ⌘⌥T/N/F/S/D jump to Title/Notes/Folder/Start/Due, ⌘↩ saves' },
-      { name: 'tasks', what: 'open the singleton Tasks tab — split layout (list + detail panel on the right showing the cursor task), group by folder/status/due, search, filter (status · derived view · ⚡ Auto / Manual), checkbox + arrow-key selection, all bulk actions via verbs (no letter shortcuts) · toggle into Runs view to scan history across every auto task at once' },
-      { name: 'tasks-tab verbs', what: 'on the Tasks tab the chip prompt swaps in task verbs · :done :reopen :in-progress :cancel · :pin :unpin · :due / :start (Today / Tomorrow / Friday / Next week / Pick…) · :open opens a task tab per selection · :terminal opens a shell in each task’s folder · :claude / :codex / :gemini run the launcher per selection · :edit opens the task editor · :goto-folder opens each task’s folder in a new tab · :delete (confirms) · :group :sort :filter · :show-completed / :hide-completed · :select all/none/invert/overdue/pinned' },
-      { name: 'tasks-tab keys', what: '↑/↓ move cursor · Shift+↑/↓ extend selection · Space toggle select on cursor row · Enter open edit · / focus search · [ / ] snooze due ∓1 day · w snooze due +7 days (acts on selection if any, else cursor row; tasks with no due date pick up "today + N") · everything else stays in the chip prompt' },
-      { name: 'tasks-tab row buttons', what: 'rows are quiet by default; hover or land the cursor on a row to reveal: ✓ mark done (or ↺ reopen when closed) · ✎ edit · ↗ open in task tab · ⋮ more (status submenu, set due quick presets, pin, go to folder, delete) · the status pill is shown only when not pending and is clickable to cycle pending → in_progress → done → cancelled · the right detail panel mirrors these actions for the focused task' },
-      { name: 'task tab', what: 'tabs bound to a task swap to a focused shell: prominent header, Open Terminal + Claude/Codex/Gemini + Rerun buttons, folder muted at the bottom · file-management verbs hidden · launching an AI from a task tab pre-types the task context into the agent prompt (edit / append / erase, then press Enter), sets BREEZE_TASK_ID, and drops a sidecar at ~/.breezefile/active-tasks/<id>.md' },
-      { name: 'auto-execute', what: 'flip ⚡ Auto on a task and a registered agent (Claude Code first; Codex / Gemini coming) runs it headlessly when due · pluggable per-task agent · scheduler retries on rate / usage errors and notifies on terminal failure · concurrent runs for the same task are refused server-side (no double-fire)' },
-      { name: 'run task in any folder', what: 'every folder tab has a ▶ Run task button in its header that opens a picker · tasks anchored to the current folder appear first, then folder-agnostic tasks (created with an empty Folder field) that run anywhere · ↑↓ navigate, Enter runs, Esc closes · runs use the active folder as cwd regardless of the task\'s anchor' },
-      { name: 'recurrence', what: 'a recurring task auto-rolls forward: pick Daily 9am / Weekdays / Weekly / Custom in the dialog · next_run_at is recomputed after every successful run and cleared cleanly when you mark the series done' },
-      { name: 'sidebar indicators', what: 'Active Tasks sidebar shows per-task glyphs: due-now dot, running spinner, last-run-failed dot, ⚡ for auto-enabled · right-click a task for Edit / Mark done / Pin / Snooze / Run now / View run history / Open last run in new tab / Delete' },
-      { name: 'run history', what: 'every auto run lands in a per-task history dialog: status, duration, attempt, conversation_id · Rerun button kicks off a fresh run via the same agent path · "Open run" spawns a new tab with an embedded terminal at the task folder and auto-runs `claude --resume <id>` so you land directly in the headless trace inside Breeze' },
-      { name: 'runs view', what: 'on the Tasks tab toggle from Tasks → Runs to see every recent run across every auto task in one cross-task feed · filter by status (succeeded / failed / running / queued / cancelled), search by title or folder, click a row to jump into that task’s history · resume-from-anywhere works from done / cancelled tasks too' },
-      { name: 'breeze CLI', what: 'a Node-based `breeze` shell command (installed alongside the app) talks HTTP to the running Breeze · `breeze status`, `breeze task list / show / add / edit / done / pin / unpin / delete / open`, `breeze open <folder>`, `breeze tabs` · <id> defaults to $BREEZE_TASK_ID so an agent inside a task tab can act on its own task without knowing the id · `breeze prime` (auto-installed Claude Code hook) feeds session context on start' },
+      { name: 'task', what: 'create a task anchored to this folder · dates accept shorthand (today / tom / +3d / fri / eow), folder field has type-ahead over open tabs + recent folders, in-dialog hotkeys ⌘⌥A toggles auto-execute, ⌘⌥P pins, ⌘⌥T/N/F/S/D jump to fields, ⌘↩ saves' },
+      { name: 'tasks', what: 'open the singleton Tasks tab — split layout (list + detail panel), group by folder/status/due, search, filter, checkbox + arrow-key selection, all bulk actions via verbs' },
+      { name: 'tasks-tab verbs', what: 'chip prompt swaps in: :done :reopen :in-progress :cancel · :pin :unpin · :due / :start (Today / Tomorrow / Friday / Next week / Pick…) · :open task tab · :terminal · :claude / :codex / :gemini · :edit · :goto-folder · :delete · :group :sort :filter · :show-completed · :select all/none/invert/overdue/pinned' },
+      { name: 'tasks-tab keys', what: '↑/↓ move cursor · Shift+↑/↓ extend selection · Space toggle select · Enter edit · / focus search · [ / ] snooze due ∓1 day · w snooze due +7 days' },
+      { name: 'row buttons', what: 'hover or land the cursor on a row to reveal: ✓ mark done (or ↺ reopen) · ✎ edit · ↗ open in task tab · ⋮ more (status, due presets, pin, go to folder, delete) · status pill is clickable to cycle pending → in_progress → done → cancelled' },
+      { name: 'task tab', what: 'tabs bound to a task swap to a focused shell: prominent header, Open Terminal + Claude/Codex/Gemini + Rerun buttons · launching an AI pre-types the task context into the prompt, sets BREEZE_TASK_ID, drops a sidecar at ~/.breezefile/active-tasks/<id>.md' },
+      { name: 'run anywhere', what: 'every folder tab has a ▶ Run task button in its header · tasks for this folder appear first, then folder-agnostic ones · runs use the active folder as cwd' },
     ],
   },
   {
     kind: 'catalog',
+    id: 'tasks-auto',
+    section: 'Tasks',
+    glyph: '⚡',
+    title: 'Automation & runs',
+    lede: 'Schedule a task, an agent runs it, every run is logged and resumable.',
+    verbs: [
+      { name: 'auto-execute', what: 'flip ⚡ Auto on a task and a registered agent (Claude Code first) runs it headlessly when due · scheduler retries on rate / usage errors and notifies on terminal failure · concurrent runs for the same task are refused server-side' },
+      { name: 'recurrence', what: 'pick Daily 9am / Weekdays / Weekly / Custom in the task dialog · next_run_at recomputes after every successful run and clears when you mark the series done' },
+      { name: 'sidebar indicators', what: 'Active Tasks sidebar shows per-task glyphs: due-now dot, running spinner, last-run-failed dot, ⚡ for auto · right-click for Edit / Mark done / Pin / Snooze / Run now / View run history / Open last run in new tab / Delete' },
+      { name: 'run history', what: 'every auto run lands in a per-task history dialog: status, duration, attempt, conversation_id · Rerun button starts a fresh run · "Open run" spawns a new tab with an embedded terminal and auto-runs `claude --resume <id>` so you land directly in the trace' },
+      { name: 'runs view', what: 'on the Tasks tab toggle from Tasks → Runs to see every recent run across every auto task in one feed · filter by status, search by title or folder, click a row to jump into that task’s history' },
+      { name: 'breeze CLI', what: 'a Node `breeze` shell command talks HTTP to the running app · `breeze status`, `breeze task list / show / add / edit / done / pin / unpin / delete / open`, `breeze open <folder>`, `breeze tabs` · <id> defaults to $BREEZE_TASK_ID inside task tabs · `breeze prime` (auto-installed Claude Code hook) feeds session context on start' },
+    ],
+  },
+  {
+    kind: 'catalog',
+    id: 'tabs',
+    section: 'More',
     glyph: '⊞',
     title: 'Tabs, terminals, the rest',
     lede: 'Live across many folders at once; mark places to return to.',
@@ -190,9 +259,21 @@ const SLIDES: Slide[] = [
   },
 ];
 
-export function HelpTour({ onClose }: { onClose: () => void }) {
+function indexOfSlide(id: HelpSlideId | undefined): number {
+  if (!id) return 0;
+  const idx = SLIDES.findIndex((s) => s.id === id);
+  return idx >= 0 ? idx : 0;
+}
+
+export function HelpTour({
+  onClose,
+  initialSlide,
+}: {
+  onClose: () => void;
+  initialSlide?: HelpSlideId;
+}) {
   const { exit, state } = useOverlayExit(onClose);
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(() => indexOfSlide(initialSlide));
   const [pendingUpdate, setPendingUpdate] = useState<{ tag: string } | null>(null);
   const [upgrading, setUpgrading] = useState(false);
 
@@ -296,7 +377,7 @@ export function HelpTour({ onClose }: { onClose: () => void }) {
         )}
 
         <div className="help__eyebrow">
-          Help · {i + 1} of {SLIDES.length}
+          Help · {slide.section} · {i + 1} of {SLIDES.length}
         </div>
 
         <div className="help__glyph" aria-hidden>
