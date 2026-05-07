@@ -425,6 +425,23 @@ export function registerIpc() {
     await shell.openPath(abs);
   });
 
+  // Open an http/https URL in the user's default browser. Used by xterm's
+  // WebLinksAddon so we route link clicks through a known-good IPC path
+  // instead of relying on window.open (which can show a browser-level
+  // navigate-confirm and silently fail in our sandboxed renderer).
+  ipcMain.handle('app:openUrl', async (_e, url: string) => {
+    if (!/^(https?:|mailto:|tel:)/i.test(url)) {
+      console.log(`[link] ipc ignored: ${url.slice(0, 200)}`);
+      return;
+    }
+    console.log(`[link] ipc opening: ${url.slice(0, 200)}`);
+    try {
+      await shell.openExternal(url);
+    } catch (err) {
+      console.error(`[link] ipc openExternal failed for ${url}:`, err);
+    }
+  });
+
   ipcMain.handle('app:pickApplication', async () => {
     const win = BrowserWindow.getFocusedWindow();
     // NB: do NOT pass `treatPackageAsDirectory` — on macOS that lets the

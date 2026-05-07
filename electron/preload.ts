@@ -43,6 +43,7 @@ const fm = {
   extract: (archives: string[], cwd: string) =>
     ipcRenderer.invoke('shell:extract', archives, cwd) as Promise<string[]>,
   open: (p: string, appPath?: string) => ipcRenderer.invoke('app:open', p, appPath),
+  openUrl: (url: string) => ipcRenderer.invoke('app:openUrl', url) as Promise<void>,
   openWith: (p: string, appName: string) => ipcRenderer.invoke('shell:openWith', p, appName),
   pickApplication: () => ipcRenderer.invoke('app:pickApplication') as Promise<string | null>,
   getBindings: () => ipcRenderer.invoke('bindings:get') as Promise<Record<string, string>>,

@@ -166,7 +166,17 @@ export function Terminal({
     term.loadAddon(fit);
     term.loadAddon(search);
     term.loadAddon(serialize);
-    term.loadAddon(new WebLinksAddon());
+    // Route link clicks through a dedicated IPC instead of WebLinksAddon's
+    // default window.open path. Plain window.open in our sandboxed renderer
+    // can show a browser-side "navigate to URL?" confirm and then silently
+    // no-op when accepted; routing to shell.openExternal directly side-steps
+    // both. The OS scheme allowlist lives main-side in the IPC handler.
+    term.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        event.preventDefault();
+        void fm.openUrl(uri);
+      }),
+    );
     term.open(wrapRef.current);
     // WebGL renderer is an order of magnitude faster for high-throughput
     // streams (build logs, ls of huge dirs). It can fail to init on older

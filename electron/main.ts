@@ -103,19 +103,28 @@ function createWindow() {
   // set to open about:blank" dialog. Allowlist the schemes we actually
   // want to hand off and silently deny everything else.
   const EXTERNAL_SCHEMES = /^(https?:|mailto:|tel:|x-apple\.|file:)/i;
+  const handLinkToOS = (url: string, source: string) => {
+    if (!EXTERNAL_SCHEMES.test(url)) {
+      console.log(`[link] ignored (${source}): ${url.slice(0, 200)}`);
+      return;
+    }
+    console.log(`[link] opening (${source}): ${url.slice(0, 200)}`);
+    shell.openExternal(url).catch((err) => {
+      console.error(`[link] openExternal failed for ${url}:`, err);
+    });
+  };
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (EXTERNAL_SCHEMES.test(url)) shell.openExternal(url);
+    handLinkToOS(url, 'window-open');
     return { action: 'deny' };
   });
   // Same guard for in-page navigations (link without target=_blank).
   // Without this, clicking such a link would navigate the renderer
   // away from the app shell.
   win.webContents.on('will-navigate', (e, url) => {
-    // Allow internal dev-server / app-shell navigations. Everything
-    // else is an external link the user clicked from rendered content.
+    // Allow internal dev-server / app-shell navigations.
     if (VITE_DEV_SERVER_URL && url.startsWith(VITE_DEV_SERVER_URL)) return;
     e.preventDefault();
-    if (EXTERNAL_SCHEMES.test(url)) shell.openExternal(url);
+    handLinkToOS(url, 'will-navigate');
   });
 
   // fm-c2w — forward focus/blur to the renderer so the attention layer

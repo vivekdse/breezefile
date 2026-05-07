@@ -38,6 +38,7 @@ type Fm = {
   compress: (sources: string[], cwd: string) => Promise<string>;
   extract: (archives: string[], cwd: string) => Promise<string[]>;
   open: (p: string, appPath?: string) => Promise<void>;
+  openUrl: (url: string) => Promise<void>;
   openWith: (p: string, appName: string) => Promise<void>;
   pickApplication: () => Promise<string | null>;
   getBindings: () => Promise<Record<string, string>>;
