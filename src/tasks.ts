@@ -80,6 +80,11 @@ export async function runTaskNow(id: string): Promise<void> {
 export async function runTaskNowAt(id: string, cwd: string): Promise<void> {
   await fm.tasksRunNowAt(id, cwd);
 }
+// fm-femh — cancel an in-flight agent run. Returns true if a run was
+// signalled, false if it had already finished by the time we asked.
+export async function cancelTaskRun(runId: string): Promise<boolean> {
+  return fm.tasksCancelRun(runId);
+}
 export async function listTaskRuns(id: string, limit = 50): Promise<TaskRun[]> {
   return fm.tasksRunsList(id, limit);
 }

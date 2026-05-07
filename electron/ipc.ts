@@ -1837,6 +1837,12 @@ end tell`;
     const { executeTaskRun } = await import('./agents/execute');
     return executeTaskRun(t, { overrideCwd: cwd });
   });
+  // fm-femh — cancel an in-flight run. Returns true when an active run
+  // was found for the id and signalled; false if it had already finished.
+  ipcMain.handle('tasks:cancelRun', async (_e, runId: string) => {
+    const { cancelRun } = await import('./agents/execute');
+    return cancelRun(runId);
+  });
   ipcMain.handle('tasks:writeActiveSidecar', (_e, id: string): string | null => {
     try {
       const t = tasks.getTask(id);

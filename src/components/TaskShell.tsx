@@ -11,6 +11,7 @@ import { makeTab, useStore } from '../store';
 import { fm } from '../bridge';
 import { basename } from '../actions';
 import {
+  cancelTaskRun,
   dueTone,
   formatDueLabel,
   getTask,
@@ -114,6 +115,22 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
     window.dispatchEvent(
       new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),
     );
+  const onCancel = async (runId: string) => {
+    try {
+      const ok = await cancelTaskRun(runId);
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', {
+          detail: { msg: ok ? `cancel signal sent for "${task.title}"` : 'no active run to cancel' },
+        }),
+      );
+    } catch (e) {
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', {
+          detail: { msg: `cancel failed: ${(e as Error).message}` },
+        }),
+      );
+    }
+  };
   const onRerun = async () => {
     try {
       await runTaskNow(task.id);
@@ -219,6 +236,16 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
                 }
               >
                 {isRunning ? 'Running…' : runCount > 0 ? 'Rerun' : 'Run now'}
+              </button>
+            )}
+            {task.auto_mode && isRunning && lastRun && (
+              <button
+                type="button"
+                className="taskshell__btn taskshell__btn--danger"
+                onClick={() => void onCancel(lastRun.id)}
+                title="Stop the in-flight run"
+              >
+                Cancel
               </button>
             )}
             {runCount > 0 && (

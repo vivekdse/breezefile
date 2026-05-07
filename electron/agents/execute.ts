@@ -53,6 +53,24 @@ export class TaskAlreadyRunningError extends Error {
   }
 }
 
+// fm-femh — registry of in-flight runs so the renderer can cancel by
+// run id. Populated only when the caller didn't provide their own
+// signal — anyone who passes a signal is responsible for their own
+// cancellation. Cleaned up in a finally block so a panic can't strand
+// an entry forever.
+const inflight = new Map<string, AbortController>();
+
+/** Send SIGTERM to the subprocess of the given run. Returns true when a
+ *  run was found and aborted. The agent runner translates the abort into
+ *  a graceful shutdown + a `cancelled` result; updateRun then writes
+ *  status='cancelled' to the row. */
+export function cancelRun(runId: string): boolean {
+  const c = inflight.get(runId);
+  if (!c) return false;
+  c.abort();
+  return true;
+}
+
 export async function executeTaskRun(
   task: Task,
   opts: ExecuteOptions = {},
@@ -99,9 +117,22 @@ export async function executeTaskRun(
     output_path: outputDir,
   });
 
-  const signal = opts.signal ?? new AbortController().signal;
+  // Register a cancellation handle if the caller didn't pre-supply one
+  // — that's how the renderer's cancel button reaches into a running
+  // subprocess (see cancelRun above).
+  let ownedAbort: AbortController | null = null;
+  let signal: AbortSignal;
+  if (opts.signal) {
+    signal = opts.signal;
+  } else {
+    ownedAbort = new AbortController();
+    signal = ownedAbort.signal;
+    inflight.set(run.id, ownedAbort);
+  }
+
   const effectiveCwd = (opts.overrideCwd?.trim() || task.folder?.trim() || '');
   if (!effectiveCwd) {
+    if (ownedAbort) inflight.delete(run.id);
     throw new Error(
       `task ${task.id} has no folder and no overrideCwd was supplied`,
     );
@@ -128,10 +159,20 @@ export async function executeTaskRun(
       errorClass: 'fatal',
       errorMessage: err.message,
     };
+  } finally {
+    if (ownedAbort) inflight.delete(run.id);
   }
 
+  // fm-femh — distinguish user-cancelled from genuine failures so the
+  // run history doesn't paint a deliberate stop in red.
+  const wasCancelled =
+    !result.ok && (signal.aborted || result.errorMessage === 'cancelled');
   run = tasks.updateRun(run.id, {
-    status: result.ok ? 'succeeded' : 'failed',
+    status: result.ok
+      ? 'succeeded'
+      : wasCancelled
+        ? 'cancelled'
+        : 'failed',
     finished_at: Date.now(),
     conversation_id: result.conversationId,
     exit_code: result.exitCode,

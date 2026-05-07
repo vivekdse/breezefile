@@ -132,6 +132,18 @@
   color: var(--on-accent, white);
 }
 
+/* fm-femh — destructive variant for the Cancel button shown while a
+   run is in flight. Muted by default so it doesn't compete with the
+   primary action; lights up red on hover to signal "this stops work". */
+.taskshell__btn--danger {
+  border-color: var(--danger, #c0392b);
+  color: var(--danger, #c0392b);
+}
+.taskshell__btn--danger:hover {
+  background: var(--danger, #c0392b);
+  color: var(--on-accent, white);
+}
+
 /* ---- meta row (status pill + due chip + start + pin) --------------- */
 
 .taskshell__meta {

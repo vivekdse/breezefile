@@ -247,6 +247,8 @@ const fm = {
   tasksRunNow: (taskId: string) => ipcRenderer.invoke('tasks:runNow', taskId),
   tasksRunNowAt: (taskId: string, cwd: string) =>
     ipcRenderer.invoke('tasks:runNowAt', taskId, cwd),
+  tasksCancelRun: (runId: string) =>
+    ipcRenderer.invoke('tasks:cancelRun', runId),
   onTaskRunsChanged: (cb: (taskId: string) => void) => {
     const handler = (_e: unknown, payload: { taskId: string }) => cb(payload.taskId);
     ipcRenderer.on('task-runs:changed', handler);

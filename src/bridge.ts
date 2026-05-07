@@ -125,6 +125,7 @@ type Fm = {
     taskId: string,
     cwd: string,
   ) => Promise<{ run: TaskRun; result: unknown }>;
+  tasksCancelRun: (runId: string) => Promise<boolean>;
   onTaskRunsChanged: (cb: (taskId: string) => void) => () => void;
   onTaskRunFailed: (cb: (payload: { taskId: string; body: string }) => void) => () => void;
   // fm-9fd — control bridge between the HTTP API server (main) and the
