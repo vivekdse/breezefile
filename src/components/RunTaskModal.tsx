@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { runTaskNowAt, useTasks } from '../tasks';
+import { startTracking, stopTracking } from '../runProgress';
 import type { Task } from '../types';
 import './RunTaskModal.css';
 
@@ -63,17 +64,32 @@ export function RunTaskModal({ cwd, onClose }: Props) {
     if (busy) return;
     setBusy(true);
     setError(null);
+    // Register the run with the renderer-side progress tracker BEFORE
+    // exiting so the banner shows up the moment the modal closes. The
+    // backend's run-row creation will arrive seconds later via the
+    // task-runs:changed event and link the runId for Cancel.
+    const trackingId = startTracking(task.id, task.title, cwd);
+    exit();
     try {
       await runTaskNowAt(task.id, cwd);
       window.dispatchEvent(
         new CustomEvent('fm:setStatus', {
-          detail: { msg: `started "${task.title}" in ${cwd}` },
+          detail: { msg: `finished "${task.title}" in ${cwd}` },
         }),
       );
-      exit();
     } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
+      window.dispatchEvent(
+        new CustomEvent('fm:setStatus', {
+          detail: { msg: `run failed: ${(e as Error).message}` },
+        }),
+      );
+    } finally {
+      stopTracking(trackingId);
+      // Refresh the folder so any files the agent created/modified
+      // become visible without a manual reload.
+      window.dispatchEvent(
+        new CustomEvent('fm:reloadDir', { detail: { path: cwd } }),
+      );
     }
   }
 

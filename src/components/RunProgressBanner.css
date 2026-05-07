@@ -1,0 +1,58 @@
+.run-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 16px;
+}
+
+.run-progress__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent, rgba(74,144,226,0.45));
+  background: var(--accent-soft, rgba(74,144,226,0.08));
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-on-canvas);
+}
+
+.run-progress__spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--accent, #4a90e2);
+  border-right-color: transparent;
+  animation: run-progress-spin 0.9s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes run-progress-spin {
+  to { transform: rotate(360deg); }
+}
+
+.run-progress__title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-progress__cancel {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--danger, #c0392b);
+  background: transparent;
+  color: var(--danger, #c0392b);
+  border-radius: 12px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.run-progress__cancel:hover:not(:disabled) {
+  background: var(--danger, #c0392b);
+  color: var(--on-accent, white);
+}
+.run-progress__cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
