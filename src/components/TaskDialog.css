@@ -281,6 +281,17 @@
   font-style: italic;
 }
 
+/* fm-femh — small "When" label between the Executor chips and the
+   schedule presets so the two pickers read as labelled groups, not
+   one long row of unrelated chips. */
+.task-dialog__auto-when-label {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
 /* fm-hbvg — date input caption: shows the resolved ISO when the user
    types shorthand like "tom" or "+3d". Red when unparseable. */
 .task-dialog__date-caption {

@@ -49,24 +49,44 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   cancelled: 'Cancelled',
 };
 
-// fm-femh — Trigger picker. "Manual" means no schedule (run-task modal
-// only); every other preset implies auto-execute on a schedule. The
-// picker replaces the old "Auto-execute" checkbox + chips combo so
-// there's exactly one control to set how the task fires.
-type Preset = {
-  id: string;
+// fm-femh — Two-level "Execute how" picker.
+//
+//   Executor: who/what does this task. Manual = the user; otherwise an
+//   agent like Claude Code. Future agents (Codex, Gemini) slot in here.
+//   When: only relevant for agent executors. "On demand" means it fires
+//   only when invoked via the Run-task modal; the rest are scheduled.
+//
+// Mapping to DB fields:
+//   Manual              → auto_mode=false, cron=null,    next_run_at=null
+//   Agent + On demand   → auto_mode=true,  cron=null,    next_run_at=null
+//   Agent + Run once    → auto_mode=true,  cron=null,    next_run_at=now (default)
+//   Agent + Daily/Weekly→ auto_mode=true,  cron=<expr>,  next_run_at=first fire
+type ExecutorOption = {
+  id: 'manual' | 'claude';
   label: string;
-  description?: string;
-  manual?: boolean;
+  /** Agent-registry id stored on auto_agent. null for manual. */
+  agentId: string | null;
+};
+
+const EXECUTORS: ExecutorOption[] = [
+  { id: 'manual', label: 'Manual (me)', agentId: null },
+  { id: 'claude', label: 'Claude Code', agentId: 'claude' },
+  // Future: { id: 'codex', label: 'Codex', agentId: 'codex' }, etc.
+];
+
+type WhenPreset = {
+  id: 'on-demand' | 'once' | 'daily' | 'weekdays' | 'weekly-mon' | 'custom';
+  label: string;
+  /** True when this preset has no schedule — fires only via Run-task modal. */
+  onDemand?: boolean;
   form: RecurrenceForm;
 };
 
-const TRIGGER_PRESETS: Preset[] = [
+const WHEN_PRESETS: WhenPreset[] = [
   {
-    id: 'manual',
-    label: 'Manual',
-    description: 'Run on demand from the Run-task button. No schedule.',
-    manual: true,
+    id: 'on-demand',
+    label: 'On demand',
+    onDemand: true,
     form: { ...defaultRecurrenceForm(), kind: 'once' },
   },
   { id: 'once', label: 'Run once on save', form: { ...defaultRecurrenceForm(), kind: 'once' } },
@@ -76,8 +96,8 @@ const TRIGGER_PRESETS: Preset[] = [
   { id: 'custom', label: 'Custom…', form: { ...defaultRecurrenceForm(), kind: 'custom' } },
 ];
 
-function presetIdFor(autoMode: boolean, f: RecurrenceForm): string {
-  if (!autoMode) return 'manual';
+function whenPresetIdFor(onDemand: boolean, f: RecurrenceForm): WhenPreset['id'] {
+  if (onDemand) return 'on-demand';
   if (f.kind === 'once') return 'once';
   if (f.kind === 'daily' && f.time === '09:00') return 'daily';
   if (f.kind === 'weekdays' && f.time === '09:00') return 'weekdays';
@@ -90,6 +110,15 @@ function presetIdFor(autoMode: boolean, f: RecurrenceForm): string {
     return 'weekly-mon';
   }
   return 'custom';
+}
+
+/** Derive initial executor from a loaded task. auto_mode=false → manual;
+ *  otherwise look at auto_agent (defaults to claude when unset). */
+function executorIdFor(task: Task | null): ExecutorOption['id'] {
+  if (!task || !task.auto_mode) return 'manual';
+  if (task.auto_agent === 'claude' || task.auto_agent == null) return 'claude';
+  // Unknown agent id from a future build — fall back to claude in the form.
+  return 'claude';
 }
 
 export function TaskDialog(props: Props) {
@@ -111,22 +140,30 @@ export function TaskDialog(props: Props) {
   const [status, setStatus] = useState<TaskStatus>(initial?.status ?? 'pending');
   const [pinned, setPinned] = useState(initial?.pinned ?? false);
 
-  // fm-zf3m — auto-execute fields. The form mirrors a structured
-  // "recurrence kind + time + days" model and compiles to cron on submit.
-  const [autoMode, setAutoMode] = useState(initial?.auto_mode ?? false);
+  // fm-femh — execution model. `executor` is the binary "who runs this":
+  // manual (human todo) or an agent. `onDemand` only matters for agents
+  // and means "no schedule — fires via the Run-task modal only".
+  const [executor, setExecutor] = useState<ExecutorOption['id']>(executorIdFor(initial));
+  // On-demand defaults: a brand-new agent task has no cron yet, so it
+  // fires once on save. We only treat an *existing* task as on-demand
+  // when it has auto_mode=true but neither cron nor next_run_at.
+  const [onDemand, setOnDemand] = useState<boolean>(
+    !!initial && initial.auto_mode && !initial.cron && initial.next_run_at == null,
+  );
   const [autoPrompt, setAutoPrompt] = useState(initial?.auto_prompt ?? '');
   const [recurrence, setRecurrence] = useState(parseCronToForm(initial?.cron ?? null));
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isAgent = executor !== 'manual';
   const recurrenceDescription = useMemo(() => describeCron(recurrence), [recurrence]);
-  const activePresetId = useMemo(
-    () => presetIdFor(autoMode, recurrence),
-    [autoMode, recurrence],
+  const activeWhenId = useMemo(
+    () => whenPresetIdFor(onDemand, recurrence),
+    [onDemand, recurrence],
   );
   const showCustomFineTune =
-    autoMode && (activePresetId === 'custom' || recurrence.kind === 'weekly');
+    isAgent && !onDemand && (activeWhenId === 'custom' || recurrence.kind === 'weekly');
 
   const titleRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
@@ -173,10 +210,13 @@ export function TaskDialog(props: Props) {
       titleRef.current?.focus();
       return;
     }
-    // fm-femh — folder is only required for auto-execute. A manual task
-    // with no folder is "runnable in any folder tab" via the Run-task modal.
-    if (autoMode && !folder.trim()) {
-      setError('Folder is required for auto-execute tasks');
+    // fm-femh — folder is only required for *scheduled* agent runs. The
+    // scheduler has no folder context at fire time, so we need an anchor.
+    // Manual tasks and on-demand agent tasks can omit folder (the latter
+    // get the active folder tab as cwd at run time).
+    const requiresFolder = isAgent && !onDemand;
+    if (requiresFolder && !folder.trim()) {
+      setError('Folder is required for scheduled agent tasks');
       folderRef.current?.focus();
       return;
     }
@@ -196,13 +236,16 @@ export function TaskDialog(props: Props) {
       setError('Due date must be on or after start date');
       return;
     }
+    // Compile cron only for scheduled agent runs. On-demand and manual
+    // executions never fire automatically.
     let cron: string | null;
     try {
-      cron = autoMode ? buildCronFromForm(recurrence) : null;
+      cron = isAgent && !onDemand ? buildCronFromForm(recurrence) : null;
     } catch (e) {
       setError((e as Error).message);
       return;
     }
+    const agentId = EXECUTORS.find((x) => x.id === executor)?.agentId ?? null;
     setBusy(true);
     setError(null);
     try {
@@ -215,9 +258,13 @@ export function TaskDialog(props: Props) {
         due_at: dueISO,
         status,
         pinned,
-        auto_mode: autoMode,
+        auto_mode: isAgent,
+        auto_agent: agentId,
         cron,
-        auto_prompt: autoMode && autoPrompt.trim() ? autoPrompt.trim() : null,
+        // On-demand: explicit null overrides the backend's "fire now"
+        // default for auto+no-cron tasks. Scheduled: let backend compute.
+        ...(isAgent && onDemand ? { next_run_at: null } : {}),
+        auto_prompt: isAgent && autoPrompt.trim() ? autoPrompt.trim() : null,
       };
       if (props.mode === 'create') {
         await createTask(payload);
@@ -266,7 +313,12 @@ export function TaskDialog(props: Props) {
       if (k === 'f') { e.preventDefault(); focusField('folder'); return; }
       if (k === 's') { e.preventDefault(); focusField('start'); return; }
       if (k === 'd') { e.preventDefault(); focusField('due'); return; }
-      if (k === 'a') { e.preventDefault(); setAutoMode((v) => !v); return; }
+      if (k === 'a') {
+        e.preventDefault();
+        // Toggle between Manual and Claude. (Future: cycle through agents.)
+        setExecutor((cur) => (cur === 'manual' ? 'claude' : 'manual'));
+        return;
+      }
       if (k === 'p') { e.preventDefault(); setPinned((v) => !v); return; }
     }
   }
@@ -325,9 +377,11 @@ export function TaskDialog(props: Props) {
 
         <FolderField
           label={
-            autoMode
-              ? 'Folder (required for auto-execute)'
-              : 'Folder (optional — leave empty to run in any folder)'
+            isAgent && !onDemand
+              ? 'Folder (required — scheduled run needs an anchor)'
+              : isAgent
+                ? 'Folder (optional — empty means runs in the active folder tab)'
+                : 'Folder (optional)'
           }
           value={folder}
           onChange={setFolder}
@@ -385,30 +439,47 @@ export function TaskDialog(props: Props) {
 
         <fieldset className="task-dialog__auto">
           <legend className="task-dialog__auto-legend">
-            <span>Trigger</span>
+            <span>Execute how</span>
           </legend>
 
-          <PresetChips
-            presets={TRIGGER_PRESETS}
-            activeId={activePresetId}
-            onPick={(p) => {
-              if (p.manual) {
-                setAutoMode(false);
-              } else {
-                setAutoMode(true);
-                setRecurrence(p.form);
-              }
+          <ExecutorChips
+            executors={EXECUTORS}
+            activeId={executor}
+            onPick={(id) => {
+              setExecutor(id);
+              // Switching to an agent for the first time defaults to
+              // on-demand — closer to what users want than "fire now".
+              if (id !== 'manual' && !isAgent) setOnDemand(true);
             }}
           />
 
-          <div className="task-dialog__auto-hint">
-            {activePresetId === 'manual'
-              ? 'Run only when you click ▶ Run task in a folder tab. Folder is optional — leave empty to run anywhere.'
-              : `Auto-execute with Claude. ${recurrenceDescription}`}
-          </div>
+          {!isAgent && (
+            <div className="task-dialog__auto-hint">
+              A to-do you'll handle yourself. Won't appear in the Run-task picker.
+            </div>
+          )}
 
-          {autoMode && (
+          {isAgent && (
             <>
+              <div className="task-dialog__auto-when-label">When</div>
+              <PresetChips
+                presets={WHEN_PRESETS}
+                activeId={activeWhenId}
+                onPick={(p) => {
+                  if (p.onDemand) {
+                    setOnDemand(true);
+                  } else {
+                    setOnDemand(false);
+                    setRecurrence(p.form);
+                  }
+                }}
+              />
+              <div className="task-dialog__auto-hint">
+                {onDemand
+                  ? 'Runs only when you click ▶ Run task in a folder tab. Folder is optional — leave empty to run in any folder.'
+                  : recurrenceDescription}
+              </div>
+
               {showCustomFineTune && (
                 <div className="task-dialog__auto-row">
                   <label className="task-dialog__field task-dialog__field--half">
@@ -523,7 +594,7 @@ export function TaskDialog(props: Props) {
         <div className="task-dialog__shortcuts" aria-hidden="true">
           <span><kbd>⌘↩</kbd> save</span>
           <span><kbd>esc</kbd> close</span>
-          <span><kbd>⌘⌥A</kbd> auto</span>
+          <span><kbd>⌘⌥A</kbd> manual/agent</span>
           <span><kbd>⌘⌥P</kbd> pin</span>
           <span><kbd>⌘⌥T/N/F/S/D</kbd> jump</span>
         </div>
@@ -722,6 +793,38 @@ function FolderField({
   );
 }
 
+/** Executor picker — Manual / Claude / (future agents). Renders as
+ *  chips so it sits visually consistent with the When picker beneath. */
+function ExecutorChips({
+  executors,
+  activeId,
+  onPick,
+}: {
+  executors: ExecutorOption[];
+  activeId: ExecutorOption['id'];
+  onPick: (id: ExecutorOption['id']) => void;
+}) {
+  return (
+    <div className="task-dialog__preset-chips" role="group" aria-label="Executor">
+      {executors.map((e) => (
+        <button
+          key={e.id}
+          type="button"
+          className={[
+            'task-dialog__chip',
+            e.id === activeId ? 'task-dialog__chip--active' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          onClick={() => onPick(e.id)}
+        >
+          {e.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Single-row preset selector for recurrence — covers the common cases
  *  with one click/keystroke instead of three (kind + time + days). */
 function PresetChips({
@@ -729,9 +832,9 @@ function PresetChips({
   activeId,
   onPick,
 }: {
-  presets: Preset[];
+  presets: WhenPreset[];
   activeId: string;
-  onPick: (p: Preset) => void;
+  onPick: (p: WhenPreset) => void;
 }) {
   return (
     <div className="task-dialog__preset-chips" role="group" aria-label="Recurrence presets">

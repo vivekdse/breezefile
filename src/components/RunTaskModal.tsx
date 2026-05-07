@@ -41,6 +41,9 @@ export function RunTaskModal({ cwd, onClose }: Props) {
     const here: Task[] = [];
     const any: Task[] = [];
     for (const t of tasks) {
+      // Manual (human) tasks aren't runnable by an agent — they belong
+      // to the user's todo list, not the Run-task picker.
+      if (!t.auto_mode) continue;
       if (!matchTask(t)) continue;
       const f = (t.folder ?? '').trim();
       if (f === cwd) here.push(t);
@@ -142,8 +145,10 @@ export function RunTaskModal({ cwd, onClose }: Props) {
           <div className="run-task__empty">Loading…</div>
         ) : flat.length === 0 ? (
           <div className="run-task__empty">
-            No runnable tasks. Create one with the <code>task</code> verb;
-            leave the folder empty to make it runnable in any folder.
+            No agent-executable tasks. Create one with the <code>task</code> verb,
+            pick an executor like Claude Code, and choose <em>On demand</em> if
+            you want it to run only from this picker. Leave folder empty to
+            make it runnable in any folder.
           </div>
         ) : (
           <ul className="run-task__list" role="listbox">
