@@ -49,17 +49,35 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   cancelled: 'Cancelled',
 };
 
-type Preset = { id: string; label: string; form: RecurrenceForm };
+// fm-femh — Trigger picker. "Manual" means no schedule (run-task modal
+// only); every other preset implies auto-execute on a schedule. The
+// picker replaces the old "Auto-execute" checkbox + chips combo so
+// there's exactly one control to set how the task fires.
+type Preset = {
+  id: string;
+  label: string;
+  description?: string;
+  manual?: boolean;
+  form: RecurrenceForm;
+};
 
-const RECURRENCE_PRESETS: Preset[] = [
-  { id: 'once', label: 'Once', form: { ...defaultRecurrenceForm(), kind: 'once' } },
+const TRIGGER_PRESETS: Preset[] = [
+  {
+    id: 'manual',
+    label: 'Manual',
+    description: 'Run on demand from the Run-task button. No schedule.',
+    manual: true,
+    form: { ...defaultRecurrenceForm(), kind: 'once' },
+  },
+  { id: 'once', label: 'Run once on save', form: { ...defaultRecurrenceForm(), kind: 'once' } },
   { id: 'daily', label: 'Daily 9am', form: { ...defaultRecurrenceForm(), kind: 'daily', time: '09:00' } },
   { id: 'weekdays', label: 'Weekdays 9am', form: { ...defaultRecurrenceForm(), kind: 'weekdays', time: '09:00' } },
   { id: 'weekly-mon', label: 'Weekly Mon 9am', form: { ...defaultRecurrenceForm(), kind: 'weekly', time: '09:00', days: [1] } },
   { id: 'custom', label: 'Custom…', form: { ...defaultRecurrenceForm(), kind: 'custom' } },
 ];
 
-function presetIdFor(f: RecurrenceForm): string {
+function presetIdFor(autoMode: boolean, f: RecurrenceForm): string {
+  if (!autoMode) return 'manual';
   if (f.kind === 'once') return 'once';
   if (f.kind === 'daily' && f.time === '09:00') return 'daily';
   if (f.kind === 'weekdays' && f.time === '09:00') return 'weekdays';
@@ -103,8 +121,12 @@ export function TaskDialog(props: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const recurrenceDescription = useMemo(() => describeCron(recurrence), [recurrence]);
-  const activePresetId = useMemo(() => presetIdFor(recurrence), [recurrence]);
-  const showCustomFineTune = activePresetId === 'custom' || recurrence.kind === 'weekly';
+  const activePresetId = useMemo(
+    () => presetIdFor(autoMode, recurrence),
+    [autoMode, recurrence],
+  );
+  const showCustomFineTune =
+    autoMode && (activePresetId === 'custom' || recurrence.kind === 'weekly');
 
   const titleRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
@@ -302,7 +324,11 @@ export function TaskDialog(props: Props) {
         </label>
 
         <FolderField
-          label={autoMode ? 'Folder' : 'Folder (optional — leave empty to run in any folder)'}
+          label={
+            autoMode
+              ? 'Folder (required for auto-execute)'
+              : 'Folder (optional — leave empty to run in any folder)'
+          }
           value={folder}
           onChange={setFolder}
           inputRef={folderRef}
@@ -359,24 +385,30 @@ export function TaskDialog(props: Props) {
 
         <fieldset className="task-dialog__auto">
           <legend className="task-dialog__auto-legend">
-            <label className="task-dialog__auto-toggle">
-              <input
-                type="checkbox"
-                checked={autoMode}
-                onChange={(e) => setAutoMode(e.target.checked)}
-              />
-              <span>Auto-execute with Claude</span>
-            </label>
+            <span>Trigger</span>
           </legend>
+
+          <PresetChips
+            presets={TRIGGER_PRESETS}
+            activeId={activePresetId}
+            onPick={(p) => {
+              if (p.manual) {
+                setAutoMode(false);
+              } else {
+                setAutoMode(true);
+                setRecurrence(p.form);
+              }
+            }}
+          />
+
+          <div className="task-dialog__auto-hint">
+            {activePresetId === 'manual'
+              ? 'Run only when you click ▶ Run task in a folder tab. Folder is optional — leave empty to run anywhere.'
+              : `Auto-execute with Claude. ${recurrenceDescription}`}
+          </div>
 
           {autoMode && (
             <>
-              <PresetChips
-                presets={RECURRENCE_PRESETS}
-                activeId={activePresetId}
-                onPick={(p) => setRecurrence(p.form)}
-              />
-
               {showCustomFineTune && (
                 <div className="task-dialog__auto-row">
                   <label className="task-dialog__field task-dialog__field--half">
@@ -470,8 +502,6 @@ export function TaskDialog(props: Props) {
                 </label>
               )}
 
-              <div className="task-dialog__auto-hint">{recurrenceDescription}</div>
-
               <label className="task-dialog__field">
                 <span className="task-dialog__label">
                   Prompt override (optional)
@@ -511,7 +541,7 @@ export function TaskDialog(props: Props) {
             type="button"
             className="task-dialog__btn task-dialog__btn--primary"
             onClick={() => void submit()}
-            disabled={busy || !title.trim() || (autoMode && !folder.trim())}
+            disabled={busy}
           >
             {props.mode === 'create' ? 'Create' : 'Save'}
             <kbd className="task-dialog__btn__kbd">⌘↩</kbd>
