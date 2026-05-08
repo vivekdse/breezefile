@@ -21,7 +21,7 @@ import { Welcome, shouldShowWelcome } from './components/Welcome';
 import { UpdateChip } from './components/UpdateChip';
 import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
-import { TaskDialog, type TaskDialogRequest } from './components/TaskDialog';
+import { TaskComposer, type TaskComposerRequest } from './components/TaskComposer';
 import { RunHistoryDialog } from './components/RunHistoryDialog';
 import { RunTaskModal } from './components/RunTaskModal';
 import { RunProgressBanner } from './components/RunProgressBanner';
@@ -77,7 +77,7 @@ function Shell() {
   const [helpOpen, setHelpOpen] = useState<{ slide?: HelpSlideId } | null>(null);
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
-  const [taskDialog, setTaskDialog] = useState<TaskDialogRequest | null>(null);
+  const [taskDialog, setTaskDialog] = useState<TaskComposerRequest | null>(null);
   // fm-zf3m — run history dialog (sidebar context-menu "View run history").
   const [runHistoryFor, setRunHistoryFor] = useState<string | null>(null);
   // fm-femh — Run-task modal: pick a task to run in the active folder tab.
@@ -428,7 +428,7 @@ function Shell() {
       setWelcomeOpen(true);
     }
     function onOpenTask(e: Event) {
-      const detail = (e as CustomEvent).detail as TaskDialogRequest | undefined;
+      const detail = (e as CustomEvent).detail as TaskComposerRequest | undefined;
       if (detail) setTaskDialog(detail);
     }
     function onOpenRunHistory(e: Event) {
@@ -741,7 +741,7 @@ function Shell() {
         />
       )}
       {taskDialog && (
-        <TaskDialog
+        <TaskComposer
           {...taskDialog}
           onClose={() => setTaskDialog(null)}
         />

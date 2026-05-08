@@ -209,7 +209,7 @@ const SLIDES: Slide[] = [
     title: 'Everyday tasks',
     lede: 'Create, view, and act on tasks. Most days you live in the Tasks tab.',
     verbs: [
-      { name: 'task', what: 'create a task anchored to this folder · dates accept shorthand (today / tom / +3d / fri / eow), folder field has type-ahead over open tabs + recent folders, in-dialog hotkeys ⌘⌥A toggles auto-execute, ⌘⌥P pins, ⌘⌥T/N/F/S/D jump to fields, ⌘↩ saves' },
+      { name: 'task', what: 'open the inline composer · type a title and ↵ to save · ⇥ walks into the detail pills (folder · when · executor · auto), ↑/↓/↵ pick within a pill, ⌘. skips a pill, esc cancels · same composer handles edit, pre-filled' },
       { name: 'tasks', what: 'open the singleton Tasks tab — split layout (list + detail panel), group by folder/status/due, search, filter, checkbox + arrow-key selection, all bulk actions via verbs' },
       { name: 'tasks-tab verbs', what: 'chip prompt swaps in: :done :reopen :in-progress :cancel · :pin :unpin · :due / :start (Today / Tomorrow / Friday / Next week / Pick…) · :open task tab · :terminal · :claude / :codex / :gemini · :edit · :goto-folder · :delete · :group :sort :filter · :show-completed · :select all/none/invert/overdue/pinned' },
       { name: 'tasks-tab keys', what: '↑/↓ move cursor · Shift+↑/↓ extend selection · Space toggle select · Enter edit · / focus search · [ / ] snooze due ∓1 day · w snooze due +7 days' },
