@@ -569,7 +569,12 @@ function Shell() {
           tabs={state.tabs}
           activeIndex={state.activeTab}
         >
-          {isTaskTab ? (
+          {taskDialog ? (
+            <TaskComposer
+              {...taskDialog}
+              onClose={() => setTaskDialog(null)}
+            />
+          ) : isTaskTab ? (
             <TaskShell tabIndex={state.activeTab} />
           ) : isTasksTab ? (
             <TasksPage />
@@ -738,12 +743,6 @@ function Shell() {
         <HelpTour
           initialSlide={helpOpen.slide}
           onClose={() => setHelpOpen(null)}
-        />
-      )}
-      {taskDialog && (
-        <TaskComposer
-          {...taskDialog}
-          onClose={() => setTaskDialog(null)}
         />
       )}
       {runHistoryFor && (

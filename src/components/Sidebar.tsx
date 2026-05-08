@@ -572,12 +572,40 @@ interface TaskRowProps {
 function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowProps) {
   const today = todayISO();
   const tone = dueTone(task.due_at, today);
+  // Brief glow when this task was just created. TaskComposer fires the
+  // `fm:taskFlash` event AND stashes the id on window for the typical
+  // case where this row mounts after the event fires (the new task only
+  // shows up here on the next render tick).
+  const [flashing, setFlashing] = useState(false);
+  useEffect(() => {
+    const w = window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number };
+    function trigger() {
+      setFlashing(true);
+      window.setTimeout(() => setFlashing(false), 2000);
+    }
+    if (
+      w.__fmFlashTaskId === task.id &&
+      w.__fmFlashTs &&
+      Date.now() - w.__fmFlashTs < 4000
+    ) {
+      // Clear the stash so a re-mount doesn't re-flash the same row.
+      w.__fmFlashTaskId = undefined;
+      trigger();
+    }
+    function onFlash(e: Event) {
+      const ce = e as CustomEvent<{ taskId?: string }>;
+      if (ce.detail?.taskId === task.id) trigger();
+    }
+    window.addEventListener('fm:taskFlash', onFlash);
+    return () => window.removeEventListener('fm:taskFlash', onFlash);
+  }, [task.id]);
   const cls = [
     'sidebar__task',
     active ? 'sidebar__task--active' : '',
     task.pinned ? 'sidebar__task--pinned' : '',
     `sidebar__task--${tone}`,
     task.auto_mode ? 'sidebar__task--auto' : '',
+    flashing ? 'sidebar__task--flash' : '',
   ]
     .filter(Boolean)
     .join(' ');

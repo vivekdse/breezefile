@@ -114,6 +114,11 @@ export function useKeyboard(
       const pending = pendingRef.current;
       if (!tab) return;
 
+      // TaskComposer owns the keyboard while it's open. It sets
+      // body[data-composer-open] on mount; we bail entirely so digit
+      // keys don't double-fire as global verbs (e.g., `1` opening goto).
+      if (document.body.dataset.composerOpen === 'true') return;
+
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
         // Tab-management mod-chords must escape focused inputs (notably

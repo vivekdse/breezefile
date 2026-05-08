@@ -303,6 +303,42 @@ button.sidebar__link:hover .sidebar__unpin {
 .sidebar__task--active {
   background: var(--chip);
 }
+
+/* fm-btyv — celebratory glow when a task is freshly created via the
+   composer. The row enters from a brief "pop" — accent fill, ring
+   glow, slight bounce — and then settles into its resting style. */
+.sidebar__task--flash {
+  position: relative;
+  z-index: 1;
+  animation: sidebarTaskFlash 1900ms cubic-bezier(0.34, 1.56, 0.64, 1) 1;
+}
+@keyframes sidebarTaskFlash {
+  0% {
+    background: var(--accent);
+    color: var(--accent-ink, white);
+    box-shadow:
+      0 0 0 4px var(--accent-glow, rgba(127, 212, 199, 0.55)),
+      0 6px 20px var(--accent-glow, rgba(127, 212, 199, 0.55));
+    transform: translateX(0) scale(0.96);
+  }
+  18% { transform: translateX(0) scale(1.06); }
+  30% { transform: translateX(-3px) scale(1.04); }
+  42% { transform: translateX(3px) scale(1.04); }
+  55% {
+    background: var(--accent-soft, rgba(127, 212, 199, 0.30));
+    color: inherit;
+    transform: translateX(0) scale(1.02);
+    box-shadow:
+      0 0 0 2px var(--accent),
+      0 0 14px var(--accent-glow, rgba(127, 212, 199, 0.45));
+  }
+  100% {
+    background: transparent;
+    color: inherit;
+    box-shadow: 0 0 0 0 transparent;
+    transform: translateX(0) scale(1);
+  }
+}
 .sidebar__task--pinned {
   background: var(--chip);
 }

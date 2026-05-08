@@ -46,6 +46,8 @@ const fm = {
   openUrl: (url: string) => ipcRenderer.invoke('app:openUrl', url) as Promise<void>,
   openWith: (p: string, appName: string) => ipcRenderer.invoke('shell:openWith', p, appName),
   pickApplication: () => ipcRenderer.invoke('app:pickApplication') as Promise<string | null>,
+  pickFolder: (defaultPath?: string) =>
+    ipcRenderer.invoke('app:pickFolder', defaultPath) as Promise<string | null>,
   getBindings: () => ipcRenderer.invoke('bindings:get') as Promise<Record<string, string>>,
   setBinding: (ext: string, appPath: string) => ipcRenderer.invoke('bindings:set', ext, appPath),
   clearBinding: (ext: string) => ipcRenderer.invoke('bindings:clear', ext),

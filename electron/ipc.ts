@@ -474,6 +474,21 @@ export function registerIpc() {
     return picked;
   });
 
+  ipcMain.handle('app:pickFolder', async (_e, defaultPath?: string) => {
+    const win = BrowserWindow.getFocusedWindow();
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Choose a Folder',
+      buttonLabel: 'Choose',
+      defaultPath,
+      properties: ['openDirectory', 'createDirectory'],
+    };
+    const res = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts);
+    if (res.canceled || res.filePaths.length === 0) return null;
+    return res.filePaths[0];
+  });
+
   ipcMain.handle('bindings:get', async () => {
     await loadBindings();
     return { ...bindings };

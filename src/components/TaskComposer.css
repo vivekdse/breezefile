@@ -1,188 +1,385 @@
-/* fm-btyv — inline task composer.
-   Visual: a slim floating bar near the top of the viewport. The overlay
-   underlay is transparent so the underlying surface (folder list / Tasks
-   tab) stays in view — composer feels inline, not modal. */
+/* fm-btyv — full-width task composer.
+   Past answers collapse into a labeled row; the active question gets
+   a wide soft-shaded band; future questions show a dim prompt. */
 
-.composer-overlay {
-  position: fixed;
-  inset: 0;
+.composer-pane {
+  flex: 1 1 auto;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 96px;
+  flex-direction: column;
+  align-items: stretch;
   background: transparent;
-  pointer-events: auto;
-  z-index: 1000;
+  overflow-y: auto;
+  min-height: 0;
+  animation: composerPaneIn 140ms var(--ease-in-out, ease-out) both;
 }
-
-.composer {
-  background: var(--panel);
-  color: var(--text-on-panel, var(--ink));
-  border: 1px solid var(--rule);
-  border-radius: 10px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
-  width: min(820px, 92vw);
-  padding: 14px 18px 12px;
-  font-family: var(--font-sans, -apple-system, system-ui, sans-serif);
-  animation: composerIn 160ms var(--ease-in-out, ease-out) both;
-}
-
-@keyframes composerIn {
-  from { opacity: 0; transform: translateY(-6px); }
+@keyframes composerPaneIn {
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
 }
 
-.composer__row {
+.composer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 0;
+  padding: 0 24px;
+  color: var(--ink);
+  font-family: var(--font-sans, -apple-system, system-ui, sans-serif);
+  outline: none;
+  flex: 1 1 auto;
+}
+
+/* ── Header ────────────────────────────────────────────────────────── */
+
+.composer__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 8px 14px;
+  background: transparent;
+}
+.composer__crumb {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 1 1 auto;
+}
+
+/* ── Main: stacked questions ───────────────────────────────────────── */
+
+.composer__main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0 24px;
+  gap: 4px;
+}
+
+/* The "band" — wide soft accent-tinted shade that surrounds only the
+   active question. Spans the composer's full inner width so focus is
+   unmistakable. */
+.composer__q {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: transparent;
+  transition: background 160ms ease, opacity 160ms ease, padding 160ms ease;
+  cursor: pointer;
+}
+.composer__q--past {
+  padding: 6px 14px;
+  opacity: 0.85;
+}
+.composer__q--future {
+  padding: 6px 14px;
+  opacity: 0.35;
+}
+.composer__q--active {
+  padding: 22px 24px 24px;
+  background: var(--accent-soft, rgba(127, 212, 199, 0.12));
+  opacity: 1;
+  cursor: default;
+}
+
+/* ── Inert rows (past answer / future prompt) ──────────────────────── */
+/* No labels, no questions for past — just the answer in the same large
+   font as the active prompt. Future shows the prompt at the same size,
+   dimmed, so the user sees what's coming. */
+
+.composer__inert {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--ink);
+  padding: 4px 2px;
+}
+.composer__q--past .composer__inert { color: var(--ink); }
+.composer__q--future .composer__inert { color: var(--muted); font-weight: 400; }
+
+/* ── Active body ───────────────────────────────────────────────────── */
+
+.composer__q-active-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.composer__q-prompt {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  line-height: 1.3;
+  margin: 0 0 4px;
+}
+
+/* ── Title input ───────────────────────────────────────────────────── */
+
+.composer__title-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
 }
-
-.composer__label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  flex: 0 0 auto;
-}
-
-.composer__title {
+.composer__title-input {
   flex: 1 1 auto;
-  min-width: 120px;
   background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 6px 0;
+  font-size: 20px;
+  font-family: inherit;
   color: inherit;
-  border: none;
   outline: none;
-  font-size: 16px;
-  font-family: inherit;
-  padding: 4px 0;
+  box-shadow: none;
+  transition: border-color 120ms ease;
 }
-.composer__title::placeholder {
-  color: var(--muted);
-  opacity: 0.6;
+.composer__title-input:focus {
+  border-bottom-color: var(--accent);
+  outline: none;
+  box-shadow: none;
 }
+.composer__title-input::placeholder { color: var(--muted); opacity: 0.55; }
 
-.composer__pills {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.composer__title-enter {
   flex: 0 0 auto;
-  flex-wrap: wrap;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 14px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--rule);
+  color: var(--muted);
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease,
+    background 120ms ease;
+}
+.composer__title-enter--ready {
+  opacity: 1;
+  color: var(--accent-ink, white);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
-.composer__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
-  font-size: 11px;
-  border-radius: 999px;
-  background: var(--panel-2, rgba(0,0,0,0.04));
-  color: var(--text-on-panel-muted, var(--muted));
-  border: 1px solid transparent;
-  cursor: pointer;
+/* ── Options as flat keyboard-hint rows ────────────────────────────── */
+
+.composer__options {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.composer__option {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: left;
   font-family: inherit;
-  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
-  white-space: nowrap;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: color 80ms ease;
 }
-.composer__pill:hover {
-  color: var(--text-on-panel, var(--ink));
+.composer__option:hover { color: var(--accent); }
+.composer__option--active { color: var(--accent); }
+.composer__option--active .composer__option-label {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
 }
-.composer__pill--active {
+.composer__option-key {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--muted);
+  flex: 0 0 auto;
+  min-width: 20px;
+  text-align: center;
+  line-height: 1.4;
+}
+.composer__option--active .composer__option-key {
   background: var(--accent);
   color: var(--accent-ink, white);
   border-color: var(--accent);
 }
-.composer__pill-glyph {
-  font-size: 12px;
-  line-height: 1;
+.composer__option-label { flex: 0 0 auto; font-weight: 500; }
+.composer__option-hint { flex: 1 1 auto; font-size: 12px; color: var(--muted); }
+
+.composer__or {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 6px 0 0;
 }
-.composer__pill-label {
-  font-size: 11px;
-  letter-spacing: 0.01em;
+.composer__path-input {
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 5px 0;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  outline: none;
+  box-shadow: none;
+}
+.composer__path-input:focus {
+  border-bottom-color: var(--accent);
+  outline: none;
+  box-shadow: none;
 }
 
-.composer__hint {
-  margin-top: 10px;
-  font-size: 11px;
-  color: var(--muted);
+/* ── Date picker (when "Pick a date…" is chosen) ───────────────────── */
+
+.composer__date-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 16px;
+  gap: 12px;
+  margin-top: 4px;
 }
-.composer__hint kbd {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 10px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: var(--panel-2, rgba(0,0,0,0.05));
-  border: 1px solid var(--rule);
+.composer__date-input {
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  border-bottom: 1px solid var(--accent);
+  border-radius: 0;
+  padding: 4px 0;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  box-shadow: none;
+  color-scheme: dark light;
+}
+.composer__date-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.composer__date-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Footer ────────────────────────────────────────────────────────── */
+
+.composer__footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px 18px;
+  background: transparent;
+  margin-top: auto;
+  border-radius: 10px;
+  transition: background 160ms ease;
+}
+/* When focus has hopped from the last question to Create/Cancel, the
+   band moves with it — no more "stuck on When" feeling. */
+.composer__footer--active {
+  background: var(--accent-soft, rgba(127, 212, 199, 0.12));
 }
 .composer__error {
+  font-size: 12px;
   color: var(--danger, #c0392b);
-}
-
-/* Picker dropdown — opens below the row when a pill is clicked. */
-.composer__picker {
-  margin-top: 10px;
-  border-top: 1px solid var(--rule);
-  padding-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  outline: none;
-  max-height: 280px;
-  overflow-y: auto;
-}
-.composer__picker--folder {
-  gap: 8px;
-}
-
-.composer__option {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  background: transparent;
-  border: none;
-  text-align: left;
-  padding: 6px 8px;
-  border-radius: 5px;
-  font-family: inherit;
-  font-size: 13px;
-  color: inherit;
-  cursor: pointer;
-}
-.composer__option:hover,
-.composer__option--active {
-  background: var(--panel-2, rgba(0,0,0,0.05));
-}
-.composer__option-label {
   flex: 1 1 auto;
 }
-.composer__option-hint {
-  font-size: 11px;
-  color: var(--muted);
-  flex: 0 0 auto;
+.composer__flash {
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+  animation: composerFlashIn 180ms ease both;
+}
+@keyframes composerFlashIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: none; }
 }
 
-.composer__folder-input {
-  width: 100%;
-  background: var(--panel-2, rgba(0,0,0,0.04));
-  color: inherit;
-  border: 1px solid var(--rule);
-  border-radius: 5px;
-  padding: 6px 8px;
+.composer__cancel-btn,
+.composer__create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 16px;
+  border-radius: 6px;
   font-size: 13px;
+  font-weight: 500;
   font-family: inherit;
-  outline: none;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease, opacity 80ms ease,
+    border-color 80ms ease;
+  flex: 0 0 auto;
 }
-.composer__folder-input:focus {
-  border-color: var(--accent);
+.composer__cancel-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--rule);
+  margin-left: auto;
 }
-.composer__folder-presets {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.composer__cancel-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.composer__cancel-btn--armed {
+  color: var(--danger, #c0392b);
+  border-color: var(--danger, #c0392b);
+}
+
+.composer__create-btn {
+  background: var(--accent);
+  color: var(--accent-ink, white);
+  border: 1px solid var(--accent);
+}
+.composer__create-btn:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.composer__create-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.composer__create-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Subtle "ready to commit" pulse once the user has picked a schedule
+   and focus has hopped to the button. */
+.composer__create-btn--ready {
+  animation: composerCreateReady 1100ms ease-in-out infinite;
+}
+@keyframes composerCreateReady {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow, rgba(127, 212, 199, 0)); }
+  50%      { box-shadow: 0 0 0 6px var(--accent-glow, rgba(127, 212, 199, 0.30)); }
+}
+
+.composer__flash {
+  animation: composerFlashCelebrate 700ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes composerFlashCelebrate {
+  0%   { opacity: 0; transform: translateY(6px) scale(0.96); }
+  60%  { opacity: 1; transform: translateY(0) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.composer__btn-kbd {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+.composer__create-btn .composer__btn-kbd {
+  border-color: var(--accent-ink, white);
+  opacity: 0.85;
 }

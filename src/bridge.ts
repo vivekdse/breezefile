@@ -41,6 +41,7 @@ type Fm = {
   openUrl: (url: string) => Promise<void>;
   openWith: (p: string, appName: string) => Promise<void>;
   pickApplication: () => Promise<string | null>;
+  pickFolder: (defaultPath?: string) => Promise<string | null>;
   getBindings: () => Promise<Record<string, string>>;
   setBinding: (ext: string, appPath: string) => Promise<void>;
   clearBinding: (ext: string) => Promise<void>;
