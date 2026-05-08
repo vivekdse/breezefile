@@ -168,6 +168,60 @@ export function useKeyboard(
         return;
       }
 
+      // Platform-standard file ops on folder tabs:
+      //   ⌘C / Ctrl+C  — yank for copy   (replaces the old `yy` chord)
+      //   ⌘X / Ctrl+X  — yank for move   (replaces the old `dd` chord)
+      //   ⌘V / Ctrl+V  — paste here      (mirror of `ph`)
+      //   ⌘A / Ctrl+A  — select-all in active column
+      //   ⌘⇧. / Ctrl+⇧.  — toggle hidden files (sticky per folder)
+      //   F2           — rename cursor item
+      // Inputs/textareas already short-circuited above, so these don't
+      // trample native text-editing shortcuts.
+      if (tab.kind === 'folder' && (e.metaKey || e.ctrlKey) && !e.altKey) {
+        if (!e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+          e.preventDefault();
+          clearTimer();
+          yankSelection('copy');
+          return;
+        }
+        if (!e.shiftKey && (e.key === 'x' || e.key === 'X')) {
+          e.preventDefault();
+          clearTimer();
+          yankSelection('move');
+          return;
+        }
+        if (!e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+          e.preventDefault();
+          clearTimer();
+          void paste(false);
+          return;
+        }
+        if (!e.shiftKey && (e.key === 'a' || e.key === 'A')) {
+          e.preventDefault();
+          clearTimer();
+          toggleSelectAllCol();
+          return;
+        }
+        // ⌘⇧. — Mac sends key '.' with shiftKey true (some layouts send '>').
+        if (e.shiftKey && (e.key === '.' || e.key === '>')) {
+          e.preventDefault();
+          clearTimer();
+          const h = !tab.showHidden;
+          setTabSticky({ showHidden: h });
+          dispatch({
+            type: 'setStatus',
+            msg: h ? 'showing hidden files' : 'hiding hidden files',
+          });
+          return;
+        }
+      }
+      if (tab.kind === 'folder' && e.key === 'F2') {
+        e.preventDefault();
+        clearTimer();
+        promptRenameCurrent('full');
+        return;
+      }
+
       // Tab management — platform-standard shortcuts.
       //   ⌘T / Ctrl+T        — new tab at current cwd
       //   ⌘W / Ctrl+W        — close active tab
@@ -378,8 +432,11 @@ export function useKeyboard(
         // unreachable. The Home / End keys replace gg / G for top/bottom.
         uq: () => dispatch({ type: 'restoreTab' }),
         // file ops
-        yy: () => yankSelection('copy'),
-        dd: () => yankSelection('move'),
+        // yy / dd removed in favor of ⌘C / ⌘X (handled above) — those are the
+        // platform-standard surfaces and the verbs (Copy / Move) cover the
+        // discoverable path. Trash chords stay; the delete verb covers the
+        // discovery surface but power users still want a chord that doesn't
+        // round-trip through a confirmation overlay.
         dD: () => trashSelection(),
         dF: () => trashSelection(),
         // ph = paste here (renamed from pp). 'phl' (hardlink) is also a
@@ -399,7 +456,9 @@ export function useKeyboard(
         uv: () => setTab({ marks: {} }),
         ut: () => clearTagOfCurrent(),
         // view / display
-        zh: () => { const h = !tab.showHidden; setTabSticky({ showHidden: h }); dispatch({ type: 'setStatus', msg: h ? 'showing hidden files' : 'hiding hidden files' }); },
+        // zh removed — replaced by ⌘⇧. (handled above) and the Show / hide
+        // hidden verb. Both write through setTabSticky so the choice
+        // persists per folder.
         zT: () => void window.dispatchEvent(new Event('fm:openTheme')),
         zf: () => dispatch({ type: 'setMode', mode: 'find', buffer: '' }),
         // fm-k9dg — toggle "directories first" for the current folder.

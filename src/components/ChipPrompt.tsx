@@ -20,7 +20,7 @@
 // selection applied, so flows like "select → images → copy → Desktop" chain
 // without extra keystrokes.
 // ────────────────────────────────────────────────────────────────────────────
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { fm } from '../bridge';
 import { runPaste } from '../clipboard';
@@ -156,6 +156,11 @@ type Option = {
   // Used for natural synonyms: e.g. the "By extension" sort option aliases
   // 'type', 'kind', 'filetype' so users who think "sort by file type" find it.
   aliases?: string[];
+  // In the verb-picker (verb=null) state, options can be either real verbs
+  // OR live folder/file results merged in from Spotlight. We tag them so the
+  // renderer can style them differently and pickOption can dispatch correctly
+  // (verb → enter slots; find → navigate or open).
+  kind?: 'verb' | 'find-folder' | 'find-file';
 };
 
 type VerbDef = {
@@ -2385,7 +2390,11 @@ export function ChipPrompt({
       activeSlot?.label === 'Where' ||
       activeSlot?.label === 'Destination' ||
       activeSlot?.label === 'Which folder';
-    if (!isDestinationSlot || filter.trim().length < 2) {
+    // Also fire when there's no verb yet — the verb picker now blends
+    // Spotlight folder hits underneath the verb list so users don't need to
+    // explicitly enter goto mode to search.
+    const inVerbPicker = verb === null;
+    if ((!isDestinationSlot && !inVerbPicker) || filter.trim().length < 2) {
       setSearchResults((prev) => (prev.length === 0 ? prev : []));
       return;
     }
@@ -2412,7 +2421,10 @@ export function ChipPrompt({
     const slotIdx = verb ? picks.length : -1;
     const activeSlot = verb && slotIdx < verb.slots.length ? verb.slots[slotIdx] : null;
     const isGotoSlot = verb?.id === 'goto' && activeSlot?.label === 'Where';
-    if (!isGotoSlot || !homedir || filter.trim().length < 2) {
+    // Fire file search in the verb picker too (verb=null) so the merged
+    // results panel can include file hits without forcing the user into goto.
+    const inVerbPicker = verb === null;
+    if ((!isGotoSlot && !inVerbPicker) || !homedir || filter.trim().length < 2) {
       setSearchFiles((prev) => (prev.length === 0 ? prev : []));
       return;
     }
@@ -2444,7 +2456,10 @@ export function ChipPrompt({
       activeSlot?.label === 'Where' ||
       activeSlot?.label === 'Destination' ||
       activeSlot?.label === 'Which folder';
-    if (!isDestinationSlot || !activeTab) {
+    // Verb picker also wants local-descendant context so name typing finds
+    // subfolders without needing to switch into goto.
+    const inVerbPicker = verb === null;
+    if ((!isDestinationSlot && !inVerbPicker) || !activeTab) {
       setLocalSubdirs((prev) => (prev.length === 0 ? prev : []));
       return;
     }
@@ -2560,22 +2575,41 @@ export function ChipPrompt({
     [launchers, tasksEnabled, inTaskMode, inTasksTab, activeTab.kind],
   );
 
-  // Build options for current state
-  const allOptions: Option[] =
-    verb === null
-      ? effectiveVerbs.map((v) => {
-          const { ok, reason } = v.isAvailable(ctx);
-          return {
-            id: v.id,
-            label: v.label,
-            detail: v.describe(ctx),
-            available: ok,
-            reason,
-          };
-        })
-      : activeSlot
-        ? activeSlot.getOptions(ctx, picks)
-        : [];
+  // Build options for current state.
+  //
+  // Verb picker (verb=null): the catalog of verbs is shown unconditionally.
+  // When the user has typed at least 2 chars we ALSO blend in folder + file
+  // hits (immediate subdirs, descendants, recents, bookmarks, Spotlight, file
+  // hits) so the palette doubles as a find-anywhere search without forcing
+  // the user to commit to the goto verb. Verbs are tagged 'verb' and find
+  // results are tagged 'find-folder' / 'find-file' so the renderer + scorer
+  // can distinguish them.
+  const allOptions: Option[] = (() => {
+    if (verb === null) {
+      const verbOpts: Option[] = effectiveVerbs.map((v) => {
+        const { ok, reason } = v.isAvailable(ctx);
+        return {
+          id: v.id,
+          label: v.label,
+          detail: v.describe(ctx),
+          available: ok,
+          reason,
+          kind: 'verb',
+        };
+      });
+      if (filter.trim().length < 2) return verbOpts;
+      const findOpts: Option[] = destinationOptions(ctx, false, true).map((o) => ({
+        ...o,
+        kind: o.id.startsWith('file:') ? 'find-file' : 'find-folder',
+      }));
+      // De-dupe: a typed query like "settings" might surface both a Settings
+      // verb and a Settings folder. Keep the verb (it's what the alias was
+      // built for) and drop the find row that collides on id.
+      const verbIds = new Set(verbOpts.map((o) => o.id));
+      return [...verbOpts, ...findOpts.filter((o) => !verbIds.has(o.id))];
+    }
+    return activeSlot ? activeSlot.getOptions(ctx, picks) : [];
+  })();
 
   // Filter + rank. For single-token queries we prefer label-starts-with
   // matches; for multi-token queries ("webinar folder") ALL tokens must
@@ -2667,6 +2701,13 @@ export function ChipPrompt({
         else if (detail.includes('levels down')) score += 20;
         else if (detail.includes('· spotlight')) score -= 15;
 
+        // In the verb picker, verbs always rank above find results. Without
+        // this a folder named "move" can outrank the Move verb on a typed
+        // "move", which is the opposite of what the user wants.
+        if (verb === null) {
+          if (o.kind === 'verb') score += 1000;
+        }
+
         // Recency boost: folders the user has actually opened beat
         // never-touched name-twins from Spotlight. Decays with position so
         // last-visited wins ties against an older recent.
@@ -2687,21 +2728,12 @@ export function ChipPrompt({
     if (highlightIdx >= matches.length) setHighlightIdx(0);
   }, [matches.length, highlightIdx]);
 
-  // Natural-language fallthrough: when the user types something that doesn't
-  // match any verb, drop into the 'Go to / Find' verb and treat the typed
-  // text as the find query. This means typing a folder name (or any phrase)
-  // from the normal view "just searches" — no verb needed.
-  useEffect(() => {
-    if (verb !== null) return;
-    if (!filter) return;
-    if (matches.length > 0) return;
-    const goto = VERBS.find((v) => v.id === 'goto');
-    if (!goto) return;
-    setVerb(goto);
-    setPicks([]);
-    setHighlightIdx(0);
-    // keep filter — it becomes the destination search query
-  }, [filter, matches.length, verb]);
+  // (Removed) Natural-language auto-fallthrough into the goto verb. Find
+  // results now blend into the verb picker directly, so the user doesn't
+  // need to be silently transported into a different verb when a typed
+  // query stops matching a verb. Verbs stay prioritized; find results
+  // appear underneath. The user can still explicitly enter goto by
+  // selecting the 'Go to / Find' verb or typing 'goto'.
 
   function pickOption(opt: Option) {
     if (!opt.available) {
@@ -2709,6 +2741,21 @@ export function ChipPrompt({
       return;
     }
     if (verb === null) {
+      // Find result picked from the merged verb-picker list: behave like the
+      // goto verb's execute — file picks open, folder picks navigate. Done
+      // inline so the user never visibly enters goto mode.
+      if (opt.kind === 'find-file') {
+        const filePath = opt.id.slice('file:'.length);
+        void fm.open(filePath);
+        onClose();
+        return;
+      }
+      if (opt.kind === 'find-folder') {
+        const target = ctx ? resolveDestination(ctx, opt.id) : null;
+        if (target) navigateTo(target);
+        onClose();
+        return;
+      }
       const v = effectiveVerbs.find((x) => x.id === opt.id);
       if (!v) return;
       setVerb(v);
@@ -3040,7 +3087,7 @@ export function ChipPrompt({
             onKeyDown={onKeyDown}
             placeholder={
               verb === null
-                ? 'type an action (move, sort, go to…) or a number'
+                ? 'type an action, file, or folder…'
                 : activeSlot
                   ? `pick ${activeSlot.label.toLowerCase()}…`
                   : ''
@@ -3059,15 +3106,29 @@ export function ChipPrompt({
           )}
           {matches.map((opt, i) => {
             const checked = inMultiSlot && multiSelected.has(opt.id);
+            const isFind = opt.kind === 'find-folder' || opt.kind === 'find-file';
+            // Section divider before the first find row in the verb picker
+            // so the eye reads "verbs first, then matching places & files."
+            const prevKind = i > 0 ? matches[i - 1].kind : undefined;
+            const showFindHeader =
+              verb === null && isFind && prevKind !== 'find-folder' && prevKind !== 'find-file';
             return (
+              <React.Fragment key={opt.id}>
+              {showFindHeader && (
+                <li className="chip-options__section" aria-hidden="true">
+                  Places & files
+                </li>
+              )}
               <li
-                key={opt.id}
                 ref={i === highlightIdx ? highlightedRef : undefined}
                 className={[
                   'chip-option',
                   i === highlightIdx ? 'chip-option--highlighted' : '',
                   !opt.available ? 'chip-option--disabled' : '',
                   checked ? 'chip-option--checked' : '',
+                  opt.kind === 'verb' ? 'chip-option--verb' : '',
+                  opt.kind === 'find-folder' ? 'chip-option--find chip-option--find-folder' : '',
+                  opt.kind === 'find-file' ? 'chip-option--find chip-option--find-file' : '',
                 ].filter(Boolean).join(' ')}
                 onMouseEnter={() => {
                   setHighlightIdx(i);
@@ -3089,6 +3150,7 @@ export function ChipPrompt({
                   <span className="chip-option__lock" title={opt.reason}>⊘</span>
                 )}
               </li>
+              </React.Fragment>
             );
           })}
         </ul>
