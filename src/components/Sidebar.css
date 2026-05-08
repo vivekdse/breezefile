@@ -233,6 +233,28 @@ button.sidebar__link:hover .sidebar__unpin {
 .sidebar__section-title--with-action {
   justify-content: space-between;
 }
+.sidebar__section-title-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sidebar__section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--text-on-panel);
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .sidebar__section-title--with-action::after {
   content: none;
 }

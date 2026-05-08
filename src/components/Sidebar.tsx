@@ -493,7 +493,14 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
   return (
     <>
       <h4 className="sidebar__section-title sidebar__section-title--with-action">
-        <span>Active Tasks</span>
+        <span className="sidebar__section-title-text">
+          Active Tasks
+          {tasks.length > 0 && (
+            <span className="sidebar__section-count" aria-label={`${tasks.length} active`}>
+              {tasks.length}
+            </span>
+          )}
+        </span>
         <button
           type="button"
           className="sidebar__section-action"
