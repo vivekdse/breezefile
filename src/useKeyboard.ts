@@ -259,6 +259,13 @@ export function useKeyboard(
       // ⌘T/⌘W/⌘1-9/⌘Tab still work, but before any browse actions.
       if (tab.kind !== 'folder') return;
 
+      // Drop any unhandled ⌘/⌥ chord. The known mod-chords (⌘F, ⌘T/W, ⌘1-9,
+      // Ctrl+Tab, C-d/u/f/b page motion) all returned earlier or use ctrlKey
+      // explicitly. Without this guard ⌘K / ⌘J etc. fall through to the
+      // single-key actions table and trigger vim motion (⌘K → moveSelection
+      // up, buffered into the nav chord as "kk", "kkk", …).
+      if (e.metaKey || e.altKey) return;
+
       const k = keyName(e);
 
       // --- <any>-consuming pending chords ---

@@ -58,20 +58,6 @@ export function Pathbar({ path, onNavigate }: Props) {
         </button>
         <button
           type="button"
-          className="pathbar__view"
-          title="Change view"
-          onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: 'view' })}
-        >
-          {activeTab?.viewMode === 'grid'
-            ? '⊞'
-            : activeTab?.viewMode === 'preview'
-              ? '▣'
-              : activeTab?.viewMode === 'tag'
-                ? '◐'
-                : '☰'}
-        </button>
-        <button
-          type="button"
           className="pathbar__find"
           title="Find (⌘F or /)"
           onClick={() => dispatch({ type: 'setMode', mode: 'command', verb: 'goto' })}
@@ -80,6 +66,15 @@ export function Pathbar({ path, onNavigate }: Props) {
           <span className="pathbar__find-icon" aria-hidden>⌕</span>
           Find
           <kbd className="pathbar__find-kbd">⌘F</kbd>
+        </button>
+        <button
+          type="button"
+          className="pathbar__view"
+          title="All actions (:)"
+          onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: '' })}
+          aria-label="All actions"
+        >
+          ☰
         </button>
       </div>
     </div>

@@ -1,5 +1,5 @@
 /*
- * ChipPrompt — verb-first sentence-chip command palette (invoked by :, !, ⌘K).
+ * ChipPrompt — verb-first sentence-chip command palette (invoked by :, !, the menu button, or any letter).
  *
  * Migrated from legacy --bg-0/--fg-* tokens to editorial tokens so the palette
  * reads like the rest of the chrome: paper surfaces (--panel), ink typography

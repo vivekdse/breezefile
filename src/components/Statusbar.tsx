@@ -33,24 +33,14 @@ export function Statusbar() {
       ? `${markedCount} of ${entries.length} selected · ${formatSize(selectedSize)}`
       : `${entries.length} items · ${formatSize(totalSize)}`;
 
-  // Keyboard-hint trail — keys relevant to NORMAL browsing.
-  // When a selection exists we surface the drag-out + paste hints instead
-  // of the generic ones, since those are the verbs the user is likely to
-  // reach for next.
-  const hints: Array<{ keys: string[]; label: string }> =
-    markedCount > 0
-      ? [
-          { keys: ['d'], label: 'drag out' },
-          { keys: ['y'], label: 'yank' },
-          { keys: ['p'], label: 'paste' },
-          { keys: [':'], label: 'command' },
-        ]
-      : [
-          { keys: ['⌘K'], label: 'command' },
-          { keys: ['y'], label: 'yank' },
-          { keys: ['space'], label: 'mark' },
-          { keys: ['d'], label: 'drag' },
-        ];
+  // Keyboard hints — only the two affordances that are still real after the
+  // shift to the verb-first model: Space marks the cursor item, `:` opens
+  // the verb palette empty. Everything else is reachable by typing any
+  // letter (which opens the palette pre-filtered).
+  const hints: Array<{ keys: string[]; label: string }> = [
+    { keys: ['space'], label: 'mark' },
+    { keys: [':'], label: 'actions' },
+  ];
 
   return (
     <div className="statusbar">
