@@ -1357,14 +1357,17 @@ end tell`;
                 const subdirs: string[] = [];
                 const hits: FindHit[] = [];
                 for (const ent of ents) {
-                  if (ent.name.startsWith('.')) continue;
                   if (FIND_SKIP.has(ent.name)) continue;
                   const full = path.join(dir, ent.name);
                   const isDir = ent.isDirectory();
+                  const isDot = ent.name.startsWith('.');
                   if (matchesName(ent.name.toLowerCase(), ent.name)) {
                     hits.push({ path: full, name: ent.name, isDir, tier: 'local' });
                   }
-                  if (isDir) subdirs.push(full);
+                  // Don't recurse into dot-directories — they're typically
+                  // heavyweight caches not covered by FIND_SKIP. The dot-dir
+                  // itself can still match by name.
+                  if (isDir && !isDot) subdirs.push(full);
                 }
                 return { hits, subdirs };
               } catch {
