@@ -176,6 +176,43 @@ function Shell() {
     // bytes on every redraw, which clobbered the hook-driven busy state
     // with a sticky 'bell'. Busy/idle now comes purely from Claude Code
     // hooks (fm-z7v, term:fg).
+    //
+    // Silence watchdog: when Claude is interrupted manually (Esc, Ctrl-C,
+    // crash, network drop), Claude Code does not always fire a Stop
+    // hook — the tab can stay green forever. As a safety net, while a
+    // pty is in 'busy' state we arm a silence timer; any term:data byte
+    // resets it. If no output flows for SILENCE_MS, we transition the
+    // tab to idle. 20s is long enough to span tool-call stalls and short
+    // network hiccups, short enough that an interrupted session goes
+    // grey within half a minute.
+    const SILENCE_MS = 20_000;
+    const silenceTimers = new Map<number, ReturnType<typeof setTimeout>>();
+    const clearSilence = (ptyId: number) => {
+      const t = silenceTimers.get(ptyId);
+      if (t) {
+        clearTimeout(t);
+        silenceTimers.delete(ptyId);
+      }
+    };
+    const armSilence = (ptyId: number) => {
+      clearSilence(ptyId);
+      const t = setTimeout(() => {
+        silenceTimers.delete(ptyId);
+        const tabs = tabsRef.current;
+        const idx = tabs.findIndex((t) => t.terminal?.ptyId === ptyId);
+        if (idx < 0) return;
+        if (tabs[idx].terminal?.attention !== 'busy') return;
+        dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
+        maybeNotify(idx, 'busy', 'idle');
+      }, SILENCE_MS);
+      silenceTimers.set(ptyId, t);
+    };
+    const offData = fm.onTermData((id) => {
+      // Only refresh if we're already tracking this pty as busy. Cheap
+      // map lookup; avoids work on the active tab's idle prompt.
+      if (silenceTimers.has(id)) armSilence(id);
+    });
+
     const offFg = fm.onTermFg((id, busy, _comm, state) => {
       const tabs = tabsRef.current;
       const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
@@ -187,6 +224,7 @@ function Shell() {
         state ?? (busy ? 'busy' : 'idle');
       if (effective === 'busy' && cur !== 'busy') {
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
+        armSilence(id);
       } else if (effective === 'waiting') {
         // Mid-turn permission prompt. Force a transition even when the
         // tab was already showing 'idle' (rare race) so the banner
@@ -204,10 +242,16 @@ function Shell() {
         maybeNotify(idx, fromForNotify, 'idle', true);
       } else if (effective === 'idle' && cur !== 'idle') {
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
+        clearSilence(id);
         maybeNotify(idx, cur, 'idle');
       }
     });
-    return () => { offFg(); };
+    return () => {
+      offFg();
+      offData();
+      for (const t of silenceTimers.values()) clearTimeout(t);
+      silenceTimers.clear();
+    };
     // Subscribe ONCE on mount. State is read through refs so the handler
     // sees current values without triggering re-subscription. Earlier
     // versions re-subscribed on every dispatch and dropped the events
