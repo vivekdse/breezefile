@@ -224,7 +224,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
             <WelcomeDemo />
 
             <p className="welcome__caption">
-              Keyboard-first Fast File Management
+              Agentic, Keyboard-First File Manager
             </p>
 
             <div className="welcome__footer">
