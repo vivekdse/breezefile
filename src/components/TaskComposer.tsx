@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { fm } from '../bridge';
-import { createTask, todayISO, updateTask } from '../tasks';
+import { createTask, runTaskNow, todayISO, updateTask } from '../tasks';
 import { humanizeError } from '../errorMessages';
 import {
   type RecurrenceForm,
@@ -54,6 +54,8 @@ type WhenOption = {
   agentOnly?: boolean;
   manualOnly?: boolean;
   pickDate?: boolean;
+  runOnSave?: boolean;
+  customCron?: boolean;
 };
 
 const WHEN_OPTIONS: WhenOption[] = [
@@ -86,6 +88,21 @@ const WHEN_OPTIONS: WhenOption[] = [
     },
   },
   { id: 'pick-date', label: 'Pick a date…', hint: 'choose a calendar day', pickDate: true },
+  {
+    id: 'on-save',
+    label: 'Run on save',
+    hint: 'fires the agent immediately',
+    agentOnly: true,
+    runOnSave: true,
+    recurrence: { ...defaultRecurrenceForm(), kind: 'once' },
+  },
+  {
+    id: 'custom-cron',
+    label: 'Custom cron…',
+    hint: '5-field expression',
+    agentOnly: true,
+    customCron: true,
+  },
 ];
 
 const WHO_OPTIONS: { id: ExecutorId; label: string; hint?: string }[] = [
@@ -98,7 +115,7 @@ function pickWhenIdFromTask(task: Task): string {
     if (!task.cron) return 'on-demand';
     if (task.cron === '0 9 * * *') return 'daily-9';
     if (task.cron === '0 9 * * 1') return 'weekly-mon-9';
-    return 'on-demand';
+    return 'custom-cron';
   }
   if (task.due_at) {
     const today = todayISO();
@@ -147,6 +164,9 @@ export function TaskComposer(props: Props) {
     initial?.due_at && pickWhenIdFromTask(initial) === 'pick-date'
       ? initial.due_at
       : '',
+  );
+  const [customCron, setCustomCron] = useState<string>(
+    initial && pickWhenIdFromTask(initial) === 'custom-cron' ? initial.cron ?? '' : '',
   );
   const [executor, setExecutor] = useState<ExecutorId>(
     initial?.auto_mode ? 'claude' : 'manual',
@@ -246,6 +266,7 @@ export function TaskComposer(props: Props) {
   const titleRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
+  const cronInputRef = useRef<HTMLInputElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const createBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -316,6 +337,10 @@ export function TaskComposer(props: Props) {
     setWhenHighlight(i);
     if (opt.pickDate) {
       setTimeout(() => dateInputRef.current?.focus(), 0);
+      return;
+    }
+    if (opt.customCron) {
+      setTimeout(() => cronInputRef.current?.focus(), 0);
       return;
     }
     enterCommitPhase();
@@ -399,6 +424,15 @@ export function TaskComposer(props: Props) {
       setTimeout(() => dateInputRef.current?.focus(), 0);
       return;
     }
+    if (effectiveWhenId === 'custom-cron') {
+      const trimmed = customCron.trim();
+      if (!trimmed || trimmed.split(/\s+/).length !== 5) {
+        setError('Cron must have 5 space-separated fields.');
+        setActiveIdx(QUESTIONS.indexOf('when'));
+        setTimeout(() => cronInputRef.current?.focus(), 0);
+        return;
+      }
+    }
     setBusy(true);
     setError(null);
     try {
@@ -434,6 +468,15 @@ export function TaskComposer(props: Props) {
           autoMode = true;
           nextRunAt = null;
         }
+        if (isAgent && when.customCron) {
+          cron = customCron.trim();
+          autoMode = true;
+        }
+        if (isAgent && when.runOnSave) {
+          autoMode = true;
+          cron = null;
+          nextRunAt = null;
+        }
       }
 
       const payload = {
@@ -460,6 +503,9 @@ export function TaskComposer(props: Props) {
       } else {
         const t = await updateTask(props.task.id, payload as TaskUpdate);
         savedId = t.id;
+      }
+      if (isAgent && when?.runOnSave) {
+        try { await runTaskNow(savedId); } catch { /* surfaced via runs list */ }
       }
       // Tell the sidebar to glow the row that just appeared. We also
       // stash the id on the window so a TaskRow that mounts AFTER the
@@ -590,6 +636,9 @@ export function TaskComposer(props: Props) {
   function whenSummary(): string {
     if (whenId === 'pick-date') {
       return pickedDate ? formatDateNice(pickedDate) : 'Pick a date…';
+    }
+    if (whenId === 'custom-cron') {
+      return customCron.trim() ? `Cron: ${customCron.trim()}` : 'Custom cron…';
     }
     return WHEN_OPTIONS.find((w) => w.id === whenId)?.label ?? 'No due date';
   }
@@ -851,6 +900,29 @@ export function TaskComposer(props: Props) {
                     <span className="composer__date-hint">
                       {pickedDate ? formatDateNice(pickedDate) : 'choose a day'}
                     </span>
+                  </div>
+                )}
+                {whenId === 'custom-cron' && (
+                  <div className="composer__date-row">
+                    <input
+                      ref={cronInputRef}
+                      type="text"
+                      className="composer__path-input"
+                      placeholder="m h dom mon dow  e.g. 0 9 * * 1-5"
+                      value={customCron}
+                      onChange={(e) => setCustomCron(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                          e.preventDefault();
+                          if (customCron.trim().split(/\s+/).length === 5) {
+                            cronInputRef.current?.blur();
+                            enterCommitPhase();
+                          }
+                        }
+                      }}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
                   </div>
                 )}
               </div>

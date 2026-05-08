@@ -227,7 +227,8 @@ const SLIDES: Slide[] = [
     lede: 'Schedule a task, an agent runs it, every run is logged and resumable.',
     verbs: [
       { name: 'auto-execute', what: 'flip ⚡ Auto on a task and a registered agent (Claude Code first) runs it headlessly when due · scheduler retries on rate / usage errors and notifies on terminal failure · concurrent runs for the same task are refused server-side' },
-      { name: 'recurrence', what: 'pick Daily 9am / Weekdays / Weekly / Custom in the task dialog · next_run_at recomputes after every successful run and clears when you mark the series done' },
+      { name: 'recurrence', what: 'pick Daily 9am / Weekly Mon 9am / Custom cron… (raw 5-field expression) in the task composer · next_run_at recomputes after every successful run and clears when you mark the series done' },
+      { name: 'run on save', what: 'agent-only When option that fires the task immediately after you create it · no cron, no schedule — one-shot kickoff' },
       { name: 'sidebar indicators', what: 'Active Tasks sidebar shows per-task glyphs: due-now dot, running spinner, last-run-failed dot, ⚡ for auto · right-click for Edit / Mark done / Pin / Snooze / Run now / View run history / Open last run in new tab / Delete' },
       { name: 'run history', what: 'every auto run lands in a per-task history dialog: status, duration, attempt, conversation_id · Rerun button starts a fresh run · "Open run" spawns a new tab with an embedded terminal and auto-runs `claude --resume <id>` so you land directly in the trace' },
       { name: 'runs view', what: 'on the Tasks tab toggle from Tasks → Runs to see every recent run across every auto task in one feed · filter by status, search by title or folder, click a row to jump into that task’s history' },
