@@ -19,15 +19,16 @@ import {
   shiftISO,
   todayISO,
   updateTask,
+  useLastRun,
   useTasks,
 } from '../tasks';
 import type { Task } from '../types';
-import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
+import { deriveRunState } from './TaskIndicators';
 import { formatOpError } from '../errorMessages';
 import { useOpenResumeInTab } from '../openResumeInTab';
 import './Sidebar.css';
 
-const MAX_VISIBLE_TASKS = 10;
+const MAX_VISIBLE_TASKS = 5;
 
 /**
  * Left sidebar — port of themes.html `.sidebar`:
@@ -572,6 +573,10 @@ interface TaskRowProps {
 function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowProps) {
   const today = todayISO();
   const tone = dueTone(task.due_at, today);
+  // Live-poll the last run only for auto tasks. Drives the green concentric
+  // pulse on the lead icon while the run is in flight.
+  const lastRun = useLastRun(task.auto_mode ? task.id : null);
+  const running = task.auto_mode && deriveRunState(task, lastRun).kind === 'running';
   // Brief glow when this task was just created. TaskComposer fires the
   // `fm:taskFlash` event AND stashes the id on window for the typical
   // case where this row mounts after the event fires (the new task only
@@ -610,22 +615,35 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
     .filter(Boolean)
     .join(' ');
 
+  // Single-line layout: lead glyph (⚡ auto / ● manual, colored by status)
+  // + title + optional tab badge. Folder + due info move to the tooltip
+  // since the second meta line was making the column feel crowded.
+  const folderLabel = basename(task.folder) || task.folder;
+  const dueLabel = task.due_at ? formatDueLabel(task.due_at, today) : '';
+  const autoLabel = task.auto_mode ? 'auto' : 'manual';
+  const tipParts = [
+    `${task.title} · ${autoLabel}`,
+    folderLabel,
+    dueLabel,
+    tabNumber !== null ? `open in tab ${tabNumber}` : '',
+  ].filter(Boolean);
+
   return (
     <button
       type="button"
       className={cls}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      title={
-        tabNumber !== null
-          ? `${task.title} · open in tab ${tabNumber}`
-          : task.title
-      }
+      title={tipParts.join(' · ')}
     >
-      <span className="sidebar__task-rail" aria-hidden="true" />
       <span className="sidebar__task-main">
         <span className="sidebar__task-title-row">
-          <TaskStatusDot status={task.status} />
+          <span
+            className={`sidebar__ico sidebar__task-lead${running ? ' sidebar__task-lead--running' : ''}`}
+            aria-label={task.auto_mode ? 'Auto task' : 'Manual task'}
+          >
+            <Icon name={task.auto_mode ? 'bolt' : 'circle'} size={18} />
+          </span>
           {task.pinned && (
             <span className="sidebar__task-pin" aria-label="Pinned" title="Pinned">
               ★
@@ -639,29 +657,6 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
             >
               {tabNumber}
             </span>
-          )}
-        </span>
-        <span className="sidebar__task-meta">
-          <span className="sidebar__task-folder">
-            {basename(task.folder) || task.folder}
-          </span>
-          {task.due_at && (
-            <>
-              <span className="sidebar__task-meta-sep" aria-hidden="true">
-                ·
-              </span>
-              <span className={`sidebar__task-due sidebar__task-due--${tone}`}>
-                {formatDueLabel(task.due_at, today)}
-              </span>
-            </>
-          )}
-          {task.auto_mode && (
-            <>
-              <span className="sidebar__task-meta-sep" aria-hidden="true">
-                ·
-              </span>
-              <TaskRunIndicator task={task} />
-            </>
           )}
         </span>
       </span>

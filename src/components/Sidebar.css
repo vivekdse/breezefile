@@ -37,12 +37,6 @@
 .sidebar__section-title:first-of-type {
   margin-top: 0;
 }
-.sidebar__section-title::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--panel-rule, var(--rule));
-}
 
 /* ─── Links ────────────────────────────────────────────────────────── */
 
@@ -281,7 +275,7 @@ button.sidebar__link:hover .sidebar__unpin {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1px;
-  padding: 7px 10px 7px 14px;
+  padding: 6px 10px;
   border-radius: 8px;
   background: none;
   border: none;
@@ -381,7 +375,7 @@ button.sidebar__link:hover .sidebar__unpin {
 .sidebar__task-title-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 10px;
   min-width: 0;
 }
 .sidebar__task-pin {
@@ -409,8 +403,26 @@ button.sidebar__link:hover .sidebar__unpin {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
-  letter-spacing: -0.005em;
+  font-weight: 450;
+}
+
+/* Lead icon for task rows — bolt (auto) / circle (manual). Sits in the
+   shared .sidebar__ico 18px box so it aligns 1:1 with Favorites' icons.
+   White by default; flips to green + concentric pulse when an auto run
+   is in flight. The pulse mirrors the tab attention indicator
+   (Terminal.css `tabbar-attn-pulse-go`) so users see the same visual
+   language across both surfaces. */
+.sidebar__task-lead {
+  color: var(--text-on-panel, #fff);
+}
+.sidebar__task-lead--running {
+  color: #34c759;
+  border-radius: 50%;
+  animation: sidebar-task-lead-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sidebar-task-lead-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.30); }
+  50%      { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.06); }
 }
 .sidebar__task--pinned .sidebar__task-title,
 .sidebar__task--overdue .sidebar__task-title {

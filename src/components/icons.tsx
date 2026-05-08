@@ -30,7 +30,9 @@ export type IconName =
   | 'app'
   | 'link'
   | 'file'
-  | 'bulb';
+  | 'bulb'
+  | 'bolt'
+  | 'circle';
 
 export const ICON_NAMES: readonly IconName[] = [
   'search',
@@ -58,6 +60,8 @@ export const ICON_NAMES: readonly IconName[] = [
   'link',
   'file',
   'bulb',
+  'bolt',
+  'circle',
 ] as const;
 
 export function IconSprite() {
@@ -339,6 +343,18 @@ export function IconSprite() {
             strokeLinejoin="round"
             fill="none"
           />
+        </g>
+        <g id="i-bolt">
+          <path
+            d="M13 3 5 14h6l-2 7 10-12h-6z"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            fill="none"
+            strokeLinejoin="round"
+          />
+        </g>
+        <g id="i-circle">
+          <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.5" fill="none" />
         </g>
       </defs>
     </svg>
