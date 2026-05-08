@@ -211,6 +211,16 @@ export function Terminal({
     // then dispatches it normally and our window-level listener picks it up.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
+      // Shift+Enter → send Esc+CR so Claude Code (and other TUIs that
+      // follow the iTerm `/terminal-setup` convention) inserts a newline
+      // instead of submitting. xterm.js's default sends a bare \r, which
+      // Claude reads as "submit". Returning false prevents that default;
+      // we write the alt-Enter sequence directly to the pty.
+      if (e.shiftKey && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const id = ptyIdRef.current;
+        if (id != null) fm.termWrite(id, '\x1b\r');
+        return false;
+      }
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return true;
       // ⌘/Ctrl + digit → tab jump
