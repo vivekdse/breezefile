@@ -1,4 +1,5 @@
 import { useStore } from '../store';
+import { openRunTaskModal } from './RunTaskModal';
 import './Pathbar.css';
 
 type Props = {
@@ -55,6 +56,14 @@ export function Pathbar({ path, onNavigate }: Props) {
         >
           sort: {activeTab?.sortKey}
           {activeTab?.sortReverse ? '↓' : '↑'}
+        </button>
+        <button
+          type="button"
+          className="pathbar__run"
+          title="Run a task in this folder"
+          onClick={() => openRunTaskModal(path)}
+        >
+          Run a task ▾
         </button>
         <button
           type="button"

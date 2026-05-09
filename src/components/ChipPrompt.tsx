@@ -1157,6 +1157,21 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    id: 'run',
+    label: 'Run a task',
+    aliases: ['run', 'run task', 'run a task', 'play'],
+    icon: '▸',
+    describe: (c) => `Pick a task to run in ${basename(c.cwd) || '/'}`,
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(
+        new CustomEvent('fm:openRunTask', { detail: { cwd: c.cwd } }),
+      );
+    },
+  },
+  {
     id: 'tag',
     availableInTaskMode: false,
     label: 'Tag',
@@ -2558,7 +2573,7 @@ export function ChipPrompt({
     () => {
       let base = tasksEnabled
         ? VERBS
-        : VERBS.filter((v) => v.id !== 'task' && v.id !== 'tasks');
+        : VERBS.filter((v) => v.id !== 'task' && v.id !== 'tasks' && v.id !== 'run');
       // fm-yi85 — tabKinds is an allowlist when present. When absent the
       // verb falls back to availableInTaskMode for tab-kind gating: a verb
       // okay-in-task-mode is also okay on the tasks-overview tab (settings,

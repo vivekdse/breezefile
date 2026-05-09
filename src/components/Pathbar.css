@@ -92,6 +92,7 @@
 .pathbar__back,
 .pathbar__sort,
 .pathbar__view,
+.pathbar__run,
 .pathbar__find {
   padding: 2px var(--sp-2);
   background: var(--chip);
@@ -107,6 +108,7 @@
 .pathbar__back:hover:not(:disabled),
 .pathbar__sort:hover,
 .pathbar__view:hover,
+.pathbar__run:hover,
 .pathbar__find:hover {
   background: var(--hi);
   border-color: var(--accent-soft);

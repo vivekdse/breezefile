@@ -215,7 +215,7 @@ const SLIDES: Slide[] = [
       { name: 'tasks-tab keys', what: '↑/↓ move cursor · Shift+↑/↓ extend selection · Space toggle select · Enter edit · / focus search · [ / ] snooze due ∓1 day · w snooze due +7 days' },
       { name: 'row buttons', what: 'hover or land the cursor on a row to reveal: ✓ mark done (or ↺ reopen) · ✎ edit · ↗ open in task tab · ⋮ more (status, due presets, pin, go to folder, delete) · status pill is clickable to cycle pending → in_progress → done → cancelled' },
       { name: 'task tab', what: 'tabs bound to a task swap to a focused shell: prominent header, Open Terminal + Claude/Codex/Gemini + Rerun buttons · launching an AI pre-types the task context into the prompt, sets BREEZE_TASK_ID, drops a sidecar at ~/.breezefile/active-tasks/<id>.md' },
-      { name: 'run anywhere', what: 'every folder tab has a ▶ Run task button in its header · tasks for this folder appear first, then folder-agnostic ones · runs use the active folder as cwd' },
+      { name: 'run anywhere', what: 'every folder tab has a Run a task ▾ button in its pathbar (next to sort/find), or type :run in the chip prompt · tasks for this folder appear first, then folder-agnostic ones · runs use the active folder as cwd' },
     ],
   },
   {
