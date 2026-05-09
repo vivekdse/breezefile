@@ -825,11 +825,6 @@
   background: var(--panel-2);
   color: var(--muted-on-panel);
 }
-.tasks__tag--orphan {
-  color: var(--danger, #c0392b);
-  border-color: var(--danger, #c0392b);
-}
-
 .tasks__status {
   font-size: var(--fs-xs);
   font-weight: 600;

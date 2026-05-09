@@ -39,7 +39,7 @@ import './TasksPage.css';
 
 type SortKey = 'due' | 'start' | 'created' | 'alpha';
 type GroupKey = 'folder' | 'status' | 'due' | 'flat';
-type DerivedFilter = 'all' | 'this_week' | 'overdue' | 'scheduled' | 'orphaned';
+type DerivedFilter = 'all' | 'this_week' | 'overdue' | 'scheduled';
 type AutoFilter = 'all' | 'auto' | 'manual';
 
 const ALL_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'done', 'cancelled'];
@@ -69,7 +69,6 @@ const DERIVED_LABEL: Record<DerivedFilter, string> = {
   this_week: 'Due this week',
   overdue: 'Overdue',
   scheduled: 'Scheduled',
-  orphaned: 'Orphaned',
 };
 
 const AUTO_LABEL: Record<AutoFilter, string> = {
@@ -98,52 +97,6 @@ function homeRel(p: string): string {
   const trimmed = p.replace(/\/+$/, '');
   const slash = trimmed.lastIndexOf('/');
   return slash >= 0 ? trimmed.slice(slash + 1) || '/' : trimmed;
-}
-
-function isOrphanedLooking(folder: string): boolean {
-  if (!folder) return true;
-  if (folder.includes('/..')) return true;
-  if (!folder.startsWith('/') && !folder.startsWith('~')) return true;
-  return false;
-}
-
-// fm-7fu — session-scoped cache of folder existence. We only stat
-// folders that are actually being shown (lazy reconciliation) and
-// remember the result for the rest of the session. Module scope so
-// the cache survives re-renders + filter changes.
-const folderExistsCache = new Map<string, boolean>();
-const folderExistsInflight = new Map<string, Promise<boolean>>();
-
-function probeFolderExists(p: string): Promise<boolean> {
-  const hit = folderExistsCache.get(p);
-  if (hit !== undefined) return Promise.resolve(hit);
-  const inflight = folderExistsInflight.get(p);
-  if (inflight) return inflight;
-  const promise = fm
-    .stat(p)
-    .then(
-      (s) => {
-        const ok = !!s.isDir;
-        folderExistsCache.set(p, ok);
-        return ok;
-      },
-      () => {
-        folderExistsCache.set(p, false);
-        return false;
-      },
-    )
-    .finally(() => folderExistsInflight.delete(p));
-  folderExistsInflight.set(p, promise);
-  return promise;
-}
-
-/** Combine the cheap string heuristic with the cached fs result. The
- *  heuristic still flags malformed paths immediately; the fs result —
- *  once available — overrides it (a malformed-looking path that the OS
- *  resolves is fine; a clean-looking path that doesn't exist is not). */
-function isTaskOrphaned(t: Task, exists: Record<string, boolean>): boolean {
-  if (isOrphanedLooking(t.folder)) return true;
-  return exists[t.folder] === false;
 }
 
 // Add `days` to an ISO 'YYYY-MM-DD' (timezone-naive). Used by snooze.
@@ -191,6 +144,9 @@ function dueGroupKey(t: Task, today: string): string {
   return 'Later';
 }
 
+// Group key for tasks with no anchored folder — runnable from anywhere.
+const ANY_FOLDER_KEY = 'Any folder';
+
 function groupOrder(group: GroupKey, key: string): number {
   if (group === 'due') {
     const order = ['Overdue', 'Today', 'This week', 'Later', 'No due date'];
@@ -202,6 +158,7 @@ function groupOrder(group: GroupKey, key: string): number {
     const i = order.indexOf(key as TaskStatus);
     return i < 0 ? 99 : i;
   }
+  if (group === 'folder' && key === ANY_FOLDER_KEY) return -1;
   return 0;
 }
 
@@ -235,12 +192,6 @@ export function TasksPage() {
   const lastSelectedRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-
-  // fm-7fu — local mirror of folderExistsCache for visible tasks.
-  // Effect below kicks off probes lazily (only for what's on screen).
-  const [folderExists, setFolderExists] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(folderExistsCache.entries()),
-  );
 
   // Inline due/start picker state — opened via :due / :start verbs
   const [datePicker, setDatePicker] = useState<{
@@ -323,15 +274,13 @@ export function TasksPage() {
           if (!t.start_at) return false;
           if (t.start_at <= today) return false;
           return t.status !== 'done' && t.status !== 'cancelled';
-        case 'orphaned':
-          return isTaskOrphaned(t, folderExists);
         case 'all':
         default:
           return true;
       }
     });
     return out.slice().sort((a, b) => compareTasks(a, b, sort));
-  }, [rawTasks, statuses, derived, autoFilter, showCompleted, sort, folderExists]);
+  }, [rawTasks, statuses, derived, autoFilter, showCompleted, sort]);
 
   // Group the filtered list. 'flat' returns one group with empty header.
   const groups = useMemo(() => {
@@ -341,7 +290,7 @@ export function TasksPage() {
       let key = '';
       switch (group) {
         case 'folder':
-          key = homeRel(t.folder) || '(no folder)';
+          key = t.folder ? homeRel(t.folder) : ANY_FOLDER_KEY;
           break;
         case 'status':
           key = t.status;
@@ -369,30 +318,6 @@ export function TasksPage() {
 
   // Flat order across groups — drives arrow nav.
   const flatOrder = useMemo(() => groups.flatMap((g) => g.tasks), [groups]);
-
-  // fm-7fu — lazily reconcile orphaned folders. Only stat folders that
-  // are currently in the visible list, debounce so rapid filter typing
-  // doesn't fire dozens of probes, and stop once we've cached a result.
-  useEffect(() => {
-    const targets: string[] = [];
-    const seen = new Set<string>();
-    for (const t of rawTasks) {
-      if (!t.folder || seen.has(t.folder)) continue;
-      seen.add(t.folder);
-      if (folderExistsCache.has(t.folder)) continue;
-      if (isOrphanedLooking(t.folder)) continue; // string-orphan dominates
-      targets.push(t.folder);
-    }
-    if (targets.length === 0) return;
-    const id = window.setTimeout(() => {
-      for (const p of targets) {
-        void probeFolderExists(p).then((ok) => {
-          setFolderExists((prev) => (prev[p] === ok ? prev : { ...prev, [p]: ok }));
-        });
-      }
-    }, 120);
-    return () => window.clearTimeout(id);
-  }, [rawTasks]);
 
   // Drop selection ids that fell out of view; re-anchor cursor.
   useEffect(() => {
@@ -835,7 +760,7 @@ export function TasksPage() {
       },
       'fm:tasks:filter': (detail) => {
         const v = (detail as { value?: DerivedFilter } | undefined)?.value;
-        if (v && (['all', 'this_week', 'overdue', 'scheduled', 'orphaned'] as DerivedFilter[]).includes(v)) setDerived(v);
+        if (v && (['all', 'this_week', 'overdue', 'scheduled'] as DerivedFilter[]).includes(v)) setDerived(v);
       },
       'fm:tasks:show-completed': () => setShowCompleted(true),
       'fm:tasks:hide-completed': () => setShowCompleted(false),
@@ -942,15 +867,13 @@ export function TasksPage() {
     })();
     let overdue = 0;
     let dueWeek = 0;
-    let orphan = 0;
     for (const t of rawTasks) {
       if (t.status === 'done' || t.status === 'cancelled') continue;
       if (t.due_at && t.due_at < today) overdue++;
       else if (t.due_at && t.due_at <= week) dueWeek++;
-      if (isTaskOrphaned(t, folderExists)) orphan++;
     }
-    return { overdue, dueWeek, orphan };
-  }, [rawTasks, folderExists]);
+    return { overdue, dueWeek };
+  }, [rawTasks]);
 
   // Detail panel shows the cursor task (or the single selected task when
   // exactly one is selected and the cursor is elsewhere).
@@ -1014,17 +937,7 @@ export function TasksPage() {
               {digest.dueWeek} due this week
             </button>
           )}
-          {digest.orphan > 0 && (
-            <button
-              type="button"
-              className="tasks__digest-chip"
-              onClick={() => setDerived('orphaned')}
-              title="Show orphaned"
-            >
-              {digest.orphan} orphaned
-            </button>
-          )}
-          {digest.overdue === 0 && digest.dueWeek === 0 && digest.orphan === 0 && (
+          {digest.overdue === 0 && digest.dueWeek === 0 && (
             <span className="tasks__digest-clear">Nothing pressing.</span>
           )}
         </div>
@@ -1382,7 +1295,6 @@ export function TasksPage() {
                   key={t.id}
                   task={t}
                   runCount={runCounts[t.id] ?? 0}
-                  orphan={isTaskOrphaned(t, folderExists)}
                   hideFolder={group === 'folder'}
                   selected={selected.has(t.id)}
                   cursor={cursorId === t.id}
@@ -1511,7 +1423,6 @@ function TaskRow({
   task,
   runCount,
   hideFolder,
-  orphan,
   selected,
   cursor,
   onCheckbox,
@@ -1525,7 +1436,6 @@ function TaskRow({
   task: Task;
   runCount: number;
   hideFolder?: boolean;
-  orphan: boolean;
   selected: boolean;
   cursor: boolean;
   onCheckbox: () => void;
@@ -1587,16 +1497,14 @@ function TaskRow({
         <div className="tasks__row-title">
           <TaskStatusDot status={task.status} />
           <span className="tasks__row-title-text">{task.title}</span>
-          {orphan && (
-            <span className="tasks__tag tasks__tag--orphan" title="Folder may not exist">
-              orphaned
-            </span>
-          )}
         </div>
         <div className="tasks__row-sub">
           {!hideFolder && (
-            <span className="tasks__row-folder" title={task.folder}>
-              {homeRel(task.folder)}
+            <span
+              className="tasks__row-folder"
+              title={task.folder || 'Runs from any folder'}
+            >
+              {task.folder ? homeRel(task.folder) : 'Any folder'}
             </span>
           )}
           {task.start_at && (

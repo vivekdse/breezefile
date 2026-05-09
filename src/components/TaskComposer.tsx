@@ -30,7 +30,7 @@ import {
   buildCronFromForm,
   defaultRecurrenceForm,
 } from '../recurrence';
-import type { Task, TaskCreate, TaskUpdate } from '../types';
+import type { Task, TaskCreate, TaskStatus, TaskUpdate } from '../types';
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
@@ -39,8 +39,22 @@ export type TaskComposerRequest =
 
 type Props = TaskComposerRequest & { onClose: () => void };
 
-type QuestionId = 'title' | 'folder' | 'who' | 'when';
-const QUESTIONS: QuestionId[] = ['title', 'folder', 'who', 'when'];
+type QuestionId =
+  | 'title'
+  | 'folder'
+  | 'who'
+  | 'when'
+  | 'status'
+  | 'start'
+  | 'pin'
+  | 'notes';
+// Order is the keyboard ↓ flow. Start sits right before When so the two
+// time questions read as a pair — "when can it start? / when is it due?".
+const QUESTIONS: QuestionId[] = [
+  'title', 'folder', 'who',
+  'start', 'when',
+  'status', 'pin', 'notes',
+];
 
 type ExecutorId = 'manual' | 'claude';
 
@@ -110,6 +124,45 @@ const WHO_OPTIONS: { id: ExecutorId; label: string; hint?: string }[] = [
   { id: 'claude', label: 'Claude Code', hint: 'an AI agent does it' },
 ];
 
+const STATUS_OPTIONS: { id: TaskStatus; label: string; hint?: string }[] = [
+  { id: 'pending', label: 'Pending', hint: 'not started yet' },
+  { id: 'in_progress', label: 'In progress', hint: 'actively working' },
+  { id: 'done', label: 'Done', hint: 'finished' },
+  { id: 'cancelled', label: 'Cancelled', hint: 'no longer needed' },
+];
+
+type StartOption = {
+  id: string;
+  label: string;
+  hint?: string;
+  offsetDays?: number;
+  pickDate?: boolean;
+  none?: boolean;
+};
+const START_OPTIONS: StartOption[] = [
+  { id: 'none', label: 'No start date', hint: 'available immediately', none: true },
+  { id: 'today', label: 'Today', offsetDays: 0 },
+  { id: 'tomorrow', label: 'Tomorrow', offsetDays: 1 },
+  { id: 'pick-start', label: 'Pick a date…', hint: 'choose a calendar day', pickDate: true },
+];
+
+const PIN_OPTIONS: { id: 'no' | 'yes'; label: string; hint?: string }[] = [
+  { id: 'no', label: 'Not pinned', hint: 'sits in normal order' },
+  { id: 'yes', label: 'Pin', hint: 'floats to the top of every list' },
+];
+
+function pickStartIdFromTask(task: Task | null, today: string): string {
+  // For a brand-new task we default to "today" — most users start now.
+  // Edited tasks read whatever's actually stored.
+  if (!task) return 'today';
+  if (!task.start_at) return 'none';
+  if (task.start_at === today) return 'today';
+  const t = new Date(today + 'T00:00:00');
+  t.setDate(t.getDate() + 1);
+  if (task.start_at === t.toISOString().slice(0, 10)) return 'tomorrow';
+  return 'pick-start';
+}
+
 function pickWhenIdFromTask(task: Task): string {
   if (task.auto_mode) {
     if (!task.cron) return 'on-demand';
@@ -171,14 +224,33 @@ export function TaskComposer(props: Props) {
   const [executor, setExecutor] = useState<ExecutorId>(
     initial?.auto_mode ? 'claude' : 'manual',
   );
+  const [status, setStatus] = useState<TaskStatus>(initial?.status ?? 'pending');
+  const [pinned, setPinned] = useState<boolean>(initial?.pinned ?? false);
+  // Notes doubles as the agent prompt for Claude tasks (one field, not two).
+  // If a legacy task only has auto_prompt set, surface it in notes so the
+  // user can see and edit it; we'll save it back as notes (auto_prompt
+  // always saves as null going forward).
+  const [notes, setNotes] = useState<string>(
+    initial?.notes && initial.notes.length > 0
+      ? initial.notes
+      : initial?.auto_prompt ?? '',
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [escArmed, setEscArmed] = useState(false);
   const [created, setCreated] = useState(false);
-  // 'editing' = walking through the four questions; 'commit' = all four
-  // answered, focus has hopped to Create/Cancel and the band moves off
-  // the last question onto the footer so the user sees where they are.
+  // 'editing' = walking through the questions; 'commit' = focus has
+  // moved to Create/Cancel and the band has hopped onto the footer.
   const [phase, setPhase] = useState<'editing' | 'commit'>('editing');
+
+  const [startId, setStartId] = useState<string>(
+    pickStartIdFromTask(initial, todayISO()),
+  );
+  const [pickedStart, setPickedStart] = useState<string>(
+    initial?.start_at && pickStartIdFromTask(initial, todayISO()) === 'pick-start'
+      ? initial.start_at
+      : '',
+  );
 
   const cwdSuggestion =
     props.mode === 'create' ? props.defaultFolder : initial?.folder ?? '';
@@ -244,6 +316,13 @@ export function TaskComposer(props: Props) {
     const i = visibleFolderPresets.findIndex((p) => p.v === folder);
     return i >= 0 ? i : 0;
   });
+  const [statusHighlight, setStatusHighlight] = useState(() =>
+    Math.max(0, STATUS_OPTIONS.findIndex((s) => s.id === status)),
+  );
+  const [startHighlight, setStartHighlight] = useState(() =>
+    Math.max(0, START_OPTIONS.findIndex((s) => s.id === startId)),
+  );
+  const [pinHighlight, setPinHighlight] = useState(() => (pinned ? 1 : 0));
 
   // If executor changes and the current When pick is hidden, reset.
   useEffect(() => {
@@ -269,6 +348,8 @@ export function TaskComposer(props: Props) {
   const cronInputRef = useRef<HTMLInputElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const createBtnRef = useRef<HTMLButtonElement>(null);
+  const startDateRef = useRef<HTMLInputElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
 
   // Stand down the global keyboard handler while composer is open.
   useEffect(() => {
@@ -276,12 +357,16 @@ export function TaskComposer(props: Props) {
     return () => { delete document.body.dataset.composerOpen; };
   }, []);
 
-  // Focus per active question. Title focuses the input; option questions
-  // focus the section div so digit keys aren't eaten by an input.
+  // Focus per active question. Title focuses the title input; Notes
+  // focuses the textarea (so the user can type immediately); option
+  // questions focus the section div so digit keys aren't eaten by an
+  // input.
   useEffect(() => {
     if (active === 'title') {
       titleRef.current?.focus();
       titleRef.current?.select();
+    } else if (active === 'notes') {
+      notesRef.current?.focus();
     } else {
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
@@ -327,6 +412,20 @@ export function TaskComposer(props: Props) {
     if (!o) return;
     setExecutor(o.id);
     setWhoHighlight(i);
+    setStartHighlight(START_OPTIONS.findIndex((s) => s.id === startId));
+    goNext();
+  }
+
+  function chooseStart(i: number) {
+    const opt = START_OPTIONS[i];
+    if (!opt) return;
+    setStartId(opt.id);
+    setStartHighlight(i);
+    if (opt.pickDate) {
+      setTimeout(() => startDateRef.current?.focus(), 0);
+      return;
+    }
+    setWhenHighlight(visibleWhenOptions.findIndex((w) => w.id === whenId));
     goNext();
   }
 
@@ -343,7 +442,25 @@ export function TaskComposer(props: Props) {
       setTimeout(() => cronInputRef.current?.focus(), 0);
       return;
     }
-    enterCommitPhase();
+    setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+    goNext();
+  }
+
+  function chooseStatus(i: number) {
+    const o = STATUS_OPTIONS[i];
+    if (!o) return;
+    setStatus(o.id);
+    setStatusHighlight(i);
+    setPinHighlight(pinned ? 1 : 0);
+    goNext();
+  }
+
+  function choosePin(i: number) {
+    const o = PIN_OPTIONS[i];
+    if (!o) return;
+    setPinned(o.id === 'yes');
+    setPinHighlight(i);
+    goNext();
   }
 
   function enterCommitPhase() {
@@ -352,10 +469,11 @@ export function TaskComposer(props: Props) {
   }
   function backToEditing() {
     setPhase('editing');
-    setActiveIdx(QUESTIONS.indexOf('when'));
-    setTimeout(() => sectionRef.current?.focus(), 0);
+    setActiveIdx(QUESTIONS.indexOf('notes'));
+    setTimeout(() => notesRef.current?.focus(), 0);
   }
 
+  // ↓ flow: title → folder → who → start → when → status → pin → notes → commit
   function moveDown() {
     if (active === 'title') {
       if (title.trim()) goNext();
@@ -370,19 +488,42 @@ export function TaskComposer(props: Props) {
     }
     if (active === 'who') {
       if (whoHighlight >= WHO_OPTIONS.length - 1) {
-        setWhenHighlight(0);
+        setStartHighlight(START_OPTIONS.findIndex((s) => s.id === startId));
         goNext();
       } else setWhoHighlight((i) => i + 1);
+      return;
+    }
+    if (active === 'start') {
+      if (startHighlight >= START_OPTIONS.length - 1) {
+        setWhenHighlight(visibleWhenOptions.findIndex((w) => w.id === whenId));
+        goNext();
+      } else setStartHighlight((i) => i + 1);
       return;
     }
     if (active === 'when') {
       if (whenHighlight < visibleWhenOptions.length - 1) {
         setWhenHighlight((i) => i + 1);
       } else {
-        // Already on the last option — walking down lands you on the
-        // commit phase (Create/Cancel).
-        enterCommitPhase();
+        setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+        goNext();
       }
+      return;
+    }
+    if (active === 'status') {
+      if (statusHighlight >= STATUS_OPTIONS.length - 1) {
+        setPinHighlight(pinned ? 1 : 0);
+        goNext();
+      } else setStatusHighlight((i) => i + 1);
+      return;
+    }
+    if (active === 'pin') {
+      if (pinHighlight >= PIN_OPTIONS.length - 1) goNext();
+      else setPinHighlight((i) => i + 1);
+      return;
+    }
+    if (active === 'notes') {
+      // Notes is text — ↓ outside the textarea jumps to commit.
+      enterCommitPhase();
       return;
     }
   }
@@ -400,11 +541,37 @@ export function TaskComposer(props: Props) {
       } else setWhoHighlight((i) => i - 1);
       return;
     }
-    if (active === 'when') {
-      if (whenHighlight === 0) {
+    if (active === 'start') {
+      if (startHighlight === 0) {
         setWhoHighlight(WHO_OPTIONS.length - 1);
         goBack();
+      } else setStartHighlight((i) => i - 1);
+      return;
+    }
+    if (active === 'when') {
+      if (whenHighlight === 0) {
+        setStartHighlight(START_OPTIONS.length - 1);
+        goBack();
       } else setWhenHighlight((i) => i - 1);
+      return;
+    }
+    if (active === 'status') {
+      if (statusHighlight === 0) {
+        setWhenHighlight(visibleWhenOptions.length - 1);
+        goBack();
+      } else setStatusHighlight((i) => i - 1);
+      return;
+    }
+    if (active === 'pin') {
+      if (pinHighlight === 0) {
+        setStatusHighlight(STATUS_OPTIONS.length - 1);
+        goBack();
+      } else setPinHighlight((i) => i - 1);
+      return;
+    }
+    if (active === 'notes') {
+      setPinHighlight(pinned ? 1 : 0);
+      goBack();
       return;
     }
   }
@@ -432,6 +599,12 @@ export function TaskComposer(props: Props) {
         setTimeout(() => cronInputRef.current?.focus(), 0);
         return;
       }
+    }
+    if (startId === 'pick-start' && !pickedStart) {
+      setError('Pick a start date.');
+      setActiveIdx(QUESTIONS.indexOf('start'));
+      setTimeout(() => startDateRef.current?.focus(), 0);
+      return;
     }
     setBusy(true);
     setError(null);
@@ -479,20 +652,32 @@ export function TaskComposer(props: Props) {
         }
       }
 
+      const trimmedNotes = notes.trim();
+      const startOpt = START_OPTIONS.find((s) => s.id === startId);
+      let resolvedStart: string | null = null;
+      if (startOpt) {
+        if (startOpt.pickDate) resolvedStart = pickedStart || null;
+        else if (startOpt.offsetDays != null) {
+          const today = todayISO();
+          const d = new Date(today + 'T00:00:00');
+          d.setDate(d.getDate() + startOpt.offsetDays);
+          resolvedStart = d.toISOString().slice(0, 10);
+        } else if (startOpt.none) resolvedStart = null;
+      }
       const payload = {
         title: title.trim(),
         folder: folder.trim(),
-        notes: initial?.notes ?? null,
-        ref_folder: initial?.ref_folder ?? null,
-        start_at:
-          initial?.start_at ?? (props.mode === 'create' ? todayISO() : null),
+        notes: trimmedNotes ? trimmedNotes : null,
+        start_at: resolvedStart,
         due_at: dueAt,
-        status: initial?.status ?? 'pending',
-        pinned: initial?.pinned ?? false,
+        status,
+        pinned,
         auto_mode: autoMode,
         auto_agent: autoMode ? 'claude' : null,
         cron,
-        auto_prompt: initial?.auto_prompt ?? null,
+        // Notes is the prompt for Claude tasks via the default template;
+        // we no longer expose a separate override field.
+        auto_prompt: null,
         ...(nextRunAt !== undefined ? { next_run_at: nextRunAt } : {}),
       };
 
@@ -623,6 +808,50 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
+    if (active === 'status') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        chooseStatus(statusHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= STATUS_OPTIONS.length) {
+        e.preventDefault();
+        chooseStatus(n - 1);
+        return;
+      }
+      return;
+    }
+    if (active === 'start') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        chooseStart(startHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= START_OPTIONS.length) {
+        e.preventDefault();
+        chooseStart(n - 1);
+        return;
+      }
+      return;
+    }
+    if (active === 'pin') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        choosePin(pinHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= PIN_OPTIONS.length) {
+        e.preventDefault();
+        choosePin(n - 1);
+        return;
+      }
+      return;
+    }
+    // 'notes' has no option list; the textarea handles typing. Global
+    // ↓ from outside the textarea moves to commit (handled in moveDown).
   };
 
   useEffect(() => {
@@ -650,12 +879,50 @@ export function TaskComposer(props: Props) {
     return WHO_OPTIONS.find((w) => w.id === executor)?.label ?? 'Manual';
   }
 
+  function statusSummary(): string {
+    return STATUS_OPTIONS.find((s) => s.id === status)?.label ?? 'Pending';
+  }
+  function startSummary(): string {
+    if (startId === 'pick-start') {
+      return pickedStart ? formatDateNice(pickedStart) : 'Pick a start date…';
+    }
+    return START_OPTIONS.find((s) => s.id === startId)?.label ?? 'No start date';
+  }
+  function pinSummary(): string {
+    return pinned ? 'Pinned' : 'Not pinned';
+  }
+  function notesSummary(): string {
+    const t = notes.trim();
+    if (!t) return executor === 'claude' ? 'No prompt yet' : 'No notes';
+    const oneLine = t.replace(/\s+/g, ' ');
+    return oneLine.length > 80 ? oneLine.slice(0, 77) + '…' : oneLine;
+  }
+
   function answerFor(q: QuestionId): string {
     if (q === 'title') return title.trim();
     if (q === 'folder') return folderSummary();
     if (q === 'who') return whoSummary();
     if (q === 'when') return whenSummary();
+    if (q === 'status') return statusSummary();
+    if (q === 'start') return startSummary();
+    if (q === 'pin') return pinSummary();
+    if (q === 'notes') return notesSummary();
     return '';
+  }
+
+  // Short caption that prefixes the answer in collapsed/past sections —
+  // a glance-able row like "start: today" / "end: tomorrow". Title is
+  // intentionally label-less; it's the headline for the whole task.
+  function labelFor(q: QuestionId): string | null {
+    if (q === 'title') return null;
+    if (q === 'folder') return 'folder';
+    if (q === 'who') return 'who';
+    if (q === 'start') return 'start';
+    if (q === 'when') return 'end';
+    if (q === 'status') return 'status';
+    if (q === 'pin') return 'pin';
+    if (q === 'notes') return 'notes';
+    return null;
   }
 
   function promptFor(q: QuestionId): string {
@@ -663,6 +930,14 @@ export function TaskComposer(props: Props) {
     if (q === 'folder') return 'Which folder?';
     if (q === 'who') return 'Who runs this?';
     if (q === 'when') return executor === 'claude' ? 'When should it run?' : 'When is it due?';
+    if (q === 'status') return "What's the status?";
+    if (q === 'start') return 'When can it start?';
+    if (q === 'pin') return 'Pin this task?';
+    if (q === 'notes') {
+      return executor === 'claude'
+        ? "What should the agent do? (this becomes the prompt)"
+        : 'Any notes?';
+    }
     return '';
   }
 
@@ -683,10 +958,21 @@ export function TaskComposer(props: Props) {
   }
 
   function renderInert(q: QuestionId) {
+    // In edit mode every collapsed section should show the task's
+    // current value — the user is here to inspect/change it, not to
+    // re-walk a guided flow. In create mode keep the original behavior
+    // (past = answer, future = prompt) so the flow feels stepwise.
     const isPast = QUESTIONS.indexOf(q) < activeIdx;
+    const showAnswer = props.mode === 'edit' || isPast;
+    if (!showAnswer) {
+      return <div className="composer__inert">{promptFor(q)}</div>;
+    }
+    const ans = answerFor(q) || promptFor(q);
+    const label = labelFor(q);
     return (
       <div className="composer__inert">
-        {isPast ? answerFor(q) || promptFor(q) : promptFor(q)}
+        {label && <span className="composer__inert-label">{label}</span>}
+        <span className="composer__inert-ans">{ans}</span>
       </div>
     );
   }
@@ -848,7 +1134,70 @@ export function TaskComposer(props: Props) {
             )}
           </section>
 
-          {/* Q4 — When */}
+          {/* Start */}
+          <section
+            className={sectionClasses('start')}
+            onClick={() => setActiveIdx(QUESTIONS.indexOf('start'))}
+          >
+            {isActiveSection('start') ? (
+              <div className="composer__q-active-body">
+                <div className="composer__q-prompt">{promptFor('start')}</div>
+                <ul className="composer__options" role="listbox">
+                  {START_OPTIONS.map((o, i) => (
+                    <li key={o.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={i === startHighlight}
+                        className={
+                          'composer__option' +
+                          (i === startHighlight ? ' composer__option--active' : '')
+                        }
+                        onMouseEnter={() => setStartHighlight(i)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chooseStart(i);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{i + 1}</kbd>
+                        <span className="composer__option-label">{o.label}</span>
+                        {o.hint && (
+                          <span className="composer__option-hint">{o.hint}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {startId === 'pick-start' && (
+                  <div className="composer__date-row">
+                    <input
+                      ref={startDateRef}
+                      type="date"
+                      className="composer__date-input"
+                      value={pickedStart}
+                      onChange={(e) => setPickedStart(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                          e.preventDefault();
+                          if (pickedStart) {
+                            (e.target as HTMLInputElement).blur();
+                            goNext();
+                          }
+                        }
+                      }}
+                    />
+                    <span className="composer__date-hint">
+                      {pickedStart ? formatDateNice(pickedStart) : 'choose a day'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              renderInert('start')
+            )}
+          </section>
+
+          {/* When (due / schedule) */}
           <section
             className={sectionClasses('when')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('when'))}
@@ -928,6 +1277,121 @@ export function TaskComposer(props: Props) {
               </div>
             ) : (
               renderInert('when')
+            )}
+          </section>
+
+          {/* Q5 — Status */}
+          <section
+            className={sectionClasses('status')}
+            onClick={() => setActiveIdx(QUESTIONS.indexOf('status'))}
+          >
+            {isActiveSection('status') ? (
+              <div className="composer__q-active-body">
+                <div className="composer__q-prompt">{promptFor('status')}</div>
+                <ul className="composer__options" role="listbox">
+                  {STATUS_OPTIONS.map((o, i) => (
+                    <li key={o.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={i === statusHighlight}
+                        className={
+                          'composer__option' +
+                          (i === statusHighlight ? ' composer__option--active' : '')
+                        }
+                        onMouseEnter={() => setStatusHighlight(i)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chooseStatus(i);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{i + 1}</kbd>
+                        <span className="composer__option-label">{o.label}</span>
+                        {o.hint && (
+                          <span className="composer__option-hint">{o.hint}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              renderInert('status')
+            )}
+          </section>
+
+          {/* Pin */}
+          <section
+            className={sectionClasses('pin')}
+            onClick={() => setActiveIdx(QUESTIONS.indexOf('pin'))}
+          >
+            {isActiveSection('pin') ? (
+              <div className="composer__q-active-body">
+                <div className="composer__q-prompt">{promptFor('pin')}</div>
+                <ul className="composer__options" role="listbox">
+                  {PIN_OPTIONS.map((o, i) => (
+                    <li key={o.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={i === pinHighlight}
+                        className={
+                          'composer__option' +
+                          (i === pinHighlight ? ' composer__option--active' : '')
+                        }
+                        onMouseEnter={() => setPinHighlight(i)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          choosePin(i);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{i + 1}</kbd>
+                        <span className="composer__option-label">{o.label}</span>
+                        {o.hint && (
+                          <span className="composer__option-hint">{o.hint}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              renderInert('pin')
+            )}
+          </section>
+
+          {/* Q8 — Notes (also serves as the Claude prompt) */}
+          <section
+            className={sectionClasses('notes')}
+            onClick={() => {
+              setActiveIdx(QUESTIONS.indexOf('notes'));
+              setTimeout(() => notesRef.current?.focus(), 0);
+            }}
+          >
+            {isActiveSection('notes') ? (
+              <div className="composer__q-active-body">
+                <div className="composer__q-prompt">{promptFor('notes')}</div>
+                <textarea
+                  ref={notesRef}
+                  className="composer__notes-input"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={
+                    executor === 'claude'
+                      ? 'Describe the work for the agent. This text becomes its prompt.'
+                      : 'Anything you want to remember about this task.'
+                  }
+                  rows={4}
+                  spellCheck
+                />
+                {executor === 'claude' && (
+                  <div className="composer__notes-help">
+                    Sent to Claude as the task’s context — Breeze wraps the title, folder, and due date around what you write here.
+                  </div>
+                )}
+              </div>
+            ) : (
+              renderInert('notes')
             )}
           </section>
         </main>

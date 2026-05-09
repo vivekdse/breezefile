@@ -243,7 +243,6 @@ function renderTemplate(tpl: string, task: Task): string {
     notes: task.notes,
     due_at: task.due_at,
     start_at: task.start_at,
-    ref_folder: task.ref_folder,
   };
   let out = tpl.replace(
     /\{\{#if\s+(\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g,

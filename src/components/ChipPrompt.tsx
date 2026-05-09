@@ -1977,7 +1977,6 @@ function buildTaskVerbs(): VerbDef[] {
             { id: 'this_week', label: 'Due this week', detail: 'due_at within 7 days', available: true },
             { id: 'overdue', label: 'Overdue', detail: 'past due, not done', available: true },
             { id: 'scheduled', label: 'Scheduled', detail: 'start_at in the future', available: true },
-            { id: 'orphaned', label: 'Orphaned', detail: 'folder may not exist', available: true },
           ],
         },
       ],

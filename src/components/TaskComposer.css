@@ -98,6 +98,26 @@
 .composer__q--past .composer__inert { color: var(--ink); }
 .composer__q--future .composer__inert { color: var(--muted); font-weight: 400; }
 
+/* Small caption that prefixes the answer in collapsed/past rows
+   ("start: today", "end: tomorrow", "status: pending"). Anchored to
+   the left, dimmed, and aligned to the answer baseline. */
+.composer__inert-label {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  background: var(--panel-2, rgba(127, 127, 127, 0.08));
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-right: 12px;
+  vertical-align: middle;
+  line-height: 1.6;
+}
+.composer__q--future .composer__inert-label { display: none; }
+.composer__inert-ans { vertical-align: middle; }
+
 /* ── Active body ───────────────────────────────────────────────────── */
 
 .composer__q-active-body {
@@ -271,6 +291,44 @@
 .composer__date-hint {
   font-size: 12px;
   color: var(--muted);
+}
+
+/* ── Notes question ───────────────────────────────────────────────────
+   Notes/prompt question uses a textarea instead of an option list,
+   styled to match the title input's banded feel. */
+
+/* Match the title input's chrome: transparent background, no border
+   except the bottom rule, accent on focus. The textarea differs only
+   in being multi-line and resizable. */
+.composer__notes-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 6px 0;
+  font-size: 16px;
+  line-height: 1.5;
+  font-family: inherit;
+  color: inherit;
+  outline: none;
+  box-shadow: none;
+  resize: vertical;
+  min-height: 100px;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 120ms ease;
+}
+.composer__notes-input:focus {
+  border-bottom-color: var(--accent);
+  outline: none;
+  box-shadow: none;
+}
+.composer__notes-input::placeholder { color: var(--muted); opacity: 0.55; }
+.composer__notes-help {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+  margin-top: -4px;
 }
 
 /* ── Footer ────────────────────────────────────────────────────────── */

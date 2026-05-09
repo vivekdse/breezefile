@@ -27,7 +27,6 @@ export type Task = {
   notes: string | null;
   status: TaskStatus;
   folder: string;
-  ref_folder: string | null;
   start_at: string | null; // 'YYYY-MM-DD'
   due_at: string | null;   // 'YYYY-MM-DD'
   pinned: boolean;
@@ -53,7 +52,6 @@ export type TaskCreate = {
   folder: string;
   notes?: string | null;
   status?: TaskStatus;
-  ref_folder?: string | null;
   start_at?: string | null;
   due_at?: string | null;
   pinned?: boolean;
@@ -69,7 +67,6 @@ export type TaskUpdate = Partial<{
   notes: string | null;
   status: TaskStatus;
   folder: string;
-  ref_folder: string | null;
   start_at: string | null;
   due_at: string | null;
   pinned: boolean;
@@ -191,7 +188,7 @@ function migrate(d: Database.Database) {
           notes TEXT,
           status TEXT NOT NULL CHECK(status IN ('pending','in_progress','done','cancelled')),
           folder TEXT NOT NULL,
-          ref_folder TEXT,
+          ref_folder TEXT, -- dropped in v3; kept here so the migration chain is consistent
           start_at TEXT,
           due_at TEXT,
           pinned INTEGER NOT NULL DEFAULT 0,
@@ -240,6 +237,14 @@ function migrate(d: Database.Database) {
         CREATE INDEX idx_runs_status ON task_runs(status);
       `);
     },
+
+    // v3 — drop ref_folder. The "tasks anchored to two folders" idea
+    // never shipped, and tasks with no folder are now valid (run from
+    // anywhere). DROP COLUMN is supported on SQLite ≥ 3.35 (2021), well
+    // below better-sqlite3's bundled version.
+    (db) => {
+      db.exec(`ALTER TABLE tasks DROP COLUMN ref_folder;`);
+    },
   ];
 
   const runFrom = current; // 0-indexed, matches array
@@ -259,7 +264,6 @@ function rowToTask(r: Record<string, unknown>): Task {
     notes: (r.notes as string | null) ?? null,
     status: r.status as TaskStatus,
     folder: r.folder as string,
-    ref_folder: (r.ref_folder as string | null) ?? null,
     start_at: (r.start_at as string | null) ?? null,
     due_at: (r.due_at as string | null) ?? null,
     pinned: ((r.pinned as number) ?? 0) === 1,
@@ -404,12 +408,12 @@ export function createTask(input: TaskCreate): Task {
   }
   d.prepare(
     `INSERT INTO tasks (
-      id, title, notes, status, folder, ref_folder,
+      id, title, notes, status, folder,
       start_at, due_at, pinned,
       cron, next_run_at, auto_mode, auto_agent, auto_prompt,
       created_at, updated_at, completed_at
     ) VALUES (
-      @id, @title, @notes, @status, @folder, @ref_folder,
+      @id, @title, @notes, @status, @folder,
       @start_at, @due_at, @pinned,
       @cron, @next_run_at, @auto_mode, @auto_agent, @auto_prompt,
       @created_at, @updated_at, @completed_at
@@ -420,7 +424,6 @@ export function createTask(input: TaskCreate): Task {
     notes: input.notes ?? null,
     status,
     folder: input.folder ?? '',
-    ref_folder: input.ref_folder ?? null,
     start_at: input.start_at ?? null,
     due_at: input.due_at ?? null,
     pinned: input.pinned ? 1 : 0,
@@ -498,7 +501,6 @@ export function updateTask(id: string, patch: TaskUpdate): Task {
        notes = @notes,
        status = @status,
        folder = @folder,
-       ref_folder = @ref_folder,
        start_at = @start_at,
        due_at = @due_at,
        pinned = @pinned,
@@ -516,7 +518,6 @@ export function updateTask(id: string, patch: TaskUpdate): Task {
     notes: next.notes ?? null,
     status: next.status,
     folder: next.folder,
-    ref_folder: next.ref_folder ?? null,
     start_at: next.start_at ?? null,
     due_at: next.due_at ?? null,
     pinned: next.pinned ? 1 : 0,
@@ -586,7 +587,6 @@ export function writeActiveTaskSidecar(task: Task): string {
     `title: ${yamlString(task.title)}`,
     `status: ${task.status}`,
     `folder: ${yamlString(task.folder)}`,
-    `ref_folder: ${task.ref_folder == null ? 'null' : yamlString(task.ref_folder)}`,
     `start_at: ${task.start_at == null ? 'null' : task.start_at}`,
     `due_at: ${task.due_at == null ? 'null' : task.due_at}`,
     `pinned: ${task.pinned ? 'true' : 'false'}`,

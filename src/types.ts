@@ -132,7 +132,6 @@ export type Task = {
   notes: string | null;
   status: TaskStatus;
   folder: string;
-  ref_folder: string | null;
   start_at: string | null; // 'YYYY-MM-DD'
   due_at: string | null;
   pinned: boolean;
@@ -152,7 +151,6 @@ export type TaskCreate = {
   folder: string;
   notes?: string | null;
   status?: TaskStatus;
-  ref_folder?: string | null;
   start_at?: string | null;
   due_at?: string | null;
   pinned?: boolean;
@@ -168,7 +166,6 @@ export type TaskUpdate = Partial<{
   notes: string | null;
   status: TaskStatus;
   folder: string;
-  ref_folder: string | null;
   start_at: string | null;
   due_at: string | null;
   pinned: boolean;
