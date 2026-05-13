@@ -1,9 +1,9 @@
 # Breeze File
 
-A breezy, ranger-inspired file manager for macOS. Built because I missed
-ranger's keyboard-first workflow but wanted **native drag-out to web apps
-like Slack and Gmail** — something ranger and the Linux helpers (`ripdrag`,
-`dragon`) can't do on macOS.
+A breezy, ranger-inspired file manager for macOS and Linux. Built because I
+missed ranger's keyboard-first workflow but wanted **native drag-out to web
+apps like Slack and Gmail** — something ranger and the Linux helpers
+(`ripdrag`, `dragon`) can't do on macOS.
 
 > Status: early personal build. Unsigned, distributed via my own Homebrew
 > tap. Use at your own pace.
@@ -31,7 +31,7 @@ like Slack and Gmail** — something ranger and the Linux helpers (`ripdrag`,
   defaults, miller-style preview pane, file thumbnails.
 
 Deferred for now: file-content preview pane (text peek exists), Linux
-packaging.
+packaging (Linux runs via `npm run dev` for now).
 
 ## Install
 
@@ -92,6 +92,58 @@ npm run build
 CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac
 # → release/Breezefile-<version>-arm64.dmg + .zip + Intel variants
 ```
+
+## Linux
+
+Linux is supported via `npm run dev`. A packaged Linux binary (AppImage)
+is on the roadmap; the dev workflow already gives you a working app.
+
+### Prerequisites
+
+- **Node.js 20+** and **npm** (use `nvm` or your distro's package manager).
+- **Python 3** and a **C/C++ toolchain** — `better-sqlite3` builds a native
+  module on install. Ubuntu/Debian: `sudo apt install build-essential python3`.
+  Fedora: `sudo dnf install @development-tools python3`. Arch: `base-devel`.
+- **Electron's runtime libraries.** Most desktops already have these; if
+  Electron complains, install the deps it names. On Ubuntu/Debian a typical
+  install includes: `libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2`.
+
+### Run
+
+```sh
+git clone https://github.com/vivekdse/breezefile.git
+cd breezefile
+npm install
+npm run dev
+```
+
+### What works on Linux today
+
+- Native, keyboard-first navigation; tabs, bookmarks, marks, sort.
+- **Native file/folder search** — backed by a local SQLite name index at
+  `~/.breezefile/index.db`. First launch kicks off a background walk of
+  `$HOME` (heavy dirs like `node_modules`, `.cache`, `.venv` are skipped);
+  while it builds, queries fall back to a live bounded walk so you get
+  results immediately. Subsequent queries are millisecond reads against
+  the FTS5 index. The index refreshes in the background after 6 hours.
+- Drag-out to other apps (Chromium's native HTML5 drag works under both
+  X11 and Wayland).
+- Editor themes, command prompt, bulk rename, "Open With…" via `xdg-open`.
+
+### What's macOS-only today
+
+The macOS share sheet, Finder color tags, Quick Look (`qlmanage`), iCloud
+Drive sidebar entry, and the dock-badge attention chime. The UI hides
+these verbs on Linux via the capability manifest — see
+[`docs/cross-platform-strategy.md`](docs/cross-platform-strategy.md) for
+how features are gated and how to add Linux parity for a given verb.
+
+### Data locations
+
+- `~/.breezefile/tasks.db` — the task store (existing).
+- `~/.breezefile/index.db` — the file/folder name index (Linux).
+- `~/.config/breezefile/` (or the platform's Electron `userData`) —
+  per-extension Open With bindings, terminal preferences, thumbnail cache.
 
 ## Stack
 

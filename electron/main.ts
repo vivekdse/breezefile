@@ -8,6 +8,7 @@ import { startApiServer } from './api-server';
 import { startScheduler } from './scheduler';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
+import { platform } from './platform';
 // Side-effect import: registers built-in agent runners (Claude) so the
 // scheduler / run-now endpoints can dispatch by id (epic fm-zf3m).
 import './agents';
@@ -205,15 +206,7 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('app:playAttentionSound', () => {
-    if (process.platform !== 'darwin') return;
-    try {
-      spawn('afplay', ['/System/Library/Sounds/Ping.aiff'], {
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
-    } catch {
-      /* best-effort — silent if afplay unavailable */
-    }
+    platform().playAttentionSound();
   });
   buildAppMenu();
   createWindow();

@@ -33,6 +33,7 @@ import { TerminalSplit } from './components/TerminalSplit';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore } from './store';
+import { PlatformProvider } from './platform';
 import { formatOpError, humanizeError } from './errorMessages';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
@@ -1301,8 +1302,10 @@ function ShellOverlay({ cwd, onClose }: { cwd: string; onClose: () => void }) {
 
 export function App() {
   return (
-    <StoreProvider>
-      <Shell />
-    </StoreProvider>
+    <PlatformProvider>
+      <StoreProvider>
+        <Shell />
+      </StoreProvider>
+    </PlatformProvider>
   );
 }

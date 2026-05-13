@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskFilter, TaskUpdate } from './tasks';
+import { platform } from './platform';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -401,6 +402,13 @@ export function dispatchTerminalFg(ptyId: number, state: ClaudeFgState) {
 }
 
 export function registerIpc() {
+  // Capability manifest — boot-time read by the renderer to gate verbs and UI
+  // (see docs/cross-platform-strategy.md). Synchronous on the adapter side.
+  ipcMain.handle('platform:capabilities', () => ({
+    id: platform().id,
+    ...platform().capabilities(),
+  }));
+
   // Hydrate persisted "Open With" bindings on startup so `app:open` can
   // dispatch to the bound app without an extra async hop on each call.
   void loadBindings();
@@ -1197,37 +1205,21 @@ end tell`;
   }
 
   ipcMain.handle('search:folders', async (_e, query: string, limit = 40): Promise<string[]> => {
-    if (process.platform !== 'darwin') return [];
     const q = query.trim();
     if (q.length === 0) return [];
-    // Split the query into whitespace-separated tokens and AND them. This
-    // lets the user type words out of order — "webinar folder" matches
-    // "Webinar data shared folder". Each token is a case-insensitive
-    // substring on kMDItemDisplayName.
+    // Tokens are whitespace-separated and AND-ed — "webinar folder" matches
+    // "Webinar data shared folder". Platform adapter picks an index strategy
+    // (Spotlight on Mac, BFS on Linux); we filter platform-specific noise
+    // paths (Library caches, node_modules, etc.) consistently here.
     const tokens = q.split(/\s+/).filter((t) => t.length > 0);
-    const nameClauses = tokens
-      .map((t) => `kMDItemDisplayName == "*${t.replace(/"/g, '')}*"c`)
-      .join(' && ');
-    const mdQuery = `${nameClauses} && kMDItemContentType == "public.folder"`;
-    const home = os.homedir();
-    return new Promise((resolve) => {
-      execFile(
-        'mdfind',
-        ['-onlyin', home, mdQuery],
-        { maxBuffer: 2 * 1024 * 1024, timeout: 3000 },
-        (err, stdout) => {
-          if (err) { resolve([]); return; }
-          const lines = stdout.split('\n').filter((l) => l.length > 0);
-          const filtered: string[] = [];
-          for (const line of lines) {
-            if (isNoisePath(line)) continue;
-            filtered.push(line);
-            if (filtered.length >= limit) break;
-          }
-          resolve(filtered);
-        },
-      );
-    });
+    const raw = await platform().searchFolders(tokens, limit * 2);
+    const filtered: string[] = [];
+    for (const line of raw) {
+      if (isNoisePath(line)) continue;
+      filtered.push(line);
+      if (filtered.length >= limit) break;
+    }
+    return filtered;
   });
 
   // Recursive BFS subdir walker for the chip prompt's `goto` slot. Returns
@@ -1294,6 +1286,9 @@ end tell`;
     '.npm', '.yarn', '.pnpm-store', '.cargo', '.rustup', 'DerivedData',
   ]);
 
+  // `tier: 'spotlight'` historically meant Mac Spotlight; it now means "found
+  // via the platform's broaden step" (Spotlight on Mac, BFS-under-$HOME on
+  // Linux). Wire name is preserved so renderer labels don't churn.
   type FindHit = { path: string; name: string; isDir: boolean; tier: 'local' | 'spotlight' };
 
   ipcMain.handle(
@@ -1390,23 +1385,12 @@ end tell`;
         if (out.length >= limit) break;
       }
 
-      // Broaden with Spotlight if we have headroom (only on darwin).
-      if (out.length < limit && process.platform === 'darwin') {
-        const nameClauses = tokens
-          .map((t) => `kMDItemDisplayName == "*${t.replace(/"/g, '')}*"c`)
-          .join(' && ');
-        const home = os.homedir();
-        const spotHits = await new Promise<string[]>((resolve) => {
-          execFile(
-            'mdfind',
-            ['-onlyin', home, nameClauses],
-            { maxBuffer: 2 * 1024 * 1024, timeout: 3000 },
-            (err, stdout) => {
-              if (err) { resolve([]); return; }
-              resolve(stdout.split('\n').filter((l) => l.length > 0));
-            },
-          );
-        });
+      // Broaden via the platform's index (Spotlight on Mac, BFS on Linux).
+      // Both honor $HOME scope. Mac's adapter returns mdfind hits, which is
+      // an instant superset; Linux's adapter walks $HOME synchronously and
+      // is bounded by depth + count.
+      if (out.length < limit) {
+        const spotHits = await platform().searchByIndex(tokens, limit);
         for (const p of spotHits) {
           if (out.length >= limit) break;
           if (seen.has(p)) continue;

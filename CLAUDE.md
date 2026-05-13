@@ -12,6 +12,9 @@ Ranger-like affordances: vim navigation, selection/yank/paste, sorting, tabs, co
 
 **Deferred:** file-content preview pane, Linux packaging.
 
+## Cross-platform (Mac + Linux)
+Breezefile targets both macOS and Linux. **Before adding any OS-coupled feature** (search, app launching, volumes, sound, share, window chrome, etc.), read [`docs/cross-platform-strategy.md`](docs/cross-platform-strategy.md). Rules in brief: no `process.platform` outside `electron/platform/`; OS-coupled work goes through the `PlatformAdapter`; UI gates on the capability manifest via `PlatformContext`; verbs declare `requires: '<capability>'`. Default to full or degraded parity — single-platform features require justification.
+
 ## Tracking
 Work is tracked in beads (`bd list`). Epic: `fm-ubk`. Run `bd ready` to see unblocked tasks.
 

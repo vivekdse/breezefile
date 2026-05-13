@@ -3,6 +3,20 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 const fm = {
   platform: process.platform,
   versions: process.versions,
+  capabilities: () =>
+    ipcRenderer.invoke('platform:capabilities') as Promise<{
+      id: 'mac' | 'linux';
+      spotlightSearch: boolean;
+      externalVolumes: boolean;
+      cloudMounts: boolean;
+      attentionSound: boolean;
+      dockBadge: boolean;
+      share: boolean;
+      colorTags: boolean;
+      quickLook: boolean;
+      openWithLauncher: boolean;
+      vibrancy: boolean;
+    }>,
   homedir: () => ipcRenderer.invoke('fs:homedir') as Promise<string>,
   listLocations: () =>
     ipcRenderer.invoke('fs:listLocations') as Promise<

@@ -1,8 +1,23 @@
 import type { Entry, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskUpdate } from './types';
 
+export type Capabilities = {
+  id: 'mac' | 'linux';
+  spotlightSearch: boolean;
+  externalVolumes: boolean;
+  cloudMounts: boolean;
+  attentionSound: boolean;
+  dockBadge: boolean;
+  share: boolean;
+  colorTags: boolean;
+  quickLook: boolean;
+  openWithLauncher: boolean;
+  vibrancy: boolean;
+};
+
 type Fm = {
   platform: NodeJS.Platform;
   versions: NodeJS.ProcessVersions;
+  capabilities: () => Promise<Capabilities>;
   homedir: () => Promise<string>;
   listLocations: () => Promise<
     Array<{
