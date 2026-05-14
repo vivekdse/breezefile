@@ -29,6 +29,7 @@ export type HelpSlideId =
   | 'tasks-intro'
   | 'tasks'
   | 'tasks-auto'
+  | 'remote'
   | 'tabs';
 
 declare const __APP_VERSION__: string;
@@ -234,6 +235,70 @@ const SLIDES: Slide[] = [
       { name: 'runs view', what: 'on the Tasks tab toggle from Tasks → Runs to see every recent run across every auto task in one feed · filter by status, search by title or folder, click a row to jump into that task’s history' },
       { name: 'breeze CLI', what: 'a Node `breeze` shell command talks HTTP to the running app · `breeze status`, `breeze task list / show / add / edit / done / pin / unpin / delete / open`, `breeze open <folder>`, `breeze tabs` · <id> defaults to $BREEZE_TASK_ID inside task tabs · `breeze prime` (auto-installed Claude Code hook) feeds session context on start' },
     ],
+  },
+  {
+    kind: 'narrative',
+    id: 'remote',
+    section: 'More',
+    glyph: '⇄',
+    title: 'Remote machines',
+    body: (
+      <>
+        Browse remote files locally via an <b>sshfs / macFUSE</b> mount, and
+        Breeze will automatically run terminals, Claude, and other launchers
+        on the <b>remote host</b> — not through the slow FUSE layer. Status
+        hooks (busy / idle / needs-input) tunnel back so tab indicators and
+        notifications work just like local sessions.
+        <br /><br />
+        <b>Prereqs.</b> Passwordless ssh to the host (a key in your agent,
+        an entry in <code>~/.ssh/config</code> so <code>ssh &lt;alias&gt;</code>
+        just works) plus an sshfs/macFUSE mount. Then anything under that
+        mount is "remote-aware".
+        <br /><br />
+        <b>Linux quick setup.</b>
+        <br />
+        <code>sudo apt install sshfs</code> · add to{' '}
+        <code>~/.ssh/config</code>:
+        <br />
+        <code>Host myserver</code><br />
+        <code>&nbsp;&nbsp;HostName example.com</code><br />
+        <code>&nbsp;&nbsp;User vivek</code><br />
+        <code>&nbsp;&nbsp;IdentityFile ~/.ssh/id_ed25519</code><br />
+        <code>&nbsp;&nbsp;ServerAliveInterval 15</code><br />
+        Then mount:{' '}
+        <code>mkdir -p ~/remotes/myserver &amp;&amp; sshfs myserver:/home/vivek
+        ~/remotes/myserver -o reconnect,ServerAliveInterval=15</code>
+        <br /><br />
+        <b>macOS quick setup.</b>
+        <br />
+        Install <code>brew install --cask macfuse</code> and{' '}
+        <code>brew install gromgit/fuse/sshfs-mac</code> (or use FUSE-T as an
+        alternative). Approve the macFUSE kernel extension in System
+        Settings → Privacy & Security on first install. The{' '}
+        <code>~/.ssh/config</code> + mount commands are identical to Linux.
+        <br /><br />
+        <b>How Breeze uses it.</b> When you open a terminal or launch Claude
+        in a folder under a remote mount, Breeze rewrites the spawn into{' '}
+        <code>ssh -t &lt;target&gt; …</code> and translates the path to the
+        remote root. On first connection per host, Breeze installs a small
+        status-hook script on the remote (needs <code>python3</code> — present
+        on every modern Linux/macOS by default). After that, hooks run
+        on every Claude turn.
+        <br /><br />
+        <b>Escape hatches.</b> Set <code>BREEZE_REMOTE_DISABLE=1</code> in
+        the environment to force local spawns everywhere. Drop a{' '}
+        <code>.breeze-remote-skip</code> file at a specific mountpoint to
+        opt out per-mount (useful if a mount is read-only or you want to
+        edit locally on purpose).
+        <br /><br />
+        <b>Troubleshooting.</b> Check{' '}
+        <code>~/.breezefile/claude-hook.log</code> on the remote: if posts
+        show <code>http=000</code> the reverse tunnel didn't come up — run{' '}
+        <code>ssh -v &lt;alias&gt;</code> to debug auth. If hook installation
+        fails, ensure <code>python3</code> is on the remote's login{' '}
+        <code>$PATH</code>.
+      </>
+    ),
   },
   {
     kind: 'catalog',
