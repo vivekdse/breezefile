@@ -20,7 +20,7 @@
 // selection applied, so flows like "select → images → copy → Desktop" chain
 // without extra keystrokes.
 // ────────────────────────────────────────────────────────────────────────────
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { fm } from '../bridge';
 import { runPaste } from '../clipboard';
@@ -2489,24 +2489,21 @@ export function ChipPrompt({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verb, picks.length, activeTab]);
 
-  // Sync with initialFilter whenever the overlay is (re)opened with a new
-  // pre-filled query. StrictMode's double-mount and any React timing weirdness
-  // can otherwise leave the filter state at '' even though we passed 'g'.
-  useEffect(() => {
-    if (initialFilter) {
-      setFilter(initialFilter);
-      setHighlightIdx(0);
-      // Move cursor to end of input so continued typing appends.
-      requestAnimationFrame(() => {
-        const el = inputRef.current;
-        if (el) {
-          el.focus();
-          el.setSelectionRange(initialFilter.length, initialFilter.length);
-        }
-      });
-    }
+  // Focus the input and place the caret at the end of the pre-filled query,
+  // synchronously on mount. A previous version used requestAnimationFrame,
+  // which fired *after* the user's next 1–2 keystrokes were already in the
+  // DOM and rewound the caret to initialFilter.length — causing typed
+  // characters to be inserted in front of earlier ones (e.g. "tips" → "tpsi").
+  // useLayoutEffect runs after commit but before the browser delivers further
+  // input events, so there is no window for the caret reset to race typing.
+  useLayoutEffect(() => {
+    if (!initialFilter) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(initialFilter.length, initialFilter.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialFilter]);
+  }, []);
 
   const ctx = useMemo<Ctx | null>(() => {
     if (!activeTab) return null;
