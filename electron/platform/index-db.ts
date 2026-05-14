@@ -117,18 +117,23 @@ export function isEmpty(): boolean {
   return row.n === 0;
 }
 
-// Crawl $HOME and upsert entries. Idempotent. Safe to call repeatedly; we
-// gate it with `walkInFlight` so concurrent searches share a single pass.
+// Refresh the index incrementally. On a tree with no changes, this only
+// lstat()s each known directory and writes nothing — the heavy walk only
+// happens for directories whose mtime advanced since the last refresh.
+//
+// Why mtime: a directory's mtime changes when an entry is added, removed,
+// or renamed inside it. For a name-only index, that's the only signal we
+// need. File content changes don't affect parent mtime, but they also
+// don't affect what we index. Idempotent; concurrent callers share one pass.
 export function rebuild(): Promise<void> {
   if (walkInFlight) return walkInFlight;
-  walkInFlight = doRebuild().finally(() => { walkInFlight = null; });
+  walkInFlight = doRefresh().finally(() => { walkInFlight = null; });
   return walkInFlight;
 }
 
-async function doRebuild(): Promise<void> {
+async function doRefresh(): Promise<void> {
   const d = open();
   const root = os.homedir();
-  const now = Date.now();
 
   const upsert = d.prepare(`
     INSERT INTO entries(path, name, lname, parent, is_dir, mtime, indexed_at)
@@ -137,74 +142,147 @@ async function doRebuild(): Promise<void> {
       name=excluded.name, lname=excluded.lname, parent=excluded.parent,
       is_dir=excluded.is_dir, mtime=excluded.mtime, indexed_at=excluded.indexed_at
   `);
-  const upsertFts = d.prepare(`
-    INSERT INTO entries_fts(rowid, lname, path)
-    VALUES ((SELECT rowid FROM entries WHERE path = @path), @lname, @path)
-  `);
+  const insertFts = d.prepare(
+    'INSERT INTO entries_fts(rowid, lname, path) VALUES (?, ?, ?)'
+  );
+  const getRowid = d.prepare('SELECT rowid FROM entries WHERE path = ?');
+  const getChildren = d.prepare(
+    'SELECT path, name, is_dir, mtime FROM entries WHERE parent = ?'
+  );
+  const deleteEntry = d.prepare('DELETE FROM entries WHERE path = ?');
+  const deleteFtsByRowid = d.prepare('DELETE FROM entries_fts WHERE rowid = ?');
+  // For dir deletes, drop the whole subtree (path = X or starts with X/).
+  const subtreeRowids = d.prepare(
+    "SELECT rowid FROM entries WHERE path = ? OR path LIKE ?"
+  );
+  const deleteSubtree = d.prepare(
+    "DELETE FROM entries WHERE path = ? OR path LIKE ?"
+  );
 
-  // Reset FTS before rebuild — cheaper than diffing for first cut. The
-  // primary `entries` table is upserted so partial walks leave a usable DB.
-  d.exec('DELETE FROM entries_fts');
+  type StoredChild = { path: string; name: string; is_dir: number; mtime: number };
+  type Frontier = { dir: string; depth: number; storedMtime: number | null };
 
-  type Frontier = { dir: string; depth: number };
-  let frontier: Frontier[] = [{ dir: root, depth: 0 }];
-  const BATCH = 500;
-  let batch: Array<{
-    path: string; name: string; lname: string; parent: string;
-    is_dir: number; mtime: number; indexed_at: number;
-  }> = [];
-
-  const flush = () => {
-    if (batch.length === 0) return;
-    d.transaction((rows: typeof batch) => {
-      for (const r of rows) {
-        upsert.run(r);
-        upsertFts.run({ path: r.path, lname: r.lname });
-      }
-    })(batch);
-    batch = [];
-  };
+  const rootMeta = d.prepare("SELECT value FROM meta WHERE key='root_mtime'").get() as
+    | { value: string } | undefined;
+  let frontier: Frontier[] = [
+    { dir: root, depth: 0, storedMtime: rootMeta ? Number(rootMeta.value) : null },
+  ];
 
   while (frontier.length > 0) {
-    const next: Frontier[] = [];
-    await Promise.all(
-      frontier.map(async ({ dir, depth }) => {
-        let ents;
-        try {
-          ents = await fs.readdir(dir, { withFileTypes: true });
-        } catch {
-          return;
+    const nextFrontier: Frontier[] = [];
+
+    // Per-dir results computed off the DB thread, then applied below.
+    const results = await Promise.all(
+      frontier.map(async (f) => {
+        let st;
+        try { st = await fs.lstat(f.dir); } catch { return null; }
+        const liveMtime = Math.floor(st.mtimeMs);
+        if (f.storedMtime !== null && liveMtime === f.storedMtime) {
+          return { kind: 'unchanged' as const, dir: f.dir, depth: f.depth };
         }
-        for (const ent of ents) {
-          if (SKIP_NAMES.has(ent.name)) continue;
-          const full = path.join(dir, ent.name);
+        let ents;
+        try { ents = await fs.readdir(f.dir, { withFileTypes: true }); }
+        catch { return null; }
+        // Stat subdirs so we can store their mtime for next-launch compare.
+        // Non-dirs don't need lstat (we only index names).
+        const childInfo = await Promise.all(ents.map(async (ent) => {
+          if (SKIP_NAMES.has(ent.name)) return null;
           const isDir = ent.isDirectory();
           let mtime = 0;
-          try {
-            const st = await fs.lstat(full);
-            mtime = Math.floor(st.mtimeMs);
-          } catch {
-            continue;
+          if (isDir) {
+            try { mtime = Math.floor((await fs.lstat(path.join(f.dir, ent.name))).mtimeMs); }
+            catch { return null; }
           }
-          batch.push({
-            path: full,
-            name: ent.name,
-            lname: ent.name.toLowerCase(),
-            parent: dir,
-            is_dir: isDir ? 1 : 0,
-            mtime,
-            indexed_at: now,
-          });
-          if (batch.length >= BATCH) flush();
-          if (isDir && !ent.name.startsWith('.') && depth + 1 < MAX_DEPTH) {
-            next.push({ dir: full, depth: depth + 1 });
-          }
-        }
+          return { name: ent.name, isDir, mtime };
+        }));
+        return {
+          kind: 'changed' as const,
+          dir: f.dir,
+          depth: f.depth,
+          liveMtime,
+          children: childInfo.filter((c): c is NonNullable<typeof c> => c !== null),
+        };
       }),
     );
-    frontier = next;
+
+    d.transaction(() => {
+      const now = Date.now();
+      for (const r of results) {
+        if (!r) continue;
+        if (r.kind === 'unchanged') {
+          // Skip readdir; just enqueue known subdirs to check deeper.
+          const kids = getChildren.all(r.dir) as StoredChild[];
+          for (const c of kids) {
+            if (c.is_dir === 1 && r.depth + 1 < MAX_DEPTH && !c.name.startsWith('.')) {
+              nextFrontier.push({ dir: c.path, depth: r.depth + 1, storedMtime: c.mtime });
+            }
+          }
+          continue;
+        }
+        // Changed: diff against stored children.
+        const stored = getChildren.all(r.dir) as StoredChild[];
+        const storedByName = new Map<string, StoredChild>();
+        for (const s of stored) storedByName.set(s.name, s);
+        const liveNames = new Set<string>();
+        for (const c of r.children) {
+          liveNames.add(c.name);
+          const full = path.join(r.dir, c.name);
+          const before = getRowid.get(full) as { rowid: number } | undefined;
+          upsert.run({
+            path: full,
+            name: c.name,
+            lname: c.name.toLowerCase(),
+            parent: r.dir,
+            is_dir: c.isDir ? 1 : 0,
+            mtime: c.mtime,
+            indexed_at: now,
+          });
+          if (!before) {
+            const after = getRowid.get(full) as { rowid: number };
+            insertFts.run(after.rowid, c.name.toLowerCase(), full);
+          }
+          if (c.isDir && r.depth + 1 < MAX_DEPTH && !c.name.startsWith('.')) {
+            nextFrontier.push({
+              dir: full,
+              depth: r.depth + 1,
+              storedMtime: storedByName.get(c.name)?.mtime ?? null,
+            });
+          }
+        }
+        // Removals (and subtrees for removed dirs).
+        for (const [name, s] of storedByName) {
+          if (liveNames.has(name)) continue;
+          if (s.is_dir === 1) {
+            const like = s.path + '/%';
+            const rows = subtreeRowids.all(s.path, like) as Array<{ rowid: number }>;
+            for (const rr of rows) deleteFtsByRowid.run(rr.rowid);
+            deleteSubtree.run(s.path, like);
+          } else {
+            const row = getRowid.get(s.path) as { rowid: number } | undefined;
+            if (row) deleteFtsByRowid.run(row.rowid);
+            deleteEntry.run(s.path);
+          }
+        }
+        // Update this dir's own row mtime (skip root — it has no parent row).
+        if (r.dir !== root) {
+          d.prepare('UPDATE entries SET mtime = ?, indexed_at = ? WHERE path = ?')
+            .run(r.liveMtime, now, r.dir);
+        }
+      }
+    })();
+
+    frontier = nextFrontier;
   }
-  flush();
+
+  // Persist root mtime for next launch.
+  try {
+    const rst = await fs.lstat(root);
+    d.prepare(
+      "INSERT INTO meta(key,value) VALUES ('root_mtime', ?) " +
+      "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).run(String(Math.floor(rst.mtimeMs)));
+  } catch { /* ignore */ }
+
   setLastBuildMs(Date.now());
 }
 

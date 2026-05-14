@@ -120,30 +120,32 @@ function friendlyFsError(err: unknown, ctx: { op: 'mkdir' | 'rename' | 'touch'; 
 
 async function readdirEntries(dirpath: string): Promise<Entry[]> {
   const abs = expandHome(dirpath);
-  const names = await fs.readdir(abs);
-  const out: Entry[] = [];
-  for (const name of names) {
-    const full = path.join(abs, name);
-    try {
-      const lst = await fs.lstat(full);
-      const ext = name.includes('.') && !name.startsWith('.')
-        ? name.split('.').pop()!.toLowerCase()
-        : undefined;
-      out.push({
-        name,
-        path: full,
-        kind: classify(name, lst, lst.mode),
-        ext,
-        size: lst.size,
-        mtimeMs: lst.mtimeMs,
-        ctimeMs: lst.ctimeMs,
-        isHidden: name.startsWith('.'),
-      });
-    } catch {
-      // skip unreadable entries
-    }
-  }
-  return out;
+  const dirents = await fs.readdir(abs, { withFileTypes: true });
+  const results = await Promise.all(
+    dirents.map(async (d): Promise<Entry | null> => {
+      const name = d.name;
+      const full = path.join(abs, name);
+      try {
+        const lst = await fs.lstat(full);
+        const ext = name.includes('.') && !name.startsWith('.')
+          ? name.split('.').pop()!.toLowerCase()
+          : undefined;
+        return {
+          name,
+          path: full,
+          kind: classify(name, lst, lst.mode),
+          ext,
+          size: lst.size,
+          mtimeMs: lst.mtimeMs,
+          ctimeMs: lst.ctimeMs,
+          isHidden: name.startsWith('.'),
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return results.filter((e): e is Entry => e !== null);
 }
 
 async function copyRecursive(src: string, dst: string) {
