@@ -50,7 +50,7 @@ function hookScriptPath(): string {
   return path.join(os.homedir(), '.breezefile', 'claude-hook.sh');
 }
 
-const HOOK_SCRIPT = `#!/bin/sh
+export const HOOK_SCRIPT = `#!/bin/sh
 # fm-z7v — Claude Code hook → file_manager bridge.
 # Argv: $1 = busy|idle|waiting.
 #   busy    — UserPromptSubmit (turn started)
@@ -72,19 +72,24 @@ echo "[$ts] argv=$state pty=\${BREEZE_PTY_ID:-<unset>} ppid=$PPID" >>"$log"
 [ "$state" = "busy" ] || [ "$state" = "idle" ] || [ "$state" = "waiting" ] || { echo "  bad state, exit" >>"$log"; exit 0; }
 [ -n "\${BREEZE_PTY_ID:-}" ] || { echo "  pty unset, exit" >>"$log"; exit 0; }
 api="$HOME/.breezefile/api.json"
-[ -f "$api" ] || { echo "  api.json missing, exit" >>"$log"; exit 0; }
-# Tiny JSON pluck. The api.json keys are well-known and never contain
-# escape sequences, so a quoted-string regex is safe and avoids a
-# python/jq dependency.
-port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$api" | head -n1)
-tok=$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$api" | head -n1)
+# Env vars win over api.json — the remote-hook path injects them via ssh
+# and has no api.json. Locally, env is unset and we fall through to the
+# file.
+host="\${BREEZE_API_HOST:-127.0.0.1}"
+port="\${BREEZE_API_PORT:-}"
+tok="\${BREEZE_API_TOKEN:-}"
+if [ -z "$port" ] || [ -z "$tok" ]; then
+  [ -f "$api" ] || { echo "  api.json missing and env unset, exit" >>"$log"; exit 0; }
+  port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' "$api" | head -n1)
+  tok=$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$api" | head -n1)
+fi
 [ -n "$port" ] && [ -n "$tok" ] || { echo "  port/tok parse failed, exit" >>"$log"; exit 0; }
-echo "  POST pty=$BREEZE_PTY_ID state=$state port=$port" >>"$log"
+echo "  POST pty=$BREEZE_PTY_ID state=$state host=$host port=$port" >>"$log"
 http=$(curl -s -m 1 -o /dev/null -w '%{http_code}' -X POST \\
   -H "Authorization: Bearer $tok" \\
   -H "Content-Type: application/json" \\
   --data "{\\"pty_id\\":$BREEZE_PTY_ID,\\"state\\":\\"$state\\"}" \\
-  "http://127.0.0.1:$port/claude-state" 2>>"$log" || echo "curl-fail")
+  "http://$host:$port/claude-state" 2>>"$log" || echo "curl-fail")
 echo "  http=$http" >>"$log"
 `;
 

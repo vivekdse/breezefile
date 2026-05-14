@@ -9,6 +9,8 @@ import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskFilter, TaskUpdate } from './tasks';
 import { platform } from './platform';
+import { resolveRemote, shQuote } from './remoteRoute';
+import { ensureRemoteHooks, readLocalApi, pickRemotePort } from './remoteHooks';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -1562,11 +1564,71 @@ end tell`;
     ): Promise<number> => {
       const cwd = expandHome(opts.cwd);
       const def = defaultShell();
-      const file = opts.shell ?? def.file;
-      const args = opts.args ?? def.args;
+      let file = opts.shell ?? def.file;
+      let args = opts.args ?? def.args;
+      let spawnCwd = cwd;
       const cols = Math.max(2, Math.min(opts.cols ?? 80, 1000));
       const rows = Math.max(2, Math.min(opts.rows ?? 24, 1000));
       const id = nextPtyId++;
+
+      // Remote routing: if cwd lives under an sshfs/macFUSE mount, swap the
+      // local shell for `ssh -t <target> …` so the PTY runs on the remote
+      // host. Translators run on the local mountpoint → remote root.
+      // Failures here just log; spawn falls through to the local shell.
+      const remote = await resolveRemote(cwd).catch(() => null);
+      let remoteTarget: string | undefined;
+      if (remote) {
+        remoteTarget = remote.target;
+        // Pull api.json so we can plumb the port+token into the remote
+        // hook via env + reverse-ssh tunnel. If api-server isn't ready,
+        // we still open the shell — the hook just won't report status.
+        const api = readLocalApi();
+        const remotePort = api ? pickRemotePort(api.port) : null;
+        // Ensure-install the hook on the remote (cached by content hash).
+        // Fire-and-forget on failure — never block the user's terminal.
+        if (api) {
+          ensureRemoteHooks(remote.target).catch(() => false);
+        }
+
+        // Env to inject on the remote side. The hook script picks these
+        // up; api.json doesn't exist on the remote so env is mandatory.
+        const envParts: string[] = [`BREEZE_PTY_ID=${id}`];
+        if (api && remotePort != null) {
+          envParts.push(`BREEZE_API_HOST=127.0.0.1`);
+          envParts.push(`BREEZE_API_PORT=${remotePort}`);
+          envParts.push(`BREEZE_API_TOKEN=${shQuote(api.token)}`);
+        }
+        const envPrefix = envParts.join(' ');
+
+        // Build the remote command. Preserve caller intent (tmux vs
+        // login shell). For tmux, the local args have the *local* cwd in
+        // `-c`; swap to the remote cwd.
+        let inner: string;
+        if (file === 'tmux') {
+          const remoteArgs = args
+            .map((a) => (a === cwd ? remote.remoteCwd : a))
+            .map(shQuote)
+            .join(' ');
+          inner = `${envPrefix} tmux ${remoteArgs}`;
+        } else {
+          inner = `${envPrefix} sh -c 'cd ${shQuote(remote.remoteCwd)} && exec $SHELL -l'`;
+        }
+
+        const sshArgs = ['-t'];
+        if (api && remotePort != null) {
+          // -R: reverse-tunnel remote:remotePort → local 127.0.0.1:apiPort.
+          // ExitOnForwardFailure=no (default) lets the 2nd+ concurrent
+          // ssh to the same host share the existing tunnel silently.
+          sshArgs.push('-R', `${remotePort}:127.0.0.1:${api.port}`);
+        }
+        sshArgs.push(remote.target, inner);
+
+        file = 'ssh';
+        args = sshArgs;
+        // Local cwd is irrelevant once we ssh out; use $HOME so node-pty
+        // doesn't fail if the mountpoint is momentarily unreachable.
+        spawnCwd = os.homedir();
+      }
       // BREEZE_PTY_ID lets Claude Code hooks (fm-z7v) tell us which tab
       // a UserPromptSubmit/Stop event belongs to. Set before spawn so it
       // propagates into the shell and any child it execs.
@@ -1574,10 +1636,12 @@ end tell`;
         name: 'xterm-256color',
         cols,
         rows,
-        cwd,
-        env: ptyEnv({ ...opts.env, BREEZE_PTY_ID: String(id) }) as {
-          [key: string]: string;
-        },
+        cwd: spawnCwd,
+        env: ptyEnv({
+          ...opts.env,
+          BREEZE_PTY_ID: String(id),
+          ...(remoteTarget ? { BREEZE_REMOTE_TARGET: remoteTarget } : {}),
+        }) as { [key: string]: string },
       });
       const senderId = e.sender.id;
       ptys.set(id, { proc, senderId, cmd: file });
