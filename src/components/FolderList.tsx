@@ -19,9 +19,17 @@ import type { HelpSlideId } from './HelpTour';
 import { formatOpError } from '../errorMessages';
 import './FolderList.css';
 
-type EmptyKind = 'truly-empty' | 'all-hidden' | 'filtered-out';
+type EmptyKind = 'loading' | 'truly-empty' | 'all-hidden' | 'filtered-out';
 
 function FolderEmptyState({ kind }: { kind: EmptyKind }) {
+  if (kind === 'loading') {
+    return (
+      <div className="folder-list__empty" role="status" aria-live="polite">
+        <div className="folder-list__empty-glyph" aria-hidden>…</div>
+        <div className="folder-list__empty-title">Loading…</div>
+      </div>
+    );
+  }
   let title: string;
   let hint: React.ReactNode;
   let helpSlide: HelpSlideId;
@@ -308,6 +316,7 @@ export function FolderList() {
   const tab = activeTab;
   const col = lastCol(tab);
   const cwd = tab.trail[col];
+  const loaded = state.entriesByPath[cwd] !== undefined;
   const rawCount = state.entriesByPath[cwd]?.length ?? 0;
   const allEntries = visibleEntries(state.entriesByPath[cwd], tab);
   // fm-uns — tag-combination filter narrows the visible list. When the
@@ -322,11 +331,13 @@ export function FolderList() {
   const emptyKind: EmptyKind | null =
     entries.length > 0
       ? null
-      : tagFilterActive && allEntries.length > 0
-        ? 'filtered-out'
-        : rawCount > 0 && allEntries.length === 0
-          ? 'all-hidden'
-          : 'truly-empty';
+      : !loaded
+        ? 'loading'
+        : tagFilterActive && allEntries.length > 0
+          ? 'filtered-out'
+          : rawCount > 0 && allEntries.length === 0
+            ? 'all-hidden'
+            : 'truly-empty';
   const selIdx = tab.selected[col] ?? 0;
   // Resolve active tag defs once per render so each row lookup is cheap.
   const vizTags = tab.tagViz
