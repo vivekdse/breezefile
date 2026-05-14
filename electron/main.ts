@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, protocol, Notification as ElectronNotification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -208,6 +208,38 @@ app.whenReady().then(() => {
   ipcMain.handle('app:playAttentionSound', () => {
     platform().playAttentionSound();
   });
+  // Attention notifications routed via main process so the click handler
+  // is reliable on Linux libnotify daemons (the web Notification API
+  // delivered clicks unreliably across daemons, and any "View" button
+  // surfaced by the daemon was a no-op). On click: focus the window and
+  // tell the renderer which tab to select.
+  ipcMain.handle(
+    'app:showAttentionNotification',
+    (_e, opts: { title: string; body: string; tabId: string }) => {
+      try {
+        if (!ElectronNotification.isSupported()) return;
+        const n = new ElectronNotification({
+          title: opts.title,
+          body: opts.body,
+          silent: true,
+        });
+        n.on('click', () => {
+          const w =
+            BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ?? null;
+          if (w) {
+            if (w.isMinimized()) w.restore();
+            w.show();
+            w.focus();
+            w.webContents.send('app:notification-clicked', { tabId: opts.tabId });
+          }
+          try { n.close(); } catch { /* already gone */ }
+        });
+        n.show();
+      } catch (e) {
+        console.warn('[notify] show failed:', (e as Error).message);
+      }
+    },
+  );
   buildAppMenu();
   createWindow();
 });

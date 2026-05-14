@@ -160,6 +160,8 @@ type Fm = {
   setDockBadge: (text: string) => Promise<void>;
   playAttentionSound: () => Promise<void>;
   onAppFocus: (cb: (focused: boolean) => void) => () => void;
+  showAttentionNotification: (opts: { title: string; body: string; tabId: string }) => Promise<void>;
+  onNotificationClicked: (cb: (tabId: string) => void) => () => void;
 };
 
 export type Launcher = {

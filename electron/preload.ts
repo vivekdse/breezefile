@@ -285,6 +285,13 @@ const fm = {
     ipcRenderer.on('app:focus', handler);
     return () => ipcRenderer.off('app:focus', handler);
   },
+  showAttentionNotification: (opts: { title: string; body: string; tabId: string }) =>
+    ipcRenderer.invoke('app:showAttentionNotification', opts) as Promise<void>,
+  onNotificationClicked: (cb: (tabId: string) => void) => {
+    const handler = (_e: unknown, payload: { tabId: string }) => cb(payload.tabId);
+    ipcRenderer.on('app:notification-clicked', handler);
+    return () => ipcRenderer.off('app:notification-clicked', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

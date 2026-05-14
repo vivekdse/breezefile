@@ -139,7 +139,7 @@ function Shell() {
       // tab — they don't need a notification for something on screen.
       // Urgent (mid-turn Notification) always banners.
       if (!urgent && appFocusRef.current && activeTabIdxRef.current === idx) return;
-      if (!notifyOnAttentionRef.current || typeof Notification === 'undefined') return;
+      if (!notifyOnAttentionRef.current) return;
       const tab = tabsRef.current[idx];
       if (!tab) return;
       const folder = tab.terminal?.cwd
@@ -158,19 +158,11 @@ function Shell() {
       if (soundOnAttentionRef.current) {
         void fm.playAttentionSound();
       }
-      try {
-        const n = new Notification(title, {
-          body,
-          silent: true,
-          tag: `fm-attn-${tab.id}`,
-        });
-        n.onclick = () => {
-          window.focus();
-          dispatch({ type: 'selectTab', index: idx });
-        };
-      } catch {
-        /* notifications unavailable / disabled at OS level */
-      }
+      // Route via main process so click works reliably on Linux libnotify
+      // daemons and any "View" button surfaced by the daemon focuses the
+      // right tab. The main-side handler emits 'app:notification-clicked'
+      // with tabId; the listener below resolves that to current index.
+      void fm.showAttentionNotification({ title, body, tabId: tab.id });
     };
 
     // term:data BEL/OSC9 detection was removed: Claude's TUI emits BEL
@@ -270,6 +262,17 @@ function Shell() {
   }, [appFocused]);
   useEffect(() => {
     const off = fm.onAppFocus((f) => setAppFocused(f));
+    return off;
+  }, []);
+
+  // Main process emits this when the user clicks an attention notification.
+  // Resolve tabId → current index here (tab order may have changed since
+  // the notification was shown) and focus that tab.
+  useEffect(() => {
+    const off = fm.onNotificationClicked((tabId) => {
+      const idx = tabsRef.current.findIndex((t) => t.id === tabId);
+      if (idx >= 0) dispatch({ type: 'selectTab', index: idx });
+    });
     return off;
   }, []);
 
