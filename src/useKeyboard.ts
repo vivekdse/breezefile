@@ -697,7 +697,20 @@ export function useKeyboard(
         const entry = entries[tab.selected[lastCol(tab)] ?? 0];
         if (!entry) return;
         if (entry.kind === 'dir') openPath(entry.path);
-        else fm.open(entry.path);
+        else {
+          // Markdown opens in Breeze's in-app editor; everything else
+          // is routed through `fm.open`, which consults the per-ext
+          // bindings (electron/ipc.ts:app:open) and falls back to the
+          // OS default app. Plain `.txt` etc. used to land in the
+          // terminal on some Linux MIME setups — route them through
+          // the binding flow too so the user's chosen GUI editor wins.
+          const ext = entry.path.split('.').pop()?.toLowerCase() ?? '';
+          if (ext === 'md' || ext === 'mdx') {
+            dispatch({ type: 'openEditTab', path: entry.path, focus: true });
+          } else {
+            void fm.open(entry.path);
+          }
+        }
       }
       function goLeft() {
         // marks are scoped to the cwd (fm-pcs) — wipe on any cwd change.
