@@ -106,7 +106,9 @@ type Fm = {
     shell?: string;
     args?: string[];
     env?: Record<string, string>;
+    remoteAttach?: { target: string; ttlSec?: number };
   }) => Promise<number>;
+  remoteListTargets: () => Promise<string[]>;
   termWrite: (id: number, data: string) => void;
   termResize: (id: number, cols: number, rows: number) => void;
   termKill: (id: number, signal?: string) => Promise<void>;

@@ -76,6 +76,8 @@ type Ctx = {
   // Open Terminal verb's conditional 'Which terminal' slot.
   defaultTerminal: string | null;
   installedTerminals: string[];
+  // ssh targets from active sshfs mounts — drives the remote-attach verb.
+  remoteTargets: string[];
   // fm-jtu — does the active tab already have an embedded terminal pane?
   activeTabHasTerminal: boolean;
   // fm-jtu — the active tab's terminal handle (when present), so verbs
@@ -138,6 +140,7 @@ type Verb =
   | 'openTerminal'
   | 'term'
   | 'term-close'
+  | 'remote-attach'
   | 'newtag'
   | 'tag'
   | 'untag'
@@ -994,6 +997,66 @@ const VERBS: VerbDef[] = [
           type: 'setStatus',
           msg: formatOpError('terminal', err),
         });
+      }
+      api.closeOverlay();
+    },
+  },
+  {
+    // Open a terminal pane that ssh's into a host from an active sshfs
+    // mount, with a session-scoped breeze CLI reachable over a
+    // reverse-ssh tunnel. The session token is minted in-process and
+    // revoked when this pane's pty exits, so detached/cron processes on
+    // the remote can never touch the task API.
+    id: 'remote-attach',
+    label: 'Remote attach (breeze on a remote)',
+    aliases: ['remote-attach', 'attach', 'remote', 'ssh-attach'],
+    icon: '⇄',
+    describe: (c) =>
+      c.remoteTargets.length
+        ? 'Open an SSH shell on a mounted host with breeze attached'
+        : 'No active sshfs mounts — mount a remote first',
+    isAvailable: (c) =>
+      c.remoteTargets.length
+        ? { ok: true }
+        : { ok: false, reason: 'No active sshfs mounts to attach to' },
+    slots: [
+      {
+        label: 'Host',
+        getOptions: (c) =>
+          c.remoteTargets.map((t) => ({
+            id: t,
+            label: t,
+            detail: 'ssh target from an active sshfs mount',
+            available: true,
+          })),
+      },
+    ],
+    execute: async (c, [target], api) => {
+      if (!target) {
+        api.dispatch({ type: 'setStatus', msg: 'no host selected' });
+        api.closeOverlay();
+        return;
+      }
+      if (api.activeTabTerminal) {
+        api.dispatch({ type: 'setStatus', msg: 'terminal already open in this tab' });
+        api.closeOverlay();
+        return;
+      }
+      try {
+        const ptyId = await spawnTerminal({
+          cwd: c.cwd,
+          sessionLabel: `attach-${target}`,
+          remoteAttach: { target },
+        });
+        api.dispatch({
+          type: 'openTerminal',
+          tabIndex: api.activeTabIndex,
+          ptyId,
+          cwd: c.cwd,
+        });
+        api.dispatch({ type: 'setStatus', msg: `attaching to ${target}…` });
+      } catch (err) {
+        api.dispatch({ type: 'setStatus', msg: formatOpError('remote-attach', err) });
       }
       api.closeOverlay();
     },
@@ -2417,6 +2480,7 @@ export function ChipPrompt({
   const [localSubdirs, setLocalSubdirs] = useState<string[]>([]);
   const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
   const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
+  const [remoteTargets, setRemoteTargets] = useState<string[]>([]);
   const [launchers, setLaunchers] = useState<import('../bridge').Launcher[]>([]);
   const searchTokenRef = useRef(0); // guards against out-of-order resolves
   const subdirsTokenRef = useRef(0);
@@ -2429,6 +2493,8 @@ export function ChipPrompt({
     // Terminal verb can render its slot immediately without an async gap.
     void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
     void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
+    // sshfs-mount ssh targets for the remote-attach verb's host slot.
+    void fm.remoteListTargets().then(setRemoteTargets).catch(() => {});
     // fm-g6r — preload the user's launcher list so :claude/:codex/:gemini
     // surface in the verb picker without a per-frame async fetch.
     void fm.launchersList().then(setLaunchers).catch(() => {});
@@ -2580,6 +2646,7 @@ export function ChipPrompt({
       forwardLen: activeTab.forward.length,
       defaultTerminal,
       installedTerminals,
+      remoteTargets,
       activeTabHasTerminal: !!activeTab.terminal,
       activeTabTerminal: activeTab.terminal ? { ptyId: activeTab.terminal.ptyId } : undefined,
       launchers,
@@ -2589,7 +2656,7 @@ export function ChipPrompt({
       activeTabKind: activeTab.kind,
       activeTabFoldersFirst: activeTab.foldersFirst ?? true,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, launchers, state.customTags, state.tagPaths]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, remoteTargets, launchers, state.customTags, state.tagPaths]);
 
   if (!activeTab || !ctx) return null;
 

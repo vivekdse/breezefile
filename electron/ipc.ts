@@ -9,8 +9,9 @@ import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskFilter, TaskUpdate } from './tasks';
 import { platform } from './platform';
-import { resolveRemote, shQuote } from './remoteRoute';
+import { resolveRemote, shQuote, listRemoteTargets } from './remoteRoute';
 import { ensureRemoteHooks, readLocalApi, pickRemotePort } from './remoteHooks';
+import { mintSessionToken, revokeSessionToken } from './session-tokens';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -1606,6 +1607,10 @@ end tell`;
     return { file, args: ['-l'] };
   }
 
+  ipcMain.handle('remote:list-targets', () =>
+    listRemoteTargets().catch(() => [] as string[]),
+  );
+
   ipcMain.handle(
     'term:spawn',
     async (
@@ -1617,6 +1622,7 @@ end tell`;
         shell?: string;
         args?: string[];
         env?: Record<string, string>;
+        remoteAttach?: { target: string; ttlSec?: number };
       },
     ): Promise<number> => {
       const cwd = expandHome(opts.cwd);
@@ -1628,12 +1634,55 @@ end tell`;
       const rows = Math.max(2, Math.min(opts.rows ?? 24, 1000));
       const id = nextPtyId++;
 
+      // ── remote-attach verb ──────────────────────────────────────────
+      // Explicit target (not inferred from an sshfs cwd): open a login
+      // shell on <target> with a session-scoped breeze CLI reachable over
+      // a reverse-ssh tunnel. The session token is minted in-process and
+      // revoked when this pty exits, so detached/cron processes on the
+      // remote can never reach the task API.
+      let attachSid: string | undefined;
+      let remoteTarget: string | undefined;
+      if (opts.remoteAttach?.target) {
+        const target = opts.remoteAttach.target;
+        remoteTarget = target;
+        const api = readLocalApi();
+        if (!api) throw new Error('Breeze API not ready — cannot remote-attach');
+        const remotePort = pickRemotePort(api.port);
+        await ensureRemoteHooks(target).catch(() => false);
+        const ttlSec = Math.min(opts.remoteAttach.ttlSec ?? 8 * 3600, 24 * 3600);
+        const sess = mintSessionToken(`remote-attach ${target}`, ttlSec);
+        attachSid = sess.sid;
+        const envPrefix = [
+          `BREEZE_PTY_ID=${id}`,
+          `BREEZE_REMOTE_MODE=1`,
+          `BREEZE_REMOTE_HOST=${shQuote(target)}`,
+          `BREEZE_API_HOST=127.0.0.1`,
+          `BREEZE_API_PORT=${remotePort}`,
+          `BREEZE_API_TOKEN=${shQuote(sess.token)}`,
+          `PATH="$HOME/.breezefile:$PATH"`,
+        ].join(' ');
+        file = 'ssh';
+        args = [
+          '-t',
+          // NOTE: do NOT add ClearAllForwardings=yes here — OpenSSH
+          // clears command-line forwardings too, which kills this -R
+          // tunnel. Config-file LocalForward noise is cosmetic; a dead
+          // tunnel is fatal (breeze on the remote can't reach the API).
+          '-R',
+          `${remotePort}:127.0.0.1:${api.port}`,
+          target,
+          `${envPrefix} exec $SHELL -l`,
+        ];
+        spawnCwd = os.homedir();
+      }
+
       // Remote routing: if cwd lives under an sshfs/macFUSE mount, swap the
       // local shell for `ssh -t <target> …` so the PTY runs on the remote
       // host. Translators run on the local mountpoint → remote root.
       // Failures here just log; spawn falls through to the local shell.
-      const remote = await resolveRemote(cwd).catch(() => null);
-      let remoteTarget: string | undefined;
+      const remote = opts.remoteAttach
+        ? null
+        : await resolveRemote(cwd).catch(() => null);
       if (remote) {
         remoteTarget = remote.target;
         // Pull api.json so we can plumb the port+token into the remote
@@ -1713,6 +1762,7 @@ end tell`;
         if (wc && !wc.isDestroyed()) {
           wc.send('term:exit', { id, code: exitCode, signal: signal ?? null });
         }
+        if (attachSid) revokeSessionToken(attachSid);
         ptys.delete(id);
       });
       // Kill orphan PTYs if the renderer process goes away (window reload,
@@ -1721,6 +1771,7 @@ end tell`;
         const r = ptys.get(id);
         if (r) {
           try { r.proc.kill(); } catch { /* noop */ }
+          if (attachSid) revokeSessionToken(attachSid);
           ptys.delete(id);
         }
       });

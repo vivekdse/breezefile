@@ -128,6 +128,13 @@ export function clearRemoteCache(): void {
   cache = null;
 }
 
+/** Distinct ssh targets from currently active sshfs/macFUSE mounts.
+ *  Drives the remote-attach verb's host slot. */
+export async function listRemoteTargets(): Promise<string[]> {
+  const mounts = await getMounts();
+  return [...new Set(mounts.map((m) => m.target))];
+}
+
 /** Resolve an absolute local cwd to an ssh target + remote cwd, or null. */
 export async function resolveRemote(cwd: string): Promise<RemoteRoute | null> {
   if (process.env.BREEZE_REMOTE_DISABLE === '1') return null;

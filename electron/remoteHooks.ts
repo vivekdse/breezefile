@@ -17,7 +17,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { app } from 'electron';
 import { HOOK_SCRIPT } from './hooks-register';
+
+// Source of the breeze CLI we ship onto remotes. Packaged → resources;
+// dev → repo bin/. Mirrors breezeBinPath() in hooks-register.ts.
+function readBreezeCliSource(): string {
+  const p = app.isPackaged
+    ? path.join(process.resourcesPath, 'breeze.mjs')
+    : path.join(app.getAppPath(), 'bin', 'breeze.mjs');
+  return readFileSync(p, 'utf8');
+}
 
 const STATE_DIR = path.join(os.homedir(), '.breezefile');
 const STATE_FILE = path.join(STATE_DIR, 'remote-installs.json');
@@ -37,7 +47,12 @@ function saveState(s: State) {
 }
 
 function scriptHash(): string {
-  return crypto.createHash('sha256').update(HOOK_SCRIPT).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(HOOK_SCRIPT)
+    .update('\0')
+    .update(readBreezeCliSource())
+    .digest('hex');
 }
 
 // Python merger run on the remote. Reads the hook script from argv[1],
@@ -51,6 +66,31 @@ function scriptHash(): string {
 // as base64 — passing it through ssh argv would break on newlines.
 function makeInstaller(): string {
   const b64 = Buffer.from(HOOK_SCRIPT, 'utf8').toString('base64');
+  const cliB64 = Buffer.from(readBreezeCliSource(), 'utf8').toString('base64');
+  // Shell wrapper: the only entry point we put on PATH (and only inside
+  // a remote-attach session). breeze.mjs needs Node >= 18 (global fetch,
+  // AbortSignal.timeout). Many hosts default /usr/bin/node to an ancient
+  // version while a modern one lives under nvm, so probe candidates and
+  // pick the first with major >= 18 rather than trusting `node`.
+  const shim = [
+    '#!/bin/sh',
+    'pick() {',
+    '  for c in "$@"; do',
+    '    [ -n "$c" ] || continue',
+    '    v=$("$c" -p "process.versions.node.split(\'.\')[0]" 2>/dev/null) || continue',
+    '    [ "$v" -ge 18 ] 2>/dev/null && { echo "$c"; return 0; }',
+    '  done',
+    '  return 1',
+    '}',
+    'NVM=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)',
+    'NODE=$(pick "$NVM" "$(command -v node)" "$(command -v nodejs)") || {',
+    '  echo "breeze: needs Node >= 18 on this host (default: $(node -v 2>/dev/null || echo none))" >&2',
+    '  exit 127',
+    '}',
+    'exec "$NODE" "$HOME/.breezefile/breeze.mjs" "$@"',
+    '',
+  ].join('\n');
+  const shimB64 = Buffer.from(shim, 'utf8').toString('base64');
   return `
 import json, os, sys, hashlib, pathlib, base64
 home = pathlib.Path.home()
@@ -60,6 +100,14 @@ hook = bf / "claude-hook.sh"
 script = base64.b64decode("${b64}").decode("utf-8")
 hook.write_text(script)
 hook.chmod(0o755)
+
+cli = bf / "breeze.mjs"
+cli_src = base64.b64decode("${cliB64}").decode("utf-8")
+cli.write_text(cli_src)
+cli.chmod(0o644)
+shim = bf / "breeze"
+shim.write_text(base64.b64decode("${shimB64}").decode("utf-8"))
+shim.chmod(0o755)
 
 claude_dir = home / ".claude"
 claude_dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +143,11 @@ reset("StopFailure", IDLE)
 reset("Notification", WAITING)
 
 sp.write_text(json.dumps(s, indent=2) + "\\n")
-print(hashlib.sha256(script.encode()).hexdigest())
+h = hashlib.sha256()
+h.update(script.encode())
+h.update(b"\\0")
+h.update(cli_src.encode())
+print(h.hexdigest())
 `;
 }
 

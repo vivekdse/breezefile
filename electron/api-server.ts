@@ -21,6 +21,8 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskUpdate } from './tasks';
 import { dispatchTerminalFg } from './ipc';
+import { resolveRemote } from './remoteRoute';
+import { matchesSessionToken, clearSessionTokens } from './session-tokens';
 import {
   AgentNotAvailableError,
   TaskAlreadyRunningError,
@@ -132,7 +134,8 @@ function authorized(req: IncomingMessage): boolean {
   const auth = req.headers.authorization ?? '';
   if (!auth.startsWith('Bearer ')) return false;
   const supplied = auth.slice(7).trim();
-  return token !== null && timingSafeEq(supplied, token);
+  if (token !== null && timingSafeEq(supplied, token)) return true;
+  return matchesSessionToken(supplied);
 }
 
 function timingSafeEq(a: string, b: string): boolean {
@@ -310,6 +313,17 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       return sendJson(res, 200, result);
     }
 
+    // Resolve a local cwd that lives under an sshfs mount to its
+    // ssh://<target><remoteCwd> identity, so `breeze prime` (running on
+    // the remote, calling back over the tunnel) can match tasks the
+    // laptop anchored — and vice-versa.
+    if (p === '/remote/resolve' && m === 'GET') {
+      const cwd = url.searchParams.get('cwd') ?? '';
+      const r = cwd ? await resolveRemote(cwd).catch(() => null) : null;
+      if (!r) return sendJson(res, 200, {});
+      return sendJson(res, 200, { ssh: `ssh://${r.target}${r.remoteCwd}` });
+    }
+
     return send(res, 404, 'not found');
   } catch (e) {
     const err = e as Error & { status?: number };
@@ -348,5 +362,6 @@ export function stopApiServer(): void {
   server.close();
   server = null;
   token = null;
+  clearSessionTokens();
   pendingControl.clear();
 }

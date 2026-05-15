@@ -71,6 +71,31 @@ Default to full or degraded parity. Single-platform requires an explicit reason.
 5. Add `requires` to verb registry; remove residual inline branches.
 6. CI matrix: macos-latest + ubuntu-latest.
 
+## Remote machines & task scheduling
+
+- The task scheduler (`electron/scheduler.ts`) is **in-process** — a single
+  timer keyed off `MIN(next_run_at)`, with a hand-rolled 5-field cron parser
+  (`electron/cron.ts`, no native deps). There is **no launchd/systemd
+  coupling**, so recurring/auto tasks work identically on Linux and macOS as
+  long as the app is running. Missed fires while the app was closed are
+  skipped (the scheduler rolls `next_run_at` forward on startup).
+- The `:remote-attach` verb (chip prompt / palette) is the only supported
+  way to get the `breeze` CLI on a remote box. You pick a host from the
+  active sshfs mounts; it opens a terminal pane that SSHes in with a
+  reverse-ssh tunnel back to the laptop's API and a TTL-bound session
+  token minted **in-process** (`mintSessionToken` in
+  `electron/session-tokens.ts`, revoked from the pty `onExit` handler in
+  `electron/ipc.ts`). The CLI is staged under `~/.breezefile` on the
+  remote and added to `$PATH` **only inside that pane's shell**. Detached
+  processes (cron, systemd-user, parked tmux) therefore cannot see or use
+  `breeze` — a deliberate safety property: no live attached pane → no
+  remote task ops. The token also rides only the tunnel as an env var; it
+  is never written to disk on either machine.
+- Tasks created on a remote anchor as `ssh://<host><abs-path>`. The
+  SessionStart hook (`bin/breeze.mjs`) resolves a local sshfs cwd to its
+  `ssh://` identity via `GET /remote/resolve` so remote-anchored tasks
+  surface when you `cd` into the matching mountpoint locally.
+
 ## Canonical capability list
 
 Maintained in `electron/platform/CAPABILITIES.md` — one row per flag with a one-line meaning. New capability = new row + new adapter method + (optionally) new verb `requires`. Keep it the source of truth.

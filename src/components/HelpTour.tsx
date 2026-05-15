@@ -235,6 +235,7 @@ const SLIDES: Slide[] = [
       { name: 'run history', what: 'every auto run lands in a per-task history dialog: status, duration, attempt, conversation_id · Rerun button starts a fresh run · "Open run" spawns a new tab with an embedded terminal and auto-runs `claude --resume <id>` so you land directly in the trace' },
       { name: 'runs view', what: 'on the Tasks tab toggle from Tasks → Runs to see every recent run across every auto task in one feed · filter by status, search by title or folder, click a row to jump into that task’s history' },
       { name: 'breeze CLI', what: 'a Node `breeze` shell command talks HTTP to the running app · `breeze status`, `breeze task list / show / add / edit / done / pin / unpin / delete / open`, `breeze open <folder>`, `breeze tabs` · <id> defaults to $BREEZE_TASK_ID inside task tabs · `breeze prime` (auto-installed Claude Code hook) feeds session context on start' },
+      { name: ':remote-attach', what: 'verb (palette / chip prompt): pick a host from your active sshfs mounts to open a terminal pane that SSHes in with a session-scoped `breeze` reachable over a reverse-ssh tunnel · tasks created there anchor as `ssh://<host><path>` and surface in the matching sshfs session locally · `breeze` is on PATH only inside that pane and its token is revoked when the pane closes, so detached/cron processes can never touch tasks' },
     ],
   },
   {
@@ -291,6 +292,21 @@ const SLIDES: Slide[] = [
         <code>.breeze-remote-skip</code> file at a specific mountpoint to
         opt out per-mount (useful if a mount is read-only or you want to
         edit locally on purpose).
+        <br /><br />
+        <b>Tasks on the remote.</b> Run the{' '}
+        <code>:remote-attach</code> verb and pick a host from your active
+        sshfs mounts to open a terminal pane where the <code>breeze</code>{' '}
+        CLI works against your laptop's task list over a reverse-ssh
+        tunnel. Tasks you create there
+        anchor as <code>ssh://&lt;host&gt;&lt;path&gt;</code> and show up
+        again when you <code>cd</code> into the matching sshfs mount locally.
+        The CLI lives only under <code>~/.breezefile</code> and is on{' '}
+        <code>$PATH</code> only inside that session, with a TTL-bound token
+        revoked on detach — so cron jobs, detached tmux, or any process
+        outside the session can't read or mutate tasks. Recurring / auto
+        tasks need no launchd or systemd: the scheduler runs in-process in
+        the app, so it works identically on Linux and macOS as long as
+        Breeze is open.
         <br /><br />
         <b>Troubleshooting.</b> Check{' '}
         <code>~/.breezefile/claude-hook.log</code> on the remote: if posts

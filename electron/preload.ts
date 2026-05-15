@@ -151,7 +151,10 @@ const fm = {
     shell?: string;
     args?: string[];
     env?: Record<string, string>;
+    remoteAttach?: { target: string; ttlSec?: number };
   }) => ipcRenderer.invoke('term:spawn', opts) as Promise<number>,
+  remoteListTargets: () =>
+    ipcRenderer.invoke('remote:list-targets') as Promise<string[]>,
   termWrite: (id: number, data: string) => ipcRenderer.send('term:write', id, data),
   termResize: (id: number, cols: number, rows: number) =>
     ipcRenderer.send('term:resize', id, cols, rows),

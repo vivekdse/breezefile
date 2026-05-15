@@ -16,6 +16,18 @@ const API_FILE = join(homedir(), '.breezefile', 'api.json');
 const SETTINGS_FILE = join(homedir(), '.claude', 'settings.json');
 
 function readApi() {
+  // 1. Env wins: this is how a `breeze remote-attach` session reaches
+  //    back to the laptop over the reverse-ssh tunnel.
+  const { BREEZE_API_PORT, BREEZE_API_TOKEN, BREEZE_API_HOST } = process.env;
+  if (BREEZE_API_PORT && BREEZE_API_TOKEN) {
+    const host = BREEZE_API_HOST || '127.0.0.1';
+    return { base: `http://${host}:${BREEZE_API_PORT}`, token: BREEZE_API_TOKEN };
+  }
+  // 2. Remote mode without env = detached session. Never fall back to a
+  //    local api.json (there is none on a remote; if there were, it'd be
+  //    the wrong machine's). Forces "session not attached".
+  if (process.env.BREEZE_REMOTE_MODE === '1') return null;
+  // 3. Local: the running app's api.json.
   if (!existsSync(API_FILE)) return null;
   try {
     const j = JSON.parse(readFileSync(API_FILE, 'utf8'));
@@ -52,10 +64,35 @@ async function call(method, path, body, timeoutMs = 2000) {
 // $PWD == folder OR $PWD descends from folder. Trailing slash on both
 // sides prevents /foo/bar matching /foo/barbaz.
 function isAncestorOrEqual(folder, pwd) {
-  if (!folder) return false;
+  if (!folder || !pwd) return false;
   const f = folder.replace(/\/+$/, '') + '/';
   const p = pwd.replace(/\/+$/, '') + '/';
   return p === f || p.startsWith(f);
+}
+
+// In a remote-attach session, anchor new tasks under the host's ssh://
+// identity so they remain distinguishable from local tasks and surface
+// in the matching sshfs session on the laptop.
+function defaultAnchor() {
+  const host = process.env.BREEZE_REMOTE_HOST;
+  return host ? `ssh://${host}${process.cwd()}` : process.cwd();
+}
+
+// The folder identities the current shell should match against. On a
+// remote-attach session that's the ssh:// URI. Locally it's the raw
+// cwd plus — if cwd is under an sshfs mount — the ssh:// URI the app
+// resolves for it, so remote-anchored tasks show up here too.
+async function pwdIdentities() {
+  const host = process.env.BREEZE_REMOTE_HOST;
+  if (host) return [`ssh://${host}${process.cwd()}`];
+  const ids = [process.cwd()];
+  const r = await call('GET', `/remote/resolve?cwd=${encodeURIComponent(process.cwd())}`);
+  if (r.ok && r.body && typeof r.body.ssh === 'string') ids.push(r.body.ssh);
+  return ids;
+}
+
+function matchesAnyIdentity(folder, ids) {
+  return ids.some((p) => isAncestorOrEqual(folder, p));
 }
 
 const PRIME_HEADER = `# Breeze: Active Work Context
@@ -92,8 +129,9 @@ async function cmdPrime() {
   // Silent exit when app unreachable so SessionStart hook never blocks.
   if (!r.ok || !Array.isArray(r.body)) return 0;
   const pwd = process.cwd();
+  const ids = await pwdIdentities();
   const pending = r.body.filter((t) => t && t.status !== 'done');
-  const scoped = pending.filter((t) => isAncestorOrEqual(t.folder, pwd));
+  const scoped = pending.filter((t) => matchesAnyIdentity(t.folder, ids));
 
   process.stdout.write(PRIME_HEADER + '\n');
   process.stdout.write('## Active Tasks (anchored to this folder or an ancestor)\n');
@@ -120,12 +158,12 @@ async function cmdList(args) {
   const all = args.includes('--all');
   const r = await call('GET', '/tasks');
   if (!r.ok || !Array.isArray(r.body)) return 1;
-  const pwd = process.cwd();
+  const ids = all ? null : await pwdIdentities();
   for (const t of r.body) {
     if (!t) continue;
     if (!all) {
       if (t.status === 'done') continue;
-      if (!isAncestorOrEqual(t.folder, pwd)) continue;
+      if (!matchesAnyIdentity(t.folder, ids)) continue;
     }
     process.stdout.write(`${t.id}  ${(t.status || '').padEnd(8)}  ${t.title}\n`);
   }
@@ -142,7 +180,7 @@ async function cmdAdd(args) {
     return 2;
   }
   let notes = null;
-  let folder = process.cwd();
+  let folder = defaultAnchor();
   let auto = false;
   let cron = null;
   let agent = null;

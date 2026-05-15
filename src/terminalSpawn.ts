@@ -36,8 +36,14 @@ export async function spawnTerminal(opts: {
   cols?: number;
   rows?: number;
   env?: Record<string, string>;
+  remoteAttach?: { target: string; ttlSec?: number };
 }): Promise<number> {
-  const { cwd, sessionLabel, cols, rows, env } = opts;
+  const { cwd, sessionLabel, cols, rows, env, remoteAttach } = opts;
+  // remote-attach drives ssh directly — never wrap it in tmux (we want a
+  // plain login shell on the remote, and the tunnel/token are per-pty).
+  if (remoteAttach) {
+    return fm.termSpawn({ cwd, cols, rows, env, remoteAttach });
+  }
   if (isTmuxEnabled()) {
     return fm.termSpawn({
       cwd,
