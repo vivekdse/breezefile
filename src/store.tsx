@@ -203,6 +203,8 @@ type Action =
   | { type: 'newTab'; tab: Tab }
   | { type: 'openTaskTab'; taskId: string; folder: string; focus?: boolean }
   | { type: 'openTasksTab'; focus?: boolean }
+  | { type: 'openEditTab'; path: string; focus?: boolean }
+  | { type: 'setTabDirty'; index: number; dirty: boolean }
   | { type: 'openOrFocusFolderTab'; path: string; focus?: boolean }
   | { type: 'setTabTaskId'; index: number; taskId: string | null }
   | { type: 'closeTab'; index: number }
@@ -248,12 +250,18 @@ type Action =
 
 function makeTab(
   path: string,
-  opts?: { kind?: 'folder' | 'task' | 'tasks'; taskId?: string | null },
+  opts?: {
+    kind?: 'folder' | 'task' | 'tasks' | 'edit';
+    taskId?: string | null;
+    editPath?: string | null;
+  },
 ): Tab {
   return {
     id: crypto.randomUUID(),
     kind: opts?.kind ?? 'folder',
     taskId: opts?.taskId ?? null,
+    editPath: opts?.editPath ?? null,
+    dirty: false,
     trail: [path],
     selected: { 0: 0 },
     marks: {},
@@ -358,6 +366,32 @@ function reducer(s: State, a: Action): State {
         tabs: [...s.tabs, tab],
         activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
       };
+    }
+    case 'openEditTab': {
+      // fm-vu55 — focus an existing edit tab for the same path, else
+      // create a new one. The trail is set to the file's parent dir so
+      // breadcrumb/title logic has something to render.
+      const existing = s.tabs.findIndex(
+        (t) => t.kind === 'edit' && t.editPath === a.path,
+      );
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const parent = a.path.replace(/\/[^/]+$/, '') || '/';
+      const tab = makeTab(parent, { kind: 'edit', editPath: a.path });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'setTabDirty': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.index];
+      if (!t) return s;
+      if ((t.dirty ?? false) === a.dirty) return s;
+      tabs[a.index] = { ...t, dirty: a.dirty };
+      return { ...s, tabs };
     }
     case 'openOrFocusFolderTab': {
       // fm-dj5 — open or focus a folder tab for `path`. Match on
@@ -863,6 +897,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // folder watcher will obsolete this when it lands.
   useEffect(() => {
     if (!activeTab) return;
+    // fm-vu55 — edit/tasks/task tabs don't browse the trail; skip the
+    // eager dir-load that would refetch a parent folder we don't show.
+    if (activeTab.kind === 'edit' || activeTab.kind === 'tasks') return;
     const trail = activeTab.trail;
     const leaf = trail[trail.length - 1];
     for (let i = 0; i < trail.length; i++) {

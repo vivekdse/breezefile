@@ -133,6 +133,7 @@ type Verb =
   | 'extract'
   | 'copy-path'
   | 'open-with'
+  | 'edit'
   | 'openTerminal'
   | 'term'
   | 'term-close'
@@ -744,6 +745,28 @@ const VERBS: VerbDef[] = [
         void fm.open(c.cursor.path);
         api.closeOverlay();
       }
+    },
+  },
+  {
+    id: 'edit',
+    availableInTaskMode: false,
+    label: 'Edit',
+    aliases: ['edit', 'edit-file'],
+    icon: '✎',
+    describe: (c) =>
+      `Edit ${c.cursor?.name ?? 'item'} in a new tab (markdown formatted, others plain)`,
+    isAvailable: (c) => {
+      if (!c.cursor) return { ok: false, reason: 'Put the cursor on a file first' };
+      if (c.cursor.kind === 'dir') return { ok: false, reason: 'Edit needs a file, not a folder' };
+      return { ok: true };
+    },
+    slots: [],
+    // fm-vu55 — open the cursor's file in a new in-app edit tab. Markdown
+    // renders via Milkdown (WYSIWYM); other text uses a plain editor.
+    execute: (c, _p, api) => {
+      if (!c.cursor) return;
+      api.dispatch({ type: 'openEditTab', path: c.cursor.path });
+      api.closeOverlay();
     },
   },
   {

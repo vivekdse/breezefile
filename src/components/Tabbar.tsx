@@ -154,14 +154,19 @@ export function Tabbar() {
     const folderName = basename(cwd) || '/';
     const isTask = t.kind === 'task';
     const isTasksOverview = t.kind === 'tasks';
+    const isEdit = t.kind === 'edit';
     // Defensive: a task tab without a resolvable id/title falls back to
     // the folder basename, then to the literal "Task" — never crash.
     // fm-yi85 — tasks-overview tab gets a fixed "All tasks" label.
+    // fm-vu55 — edit tabs label by the file's basename.
+    const editName = isEdit && t.editPath ? basename(t.editPath) : '';
     const label = isTasksOverview
       ? 'All tasks'
-      : isTask
-        ? (t.taskId && taskById.get(t.taskId)) || folderName || 'Task'
-        : folderName;
+      : isEdit
+        ? editName || 'Untitled'
+        : isTask
+          ? (t.taskId && taskById.get(t.taskId)) || folderName || 'Task'
+          : folderName;
     const active = i === state.activeTab;
     const canClose = state.tabs.length > 1;
     const isDropTarget = dropIdx === i;
@@ -207,7 +212,10 @@ export function Tabbar() {
             {pos}
           </span>
         )}
-        <span className="tabbar__label">{label}</span>
+        <span className="tabbar__label">
+          {label}
+          {isEdit && t.dirty ? ' •' : ''}
+        </span>
         {/* fm-fux — attention badge layers on top of either kind. */}
         {t.terminal?.attention && (
           <span
@@ -225,6 +233,21 @@ export function Tabbar() {
               // the main process until window close.
               if (t.terminal) {
                 void fm.termKill(t.terminal.ptyId).catch(() => {});
+              }
+              // fm-vu55 — warn before discarding unsaved editor changes.
+              if (t.kind === 'edit' && t.dirty) {
+                window.dispatchEvent(
+                  new CustomEvent('fm:confirm', {
+                    detail: {
+                      title: 'Discard unsaved changes?',
+                      body: `${basename(t.editPath ?? '')} has unsaved changes that will be lost.`,
+                      confirmLabel: 'Discard',
+                      destructive: true,
+                      onConfirm: () => dispatch({ type: 'closeTab', index: i }),
+                    },
+                  }),
+                );
+                return;
               }
               dispatch({ type: 'closeTab', index: i });
             }}

@@ -1,0 +1,242 @@
+/* fm-vu55 — in-app editor shell. fm-uatz layers richer theming on top. */
+.edit-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg, var(--bg-1));
+  color: var(--text-on-canvas, var(--fg-1));
+}
+
+.edit-shell__header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule-on-panel, var(--border-1));
+  flex: 0 0 auto;
+  background: var(--bg-2, var(--bg, var(--bg-1)));
+}
+
+.edit-shell__title {
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-serif);
+  color: var(--text-on-canvas, var(--fg-1));
+}
+
+.edit-shell__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+
+.edit-shell__path {
+  font-size: 11px;
+  color: var(--muted-on-panel, var(--fg-3));
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.edit-shell__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.edit-shell__status {
+  font-size: 11px;
+  color: var(--muted-on-canvas, var(--fg-2));
+}
+
+.edit-shell__btn {
+  background: var(--bg-2, var(--panel-2));
+  color: var(--text-on-canvas, var(--fg-1));
+  border: 1px solid var(--rule-on-panel, var(--border-2));
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.edit-shell__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.edit-shell__btn:not(:disabled):hover {
+  background: var(--chip, var(--bg-3));
+  border-color: var(--accent);
+}
+
+.edit-shell__icon-btn {
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 9px;
+  min-width: 28px;
+}
+.edit-shell__close {
+  font-size: 18px;
+}
+.edit-shell__close:hover {
+  color: var(--err, #c44);
+  border-color: var(--err, #c44);
+  background: var(--chip, var(--bg-3, var(--bg-3)));
+}
+
+.edit-shell__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  background: var(--bg, var(--bg-1));
+}
+
+.edit-shell__loading,
+.edit-shell__error {
+  padding: 20px;
+  color: var(--muted-on-canvas, var(--fg-2));
+  font-size: 13px;
+}
+.edit-shell__error {
+  color: var(--err, #c44);
+}
+
+.edit-shell__textarea {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-on-canvas, var(--fg-1));
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 16px 20px;
+  resize: none;
+  tab-size: 2;
+  caret-color: var(--accent);
+}
+
+.edit-shell__milkdown {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg, var(--bg-1));
+}
+
+/* Re-map Crepe's color & font tokens to our theme tokens. The selector is
+   intentionally more specific than crepe's own `.milkdown {…}` block so
+   these win regardless of stylesheet import order. */
+.edit-shell .edit-shell__milkdown .milkdown {
+  height: 100%;
+  --crepe-color-background: var(--bg, var(--bg-1));
+  --crepe-color-on-background: var(--text-on-canvas, var(--fg-1));
+  --crepe-color-surface: var(--bg-2, var(--panel-2));
+  --crepe-color-surface-low: var(--bg, var(--bg-1));
+  --crepe-color-on-surface: var(--text-on-canvas, var(--fg-1));
+  --crepe-color-on-surface-variant: var(--muted-on-canvas, var(--fg-2));
+  --crepe-color-outline: var(--rule-on-panel, var(--border-2));
+  --crepe-color-primary: var(--accent);
+  --crepe-color-secondary: var(--chip, var(--bg-3));
+  --crepe-color-on-secondary: var(--text-on-canvas, var(--fg-1));
+  --crepe-color-inverse: var(--text-on-canvas, var(--fg-1));
+  --crepe-color-on-inverse: var(--bg, var(--bg-1));
+  --crepe-color-inline-code: var(--accent-strong, var(--accent));
+  --crepe-color-error: var(--err, #c44);
+  --crepe-color-hover: var(--chip, var(--bg-3));
+  --crepe-color-selected: var(--accent-soft);
+  --crepe-color-inline-area: var(--chip, var(--bg-3));
+  --crepe-font-title: var(--font-serif);
+  --crepe-font-default: var(--font-sans);
+  --crepe-font-code: var(--font-mono);
+  background: var(--bg, var(--bg-1));
+  color: var(--text-on-canvas, var(--fg-1));
+  font-family: var(--font-sans);
+}
+
+/* Crepe's reset.css applies `font-family: var(--crepe-font-default)` only
+   on `.milkdown`. Inner block elements (h1–h6, p, li, td, etc.) often
+   pull from the user agent's defaults, so re-assert explicitly. */
+.edit-shell__milkdown .milkdown,
+.edit-shell__milkdown .milkdown p,
+.edit-shell__milkdown .milkdown li,
+.edit-shell__milkdown .milkdown td,
+.edit-shell__milkdown .milkdown th,
+.edit-shell__milkdown .milkdown blockquote {
+  font-family: var(--font-sans);
+  color: var(--text-on-canvas, var(--fg-1));
+}
+.edit-shell__milkdown .milkdown h1,
+.edit-shell__milkdown .milkdown h2,
+.edit-shell__milkdown .milkdown h3,
+.edit-shell__milkdown .milkdown h4,
+.edit-shell__milkdown .milkdown h5,
+.edit-shell__milkdown .milkdown h6 {
+  font-family: var(--font-serif);
+  color: var(--text-on-canvas, var(--fg-1));
+  letter-spacing: var(--tracking-tight);
+}
+.edit-shell__milkdown .milkdown code,
+.edit-shell__milkdown .milkdown pre,
+.edit-shell__milkdown .milkdown pre code {
+  font-family: var(--font-mono);
+}
+
+.edit-shell__milkdown .ProseMirror {
+  min-height: 100%;
+  padding: 24px 32px;
+  outline: none;
+  background: var(--bg, var(--bg-1));
+  color: var(--text-on-canvas, var(--fg-1));
+  caret-color: var(--accent);
+}
+.edit-shell__milkdown .ProseMirror a {
+  color: var(--accent);
+}
+.edit-shell__milkdown .ProseMirror code {
+  background: var(--bg-2, var(--panel-2));
+  color: var(--accent-strong, var(--accent));
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.edit-shell__milkdown .ProseMirror pre {
+  background: var(--bg-2, var(--panel-2));
+  color: var(--text-on-canvas, var(--fg-1));
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.edit-shell__milkdown .ProseMirror blockquote {
+  border-left: 3px solid var(--accent);
+  color: var(--muted-on-canvas, var(--fg-2));
+  padding-left: 12px;
+}
+.edit-shell__milkdown .ProseMirror ul,
+.edit-shell__milkdown .ProseMirror ol {
+  padding-left: 1.6em;
+}
+.edit-shell__milkdown .ProseMirror li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+/* Crepe replaces native list markers with a `.label-wrapper` span whose
+   color is wired to --crepe-color-outline. Override that here so bullet
+   glyphs and numeric labels pick up the theme accent. */
+.edit-shell__milkdown .milkdown .milkdown-list-item-block li .label-wrapper,
+.edit-shell__milkdown .milkdown .milkdown-list-item-block li .label-wrapper .label {
+  color: var(--accent);
+  font-weight: 600;
+}
+.edit-shell__milkdown .milkdown .milkdown-list-item-block li .label-wrapper svg {
+  fill: var(--accent);
+}
+.edit-shell__milkdown .ProseMirror hr {
+  border: 0;
+  border-top: 1px solid var(--rule-on-panel, var(--border-2));
+}

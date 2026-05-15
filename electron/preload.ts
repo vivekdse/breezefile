@@ -95,6 +95,18 @@ const fm = {
   },
   bulkRename: (names: string[]) =>
     ipcRenderer.invoke('editor:bulkRename', names) as Promise<string[]>,
+  editorOpen: (p: string) =>
+    ipcRenderer.invoke('editor:openFile', p) as Promise<{
+      content: string;
+      mtimeMs: number;
+      error?: string;
+    }>,
+  editorSave: (p: string, content: string, expectedMtimeMs: number | null) =>
+    ipcRenderer.invoke('editor:saveFile', p, content, expectedMtimeMs) as Promise<{
+      mtimeMs: number;
+      conflict?: boolean;
+      error?: string;
+    }>,
   dragStart: (paths: string[]) => ipcRenderer.send('drag:start', paths),
   // Electron 32+ removed the `path` field from renderer File objects; the
   // sanctioned replacement is webUtils.getPathForFile, which lives in the

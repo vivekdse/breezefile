@@ -147,6 +147,7 @@ const SLIDES: Slide[] = [
       { name: 'copy path', chord: 'yp / yn / yd', what: 'full path / name / parent dir to clipboard' },
       { name: 'reveal', chord: 'R', what: 'reveal in Finder' },
       { name: 'open terminal', what: 'launch your default terminal in this folder' },
+      { name: 'edit', what: 'open the file in a new in-app edit tab — markdown renders WYSIWYM via Milkdown (h1/strong/list styled by your theme; markers disappear as you type), other text gets a plain editor · ⌘S saves atomically · the tab title shows • when there are unsaved changes and closing prompts before discarding' },
     ],
   },
   {

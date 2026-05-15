@@ -26,7 +26,11 @@ export type TagFilter = { mode: TagFilterMode; ids: string[] };
 // the modal All-tasks dialog: inline page that participates in the chip
 // prompt and side-panel ecosystem like any other tab. Tasks-tab-scoped verbs
 // (done, due, claude, etc.) gate on this kind.
-export type TabKind = 'folder' | 'task' | 'tasks';
+// fm-vu55 — 'edit' is an in-app text editor tab (markdown via Milkdown,
+// other text via a plain textarea). The trail is a single-element array
+// holding the file's parent dir (for breadcrumb consistency); `editPath`
+// carries the actual file path and `dirty` tracks unsaved changes.
+export type TabKind = 'folder' | 'task' | 'tasks' | 'edit';
 
 export type Tab = {
   id: string;
@@ -38,6 +42,12 @@ export type Tab = {
    *  "active in tab N" indicator. Stable across navigation within
    *  the tab — clearing means the tab is no longer working on a task. */
   taskId?: string | null;
+  /** fm-vu55 — when kind === 'edit', the absolute path of the file
+   *  being edited. */
+  editPath?: string | null;
+  /** fm-vu55 — when kind === 'edit', true while the editor has
+   *  unsaved changes (tab title shows '• modified', closing prompts). */
+  dirty?: boolean;
   trail: string[]; // absolute paths
   selected: Record<number, number>; // per-column selection index
   marks: Record<string, true>; // paths marked for selection (multi-select)

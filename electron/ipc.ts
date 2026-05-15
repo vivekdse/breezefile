@@ -1149,6 +1149,63 @@ end tell`;
     },
   );
 
+  // fm-vu55 — load a text file in full for the in-app editor. Unlike the
+  // preview's readTextFile, this is uncapped (the editor needs to round-
+  // trip the entire file). Returns content + mtime so the renderer can
+  // detect external edits at save time.
+  ipcMain.handle(
+    'editor:openFile',
+    async (
+      _e,
+      p: string,
+    ): Promise<{ content: string; mtimeMs: number; error?: string }> => {
+      const abs = expandHome(p);
+      try {
+        const st = await fs.stat(abs);
+        const content = await fs.readFile(abs, 'utf8');
+        return { content, mtimeMs: st.mtimeMs };
+      } catch (err) {
+        return { content: '', mtimeMs: 0, error: (err as Error).message };
+      }
+    },
+  );
+
+  // Atomic save via tmp-file + rename in the same directory. The
+  // expectedMtimeMs guard rejects writes when the file changed on disk
+  // since open (renderer surfaces "file was modified externally").
+  ipcMain.handle(
+    'editor:saveFile',
+    async (
+      _e,
+      p: string,
+      content: string,
+      expectedMtimeMs: number | null,
+    ): Promise<{ mtimeMs: number; conflict?: boolean; error?: string }> => {
+      const abs = expandHome(p);
+      try {
+        if (expectedMtimeMs != null) {
+          try {
+            const st = await fs.stat(abs);
+            // Tolerate ms-level rounding differences across filesystems.
+            if (Math.abs(st.mtimeMs - expectedMtimeMs) > 1) {
+              return { mtimeMs: st.mtimeMs, conflict: true };
+            }
+          } catch {
+            // File missing — treat as a fresh write, no conflict.
+          }
+        }
+        const dir = path.dirname(abs);
+        const tmp = path.join(dir, `.${path.basename(abs)}.tmp-${process.pid}-${Date.now()}`);
+        await fs.writeFile(tmp, content, 'utf8');
+        await fs.rename(tmp, abs);
+        const st = await fs.stat(abs);
+        return { mtimeMs: st.mtimeMs };
+      } catch (err) {
+        return { mtimeMs: 0, error: (err as Error).message };
+      }
+    },
+  );
+
   ipcMain.handle('editor:bulkRename', async (_e, names: string[]) => {
     const tmp = path.join(os.tmpdir(), `fm-rename-${Date.now()}.txt`);
     await fs.writeFile(tmp, names.join('\n') + '\n', 'utf8');

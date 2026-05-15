@@ -73,6 +73,13 @@ type Fm = {
   ) => Promise<{ content: string; truncated: boolean; bytes: number; error?: string }>;
   fileUrl: (p: string) => string;
   bulkRename: (names: string[]) => Promise<string[]>;
+  // fm-vu55 — in-app text editor (markdown via Milkdown, others plain).
+  editorOpen: (p: string) => Promise<{ content: string; mtimeMs: number; error?: string }>;
+  editorSave: (
+    p: string,
+    content: string,
+    expectedMtimeMs: number | null,
+  ) => Promise<{ mtimeMs: number; conflict?: boolean; error?: string }>;
   dragStart: (paths: string[]) => void;
   pathForFile: (file: File) => string;
   findFolders: (query: string, limit?: number) => Promise<string[]>;
