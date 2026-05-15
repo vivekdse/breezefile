@@ -145,6 +145,7 @@ type Persisted = {
   tags: Tags;
   keybinds: Keybinds;
   recents: string[]; // LRU of recently-visited folders, most recent first
+  recentFiles: string[]; // LRU of recently-opened files, most recent first
   pinned: string[]; // user-pinned folder paths shown in sidebar Favorites
   // fm-60k — user-authored tags (manual-only v1) and the path lists they
   // were applied to. tagPaths is keyed by tag id; covers both custom and
@@ -222,6 +223,7 @@ type Action =
   | { type: 'setLastFind'; query: string }
   | { type: 'restoreTab' }
   | { type: 'pushRecent'; path: string }
+  | { type: 'pushRecentFile'; path: string }
   | { type: 'pinFolder'; path: string }
   | { type: 'unpinFolder'; path: string }
   | { type: 'createCustomTag'; tag: CustomTag }
@@ -287,6 +289,7 @@ const initialState: State = {
   tags: {},
   keybinds: DEFAULT_KEYBINDS,
   recents: [],
+  recentFiles: [],
   pinned: [],
   customTags: [],
   tagPaths: {},
@@ -374,8 +377,15 @@ function reducer(s: State, a: Action): State {
       const existing = s.tabs.findIndex(
         (t) => t.kind === 'edit' && t.editPath === a.path,
       );
+      const recentFilesNext = (() => {
+        const clean = (s.recentFiles ?? []).filter((p) => p !== a.path);
+        clean.unshift(a.path);
+        if (clean.length > RECENTS_CAP) clean.length = RECENTS_CAP;
+        return clean;
+      })();
       if (existing >= 0) {
-        return a.focus !== false ? { ...s, activeTab: existing } : s;
+        const base = a.focus !== false ? { ...s, activeTab: existing } : s;
+        return { ...base, recentFiles: recentFilesNext };
       }
       const parent = a.path.replace(/\/[^/]+$/, '') || '/';
       const tab = makeTab(parent, { kind: 'edit', editPath: a.path });
@@ -383,6 +393,7 @@ function reducer(s: State, a: Action): State {
         ...s,
         tabs: [...s.tabs, tab],
         activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+        recentFiles: recentFilesNext,
       };
     }
     case 'setTabDirty': {
@@ -470,6 +481,12 @@ function reducer(s: State, a: Action): State {
       clean.unshift(a.path);
       if (clean.length > RECENTS_CAP) clean.length = RECENTS_CAP;
       return { ...s, recents: clean };
+    }
+    case 'pushRecentFile': {
+      const clean = (s.recentFiles ?? []).filter((p) => p !== a.path);
+      clean.unshift(a.path);
+      if (clean.length > RECENTS_CAP) clean.length = RECENTS_CAP;
+      return { ...s, recentFiles: clean };
     }
     case 'pinFolder': {
       const pinned = s.pinned ?? [];
@@ -614,6 +631,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tags,
           keybinds,
           recents,
+          recentFiles,
           pinned,
           customTags,
           tagPaths,
@@ -630,6 +648,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(tags ? { tags } : {}),
             ...(keybinds ? { keybinds } : {}),
             ...(recents ? { recents } : {}),
+            ...(recentFiles ? { recentFiles } : {}),
             ...(pinned ? { pinned } : {}),
             ...(customTags ? { customTags } : {}),
             ...(tagPaths ? { tagPaths } : {}),
@@ -684,6 +703,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tags: state.tags,
       keybinds: state.keybinds,
       recents: state.recents,
+      recentFiles: state.recentFiles,
       pinned: state.pinned,
       customTags: state.customTags,
       tagPaths: state.tagPaths,
@@ -699,6 +719,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.tags,
     state.keybinds,
     state.recents,
+    state.recentFiles,
     state.pinned,
     state.customTags,
     state.tagPaths,
@@ -860,6 +881,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'pushRecent', path: p });
       await loadDir(p);
     } else {
+      dispatch({ type: 'pushRecentFile', path: p });
       await fm.open(p);
     }
   }

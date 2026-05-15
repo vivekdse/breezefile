@@ -708,6 +708,7 @@ export function useKeyboard(
           if (ext === 'md' || ext === 'mdx') {
             dispatch({ type: 'openEditTab', path: entry.path, focus: true });
           } else {
+            dispatch({ type: 'pushRecentFile', path: entry.path });
             void fm.open(entry.path);
           }
         }

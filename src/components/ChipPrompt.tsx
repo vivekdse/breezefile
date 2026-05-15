@@ -62,6 +62,7 @@ type Ctx = {
   bookmarks: Record<string, string>;
   homedir: string;
   recents: string[];
+  recentFiles: string[];
   pinned: string[];
   tabs: Array<{ index: number; id: string; cwd: string; label: string; active: boolean }>;
   canRestoreTab: boolean;
@@ -571,7 +572,13 @@ const VERBS: VerbDef[] = [
       // not its enclosing folder narrowed.
       if (dest.startsWith('file:')) {
         const filePath = dest.slice('file:'.length);
-        void fm.open(filePath);
+        const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+        if (ext === 'md' || ext === 'mdx') {
+          api.dispatch({ type: 'openEditTab', path: filePath, focus: true });
+        } else {
+          api.dispatch({ type: 'pushRecentFile', path: filePath });
+          void fm.open(filePath);
+        }
         return;
       }
       const target = resolveDestination(c, dest);
@@ -742,6 +749,7 @@ const VERBS: VerbDef[] = [
     slots: [],
     execute: (c, _p, api) => {
       if (c.cursor) {
+        api.dispatch({ type: 'pushRecentFile', path: c.cursor.path });
         void fm.open(c.cursor.path);
         api.closeOverlay();
       }
@@ -2341,6 +2349,17 @@ function destinationOptions(c: Ctx, includeCurrent = false, includeFiles = false
         available: true,
       });
     }
+    for (const p of c.recentFiles.slice(0, 8)) {
+      const id = `file:${p}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      opts.push({
+        id,
+        label: basename(p) || p,
+        detail: prettyPath(dirnameOf(p), c.homedir) + '  ·  recent file',
+        available: true,
+      });
+    }
   }
   return opts;
 }
@@ -2543,6 +2562,7 @@ export function ChipPrompt({
       bookmarks: state.bookmarks,
       homedir,
       recents: state.recents ?? [],
+      recentFiles: state.recentFiles ?? [],
       pinned: state.pinned ?? [],
       tabs: state.tabs.map((t, i) => ({
         index: i,
@@ -2569,7 +2589,7 @@ export function ChipPrompt({
       activeTabKind: activeTab.kind,
       activeTabFoldersFirst: activeTab.foldersFirst ?? true,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, launchers, state.customTags, state.tagPaths]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, launchers, state.customTags, state.tagPaths]);
 
   if (!activeTab || !ctx) return null;
 
@@ -2663,9 +2683,13 @@ export function ChipPrompt({
     // common subdirs (Desktop, Documents…) still hit when their absolute
     // counterpart is in recents.
     const recents = ctx?.recents ?? [];
+    const recentFiles = ctx?.recentFiles ?? [];
     const home = ctx?.homedir ?? '';
     const recentRank = new Map<string, number>();
     for (let i = 0; i < recents.length; i++) recentRank.set(recents[i], i);
+    for (let i = 0; i < recentFiles.length; i++) {
+      if (!recentRank.has(recentFiles[i])) recentRank.set(recentFiles[i], i);
+    }
     const absId = (id: string): string => {
       if (id === '~') return home;
       if (id.startsWith('~/') && home) return home + id.slice(1);
@@ -2780,7 +2804,13 @@ export function ChipPrompt({
       // inline so the user never visibly enters goto mode.
       if (opt.kind === 'find-file') {
         const filePath = opt.id.slice('file:'.length);
-        void fm.open(filePath);
+        const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+        if (ext === 'md' || ext === 'mdx') {
+          dispatch({ type: 'openEditTab', path: filePath, focus: true });
+        } else {
+          dispatch({ type: 'pushRecentFile', path: filePath });
+          void fm.open(filePath);
+        }
         onClose();
         return;
       }
