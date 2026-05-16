@@ -9,6 +9,7 @@
     "dev": "vite",
     "build:native": "node -e \"if(process.platform==='darwin'){require('child_process').execSync('make -C native/sharer',{stdio:'inherit'})}else{console.log('build:native: skipped on '+process.platform)}\"",
     "build": "npm run build:native && tsc -b && vite build",
+    "build:daemon": "esbuild daemon/breezed.ts --bundle --platform=node --format=esm --target=node18 --external:better-sqlite3 --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\" --outfile=daemon/dist/breezed.mjs",
     "start": "npm run dev",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
