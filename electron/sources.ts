@@ -109,26 +109,45 @@ export function connectedHosts(): string[] {
   return [...remotes.keys()];
 }
 
+// breezed holds /tasks/changes open up to 25s when idle. The client
+// timeout MUST exceed that, or every idle poll "times out" and looks
+// like a dead tunnel (that bug nuked the connection ~15s after connect).
+const CHANGE_POLL_TIMEOUT_MS = 35_000;
+
 // Long-poll the remote's change feed; on each advance, tell the renderer
-// to re-pull (same 'tasks:changed' event the local store uses).
+// to re-pull (same 'tasks:changed' event the local store uses). An
+// idle-timeout/abort is NORMAL — just re-poll. Only a run of genuine
+// failures (tunnel actually dropped) tears the source down.
 async function pollLoop(r: Remote) {
   if (r.polling) return;
   r.polling = true;
+  let consecutiveFailures = 0;
   while (!r.stopped) {
     try {
-      const out = await remoteRequest<{ seq: number }>(
-        r.host,
-        'GET',
-        `/tasks/changes?since=${r.seq}`,
-      );
+      const res = await fetch(`${r.conn.base}/tasks/changes?since=${r.seq}`, {
+        headers: { Authorization: `Bearer ${r.conn.token}` },
+        signal: AbortSignal.timeout(CHANGE_POLL_TIMEOUT_MS),
+      });
       if (r.stopped) break;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const out = (await res.json()) as { seq?: number };
+      consecutiveFailures = 0;
       if (typeof out.seq === 'number' && out.seq !== r.seq) {
         r.seq = out.seq;
         broadcast('tasks:changed');
       }
-    } catch {
+    } catch (e) {
       if (r.stopped) break;
-      // Tunnel likely dropped — tear the source down so the UI reflects
+      // Our own idle-timeout: the long-poll simply found no change in
+      // 35s. Not an error — immediately re-poll.
+      if (e instanceof Error && e.name === 'TimeoutError') continue;
+      // A real failure (ECONNREFUSED, tunnel exited, auth). Tolerate a
+      // couple of transient blips before tearing down.
+      if (++consecutiveFailures < 3) {
+        await new Promise((res2) => setTimeout(res2, 1500));
+        continue;
+      }
+      // Tunnel really gone — tear the source down so the UI reflects
       // reality rather than spinning forever.
       void disconnectSource(r.host);
       return;
