@@ -154,6 +154,9 @@ export type Task = {
   created_at: number;
   updated_at: number;
   completed_at: number | null;
+  // breezed P4 — owning machine: 'local' or an ssh host. Tagged by the
+  // aggregating IPC; absent on rows written/read directly.
+  source?: string;
 };
 
 export type TaskCreate = {

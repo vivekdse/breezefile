@@ -234,10 +234,24 @@ const fm = {
     ipcRenderer.invoke('launchers:revealConfig') as Promise<void>,
   // ─── Tasks (fm-dhc) ───────────────────────────────────────────────
   tasksList: (filter?: unknown) => ipcRenderer.invoke('tasks:list', filter),
-  tasksGet: (id: string) => ipcRenderer.invoke('tasks:get', id),
-  tasksCreate: (input: unknown) => ipcRenderer.invoke('tasks:create', input),
-  tasksUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('tasks:update', id, patch),
-  tasksDelete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
+  tasksGet: (id: string, source?: string) =>
+    ipcRenderer.invoke('tasks:get', id, source),
+  tasksCreate: (input: unknown, source?: string) =>
+    ipcRenderer.invoke('tasks:create', input, source),
+  tasksUpdate: (id: string, patch: unknown, source?: string) =>
+    ipcRenderer.invoke('tasks:update', id, patch, source),
+  tasksDelete: (id: string, source?: string) =>
+    ipcRenderer.invoke('tasks:delete', id, source),
+  // ── Multi-source (breezed P4) ──
+  sourcesList: () => ipcRenderer.invoke('sources:list'),
+  sourcesConnect: (host: string) => ipcRenderer.invoke('sources:connect', host),
+  sourcesDisconnect: (host: string) =>
+    ipcRenderer.invoke('sources:disconnect', host),
+  onSourcesChanged: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('sources:changed', handler);
+    return () => ipcRenderer.off('sources:changed', handler);
+  },
   tasksCountByFolder: (folder: string) => ipcRenderer.invoke('tasks:countByFolder', folder),
   tasksDbExists: () => ipcRenderer.invoke('tasks:dbExists') as Promise<boolean>,
   // ─── External-API control bridge (fm-9fd) ─────────────────────────
@@ -275,7 +289,8 @@ const fm = {
     ipcRenderer.invoke('tasks:runsListAll', limit),
   tasksRunsCountByTask: () => ipcRenderer.invoke('tasks:runsCountByTask'),
   tasksLastRun: (taskId: string) => ipcRenderer.invoke('tasks:lastRun', taskId),
-  tasksRunNow: (taskId: string) => ipcRenderer.invoke('tasks:runNow', taskId),
+  tasksRunNow: (taskId: string, source?: string) =>
+    ipcRenderer.invoke('tasks:runNow', taskId, source),
   tasksRunNowAt: (taskId: string, cwd: string) =>
     ipcRenderer.invoke('tasks:runNowAt', taskId, cwd),
   tasksCancelRun: (runId: string) =>

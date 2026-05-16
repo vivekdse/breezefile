@@ -12,6 +12,13 @@ import { platform } from './platform';
 import { resolveRemote, shQuote, listRemoteTargets } from './remoteRoute';
 import { ensureRemoteHooks, readLocalApi, pickRemotePort } from './remoteHooks';
 import { mintSessionToken, revokeSessionToken } from './session-tokens';
+import {
+  listSources,
+  connectSource,
+  disconnectSource,
+  connectedHosts,
+  remoteRequest,
+} from './sources';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -1974,13 +1981,71 @@ end tell`;
   // SQLite-backed task store at ~/.breezefile/tasks.db. Reads run on the
   // main thread (better-sqlite3 is synchronous and fast); writes broadcast
   // a 'tasks:changed' event to every window so the UI re-pulls.
-  ipcMain.handle('tasks:list', (_e, filter?: TaskFilter) => tasks.listTasks(filter ?? {}));
-  ipcMain.handle('tasks:get', (_e, id: string) => tasks.getTask(id));
-  ipcMain.handle('tasks:create', (_e, input: TaskCreate) => tasks.createTask(input));
-  ipcMain.handle('tasks:update', (_e, id: string, patch: TaskUpdate) =>
-    tasks.updateTask(id, patch),
+  // ── Multi-source (breezed P4) ──────────────────────────────────────
+  // Every task is tagged with `source` ('local' | <host>) so the UI can
+  // group by machine. Mutations route to the owning source. Remote
+  // failures are logged, never thrown — a dead tunnel must not blank the
+  // local list.
+  const taskQuery = (f?: TaskFilter): string => {
+    if (!f) return '';
+    const q = new URLSearchParams();
+    if (typeof f.status === 'string') q.set('status', f.status);
+    if (f.folder) q.set('folder', f.folder);
+    if (f.pinned === true) q.set('pinned', '1');
+    else if (f.pinned === false) q.set('pinned', '0');
+    if (f.search) q.set('search', f.search);
+    if (f.activeOnly) q.set('activeOnly', '1');
+    if (f.includeDone === false) q.set('includeDone', '0');
+    const s = q.toString();
+    return s ? `?${s}` : '';
+  };
+  ipcMain.handle('sources:list', () => listSources());
+  ipcMain.handle('sources:connect', (_e, host: string) => connectSource(host));
+  ipcMain.handle('sources:disconnect', (_e, host: string) =>
+    disconnectSource(host),
   );
-  ipcMain.handle('tasks:delete', (_e, id: string) => tasks.deleteTask(id));
+
+  ipcMain.handle('tasks:list', async (_e, filter?: TaskFilter) => {
+    const out = tasks
+      .listTasks(filter ?? {})
+      .map((t) => ({ ...t, source: 'local' }));
+    const qs = taskQuery(filter);
+    for (const host of connectedHosts()) {
+      try {
+        const remote = await remoteRequest<Array<Record<string, unknown>>>(
+          host,
+          'GET',
+          `/tasks${qs}`,
+        );
+        for (const t of remote) out.push({ ...(t as object), source: host } as never);
+      } catch (e) {
+        console.warn('[tasks:list]', host, 'failed:', (e as Error).message);
+      }
+    }
+    return out;
+  });
+  ipcMain.handle('tasks:get', (_e, id: string, source?: string) =>
+    source && source !== 'local'
+      ? remoteRequest(source, 'GET', `/tasks/${encodeURIComponent(id)}`)
+      : tasks.getTask(id),
+  );
+  ipcMain.handle('tasks:create', (_e, input: TaskCreate, source?: string) =>
+    source && source !== 'local'
+      ? remoteRequest(source, 'POST', '/tasks', input)
+      : tasks.createTask(input),
+  );
+  ipcMain.handle(
+    'tasks:update',
+    (_e, id: string, patch: TaskUpdate, source?: string) =>
+      source && source !== 'local'
+        ? remoteRequest(source, 'PATCH', `/tasks/${encodeURIComponent(id)}`, patch)
+        : tasks.updateTask(id, patch),
+  );
+  ipcMain.handle('tasks:delete', (_e, id: string, source?: string) =>
+    source && source !== 'local'
+      ? remoteRequest(source, 'DELETE', `/tasks/${encodeURIComponent(id)}`)
+      : tasks.deleteTask(id),
+  );
   ipcMain.handle('tasks:countByFolder', (_e, folder: string) => tasks.countByFolder(folder));
   ipcMain.handle('tasks:dbExists', () => tasks.dbExists());
   // fm-adc — drop a YAML-frontmatter+markdown sidecar at
@@ -1997,7 +2062,17 @@ end tell`;
   );
   ipcMain.handle('tasks:runsCountByTask', () => tasks.runCountsByTask());
   ipcMain.handle('tasks:lastRun', (_e, taskId: string) => tasks.getLastRun(taskId));
-  ipcMain.handle('tasks:runNow', async (_e, taskId: string) => {
+  ipcMain.handle('tasks:runNow', async (_e, taskId: string, source?: string) => {
+    // Remote: the run executes on that machine's daemon (its agent, its
+    // filesystem) — the whole point of per-machine ownership.
+    if (source && source !== 'local') {
+      return remoteRequest(
+        source,
+        'POST',
+        `/tasks/${encodeURIComponent(taskId)}/run`,
+        {},
+      );
+    }
     const t = tasks.getTask(taskId);
     if (!t) throw new Error(`task not found: ${taskId}`);
     const { executeTaskRun } = await import('./agents/execute');

@@ -131,10 +131,17 @@ type Fm = {
   launchersRevealConfig: () => Promise<void>;
   // fm-dhc — task store
   tasksList: (filter?: TaskFilter) => Promise<Task[]>;
-  tasksGet: (id: string) => Promise<Task | null>;
-  tasksCreate: (input: TaskCreate) => Promise<Task>;
-  tasksUpdate: (id: string, patch: TaskUpdate) => Promise<Task>;
-  tasksDelete: (id: string) => Promise<void>;
+  tasksGet: (id: string, source?: string) => Promise<Task | null>;
+  tasksCreate: (input: TaskCreate, source?: string) => Promise<Task>;
+  tasksUpdate: (id: string, patch: TaskUpdate, source?: string) => Promise<Task>;
+  tasksDelete: (id: string, source?: string) => Promise<void>;
+  // ── Multi-source (breezed P4) ──
+  sourcesList: () => Promise<
+    Array<{ id: string; kind: 'local' | 'remote'; status: 'connected' | 'connecting' }>
+  >;
+  sourcesConnect: (host: string) => Promise<void>;
+  sourcesDisconnect: (host: string) => Promise<void>;
+  onSourcesChanged: (cb: () => void) => () => void;
   tasksCountByFolder: (folder: string) => Promise<number>;
   tasksDbExists: () => Promise<boolean>;
   // fm-adc — write the per-task sidecar markdown for AI launchers
@@ -145,7 +152,10 @@ type Fm = {
   tasksRunsListAll: (limit?: number) => Promise<TaskRunWithTitle[]>;
   tasksRunsCountByTask: () => Promise<Record<string, number>>;
   tasksLastRun: (taskId: string) => Promise<TaskRun | null>;
-  tasksRunNow: (taskId: string) => Promise<{ run: TaskRun; result: unknown }>;
+  tasksRunNow: (
+    taskId: string,
+    source?: string,
+  ) => Promise<{ run: TaskRun; result: unknown }>;
   tasksRunNowAt: (
     taskId: string,
     cwd: string,

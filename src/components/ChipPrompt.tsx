@@ -1002,23 +1002,23 @@ const VERBS: VerbDef[] = [
     },
   },
   {
-    // Open a terminal pane that ssh's into a host from an active sshfs
-    // mount, with a session-scoped breeze CLI reachable over a
-    // reverse-ssh tunnel. The session token is minted in-process and
-    // revoked when this pane's pty exits, so detached/cron processes on
-    // the remote can never touch the task API.
+    // Connect a host from an active sshfs mount as a task source. The
+    // app installs/starts breezed there (persistent systemd --user
+    // service) and opens a forward ssh tunnel; that machine's tasks then
+    // appear under their own "<host>" section. No terminal, no sync —
+    // the host owns and runs its own tasks. Disconnect from the sidebar.
     id: 'remote-attach',
-    label: 'Remote attach (breeze on a remote)',
-    aliases: ['remote-attach', 'attach', 'remote', 'ssh-attach'],
+    label: 'Connect host (breeze tasks from a remote)',
+    aliases: ['remote-attach', 'attach', 'remote', 'connect', 'ssh-attach'],
     icon: '⇄',
     describe: (c) =>
       c.remoteTargets.length
-        ? 'Open an SSH shell on a mounted host with breeze attached'
+        ? 'Connect a mounted host as a task source'
         : 'No active sshfs mounts — mount a remote first',
     isAvailable: (c) =>
       c.remoteTargets.length
         ? { ok: true }
-        : { ok: false, reason: 'No active sshfs mounts to attach to' },
+        : { ok: false, reason: 'No active sshfs mounts to connect' },
     slots: [
       {
         label: 'Host',
@@ -1031,34 +1031,23 @@ const VERBS: VerbDef[] = [
           })),
       },
     ],
-    execute: async (c, [target], api) => {
+    execute: async (_c, [target], api) => {
       if (!target) {
         api.dispatch({ type: 'setStatus', msg: 'no host selected' });
         api.closeOverlay();
         return;
       }
-      if (api.activeTabTerminal) {
-        api.dispatch({ type: 'setStatus', msg: 'terminal already open in this tab' });
-        api.closeOverlay();
-        return;
-      }
-      try {
-        const ptyId = await spawnTerminal({
-          cwd: c.cwd,
-          sessionLabel: `attach-${target}`,
-          remoteAttach: { target },
-        });
-        api.dispatch({
-          type: 'openTerminal',
-          tabIndex: api.activeTabIndex,
-          ptyId,
-          cwd: c.cwd,
-        });
-        api.dispatch({ type: 'setStatus', msg: `attaching to ${target}…` });
-      } catch (err) {
-        api.dispatch({ type: 'setStatus', msg: formatOpError('remote-attach', err) });
-      }
+      api.dispatch({ type: 'setStatus', msg: `connecting ${target}…` });
       api.closeOverlay();
+      // Fire-and-forget: install+tunnel can take a few seconds; the
+      // sidebar shows a "connecting" entry and flips to connected via
+      // the sources:changed broadcast.
+      fm.sourcesConnect(target).catch((err: unknown) =>
+        api.dispatch({
+          type: 'setStatus',
+          msg: formatOpError('connect', err),
+        }),
+      );
     },
   },
   {

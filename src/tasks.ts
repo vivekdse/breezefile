@@ -58,22 +58,32 @@ export function useTasks(filter: TaskFilter = {}): {
   };
 }
 
-export async function createTask(input: TaskCreate): Promise<Task> {
-  return fm.tasksCreate(input);
+// breezed P4 — `source` ('local' | <host>) routes the mutation to the
+// owning machine. Optional + defaulting to local keeps every existing
+// caller working unchanged.
+export async function createTask(
+  input: TaskCreate,
+  source?: string,
+): Promise<Task> {
+  return fm.tasksCreate(input, source);
 }
-export async function updateTask(id: string, patch: TaskUpdate): Promise<Task> {
-  return fm.tasksUpdate(id, patch);
+export async function updateTask(
+  id: string,
+  patch: TaskUpdate,
+  source?: string,
+): Promise<Task> {
+  return fm.tasksUpdate(id, patch, source);
 }
-export async function deleteTask(id: string): Promise<void> {
-  return fm.tasksDelete(id);
+export async function deleteTask(id: string, source?: string): Promise<void> {
+  return fm.tasksDelete(id, source);
 }
-export async function getTask(id: string): Promise<Task | null> {
-  return fm.tasksGet(id);
+export async function getTask(id: string, source?: string): Promise<Task | null> {
+  return fm.tasksGet(id, source);
 }
 
 // fm-zf3m — runs API + hooks for the renderer.
-export async function runTaskNow(id: string): Promise<void> {
-  await fm.tasksRunNow(id);
+export async function runTaskNow(id: string, source?: string): Promise<void> {
+  await fm.tasksRunNow(id, source);
 }
 // fm-femh — run a task against an explicit cwd (the active folder tab).
 // Used by the Run-task modal so folder-agnostic tasks can be triggered

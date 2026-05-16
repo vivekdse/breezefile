@@ -8,6 +8,7 @@ import { startApiServer } from './api-server';
 import { startScheduler } from './scheduler';
 import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
+import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
 import { platform } from './platform';
@@ -179,6 +180,9 @@ app.whenReady().then(() => {
   // Starts after the API server so the scheduler can rely on agent
   // registration (electron/agents has already been side-effect imported).
   startScheduler();
+  // Reconnect previously-connected remote breezed daemons (best-effort,
+  // never blocks startup).
+  restoreSources();
   // fm-fc0 — best-effort: register breeze-mcp into ~/.claude/settings.json
   // on every launch. Idempotent — does nothing if already present and
   // up-to-date. Failures (file unreadable, no MCP binary) are logged

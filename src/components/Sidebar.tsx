@@ -26,6 +26,7 @@ import type { Task } from '../types';
 import { deriveRunState } from './TaskIndicators';
 import { formatOpError } from '../errorMessages';
 import { useOpenResumeInTab } from '../openResumeInTab';
+import { useSources } from '../sources';
 import './Sidebar.css';
 
 const MAX_VISIBLE_TASKS = 5;
@@ -227,6 +228,7 @@ export function Sidebar() {
   };
 
   const pinned = state.pinned ?? [];
+  const remoteSources = useSources().filter((s) => s.kind === 'remote');
   // fm-22o — gate the entire task subsystem behind the opt-in flag.
   const tasksEnabled = state.taskManagementEnabled;
 
@@ -299,6 +301,45 @@ export function Sidebar() {
           </button>
         ))}
       </div>
+
+      {remoteSources.length > 0 && (
+        <>
+          <h4 className="sidebar__section-title">Connected hosts</h4>
+          {remoteSources.map((s) => (
+            <button
+              key={`src:${s.id}`}
+              type="button"
+              className={linkClass(false)}
+              title={
+                s.status === 'connecting'
+                  ? `Connecting to ${s.id}…`
+                  : `${s.id} — its tasks show in their own section`
+              }
+            >
+              <span className="sidebar__ico">
+                <Icon name="link" size={18} />
+              </span>
+              <span className="sidebar__pin-label">
+                {s.id}
+                {s.status === 'connecting' ? ' …' : ''}
+              </span>
+              <span
+                className="sidebar__unpin"
+                role="button"
+                aria-label={`Disconnect ${s.id}`}
+                title={`Disconnect ${s.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void fm.sourcesDisconnect(s.id);
+                  dispatch({ type: 'setStatus', msg: `disconnected ${s.id}` });
+                }}
+              >
+                ×
+              </span>
+            </button>
+          ))}
+        </>
+      )}
 
       <h4 className="sidebar__section-title">Locations</h4>
       {locations.map((loc) => (

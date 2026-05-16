@@ -38,7 +38,7 @@ import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './TasksPage.css';
 
 type SortKey = 'due' | 'start' | 'created' | 'alpha';
-type GroupKey = 'folder' | 'status' | 'due' | 'flat';
+type GroupKey = 'source' | 'folder' | 'status' | 'due' | 'flat';
 type DerivedFilter = 'all' | 'this_week' | 'overdue' | 'scheduled';
 type AutoFilter = 'all' | 'auto' | 'manual';
 
@@ -58,6 +58,7 @@ const SORT_LABEL: Record<SortKey, string> = {
 };
 
 const GROUP_LABEL: Record<GroupKey, string> = {
+  source: 'Source',
   folder: 'Folder',
   status: 'Status',
   due: 'Due',
@@ -159,6 +160,7 @@ function groupOrder(group: GroupKey, key: string): number {
     return i < 0 ? 99 : i;
   }
   if (group === 'folder' && key === ANY_FOLDER_KEY) return -1;
+  if (group === 'source') return key === 'Local' ? -1 : 0;
   return 0;
 }
 
@@ -289,6 +291,9 @@ export function TasksPage() {
     for (const t of filtered) {
       let key = '';
       switch (group) {
+        case 'source':
+          key = !t.source || t.source === 'local' ? 'Local' : t.source;
+          break;
         case 'folder':
           key = t.folder ? homeRel(t.folder) : ANY_FOLDER_KEY;
           break;
@@ -752,7 +757,7 @@ export function TasksPage() {
       },
       'fm:tasks:group': (detail) => {
         const v = (detail as { value?: GroupKey } | undefined)?.value;
-        if (v && (['folder', 'status', 'due', 'flat'] as GroupKey[]).includes(v)) setGroup(v);
+        if (v && (['source', 'folder', 'status', 'due', 'flat'] as GroupKey[]).includes(v)) setGroup(v);
       },
       'fm:tasks:sort': (detail) => {
         const v = (detail as { value?: SortKey } | undefined)?.value;
