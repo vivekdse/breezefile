@@ -6,6 +6,8 @@ import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
 import { startScheduler } from './scheduler';
+import { setBreezeHost } from './core/host';
+import { ElectronBreezeHost } from './core/electron-host';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
 import { platform } from './platform';
@@ -167,6 +169,11 @@ app.whenReady().then(() => {
   });
 
   registerIpc();
+  // Inject the Electron host before any task subsystem runs so
+  // tasks.ts/scheduler.ts broadcast to windows + raise notifications
+  // exactly as before the P1 core extraction (breezed injects a
+  // headless host instead).
+  setBreezeHost(ElectronBreezeHost);
   startApiServer();
   // fm-zf3m — auto-executor for tasks with auto_mode=1 / cron set.
   // Starts after the API server so the scheduler can rely on agent

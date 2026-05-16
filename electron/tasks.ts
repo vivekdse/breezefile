@@ -6,12 +6,12 @@
 // re-pull the affected slice without polling.
 
 import Database from 'better-sqlite3';
-import { BrowserWindow } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { nextFireFromExpr } from './cron';
+import { breezeHost } from './core/host';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'done' | 'cancelled';
 
@@ -563,9 +563,7 @@ export function setTaskChangeHook(fn: () => void): void {
 }
 
 function broadcastChange() {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('tasks:changed');
-  }
+  breezeHost().onTasksChanged();
   // Best-effort, never throws past the caller — a misbehaving hook
   // shouldn't fail a CRUD operation.
   try { onTaskChange?.(); } catch (e) { console.error('[tasks] change hook:', e); }
@@ -823,11 +821,7 @@ export function nextScheduledFire(): number | null {
 }
 
 function broadcastRunChange(taskId: string) {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) {
-      w.webContents.send('task-runs:changed', { taskId });
-    }
-  }
+  breezeHost().onRunsChanged(taskId);
 }
 
 // For tests / explicit cleanup. Production code never calls this — the

@@ -14,7 +14,7 @@
 // and an in-memory backoff queue. Anything load-bearing lives in the
 // task_runs / tasks tables so a crash doesn't lose work.
 
-import { Notification, BrowserWindow } from 'electron';
+import { breezeHost } from './core/host';
 import * as tasks from './tasks';
 import type { Task, TaskRun, TaskRunErrorClass } from './tasks';
 import { executeTaskRun, AgentNotAvailableError } from './agents/execute';
@@ -203,24 +203,11 @@ function notifyFailure(task: Task, run: TaskRun): void {
 }
 
 function notify(task: Task, body: string): void {
-  // Prefer system notification when supported; in headless / test
-  // environments it's a no-op which is fine.
+  // Delegated to the host: ElectronBreezeHost raises a system
+  // Notification + renderer badge; HeadlessBreezeHost (breezed) logs.
   try {
-    if (Notification.isSupported()) {
-      const n = new Notification({
-        title: `Auto-execute failed: ${task.title}`,
-        body,
-        silent: false,
-      });
-      n.show();
-    }
+    breezeHost().onRunFailed(task, body);
   } catch (e) {
     console.error('[scheduler] notify:', e);
-  }
-  // Also tell the renderer so it can update the sidebar badge.
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) {
-      w.webContents.send('task-runs:failed', { taskId: task.id, body });
-    }
   }
 }
