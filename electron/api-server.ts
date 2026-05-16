@@ -5,11 +5,11 @@
 // find us. Bearer-token auth on every endpoint except /healthz. Cleans up
 // api.json on quit. Pure node:http to avoid pulling in an Express dep.
 //
-// Endpoints fall into two camps:
-//   - tasks/*  — pure-main work, talks directly to the tasks module.
-//   - app/*    — needs the renderer (state.tabs lives there). We bridge
-//                via webContents.send('control:request', …) and await a
-//                reply on ipcMain.on('control:reply', …).
+// Post-P1: the PURE surface (/healthz, /tasks/*, /runs/*, /remote/resolve,
+// auth, http helpers) lives in core/task-http.ts and is shared verbatim
+// with the headless `breezed` daemon. This module is now just the
+// Electron composer: it owns the token + server lifecycle and adds the
+// renderer-coupled routes (/app/*, /claude-state).
 
 import http, { IncomingMessage, ServerResponse } from 'node:http';
 import { AddressInfo } from 'node:net';
@@ -18,16 +18,9 @@ import os from 'node:os';
 import { writeFileSync, unlinkSync, chmodSync, mkdirSync, existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
-import * as tasks from './tasks';
-import type { TaskCreate, TaskUpdate } from './tasks';
 import { dispatchTerminalFg } from './ipc';
-import { resolveRemote } from './remoteRoute';
-import { matchesSessionToken, clearSessionTokens } from './session-tokens';
-import {
-  AgentNotAvailableError,
-  TaskAlreadyRunningError,
-  executeTaskRun,
-} from './agents/execute';
+import { clearSessionTokens } from './session-tokens';
+import { createTaskApi, sendJson, send, readJson } from './core/task-http';
 
 const API_FILE_DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(API_FILE_DIR, 'api.json');
@@ -35,6 +28,10 @@ const API_FILE = path.join(API_FILE_DIR, 'api.json');
 let server: http.Server | null = null;
 let token: string | null = null;
 let pendingControl = new Map<string, (v: unknown) => void>();
+
+// The shared pure task/runs/remote routes + auth. `getToken` closes over
+// the mutable primary token so it's always current after startup.
+const taskApi = createTaskApi(() => token);
 
 function newToken(): string {
   return crypto.randomBytes(24).toString('base64url');
@@ -104,161 +101,24 @@ function registerControlReply() {
   );
 }
 
-// ─── HTTP plumbing ───────────────────────────────────────────────────
-function sendJson(res: ServerResponse, status: number, body: unknown) {
-  const buf = Buffer.from(JSON.stringify(body), 'utf8');
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': buf.length,
-  });
-  res.end(buf);
-}
-
-function send(res: ServerResponse, status: number, msg: string) {
-  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end(msg);
-}
-
-async function readJson<T>(req: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  if (chunks.length === 0) return {} as T;
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
-  } catch {
-    throw Object.assign(new Error('invalid JSON body'), { status: 400 });
-  }
-}
-
-function authorized(req: IncomingMessage): boolean {
-  const auth = req.headers.authorization ?? '';
-  if (!auth.startsWith('Bearer ')) return false;
-  const supplied = auth.slice(7).trim();
-  if (token !== null && timingSafeEq(supplied, token)) return true;
-  return matchesSessionToken(supplied);
-}
-
-function timingSafeEq(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return crypto.timingSafeEqual(ab, bb);
-}
-
 // ─── Routing ─────────────────────────────────────────────────────────
+// Order: healthz (open) → auth → shared pure routes → app/* + claude-state
+// → 404. The shared routes own their own error→JSON; the app/* block has
+// its own try/catch for the same envelope shape as before P1.
 async function route(req: IncomingMessage, res: ServerResponse) {
+  if (taskApi.tryHealthz(req, res)) return;
+
+  if (!taskApi.authorized(req)) {
+    return send(res, 401, 'unauthorized');
+  }
+
+  if (await taskApi.route(req, res)) return;
+
   const url = new URL(req.url ?? '/', 'http://localhost');
   const p = url.pathname;
   const m = (req.method ?? 'GET').toUpperCase();
 
-  // Healthz is unauthenticated so the CLI can probe before sending creds.
-  if (p === '/healthz' && m === 'GET') {
-    return sendJson(res, 200, { ok: true, name: 'breeze', pid: process.pid });
-  }
-
-  if (!authorized(req)) {
-    return send(res, 401, 'unauthorized');
-  }
-
   try {
-    // tasks/*
-    if (p === '/tasks' && m === 'GET') {
-      const filter = {
-        status: url.searchParams.get('status') as tasks.TaskStatus | null,
-        folder: url.searchParams.get('folder') ?? undefined,
-        pinned:
-          url.searchParams.get('pinned') === '1'
-            ? true
-            : url.searchParams.get('pinned') === '0'
-              ? false
-              : undefined,
-        search: url.searchParams.get('search') ?? undefined,
-        activeOnly: url.searchParams.get('activeOnly') === '1',
-        includeDone: url.searchParams.get('includeDone') !== '0',
-      };
-      const list = tasks.listTasks({
-        ...(filter.status ? { status: filter.status } : {}),
-        ...(filter.folder ? { folder: filter.folder } : {}),
-        ...(filter.pinned !== undefined ? { pinned: filter.pinned } : {}),
-        ...(filter.search ? { search: filter.search } : {}),
-        ...(filter.activeOnly ? { activeOnly: true } : {}),
-        includeDone: filter.includeDone,
-      });
-      return sendJson(res, 200, list);
-    }
-    if (p === '/tasks' && m === 'POST') {
-      const body = await readJson<TaskCreate>(req);
-      const t = tasks.createTask(body);
-      return sendJson(res, 201, t);
-    }
-    const taskMatch = /^\/tasks\/([^/]+)$/.exec(p);
-    if (taskMatch) {
-      const id = decodeURIComponent(taskMatch[1]);
-      if (m === 'GET') {
-        const t = tasks.getTask(id);
-        if (!t) return send(res, 404, 'not found');
-        return sendJson(res, 200, t);
-      }
-      if (m === 'PATCH') {
-        const body = await readJson<TaskUpdate>(req);
-        const t = tasks.updateTask(id, body);
-        return sendJson(res, 200, t);
-      }
-      if (m === 'DELETE') {
-        tasks.deleteTask(id);
-        return sendJson(res, 200, { ok: true });
-      }
-    }
-
-    // fm-zf3m — run a task immediately via its (or default) agent.
-    // Body: { agentId?: string }. Synchronous: replies after the run
-    // completes so the CLI can surface success/failure inline. The
-    // scheduler will use the same executeTaskRun() but with its own
-    // queue; this path is for explicit user-triggered runs.
-    const runMatch = /^\/tasks\/([^/]+)\/run$/.exec(p);
-    if (runMatch && m === 'POST') {
-      const id = decodeURIComponent(runMatch[1]);
-      const t = tasks.getTask(id);
-      if (!t) return send(res, 404, 'not found');
-      const body = await readJson<{ agentId?: string }>(req);
-      try {
-        const { run, result } = await executeTaskRun(t, {
-          agentId: body.agentId,
-        });
-        return sendJson(res, 200, { run, result });
-      } catch (e) {
-        if (e instanceof AgentNotAvailableError) {
-          return sendJson(res, 400, { error: e.message });
-        }
-        if (e instanceof TaskAlreadyRunningError) {
-          return sendJson(res, 409, {
-            error: e.message,
-            taskId: e.taskId,
-            runId: e.runId,
-          });
-        }
-        throw e;
-      }
-    }
-
-    // fm-zf3m — run history for a task.
-    const runsMatch = /^\/tasks\/([^/]+)\/runs$/.exec(p);
-    if (runsMatch && m === 'GET') {
-      const id = decodeURIComponent(runsMatch[1]);
-      const limit = Number(url.searchParams.get('limit')) || 50;
-      return sendJson(res, 200, tasks.listRunsForTask(id, limit));
-    }
-
-    // fm-zf3m — fetch a single run row (for the trace opener).
-    const oneRunMatch = /^\/runs\/([^/]+)$/.exec(p);
-    if (oneRunMatch && m === 'GET') {
-      const id = decodeURIComponent(oneRunMatch[1]);
-      const r = tasks.getRun(id);
-      if (!r) return send(res, 404, 'not found');
-      return sendJson(res, 200, r);
-    }
-
-    // app/*
     if (p === '/app/navigate' && m === 'POST') {
       const body = await readJson<{ path: string }>(req);
       if (!body.path) throw Object.assign(new Error('path required'), { status: 400 });
@@ -313,22 +173,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       return sendJson(res, 200, result);
     }
 
-    // Resolve a local cwd that lives under an sshfs mount to its
-    // ssh://<target><remoteCwd> identity, so `breeze prime` (running on
-    // the remote, calling back over the tunnel) can match tasks the
-    // laptop anchored — and vice-versa.
-    if (p === '/remote/resolve' && m === 'GET') {
-      const cwd = url.searchParams.get('cwd') ?? '';
-      const r = cwd ? await resolveRemote(cwd).catch(() => null) : null;
-      if (!r) return sendJson(res, 200, {});
-      return sendJson(res, 200, { ssh: `ssh://${r.target}${r.remoteCwd}` });
-    }
-
     return send(res, 404, 'not found');
   } catch (e) {
     const err = e as Error & { status?: number };
-    const status = err.status ?? 500;
-    return sendJson(res, status, { error: err.message });
+    return sendJson(res, err.status ?? 500, { error: err.message });
   }
 }
 
