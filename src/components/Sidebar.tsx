@@ -233,6 +233,9 @@ export function Sidebar() {
   // connecting→connected transition, then settles to a static dot.
   // Disconnects (explicit × OR tunnel drop) emit a brief status line.
   const [justConnected, setJustConnected] = useState<Set<string>>(new Set());
+  // Hosts that just disconnected: kept mounted ~1.2s with a red
+  // fade-out so the removal is visible (sidebar × OR verb OR drop).
+  const [leaving, setLeaving] = useState<string[]>([]);
   const prevConnRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const now = new Set(
@@ -257,6 +260,11 @@ export function Sidebar() {
     for (const id of prev) {
       if (!now.has(id) && !remoteSources.some((s) => s.id === id)) {
         dispatch({ type: 'setStatus', msg: `disconnected ${id}` });
+        setLeaving((p) => (p.includes(id) ? p : [...p, id]));
+        setTimeout(
+          () => setLeaving((p) => p.filter((x) => x !== id)),
+          1200,
+        );
       }
     }
     prevConnRef.current = now;
@@ -334,7 +342,8 @@ export function Sidebar() {
         ))}
       </div>
 
-      {remoteSources.length > 0 && (
+      {(remoteSources.length > 0 ||
+        leaving.some((id) => !remoteSources.some((s) => s.id === id))) && (
         <>
           <h4 className="sidebar__section-title">Connected hosts</h4>
           {remoteSources.map((s) => (
@@ -385,6 +394,29 @@ export function Sidebar() {
               </span>
             </button>
           ))}
+          {leaving
+            .filter((id) => !remoteSources.some((s) => s.id === id))
+            .map((id) => (
+              <button
+                key={`src-leaving:${id}`}
+                type="button"
+                disabled
+                className={`${linkClass(false)} sidebar__src--leaving`}
+                title={`${id} disconnected`}
+                aria-hidden="true"
+              >
+                <span className="sidebar__ico">
+                  <Icon name="link" size={18} />
+                </span>
+                <span className="sidebar__pin-label">
+                  <span
+                    className="sidebar__src-dot sidebar__src-dot--gone"
+                    aria-hidden="true"
+                  />
+                  {id} (disconnected)
+                </span>
+              </button>
+            ))}
         </>
       )}
 

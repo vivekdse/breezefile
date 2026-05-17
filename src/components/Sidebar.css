@@ -143,10 +143,26 @@ button.sidebar__link:focus-visible {
 .sidebar__link.sidebar__src--connecting {
   background: rgba(255, 159, 10, 0.12);
 }
+/* Disconnected: red dot + the row briefly washes red and fades out
+   before it unmounts (~1.2s in JS), so removal is visible. */
+.sidebar__src-dot--gone {
+  background: #ff453a;
+}
+.sidebar__link.sidebar__src--leaving {
+  pointer-events: none;
+  animation: sidebar-src-leave 1.15s ease-in forwards;
+}
+@keyframes sidebar-src-leave {
+  0%   { background: rgba(255, 69, 58, 0.26); opacity: 1; }
+  55%  { background: rgba(255, 69, 58, 0.20); opacity: 1; }
+  100% { background: transparent; opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
   .sidebar__src-dot--connecting,
-  .sidebar__link.sidebar__src--flash { animation: none; }
+  .sidebar__link.sidebar__src--flash,
+  .sidebar__link.sidebar__src--leaving { animation: none; }
   .sidebar__link.sidebar__src--flash { background: rgba(52, 199, 89, 0.18); }
+  .sidebar__link.sidebar__src--leaving { background: rgba(255, 69, 58, 0.18); }
 }
 
 /* ─── Drives ───────────────────────────────────────────────────────── */

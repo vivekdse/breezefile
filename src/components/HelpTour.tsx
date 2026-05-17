@@ -236,6 +236,7 @@ const SLIDES: Slide[] = [
       { name: 'runs view', what: 'on the Tasks tab toggle from Tasks → Runs to see every recent run across every auto task in one feed · filter by status, search by title or folder, click a row to jump into that task’s history' },
       { name: 'breeze CLI', what: 'a Node `breeze` shell command talks HTTP to the running app · `breeze status`, `breeze task list / show / add / edit / done / pin / unpin / delete / open`, `breeze open <folder>`, `breeze tabs` · <id> defaults to $BREEZE_TASK_ID inside task tabs · `breeze prime` (auto-installed Claude Code hook) feeds session context on start' },
       { name: ':remote-attach', what: 'verb (palette / chip prompt; aliases connect/attach): pick a host from your active sshfs mounts to connect it as a task SOURCE · the app installs + starts a persistent breezed daemon there (systemd --user, survives disconnect + reboot) and opens a forward ssh tunnel · that machine’s tasks appear under their own "<host>" section (group Tasks by Source) · creating a task in a folder under that host’s mount auto-routes it to that machine’s store with the real remote path · each machine owns + runs its own tasks (no sync) · "Connected hosts" in the sidebar lists them with a × to disconnect' },
+      { name: ':disconnect', what: 'verb (aliases detach/drop-host): pick a connected remote host to disconnect it — tears down the forward tunnel and removes its task section (the host’s breezed keeps running there). Same as the sidebar × · the row flashes red briefly so you see it go' },
     ],
   },
   {

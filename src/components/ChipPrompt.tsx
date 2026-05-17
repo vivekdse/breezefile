@@ -78,6 +78,8 @@ type Ctx = {
   installedTerminals: string[];
   // ssh targets from active sshfs mounts — drives the remote-attach verb.
   remoteTargets: string[];
+  // currently-connected remote sources — drives the :disconnect verb.
+  connectedSources: string[];
   // fm-jtu — does the active tab already have an embedded terminal pane?
   activeTabHasTerminal: boolean;
   // fm-jtu — the active tab's terminal handle (when present), so verbs
@@ -141,6 +143,7 @@ type Verb =
   | 'term'
   | 'term-close'
   | 'remote-attach'
+  | 'disconnect'
   | 'newtag'
   | 'tag'
   | 'untag'
@@ -1046,6 +1049,49 @@ const VERBS: VerbDef[] = [
         api.dispatch({
           type: 'setStatus',
           msg: formatOpError('connect', err),
+        }),
+      );
+    },
+  },
+  {
+    // Disconnect a connected remote task source. Host slot is the list
+    // of currently-connected sources (mirrors the sidebar × action).
+    id: 'disconnect',
+    label: 'Disconnect host (remote task source)',
+    aliases: ['disconnect', 'detach', 'unmount-source', 'drop-host'],
+    icon: '⊘',
+    describe: (c) =>
+      c.connectedSources.length
+        ? 'Disconnect a connected remote task source'
+        : 'No connected remote hosts',
+    isAvailable: (c) =>
+      c.connectedSources.length
+        ? { ok: true }
+        : { ok: false, reason: 'No connected remote hosts to disconnect' },
+    slots: [
+      {
+        label: 'Host',
+        getOptions: (c) =>
+          c.connectedSources.map((h) => ({
+            id: h,
+            label: h,
+            detail: 'connected remote task source',
+            available: true,
+          })),
+      },
+    ],
+    execute: async (_c, [host], api) => {
+      if (!host) {
+        api.dispatch({ type: 'setStatus', msg: 'no host selected' });
+        api.closeOverlay();
+        return;
+      }
+      api.dispatch({ type: 'setStatus', msg: `disconnecting ${host}…` });
+      api.closeOverlay();
+      fm.sourcesDisconnect(host).catch((err: unknown) =>
+        api.dispatch({
+          type: 'setStatus',
+          msg: formatOpError('disconnect', err),
         }),
       );
     },
@@ -2470,6 +2516,7 @@ export function ChipPrompt({
   const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
   const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
   const [remoteTargets, setRemoteTargets] = useState<string[]>([]);
+  const [connectedSources, setConnectedSources] = useState<string[]>([]);
   const [launchers, setLaunchers] = useState<import('../bridge').Launcher[]>([]);
   const searchTokenRef = useRef(0); // guards against out-of-order resolves
   const subdirsTokenRef = useRef(0);
@@ -2484,9 +2531,23 @@ export function ChipPrompt({
     void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
     // sshfs-mount ssh targets for the remote-attach verb's host slot.
     void fm.remoteListTargets().then(setRemoteTargets).catch(() => {});
+    // Connected remote sources for the :disconnect verb's host slot.
+    // Refresh on every connect/disconnect broadcast.
+    const loadSources = () =>
+      void fm
+        .sourcesList()
+        .then((ss) =>
+          setConnectedSources(
+            ss.filter((s) => s.kind === 'remote' && s.status === 'connected').map((s) => s.id),
+          ),
+        )
+        .catch(() => {});
+    loadSources();
+    const offSources = fm.onSourcesChanged(loadSources);
     // fm-g6r — preload the user's launcher list so :claude/:codex/:gemini
     // surface in the verb picker without a per-frame async fetch.
     void fm.launchersList().then(setLaunchers).catch(() => {});
+    return () => offSources();
   }, []);
 
   // Fire Spotlight folder search when a destination slot is active and the
@@ -2636,6 +2697,7 @@ export function ChipPrompt({
       defaultTerminal,
       installedTerminals,
       remoteTargets,
+      connectedSources,
       activeTabHasTerminal: !!activeTab.terminal,
       activeTabTerminal: activeTab.terminal ? { ptyId: activeTab.terminal.ptyId } : undefined,
       launchers,
@@ -2645,7 +2707,7 @@ export function ChipPrompt({
       activeTabKind: activeTab.kind,
       activeTabFoldersFirst: activeTab.foldersFirst ?? true,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, remoteTargets, launchers, state.customTags, state.tagPaths]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, remoteTargets, connectedSources, launchers, state.customTags, state.tagPaths]);
 
   if (!activeTab || !ctx) return null;
 
