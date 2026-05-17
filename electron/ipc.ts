@@ -2029,11 +2029,25 @@ end tell`;
       ? remoteRequest(source, 'GET', `/tasks/${encodeURIComponent(id)}`)
       : tasks.getTask(id),
   );
-  ipcMain.handle('tasks:create', (_e, input: TaskCreate, source?: string) =>
-    source && source !== 'local'
-      ? remoteRequest(source, 'POST', '/tasks', input)
-      : tasks.createTask(input),
-  );
+  // Auto-by-folder routing: if the caller didn't pin a source and the
+  // task's folder lives under a *connected* host's sshfs mount, the
+  // task belongs to that machine — create it on its daemon with the
+  // folder rewritten to the real remote path. Otherwise local.
+  ipcMain.handle('tasks:create', async (_e, input: TaskCreate, source?: string) => {
+    if (source && source !== 'local') {
+      return remoteRequest(source, 'POST', '/tasks', input);
+    }
+    if (!source && input.folder) {
+      const rr = await resolveRemote(input.folder).catch(() => null);
+      if (rr && connectedHosts().includes(rr.target)) {
+        return remoteRequest(rr.target, 'POST', '/tasks', {
+          ...input,
+          folder: rr.remoteCwd,
+        });
+      }
+    }
+    return tasks.createTask(input);
+  });
   ipcMain.handle(
     'tasks:update',
     (_e, id: string, patch: TaskUpdate, source?: string) =>
