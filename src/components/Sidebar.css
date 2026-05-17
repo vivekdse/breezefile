@@ -101,6 +101,36 @@ button.sidebar__link:focus-visible {
   flex-shrink: 0;
 }
 
+/* Connected-host liveness indicator. A connected source pulses green
+   so it's obvious the tunnel is live; connecting blinks amber. */
+.sidebar__src-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+.sidebar__src-dot--live {
+  background: #34c759;
+  animation: sidebar-src-pulse 1.6s ease-in-out infinite;
+}
+@keyframes sidebar-src-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.32); }
+  50%      { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.05); }
+}
+.sidebar__src-dot--connecting {
+  background: #ff9f0a;
+  animation: sidebar-src-blink 0.9s ease-in-out infinite;
+}
+@keyframes sidebar-src-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__src-dot--live,
+  .sidebar__src-dot--connecting { animation: none; }
+}
+
 /* ─── Drives ───────────────────────────────────────────────────────── */
 
 .sidebar__drive {

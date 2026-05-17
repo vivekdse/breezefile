@@ -319,9 +319,17 @@ export function Sidebar() {
               <span className="sidebar__ico">
                 <Icon name="link" size={18} />
               </span>
+              <span
+                className={`sidebar__src-dot ${
+                  s.status === 'connecting'
+                    ? 'sidebar__src-dot--connecting'
+                    : 'sidebar__src-dot--live'
+                }`}
+                aria-hidden="true"
+              />
               <span className="sidebar__pin-label">
                 {s.id}
-                {s.status === 'connecting' ? ' …' : ''}
+                {s.status === 'connecting' ? ' (connecting…)' : ''}
               </span>
               <span
                 className="sidebar__unpin"
