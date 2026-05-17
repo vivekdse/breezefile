@@ -143,13 +143,12 @@ export function FolderList() {
   // could see fresh state. Now it's built here, once, reading fresh state
   // from ctxRef at click time.
   const onContextMenu = useCallback((entry: Entry, e: React.MouseEvent) => {
-    const { store, overlays, tab } = ctxRef.current;
+    const { store, overlays } = ctxRef.current;
     const { state, dispatch, refreshActive } = store;
 
     const parentDir = entry.path.slice(0, entry.path.lastIndexOf('/')) || '/';
     const baseName = entry.path.slice(entry.path.lastIndexOf('/') + 1);
     const hasClipboard = state.yank.length > 0;
-    const cwd = tab?.trail[tab.trail.length - 1] ?? parentDir;
 
     async function doPasteInto(dst: string) {
       if (state.yank.length === 0) return;
@@ -215,31 +214,13 @@ export function FolderList() {
         : []),
       {
         label: 'Open With…',
-        submenu: ['Visual Studio Code', 'TextEdit', 'Preview', 'QuickLook', 'Finder'].map(
-          (appName) => ({
-            label: appName,
-            action: async () => {
-              try {
-                if (appName === 'QuickLook') {
-                  await fm.runCommand(
-                    cwd,
-                    `qlmanage -p "${entry.path.replace(/"/g, '\\"')}" >/dev/null 2>&1 &`,
-                  );
-                } else if (appName === 'Finder') {
-                  await fm.openWith(entry.path, 'Finder');
-                } else {
-                  await fm.openWith(entry.path, appName);
-                }
-                dispatch({ type: 'setStatus', msg: `opened in ${appName}` });
-              } catch (err) {
-                dispatch({
-                  type: 'setStatus',
-                  msg: formatOpError(appName, err),
-                });
-              }
-            },
-          }),
-        ),
+        action: () => {
+          const dot = entry.name.lastIndexOf('.');
+          const ext = dot > 0 ? entry.name.slice(dot + 1).toLowerCase() : undefined;
+          window.dispatchEvent(
+            new CustomEvent('fm:openWith', { detail: { path: entry.path, ext } }),
+          );
+        },
       },
       { label: 'Reveal in Finder', action: () => fm.reveal(entry.path) },
       { separator: true },
