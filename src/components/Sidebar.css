@@ -110,14 +110,21 @@ button.sidebar__link:focus-visible {
   flex-shrink: 0;
   margin-right: 6px;
 }
+/* Connected = static green (no persistent animation). */
 .sidebar__src-dot--live {
   background: #34c759;
-  animation: sidebar-src-pulse 1.6s ease-in-out infinite;
+}
+/* Just connected: pulse a few times (~3s) then the class is removed
+   in JS and it settles to the static --live dot. */
+.sidebar__src-dot--flash {
+  background: #34c759;
+  animation: sidebar-src-pulse 1s ease-in-out 3;
 }
 @keyframes sidebar-src-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.32); }
+  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.36); }
   50%      { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.05); }
 }
+/* Connecting is inherently brief — a soft blink until it flips. */
 .sidebar__src-dot--connecting {
   background: #ff9f0a;
   animation: sidebar-src-blink 0.9s ease-in-out infinite;
@@ -127,7 +134,7 @@ button.sidebar__link:focus-visible {
   50%      { opacity: 0.25; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar__src-dot--live,
+  .sidebar__src-dot--flash,
   .sidebar__src-dot--connecting { animation: none; }
 }
 

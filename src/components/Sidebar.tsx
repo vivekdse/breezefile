@@ -229,6 +229,38 @@ export function Sidebar() {
 
   const pinned = state.pinned ?? [];
   const remoteSources = useSources().filter((s) => s.kind === 'remote');
+  // Transient "just connected" set: a host pulses for ~3s on the
+  // connecting→connected transition, then settles to a static dot.
+  // Disconnects (explicit × OR tunnel drop) emit a brief status line.
+  const [justConnected, setJustConnected] = useState<Set<string>>(new Set());
+  const prevConnRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const now = new Set(
+      remoteSources.filter((s) => s.status === 'connected').map((s) => s.id),
+    );
+    const prev = prevConnRef.current;
+    for (const id of now) {
+      if (!prev.has(id)) {
+        setJustConnected((p) => new Set(p).add(id));
+        dispatch({ type: 'setStatus', msg: `connected ${id}` });
+        setTimeout(
+          () =>
+            setJustConnected((p) => {
+              const n = new Set(p);
+              n.delete(id);
+              return n;
+            }),
+          3200,
+        );
+      }
+    }
+    for (const id of prev) {
+      if (!now.has(id) && !remoteSources.some((s) => s.id === id)) {
+        dispatch({ type: 'setStatus', msg: `disconnected ${id}` });
+      }
+    }
+    prevConnRef.current = now;
+  }, [remoteSources, dispatch]);
   // fm-22o — gate the entire task subsystem behind the opt-in flag.
   const tasksEnabled = state.taskManagementEnabled;
 
@@ -323,7 +355,9 @@ export function Sidebar() {
                 className={`sidebar__src-dot ${
                   s.status === 'connecting'
                     ? 'sidebar__src-dot--connecting'
-                    : 'sidebar__src-dot--live'
+                    : justConnected.has(s.id)
+                      ? 'sidebar__src-dot--flash'
+                      : 'sidebar__src-dot--live'
                 }`}
                 aria-hidden="true"
               />
@@ -338,8 +372,9 @@ export function Sidebar() {
                 title={`Disconnect ${s.id}`}
                 onClick={(e) => {
                   e.stopPropagation();
+                  // The sources effect emits the "disconnected X" status
+                  // (covers tunnel-drop too) — don't double-message here.
                   void fm.sourcesDisconnect(s.id);
-                  dispatch({ type: 'setStatus', msg: `disconnected ${s.id}` });
                 }}
               >
                 ×
