@@ -341,7 +341,13 @@ export function Sidebar() {
             <button
               key={`src:${s.id}`}
               type="button"
-              className={linkClass(false)}
+              className={`${linkClass(false)}${
+                s.status === 'connecting'
+                  ? ' sidebar__src--connecting'
+                  : justConnected.has(s.id)
+                    ? ' sidebar__src--flash'
+                    : ''
+              }`}
               title={
                 s.status === 'connecting'
                   ? `Connecting to ${s.id}…`
@@ -351,17 +357,15 @@ export function Sidebar() {
               <span className="sidebar__ico">
                 <Icon name="link" size={18} />
               </span>
-              <span
-                className={`sidebar__src-dot ${
-                  s.status === 'connecting'
-                    ? 'sidebar__src-dot--connecting'
-                    : justConnected.has(s.id)
-                      ? 'sidebar__src-dot--flash'
-                      : 'sidebar__src-dot--live'
-                }`}
-                aria-hidden="true"
-              />
               <span className="sidebar__pin-label">
+                <span
+                  className={`sidebar__src-dot ${
+                    s.status === 'connecting'
+                      ? 'sidebar__src-dot--connecting'
+                      : 'sidebar__src-dot--live'
+                  }`}
+                  aria-hidden="true"
+                />
                 {s.id}
                 {s.status === 'connecting' ? ' (connecting…)' : ''}
               </span>

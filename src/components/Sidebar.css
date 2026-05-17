@@ -101,41 +101,52 @@ button.sidebar__link:focus-visible {
   flex-shrink: 0;
 }
 
-/* Connected-host liveness indicator. A connected source pulses green
-   so it's obvious the tunnel is live; connecting blinks amber. */
+/* Connected-host indicator: a small static dot tucked right next to
+   the host name (inside the label, so the row's flex gap doesn't
+   apply — keeps dot↔text tight). Attention on connect/disconnect is
+   drawn by a brief ROW background flash (not a clipped box-shadow). */
 .sidebar__src-dot {
+  display: inline-block;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  flex-shrink: 0;
-  margin-right: 6px;
+  margin-right: 5px;
+  vertical-align: middle;
 }
-/* Connected = static green (no persistent animation). */
 .sidebar__src-dot--live {
   background: #34c759;
 }
-/* Just connected: pulse a few times (~3s) then the class is removed
-   in JS and it settles to the static --live dot. */
-.sidebar__src-dot--flash {
-  background: #34c759;
-  animation: sidebar-src-pulse 1s ease-in-out 3;
-}
-@keyframes sidebar-src-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.36); }
-  50%      { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.05); }
-}
-/* Connecting is inherently brief — a soft blink until it flips. */
 .sidebar__src-dot--connecting {
   background: #ff9f0a;
-  animation: sidebar-src-blink 0.9s ease-in-out infinite;
+  animation: sidebar-src-blink 0.85s ease-in-out infinite;
 }
 @keyframes sidebar-src-blink {
   0%, 100% { opacity: 1; }
-  50%      { opacity: 0.25; }
+  50%      { opacity: 0.2; }
+}
+
+/* Just connected: the whole row + its text pulse a green wash a few
+   times (~3s), then JS drops the class and it settles flat. Visible
+   even though small box-shadows get clipped by the scroll container. */
+.sidebar__link.sidebar__src--flash {
+  animation: sidebar-src-rowflash 1s ease-in-out 3;
+}
+@keyframes sidebar-src-rowflash {
+  0%, 100% { background: transparent; }
+  50% {
+    background: rgba(52, 199, 89, 0.22);
+    color: var(--panel-ink, var(--ink-2));
+    font-weight: 600;
+  }
+}
+/* Connecting: a steady soft amber wash on the row until it flips. */
+.sidebar__link.sidebar__src--connecting {
+  background: rgba(255, 159, 10, 0.12);
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar__src-dot--flash,
-  .sidebar__src-dot--connecting { animation: none; }
+  .sidebar__src-dot--connecting,
+  .sidebar__link.sidebar__src--flash { animation: none; }
+  .sidebar__link.sidebar__src--flash { background: rgba(52, 199, 89, 0.18); }
 }
 
 /* ─── Drives ───────────────────────────────────────────────────────── */
