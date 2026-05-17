@@ -79,22 +79,33 @@ Default to full or degraded parity. Single-platform requires an explicit reason.
   coupling**, so recurring/auto tasks work identically on Linux and macOS as
   long as the app is running. Missed fires while the app was closed are
   skipped (the scheduler rolls `next_run_at` forward on startup).
-- The `:remote-attach` verb (chip prompt / palette) is the only supported
-  way to get the `breeze` CLI on a remote box. You pick a host from the
-  active sshfs mounts; it opens a terminal pane that SSHes in with a
-  reverse-ssh tunnel back to the laptop's API and a TTL-bound session
-  token minted **in-process** (`mintSessionToken` in
-  `electron/session-tokens.ts`, revoked from the pty `onExit` handler in
-  `electron/ipc.ts`). The CLI is staged under `~/.breezefile` on the
-  remote and added to `$PATH` **only inside that pane's shell**. Detached
-  processes (cron, systemd-user, parked tmux) therefore cannot see or use
-  `breeze` — a deliberate safety property: no live attached pane → no
-  remote task ops. The token also rides only the tunnel as an env var; it
-  is never written to disk on either machine.
-- Tasks created on a remote anchor as `ssh://<host><abs-path>`. The
-  SessionStart hook (`bin/breeze.mjs`) resolves a local sshfs cwd to its
-  `ssh://` identity via `GET /remote/resolve` so remote-anchored tasks
-  surface when you `cd` into the matching mountpoint locally.
+- **Per-machine task ownership (breezed).** The `:remote-attach` verb
+  (alias `connect`) picks a host from the active sshfs mounts and
+  connects it as a task *source*. `electron/remoteDaemon.ts` ssh-installs
+  a headless `breezed` daemon there (`daemon/breezed.ts` — the same
+  store + scheduler + agent executor, no Electron, sharing
+  `electron/core/task-http.ts`), runs it under a lingering
+  `systemd --user` unit (survives disconnect **and** reboot;
+  self-linger needs no sudo), and opens a forward `ssh -L` tunnel.
+  `electron/sources.ts` is the laptop-side registry; the task IPC
+  aggregates `local` + every connected host, tagging each task with
+  `source`, and routes mutations to the owning machine. `tasks:create`
+  with no pinned source resolves the folder against connected hosts'
+  sshfs mounts — a folder under a connected mount is created on that
+  host's daemon with the path rewritten to the real remote path. No
+  sync, no merge: a task lives on exactly one machine and that machine
+  fires its own scheduled/auto runs 24/7. Connected hosts persist and
+  reconnect best-effort on launch (`restoreSources`).
+  better-sqlite3 on the server uses the official prebuilt for its Node
+  ABI (npm's prebuild-install is unreliable on some hosts), fetched by
+  the installer; `npm install --ignore-scripts` lays down JS only.
+- The reverse-ssh `:remote-attach` (single laptop store + session
+  tokens) and its hidden-pty v2 were **superseded** by the above. The
+  now-unused reverse-tunnel path in `electron/ipc.ts` +
+  `electron/session-tokens.ts` are kept inert pending a cleanup pass.
+  `GET /remote/resolve` is still used — by the auto-route logic and the
+  SessionStart hook (`bin/breeze.mjs`) — to map a local sshfs cwd to its
+  `ssh://<host><remote-path>` identity.
 
 ## Canonical capability list
 
