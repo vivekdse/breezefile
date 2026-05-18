@@ -26,7 +26,13 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
 
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [initialContent, setInitialContent] = useState('');
+  // `seed` is the value handed to the editor. It changes ONLY on a real
+  // file (re)load — never on save — so a save doesn't remount Crepe or
+  // re-seed the textarea (which would lose cursor + undo history).
+  const [seed, setSeed] = useState('');
+  // Baseline for dirty comparison. A ref (not state) so updating it on
+  // save doesn't trigger a re-render / editor remount.
+  const baselineRef = useRef('');
   // Mutable buffers — current editor contents (kept in a ref so save
   // doesn't re-render). mtimeRef is the last known on-disk mtime; we
   // pass it to saveFile so an external edit between open and save is
@@ -55,7 +61,8 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
       }
       contentRef.current = res.content;
       mtimeRef.current = res.mtimeMs;
-      setInitialContent(res.content);
+      baselineRef.current = res.content;
+      setSeed(res.content);
       setLoaded(true);
     });
     return () => {
@@ -71,7 +78,7 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
 
   const onChange = (next: string) => {
     contentRef.current = next;
-    const dirty = next !== initialContent;
+    const dirty = next !== baselineRef.current;
     markDirty(dirty);
     if (autosaveRef.current) clearTimeout(autosaveRef.current);
     if (dirty) {
@@ -100,7 +107,7 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
         return;
       }
       mtimeRef.current = res.mtimeMs;
-      setInitialContent(contentRef.current);
+      baselineRef.current = contentRef.current;
       markDirty(false);
       setStatusMsg('saved');
       // Clear the "saved" toast after a beat so it doesn't linger.
@@ -186,9 +193,9 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
         ) : error ? (
           <div className="edit-shell__error">Couldn't open: {error}</div>
         ) : isMd ? (
-          <MilkdownEditor initial={initialContent} onChange={onChange} />
+          <MilkdownEditor initial={seed} onChange={onChange} />
         ) : (
-          <PlainEditor initial={initialContent} onChange={onChange} />
+          <PlainEditor initial={seed} onChange={onChange} />
         )}
       </div>
     </div>
@@ -202,18 +209,17 @@ function PlainEditor({
   initial: string;
   onChange: (next: string) => void;
 }) {
-  const [value, setValue] = useState(initial);
-  // Re-seed when the file is reloaded (different initial).
-  useEffect(() => setValue(initial), [initial]);
+  // Uncontrolled so the browser keeps its native undo/redo stack
+  // (a controlled `value` resets the stack on every keystroke). `key`
+  // remounts with fresh contents only on a genuine reload, since the
+  // parent changes `initial` only on file load — never on save.
   return (
     <textarea
+      key={initial}
       className="edit-shell__textarea"
-      value={value}
+      defaultValue={initial}
       spellCheck={false}
-      onChange={(e) => {
-        setValue(e.target.value);
-        onChange(e.target.value);
-      }}
+      onChange={(e) => onChange(e.target.value)}
     />
   );
 }
