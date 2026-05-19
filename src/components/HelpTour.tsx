@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
+import { useIsMac, fmtKeys } from '../platform';
 import { fm } from '../bridge';
 import './HelpTour.css';
 
@@ -335,7 +336,7 @@ const SLIDES: Slide[] = [
       { name: 'bookmark', chord: 'm<k> / \'<k>', what: 'set / jump (m a then \'a)' },
       { name: 'pin', what: 'pin a folder to the sidebar Favorites' },
       { name: 'shell', chord: '! / s', what: 'run a one-off command in this folder' },
-      { name: 'term', what: 'open an embedded terminal pane rooted at this folder · :term-close to dismiss · drop files (from Finder, web pages, or Breeze rows) onto the pane to paste their absolute paths into the running shell / Claude Code prompt · select text + ⌘C (macOS) or Ctrl+Shift+C (Linux) to copy · right-click the pane: with text selected → Copy (+ Open URL when the selection is a link); with nothing selected → Open ▸ Open folder / Open With… on the pane\'s working directory · theme-aware ANSI palette with a minimum contrast floor so colors stay readable on every theme' },
+      { name: 'term', what: 'open an embedded terminal pane rooted at this folder · :term-close to dismiss · drop files (from Finder, web pages, or Breeze rows) onto the pane to paste their absolute paths into the running shell / Claude Code prompt · select text and right-click → Copy, or use the platform copy shortcut (Cmd+C on macOS, Ctrl+Shift+C on Linux since plain Ctrl+C is SIGINT) · right-click the pane: with text selected → Copy (+ Open URL when the selection is a link); with nothing selected → Open ▸ Open folder / Open With… on the pane\'s working directory · theme-aware ANSI palette with a minimum contrast floor so colors stay readable on every theme' },
       { name: 'claude / codex / gemini', what: 'open the terminal pane and launch the AI CLI · when the launcher has variants the verb gains a Flags slot — Space toggles each flag (e.g. Continue, Skip-permissions), Enter launches with the union (no flags = bare) · backgrounded tabs badge red when the agent is waiting for you (turn end OR mid-turn permission prompt) · dock badge + Ping sound + system notification when Breeze is in the background (per-channel toggles in Settings → Notifications)' },
       { name: 'open-terminal', chord: 'cli', what: 'open an external terminal app (iTerm, Warp, …) at this folder' },
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
@@ -360,6 +361,7 @@ export function HelpTour({
   initialSlide?: HelpSlideId;
 }) {
   const { exit, state } = useOverlayExit(onClose);
+  const isMac = useIsMac();
   const [i, setI] = useState(() => indexOfSlide(initialSlide));
   const [pendingUpdate, setPendingUpdate] = useState<{ tag: string } | null>(null);
   const [upgrading, setUpgrading] = useState(false);
@@ -483,8 +485,10 @@ export function HelpTour({
               {slide.verbs.map((v) => (
                 <li key={v.name + (v.chord ?? '')} className="help__verb">
                   <span className="help__verb-name">{v.name}</span>
-                  {v.chord && <kbd className="help__verb-chord">{v.chord}</kbd>}
-                  <span className="help__verb-what">{v.what}</span>
+                  {v.chord && (
+                    <kbd className="help__verb-chord">{fmtKeys(v.chord, isMac)}</kbd>
+                  )}
+                  <span className="help__verb-what">{fmtKeys(v.what, isMac)}</span>
                 </li>
               ))}
             </ul>

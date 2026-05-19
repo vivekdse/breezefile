@@ -11,6 +11,7 @@ import {
   resolveDropPaths,
 } from '../dragState';
 import { useTasks } from '../tasks';
+import { useIsMac } from '../platform';
 import { formatOpError } from '../errorMessages';
 import type { Tab } from '../types';
 import './Tabbar.css';
@@ -137,8 +138,7 @@ export function Tabbar() {
     else folderTabs.push({ tab, index });
   });
 
-  const isMac =
-    typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+  const isMac = useIsMac();
   const modKey = isMac ? '⌘' : 'Ctrl+';
 
   const renderTab = ({

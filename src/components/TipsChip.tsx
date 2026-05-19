@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { shouldShowWelcome } from './Welcome';
+import { useIsMac, fmtKeys } from '../platform';
 import { Icon } from './Icon';
 import './TipsChip.css';
 
@@ -117,6 +118,7 @@ export function TipsChip({ variant = 'floating' }: { variant?: 'floating' | 'cen
 
   if (!visible) return null;
   const tip = TIPS[idx];
+  const isMac = useIsMac();
 
   const centered = variant === 'centered';
   return (
@@ -139,7 +141,7 @@ export function TipsChip({ variant = 'floating' }: { variant?: 'floating' | 'cen
         {tip.type && (
           <>
             {' '}
-            <kbd className="tips-chip__kbd">{tip.type}</kbd>
+            <kbd className="tips-chip__kbd">{fmtKeys(tip.type, isMac)}</kbd>
           </>
         )}
         {tip.tail && <> {tip.tail}</>}

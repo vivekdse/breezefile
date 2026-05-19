@@ -1,4 +1,5 @@
 import { useStore } from '../store';
+import { useIsMac, fmtKeys } from '../platform';
 import { openRunTaskModal } from './RunTaskModal';
 import './Pathbar.css';
 
@@ -9,6 +10,8 @@ type Props = {
 
 export function Pathbar({ path, onNavigate }: Props) {
   const { dispatch, activeTab, goBack } = useStore();
+  const isMac = useIsMac();
+  const findKbd = fmtKeys('⌘F', isMac);
   const canGoBack = (activeTab?.history.length ?? 0) > 0;
   const segments = path.split('/').filter(Boolean);
 
@@ -68,13 +71,13 @@ export function Pathbar({ path, onNavigate }: Props) {
         <button
           type="button"
           className="pathbar__find"
-          title="Find (⌘F or /)"
+          title={`Find (${findKbd} or /)`}
           onClick={() => dispatch({ type: 'setMode', mode: 'command', verb: 'goto' })}
           aria-label="Find"
         >
           <span className="pathbar__find-icon" aria-hidden>⌕</span>
           Find
-          <kbd className="pathbar__find-kbd">⌘F</kbd>
+          <kbd className="pathbar__find-kbd">{findKbd}</kbd>
         </button>
         <button
           type="button"
