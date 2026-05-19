@@ -55,8 +55,7 @@ type QuestionId =
 // skippable). Start sits right before When so the two time questions read
 // as a pair — "when can it start? / when is it due?".
 const QUESTIONS: QuestionId[] = [
-  'title', 'folder', 'notes',
-  'who',
+  'title', 'folder', 'who', 'notes',
   'start', 'when',
   'status', 'pin',
 ];
@@ -470,7 +469,7 @@ export function TaskComposer(props: Props) {
     if (!o) return;
     setPinned(o.id === 'yes');
     setPinHighlight(i);
-    goNext();
+    enterCommitPhase();
   }
 
   function enterCommitPhase() {
@@ -478,12 +477,13 @@ export function TaskComposer(props: Props) {
     setTimeout(() => createBtnRef.current?.focus(), 0);
   }
   function backToEditing() {
+    // Return to the last question (Pin); the [active] effect restores
+    // focus to its section.
     setPhase('editing');
-    setActiveIdx(QUESTIONS.indexOf('notes'));
-    setTimeout(() => notesRef.current?.focus(), 0);
+    setActiveIdx(QUESTIONS.length - 1);
   }
 
-  // ↓ flow: title → folder → who → start → when → status → pin → notes → commit
+  // ↓ flow: title → folder → who → notes → start → when → status → pin → commit
   function moveDown() {
     if (active === 'title') {
       if (title.trim()) goNext();
@@ -497,10 +497,15 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'who') {
-      if (whoHighlight >= WHO_OPTIONS.length - 1) {
-        setStartHighlight(START_OPTIONS.findIndex((s) => s.id === startId));
-        goNext();
-      } else setWhoHighlight((i) => i + 1);
+      // Who → Notes (Notes has no option list; it's a textarea).
+      if (whoHighlight >= WHO_OPTIONS.length - 1) goNext();
+      else setWhoHighlight((i) => i + 1);
+      return;
+    }
+    if (active === 'notes') {
+      // Notes → Start. ↓ outside the textarea advances to scheduling.
+      setStartHighlight(START_OPTIONS.findIndex((s) => s.id === startId));
+      goNext();
       return;
     }
     if (active === 'start') {
@@ -527,13 +532,9 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'pin') {
-      if (pinHighlight >= PIN_OPTIONS.length - 1) goNext();
+      // Pin is the last question — ↓ off the end goes to commit.
+      if (pinHighlight >= PIN_OPTIONS.length - 1) enterCommitPhase();
       else setPinHighlight((i) => i + 1);
-      return;
-    }
-    if (active === 'notes') {
-      // Notes is text — ↓ outside the textarea jumps to commit.
-      enterCommitPhase();
       return;
     }
   }
@@ -552,10 +553,10 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'start') {
-      if (startHighlight === 0) {
-        setWhoHighlight(WHO_OPTIONS.length - 1);
-        goBack();
-      } else setStartHighlight((i) => i - 1);
+      // Start ↑ → back into Notes (the textarea regains focus via the
+      // [active] effect).
+      if (startHighlight === 0) goBack();
+      else setStartHighlight((i) => i - 1);
       return;
     }
     if (active === 'when') {
@@ -580,7 +581,8 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'notes') {
-      setPinHighlight(pinned ? 1 : 0);
+      // Notes ↑ → back to Who.
+      setWhoHighlight(WHO_OPTIONS.length - 1);
       goBack();
       return;
     }
@@ -1144,6 +1146,42 @@ export function TaskComposer(props: Props) {
             )}
           </section>
 
+          {/* Notes — sits right after Who: what / where / who / notes are
+              the fields that matter; scheduling lives below. */}
+          <section
+            className={sectionClasses('notes')}
+            onClick={() => {
+              setActiveIdx(QUESTIONS.indexOf('notes'));
+              setTimeout(() => notesRef.current?.focus(), 0);
+            }}
+          >
+            {isActiveSection('notes') ? (
+              <div className="composer__q-active-body">
+                <div className="composer__q-prompt">{promptFor('notes')}</div>
+                <textarea
+                  ref={notesRef}
+                  className="composer__notes-input"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={
+                    executor === 'claude'
+                      ? 'Describe the work for the agent. This text becomes its prompt.'
+                      : 'Anything you want to remember about this task.'
+                  }
+                  rows={4}
+                  spellCheck
+                />
+                {executor === 'claude' && (
+                  <div className="composer__notes-help">
+                    Sent to Claude as the task’s context — Breeze wraps the title, folder, and due date around what you write here.
+                  </div>
+                )}
+              </div>
+            ) : (
+              renderInert('notes')
+            )}
+          </section>
+
           {/* Start */}
           <section
             className={sectionClasses('start')}
@@ -1370,40 +1408,6 @@ export function TaskComposer(props: Props) {
             )}
           </section>
 
-          {/* Q8 — Notes (also serves as the Claude prompt) */}
-          <section
-            className={sectionClasses('notes')}
-            onClick={() => {
-              setActiveIdx(QUESTIONS.indexOf('notes'));
-              setTimeout(() => notesRef.current?.focus(), 0);
-            }}
-          >
-            {isActiveSection('notes') ? (
-              <div className="composer__q-active-body">
-                <div className="composer__q-prompt">{promptFor('notes')}</div>
-                <textarea
-                  ref={notesRef}
-                  className="composer__notes-input"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder={
-                    executor === 'claude'
-                      ? 'Describe the work for the agent. This text becomes its prompt.'
-                      : 'Anything you want to remember about this task.'
-                  }
-                  rows={4}
-                  spellCheck
-                />
-                {executor === 'claude' && (
-                  <div className="composer__notes-help">
-                    Sent to Claude as the task’s context — Breeze wraps the title, folder, and due date around what you write here.
-                  </div>
-                )}
-              </div>
-            ) : (
-              renderInert('notes')
-            )}
-          </section>
         </main>
 
         <footer
