@@ -2479,6 +2479,29 @@ function resolveDestination(c: Ctx, destId: string): string | null {
   return destId;
 }
 
+// Blended find-anywhere tuning. The verb picker doubles as a search box,
+// but the disk walks behind it (Spotlight + recursive $HOME) are the
+// expensive part — so we cap, debounce, and gate them.
+const FIND_CAP = 30;
+const FIND_DEBOUNCE_MS = 200;
+// The recursive $HOME walk (findEntries) is the heaviest; demand one more
+// character before paying for it.
+const FILE_FIND_MIN_LEN = 3;
+
+// True when the typed query is just a verb name being entered (term,
+// claude, settings, …). In that case the verb picker has a local answer
+// and must not kick off a Spotlight / $HOME search at all.
+function queryMatchesVerb(q: string, verbs: VerbDef[]): boolean {
+  const s = q.trim().toLowerCase();
+  if (!s) return false;
+  return verbs.some(
+    (v) =>
+      v.id.toLowerCase().startsWith(s) ||
+      v.label.toLowerCase().startsWith(s) ||
+      v.aliases.some((a) => a.toLowerCase().startsWith(s)),
+  );
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // The overlay component
 // ────────────────────────────────────────────────────────────────────────────
@@ -2520,6 +2543,11 @@ export function ChipPrompt({
   const [launchers, setLaunchers] = useState<import('../bridge').Launcher[]>([]);
   const searchTokenRef = useRef(0); // guards against out-of-order resolves
   const subdirsTokenRef = useRef(0);
+  // Last query actually sent to the filesystem (per source). Used to skip
+  // a re-walk when the user is only *extending* a query we already ran —
+  // narrowing then happens client-side in the scorer.
+  const lastFolderQueryRef = useRef('');
+  const lastFileQueryRef = useRef('');
   const inputRef = useRef<HTMLInputElement>(null);
   const [openRename, setOpenRename] = useState<Entry | null>(null);
 
@@ -2566,21 +2594,47 @@ export function ChipPrompt({
     // Spotlight folder hits underneath the verb list so users don't need to
     // explicitly enter goto mode to search.
     const inVerbPicker = verb === null;
-    if ((!isDestinationSlot && !inVerbPicker) || filter.trim().length < 2) {
+    const query = filter.trim();
+    if ((!isDestinationSlot && !inVerbPicker) || query.length < 2) {
+      lastFolderQueryRef.current = '';
       setSearchResults((prev) => (prev.length === 0 ? prev : []));
       return;
     }
+    // Verb-name typing (term, claude, settings…) is answered locally by
+    // the verb picker — don't pay for a Spotlight walk for it.
+    if (
+      inVerbPicker &&
+      queryMatchesVerb(query, [...VERBS, ...synthesizeLauncherVerbs(launchers)])
+    ) {
+      lastFolderQueryRef.current = '';
+      setSearchResults((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    // Pure narrowing: the user is just extending a query we already
+    // walked, and that walk wasn't truncated at the cap — so every
+    // matching folder is already in `searchResults`. Let the scorer
+    // filter them client-side instead of re-hitting the filesystem.
+    const prevQ = lastFolderQueryRef.current;
+    if (
+      prevQ &&
+      query.startsWith(prevQ) &&
+      searchResults.length > 0 &&
+      searchResults.length < FIND_CAP
+    ) {
+      return;
+    }
     const token = ++searchTokenRef.current;
-    const query = filter.trim();
     const timer = window.setTimeout(() => {
-      void fm.findFolders(query, 30).then((hits) => {
+      void fm.findFolders(query, FIND_CAP).then((hits) => {
         if (searchTokenRef.current !== token) return;
+        lastFolderQueryRef.current = query;
         setSearchResults(hits);
       }).catch(() => {
         if (searchTokenRef.current !== token) return;
+        lastFolderQueryRef.current = '';
         setSearchResults((prev) => (prev.length === 0 ? prev : []));
       });
-    }, 150);
+    }, FIND_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, verb, picks.length]);
@@ -2596,23 +2650,52 @@ export function ChipPrompt({
     // Fire file search in the verb picker too (verb=null) so the merged
     // results panel can include file hits without forcing the user into goto.
     const inVerbPicker = verb === null;
-    if ((!isGotoSlot && !inVerbPicker) || !homedir || filter.trim().length < 2) {
+    const query = filter.trim();
+    // The recursive $HOME walk is the heaviest of the blended searches —
+    // demand FILE_FIND_MIN_LEN chars before paying for it.
+    if (
+      (!isGotoSlot && !inVerbPicker) ||
+      !homedir ||
+      query.length < FILE_FIND_MIN_LEN
+    ) {
+      lastFileQueryRef.current = '';
       setSearchFiles((prev) => (prev.length === 0 ? prev : []));
       return;
     }
+    // Same verb-name gate as the folder search.
+    if (
+      inVerbPicker &&
+      queryMatchesVerb(query, [...VERBS, ...synthesizeLauncherVerbs(launchers)])
+    ) {
+      lastFileQueryRef.current = '';
+      setSearchFiles((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    // Pure narrowing — extend an already-walked, un-truncated query
+    // client-side instead of re-walking $HOME.
+    const prevQ = lastFileQueryRef.current;
+    if (
+      prevQ &&
+      query.startsWith(prevQ) &&
+      searchFiles.length > 0 &&
+      searchFiles.length < FIND_CAP
+    ) {
+      return;
+    }
     const token = ++fileSearchTokenRef.current;
-    const query = filter.trim();
     const timer = window.setTimeout(() => {
-      void fm.findEntries([homedir], query, 30).then((hits) => {
+      void fm.findEntries([homedir], query, FIND_CAP).then((hits) => {
         if (fileSearchTokenRef.current !== token) return;
         // Files only — folders already come through findFolders / localSubdirs.
         const files = hits.filter((h) => !h.isDir);
+        lastFileQueryRef.current = query;
         setSearchFiles(files);
       }).catch(() => {
         if (fileSearchTokenRef.current !== token) return;
+        lastFileQueryRef.current = '';
         setSearchFiles((prev) => (prev.length === 0 ? prev : []));
       });
-    }, 150);
+    }, FIND_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, verb, picks.length, homedir]);
@@ -2756,7 +2839,11 @@ export function ChipPrompt({
   // the user to commit to the goto verb. Verbs are tagged 'verb' and find
   // results are tagged 'find-folder' / 'find-file' so the renderer + scorer
   // can distinguish them.
-  const allOptions: Option[] = (() => {
+  // Memoized: this used to be a per-render IIFE, so the `matches` scorer
+  // (which lists allOptions in its deps) re-ranked the entire blended
+  // list on every render — including a plain ArrowDown that only moves
+  // the highlight. Stable identity here keeps arrow nav from re-scoring.
+  const allOptions: Option[] = useMemo(() => {
     if (verb === null) {
       const verbOpts: Option[] = effectiveVerbs.map((v) => {
         const { ok, reason } = v.isAvailable(ctx);
@@ -2781,7 +2868,8 @@ export function ChipPrompt({
       return [...verbOpts, ...findOpts.filter((o) => !verbIds.has(o.id))];
     }
     return activeSlot ? activeSlot.getOptions(ctx, picks) : [];
-  })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verb, effectiveVerbs, ctx, filter, activeSlot, picks]);
 
   // Filter + rank. For single-token queries we prefer label-starts-with
   // matches; for multi-token queries ("webinar folder") ALL tokens must

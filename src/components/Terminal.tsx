@@ -22,6 +22,7 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { humanizeError } from '../errorMessages';
+import { showContextMenu, type MenuItem } from './FileRow';
 import { fm } from '../bridge';
 import { spawnTerminal } from '../terminalSpawn';
 import { currentDragPaths, hasAppDrag } from '../dragState';
@@ -35,6 +36,16 @@ import './Terminal.css';
 function shellQuote(p: string): string {
   if (/^[A-Za-z0-9_./~:@+\-,=]+$/.test(p)) return p;
   return `'${p.replace(/'/g, `'\\''`)}'`;
+}
+
+// Pull a single openable URL out of a terminal selection. Selections are
+// often noisy (wrapped lines, trailing prompt chars), so we accept the
+// first http(s)/file token, and promote a bare www.* host to https.
+function urlFromSelection(sel: string): string | null {
+  const m = sel.match(/\b((?:https?|file):\/\/|www\.)[^\s"'<>]+/i);
+  if (!m) return null;
+  const raw = m[0].replace(/[.,;:)\]}>'"]+$/, '');
+  return /^www\./i.test(raw) ? `https://${raw}` : raw;
 }
 
 export type AttentionState = 'idle' | 'busy' | 'bell' | null;
@@ -220,6 +231,21 @@ export function Terminal({
         const id = ptyIdRef.current;
         if (id != null) fm.termWrite(id, '\x1b\r');
         return false;
+      }
+      // Copy selection: Cmd+C (macOS) or Ctrl+Shift+C (Linux/Win). Plain
+      // Ctrl+C must stay SIGINT, so the Linux combo deliberately requires
+      // Shift. No selection → fall through (Cmd+C is otherwise inert here;
+      // Ctrl+C without Shift never reaches this branch).
+      if (
+        (e.key === 'c' || e.key === 'C') &&
+        ((e.metaKey && !e.ctrlKey && !e.altKey) ||
+          (e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey))
+      ) {
+        const sel = term.getSelection();
+        if (sel) {
+          void navigator.clipboard.writeText(sel);
+          return false;
+        }
       }
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return true;
@@ -431,6 +457,45 @@ export function Terminal({
     xtermRef.current?.focus();
   };
 
+  // Right-click menu. With a selection: Copy, plus Open URL when the
+  // selection holds a link. With no selection: an Open submenu that
+  // acts on the terminal's working directory (mirrors the file list's
+  // Open / Open With… so the same muscle memory works in the pane).
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const sel = (xtermRef.current?.getSelection() ?? '').trim();
+    const items: MenuItem[] = [];
+    if (sel) {
+      items.push({
+        label: 'Copy',
+        action: () => { void navigator.clipboard.writeText(sel); },
+      });
+      const url = urlFromSelection(sel);
+      if (url) {
+        items.push({
+          label: 'Open URL',
+          action: () => { void fm.openUrl(url); },
+        });
+      }
+    } else {
+      items.push({
+        label: 'Open',
+        submenu: [
+          { label: 'Open folder', action: () => { void fm.open(cwd); } },
+          {
+            label: 'Open With…',
+            action: () => {
+              window.dispatchEvent(
+                new CustomEvent('fm:openWith', { detail: { path: cwd } }),
+              );
+            },
+          },
+        ],
+      });
+    }
+    showContextMenu(e.clientX, e.clientY, items);
+  };
+
   return (
     <div
       className="terminal-pane"
@@ -438,6 +503,7 @@ export function Terminal({
       // focus on xterm's helper textarea so the user can immediately
       // start typing without having to click the cursor row exactly.
       onMouseDown={() => xtermRef.current?.focus()}
+      onContextMenu={onContextMenu}
       onDragOver={onDragOver}
       onDragEnter={onDragOver}
       onDrop={onDrop}

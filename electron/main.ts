@@ -265,7 +265,11 @@ function buildAppMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
+        // Cmd/Ctrl+R is deliberately NOT a full BrowserWindow reload —
+        // that nukes every tab + the terminal ptys. The renderer binds
+        // C-r to a tab-scoped refresh (store.refreshActive). A full
+        // reload is still reachable for dev under Cmd/Ctrl+Shift+R.
+        { role: 'forceReload', accelerator: 'CmdOrCtrl+Shift+R' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },

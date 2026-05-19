@@ -22,6 +22,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
+import { usePlatform } from '../platform';
 import { fm } from '../bridge';
 import { createTask, runTaskNow, todayISO, updateTask } from '../tasks';
 import { humanizeError } from '../errorMessages';
@@ -48,12 +49,16 @@ type QuestionId =
   | 'start'
   | 'pin'
   | 'notes';
-// Order is the keyboard ↓ flow. Start sits right before When so the two
-// time questions read as a pair — "when can it start? / when is it due?".
+// Order is the keyboard ↓ flow. Name, folder, and notes come first — they
+// are the only fields that actually matter for most tasks, and a task can
+// be created the moment they're filled (everything below is optional and
+// skippable). Start sits right before When so the two time questions read
+// as a pair — "when can it start? / when is it due?".
 const QUESTIONS: QuestionId[] = [
-  'title', 'folder', 'who',
+  'title', 'folder', 'notes',
+  'who',
   'start', 'when',
-  'status', 'pin', 'notes',
+  'status', 'pin',
 ];
 
 type ExecutorId = 'manual' | 'claude';
@@ -201,6 +206,11 @@ function formatDateNice(iso: string): string {
 
 export function TaskComposer(props: Props) {
   const { exit, state } = useOverlayExit(props.onClose);
+  const { caps } = usePlatform();
+  // Submit accelerator is Cmd+Enter on macOS, Ctrl+Enter elsewhere — the
+  // handler already accepts both; this is just the label so Linux users
+  // don't see a ⌘ they don't have.
+  const submitKbd = caps.id === 'mac' ? '⌘↵' : 'Ctrl+↵';
   const initial: Task | null = props.mode === 'edit' ? props.task : null;
 
   const [activeIdx, setActiveIdx] = useState(0);
@@ -1444,7 +1454,7 @@ export function TaskComposer(props: Props) {
               >
                 {busy ? 'Saving…' : props.mode === 'edit' ? 'Save changes' : 'Create task'}
                 <span className="composer__btn-kbd">
-                  {phase === 'commit' ? 'C' : '⌘↵'}
+                  {phase === 'commit' ? 'C' : submitKbd}
                 </span>
               </button>
             </>
