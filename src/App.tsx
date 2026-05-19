@@ -118,6 +118,10 @@ function Shell() {
   const soundOnAttentionRef = useRef(state.soundOnAttention);
   const activeTabIdxRef = useRef(state.activeTab);
   tabsRef.current = state.tabs;
+  // Expose the open-tab count so the main process can warn before a full
+  // BrowserWindow reload (Cmd/Ctrl+Shift+R) blows away every tab + pty.
+  (window as unknown as { __fmTabCount?: number }).__fmTabCount =
+    state.tabs.length;
   notifyOnAttentionRef.current = state.notifyOnAttention;
   soundOnAttentionRef.current = state.soundOnAttention;
   activeTabIdxRef.current = state.activeTab;

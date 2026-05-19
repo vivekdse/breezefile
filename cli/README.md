@@ -8,8 +8,15 @@ This means every verb you can invoke from the CLI is a verb the app itself under
 
 ```sh
 ./install.sh
-# → links cli/breeze.mjs into ~/.local/bin/breeze
+# → links bin/breeze (the runtime shim) into ~/.local/bin/breeze
 ```
+
+The CLI itself lives at [`../bin/breeze.mjs`](../bin/breeze.mjs); `bin/breeze`
+is a POSIX shim that finds a Node-compatible runtime and execs it. You
+normally don't need `install.sh` at all: the running app installs this
+symlink for you on launch (see `ensureBreezeCli` in
+`electron/hooks-register.ts`). `install.sh` is just the manual
+equivalent for when the app isn't running yet.
 
 If `~/.local/bin` is not on your `PATH`, add this to your shell rc:
 

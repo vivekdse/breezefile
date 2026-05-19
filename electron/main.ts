@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, protocol, Notification as ElectronNotification } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, Notification as ElectronNotification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -10,7 +10,7 @@ import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
 import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
-import { registerBreezeHooks } from './hooks-register';
+import { registerBreezeHooks, ensureBreezeCli } from './hooks-register';
 import { platform } from './platform';
 // Side-effect import: registers built-in agent runners (Claude) so the
 // scheduler / run-now endpoints can dispatch by id (epic fm-zf3m).
@@ -88,6 +88,11 @@ function createWindow() {
     height: 800,
     minWidth: 720,
     minHeight: 480,
+    // Don't paint until first frame is ready. In dev (vite-plugin-electron
+    // relaunches the process on every code change) we then show the window
+    // *inactive* so it reappears in place without stealing focus from
+    // whatever app you're working in. Production launch focuses normally.
+    show: false,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#0f1114',
@@ -138,9 +143,22 @@ function createWindow() {
   win.on('focus', () => win?.webContents.send('app:focus', true));
   win.on('blur', () => win?.webContents.send('app:focus', false));
 
+  win.once('ready-to-show', () => {
+    if (!win || win.isDestroyed()) return;
+    // showInactive() avoids raising the window above other apps / stealing
+    // keyboard focus on every dev reload. A real production launch should
+    // come to the front like a normal app.
+    if (VITE_DEV_SERVER_URL) win.showInactive();
+    else win.show();
+  });
+
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
-    win.webContents.openDevTools({ mode: 'detach' });
+    // DevTools is opt-in during dev so it stops popping on every reload.
+    // Set BREEZE_DEVTOOLS=1 to auto-open it, or use the View menu /
+    // Cmd-Alt-I (Ctrl-Shift-I) any time.
+    if (process.env.BREEZE_DEVTOOLS === '1')
+      win.webContents.openDevTools({ mode: 'detach' });
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'));
   }
@@ -206,6 +224,18 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('[hooks-register] failed:', (e as Error).message);
   }
+  // Put `breeze` on PATH automatically (symlink ~/.local/bin/breeze →
+  // bundled/dev shim). Idempotent; covers both `npm run dev` and the
+  // packaged .app so users never need ./cli/install.sh. Best-effort —
+  // failures are logged and never block startup.
+  try {
+    const result = ensureBreezeCli();
+    if (result === 'written') {
+      console.log('[breeze-cli] linked ~/.local/bin/breeze');
+    }
+  } catch (e) {
+    console.warn('[breeze-cli] failed:', (e as Error).message);
+  }
   // fm-c2w — dock badge IPC. Renderer passes a string ('' clears, '!' or
   // a count for active attention). On non-darwin, app.dock is undefined
   // and we silently no-op.
@@ -268,8 +298,43 @@ function buildAppMenu() {
         // Cmd/Ctrl+R is deliberately NOT a full BrowserWindow reload —
         // that nukes every tab + the terminal ptys. The renderer binds
         // C-r to a tab-scoped refresh (store.refreshActive). A full
-        // reload is still reachable for dev under Cmd/Ctrl+Shift+R.
-        { role: 'forceReload', accelerator: 'CmdOrCtrl+Shift+R' },
+        // reload is still reachable under Cmd/Ctrl+Shift+R, but since it
+        // discards every tab + pty we confirm first (and spell out the
+        // cost when more than one tab is open).
+        {
+          label: 'Force Reload (discards tabs)',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          async click() {
+            const target =
+              BrowserWindow.getFocusedWindow() ??
+              BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+              null;
+            if (!target || target.isDestroyed()) return;
+            let tabCount = 0;
+            try {
+              tabCount = Number(
+                await target.webContents.executeJavaScript(
+                  'window.__fmTabCount ?? 0',
+                ),
+              );
+            } catch {
+              tabCount = 0;
+            }
+            const many = tabCount > 1;
+            const { response } = await dialog.showMessageBox(target, {
+              type: 'warning',
+              buttons: ['Cancel', 'Reload'],
+              defaultId: 0,
+              cancelId: 0,
+              title: 'Force Reload',
+              message: 'Reload the whole window?',
+              detail: many
+                ? `This will close all ${tabCount} open tabs and their terminals. Unsaved work and running terminal sessions will be lost.`
+                : 'This closes the current tab and its terminal. Unsaved work and any running terminal session will be lost.',
+            });
+            if (response === 1) target.webContents.reloadIgnoringCache();
+          },
+        },
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
