@@ -130,6 +130,8 @@ const SLIDES: Slide[] = [
       { name: 'rename', chord: 'F2 or cw / a / A / I', what: 'whole / before-ext / append / prepend' },
       { name: 'trash / delete', chord: 'dD / dF', what: 'send to Trash / permanent delete' },
       { name: 'create', chord: 'F7 or :touch', what: 'new folder / new file' },
+      { name: 'note', chord: ':note', what: 'new date-named markdown note in ~/.breezefile/breeze notes — first `# heading` becomes the filename on save' },
+      { name: 'notes', chord: ':notes', what: 'jump to the breeze notes folder' },
       { name: 'duplicate', what: 'right-click → Duplicate' },
     ],
   },

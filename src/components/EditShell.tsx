@@ -1,12 +1,43 @@
 import { useEffect, useRef, useState } from 'react';
 import { Crepe } from '@milkdown/crepe';
+import { editorViewCtx } from '@milkdown/kit/core';
+import { TextSelection } from '@milkdown/kit/prose/state';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 import { useStore } from '../store';
 import { fm } from '../bridge';
-import { basename } from '../actions';
+import { basename, dirname } from '../actions';
 import { humanizeError } from '../errorMessages';
+import { isDefaultNoteName, notesDirFor } from './ChipPrompt';
 import './EditShell.css';
+
+// fm-notes — derive a filename from a markdown heading. Keep ASCII
+// letters/digits/dot/dash/underscore; collapse the rest to single dashes.
+// Cap at a generous length so titles like "Thoughts on the Q3 roadmap"
+// land as readable filenames without a renderer surprise.
+function slugifyHeading(heading: string): string {
+  const trimmed = heading.replace(/^#+\s*/, '').trim();
+  if (!trimmed) return '';
+  const slug = trimmed
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 80);
+  return slug;
+}
+
+// Pull the first markdown heading (`# ...`, `## ...`, …) at the top of
+// the file. Stops at the first non-empty non-heading line so the body
+// content can't be mistaken for a title.
+function firstHeading(md: string): string {
+  const lines = md.split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const m = /^#{1,6}\s+(.+?)\s*$/.exec(line);
+    return m ? m[1] : '';
+  }
+  return '';
+}
 
 /**
  * fm-vu55 — editor shell for an `edit`-kind tab. Routes by extension:
@@ -45,10 +76,23 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
   // Debounce handle for autosave — saves ~800ms after the last keystroke
   // so we don't thrash the disk on every character, but feel "live".
   const autosaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // fm-notes — when we rename a default-named note based on its first
+  // heading, tab.editPath changes; the load effect would otherwise re-read
+  // the file and remount the editor (losing the user's cursor mid-type).
+  // This flag lets the rename skip that single reload.
+  const skipNextOpenRef = useRef(false);
+  const [homedir, setHomedir] = useState('');
+  useEffect(() => {
+    void fm.homedir().then(setHomedir).catch(() => {});
+  }, []);
 
   // Load file contents on mount / when path changes.
   useEffect(() => {
     if (!filePath) return;
+    if (skipNextOpenRef.current) {
+      skipNextOpenRef.current = false;
+      return;
+    }
     let cancelled = false;
     setLoaded(false);
     setError(null);
@@ -112,6 +156,73 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
       setStatusMsg('saved');
       // Clear the "saved" toast after a beat so it doesn't linger.
       setTimeout(() => setStatusMsg((m) => (m === 'saved' ? null : m)), 1500);
+      // fm-notes — if this is a default-named note in the breeze notes
+      // folder and the user has typed a `# heading` at the top, promote
+      // the heading to the filename. Once the file is named anything
+      // other than YYYY-MM-DD-N.md (either by the heading rename or by
+      // the user typing a name later), this short-circuits and leaves
+      // the filename alone — so a manual rename always wins.
+      if (isMd && homedir) {
+        const notesDir = notesDirFor(homedir);
+        const name = basename(filePath);
+        // Only consider a heading-rename once the user has moved off the
+        // first line. The seed content is `# \n` (a single newline after
+        // the empty heading), so we require something past that — either
+        // body text or an additional blank line the user navigated to.
+        // Without this, the file would rename on the first character the
+        // user types into the title, which feels jumpy.
+        const movedPastTitle = /[^\n]\n[^\n]|[^\n]\n\n/.test(contentRef.current);
+        if (
+          movedPastTitle &&
+          dirname(filePath) === notesDir &&
+          isDefaultNoteName(name)
+        ) {
+          const heading = firstHeading(contentRef.current);
+          const slug = slugifyHeading(heading);
+          if (slug) {
+            // Collision safety: never silently overwrite an existing note
+            // with the same title. Probe with fm.stat and walk a `-2`,
+            // `-3`… suffix until we find a free name (or give up after a
+            // reasonable bound and leave the date-named file alone).
+            let newPath = `${notesDir}/${slug}.md`;
+            let attempt = 1;
+            while (attempt < 50) {
+              const candidate =
+                attempt === 1
+                  ? `${notesDir}/${slug}.md`
+                  : `${notesDir}/${slug}-${attempt}.md`;
+              try {
+                await fm.stat(candidate);
+                // Exists — try the next suffix.
+                attempt++;
+                continue;
+              } catch {
+                newPath = candidate;
+                break;
+              }
+            }
+            if (newPath !== filePath && attempt < 50) {
+              try {
+                await fm.rename(filePath, newPath);
+                try {
+                  const st = await fm.stat(newPath);
+                  mtimeRef.current = st.mtimeMs;
+                } catch { /* ignore */ }
+                skipNextOpenRef.current = true;
+                dispatch({
+                  type: 'updateTab',
+                  index: tabIndex,
+                  patch: { editPath: newPath },
+                });
+              } catch {
+                // Race (someone created the candidate between stat and
+                // rename) — leave the date-named file in place; the user
+                // can rename manually.
+              }
+            }
+          }
+        }
+      }
     } catch (err) {
       setStatusMsg(`save failed: ${humanizeError(err).message}`);
     } finally {
@@ -216,6 +327,7 @@ function PlainEditor({
   return (
     <textarea
       key={initial}
+      autoFocus
       className="edit-shell__textarea"
       defaultValue={initial}
       spellCheck={false}
@@ -240,7 +352,16 @@ function MilkdownEditor({
 
   useEffect(() => {
     if (!hostRef.current) return;
-    const crepe = new Crepe({ root: hostRef.current, defaultValue: initial });
+    const crepe = new Crepe({
+      root: hostRef.current,
+      defaultValue: initial,
+      featureConfigs: {
+        [Crepe.Feature.Placeholder]: {
+          text: 'Note title here',
+          mode: 'block',
+        },
+      },
+    });
     crepeRef.current = crepe;
     let disposed = false;
     void crepe.create().then(() => {
@@ -250,6 +371,28 @@ function MilkdownEditor({
           onChangeRef.current(markdown);
         });
       });
+      // Land focus + caret inside the editor on open so `:note` drops
+      // the user straight onto the title line. Route through Crepe's own
+      // editor.action so we use the ProseMirror view's selection API —
+      // a raw DOM focus() runs before the view has wired up its
+      // selection and silently no-ops on the first keystroke.
+      const focusEditor = () => {
+        try {
+          crepe.editor.action((ctx) => {
+            const view = ctx.get(editorViewCtx);
+            // Caret at the end of the doc so the first keystroke
+            // extends the seeded `# ` instead of replacing it.
+            const end = view.state.doc.content.size;
+            const sel = TextSelection.create(view.state.doc, end);
+            view.dispatch(view.state.tr.setSelection(sel).scrollIntoView());
+            view.focus();
+          });
+        } catch { /* ignore — editor may have torn down */ }
+      };
+      // Two ticks: first for React commit, second for the chip overlay
+      // (which closes after dispatching openEditTab) to release focus.
+      setTimeout(focusEditor, 0);
+      setTimeout(focusEditor, 50);
     });
     return () => {
       disposed = true;

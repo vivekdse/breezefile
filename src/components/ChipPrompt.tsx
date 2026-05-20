@@ -152,7 +152,10 @@ type Verb =
   | 'welcome'
   | 'task'
   | 'tasks'
-  | 'settings';
+  | 'settings'
+  | 'note'
+  | 'notes'
+  | 'run';
 
 type Option = {
   id: string;
@@ -1548,6 +1551,64 @@ const VERBS: VerbDef[] = [
       if (kind === 'file') api.openTouch();
     },
   },
+  // ── Notes (fm-notes) ──────────────────────────────────────────────
+  // `:note` creates a new markdown file in ~/.breezefile/breeze notes/
+  // named YYYY-MM-DD-N.md (N = next available for today) and opens it
+  // for editing. The point is to capture the thought first; the file
+  // gets a meaningful name later — either by typing into the title or
+  // by the on-save heading-rename in EditShell. `:notes` jumps to the
+  // notes folder so the user can browse everything they've jotted.
+  {
+    id: 'note',
+    availableInTaskMode: true,
+    label: 'New note',
+    aliases: ['note', 'new note', 'newnote', 'jot', 'scratch'],
+    icon: '✎',
+    describe: () => 'Create a new note (markdown, date-named)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: async (c, _picks, api) => {
+      try {
+        const dir = await ensureNotesDir(c.homedir);
+        const filePath = await nextNotePath(dir);
+        await fm.touch(filePath);
+        // Seed the file with an empty `# ` so the editor opens on a title
+        // line the user can fill in. EditShell uses the presence of the
+        // heading on save to derive the filename — until the user types
+        // something after `# `, the slug is empty and the rename is a
+        // no-op, so this stays invisible.
+        await fm.editorSave(filePath, '# \n', null);
+        api.dispatch({ type: 'openEditTab', path: filePath, focus: true });
+        api.dispatch({ type: 'pushRecentFile', path: filePath });
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `new note failed: ${(err as Error).message ?? String(err)}`,
+        });
+      }
+    },
+  },
+  {
+    id: 'notes',
+    availableInTaskMode: true,
+    label: 'Notes folder',
+    aliases: ['notes', 'all notes', 'browse notes', 'goto notes', 'show notes', 'open notes'],
+    icon: '📓',
+    describe: () => 'Open the breeze notes folder',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: async (c, _picks, api) => {
+      try {
+        const dir = await ensureNotesDir(c.homedir);
+        api.navigateTo(dir);
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `open notes failed: ${(err as Error).message ?? String(err)}`,
+        });
+      }
+    },
+  },
   {
     id: 'showHidden',
     availableInTaskMode: false,
@@ -2473,6 +2534,61 @@ function prettyPath(p: string, home: string): string {
   return p;
 }
 
+// fm-notes — the breeze notes folder lives under the user's home config
+// dir (~/.breezefile/breeze notes). Exported helpers so the `:note` and
+// `:notes` verbs share path logic and EditShell can recognize "this file
+// was created by :note" when deciding whether to rename on save.
+export const NOTES_SUBDIR = '.breezefile/breeze notes';
+
+export function notesDirFor(home: string): string {
+  return `${home}/${NOTES_SUBDIR}`;
+}
+
+export function isDefaultNoteName(name: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}-\d+\.md$/.test(name);
+}
+
+async function ensureNotesDir(home: string): Promise<string> {
+  const dir = notesDirFor(home);
+  try {
+    const st = await fm.stat(dir);
+    if (st.isDir) return dir;
+  } catch {
+    // not present — fall through and create it
+  }
+  try {
+    await fm.mkdir(dir);
+  } catch (err) {
+    // Race / pre-existing: a second stat resolves the ambiguity. If the
+    // folder is there now (some other code path created it between our
+    // stat and mkdir), proceed; otherwise surface the original error.
+    try {
+      const st = await fm.stat(dir);
+      if (st.isDir) return dir;
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+  return dir;
+}
+
+async function nextNotePath(dir: string): Promise<string> {
+  const d = new Date();
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  let names: string[] = [];
+  try {
+    const entries = await fm.readdir(dir);
+    names = entries.map((e) => e.name);
+  } catch {
+    /* empty folder is fine */
+  }
+  const used = new Set(names);
+  let n = 1;
+  while (used.has(`${date}-${n}.md`)) n++;
+  return `${dir}/${date}-${n}.md`;
+}
+
 function resolveDestination(c: Ctx, destId: string): string | null {
   if (destId === '~') return c.homedir;
   if (destId.startsWith('~/')) return c.homedir + destId.slice(1);
@@ -2531,6 +2647,9 @@ export function ChipPrompt({
   useEffect(() => {
     highlightedRef.current?.scrollIntoView({ block: 'nearest' });
   }, [highlightIdx]);
+  // Sticky highlight by option id — declared here so the keydown handler
+  // can capture it; the matches-restore effect lives just below `matches`.
+  const stickyHighlightIdRef = useRef<string | null>(null);
   const [homedir, setHomedir] = useState('');
   const [hoverReason, setHoverReason] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<string[]>([]);
@@ -2992,6 +3111,21 @@ export function ChipPrompt({
     if (highlightIdx >= matches.length) setHighlightIdx(0);
   }, [matches.length, highlightIdx]);
 
+  // When async results re-rank `matches`, pull the cursor back to the row
+  // the user was deliberately aiming at. Without this, arrow-keying to a
+  // folder while Spotlight is still walking could land Enter on a
+  // different row once results streamed in 200ms later. The sticky id is
+  // only set on explicit user moves (Arrow / hover), so result arrivals
+  // before the user has touched the list don't strand the highlight on a
+  // stale row.
+  useLayoutEffect(() => {
+    const id = stickyHighlightIdRef.current;
+    if (!id) return;
+    const idx = matches.findIndex((m) => m.id === id);
+    if (idx >= 0 && idx !== highlightIdx) setHighlightIdx(idx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches]);
+
   // (Removed) Natural-language auto-fallthrough into the goto verb. Find
   // results now blend into the verb picker directly, so the user doesn't
   // need to be silently transported into a different verb when a typed
@@ -3032,6 +3166,7 @@ export function ChipPrompt({
       setPicks([]);
       setFilter('');
       setHighlightIdx(0);
+      stickyHighlightIdRef.current = null;
       // If verb has zero slots — execute immediately
       if (v.slots.length === 0) {
         void executeWith(v, []);
@@ -3058,6 +3193,7 @@ export function ChipPrompt({
         setPicks(nextPicks);
         setFilter('');
         setHighlightIdx(0);
+        stickyHighlightIdRef.current = null;
       }
     }
   }
@@ -3083,6 +3219,7 @@ export function ChipPrompt({
       setPicks(nextPicks);
       setFilter('');
       setHighlightIdx(0);
+      stickyHighlightIdRef.current = null;
     }
   }
 
@@ -3181,6 +3318,7 @@ export function ChipPrompt({
           setPicks([]);
           setFilter('');
           setHighlightIdx(0);
+          stickyHighlightIdRef.current = null;
           if (status) dispatch({ type: 'setStatus', msg: status });
         },
       });
@@ -3269,12 +3407,16 @@ export function ChipPrompt({
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightIdx((i) => Math.min(i + 1, matches.length - 1));
+      const next = Math.min(highlightIdx + 1, matches.length - 1);
+      setHighlightIdx(next);
+      stickyHighlightIdRef.current = matches[next]?.id ?? null;
       return;
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setHighlightIdx((i) => Math.max(i - 1, 0));
+      const next = Math.max(highlightIdx - 1, 0);
+      setHighlightIdx(next);
+      stickyHighlightIdRef.current = matches[next]?.id ?? null;
       return;
     }
     if (e.key === 'Backspace' && !filter) {
@@ -3353,7 +3495,7 @@ export function ChipPrompt({
             autoFocus
             className="chip-input"
             value={filter}
-            onChange={(e) => { setFilter(e.target.value); setHighlightIdx(0); setHoverReason(null); }}
+            onChange={(e) => { setFilter(e.target.value); setHighlightIdx(0); stickyHighlightIdRef.current = null; setHoverReason(null); }}
             onKeyDown={onKeyDown}
             placeholder={
               verb === null
@@ -3402,6 +3544,7 @@ export function ChipPrompt({
                 ].filter(Boolean).join(' ')}
                 onMouseEnter={() => {
                   setHighlightIdx(i);
+                  stickyHighlightIdRef.current = opt.id;
                   setHoverReason(opt.available ? null : opt.reason ?? null);
                 }}
                 onMouseLeave={() => setHoverReason(null)}
