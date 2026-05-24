@@ -281,6 +281,17 @@ function Shell() {
     return off;
   }, []);
 
+  // Native menu items forward a verb id here. Open ChipPrompt pre-loaded
+  // with that verb — zero-slot verbs auto-execute, multi-slot verbs land
+  // on the first option list so the user picks. Mirrors the keyboard
+  // path that types ':<verb>'.
+  useEffect(() => {
+    const off = fm.onMenuVerb((verbId) => {
+      dispatch({ type: 'setMode', mode: 'command', verb: verbId });
+    });
+    return off;
+  }, [dispatch]);
+
   // fm-c2w — dock badge reflects how many tabs currently demand
   // attention (idle waiting-for-input or explicit bell). 'busy' is
   // generating-only and doesn't count — we don't want a badge while

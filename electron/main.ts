@@ -307,13 +307,89 @@ app.whenReady().then(() => {
   createWindow();
 });
 
+function sendVerbToFocused(verbId: string) {
+  const w =
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+    null;
+  if (!w || w.isDestroyed()) return;
+  w.webContents.send('app:menu-verb', { verbId });
+}
+
+// Forward a renderer verb from a native menu item. The renderer opens
+// ChipPrompt with this verb pre-selected; zero-slot verbs execute
+// immediately. Accelerators here are advisory display only — the actual
+// key binding lives in useKeyboard.ts. We omit accelerator on items
+// whose chord is multi-key (e.g. "gh", "wt"), since Electron menus only
+// support single chords.
+function verbItem(
+  label: string,
+  verbId: string,
+  accelerator?: string,
+): Electron.MenuItemConstructorOptions {
+  return {
+    label,
+    ...(accelerator ? { accelerator } : {}),
+    click: () => sendVerbToFocused(verbId),
+  };
+}
+
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac
       ? ([{ role: 'appMenu' }] as Electron.MenuItemConstructorOptions[])
       : []),
+    {
+      label: 'File',
+      submenu: [
+        verbItem('New Tab', 'newTab', 'CmdOrCtrl+T'),
+        verbItem('Close Tab', 'closeTab', 'CmdOrCtrl+W'),
+        verbItem('Reopen Closed Tab', 'restoreTab', 'CmdOrCtrl+Shift+T'),
+        { type: 'separator' },
+        verbItem('New Folder…', 'folder'),
+        verbItem('New File…', 'file'),
+        verbItem('New Note', 'note'),
+        { type: 'separator' },
+        verbItem('Rename…', 'rename', 'F2'),
+        verbItem('Edit File', 'edit'),
+        verbItem('Open', 'open'),
+        verbItem('Open With…', 'open-with'),
+        verbItem('Reveal in File Manager', 'reveal'),
+        { type: 'separator' },
+        verbItem('Move to Trash', 'delete'),
+        verbItem('Compress…', 'compress'),
+        verbItem('Extract', 'extract'),
+      ],
+    },
     { role: 'editMenu' },
+    {
+      label: 'Navigate',
+      submenu: [
+        verbItem('Back', 'back'),
+        verbItem('Forward', 'forward'),
+        verbItem('Up', 'up'),
+        { type: 'separator' },
+        verbItem('Go to…', 'goto', 'CmdOrCtrl+F'),
+        verbItem('Notes Folder', 'notes'),
+        verbItem('Switch Tab…', 'switchTab'),
+        { type: 'separator' },
+        verbItem('Pin Folder', 'pin'),
+        verbItem('Unpin Folder', 'unpin'),
+      ],
+    },
+    {
+      label: 'Selection',
+      submenu: [
+        verbItem('Select…', 'select'),
+        verbItem('Copy', 'copy', 'CmdOrCtrl+C'),
+        verbItem('Move (cut)', 'move', 'CmdOrCtrl+X'),
+        verbItem('Paste', 'paste', 'CmdOrCtrl+V'),
+        { type: 'separator' },
+        verbItem('Copy Path', 'copy-path'),
+        verbItem('Share…', 'share'),
+      ],
+    },
     {
       label: 'View',
       submenu: [
@@ -378,6 +454,35 @@ function buildAppMenu() {
           },
         },
         { role: 'togglefullscreen' },
+        { type: 'separator' },
+        verbItem('Change View…', 'view'),
+        verbItem('Sort…', 'sort'),
+        verbItem('Toggle Hidden Files', 'showHidden', 'CmdOrCtrl+Shift+.'),
+        verbItem('Theme…', 'theme'),
+        { type: 'separator' },
+        verbItem('Tag…', 'tag'),
+        verbItem('Untag…', 'untag'),
+        verbItem('New Tag…', 'newtag'),
+        verbItem('Filter by Tag…', 'filter'),
+      ],
+    },
+    {
+      label: 'Tools',
+      submenu: [
+        verbItem('Terminal in this Folder', 'term'),
+        verbItem('Open External Terminal', 'openTerminal'),
+        verbItem('Close Terminal', 'term-close'),
+        { type: 'separator' },
+        verbItem('Attach Remote (SSH)…', 'remote-attach'),
+        verbItem('Disconnect Remote', 'disconnect'),
+        { type: 'separator' },
+        verbItem('Run…', 'run'),
+        verbItem('New Task', 'task'),
+        verbItem('Tasks View', 'tasks'),
+        { type: 'separator' },
+        verbItem('Settings', 'settings'),
+        verbItem('Permissions', 'permissions'),
+        verbItem('Check for Update', 'upgrade'),
       ],
     },
     // Custom Window menu — the default 'windowMenu' role binds ⌘W to
@@ -396,6 +501,15 @@ function buildAppMenu() {
               { role: 'front' },
             ] as Electron.MenuItemConstructorOptions[])
           : []),
+      ],
+    },
+    {
+      role: 'help',
+      submenu: [
+        verbItem('Help', 'help', 'F1'),
+        verbItem('Tutorial', 'tutorial'),
+        verbItem('Tips', 'tips'),
+        verbItem('Welcome', 'welcome'),
       ],
     },
   ];

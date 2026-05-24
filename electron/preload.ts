@@ -326,6 +326,14 @@ const fm = {
     ipcRenderer.on('app:notification-clicked', handler);
     return () => ipcRenderer.off('app:notification-clicked', handler);
   },
+  // Native-menu → renderer bridge. Main process menu items click() forward
+  // a verb id here so the renderer can open ChipPrompt pre-loaded with
+  // that verb (zero-slot verbs execute immediately).
+  onMenuVerb: (cb: (verbId: string) => void) => {
+    const handler = (_e: unknown, payload: { verbId: string }) => cb(payload.verbId);
+    ipcRenderer.on('app:menu-verb', handler);
+    return () => ipcRenderer.off('app:menu-verb', handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('fm', fm);
