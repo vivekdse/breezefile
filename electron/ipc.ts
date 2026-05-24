@@ -1724,7 +1724,11 @@ end tell`;
             .join(' ');
           inner = `${envPrefix} tmux ${remoteArgs}`;
         } else {
-          inner = `${envPrefix} sh -c 'cd ${shQuote(remote.remoteCwd)} && exec $SHELL -l'`;
+          // shQuote the *whole* sh -c payload — naively wrapping in literal
+          // single quotes breaks when remoteCwd itself contains a space,
+          // because shQuote(remoteCwd) injects its own single quotes and
+          // closes the outer quote prematurely.
+          inner = `${envPrefix} sh -c ${shQuote(`cd ${shQuote(remote.remoteCwd)} && exec $SHELL -l`)}`;
         }
 
         const sshArgs = ['-t'];
