@@ -149,6 +149,8 @@ type Verb =
   | 'untag'
   | 'filter'
   | 'help'
+  | 'maximize'
+  | 'fullscreen'
   | 'welcome'
   | 'task'
   | 'tasks'
@@ -1690,6 +1692,32 @@ const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openSettings'));
+    },
+  },
+  {
+    id: 'maximize',
+    label: 'Maximize window',
+    aliases: ['maximize', 'maximise', 'max', 'unmaximize', 'restore', 'window'],
+    icon: '⛶',
+    describe: () => 'Toggle window maximize (works around WM Alt+Space conflicts)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      void fm.windowToggleMaximize();
+    },
+  },
+  {
+    id: 'fullscreen',
+    label: 'Fullscreen',
+    aliases: ['fullscreen', 'full-screen', 'fs', 'full'],
+    icon: '⤢',
+    describe: () => 'Toggle fullscreen',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      void fm.windowToggleFullscreen();
     },
   },
   {

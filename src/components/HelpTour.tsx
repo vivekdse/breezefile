@@ -342,6 +342,7 @@ const SLIDES: Slide[] = [
       { name: 'claude / codex / gemini', what: 'open the terminal pane and launch the AI CLI · when the launcher has variants the verb gains a Flags slot — Space toggles each flag (e.g. Continue, Skip-permissions), Enter launches with the union (no flags = bare) · backgrounded tabs badge red when the agent is waiting for you (turn end OR mid-turn permission prompt) · dock badge + Ping sound + system notification when Breeze is in the background (per-channel toggles in Settings → Notifications)' },
       { name: 'open-terminal', chord: 'cli', what: 'open an external terminal app (iTerm, Warp, …) at this folder' },
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
+      { name: 'maximize / fullscreen', chord: 'Ctrl+Shift+M / F11', what: 'toggle window maximize or fullscreen from inside Breeze — bypasses WM shortcuts (e.g. Alt+Space) that may collide with Breeze\'s own bindings on Linux' },
       { name: 'settings', chord: '?', what: 'view & rebind keys · per-launcher settings · notification channels · Reset to defaults' },
       { name: 'permissions', what: 'see which protected folders Breeze can read; grant any still missing' },
       { name: 'upgrade', what: ':upgrade runs brew upgrade --cask breezefile and relaunches · the help dialog also surfaces an "Update available" banner when a newer release is out' },

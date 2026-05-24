@@ -58,6 +58,10 @@ const fm = {
     ipcRenderer.invoke('shell:extract', archives, cwd) as Promise<string[]>,
   open: (p: string, appPath?: string) => ipcRenderer.invoke('app:open', p, appPath),
   openUrl: (url: string) => ipcRenderer.invoke('app:openUrl', url) as Promise<void>,
+  windowToggleMaximize: () =>
+    ipcRenderer.invoke('window:toggleMaximize') as Promise<void>,
+  windowToggleFullscreen: () =>
+    ipcRenderer.invoke('window:toggleFullscreen') as Promise<void>,
   openWith: (p: string, appName: string) => ipcRenderer.invoke('shell:openWith', p, appName),
   pickApplication: () => ipcRenderer.invoke('app:pickApplication') as Promise<string | null>,
   pickFolder: (defaultPath?: string) =>

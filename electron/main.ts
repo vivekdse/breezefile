@@ -249,6 +249,28 @@ app.whenReady().then(() => {
   ipcMain.handle('app:playAttentionSound', () => {
     platform().playAttentionSound();
   });
+  // Window state verbs. Linux WMs commonly bind Alt+Space to a menu that
+  // owns maximize / fullscreen, but Breezefile's chip prompt also uses
+  // Alt+Space, so we expose explicit verbs (and accelerators) instead of
+  // depending on the WM.
+  function focusedWindow(): BrowserWindow | null {
+    return (
+      BrowserWindow.getFocusedWindow() ??
+      BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+      null
+    );
+  }
+  ipcMain.handle('window:toggleMaximize', () => {
+    const w = focusedWindow();
+    if (!w) return;
+    if (w.isMaximized()) w.unmaximize();
+    else w.maximize();
+  });
+  ipcMain.handle('window:toggleFullscreen', () => {
+    const w = focusedWindow();
+    if (!w) return;
+    w.setFullScreen(!w.isFullScreen());
+  });
   // Attention notifications routed via main process so the click handler
   // is reliable on Linux libnotify daemons (the web Notification API
   // delivered clicks unreliably across daemons, and any "View" button
@@ -342,6 +364,19 @@ function buildAppMenu() {
         { role: 'zoomIn', accelerator: 'CmdOrCtrl+=' },
         { role: 'zoomOut' },
         { type: 'separator' },
+        {
+          label: 'Toggle Maximize',
+          accelerator: 'CmdOrCtrl+Shift+M',
+          click() {
+            const w =
+              BrowserWindow.getFocusedWindow() ??
+              BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+              null;
+            if (!w) return;
+            if (w.isMaximized()) w.unmaximize();
+            else w.maximize();
+          },
+        },
         { role: 'togglefullscreen' },
       ],
     },
