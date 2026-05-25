@@ -1590,6 +1590,20 @@ end tell`;
   };
   const ptys = new Map<number, PtyRecord>();
   let nextPtyId = 1;
+  // One 'destroyed' listener per WebContents — earlier code attached one per
+  // PTY spawn, which tripped Node's MaxListeners warning after ~10 terminals.
+  const ptyDestroyHooked = new WeakSet<Electron.WebContents>();
+  function ensurePtyDestroyHook(wc: Electron.WebContents) {
+    if (ptyDestroyHooked.has(wc)) return;
+    ptyDestroyHooked.add(wc);
+    wc.once('destroyed', () => {
+      for (const [id, r] of ptys) {
+        if (r.senderId !== wc.id) continue;
+        try { r.proc.kill(); } catch { /* noop */ }
+        ptys.delete(id);
+      }
+    });
+  }
 
   function ptyEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env };
@@ -1777,15 +1791,9 @@ end tell`;
         ptys.delete(id);
       });
       // Kill orphan PTYs if the renderer process goes away (window reload,
-      // crash). Otherwise the shell keeps the file_manager parent alive.
-      e.sender.once('destroyed', () => {
-        const r = ptys.get(id);
-        if (r) {
-          try { r.proc.kill(); } catch { /* noop */ }
-          if (attachSid) revokeSessionToken(attachSid);
-          ptys.delete(id);
-        }
-      });
+      // crash). One shared 'destroyed' listener per WebContents reaps all
+      // PTYs it owns; proc.onExit then revokes any attach token.
+      ensurePtyDestroyHook(e.sender);
       return id;
     },
   );

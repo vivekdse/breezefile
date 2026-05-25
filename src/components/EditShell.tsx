@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Crepe } from '@milkdown/crepe';
 import { editorViewCtx } from '@milkdown/kit/core';
 import { TextSelection } from '@milkdown/kit/prose/state';
+import type { EditorView } from '@milkdown/kit/prose/view';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 import { useStore } from '../store';
@@ -304,7 +305,7 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
         ) : error ? (
           <div className="edit-shell__error">Couldn't open: {error}</div>
         ) : isMd ? (
-          <MilkdownEditor initial={seed} onChange={onChange} />
+          <MilkdownEditor initial={seed} onChange={onChange} filePath={filePath} />
         ) : (
           <PlainEditor initial={seed} onChange={onChange} />
         )}
@@ -336,12 +337,18 @@ function PlainEditor({
   );
 }
 
+// Caret offset per file, kept across editor unmounts so switching tabs
+// away and back lands you where you left off instead of at end-of-doc.
+const caretByPath = new Map<string, number>();
+
 function MilkdownEditor({
   initial,
   onChange,
+  filePath,
 }: {
   initial: string;
   onChange: (next: string) => void;
+  filePath: string;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<Crepe | null>(null);
@@ -349,6 +356,9 @@ function MilkdownEditor({
   // Crepe's listener is attached once.
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // Keep a live handle to the prose view so the unmount cleanup can
+  // snapshot the caret before tear-down.
+  const viewRef = useRef<EditorView | null>(null);
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -371,19 +381,18 @@ function MilkdownEditor({
           onChangeRef.current(markdown);
         });
       });
-      // Land focus + caret inside the editor on open so `:note` drops
-      // the user straight onto the title line. Route through Crepe's own
-      // editor.action so we use the ProseMirror view's selection API —
-      // a raw DOM focus() runs before the view has wired up its
-      // selection and silently no-ops on the first keystroke.
       const focusEditor = () => {
         try {
           crepe.editor.action((ctx) => {
             const view = ctx.get(editorViewCtx);
-            // Caret at the end of the doc so the first keystroke
-            // extends the seeded `# ` instead of replacing it.
+            viewRef.current = view;
+            // Restore the saved caret for this file if we've seen it
+            // before. Fresh opens (e.g. `:note`) fall back to end-of-doc
+            // so the first keystroke extends the seeded `# `.
             const end = view.state.doc.content.size;
-            const sel = TextSelection.create(view.state.doc, end);
+            const saved = filePath ? caretByPath.get(filePath) : undefined;
+            const pos = saved != null ? Math.min(saved, end) : end;
+            const sel = TextSelection.create(view.state.doc, pos);
             view.dispatch(view.state.tr.setSelection(sel).scrollIntoView());
             view.focus();
           });
@@ -396,6 +405,14 @@ function MilkdownEditor({
     });
     return () => {
       disposed = true;
+      // Snapshot the caret so a remount (tab-switch back) restores it.
+      try {
+        const view = viewRef.current;
+        if (view && filePath) {
+          caretByPath.set(filePath, view.state.selection.from);
+        }
+      } catch { /* noop */ }
+      viewRef.current = null;
       try {
         crepe.destroy();
       } catch {

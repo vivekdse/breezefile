@@ -751,6 +751,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           shownPrivacyFor.add(p);
           window.dispatchEvent(new CustomEvent('fm:openPrivacyHelp'));
         }
+      } else if (/^ENOENT\b/.test(msg)) {
+        dispatch({ type: 'setStatus', msg: `folder deleted: ${p}` });
       } else {
         dispatch({ type: 'setStatus', msg: `error reading ${p}: ${msg}` });
       }
