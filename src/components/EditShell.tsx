@@ -580,14 +580,16 @@ function MilkdownEditor({
           onChangeRef.current(markdown);
         });
       });
-      // Render sanity check: if we seeded non-empty markdown but the editor
-      // painted nothing, Crepe crashed mid-render. Drop to the plain editor.
+      // Render sanity check: if Crepe crashed mid-render it mounts but paints
+      // nothing — an empty/childless `.ProseMirror`. We detect that and drop to
+      // the plain editor. We check for painted *block elements*, not text: a
+      // successful render always emits the doc's top-level nodes (a fresh note
+      // seeded with `# ` and no words yet still yields an empty <h1>), so a
+      // blank-text-but-structurally-present doc must NOT be mistaken for a crash.
       const probeRender = () => {
         if (disposed) return;
-        if (!initial.trim()) return;
         const pm = hostRef.current?.querySelector('.ProseMirror');
-        const rendered = (pm?.textContent ?? '').trim().length > 0;
-        if (!rendered) setFailed(true);
+        if (!pm || pm.childElementCount === 0) setFailed(true);
       };
       const focusEditor = () => {
         try {
