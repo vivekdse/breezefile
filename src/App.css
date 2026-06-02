@@ -59,6 +59,17 @@
   grid-template-columns: var(--sidebar-w) 1fr 0px var(--chat-w);
 }
 
+/* fm-dly3 — edit tabs render neither Sidebar nor Preview, but those columns
+   still reserve width. That's harmless on its own (the no-chat editor centres
+   in the leftover space), but once the chat panel opens the editor would be
+   squished between two empty rails. So when chat is open on an edit tab,
+   collapse both rails and give the whole row to editor + chat. */
+.shell[data-tab-kind="edit"][data-chat="open"] {
+  --sidebar-w: 0px;
+  --preview-w: 0px;
+  grid-template-columns: 0px 1fr 0px var(--chat-w);
+}
+
 .shell__title   { grid-area: title;   min-width: 0; }
 .shell__chrome  { grid-area: chrome;  min-width: 0; }
 .shell__status  { grid-area: status;  min-width: 0; }
@@ -186,7 +197,7 @@
 @media (max-width: 1100px) {
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) {
     --preview-w: 0px;
-    grid-template-columns: var(--sidebar-w) 1fr 0px;
+    grid-template-columns: var(--sidebar-w) 1fr 0px var(--chat-w);
   }
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) .shell__preview {
     display: none;
@@ -196,7 +207,7 @@
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) {
     --sidebar-w: 0px;
     --preview-w: 0px;
-    grid-template-columns: 0px 1fr 0px;
+    grid-template-columns: 0px 1fr 0px var(--chat-w);
   }
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) .shell__side {
     display: none;

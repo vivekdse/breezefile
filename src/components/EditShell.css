@@ -110,7 +110,10 @@
 }
 
 .edit-shell__textarea {
+  display: block;
   width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
   height: 100%;
   border: 0;
   outline: 0;
@@ -191,6 +194,13 @@
 
 .edit-shell__milkdown .ProseMirror {
   min-height: 100%;
+  /* fm-dly3 — cap the reading measure and centre it. Only bites when the
+     editor column is wide (chat open / large screens); narrow columns are
+     under the cap and look unchanged. box-sizing keeps the cap honest with
+     the horizontal padding. */
+  max-width: 860px;
+  margin: 0 auto;
+  box-sizing: border-box;
   padding: 24px 32px;
   outline: none;
   background: var(--bg, var(--bg-1));

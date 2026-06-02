@@ -64,6 +64,8 @@ const fm = {
     ipcRenderer.invoke('window:toggleMaximize') as Promise<void>,
   windowToggleFullscreen: () =>
     ipcRenderer.invoke('window:toggleFullscreen') as Promise<void>,
+  windowChatResize: (open: boolean, panelWidth: number) =>
+    ipcRenderer.invoke('window:chatResize', open, panelWidth) as Promise<void>,
   openWith: (p: string, appName: string) => ipcRenderer.invoke('shell:openWith', p, appName),
   pickApplication: () => ipcRenderer.invoke('app:pickApplication') as Promise<string | null>,
   pickFolder: (defaultPath?: string) =>

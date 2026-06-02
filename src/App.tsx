@@ -430,6 +430,14 @@ function Shell() {
     return () => window.removeEventListener('fm:toggle-chat', onToggle);
   }, [dispatch]);
 
+  // fm-dly3 — widen the OS window while the active tab shows a chat panel so
+  // the editor / file list keeps its width (380px matches --chat-w in
+  // App.css). Restores when the chat closes or you switch to a chat-less tab.
+  const chatVisible = !!state.tabs[state.activeTab]?.chat;
+  useEffect(() => {
+    void fm.windowChatResize(chatVisible, 380);
+  }, [chatVisible]);
+
   // fm-c2w — dock badge reflects how many tabs currently demand
   // attention (idle waiting-for-input or explicit bell). 'busy' is
   // generating-only and doesn't count — we don't want a badge while

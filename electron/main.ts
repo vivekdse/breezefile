@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, Notification as ElectronNotification } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, screen, Notification as ElectronNotification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -276,6 +276,40 @@ app.whenReady().then(() => {
     if (!w) return;
     w.setFullScreen(!w.isFullScreen());
   });
+  // fm-dly3 — grow the window by the chat panel's width when chat opens so the
+  // editor / file list keeps the width it had before, then restore on close.
+  // Clamped to the current display's work area (and skipped while maximized /
+  // fullscreen, where we can't grow and the CSS handles the squeeze). Keyed
+  // per-window so multi-window stays sane.
+  const chatGrow = new Map<number, number>(); // win.id → width before growing
+  ipcMain.handle(
+    'window:chatResize',
+    (e, open: boolean, panelWidth: number) => {
+      const w = BrowserWindow.fromWebContents(e.sender);
+      if (!w || w.isDestroyed()) return;
+      if (w.isMaximized() || w.isFullScreen()) return;
+      const id = w.id;
+      const pad = Math.max(0, Math.round(panelWidth));
+      const [x, y] = w.getPosition();
+      const [width, height] = w.getSize();
+      const wa = screen.getDisplayMatching(w.getBounds()).workArea;
+      if (open) {
+        if (chatGrow.has(id)) return; // already grown
+        const target = Math.min(width + pad, wa.width);
+        if (target <= width) return; // no room to grow — CSS copes
+        chatGrow.set(id, width);
+        // Keep the (now wider) window inside the work area.
+        const nx = Math.max(wa.x, Math.min(x, wa.x + wa.width - target));
+        w.setBounds({ x: nx, y, width: target, height });
+      } else {
+        const prev = chatGrow.get(id);
+        if (prev == null) return; // we didn't grow it
+        chatGrow.delete(id);
+        const minW = w.getMinimumSize()[0] || 0;
+        w.setBounds({ x, y, width: Math.max(prev, minW), height });
+      }
+    },
+  );
   // Attention notifications routed via main process so the click handler
   // is reliable on Linux libnotify daemons (the web Notification API
   // delivered clicks unreliably across daemons, and any "View" button

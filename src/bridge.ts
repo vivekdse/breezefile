@@ -58,6 +58,8 @@ type Fm = {
   openUrl: (url: string) => Promise<void>;
   windowToggleMaximize: () => Promise<void>;
   windowToggleFullscreen: () => Promise<void>;
+  // fm-dly3 — grow/restore the OS window when the chat panel opens/closes
+  windowChatResize: (open: boolean, panelWidth: number) => Promise<void>;
   openWith: (p: string, appName: string) => Promise<void>;
   pickApplication: () => Promise<string | null>;
   pickFolder: (defaultPath?: string) => Promise<string | null>;
