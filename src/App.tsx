@@ -28,6 +28,8 @@ import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { EditSplit } from './components/EditShell';
+import { ChatPanel } from './components/ChatPanel';
+import { openChatPanel, type ChatTarget } from './openChat';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -372,6 +374,31 @@ function Shell() {
     return off;
   }, [dispatch]);
 
+  // fm-dly3 — toggle the agent chat panel for the active tab. Centralized
+  // here (rather than in the verb / header icons) so the folder-vs-document
+  // target and the open/close decision live in one place; the chip verb and
+  // the header chat icons just fire `fm:toggle-chat`. Subscribes once and
+  // reads live state through refs.
+  useEffect(() => {
+    const onToggle = () => {
+      const idx = activeTabIdxRef.current;
+      const t = tabsRef.current[idx];
+      if (!t) return;
+      if (t.chat) {
+        void fm.termKill(t.chat.ptyId).catch(() => {});
+        dispatch({ type: 'closeChat', tabIndex: idx });
+        return;
+      }
+      const target: ChatTarget =
+        t.kind === 'edit' && t.editPath
+          ? { kind: 'document', filePath: t.editPath }
+          : { kind: 'folder', cwd: t.trail[lastCol(t)] };
+      void openChatPanel({ tabIndex: idx, target, dispatch });
+    };
+    window.addEventListener('fm:toggle-chat', onToggle);
+    return () => window.removeEventListener('fm:toggle-chat', onToggle);
+  }, [dispatch]);
+
   // fm-c2w — dock badge reflects how many tabs currently demand
   // attention (idle waiting-for-input or explicit bell). 'busy' is
   // generating-only and doesn't count — we don't want a badge while
@@ -696,6 +723,7 @@ function Shell() {
       data-view={tab.viewMode}
       data-mode={tab.terminal ? 'terminal' : 'files'}
       data-tab-kind={tab.kind}
+      data-chat={tab.chat ? 'open' : undefined}
     >
       <IconSprite />
       {/* title slot — owned by fm-9w0 */}
@@ -763,6 +791,9 @@ function Shell() {
       {!tab.terminal && !isTaskTab && !isTasksTab && !isEditTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
+      {/* chat slot — fm-dly3 agent chat panel, docked right. Renders for the
+          active tab when its chat is open (works in folder + edit modes). */}
+      {tab.chat && <ChatPanel tabIndex={state.activeTab} chat={tab.chat} />}
       {/* status slot — ModeLine stacked above Statusbar. Hidden in
           terminal mode so the terminal pane reaches the bottom edge. */}
       {!tab.terminal && !isEditTab && (

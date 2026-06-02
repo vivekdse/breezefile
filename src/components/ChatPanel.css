@@ -1,0 +1,62 @@
+/* fm-dly3 — agent chat side-panel, docked in the `chat` grid slot. */
+.chat-panel {
+  grid-area: chat;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel, var(--bg-1));
+  border-left: 1px solid var(--rule, var(--border-1));
+}
+
+.chat-panel__header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--rule-on-panel, var(--border-1));
+  background: var(--bg-2, var(--panel, var(--bg-1)));
+}
+
+.chat-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-on-panel, var(--fg-1));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-panel__glyph {
+  font-size: 13px;
+}
+
+.chat-panel__close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-2, var(--muted));
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-panel__close:hover {
+  background: var(--bg-1, rgba(0, 0, 0, 0.08));
+  color: var(--fg-1, var(--ink));
+}
+
+.chat-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}

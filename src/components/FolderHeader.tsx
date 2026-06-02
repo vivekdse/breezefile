@@ -67,6 +67,7 @@ function FolderHeaderView({
 }: FolderHeaderViewProps) {
   const { state } = useStore();
   const tasksEnabled = state.taskManagementEnabled;
+  const chatOpen = !!state.tabs[state.activeTab]?.chat;
 
   // fm-39969baf — count of active tasks anchored to this folder. Mirrors the
   // sidebar's "active" rule (countByFolder excludes done/cancelled and
@@ -99,6 +100,15 @@ function FolderHeaderView({
 
   return (
     <header className="folder-header">
+      <button
+        type="button"
+        className={`folder-header__chat${chatOpen ? ' folder-header__chat--on' : ''}`}
+        onClick={() => window.dispatchEvent(new CustomEvent('fm:toggle-chat'))}
+        title="Chat with this folder (agent)"
+        aria-label="Chat with this folder"
+      >
+        💬
+      </button>
       <div className="folder-header__kicker">
         {parentName && (
           <>

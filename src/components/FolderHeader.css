@@ -96,3 +96,34 @@
 .folder-header__tasks:hover {
   text-decoration-style: solid;
 }
+
+/* fm-dly3 — chat-with-folder affordance, top-right of the header. */
+.folder-header__chat {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.folder-header__chat:hover {
+  opacity: 1;
+  background: var(--panel, rgba(0, 0, 0, 0.05));
+  border-color: var(--rule, var(--border-1));
+}
+.folder-header__chat--on {
+  opacity: 1;
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(0, 0, 0, 0.06));
+}

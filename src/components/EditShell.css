@@ -240,3 +240,8 @@
   border: 0;
   border-top: 1px solid var(--rule-on-panel, var(--border-2));
 }
+
+/* fm-dly3 — active state for the chat toggle in the editor header. */
+.edit-shell__icon-btn--on {
+  color: var(--accent);
+}

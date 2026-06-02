@@ -422,6 +422,15 @@ export function EditShell({
           )}
           <button
             type="button"
+            className={`edit-shell__btn edit-shell__icon-btn${tab.chat ? ' edit-shell__icon-btn--on' : ''}`}
+            onClick={() => window.dispatchEvent(new CustomEvent('fm:toggle-chat'))}
+            title="Chat with this document (agent)"
+            aria-label="Chat with this document"
+          >
+            💬
+          </button>
+          <button
+            type="button"
             className="edit-shell__btn edit-shell__icon-btn"
             onClick={() => dispatch({ type: 'setMode', mode: 'command', buffer: '' })}
             title="All actions (:)"

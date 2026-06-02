@@ -147,6 +147,7 @@ type Verb =
   | 'openTerminal'
   | 'term'
   | 'term-close'
+  | 'chat'
   | 'remote-attach'
   | 'disconnect'
   | 'newtag'
@@ -1245,6 +1246,28 @@ const VERBS: VerbDef[] = [
           msg: formatOpError('disconnect', err),
         }),
       );
+    },
+  },
+  {
+    // fm-dly3 — toggle the agent chat side-panel. App owns the open/close +
+    // folder-vs-document target; we just fire the event. Available on folder
+    // and edit tabs (where there's a folder or document to put in context).
+    id: 'chat',
+    label: 'Chat with this folder / document',
+    aliases: ['chat', 'ask', 'agent', 'claude-chat', 'gemini'],
+    icon: '💬',
+    describe: (c) =>
+      c.activeTabKind === 'edit'
+        ? 'Open an agent chat with this document in context'
+        : `Open an agent chat in ${basename(c.cwd) || '/'}`,
+    isAvailable: (c) =>
+      c.activeTabKind === 'folder' || c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Chat works on a folder or a document tab' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:toggle-chat'));
+      api.closeOverlay();
     },
   },
   {

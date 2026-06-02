@@ -248,6 +248,21 @@ type Action =
       type: 'setTerminalAttention';
       tabIndex: number;
       attention: 'idle' | 'busy' | 'bell' | null;
+    }
+  // fm-dly3 — agent chat side-panel
+  | {
+      type: 'openChat';
+      tabIndex: number;
+      ptyId: number;
+      cwd: string;
+      agentId: string;
+      label?: string;
+    }
+  | { type: 'closeChat'; tabIndex: number }
+  | {
+      type: 'setChatAttention';
+      tabIndex: number;
+      attention: 'idle' | 'busy' | 'bell' | null;
     };
 
 function makeTab(
@@ -572,6 +587,41 @@ function reducer(s: State, a: Action): State {
       tabs[a.tabIndex] = {
         ...t,
         terminal: { ...t.terminal, attention: a.attention },
+      };
+      return { ...s, tabs };
+    }
+    case 'openChat': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t) return s;
+      tabs[a.tabIndex] = {
+        ...t,
+        chat: {
+          ptyId: a.ptyId,
+          cwd: a.cwd,
+          agentId: a.agentId,
+          label: a.label,
+          attention: null,
+        },
+      };
+      return { ...s, tabs };
+    }
+    case 'closeChat': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t) return s;
+      const { chat: _drop, ...rest } = t;
+      void _drop;
+      tabs[a.tabIndex] = rest as typeof t;
+      return { ...s, tabs };
+    }
+    case 'setChatAttention': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t || !t.chat) return s;
+      tabs[a.tabIndex] = {
+        ...t,
+        chat: { ...t.chat, attention: a.attention },
       };
       return { ...s, tabs };
     }

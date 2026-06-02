@@ -77,6 +77,18 @@ export type Tab = {
     label?: string;
     attention?: 'idle' | 'busy' | 'bell' | null;
   };
+  // fm-dly3 — agent chat side-panel docked on the right of this tab. Hosts a
+  // PTY running an agent CLI (claude/gemini/…) anchored to the folder (folder
+  // tabs) or the open document's dir (edit tabs). Independent of `terminal`
+  // (the full-bleed pane) — a tab can have both. `agentId` is the launcher id
+  // that started it, for the panel header label/picker.
+  chat?: {
+    ptyId: number;
+    cwd: string;
+    agentId: string;
+    label?: string;
+    attention?: 'idle' | 'busy' | 'bell' | null;
+  };
 };
 
 export type YankMode = 'copy' | 'move' | 'symlink' | 'symlinkRel' | 'hardlink';
