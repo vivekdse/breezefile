@@ -20,7 +20,8 @@ type TagDispatch = (
   a:
     | { type: 'createCustomTag'; tag: CustomTag }
     | { type: 'applyTag'; id: string; paths: string[] }
-    | { type: 'untagPaths'; id: string; paths: string[] },
+    | { type: 'untagPaths'; id: string; paths: string[] }
+    | { type: 'addTagViz'; id: string },
 ) => void;
 
 export type TagControlReq =
@@ -119,6 +120,11 @@ export function handleTagControl(req: TagControlReq, ctx: TagControlCtx): unknow
         created = true;
       }
       ctx.dispatch({ type: 'applyTag', id: tag.id, paths });
+      // Visualize the tag on the active tab so its color band shows up in
+      // list view immediately — mirrors the manual TagPicker apply path,
+      // which also opts the tab into visualizing the tag it just applied.
+      // Without this an agent-applied tag stays invisible (fm-awii bug).
+      ctx.dispatch({ type: 'addTagViz', id: tag.id });
       return { id: tag.id, name: tag.name, applied: paths.length, created };
     }
 
