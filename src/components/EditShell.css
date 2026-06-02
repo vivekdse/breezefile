@@ -24,8 +24,22 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* fm-dly3 — keep the header a single full-width row: the filename stays on
+     one line and truncates instead of wrapping. min-width:0 lets it shrink
+     inside the flex header; max-width keeps a very long title from crowding
+     out the path. The full name is in the title attr (tooltip). */
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 60%;
   font-family: var(--font-serif);
   color: var(--text-on-canvas, var(--fg-1));
+}
+
+.edit-shell__filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .edit-shell__dot {
@@ -34,6 +48,7 @@
   border-radius: 50%;
   background: var(--accent);
   display: inline-block;
+  flex: 0 0 auto;
 }
 
 .edit-shell__path {

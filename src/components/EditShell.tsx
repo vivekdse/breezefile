@@ -410,8 +410,8 @@ export function EditShell({
   return (
     <div className="edit-shell">
       <div className="edit-shell__header">
-        <div className="edit-shell__title">
-          {fileName}
+        <div className="edit-shell__title" title={fileName}>
+          <span className="edit-shell__filename">{fileName}</span>
           {dirty && <span className="edit-shell__dot" title="unsaved changes" />}
         </div>
         <div className="edit-shell__path" title={filePath}>{filePath}</div>
