@@ -227,6 +227,10 @@
 .taskshell__notes--expanded {
   -webkit-line-clamp: unset;
   display: block;
+  /* Grow with the note up to a point, then scroll inside the block so a
+     long note never pushes the task actions off-screen. */
+  max-height: 40vh;
+  overflow-y: auto;
 }
 .taskshell__notes:focus-visible {
   border-color: var(--accent);
