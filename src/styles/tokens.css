@@ -5,10 +5,20 @@
 
 :root {
   /* Type */
+  /* Emoji families are appended to every stack: CSS falls back per-glyph,
+     so the latin/mono fonts still own normal text while any emoji (💬 chat,
+     ⚡ launchers, ★ pins, …) resolves to a real color-emoji font instead of
+     a .notdef tofu box. Without this the chat-panel title's 💬 rendered as
+     an empty rectangle on Linux, where the sans stack has no emoji coverage. */
+  --emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji',
+    'Segoe UI Symbol';
   --font-sans: 'Inter Tight', 'Inter', ui-sans-serif, -apple-system,
-    BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
-  --font-serif: 'Fraunces', 'Iowan Old Style', 'Hoefler Text', Georgia, serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
+    BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif,
+    var(--emoji);
+  --font-serif: 'Fraunces', 'Iowan Old Style', 'Hoefler Text', Georgia, serif,
+    var(--emoji);
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace,
+    var(--emoji);
 
   /* Bumped one step up throughout for better legibility on big monitors. */
   --fs-xs: 12px;

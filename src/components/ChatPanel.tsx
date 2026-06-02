@@ -21,25 +21,21 @@ export function ChatPanel({ tabIndex, chat }: Props) {
     dispatch({ type: 'closeChat', tabIndex });
   };
 
+  // No header row: the panel is the terminal, full-bleed. The old title bar
+  // (💬 + label) read as redundant chrome and its emoji glyph was the source
+  // of the stray tofu rectangle. The close affordance is kept as a small
+  // floating button in the corner instead of a full bar.
   return (
     <aside className="chat-panel" aria-label="Agent chat">
-      <div className="chat-panel__header">
-        <span className="chat-panel__title" title={chat.cwd}>
-          <span className="chat-panel__glyph" aria-hidden>
-            💬
-          </span>
-          {chat.label ?? chat.agentId}
-        </span>
-        <button
-          type="button"
-          className="chat-panel__close"
-          onClick={close}
-          title="Close chat"
-          aria-label="Close chat"
-        >
-          ×
-        </button>
-      </div>
+      <button
+        type="button"
+        className="chat-panel__close"
+        onClick={close}
+        title="Close chat"
+        aria-label="Close chat"
+      >
+        ×
+      </button>
       <div className="chat-panel__body">
         <Terminal
           key={chat.ptyId}

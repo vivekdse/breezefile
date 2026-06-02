@@ -70,6 +70,32 @@
   grid-template-columns: 0px 1fr 0px var(--chat-w);
 }
 
+/* fm-dly3 — folder tabs: when the agent chat opens, collapse the left
+   Sidebar (tasks / favourites / locations). The chat is the active surface
+   and the sidebar's navigation is rarely needed mid-conversation, so giving
+   its 240px to the file list + chat is the uncluttered default. Applies to
+   every folder view; closing chat — same 💬 toggle — restores the sidebar.
+   Terminal mode already zeroes both rails. */
+.shell[data-tab-kind="folder"][data-chat="open"] {
+  --sidebar-w: 0px;
+}
+.shell[data-tab-kind="folder"][data-chat="open"] .shell__side {
+  display: none;
+}
+
+/* In the plain list / grid views the right Preview pane is a secondary
+   glance surface — when chat opens it claims that space instead, so the
+   file list sits directly beside the chat with no idle pane between them.
+   Excludes the preview/zoom view (the preview IS that view) and the tag
+   view (its right pane is the TagInspector tagging surface, not a file
+   preview) — both keep their right pane and dock chat beyond it. */
+.shell[data-tab-kind="folder"][data-chat="open"]:not([data-view="preview"]):not([data-view="tag"]) {
+  --preview-w: 0px;
+}
+.shell[data-tab-kind="folder"][data-chat="open"]:not([data-view="preview"]):not([data-view="tag"]) .shell__preview {
+  display: none;
+}
+
 .shell__title   { grid-area: title;   min-width: 0; }
 .shell__chrome  { grid-area: chrome;  min-width: 0; }
 .shell__status  { grid-area: status;  min-width: 0; }
