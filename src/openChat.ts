@@ -100,17 +100,21 @@ export async function openChatPanel(opts: {
   // already aware, with no visible first message. Otherwise fall back to
   // pre-typing the preamble after the CLI's input box appears.
   const useFlag = !!agent.contextFlag;
-  const cmd = useFlag
+  const launch = useFlag
     ? `${commandLine} ${agent.contextFlag} ${shQuote(contextSentence(target))}`
     : commandLine;
   try {
     const ptyId = await spawnTerminal({ cwd, sessionLabel: `chat · ${name}` });
     dispatch({ type: 'openChat', tabIndex, ptyId, cwd, agentId: agent.id, label });
-    // Cadence mirrors invokeLauncher: 220ms for the shell prompt, then ~900ms
-    // for the AI CLI's input box (only needed for the typed-preamble fallback).
-    setTimeout(() => fm.termWrite(ptyId, cmd + '\r'), 220);
+    // Send `clear` as its own command first so SSH login banners / MOTD /
+    // shell-init noise are wiped and the agent's TUI opens at the top of a
+    // clean pane; then launch the agent a beat later. Cadence: 220ms for the
+    // shell prompt, +160ms so the clear has executed, then ~900ms after launch
+    // for the AI CLI's input box (typed-preamble fallback only).
+    setTimeout(() => fm.termWrite(ptyId, 'clear\r'), 220);
+    setTimeout(() => fm.termWrite(ptyId, launch + '\r'), 380);
     if (!useFlag) {
-      setTimeout(() => fm.termWrite(ptyId, preambleFor(target)), 900);
+      setTimeout(() => fm.termWrite(ptyId, preambleFor(target)), 1060);
     }
     dispatch({ type: 'setStatus', msg: `chat · ${label}` });
     return { ok: true };
