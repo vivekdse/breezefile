@@ -213,6 +213,10 @@ export type Launcher = {
     args?: string[];
     description?: string;
   }>;
+  // fm-dly3 — flag this agent takes background context through (e.g.
+  // '--append-system-prompt'). The chat panel uses it to inject the folder /
+  // document as a system prompt instead of a typed first message.
+  contextFlag?: string;
 };
 
 declare global {

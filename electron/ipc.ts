@@ -1875,6 +1875,11 @@ end tell`;
     description?: string;
     // fm-e66 — named flag combinations layered atop `args`.
     variants?: LauncherVariant[];
+    // fm-dly3 — flag this agent uses to receive background context (folder /
+    // document) as a system-prompt addendum, e.g. '--append-system-prompt'.
+    // The chat panel passes context via this flag instead of typing it as a
+    // first message. Launchers without it fall back to the typed preamble.
+    contextFlag?: string;
   };
   // fm-e66 — defaults seed the common modifier modes for each AI CLI.
   // Real users don't run `claude` once and forget; they run it three ways
@@ -1887,6 +1892,7 @@ end tell`;
       aliases: ['claude', 'cc'],
       command: 'claude',
       description: 'Anthropic Claude Code CLI',
+      contextFlag: '--append-system-prompt',
       variants: [
         {
           id: 'continue',
@@ -1939,11 +1945,21 @@ end tell`;
   } {
     let changed = false;
     const next = list.map((l) => {
-      if (l.variants !== undefined) return l;
       const seed = DEFAULT_LAUNCHERS.find((d) => d.id === l.id);
-      if (!seed || !seed.variants) return l;
-      changed = true;
-      return { ...l, variants: seed.variants };
+      if (!seed) return l;
+      let out = l;
+      // fm-e66 — backfill default variants for pre-variants configs.
+      if (out.variants === undefined && seed.variants) {
+        out = { ...out, variants: seed.variants };
+        changed = true;
+      }
+      // fm-dly3 — backfill the context flag so existing claude launchers get
+      // background-context injection without a manual edit.
+      if (out.contextFlag === undefined && seed.contextFlag) {
+        out = { ...out, contextFlag: seed.contextFlag };
+        changed = true;
+      }
+      return out;
     });
     return { list: next, changed };
   }

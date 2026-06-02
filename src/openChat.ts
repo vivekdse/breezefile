@@ -45,11 +45,35 @@ async function pickAgent(agentId?: string): Promise<Launcher | null> {
   return list.find((l) => l.id === agentId) ?? null;
 }
 
+// Typed-message fallback (for agents with no contextFlag): looks like the
+// user opened with this text; they press Enter to send.
 function preambleFor(target: ChatTarget): string {
   if (target.kind === 'document') {
     return `I'm looking at this file — let's discuss and edit it together: ${target.filePath}\n`;
   }
   return `I'm working in this folder — help me explore and work with its files: ${target.cwd}\n`;
+}
+
+// Single-line background context, passed via the agent's system-prompt flag
+// (e.g. claude --append-system-prompt). Never shown as a chat turn.
+function contextSentence(target: ChatTarget): string {
+  if (target.kind === 'document') {
+    return (
+      `You are assisting inside the Breeze editor. The user is working on the file ` +
+      `${target.filePath} (your working directory is its folder). Help them discuss ` +
+      `and edit this file; read it first if useful.`
+    );
+  }
+  return (
+    `You are assisting inside the Breeze file manager. The user is working in the ` +
+    `folder ${target.cwd} (also your working directory). Help them explore and work ` +
+    `with the files here.`
+  );
+}
+
+// Minimal POSIX single-quote escaping for typing a flag value into the pty.
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 export type OpenChatResult = { ok: true } | { ok: false; needsAgent: true };
@@ -71,15 +95,23 @@ export async function openChatPanel(opts: {
   const { commandLine, label } = resolveCommandLine(agent);
   const name =
     target.kind === 'document' ? basename(target.filePath) : basename(cwd) || cwd;
+  // When the agent declares a contextFlag, fold the folder/document context
+  // into the launch command as a system-prompt addendum — the session opens
+  // already aware, with no visible first message. Otherwise fall back to
+  // pre-typing the preamble after the CLI's input box appears.
+  const useFlag = !!agent.contextFlag;
+  const cmd = useFlag
+    ? `${commandLine} ${agent.contextFlag} ${shQuote(contextSentence(target))}`
+    : commandLine;
   try {
     const ptyId = await spawnTerminal({ cwd, sessionLabel: `chat · ${name}` });
     dispatch({ type: 'openChat', tabIndex, ptyId, cwd, agentId: agent.id, label });
-    // Boot the agent, then pre-type the context. Cadence mirrors
-    // invokeLauncher: 220ms for the shell prompt, then ~900ms for the AI CLI
-    // to draw its input box. No trailing \r on the preamble — the user edits
-    // and sends it themselves.
-    setTimeout(() => fm.termWrite(ptyId, commandLine + '\r'), 220);
-    setTimeout(() => fm.termWrite(ptyId, preambleFor(target)), 900);
+    // Cadence mirrors invokeLauncher: 220ms for the shell prompt, then ~900ms
+    // for the AI CLI's input box (only needed for the typed-preamble fallback).
+    setTimeout(() => fm.termWrite(ptyId, cmd + '\r'), 220);
+    if (!useFlag) {
+      setTimeout(() => fm.termWrite(ptyId, preambleFor(target)), 900);
+    }
     dispatch({ type: 'setStatus', msg: `chat · ${label}` });
     return { ok: true };
   } catch (err) {
