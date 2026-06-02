@@ -56,6 +56,11 @@ function Shell() {
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [touchOpen, setTouchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // fm-xt1g — when opening Settings to surface a specific section (e.g. the
+  // chat-agent prompt when no default is set).
+  const [settingsSection, setSettingsSection] = useState<'chat-agent' | undefined>(
+    undefined,
+  );
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -394,6 +399,18 @@ function Shell() {
         dispatch({ type: 'closeChat', tabIndex: idx });
         return;
       }
+      // fm-xt1g — no per-chat picker; the Settings default is authoritative.
+      // If it's unset, surface it (jump to the Chat agent setting) instead of
+      // silently guessing an agent.
+      const surfaceDefault = (msg: string) => {
+        dispatch({ type: 'setStatus', msg });
+        setSettingsSection('chat-agent');
+        setSettingsOpen(true);
+      };
+      if (!defaultAgentRef.current) {
+        surfaceDefault('Pick a default chat agent in Settings to start chatting');
+        return;
+      }
       const target: ChatTarget =
         t.kind === 'edit' && t.editPath
           ? { kind: 'document', filePath: t.editPath }
@@ -401,8 +418,12 @@ function Shell() {
       void openChatPanel({
         tabIndex: idx,
         target,
-        defaultAgentId: defaultAgentRef.current,
+        agentId: defaultAgentRef.current,
         dispatch,
+      }).then((res) => {
+        if (!res.ok && res.needsAgent) {
+          surfaceDefault('Your default chat agent is unavailable — pick another');
+        }
       });
     };
     window.addEventListener('fm:toggle-chat', onToggle);
@@ -919,7 +940,15 @@ function Shell() {
       {tutorialOpen && (
         <Tutorial key={tutorialNonce} onClose={() => setTutorialOpen(false)} />
       )}
-      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <Settings
+          onClose={() => {
+            setSettingsOpen(false);
+            setSettingsSection(undefined);
+          }}
+          initialSection={settingsSection}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           {...confirm}

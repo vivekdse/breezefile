@@ -4,7 +4,7 @@ import { fm, type Launcher } from '../bridge';
 import { formatOpError } from '../errorMessages';
 import './Settings.css';
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; initialSection?: SectionId };
 
 type SectionId =
   | 'keybindings'
@@ -15,7 +15,7 @@ type SectionId =
   | 'claude-integration'
   | 'bookmarks';
 
-export function Settings({ onClose }: Props) {
+export function Settings({ onClose, initialSection }: Props) {
   const { state, dispatch } = useStore();
   const [editing, setEditing] = useState<string | null>(null);
   const [draftKey, setDraftKey] = useState('');
@@ -28,7 +28,7 @@ export function Settings({ onClose }: Props) {
   // Single-open accordion. Keybindings opens by default since it's the
   // densest section and the most common reason to open Settings.
   const [openSection, setOpenSection] = useState<SectionId | null>(
-    'keybindings',
+    initialSection ?? 'keybindings',
   );
   // fm-at5 — inline result of the "Reset Claude integration" action.
   const [claudeResetMsg, setClaudeResetMsg] = useState<string | null>(null);
@@ -318,7 +318,7 @@ export function Settings({ onClose }: Props) {
                   })
                 }
               >
-                <option value="">Auto (Claude Code if available)</option>
+                <option value="">— not set —</option>
                 {launchers
                   .filter((l) => l.id !== 'term')
                   .map((l) => (
@@ -330,9 +330,10 @@ export function Settings({ onClose }: Props) {
             </div>
             <div className="settings__row">
               <span className="settings__path settings__hint">
-                Which agent the 💬 chat panel (<kbd>:chat</kbd>) launches by
-                default for a folder or document. Agents come from your
-                launchers config.
+                The agent the 💬 chat panel (<kbd>:chat</kbd>) launches for a
+                folder or document. Agents come from your launchers config.
+                While this is unset, opening a chat brings you here to choose
+                one.
               </span>
             </div>
           </AccordionSection>

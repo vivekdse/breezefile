@@ -31,26 +31,18 @@ type ChatDispatch = (
     | { type: 'setStatus'; msg: string },
 ) => void;
 
-/** Pick the agent launcher: an explicit id, else a 'claude' launcher, else the
- *  first non-terminal (AI) launcher, else the first one. null when none are
- *  configured. */
+/** Resolve the configured agent launcher by id. Returns null when no id is
+ *  given or it no longer matches a launcher — the caller then surfaces the
+ *  "set a default chat agent" prompt rather than silently guessing. */
 async function pickAgent(agentId?: string): Promise<Launcher | null> {
+  if (!agentId) return null;
   let list: Launcher[] = [];
   try {
     list = await fm.launchersList();
   } catch {
     return null;
   }
-  if (list.length === 0) return null;
-  if (agentId) {
-    const m = list.find((l) => l.id === agentId);
-    if (m) return m;
-  }
-  return (
-    list.find((l) => l.id === 'claude') ??
-    list.find((l) => l.id !== 'term') ??
-    list[0]
-  );
+  return list.find((l) => l.id === agentId) ?? null;
 }
 
 function preambleFor(target: ChatTarget): string {
@@ -60,26 +52,22 @@ function preambleFor(target: ChatTarget): string {
   return `I'm working in this folder — help me explore and work with its files: ${target.cwd}\n`;
 }
 
-/** Spawn the agent for `target` and dock it as this tab's chat panel. */
+export type OpenChatResult = { ok: true } | { ok: false; needsAgent: true };
+
+/** Spawn the configured agent for `target` and dock it as this tab's chat
+ *  panel. Returns { ok:false, needsAgent:true } when `agentId` is unset or no
+ *  longer resolves, so the caller can surface the default-agent prompt. */
 export async function openChatPanel(opts: {
   tabIndex: number;
   target: ChatTarget;
-  /** Explicit agent for this open. */
-  agentId?: string;
-  /** User's configured default (fm-9iha), used when no explicit agent. */
-  defaultAgentId?: string | null;
+  /** The configured default agent launcher id (fm-9iha). */
+  agentId?: string | null;
   dispatch: ChatDispatch;
-}): Promise<void> {
-  const { tabIndex, target, agentId, defaultAgentId, dispatch } = opts;
+}): Promise<OpenChatResult> {
+  const { tabIndex, target, agentId, dispatch } = opts;
   const cwd = target.kind === 'folder' ? target.cwd : dirname(target.filePath);
-  const agent = await pickAgent(agentId ?? defaultAgentId ?? undefined);
-  if (!agent) {
-    dispatch({
-      type: 'setStatus',
-      msg: 'No chat agent configured — add one in the launchers config',
-    });
-    return;
-  }
+  const agent = await pickAgent(agentId ?? undefined);
+  if (!agent) return { ok: false, needsAgent: true };
   const { commandLine, label } = resolveCommandLine(agent);
   const name =
     target.kind === 'document' ? basename(target.filePath) : basename(cwd) || cwd;
@@ -93,7 +81,9 @@ export async function openChatPanel(opts: {
     setTimeout(() => fm.termWrite(ptyId, commandLine + '\r'), 220);
     setTimeout(() => fm.termWrite(ptyId, preambleFor(target)), 900);
     dispatch({ type: 'setStatus', msg: `chat · ${label}` });
+    return { ok: true };
   } catch (err) {
     dispatch({ type: 'setStatus', msg: formatOpError('chat', err) });
+    return { ok: true }; // spawn failed but it's a real attempt, not a missing-agent case
   }
 }

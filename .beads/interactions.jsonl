@@ -11,3 +11,4 @@
 {"id":"int-c45c3991","kind":"field_change","created_at":"2026-06-02T16:31:34.521162166Z","actor":"Vivek Desktop","issue_id":"fm-2rc8","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-c4917f36","kind":"field_change","created_at":"2026-06-02T16:31:41.570846469Z","actor":"Vivek Desktop","issue_id":"fm-irfe","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-a1c02f69","kind":"field_change","created_at":"2026-06-02T16:59:09.019249087Z","actor":"Vivek Desktop","issue_id":"fm-awii","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-96d7816c","kind":"field_change","created_at":"2026-06-02T16:59:37.549153817Z","actor":"Vivek Desktop","issue_id":"fm-9iha","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"defaultAgentId persisted + Settings dropdown + openChat fallback. Build-verified. (parent fm-dly3 epic still open by design.)"}}
