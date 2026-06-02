@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, Notification as ElectronNotification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
@@ -102,6 +101,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.mjs'),
       sandbox: true,
       contextIsolation: true,
+      // Electron throttles a backgrounded renderer (paused timers, dropped
+      // GPU surface), which is what makes Breeze paint blank for a beat when
+      // you switch back from another app. We're a foreground productivity
+      // tool, not a background tab — keep rendering at full rate so refocus
+      // is instant.
+      backgroundThrottling: false,
     },
   });
 

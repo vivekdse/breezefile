@@ -27,7 +27,7 @@ import { RunTaskModal } from './components/RunTaskModal';
 import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
-import { EditShell } from './components/EditShell';
+import { EditSplit } from './components/EditShell';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -39,6 +39,7 @@ import { formatOpError, humanizeError } from './errorMessages';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
+import { isTextEntryTarget } from './textFocus';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
 import type { CustomTagCriterion, Entry } from './types';
@@ -419,8 +420,12 @@ function Shell() {
 
   useEffect(() => {
     function h(e: KeyboardEvent) {
-      const tgt = e.target as HTMLElement | null;
-      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) return;
+      // Don't hijack `?` while the user is typing — any text field (search,
+      // rename, the new-task form), or a contenteditable surface like the
+      // Milkdown markdown editor. Also bail while the task composer owns the
+      // keyboard, so `?` is inert even on its non-field elements.
+      if (isTextEntryTarget(e) || document.body.dataset.composerOpen === 'true')
+        return;
       if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setSettingsOpen((v) => !v);
@@ -644,7 +649,9 @@ function Shell() {
           ) : isTasksTab ? (
             <TasksPage />
           ) : isEditTab ? (
-            <EditShell tabIndex={state.activeTab} />
+            // Edit tabs render in the persistent EditSplit layer below so
+            // they survive tab switches; nothing to draw here.
+            null
           ) : (
             <>
               <FolderHeader />
@@ -654,6 +661,9 @@ function Shell() {
             </>
           )}
         </TerminalSplit>
+        {/* Persistent edit-tab layer (mirrors TerminalSplit): keeps every
+            edit tab's Milkdown editor mounted so switching back is instant. */}
+        <EditSplit tabs={state.tabs} activeIndex={state.activeTab} />
       </main>
       {/* preview slot — Preview (fm-fda) fills the reserved 340px slot.
           In tag view (fm-uns) the slot hosts TagInspector instead, so the

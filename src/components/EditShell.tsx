@@ -10,6 +10,7 @@ import { fm } from '../bridge';
 import { basename, dirname } from '../actions';
 import { humanizeError } from '../errorMessages';
 import { isDefaultNoteName, notesDirFor } from './ChipPrompt';
+import type { Tab } from '../types';
 import './EditShell.css';
 
 // fm-notes — derive a filename from a markdown heading. Keep ASCII
@@ -49,7 +50,63 @@ function firstHeading(md: string): string {
  * saves atomically through `fm.editorSave`, which writes via tmp-file
  * + rename and refuses to clobber a file modified on disk since open.
  */
-export function EditShell({ tabIndex }: { tabIndex: number }) {
+/**
+ * Persistent edit-tab layer, mirroring TerminalSplit (fm-jtu). We mount an
+ * EditShell for *every* edit-kind tab and only show the active one, so
+ * switching back into a note doesn't re-read the file + rebuild Milkdown
+ * from scratch — that cold start was the seconds-long "can't type" lag.
+ * Backgrounded editors stay warm and never grab focus.
+ */
+export function EditSplit({
+  tabs,
+  activeIndex,
+}: {
+  tabs: Tab[];
+  activeIndex: number;
+}) {
+  const activeIsEdit = tabs[activeIndex]?.kind === 'edit';
+  return (
+    <div
+      className="edit-fullbleed"
+      style={{
+        display: activeIsEdit ? 'flex' : 'none',
+        flexDirection: 'column',
+        flex: '1 1 auto',
+        minHeight: 0,
+      }}
+    >
+      {tabs.map((t, i) => {
+        if (t.kind !== 'edit') return null;
+        const isActive = i === activeIndex;
+        return (
+          <div
+            key={t.id}
+            style={{
+              display: isActive ? 'flex' : 'none',
+              flexDirection: 'column',
+              flex: '1 1 auto',
+              minHeight: 0,
+            }}
+          >
+            <EditShell tabIndex={i} isActive={isActive} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function EditShell({
+  tabIndex,
+  isActive = true,
+}: {
+  tabIndex: number;
+  /** Edit tabs stay mounted across switches (fm-jtu-style persistence) so
+   *  the Milkdown editor isn't torn down + rebuilt on every switch — that
+   *  cold start was the multi-second "can't type yet" lag. Only the active
+   *  tab is visible and grabs focus; background editors stay warm and quiet. */
+  isActive?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const tab = state.tabs[tabIndex];
   const filePath = tab?.editPath ?? '';
@@ -57,6 +114,9 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
   const isMd = ext === 'md' || ext === 'mdx';
 
   const [loaded, setLoaded] = useState(false);
+  // The child editor (Milkdown view or textarea) registers a focus fn here
+  // so we can re-focus it when this tab becomes active without remounting.
+  const editorFocusRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   // `seed` is the value handed to the editor. It changes ONLY on a real
   // file (re)load — never on save — so a save doesn't remount Crepe or
@@ -114,6 +174,15 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
       cancelled = true;
     };
   }, [filePath]);
+
+  // When this persisted tab becomes active (or finishes loading while
+  // active), pull keyboard focus into its editor. rAF lets the display
+  // toggle commit first so focus lands on a visible surface.
+  useEffect(() => {
+    if (!isActive || !loaded) return;
+    const id = requestAnimationFrame(() => editorFocusRef.current?.());
+    return () => cancelAnimationFrame(id);
+  }, [isActive, loaded, seed]);
 
   const markDirty = (dirty: boolean) => {
     if (dirtyRef.current === dirty) return;
@@ -305,9 +374,20 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
         ) : error ? (
           <div className="edit-shell__error">Couldn't open: {error}</div>
         ) : isMd ? (
-          <MilkdownEditor initial={seed} onChange={onChange} filePath={filePath} />
+          <MilkdownEditor
+            initial={seed}
+            onChange={onChange}
+            filePath={filePath}
+            autoFocus={isActive}
+            registerFocus={(fn) => { editorFocusRef.current = fn; }}
+          />
         ) : (
-          <PlainEditor initial={seed} onChange={onChange} />
+          <PlainEditor
+            initial={seed}
+            onChange={onChange}
+            autoFocus={isActive}
+            registerFocus={(fn) => { editorFocusRef.current = fn; }}
+          />
         )}
       </div>
     </div>
@@ -317,10 +397,18 @@ export function EditShell({ tabIndex }: { tabIndex: number }) {
 function PlainEditor({
   initial,
   onChange,
+  autoFocus = true,
+  registerFocus,
 }: {
   initial: string;
   onChange: (next: string) => void;
+  autoFocus?: boolean;
+  registerFocus?: (fn: () => void) => void;
 }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    registerFocus?.(() => ref.current?.focus());
+  }, [registerFocus]);
   // Uncontrolled so the browser keeps its native undo/redo stack
   // (a controlled `value` resets the stack on every keystroke). `key`
   // remounts with fresh contents only on a genuine reload, since the
@@ -328,7 +416,8 @@ function PlainEditor({
   return (
     <textarea
       key={initial}
-      autoFocus
+      ref={ref}
+      autoFocus={autoFocus}
       className="edit-shell__textarea"
       defaultValue={initial}
       spellCheck={false}
@@ -345,10 +434,14 @@ function MilkdownEditor({
   initial,
   onChange,
   filePath,
+  autoFocus = true,
+  registerFocus,
 }: {
   initial: string;
   onChange: (next: string) => void;
   filePath: string;
+  autoFocus?: boolean;
+  registerFocus?: (fn: () => void) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<Crepe | null>(null);
@@ -359,19 +452,41 @@ function MilkdownEditor({
   // Keep a live handle to the prose view so the unmount cleanup can
   // snapshot the caret before tear-down.
   const viewRef = useRef<EditorView | null>(null);
+  // When Crepe can't render a file (e.g. a malformed GFM table produces an
+  // "Invalid array passed to renderSpec" crash deep in ProseMirror), the
+  // WYSIWYG editor mounts but paints nothing — a silent blank. We detect
+  // that and fall back to the plain-text editor so the content is never
+  // lost behind an empty pane. Note: the crash is async (inside ProseMirror's
+  // view update), so a React error boundary wouldn't catch it — we catch
+  // create() rejections and also probe the rendered DOM after mount.
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!hostRef.current) return;
-    const crepe = new Crepe({
-      root: hostRef.current,
-      defaultValue: initial,
-      featureConfigs: {
-        [Crepe.Feature.Placeholder]: {
-          text: 'Note title here',
-          mode: 'block',
+    setFailed(false);
+    let crepe: Crepe;
+    try {
+      crepe = new Crepe({
+        root: hostRef.current,
+        defaultValue: initial,
+        features: {
+          // The Latex feature scans prose for `$` and treats stray Unicode
+          // (ordinary en-dashes "–") as math input, flooding the console
+          // with "LaTeX-incompatible input" warnings and adding render
+          // surface that can crash. This is a note editor, not a math doc.
+          [Crepe.Feature.Latex]: false,
         },
-      },
-    });
+        featureConfigs: {
+          [Crepe.Feature.Placeholder]: {
+            text: 'Note title here',
+            mode: 'block',
+          },
+        },
+      });
+    } catch {
+      setFailed(true);
+      return;
+    }
     crepeRef.current = crepe;
     let disposed = false;
     void crepe.create().then(() => {
@@ -381,6 +496,15 @@ function MilkdownEditor({
           onChangeRef.current(markdown);
         });
       });
+      // Render sanity check: if we seeded non-empty markdown but the editor
+      // painted nothing, Crepe crashed mid-render. Drop to the plain editor.
+      const probeRender = () => {
+        if (disposed) return;
+        if (!initial.trim()) return;
+        const pm = hostRef.current?.querySelector('.ProseMirror');
+        const rendered = (pm?.textContent ?? '').trim().length > 0;
+        if (!rendered) setFailed(true);
+      };
       const focusEditor = () => {
         try {
           crepe.editor.action((ctx) => {
@@ -398,10 +522,22 @@ function MilkdownEditor({
           });
         } catch { /* ignore — editor may have torn down */ }
       };
+      // Expose focus so EditShell can re-focus this editor when its tab is
+      // re-activated (the editor stays mounted, so this is the only hook).
+      registerFocus?.(focusEditor);
+      // Auto-focus only the active editor on create — a backgrounded edit
+      // tab that mounted for persistence must not steal the keyboard.
       // Two ticks: first for React commit, second for the chip overlay
       // (which closes after dispatching openEditTab) to release focus.
-      setTimeout(focusEditor, 0);
-      setTimeout(focusEditor, 50);
+      if (autoFocus) {
+        setTimeout(focusEditor, 0);
+        setTimeout(focusEditor, 50);
+      }
+      // Probe after the view has had a chance to render (ProseMirror renders
+      // synchronously, but give the double-focus pass room first).
+      setTimeout(probeRender, 60);
+    }).catch(() => {
+      if (!disposed) setFailed(true);
     });
     return () => {
       disposed = true;
@@ -424,6 +560,21 @@ function MilkdownEditor({
     // reloaded with different bytes (rare), the parent passes a new
     // `initial` and we remount — simpler than setMarkdown gymnastics.
   }, [initial]);
+
+  // Crepe couldn't render this file — show the raw markdown in the plain
+  // editor so it's editable rather than a silent blank. `key` ties the
+  // textarea to the file so switching files re-seeds it.
+  if (failed) {
+    return (
+      <PlainEditor
+        key={`fallback:${filePath}`}
+        initial={initial}
+        onChange={onChange}
+        autoFocus={autoFocus}
+        registerFocus={registerFocus}
+      />
+    );
+  }
 
   return <div ref={hostRef} className="edit-shell__milkdown" />;
 }

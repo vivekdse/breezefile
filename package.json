@@ -6,6 +6,7 @@
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
+    "predev": "pkill -f \"$PWD/node_modules/electron/dist/electron\" 2>/dev/null; true",
     "dev": "vite",
     "build:native": "node -e \"if(process.platform==='darwin'){require('child_process').execSync('make -C native/sharer',{stdio:'inherit'})}else{console.log('build:native: skipped on '+process.platform)}\"",
     "build": "npm run build:native && tsc -b && vite build",

@@ -205,13 +205,29 @@ export function Terminal({
     // streams (build logs, ls of huge dirs). It can fail to init on older
     // GPUs / certain virtualization setups, so try-catch and let xterm
     // fall back to canvas/DOM rendering.
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {
-      // canvas fallback is automatic
-    }
+    // The compositor drops a backgrounded window's GPU surface, which fires
+    // `contextlost`. Disposing the addon without re-creating it leaves xterm
+    // on a cold canvas fallback that must repaint the whole grid on refocus —
+    // that's the multi-second "blank terminal" when you tab back into Breeze.
+    // So on loss we dispose *and* re-attach a fresh WebGL addon (guarded so a
+    // permanently-failing context just falls through to canvas, not a loop).
+    const attachWebgl = () => {
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          webgl.dispose();
+          // Re-acquire on the next frame, once the GPU surface is back.
+          requestAnimationFrame(() => {
+            if (!xtermRef.current) return; // terminal torn down
+            attachWebgl();
+          });
+        });
+        term.loadAddon(webgl);
+      } catch {
+        // canvas fallback is automatic
+      }
+    };
+    attachWebgl();
     xtermRef.current = term;
     fitRef.current = fit;
 

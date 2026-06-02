@@ -183,6 +183,7 @@ type Fm = {
   onAppFocus: (cb: (focused: boolean) => void) => () => void;
   showAttentionNotification: (opts: { title: string; body: string; tabId: string }) => Promise<void>;
   onNotificationClicked: (cb: (tabId: string) => void) => () => void;
+  onMenuVerb: (cb: (verbId: string) => void) => () => void;
 };
 
 export type Launcher = {

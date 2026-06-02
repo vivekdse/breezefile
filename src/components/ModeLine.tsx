@@ -20,6 +20,8 @@ export function ModeLine() {
   // message so the animation re-runs even when the text repeats.
   const [msg, setMsg] = useState<string | null>(null);
   const [msgKey, setMsgKey] = useState(0);
+  const [isError, setIsError] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!state.statusMsg) {
@@ -28,11 +30,16 @@ export function ModeLine() {
     }
     setMsg(state.statusMsg);
     setMsgKey((k) => k + 1);
-    // Errors and "failed" messages stick around 3× longer — long enough
-    // for the user to actually read what went wrong instead of catching
-    // a flash and having to reproduce the failure to retry.
-    const isError = /failed|error|denied|refused/i.test(state.statusMsg);
-    const t = window.setTimeout(() => setMsg(null), isError ? 9000 : 3000);
+    setCopied(false);
+    // Errors don't auto-dismiss: they stick until the next message or an
+    // explicit dismiss, so there's always time to read AND copy them
+    // (errors like "tunnel did not come up" need to be pasted elsewhere).
+    const err = /failed|error|denied|refused|did not come up|timed out/i.test(
+      state.statusMsg,
+    );
+    setIsError(err);
+    if (err) return;
+    const t = window.setTimeout(() => setMsg(null), 3000);
     return () => window.clearTimeout(t);
   }, [state.statusMsg]);
 
@@ -49,8 +56,41 @@ export function ModeLine() {
         </span>
       )}
       {msg && (
-        <span key={`msg-${msgKey}`} className="modeline__status modeline__slide">
+        <span
+          key={`msg-${msgKey}`}
+          className={`modeline__status modeline__slide${
+            isError ? ' modeline__status--error' : ''
+          }`}
+        >
           {msg}
+        </span>
+      )}
+      {msg && isError && (
+        <span className="modeline__actions">
+          <button
+            type="button"
+            className="modeline__btn"
+            title="Copy this message to the clipboard"
+            onClick={() => {
+              navigator.clipboard.writeText(msg).then(
+                () => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                },
+                () => {},
+              );
+            }}
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            type="button"
+            className="modeline__btn"
+            title="Dismiss"
+            onClick={() => setMsg(null)}
+          >
+            ✕
+          </button>
         </span>
       )}
     </div>
