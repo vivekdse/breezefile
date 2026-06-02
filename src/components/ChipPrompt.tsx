@@ -2516,7 +2516,7 @@ function destinationOptions(c: Ctx, includeCurrent = false, includeFiles = false
     push({
       id: p,
       label: basename(p) || p,
-      detail: prettyPath(p, c.homedir) + '  ·  spotlight',
+      detail: prettyPath(p, c.homedir) + '  ·  search',
       available: true,
     });
   }
@@ -3110,7 +3110,7 @@ export function ChipPrompt({
         // destinationOptions — keeps the scorer source-agnostic.
         if (detail.includes('in this folder')) score += 25;
         else if (detail.includes('levels down')) score += 20;
-        else if (detail.includes('· spotlight')) score -= 15;
+        else if (detail.includes('· search')) score -= 15;
 
         // In the verb picker, verbs always rank above find results. Without
         // this a folder named "move" can outrank the Move verb on a typed

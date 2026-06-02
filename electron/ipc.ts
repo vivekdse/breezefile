@@ -18,6 +18,7 @@ import {
   disconnectSource,
   connectedHosts,
   remoteRequest,
+  autoAttachForPath,
 } from './sources';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
@@ -2013,6 +2014,11 @@ end tell`;
   };
   ipcMain.handle('sources:list', () => listSources());
   ipcMain.handle('sources:connect', (_e, host: string) => connectSource(host));
+  // Navigation hook: if `cwd` lives under an active sshfs mount, attach its
+  // host automatically (idempotent + once-per-host-per-session inside).
+  ipcMain.handle('sources:auto-attach', (_e, cwd: string) =>
+    autoAttachForPath(cwd).catch(() => null),
+  );
   ipcMain.handle('sources:disconnect', (_e, host: string) =>
     disconnectSource(host),
   );

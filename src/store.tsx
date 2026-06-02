@@ -897,6 +897,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (activeTab.kind !== 'folder') return;
     const leaf = activeTab.trail[activeTab.trail.length - 1];
     if (!leaf) return;
+    // Auto-attach: if this folder lives under an active sshfs mount, connect
+    // its host as a task source so its tasks appear and creates route to it —
+    // no manual :remote-attach needed. Idempotent + guarded in the main
+    // process (once per host/session), and a no-op on platforms / paths
+    // without a remote mount. Fire-and-forget; never blocks navigation.
+    void fm.sourcesAutoAttach(leaf).catch(() => {});
     const pref = state.folderPrefs[leaf];
     if (!pref) return;
     const patch: Partial<Tab> = {};

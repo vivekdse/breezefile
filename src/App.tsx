@@ -171,21 +171,40 @@ function Shell() {
       void fm.showAttentionNotification({ title, body, tabId: tab.id });
     };
 
-    // term:data BEL/OSC9 detection was removed: Claude's TUI emits BEL
-    // bytes on every redraw, which clobbered the hook-driven busy state
-    // with a sticky 'bell'. Busy/idle now comes purely from Claude Code
-    // hooks (fm-z7v, term:fg).
+    // Busy/idle is driven by Claude Code hooks (fm-z7v, term:fg), which
+    // are authoritative. Two safety nets cover MISSED hook events
+    // (fm-9iyx) — they matter more now that recent Claude Code releases
+    // (2.1.69 spinner isolation, 2.1.117 idle re-render fix, …) emit far
+    // fewer PTY bytes during a turn, so a working session can sit silent
+    // for many seconds:
     //
-    // Silence watchdog: when Claude is interrupted manually (Esc, Ctrl-C,
-    // crash, network drop), Claude Code does not always fire a Stop
-    // hook — the tab can stay green forever. As a safety net, while a
-    // pty is in 'busy' state we arm a silence timer; any term:data byte
-    // resets it. If no output flows for SILENCE_MS, we transition the
-    // tab to idle. 20s is long enough to span tool-call stalls and short
-    // network hiccups, short enough that an interrupted session goes
-    // grey within half a minute.
-    const SILENCE_MS = 20_000;
+    //  1. Silence watchdog — while a pty is 'busy' we arm a timer that any
+    //     term:data byte resets. If no output flows for SILENCE_MS the tab
+    //     is *provisionally* flipped to idle (interrupt/crash where Stop
+    //     never fired). It's only a guess, so we DON'T banner — and we
+    //     remember the pty in `watchdogIdle` so the flip can be undone.
+    //  2. Output recovery — if a watchdog-idled pty emits ANY byte again,
+    //     it was alive all along (slow tool call / long thinking), so we
+    //     restore 'busy' immediately. This is why the dot no longer sticks
+    //     red while Claude is quietly working.
+    //
+    // A coarse RECONCILE_MS poll re-checks both directions in case an
+    // event was dropped entirely, so a stale dot can't wedge for longer
+    // than one tick. term:data still can't *originate* busy (it goes silent
+    // under heavy TUI streaming, fm-81n) — it only sustains or recovers a
+    // state the hooks established. SILENCE_MS is generous (45s) because a
+    // quiet-but-working turn is now common; an interrupt still resolves
+    // within a tick once output stops.
+    const SILENCE_MS = 45_000;
+    const RECONCILE_MS = 15_000;
     const silenceTimers = new Map<number, ReturnType<typeof setTimeout>>();
+    // ptys the watchdog provisionally flipped to idle — eligible for
+    // output-driven recovery back to 'busy'. Any authoritative hook event
+    // clears the marker.
+    const watchdogIdle = new Set<number>();
+    // last term:data timestamp per pty, for the reconcile poll's staleness
+    // check. Cheap to maintain; only read on the tick.
+    const lastDataAt = new Map<number, number>();
     const clearSilence = (ptyId: number) => {
       const t = silenceTimers.get(ptyId);
       if (t) {
@@ -201,21 +220,40 @@ function Shell() {
         const idx = tabs.findIndex((t) => t.terminal?.ptyId === ptyId);
         if (idx < 0) return;
         if (tabs[idx].terminal?.attention !== 'busy') return;
+        // Provisional flip: silence only *guesses* the turn ended (it could
+        // be a slow tool call). Turn the dot red but suppress the banner —
+        // a guess shouldn't interrupt — and remember the pty so resumed
+        // output can restore 'busy'.
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
-        maybeNotify(idx, 'busy', 'idle');
+        watchdogIdle.add(ptyId);
       }, SILENCE_MS);
       silenceTimers.set(ptyId, t);
     };
     const offData = fm.onTermData((id) => {
-      // Only refresh if we're already tracking this pty as busy. Cheap
-      // map lookup; avoids work on the active tab's idle prompt.
-      if (silenceTimers.has(id)) armSilence(id);
+      lastDataAt.set(id, Date.now());
+      if (silenceTimers.has(id)) {
+        // Already tracked as busy — sustain it (resets the watchdog).
+        armSilence(id);
+      } else if (watchdogIdle.has(id)) {
+        // Output resumed after the watchdog gave up: the session was alive
+        // all along (slow tool call / long thinking). Restore busy.
+        watchdogIdle.delete(id);
+        const tabs = tabsRef.current;
+        const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
+        if (idx >= 0 && tabs[idx].terminal?.attention === 'idle') {
+          dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
+          armSilence(id);
+        }
+      }
     });
 
     const offFg = fm.onTermFg((id, busy, _comm, state) => {
       const tabs = tabsRef.current;
       const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
       if (idx < 0) return;
+      // An authoritative hook event supersedes the watchdog's guess: clear
+      // the recovery marker so a real Stop can't be undone by stray output.
+      watchdogIdle.delete(id);
       const cur = tabs[idx].terminal?.attention ?? null;
       // Tri-state from the hook bridge. Older hook scripts that only
       // know 'busy'/'idle' keep working via the legacy `busy` bool.
@@ -245,11 +283,52 @@ function Shell() {
         maybeNotify(idx, cur, 'idle');
       }
     });
+    // fm-9iyx — coarse safety-net poll. The event handlers above react
+    // instantly; this only catches the rare case where a term:data or
+    // term:fg event was dropped entirely, so a stale dot can't wedge for
+    // more than one tick. A handful of map lookups every 15s.
+    const reconcile = setInterval(() => {
+      const now = Date.now();
+      const tabs = tabsRef.current;
+      for (let idx = 0; idx < tabs.length; idx++) {
+        const term = tabs[idx].terminal;
+        if (!term) continue;
+        const id = term.ptyId;
+        const att = term.attention ?? null;
+        const last = lastDataAt.get(id);
+        if (att === 'busy' && !silenceTimers.has(id)) {
+          // Busy but no live watchdog (a term:fg/data event was dropped).
+          // Flip now if already stale, else re-arm so the silence path
+          // resumes governing it.
+          if (last && now - last > SILENCE_MS) {
+            dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
+            watchdogIdle.add(id);
+          } else {
+            armSilence(id);
+          }
+        } else if (
+          att === 'idle' &&
+          watchdogIdle.has(id) &&
+          last &&
+          now - last < RECONCILE_MS
+        ) {
+          // Watchdog-idled but produced output within the last tick — a
+          // recovery term:data event must have been dropped. Restore busy.
+          watchdogIdle.delete(id);
+          dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
+          armSilence(id);
+        }
+      }
+    }, RECONCILE_MS);
+
     return () => {
       offFg();
       offData();
+      clearInterval(reconcile);
       for (const t of silenceTimers.values()) clearTimeout(t);
       silenceTimers.clear();
+      watchdogIdle.clear();
+      lastDataAt.clear();
     };
     // Subscribe ONCE on mount. State is read through refs so the handler
     // sees current values without triggering re-subscription. Earlier
@@ -516,8 +595,19 @@ function Shell() {
       const detail = (e as CustomEvent).detail as { msg?: string } | undefined;
       if (detail?.msg) dispatch({ type: 'setStatus', msg: detail.msg });
     }
-    function onOpenTasksPage() {
+    function onOpenTasksPage(e: Event) {
+      // fm-39969baf — optional folder filter deep-link. Stash it on window so
+      // a freshly-mounted TasksPage can pick it up as its initial filter, and
+      // also re-broadcast so an already-mounted page applies it immediately.
+      const folder = (e as CustomEvent).detail?.folder as string | undefined;
+      const w = window as unknown as { __fmTasksFolderFilter?: string };
+      if (folder !== undefined) w.__fmTasksFolderFilter = folder;
       dispatch({ type: 'openTasksTab' });
+      if (folder !== undefined) {
+        window.dispatchEvent(
+          new CustomEvent('fm:tasks:folder-filter', { detail: { folder } }),
+        );
+      }
     }
     function onOpenSettings() {
       setSettingsOpen(true);

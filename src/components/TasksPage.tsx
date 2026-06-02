@@ -174,7 +174,18 @@ export function TasksPage() {
   const [statuses, setStatuses] = useState<Set<TaskStatus>>(
     () => new Set<TaskStatus>(['pending', 'in_progress']),
   );
-  const [folder, setFolder] = useState('');
+  // fm-39969baf — seed from a pending folder-filter deep-link (set by the
+  // FolderHeader "Z tasks" affordance via fm:openTasksPage). Consumed once so
+  // a later manual filter edit isn't clobbered on re-render.
+  const [folder, setFolder] = useState(() => {
+    const w = window as unknown as { __fmTasksFolderFilter?: string };
+    const pending = w.__fmTasksFolderFilter;
+    if (pending !== undefined) {
+      w.__fmTasksFolderFilter = undefined;
+      return pending;
+    }
+    return '';
+  });
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [derived, setDerived] = useState<DerivedFilter>('all');
   const [autoFilter, setAutoFilter] = useState<AutoFilter>('all');
@@ -215,6 +226,18 @@ export function TasksPage() {
     const id = window.setTimeout(() => setSearch(searchInput.trim()), 150);
     return () => window.clearTimeout(id);
   }, [searchInput]);
+
+  // fm-39969baf — apply a folder-filter deep-link when this page is already
+  // mounted (the initial-state seed above only fires on first mount).
+  useEffect(() => {
+    function onFolderFilter(e: Event) {
+      const f = (e as CustomEvent).detail?.folder as string | undefined;
+      if (f !== undefined) setFolder(f);
+    }
+    window.addEventListener('fm:tasks:folder-filter', onFolderFilter);
+    return () =>
+      window.removeEventListener('fm:tasks:folder-filter', onFolderFilter);
+  }, []);
 
   // The explicit chip selection wins regardless of "Show completed" —
   // if a user clicks the Done chip they want done rows even with the

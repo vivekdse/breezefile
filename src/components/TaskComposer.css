@@ -244,6 +244,37 @@
   letter-spacing: 0.1em;
   margin: 6px 0 0;
 }
+/* ── Due-date quick-picks (1 week / Friday / Monday chips) ─────────── */
+.composer__quickpicks {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.composer__quickpicks-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.composer__quickpick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: inherit;
+  padding: 3px 10px 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.composer__quickpick:hover {
+  border-color: var(--accent);
+}
+.composer__quickpick-label { font-weight: 500; }
+
 .composer__path-input {
   width: 100%;
   background: transparent;

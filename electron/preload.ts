@@ -249,6 +249,8 @@ const fm = {
   // ── Multi-source (breezed P4) ──
   sourcesList: () => ipcRenderer.invoke('sources:list'),
   sourcesConnect: (host: string) => ipcRenderer.invoke('sources:connect', host),
+  sourcesAutoAttach: (cwd: string) =>
+    ipcRenderer.invoke('sources:auto-attach', cwd) as Promise<string | null>,
   sourcesDisconnect: (host: string) =>
     ipcRenderer.invoke('sources:disconnect', host),
   onSourcesChanged: (cb: () => void) => {

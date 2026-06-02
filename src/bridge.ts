@@ -142,6 +142,10 @@ type Fm = {
     Array<{ id: string; kind: 'local' | 'remote'; status: 'connected' | 'connecting' }>
   >;
   sourcesConnect: (host: string) => Promise<void>;
+  /** Auto-attach the remote behind `cwd` if it's under an active sshfs
+   *  mount; resolves to the attached host or null (already attached / not a
+   *  remote path / detection unavailable). Idempotent, never throws. */
+  sourcesAutoAttach: (cwd: string) => Promise<string | null>;
   sourcesDisconnect: (host: string) => Promise<void>;
   onSourcesChanged: (cb: () => void) => () => void;
   tasksCountByFolder: (folder: string) => Promise<number>;

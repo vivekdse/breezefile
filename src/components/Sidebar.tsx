@@ -564,14 +564,14 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
   const today = todayISO();
   const tasks = useMemo(() => {
     const now = Date.now();
-    return all.filter((t) => {
+    const active = all.filter((t) => {
       // Active per the existing rule: not done/cancelled, and start_at
       // hasn't deferred it past today.
-      const active =
+      const isActive =
         t.status !== 'done' &&
         t.status !== 'cancelled' &&
         (!t.start_at || t.start_at <= today);
-      if (active) return true;
+      if (isActive) return true;
       // Grace window for auto tasks that just completed.
       if (
         t.auto_mode &&
@@ -583,7 +583,16 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
       }
       return false;
     });
-  }, [all, today]);
+    // fm-39969baf — surface tasks anchored to the folder the user is looking
+    // at first, so navigating somewhere brings "what's on my plate here" to
+    // the top of the list. Stable beyond the partition: original (already
+    // filter-ordered) order is preserved within each group.
+    if (!cwd) return active;
+    const here: Task[] = [];
+    const elsewhere: Task[] = [];
+    for (const t of active) (t.folder === cwd ? here : elsewhere).push(t);
+    return [...here, ...elsewhere];
+  }, [all, today, cwd]);
 
   const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
   const overflow = Math.max(0, tasks.length - MAX_VISIBLE_TASKS);
@@ -649,6 +658,9 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
             // signal isn't useful anymore: clicking a task always
             // opens it in a dedicated task tab.
             active={tabNumber !== null}
+            // fm-39969baf — anchored to the folder the user is browsing →
+            // distinct lead icon so it reads as "for here".
+            inCurrentFolder={!!cwd && t.folder === cwd}
             tabNumber={tabNumber}
             onClick={() =>
               dispatch({
@@ -690,6 +702,10 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
 interface TaskRowProps {
   task: Task;
   active: boolean;
+  /** fm-39969baf — task is anchored to the folder currently being browsed.
+   *  Renders a distinct lead icon so "tasks for here" stand apart from the
+   *  rest of the active list. */
+  inCurrentFolder: boolean;
   /** fm-csg — 1-based tab index of the open task tab bound to this task,
    *  or null when no task tab exists. Drives the "active in tab N" badge. */
   tabNumber: number | null;
@@ -697,7 +713,7 @@ interface TaskRowProps {
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
-function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowProps) {
+function TaskRow({ task, active, inCurrentFolder, tabNumber, onClick, onContextMenu }: TaskRowProps) {
   const today = todayISO();
   const tone = dueTone(task.due_at, today);
   // Live-poll the last run only for auto tasks. Drives the green concentric
@@ -737,6 +753,7 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
     task.pinned ? 'sidebar__task--pinned' : '',
     `sidebar__task--${tone}`,
     task.auto_mode ? 'sidebar__task--auto' : '',
+    inCurrentFolder ? 'sidebar__task--here' : '',
     flashing ? 'sidebar__task--flash' : '',
   ]
     .filter(Boolean)
@@ -766,10 +783,21 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
       <span className="sidebar__task-main">
         <span className="sidebar__task-title-row">
           <span
-            className={`sidebar__ico sidebar__task-lead${running ? ' sidebar__task-lead--running' : ''}`}
-            aria-label={task.auto_mode ? 'Auto task' : 'Manual task'}
+            className={`sidebar__ico sidebar__task-lead${running ? ' sidebar__task-lead--running' : ''}${inCurrentFolder ? ' sidebar__task-lead--here' : ''}`}
+            aria-label={
+              inCurrentFolder
+                ? task.auto_mode
+                  ? 'Auto task in this folder'
+                  : 'Task in this folder'
+                : task.auto_mode
+                  ? 'Auto task'
+                  : 'Manual task'
+            }
           >
-            <Icon name={task.auto_mode ? 'bolt' : 'circle'} size={18} />
+            <Icon
+              name={inCurrentFolder ? 'folder' : task.auto_mode ? 'bolt' : 'circle'}
+              size={18}
+            />
           </span>
           {task.pinned && (
             <span className="sidebar__task-pin" aria-label="Pinned" title="Pinned">

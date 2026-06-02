@@ -515,6 +515,16 @@ button.sidebar__link:hover .sidebar__unpin {
   font-weight: 600;
 }
 
+/* fm-39969baf — tasks anchored to the folder being browsed. The distinct
+   folder glyph carries the signal; the accent tint + a faint inset rail
+   reinforce that these belong to "here". */
+.sidebar__task-lead--here {
+  color: var(--accent);
+}
+.sidebar__task--here {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 .sidebar__task-meta {
   display: flex;
   align-items: baseline;
