@@ -68,7 +68,13 @@ type ControlKind =
   | { kind: 'navigate'; path: string }
   | { kind: 'openTaskTab'; taskId: string }
   | { kind: 'launch'; tabId: string; launcherId: string; variantId?: string }
-  | { kind: 'listTabs' };
+  | { kind: 'listTabs' }
+  // fm-awii — agent tagging API (proxied to the renderer's tag store)
+  | { kind: 'tagsList' }
+  | { kind: 'tagApply'; tag: string; paths: string[]; create?: boolean }
+  | { kind: 'tagUntag'; tag: string; paths: string[] }
+  | { kind: 'tagCreate'; name: string; color?: string }
+  | { kind: 'tagsForPath'; path: string };
 
 function controlRenderer<T = unknown>(req: ControlKind, timeoutMs = 4000): Promise<T> {
   const reqId = crypto.randomUUID();
@@ -171,6 +177,53 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (p === '/app/tabs' && m === 'GET') {
       const result = await controlRenderer<unknown>({ kind: 'listTabs' });
       return sendJson(res, 200, result);
+    }
+
+    // fm-awii — tagging API. Tags live in the renderer store, so every route
+    // proxies through the control bridge to the focused window.
+    if (p === '/tags' && m === 'GET') {
+      return sendJson(res, 200, await controlRenderer({ kind: 'tagsList' }));
+    }
+    if (p === '/tags' && m === 'POST') {
+      const body = await readJson<{ name: string; color?: string }>(req);
+      if (!body.name) throw Object.assign(new Error('name required'), { status: 400 });
+      return sendJson(
+        res,
+        201,
+        await controlRenderer({ kind: 'tagCreate', name: body.name, color: body.color }),
+      );
+    }
+    if (p === '/tags/apply' && m === 'POST') {
+      const body = await readJson<{ tag: string; paths: string[]; create?: boolean }>(req);
+      if (!body.tag || !Array.isArray(body.paths)) {
+        throw Object.assign(new Error('tag and paths required'), { status: 400 });
+      }
+      return sendJson(
+        res,
+        200,
+        await controlRenderer({
+          kind: 'tagApply',
+          tag: body.tag,
+          paths: body.paths,
+          create: body.create,
+        }),
+      );
+    }
+    if (p === '/tags/untag' && m === 'POST') {
+      const body = await readJson<{ tag: string; paths: string[] }>(req);
+      if (!body.tag || !Array.isArray(body.paths)) {
+        throw Object.assign(new Error('tag and paths required'), { status: 400 });
+      }
+      return sendJson(
+        res,
+        200,
+        await controlRenderer({ kind: 'tagUntag', tag: body.tag, paths: body.paths }),
+      );
+    }
+    if (p === '/tags/of' && m === 'GET') {
+      const target = url.searchParams.get('path');
+      if (!target) throw Object.assign(new Error('path required'), { status: 400 });
+      return sendJson(res, 200, await controlRenderer({ kind: 'tagsForPath', path: target }));
     }
 
     return send(res, 404, 'not found');

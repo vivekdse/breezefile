@@ -160,6 +160,9 @@ type Persisted = {
   // Settings. Existing installs that already have a tasks DB are migrated
   // to true on first launch with this flag (see App.tsx hydrate path).
   taskManagementEnabled: boolean;
+  // fm-9iha — default agent launcher id for the chat panel (fm-dly3). null =
+  // fall back to a 'claude' launcher, else the first AI launcher.
+  defaultAgentId: string | null;
   // fm-c2w — system notification when a backgrounded tab's terminal
   // demands attention (cursor reappears or BEL/OSC9). Default ON since
   // it's the differentiator over tmux/iTerm. Sound separate and OFF by
@@ -220,6 +223,7 @@ type Action =
   | { type: 'setTag'; path: string; tag: string | null }
   | { type: 'setKeybinds'; keybinds: Keybinds }
   | { type: 'setTaskManagementEnabled'; enabled: boolean }
+  | { type: 'setDefaultAgentId'; id: string | null }
   | { type: 'setLastFind'; query: string }
   | { type: 'restoreTab' }
   | { type: 'pushRecent'; path: string }
@@ -315,6 +319,7 @@ const initialState: State = {
   // but didn't carry the field; the explicit-false path stays available
   // for users who turn it off in Settings.
   taskManagementEnabled: true,
+  defaultAgentId: null,
   notifyOnAttention: true,
   soundOnAttention: true,
   useTmux: false,
@@ -489,6 +494,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, keybinds: a.keybinds };
     case 'setTaskManagementEnabled':
       return { ...s, taskManagementEnabled: a.enabled };
+    case 'setDefaultAgentId':
+      return { ...s, defaultAgentId: a.id };
     case 'setLastFind':
       return { ...s, lastFind: a.query };
     case 'pushRecent': {
@@ -686,6 +693,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           customTags,
           tagPaths,
           taskManagementEnabled,
+          defaultAgentId,
           notifyOnAttention,
           soundOnAttention,
           useTmux,
@@ -704,6 +712,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(tagPaths ? { tagPaths } : {}),
             ...(taskManagementEnabled !== undefined
               ? { taskManagementEnabled }
+              : {}),
+            ...(typeof defaultAgentId === 'string' || defaultAgentId === null
+              ? { defaultAgentId }
               : {}),
             ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
             ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
@@ -758,6 +769,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       customTags: state.customTags,
       tagPaths: state.tagPaths,
       taskManagementEnabled: state.taskManagementEnabled,
+      defaultAgentId: state.defaultAgentId,
       notifyOnAttention: state.notifyOnAttention,
       soundOnAttention: state.soundOnAttention,
       useTmux: state.useTmux,
@@ -774,6 +786,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.customTags,
     state.tagPaths,
     state.taskManagementEnabled,
+    state.defaultAgentId,
     state.notifyOnAttention,
     state.soundOnAttention,
     state.useTmux,

@@ -30,6 +30,7 @@ import { TaskShell } from './components/TaskShell';
 import { EditSplit } from './components/EditShell';
 import { ChatPanel } from './components/ChatPanel';
 import { openChatPanel, type ChatTarget } from './openChat';
+import { handleTagControl, isTagControl, type TagControlReq } from './tagControl';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -128,6 +129,10 @@ function Shell() {
   notifyOnAttentionRef.current = state.notifyOnAttention;
   soundOnAttentionRef.current = state.soundOnAttention;
   activeTabIdxRef.current = state.activeTab;
+  // fm-9iha — live ref so the (once-subscribed) chat toggle reads the current
+  // default agent without re-subscribing.
+  const defaultAgentRef = useRef(state.defaultAgentId);
+  defaultAgentRef.current = state.defaultAgentId;
 
   useEffect(() => {
     const maybeNotify = (
@@ -393,7 +398,12 @@ function Shell() {
         t.kind === 'edit' && t.editPath
           ? { kind: 'document', filePath: t.editPath }
           : { kind: 'folder', cwd: t.trail[lastCol(t)] };
-      void openChatPanel({ tabIndex: idx, target, dispatch });
+      void openChatPanel({
+        tabIndex: idx,
+        target,
+        defaultAgentId: defaultAgentRef.current,
+        dispatch,
+      });
     };
     window.addEventListener('fm:toggle-chat', onToggle);
     return () => window.removeEventListener('fm:toggle-chat', onToggle);
@@ -476,6 +486,17 @@ function Shell() {
             break;
           }
           default:
+            // fm-awii — agent tagging API. Tags live in this store, so the
+            // HTTP API proxies tag ops here.
+            if (isTagControl(req.kind)) {
+              result = handleTagControl(req as unknown as TagControlReq, {
+                customTags: state.customTags,
+                tagPaths: state.tagPaths,
+                dispatch,
+                now: Date.now(),
+              });
+              break;
+            }
             throw new Error(`unknown control kind: ${req.kind}`);
         }
         fm.sendControlReply({ reqId: req.reqId, ok: true, result });
@@ -488,7 +509,7 @@ function Shell() {
       }
     });
     return off;
-  }, [dispatch, state.tabs]);
+  }, [dispatch, state.tabs, state.customTags, state.tagPaths]);
 
   // Bridge fm:apiNavigate → store.navigateTo so the API navigate command
   // routes through the same code path as user-driven nav (history, marks,

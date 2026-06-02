@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore, DEFAULT_KEYBINDS } from '../store';
-import { fm } from '../bridge';
+import { fm, type Launcher } from '../bridge';
 import { formatOpError } from '../errorMessages';
 import './Settings.css';
 
@@ -10,6 +10,7 @@ type SectionId =
   | 'keybindings'
   | 'task-management'
   | 'terminal'
+  | 'chat-agent'
   | 'notifications'
   | 'claude-integration'
   | 'bookmarks';
@@ -22,6 +23,8 @@ export function Settings({ onClose }: Props) {
   // (userData/terminal.json), so we fetch on open and write back on change.
   const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
   const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
+  // fm-9iha — agent launchers for the "Default chat agent" picker.
+  const [launchers, setLaunchers] = useState<Launcher[]>([]);
   // Single-open accordion. Keybindings opens by default since it's the
   // densest section and the most common reason to open Settings.
   const [openSection, setOpenSection] = useState<SectionId | null>(
@@ -59,6 +62,7 @@ export function Settings({ onClose }: Props) {
   useEffect(() => {
     void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
     void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
+    void fm.launchersList().then(setLaunchers).catch(() => {});
   }, []);
 
   // ESC closes — also handled by the chip prompt's overlay manager elsewhere,
@@ -292,6 +296,43 @@ export function Settings({ onClose }: Props) {
                 session survives closing/reopening the terminal in that tab.
                 Requires <code>tmux</code> on PATH (
                 <code>brew install tmux</code>).
+              </span>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection
+            id="chat-agent"
+            title="Chat agent"
+            isOpen={openSection === 'chat-agent'}
+            onToggle={() => toggle('chat-agent')}
+          >
+            <div className="settings__row">
+              <span className="settings__action">Default chat agent</span>
+              <select
+                className="settings__select"
+                value={state.defaultAgentId ?? ''}
+                onChange={(e) =>
+                  dispatch({
+                    type: 'setDefaultAgentId',
+                    id: e.target.value || null,
+                  })
+                }
+              >
+                <option value="">Auto (Claude Code if available)</option>
+                {launchers
+                  .filter((l) => l.id !== 'term')
+                  .map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.label}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="settings__row">
+              <span className="settings__path settings__hint">
+                Which agent the 💬 chat panel (<kbd>:chat</kbd>) launches by
+                default for a folder or document. Agents come from your
+                launchers config.
               </span>
             </div>
           </AccordionSection>

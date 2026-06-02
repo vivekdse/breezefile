@@ -28,7 +28,7 @@ import {
   readFileSync, writeFileSync, copyFileSync,
   existsSync, mkdirSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import process from 'node:process';
 
@@ -654,6 +654,66 @@ async function cmdTabs(args) {
   ]) + '\n');
 }
 
+// ─── Tags (fm-awii) ──────────────────────────────────────────────────
+// Agent-facing tagging surface. Tags live in the running app's renderer
+// store; these proxy through the HTTP API → control bridge. Paths are
+// resolved against $PWD so an agent can pass relative paths. Output is
+// JSON (agents parse it); errors go to stderr with exit 1 (2 if app down).
+function emitTag(r) {
+  if (r.status === 0) {
+    process.stderr.write('Breeze is not running.\n');
+    return 2;
+  }
+  if (!r.ok) {
+    const msg = r.body && r.body.error ? r.body.error : `HTTP ${r.status}`;
+    process.stderr.write(`${msg}\n`);
+    return 1;
+  }
+  process.stdout.write(JSON.stringify(r.body) + '\n');
+  return 0;
+}
+
+async function cmdTag(args) {
+  const [sub, ...rest] = args;
+  switch (sub) {
+    case 'list': case 'ls':
+      return emitTag(await call('GET', '/tags'));
+    case 'create': case 'new': {
+      const name = rest.find((x) => !x.startsWith('--'));
+      if (!name) { process.stderr.write('usage: breeze tag create <name> [--color <hex>]\n'); return 2; }
+      const ci = rest.indexOf('--color');
+      const color = ci >= 0 ? rest[ci + 1] : undefined;
+      return emitTag(await call('POST', '/tags', { name, ...(color ? { color } : {}) }));
+    }
+    case 'apply': case 'add': {
+      const tag = rest.shift();
+      const create = !rest.includes('--no-create');
+      const paths = rest.filter((x) => !x.startsWith('--')).map((p) => resolve(process.cwd(), p));
+      if (!tag || paths.length === 0) {
+        process.stderr.write('usage: breeze tag apply <name> <path...> [--no-create]\n'); return 2;
+      }
+      return emitTag(await call('POST', '/tags/apply', { tag, paths, create }));
+    }
+    case 'remove': case 'rm': case 'untag': {
+      const tag = rest.shift();
+      const paths = rest.filter((x) => !x.startsWith('--')).map((p) => resolve(process.cwd(), p));
+      if (!tag || paths.length === 0) {
+        process.stderr.write('usage: breeze tag remove <name> <path...>\n'); return 2;
+      }
+      return emitTag(await call('POST', '/tags/untag', { tag, paths }));
+    }
+    case 'of': {
+      const p = rest.find((x) => !x.startsWith('--'));
+      if (!p) { process.stderr.write('usage: breeze tag of <path>\n'); return 2; }
+      const abs = resolve(process.cwd(), p);
+      return emitTag(await call('GET', `/tags/of?path=${encodeURIComponent(abs)}`));
+    }
+    default:
+      process.stderr.write(`unknown tag subcommand: ${sub ?? '(none)'}. Try 'breeze help'.\n`);
+      return 2;
+  }
+}
+
 async function cmdTask(args) {
   const [sub, ...subArgs] = args;
   switch (sub) {
@@ -721,6 +781,14 @@ Human surface (ANSI tables; exits 2 if the app isn't running):
   breeze task delete [<id>] --yes
   breeze task open   [<id>]
 
+Tagging (agent surface — JSON out; paths resolve against \$PWD):
+  breeze tag list                        List all tags (JSON)
+  breeze tag create <name> [--color hex] Create a custom tag
+  breeze tag apply  <name> <path...>     Tag files (auto-creates <name>;
+                                         pass --no-create to require it)
+  breeze tag remove <name> <path...>     Untag files
+  breeze tag of     <path>               Tags manually applied to <path>
+
 <id> defaults to \$BREEZE_TASK_ID. A positional <id> always wins.
 Exit codes: 0 ok, 1 error, 2 Breeze not running.
 `);
@@ -745,6 +813,7 @@ const handlers = {
   open: cmdOpen,
   tabs: cmdTabs,
   task: cmdTask,
+  tag: cmdTag,
   // help
   help, '-h': help, '--help': help,
 };

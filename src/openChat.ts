@@ -64,12 +64,15 @@ function preambleFor(target: ChatTarget): string {
 export async function openChatPanel(opts: {
   tabIndex: number;
   target: ChatTarget;
+  /** Explicit agent for this open. */
   agentId?: string;
+  /** User's configured default (fm-9iha), used when no explicit agent. */
+  defaultAgentId?: string | null;
   dispatch: ChatDispatch;
 }): Promise<void> {
-  const { tabIndex, target, agentId, dispatch } = opts;
+  const { tabIndex, target, agentId, defaultAgentId, dispatch } = opts;
   const cwd = target.kind === 'folder' ? target.cwd : dirname(target.filePath);
-  const agent = await pickAgent(agentId);
+  const agent = await pickAgent(agentId ?? defaultAgentId ?? undefined);
   if (!agent) {
     dispatch({
       type: 'setStatus',
