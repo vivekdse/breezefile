@@ -35,6 +35,8 @@ type Fm = {
   mkdir: (p: string) => Promise<void>;
   rename: (from: string, to: string) => Promise<void>;
   trash: (paths: string[]) => Promise<void>;
+  // fm-7klh — irreversible delete (renderer gates this behind type-to-confirm)
+  permanentDelete: (paths: string[]) => Promise<void>;
   touch: (p: string) => Promise<void>;
   paste: (
     ops: {
@@ -147,6 +149,9 @@ type Fm = {
    *  remote path / detection unavailable). Idempotent, never throws. */
   sourcesAutoAttach: (cwd: string) => Promise<string | null>;
   sourcesDisconnect: (host: string) => Promise<void>;
+  // fm-at5 — reset the auto-registered Claude Code integration
+  claudeUnregisterMcp: () => Promise<'removed' | 'absent' | 'error'>;
+  claudeUnregisterHooks: () => Promise<'removed' | 'absent' | 'error'>;
   onSourcesChanged: (cb: () => void) => () => void;
   tasksCountByFolder: (folder: string) => Promise<number>;
   tasksDbExists: () => Promise<boolean>;

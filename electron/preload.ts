@@ -35,6 +35,8 @@ const fm = {
   mkdir: (p: string) => ipcRenderer.invoke('fs:mkdir', p),
   rename: (from: string, to: string) => ipcRenderer.invoke('fs:rename', from, to),
   trash: (paths: string[]) => ipcRenderer.invoke('fs:trash', paths),
+  permanentDelete: (paths: string[]) =>
+    ipcRenderer.invoke('fs:permanent-delete', paths),
   touch: (p: string) => ipcRenderer.invoke('fs:touch', p),
   paste: (
     ops: {
@@ -253,6 +255,15 @@ const fm = {
     ipcRenderer.invoke('sources:auto-attach', cwd) as Promise<string | null>,
   sourcesDisconnect: (host: string) =>
     ipcRenderer.invoke('sources:disconnect', host),
+  // fm-at5 — Claude Code integration reset
+  claudeUnregisterMcp: () =>
+    ipcRenderer.invoke('claude:unregister-mcp') as Promise<
+      'removed' | 'absent' | 'error'
+    >,
+  claudeUnregisterHooks: () =>
+    ipcRenderer.invoke('claude:unregister-hooks') as Promise<
+      'removed' | 'absent' | 'error'
+    >,
   onSourcesChanged: (cb: () => void) => {
     const handler = () => cb();
     ipcRenderer.on('sources:changed', handler);

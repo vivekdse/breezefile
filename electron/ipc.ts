@@ -600,6 +600,15 @@ export function registerIpc() {
     for (const p of paths) await shell.trashItem(expandHome(p));
   });
 
+  // fm-7klh — irreversible delete (no Trash). Gated behind a typed
+  // confirmation in the renderer; there is no keyboard chord for it. `force`
+  // ignores already-gone paths so a partial selection still completes.
+  ipcMain.handle('fs:permanent-delete', async (_e, paths: string[]) => {
+    for (const p of paths) {
+      await fs.rm(expandHome(p), { recursive: true, force: true });
+    }
+  });
+
   ipcMain.handle(
     'fs:paste',
     async (
@@ -2022,6 +2031,19 @@ end tell`;
   ipcMain.handle('sources:disconnect', (_e, host: string) =>
     disconnectSource(host),
   );
+
+  // fm-at5 — let the user cleanly back out of the auto-registered Claude
+  // Code integration (MCP server + settings.json hooks + hook script).
+  // Re-registration runs on next app launch, so this is a reset, not a
+  // permanent opt-out.
+  ipcMain.handle('claude:unregister-mcp', async () => {
+    const { unregisterBreezeMcp } = await import('./mcp-register');
+    return unregisterBreezeMcp();
+  });
+  ipcMain.handle('claude:unregister-hooks', async () => {
+    const { unregisterBreezeHooks } = await import('./hooks-register');
+    return unregisterBreezeHooks();
+  });
 
   ipcMain.handle('tasks:list', async (_e, filter?: TaskFilter) => {
     const out = tasks

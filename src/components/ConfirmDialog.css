@@ -163,3 +163,27 @@
 .confirm__btn--destructive .confirm__btn__kbd {
   background: rgba(255, 255, 255, 0.22);
 }
+
+/* fm-7klh — type-to-confirm field for irreversible actions (permanent
+   delete). Sits between the body and the action row; the confirm button
+   stays disabled until the typed phrase matches. */
+.confirm__type-input {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 10px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-1, var(--ink));
+  background: var(--bg-1, var(--panel));
+  border: 1px solid var(--border-1, var(--accent-soft));
+  border-radius: 6px;
+  outline: none;
+}
+.confirm__type-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.confirm__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

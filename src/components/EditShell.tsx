@@ -313,8 +313,11 @@ export function EditShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
 
-  // ⌘S / Ctrl+S to save, scoped to this tab being active.
+  // ⌘S / Ctrl+S to save, scoped to this tab being active. The `isActive`
+  // guard matters now that every edit tab stays mounted (fm-jtu-style
+  // persistence) — without it a single ⌘S would save *all* open editors.
   useEffect(() => {
+    if (!isActive) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -325,7 +328,79 @@ export function EditShell({
     return () => window.removeEventListener('keydown', onKey);
     // doSave is stable enough — its inputs come from refs and component state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filePath, saving]);
+  }, [filePath, saving, isActive]);
+
+  // fm-xpk7 — chip-prompt editor verbs (:save / :revert / :close) target the
+  // active edit tab via window events. Only the active EditShell responds, so
+  // no per-tab addressing is needed.
+  useEffect(() => {
+    if (!isActive) return;
+    const onSave = () => void doSave();
+    const reread = () => {
+      void fm.editorOpen(filePath).then((res) => {
+        if (res.error) {
+          setStatusMsg(`reopen failed: ${res.error}`);
+          return;
+        }
+        contentRef.current = res.content;
+        mtimeRef.current = res.mtimeMs;
+        baselineRef.current = res.content;
+        setSeed(res.content); // remounts the editor with the on-disk bytes
+        markDirty(false);
+        setStatusMsg('reverted to disk');
+        setTimeout(
+          () => setStatusMsg((m) => (m === 'reverted to disk' ? null : m)),
+          1500,
+        );
+      });
+    };
+    const onRevert = () => {
+      if (!filePath) return;
+      if (dirtyRef.current) {
+        window.dispatchEvent(
+          new CustomEvent('fm:confirm', {
+            detail: {
+              title: 'Revert to disk?',
+              body: 'Discard unsaved changes and reload this file from disk.',
+              confirmLabel: 'Revert',
+              destructive: true,
+              onConfirm: reread,
+            },
+          }),
+        );
+      } else {
+        reread();
+      }
+    };
+    const onClose = () => {
+      const close = () => dispatch({ type: 'closeTab', index: tabIndex });
+      if (dirtyRef.current) {
+        window.dispatchEvent(
+          new CustomEvent('fm:confirm', {
+            detail: {
+              title: 'Close without saving?',
+              body: 'This file has unsaved changes that will be lost.',
+              confirmLabel: 'Discard & close',
+              cancelLabel: 'Keep editing',
+              destructive: true,
+              onConfirm: close,
+            },
+          }),
+        );
+      } else {
+        close();
+      }
+    };
+    window.addEventListener('fm:editor-save', onSave);
+    window.addEventListener('fm:editor-revert', onRevert);
+    window.addEventListener('fm:editor-close', onClose);
+    return () => {
+      window.removeEventListener('fm:editor-save', onSave);
+      window.removeEventListener('fm:editor-revert', onRevert);
+      window.removeEventListener('fm:editor-close', onClose);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, filePath, tabIndex]);
 
   if (!tab) return null;
 

@@ -111,6 +111,7 @@ type Verb =
   | 'paste'
   | 'sort'
   | 'delete'
+  | 'permanent-delete'
   | 'rename'
   | 'open'
   | 'goto'
@@ -139,6 +140,10 @@ type Verb =
   | 'copy-path'
   | 'open-with'
   | 'edit'
+  | 'open-editor'
+  | 'editor-save'
+  | 'editor-revert'
+  | 'editor-close'
   | 'openTerminal'
   | 'term'
   | 'term-close'
@@ -552,6 +557,68 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    // fm-7klh — irreversible delete, no Trash. Deliberately harder to reach
+    // than :delete: no chord, palette-only, and a typed "delete N" phrase
+    // (GitHub repo-delete pattern) before the confirm button enables.
+    id: 'permanent-delete',
+    availableInTaskMode: false,
+    label: 'Delete permanently',
+    aliases: ['permanent-delete', 'delete-forever', 'destroy', 'shred'],
+    icon: '⨯',
+    describe: (c) =>
+      c.markedPaths.length > 0
+        ? `Permanently delete ${c.markedPaths.length} item${c.markedPaths.length === 1 ? '' : 's'} (no Trash)`
+        : `Permanently delete ${c.cursor?.name ?? 'item'} (no Trash)`,
+    isAvailable: (c) => {
+      if (c.markedPaths.length === 0 && !c.cursor) {
+        return { ok: false, reason: 'Select files first or put cursor on one' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    execute: (c, _picks, api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      const names = sources.map((p) => basename(p));
+      const noun = sources.length === 1 ? `“${names[0]}”` : `${sources.length} items`;
+      window.dispatchEvent(
+        new CustomEvent('fm:confirm', {
+          detail: {
+            title: 'Permanently delete?',
+            body: (
+              <>
+                <div>
+                  Permanently delete {noun}. This bypasses the Trash and{' '}
+                  <strong>cannot be undone</strong>.
+                </div>
+                {sources.length > 1 && summarizeNamesNode(names)}
+              </>
+            ),
+            confirmLabel: 'Delete permanently',
+            destructive: true,
+            requireType: `delete ${sources.length}`,
+            onConfirm: async () => {
+              try {
+                await fm.permanentDelete(sources);
+                api.setTab({ marks: {} });
+                await api.refreshActive();
+                api.dispatch({
+                  type: 'setStatus',
+                  msg: `permanently deleted ${sources.length} item${sources.length === 1 ? '' : 's'}`,
+                });
+              } catch (err) {
+                api.dispatch({
+                  type: 'setStatus',
+                  msg: formatOpError('delete', err),
+                });
+              }
+            },
+          },
+        }),
+      );
+    },
+  },
+  {
     id: 'rename',
     availableInTaskMode: false,
     label: 'Rename',
@@ -770,7 +837,7 @@ const VERBS: VerbDef[] = [
     id: 'edit',
     availableInTaskMode: false,
     label: 'Edit',
-    aliases: ['edit', 'edit-file'],
+    aliases: ['edit', 'e', 'edit-file'],
     icon: '✎',
     describe: (c) =>
       `Edit ${c.cursor?.name ?? 'item'} in a new tab (markdown formatted, others plain)`,
@@ -785,6 +852,85 @@ const VERBS: VerbDef[] = [
     execute: (c, _p, api) => {
       if (!c.cursor) return;
       api.dispatch({ type: 'openEditTab', path: c.cursor.path });
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — explicit "open in the in-app editor" override. Same effect as
+    // :edit, but framed as a deliberate bypass of default-app routing (e.g.
+    // a .json you'd normally open in your IDE).
+    id: 'open-editor',
+    availableInTaskMode: false,
+    label: 'Open in editor',
+    aliases: ['open-editor', 'edit-here', 'edit-in-app'],
+    icon: '✎',
+    describe: (c) =>
+      `Open ${c.cursor?.name ?? 'item'} in the in-app editor (override default app)`,
+    isAvailable: (c) => {
+      if (!c.cursor) return { ok: false, reason: 'Put the cursor on a file first' };
+      if (c.cursor.kind === 'dir') return { ok: false, reason: 'Needs a file, not a folder' };
+      return { ok: true };
+    },
+    slots: [],
+    execute: (c, _p, api) => {
+      if (!c.cursor) return;
+      api.dispatch({ type: 'openEditTab', path: c.cursor.path });
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — save the active edit tab (⌘S equivalent). The active
+    // EditShell owns doSave; we signal it via a window event.
+    id: 'editor-save',
+    availableInTaskMode: false,
+    label: 'Save',
+    aliases: ['save', 'w', 'write'],
+    icon: '💾',
+    describe: () => 'Save the current file to disk',
+    isAvailable: (c) =>
+      c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Only on an edit tab — open one with :edit' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:editor-save'));
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — discard unsaved edits and re-read from disk. EditShell prompts
+    // first when the buffer is dirty.
+    id: 'editor-revert',
+    availableInTaskMode: false,
+    label: 'Revert to disk',
+    aliases: ['revert', 'revert-to-disk', 'discard-changes'],
+    icon: '↺',
+    describe: () => 'Discard unsaved changes and reload from disk',
+    isAvailable: (c) =>
+      c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Only on an edit tab — open one with :edit' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:editor-revert'));
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — close the active edit tab. EditShell warns when dirty.
+    id: 'editor-close',
+    availableInTaskMode: false,
+    label: 'Close edit tab',
+    aliases: ['close', 'close-edit', 'close-tab'],
+    icon: '✕',
+    describe: () => 'Close the current edit tab (warns if unsaved)',
+    isAvailable: (c) =>
+      c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Only on an edit tab' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:editor-close'));
       api.closeOverlay();
     },
   },

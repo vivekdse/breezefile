@@ -11,6 +11,7 @@ type SectionId =
   | 'task-management'
   | 'terminal'
   | 'notifications'
+  | 'claude-integration'
   | 'bookmarks';
 
 export function Settings({ onClose }: Props) {
@@ -26,6 +27,34 @@ export function Settings({ onClose }: Props) {
   const [openSection, setOpenSection] = useState<SectionId | null>(
     'keybindings',
   );
+  // fm-at5 — inline result of the "Reset Claude integration" action.
+  const [claudeResetMsg, setClaudeResetMsg] = useState<string | null>(null);
+  const [claudeResetting, setClaudeResetting] = useState(false);
+
+  async function resetClaudeIntegration() {
+    if (claudeResetting) return;
+    setClaudeResetting(true);
+    setClaudeResetMsg(null);
+    try {
+      const [mcp, hooks] = await Promise.all([
+        fm.claudeUnregisterMcp(),
+        fm.claudeUnregisterHooks(),
+      ]);
+      if (mcp === 'error' || hooks === 'error') {
+        setClaudeResetMsg('Reset failed — see logs. Some entries may remain.');
+      } else if (mcp === 'removed' || hooks === 'removed') {
+        setClaudeResetMsg(
+          'Removed Breeze MCP + hooks from ~/.claude. They re-register on next launch.',
+        );
+      } else {
+        setClaudeResetMsg('Already clean — nothing of Breeze was registered.');
+      }
+    } catch (err) {
+      setClaudeResetMsg(formatOpError('reset', err));
+    } finally {
+      setClaudeResetting(false);
+    }
+  }
 
   useEffect(() => {
     void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
@@ -303,6 +332,33 @@ export function Settings({ onClose }: Props) {
                 }
               />
             </div>
+          </AccordionSection>
+
+          <AccordionSection
+            id="claude-integration"
+            title="Claude integration"
+            isOpen={openSection === 'claude-integration'}
+            onToggle={() => toggle('claude-integration')}
+          >
+            <div className="settings__row">
+              <span className="settings__action">
+                Breeze auto-registers a Claude Code MCP server and busy/idle
+                hooks in <code>~/.claude</code> on launch. Reset to strip them
+                (and the hook script); they re-register next launch.
+              </span>
+              <button
+                className="settings__reset"
+                disabled={claudeResetting}
+                onClick={() => void resetClaudeIntegration()}
+              >
+                {claudeResetting ? 'Resetting…' : 'Reset Claude integration'}
+              </button>
+            </div>
+            {claudeResetMsg && (
+              <div className="settings__row">
+                <span className="settings__path">{claudeResetMsg}</span>
+              </div>
+            )}
           </AccordionSection>
 
           <AccordionSection

@@ -311,3 +311,46 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' {
     return 'error';
   }
 }
+
+// fm-at5 — inverse of registerBreezeHooks: strip every Breeze-owned hook
+// entry from ~/.claude/settings.json (matched by isBreezeHook) and delete
+// the dropped ~/.breezefile/claude-hook.sh. Idempotent: 'absent' when there
+// was nothing of ours to remove. Foreign hooks/events are preserved; an
+// event we empty out is dropped so we don't leave dangling `"Stop": []`.
+export function unregisterBreezeHooks(): 'removed' | 'absent' | 'error' {
+  const existed = existsSync(settingsPath());
+  const scriptExists = existsSync(hookScriptPath());
+  const settings = existed ? readSettings() : {};
+  if (settings === null) return 'error';
+
+  const oldHooks = settings.hooks ?? {};
+  const nextHooks: Record<string, HookMatcher[]> = {};
+  for (const event of Object.keys(oldHooks)) {
+    const cleaned = withoutBreezeMatchers(oldHooks[event]);
+    if (cleaned.length > 0) nextHooks[event] = cleaned;
+  }
+  const hooksChanged = JSON.stringify(oldHooks) !== JSON.stringify(nextHooks);
+
+  // Nothing of ours anywhere → already absent.
+  if (!hooksChanged && !scriptExists) return 'absent';
+
+  try {
+    if (hooksChanged) {
+      const next: ClaudeSettings = { ...settings };
+      if (Object.keys(nextHooks).length > 0) next.hooks = nextHooks;
+      else delete next.hooks;
+      writeSettings(next, existed);
+    }
+    if (scriptExists) {
+      try {
+        unlinkSync(hookScriptPath());
+      } catch {
+        /* best-effort: settings already cleaned */
+      }
+    }
+    return 'removed';
+  } catch (e) {
+    console.warn('[hooks-register] unregister failed:', (e as Error).message);
+    return 'error';
+  }
+}
