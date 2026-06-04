@@ -630,13 +630,27 @@ async function cmdTaskOpen(args) {
   process.stdout.write(c.green('→ ') + 'opened task tab ' + c.dim(shortId(id)) + '\n');
 }
 
+// Expand a leading `~` then resolve against $PWD so the app receives an
+// absolute path. On a remote-attach session this is the remote's abs
+// path, which is what the app's matching sshfs view expects.
+function resolveOpenPath(p) {
+  let s = p;
+  if (s === '~') s = homedir();
+  else if (s.startsWith('~/')) s = join(homedir(), s.slice(2));
+  return resolve(process.cwd(), s);
+}
+
 async function cmdOpen(args) {
   const { positional, flags } = parseArgs(args, new Set(['json']));
-  const folder = positional[0];
-  if (!folder) fail('folder required: breeze open <folder>');
-  await apiStrict('POST', '/app/navigate', { path: folder });
-  if (flags.json) return printJson({ ok: true });
-  process.stdout.write(c.green('→ ') + 'navigated to ' + folder + '\n');
+  const target = positional[0];
+  if (!target) fail('path required: breeze open <path>');
+  const path = resolveOpenPath(target);
+  // Folders open as a tab, markdown in the in-app editor, anything else
+  // via the OS default app — the app classifies and tells us which.
+  const r = await apiStrict('POST', '/app/open', { path });
+  if (flags.json) return printJson(r ?? { ok: true });
+  const verb = { folder: 'opened tab', edit: 'opened in editor', external: 'opened externally' };
+  process.stdout.write(c.green('→ ') + (verb[r?.kind] ?? 'opened') + ' ' + path + '\n');
 }
 
 async function cmdTabs(args) {
@@ -763,7 +777,8 @@ Agent / scripting surface (terse, exits 0 silently if app is down):
 
 Human surface (ANSI tables; exits 2 if the app isn't running):
   breeze status
-  breeze open  <folder>
+  breeze open  <path>            Open a folder as a tab, a markdown file in
+                                 the in-app editor, else via the OS default app
   breeze tabs  [--json]
   breeze task list   [--status=S] [--folder=PATH] [--pinned] [--search=TEXT]
                      [--active] [--show-completed] [--json]

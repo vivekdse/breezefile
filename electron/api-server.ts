@@ -66,6 +66,7 @@ function clearApiFile() {
 // or rejects after a timeout.
 type ControlKind =
   | { kind: 'navigate'; path: string }
+  | { kind: 'open'; path: string }
   | { kind: 'openTaskTab'; taskId: string }
   | { kind: 'launch'; tabId: string; launcherId: string; variantId?: string }
   | { kind: 'listTabs' }
@@ -91,6 +92,20 @@ function controlRenderer<T = unknown>(req: ControlKind, timeoutMs = 4000): Promi
     });
     win.webContents.send('control:request', { reqId, ...req });
   });
+}
+
+// Bring the app to the foreground after an external `breeze open`, the
+// way `code <file>` raises VS Code. Best-effort; never throws.
+function focusMainWindow() {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  if (!win || win.isDestroyed()) return;
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } catch {
+    /* non-fatal */
+  }
 }
 
 function registerControlReply() {
@@ -130,6 +145,17 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (!body.path) throw Object.assign(new Error('path required'), { status: 400 });
       await controlRenderer({ kind: 'navigate', path: body.path });
       return sendJson(res, 200, { ok: true });
+    }
+    // `breeze open <path>` — folders open as a (new or focused) tab,
+    // markdown opens in the in-app editor, anything else falls back to
+    // the OS default app. The renderer classifies the path (it owns
+    // tab state + filesystem access) and returns which surface it used.
+    if (p === '/app/open' && m === 'POST') {
+      const body = await readJson<{ path: string }>(req);
+      if (!body.path) throw Object.assign(new Error('path required'), { status: 400 });
+      const result = await controlRenderer<{ kind: string }>({ kind: 'open', path: body.path });
+      focusMainWindow();
+      return sendJson(res, 200, { ok: true, ...(result ?? {}) });
     }
     if (p === '/app/open-task-tab' && m === 'POST') {
       const body = await readJson<{ taskId: string }>(req);

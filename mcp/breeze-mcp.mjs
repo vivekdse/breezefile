@@ -338,6 +338,21 @@ const tools = [
       callBreeze('POST', '/app/navigate', { body: { path: args.path } }),
   },
   {
+    name: 'app_open',
+    description:
+      'Open a path in Breeze: a folder opens as a (new or focused) tab, a markdown file opens in the in-app editor, and anything else opens via the OS default app. Brings the app to the foreground.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path to a folder or file.' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    handler: async (args) =>
+      callBreeze('POST', '/app/open', { body: { path: args.path } }),
+  },
+  {
     name: 'app_open_task_tab',
     description:
       'Open or focus the task tab for a given task in Breeze. Defaults to $BREEZE_TASK_ID if `task_id` is omitted.',

@@ -489,6 +489,39 @@ function Shell() {
             );
             break;
           }
+          case 'open': {
+            // `breeze open <path>` — classify the path and route it to the
+            // right surface. Folders open as a tab; markdown opens in the
+            // in-app editor; everything else defers to the OS default app
+            // (mirrors the Enter/goRight behaviour in useKeyboard.ts).
+            const p = req.path as string;
+            if (typeof p !== 'string' || !p) throw new Error('path required');
+            let st: { isDir: boolean };
+            try {
+              st = await fm.stat(p);
+            } catch {
+              throw new Error(`cannot open: no such file or folder: ${p}`);
+            }
+            if (st.isDir) {
+              dispatch({ type: 'openOrFocusFolderTab', path: p, focus: true });
+              result = { ok: true, kind: 'folder' };
+            } else {
+              const ext = p.split('.').pop()?.toLowerCase() ?? '';
+              if (ext === 'md' || ext === 'mdx') {
+                dispatch({ type: 'openEditTab', path: p, focus: true });
+                result = { ok: true, kind: 'edit' };
+              } else {
+                // Fire-and-forget, like goRight in useKeyboard.ts: the OS
+                // open can block (Linux xdg-open) far past the control
+                // timeout, so don't await it or the CLI reports a spurious
+                // failure for a launch that actually succeeded.
+                dispatch({ type: 'pushRecentFile', path: p });
+                void fm.open(p);
+                result = { ok: true, kind: 'external' };
+              }
+            }
+            break;
+          }
           case 'openTaskTab': {
             const taskId = req.taskId as string;
             if (!taskId) throw new Error('taskId required');
