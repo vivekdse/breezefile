@@ -8,11 +8,37 @@
 // `/local/mountpoint`, we just read it back.
 
 import { exec } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execP = promisify(exec);
+
+// Probe for the `.breeze-remote-skip` opt-out sentinel without ever blocking
+// the main-process event loop. The sentinel lets a mount opt out of remote
+// routing, but checking for it stats INTO the mountpoint — and over sshfs
+// that's a network round-trip. Done synchronously (existsSync), a slow or
+// half-dead link froze the entire event loop, stalling every unrelated IPC
+// call (local move, mkdir, refresh) until the stat returned. Async + a hard
+// timeout means a sluggish mount resolves to "not skipped" within the budget
+// instead of hanging the UI.
+const SKIP_PROBE_TIMEOUT_MS = 300;
+
+async function hasSkipSentinel(mountpoint: string): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const probe = access(path.join(mountpoint, '.breeze-remote-skip'))
+    .then(() => true)
+    .catch(() => false);
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), SKIP_PROBE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([probe, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export type RemoteMount = {
   /** Local mountpoint, e.g. /home/vivek/vivekhp */
@@ -73,7 +99,7 @@ async function readMounts(): Promise<RemoteMount[]> {
     if (!looksRemoteFs(`${typeTag} ${tail}`)) continue;
     const srcM = source.match(SOURCE_RE);
     if (!srcM) continue;
-    if (existsSync(path.join(mountpoint, '.breeze-remote-skip'))) continue;
+    if (await hasSkipSentinel(mountpoint)) continue;
     results.push({
       mountpoint: path.resolve(mountpoint),
       target: srcM[1],
@@ -101,7 +127,7 @@ async function readMounts(): Promise<RemoteMount[]> {
         if (!looksRemoteFs(fsType)) continue;
         const srcM = source.match(SOURCE_RE);
         if (!srcM) continue;
-        if (existsSync(path.join(mountpoint, '.breeze-remote-skip'))) continue;
+        if (await hasSkipSentinel(mountpoint)) continue;
         procMounts.push({
           mountpoint: path.resolve(mountpoint),
           target: srcM[1],
@@ -117,6 +143,10 @@ async function readMounts(): Promise<RemoteMount[]> {
 }
 
 async function getMounts(): Promise<RemoteMount[]> {
+  // Kill-switch: skip all mount probing (and the stat-into-mount it implies)
+  // when remote routing is disabled. resolveRemote checks this too, but
+  // listRemoteTargets reaches getMounts directly, so gate it here as well.
+  if (process.env.BREEZE_REMOTE_DISABLE === '1') return [];
   const now = Date.now();
   if (cache && now - cache.at < TTL_MS) return cache.mounts;
   const mounts = await readMounts();
