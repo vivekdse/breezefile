@@ -29,7 +29,12 @@ import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { EditSplit } from './components/EditShell';
 import { ChatPanel } from './components/ChatPanel';
-import { openChatPanel, type ChatTarget } from './openChat';
+import { openChatPanel, resolveAgent, isClaudeAgent, type ChatTarget } from './openChat';
+import {
+  ChatLaunchOptions,
+  claudeChatOptions,
+  type ChatLaunchOption,
+} from './components/ChatLaunchOptions';
 import { handleTagControl, isTagControl, type TagControlReq } from './tagControl';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
@@ -93,6 +98,18 @@ function Shell() {
   const [runHistoryFor, setRunHistoryFor] = useState<string | null>(null);
   // fm-femh — Run-task modal: pick a task to run in the active folder tab.
   const [runTaskCwd, setRunTaskCwd] = useState<string | null>(null);
+  // Inline-chat launch options: when the user opens a chat we first show a
+  // small picker (Continue / Skip permissions for Claude). The chosen flags
+  // are threaded into openChatPanel. Holds the resolved spawn args while the
+  // picker is open; null when no picker is showing.
+  const [chatLaunch, setChatLaunch] = useState<{
+    tabIndex: number;
+    target: ChatTarget;
+    agentId: string;
+    agentLabel: string;
+    targetLabel: string;
+    options: ChatLaunchOption[];
+  } | null>(null);
   // fm-kaa / fm-yi85 — Tasks overview is now a singleton tab (kind='tasks'),
   // not a modal. The :tasks verb and the sidebar "See all" link dispatch
   // openTasksTab; rendering is inline in the main slot.
@@ -415,15 +432,27 @@ function Shell() {
         t.kind === 'edit' && t.editPath
           ? { kind: 'document', filePath: t.editPath }
           : { kind: 'folder', cwd: t.trail[lastCol(t)] };
-      void openChatPanel({
-        tabIndex: idx,
-        target,
-        agentId: defaultAgentRef.current,
-        dispatch,
-      }).then((res) => {
-        if (!res.ok && res.needsAgent) {
+      // Resolve the agent up front so the picker can offer agent-specific
+      // launch flags (Claude's --continue / skip-permissions) and degrade to a
+      // bare confirm for everything else. If the default agent no longer
+      // resolves, surface the Settings prompt — same as openChatPanel's
+      // needsAgent path — instead of guessing.
+      const agentId = defaultAgentRef.current!;
+      void resolveAgent(agentId).then((agent) => {
+        if (!agent) {
           surfaceDefault('Your default chat agent is unavailable — pick another');
+          return;
         }
+        const targetLabel =
+          target.kind === 'document' ? target.filePath : target.cwd;
+        setChatLaunch({
+          tabIndex: idx,
+          target,
+          agentId,
+          agentLabel: agent.label,
+          targetLabel,
+          options: isClaudeAgent(agent) ? claudeChatOptions() : [],
+        });
       });
     };
     window.addEventListener('fm:toggle-chat', onToggle);
@@ -1042,6 +1071,34 @@ function Shell() {
       )}
       {runTaskCwd && (
         <RunTaskModal cwd={runTaskCwd} onClose={() => setRunTaskCwd(null)} />
+      )}
+      {chatLaunch && (
+        <ChatLaunchOptions
+          agentLabel={chatLaunch.agentLabel}
+          targetLabel={chatLaunch.targetLabel}
+          options={chatLaunch.options}
+          onClose={() => setChatLaunch(null)}
+          onStart={(flags) => {
+            const req = chatLaunch;
+            setChatLaunch(null);
+            void openChatPanel({
+              tabIndex: req.tabIndex,
+              target: req.target,
+              agentId: req.agentId,
+              extraFlags: flags,
+              dispatch,
+            }).then((res) => {
+              if (!res.ok && res.needsAgent) {
+                dispatch({
+                  type: 'setStatus',
+                  msg: 'Your default chat agent is unavailable — pick another',
+                });
+                setSettingsSection('chat-agent');
+                setSettingsOpen(true);
+              }
+            });
+          }}
+        />
       )}
     </div>
     </OverlayCtx.Provider>

@@ -34,6 +34,20 @@ type ChatDispatch = (
 /** Resolve the configured agent launcher by id. Returns null when no id is
  *  given or it no longer matches a launcher — the caller then surfaces the
  *  "set a default chat agent" prompt rather than silently guessing. */
+export async function resolveAgent(agentId?: string): Promise<Launcher | null> {
+  return pickAgent(agentId);
+}
+
+/** Heuristic: does this launcher invoke Claude Code? The inline-chat launch
+ *  flags (--continue / --dangerously-skip-permissions) are Claude-specific, so
+ *  the picker only offers them when this returns true. Match on command or id
+ *  containing 'claude' (case-insensitive) so renamed/aliased entries still
+ *  qualify, without hardcoding flags for agents that don't support them. */
+export function isClaudeAgent(agent: Launcher): boolean {
+  const hay = `${agent.command} ${agent.id}`.toLowerCase();
+  return hay.includes('claude');
+}
+
 async function pickAgent(agentId?: string): Promise<Launcher | null> {
   if (!agentId) return null;
   let list: Launcher[] = [];
@@ -86,9 +100,13 @@ export async function openChatPanel(opts: {
   target: ChatTarget;
   /** The configured default agent launcher id (fm-9iha). */
   agentId?: string | null;
+  /** Launch flags chosen in the inline-chat options picker (e.g. Claude's
+   *  --continue / --dangerously-skip-permissions). Appended to the launch
+   *  command line. Empty / omitted → a fresh normal session. */
+  extraFlags?: string[];
   dispatch: ChatDispatch;
 }): Promise<OpenChatResult> {
-  const { tabIndex, target, agentId, dispatch } = opts;
+  const { tabIndex, target, agentId, extraFlags, dispatch } = opts;
   const cwd = target.kind === 'folder' ? target.cwd : dirname(target.filePath);
   const agent = await pickAgent(agentId ?? undefined);
   if (!agent) return { ok: false, needsAgent: true };
@@ -100,9 +118,14 @@ export async function openChatPanel(opts: {
   // already aware, with no visible first message. Otherwise fall back to
   // pre-typing the preamble after the CLI's input box appears.
   const useFlag = !!agent.contextFlag;
+  // User-chosen launch flags (--continue, --dangerously-skip-permissions, …)
+  // sit right after the base command, before the context system-prompt flag so
+  // the (potentially long, quoted) context stays at the tail of the line.
+  const flags = (extraFlags ?? []).filter((f) => f.trim().length > 0);
+  const withFlags = flags.length > 0 ? `${commandLine} ${flags.join(' ')}` : commandLine;
   const launch = useFlag
-    ? `${commandLine} ${agent.contextFlag} ${shQuote(contextSentence(target))}`
-    : commandLine;
+    ? `${withFlags} ${agent.contextFlag} ${shQuote(contextSentence(target))}`
+    : withFlags;
   try {
     const ptyId = await spawnTerminal({ cwd, sessionLabel: `chat · ${name}` });
     dispatch({ type: 'openChat', tabIndex, ptyId, cwd, agentId: agent.id, label });
