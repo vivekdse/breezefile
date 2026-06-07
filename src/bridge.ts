@@ -86,6 +86,9 @@ type Fm = {
     content: string,
     expectedMtimeMs: number | null,
   ) => Promise<{ mtimeMs: number; conflict?: boolean; error?: string }>;
+  editorWatch: (p: string) => Promise<void>;
+  editorUnwatch: (p: string) => Promise<void>;
+  onEditorFileChanged: (cb: (p: string, mtimeMs: number) => void) => () => void;
   dragStart: (paths: string[]) => void;
   pathForFile: (file: File) => string;
   findFolders: (query: string, limit?: number) => Promise<string[]>;

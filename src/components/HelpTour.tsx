@@ -153,7 +153,7 @@ const SLIDES: Slide[] = [
       { name: 'edit / :e', what: 'open the cursor file in a new in-app edit tab — markdown renders WYSIWYM via Milkdown (h1/strong/list styled by your theme; markers disappear as you type), other text gets a plain editor · ⌘S saves atomically · the tab title shows • when there are unsaved changes' },
       { name: 'open-editor', what: 'force-open the focused file in the in-app editor, even if another app is its default' },
       { name: 'save / :w', chord: '⌘S', what: 'save the current edit tab to disk' },
-      { name: 'revert', what: 'discard unsaved changes and reload the file from disk (prompts if dirty)' },
+      { name: 'revert / reload', chord: '⌘R / Ctrl+R / F5 · ↻', what: 'reload the file from disk — discards unsaved changes (prompts if dirty). An edit tab also auto-refreshes when the file changes on disk underneath you (e.g. an agent editing it from the chat panel); your cursor and scroll position are kept approximately' },
       { name: 'close', what: 'close the current edit tab (prompts before discarding unsaved changes)' },
     ],
   },

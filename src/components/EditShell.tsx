@@ -313,15 +313,28 @@ export function EditShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
 
-  // ⌘S / Ctrl+S to save, scoped to this tab being active. The `isActive`
-  // guard matters now that every edit tab stays mounted (fm-jtu-style
-  // persistence) — without it a single ⌘S would save *all* open editors.
+  // ⌘S / Ctrl+S to save; ⌘R / Ctrl+R / F5 to reload from disk. Scoped to
+  // this tab being active — the `isActive` guard matters now that every edit
+  // tab stays mounted (fm-jtu-style persistence), so a single ⌘S/⌘R wouldn't
+  // fan out to *all* open editors. The global keyboard handler bails inside
+  // the editor's text surface for everything but tab chords, so these don't
+  // collide with the folder-view `C-r` refresh. We preventDefault so ⌘R/F5
+  // reloads the document, not the whole renderer (a hard refresh in dev).
   useEffect(() => {
     if (!isActive) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         void doSave();
+        return;
+      }
+      const isReload =
+        e.key === 'F5' ||
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r' && !e.shiftKey);
+      if (isReload) {
+        e.preventDefault();
+        // Reuse the :revert path so a dirty buffer prompts before discarding.
+        window.dispatchEvent(new CustomEvent('fm:editor-revert'));
       }
     };
     window.addEventListener('keydown', onKey);
@@ -402,6 +415,47 @@ export function EditShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, filePath, tabIndex]);
 
+  // fm-mdwatch — live-refresh when the file changes on disk underneath us
+  // (most often an agent editing it from the chat panel). We watch every
+  // mounted edit tab, not just the active one, so a backgrounded note still
+  // reflects external edits when you switch back. When the editor has no
+  // unsaved changes we silently reseed (the edit "just appears"); when it's
+  // dirty we don't clobber — we surface a notice and let the user :revert.
+  useEffect(() => {
+    if (!filePath) return;
+    void fm.editorWatch(filePath).catch(() => {});
+    const off = fm.onEditorFileChanged((changedPath) => {
+      if (changedPath !== filePath) return;
+      void fm.editorOpen(filePath).then((res) => {
+        if (res.error) return;
+        // Our own save (or a no-op touch) — on-disk bytes already match what
+        // the editor holds. Nothing to do.
+        if (res.content === contentRef.current) {
+          mtimeRef.current = res.mtimeMs;
+          return;
+        }
+        if (dirtyRef.current) {
+          // Unsaved edits would be lost by a reseed — warn instead.
+          setStatusMsg('changed on disk — ↻ to reload (discards your edits)');
+          return;
+        }
+        contentRef.current = res.content;
+        mtimeRef.current = res.mtimeMs;
+        baselineRef.current = res.content;
+        setSeed(res.content); // remounts the editor with the on-disk bytes
+        setStatusMsg('updated from disk');
+        setTimeout(
+          () => setStatusMsg((m) => (m === 'updated from disk' ? null : m)),
+          1500,
+        );
+      });
+    });
+    return () => {
+      off();
+      void fm.editorUnwatch(filePath).catch(() => {});
+    };
+  }, [filePath]);
+
   if (!tab) return null;
 
   const fileName = filePath ? basename(filePath) : '(unsaved)';
@@ -420,6 +474,15 @@ export function EditShell({
           {!statusMsg && dirty && (
             <span className="edit-shell__status">{saving ? 'Saving…' : 'Editing…'}</span>
           )}
+          <button
+            type="button"
+            className="edit-shell__btn edit-shell__icon-btn"
+            onClick={() => window.dispatchEvent(new CustomEvent('fm:editor-revert'))}
+            title="Reload from disk (discards unsaved changes)"
+            aria-label="Reload from disk"
+          >
+            ↻
+          </button>
           <button
             type="button"
             className={`edit-shell__btn edit-shell__icon-btn${tab.chat ? ' edit-shell__icon-btn--on' : ''}`}
@@ -469,6 +532,7 @@ export function EditShell({
           <PlainEditor
             initial={seed}
             onChange={onChange}
+            filePath={filePath}
             autoFocus={isActive}
             registerFocus={(fn) => { editorFocusRef.current = fn; }}
           />
@@ -478,14 +542,25 @@ export function EditShell({
   );
 }
 
+// Selection + scroll per file for the plain editor, kept across the `key`
+// remount that a reload triggers. Mirrors caretByPath for Milkdown so a
+// live-refresh (agent edit from chat) or :revert lands you back where you
+// were instead of jumping to the top.
+const plainStateByPath = new Map<
+  string,
+  { start: number; end: number; scrollTop: number }
+>();
+
 function PlainEditor({
   initial,
   onChange,
+  filePath = '',
   autoFocus = true,
   registerFocus,
 }: {
   initial: string;
   onChange: (next: string) => void;
+  filePath?: string;
   autoFocus?: boolean;
   registerFocus?: (fn: () => void) => void;
 }) {
@@ -493,6 +568,31 @@ function PlainEditor({
   useEffect(() => {
     registerFocus?.(() => ref.current?.focus());
   }, [registerFocus]);
+  // Restore caret + scroll on mount (this fires on every `key` remount, i.e.
+  // every reload), and snapshot them on unmount so the next mount can replay.
+  // Clamp the offsets to the new length since a reload may have changed it.
+  useEffect(() => {
+    const el = ref.current;
+    if (el && filePath) {
+      const saved = plainStateByPath.get(filePath);
+      if (saved) {
+        const max = el.value.length;
+        try {
+          el.setSelectionRange(Math.min(saved.start, max), Math.min(saved.end, max));
+        } catch { /* noop */ }
+        el.scrollTop = saved.scrollTop;
+      }
+    }
+    return () => {
+      if (el && filePath) {
+        plainStateByPath.set(filePath, {
+          start: el.selectionStart,
+          end: el.selectionEnd,
+          scrollTop: el.scrollTop,
+        });
+      }
+    };
+  }, [initial, filePath]);
   // Uncontrolled so the browser keeps its native undo/redo stack
   // (a controlled `value` resets the stack on every keystroke). `key`
   // remounts with fresh contents only on a genuine reload, since the
@@ -656,6 +756,7 @@ function MilkdownEditor({
         key={`fallback:${filePath}`}
         initial={initial}
         onChange={onChange}
+        filePath={filePath}
         autoFocus={autoFocus}
         registerFocus={registerFocus}
       />

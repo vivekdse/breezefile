@@ -115,6 +115,19 @@ const fm = {
       conflict?: boolean;
       error?: string;
     }>,
+  // fm-mdwatch — watch/unwatch an open editor file for external edits, and
+  // subscribe to change notifications. The editor uses this to live-refresh
+  // when an agent edits the file from the chat panel.
+  editorWatch: (p: string) =>
+    ipcRenderer.invoke('editor:watch', p) as Promise<void>,
+  editorUnwatch: (p: string) =>
+    ipcRenderer.invoke('editor:unwatch', p) as Promise<void>,
+  onEditorFileChanged: (cb: (p: string, mtimeMs: number) => void) => {
+    const handler = (_e: unknown, payload: { path: string; mtimeMs: number }) =>
+      cb(payload.path, payload.mtimeMs);
+    ipcRenderer.on('editor:fileChanged', handler);
+    return () => ipcRenderer.off('editor:fileChanged', handler);
+  },
   dragStart: (paths: string[]) => ipcRenderer.send('drag:start', paths),
   // Electron 32+ removed the `path` field from renderer File objects; the
   // sanctioned replacement is webUtils.getPathForFile, which lives in the
