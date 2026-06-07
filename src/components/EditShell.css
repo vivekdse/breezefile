@@ -270,3 +270,52 @@
 .edit-shell__icon-btn--on {
   color: var(--accent);
 }
+
+/* fada85ea — Crepe's floating selection toolbar (and the link preview / link
+   edit popovers) paint their icon SVGs with `color/fill: var(--crepe-color-outline)`,
+   which we map to the faint border token. On dark/sepia surfaces that border
+   color is nearly transparent, so the bold/italic/link icons all but vanished.
+   Re-theme these floaters explicitly: an elevated surface, a visible border +
+   shadow so the popover separates from the editor canvas, full-contrast icons
+   via the on-canvas text token, and the accent only for the active toggle. */
+.edit-shell__milkdown .milkdown .milkdown-toolbar,
+.edit-shell__milkdown .milkdown .milkdown-link-preview > .link-preview,
+.edit-shell__milkdown .milkdown .milkdown-link-edit > .link-edit {
+  background: var(--bg-2, var(--panel-2));
+  border: 1px solid var(--rule-on-panel, var(--border-2));
+  box-shadow: var(--shadow-2, 0 8px 24px rgba(0, 0, 0, 0.35));
+}
+
+/* Icons: drop the faint outline color, use the readable on-canvas text token. */
+.edit-shell__milkdown .milkdown .milkdown-toolbar .toolbar-item svg,
+.edit-shell__milkdown .milkdown .milkdown-link-preview .link-icon > svg,
+.edit-shell__milkdown .milkdown .milkdown-link-preview .button > svg,
+.edit-shell__milkdown .milkdown .milkdown-link-edit .button > svg {
+  color: var(--text-on-canvas, var(--fg-1));
+  fill: var(--text-on-canvas, var(--fg-1));
+}
+
+/* Hover affordance with a clearly visible tint across themes. */
+.edit-shell__milkdown .milkdown .milkdown-toolbar .toolbar-item:hover,
+.edit-shell__milkdown .milkdown .milkdown-link-preview .link-icon:hover,
+.edit-shell__milkdown .milkdown .milkdown-link-preview .button:hover,
+.edit-shell__milkdown .milkdown .milkdown-link-edit .button:hover {
+  background: var(--chip, var(--bg-3));
+}
+
+/* Active formatting (e.g. bold applied to the selection) reads as accent. */
+.edit-shell__milkdown .milkdown .milkdown-toolbar .toolbar-item.active svg {
+  color: var(--accent);
+  fill: var(--accent);
+}
+
+/* The toolbar divider is keyed off --crepe-color-outline too; give it enough
+   alpha to register against the elevated surface in every theme. */
+.edit-shell__milkdown .milkdown .milkdown-toolbar .divider {
+  background: var(--rule-on-panel, var(--border-2));
+}
+
+/* Link-edit URL input text. */
+.edit-shell__milkdown .milkdown .milkdown-link-edit .input-area {
+  color: var(--text-on-canvas, var(--fg-1));
+}
