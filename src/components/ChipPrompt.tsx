@@ -384,7 +384,14 @@ const VERBS: VerbDef[] = [
       }
       return { ok: true };
     },
-    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c) }],
+    // fm-958a — give move the full goto/find destination picker: ancestors
+    // (parent folders), descendants, recents, bookmarks, common dirs, the
+    // current folder, and live Spotlight folder hits. Previously this passed
+    // no flags, so parent folders weren't first-class candidates and the
+    // current folder couldn't be chosen. `includeFiles` stays off — a file
+    // is never a valid move destination — but folder sourcing is now
+    // identical to goto's `destinationOptions(c, true, true)`.
+    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true) }],
     // fm-3km: stage + navigate. The user lands at the destination and a
     // floating PasteChip prompts them to confirm — they can also keep
     // navigating into a sub-folder before pasting.
@@ -421,7 +428,8 @@ const VERBS: VerbDef[] = [
       }
       return { ok: true };
     },
-    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c) }],
+    // fm-958a — match Move: full goto-style folder picker (parents included).
+    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true) }],
     // fm-3km: stage + navigate. Same pattern as Move — the user lands at
     // the destination, the PasteChip floats above the statusbar, and they
     // confirm with pp / click. Yank persists across copy paste so they can
@@ -2626,6 +2634,34 @@ function destinationOptions(c: Ctx, includeCurrent = false, includeFiles = false
     });
   }
 
+  // 1b) Ancestor chain — every parent folder up to root. Without this the
+  //     picker could only ever go *down* (children + BFS descendants) or
+  //     sideways (recents/bookmarks/Spotlight); the immediate parent of a
+  //     deep folder often isn't a recent and may not be Spotlight-indexed,
+  //     so "move/go up one folder" had no candidate to land on. Listing the
+  //     ancestors makes parent folders first-class destinations for both
+  //     goto and move/copy. Walk from cwd's parent up to '/'.
+  // Normalize a trailing slash so dirnameOf walks to the real parent
+  // ('/a/b/' → '/a/b' is the same folder, not its parent).
+  const cwdNorm = c.cwd.length > 1 && c.cwd.endsWith('/') ? c.cwd.replace(/\/+$/, '') : c.cwd;
+  let anc = dirnameOf(cwdNorm);
+  let up = 1;
+  // Guard against degenerate paths; dirnameOf('/') === '/'.
+  while (anc && anc !== cwdNorm && up <= 64) {
+    push({
+      id: anc,
+      label: basename(anc) || anc,
+      detail: up === 1
+        ? 'parent folder · ' + prettyPath(anc, c.homedir)
+        : `${up} levels up · ${prettyPath(anc, c.homedir)}`,
+      available: true,
+    });
+    const next = dirnameOf(anc);
+    if (next === anc) break; // reached root
+    anc = next;
+    up++;
+  }
+
   // 2) Deeper descendants found via BFS (depth ~3). Calculate how many
   //    levels down each path is from cwd to give the user a rough sense of
   //    where they're going. Skip any that are already in the immediate set.
@@ -3279,6 +3315,7 @@ export function ChipPrompt({
         // destinationOptions — keeps the scorer source-agnostic.
         if (detail.includes('in this folder')) score += 25;
         else if (detail.includes('levels down')) score += 20;
+        else if (detail.includes('parent folder') || detail.includes('levels up')) score += 22;
         else if (detail.includes('· search')) score -= 15;
 
         // In the verb picker, verbs always rank above find results. Without
