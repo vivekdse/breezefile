@@ -50,7 +50,7 @@
 }
 .run-progress__cancel:hover:not(:disabled) {
   background: var(--danger, #c0392b);
-  color: var(--on-accent, white);
+  color: #ffffff;
 }
 .run-progress__cancel:disabled {
   opacity: 0.5;

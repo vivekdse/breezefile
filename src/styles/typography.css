@@ -1,0 +1,30 @@
+/* fm-d0t — typography utilities for text on inverse / tinted surfaces.
+
+   Most text pairs with --text-on-panel (panel/sidebar/modal surfaces) or
+   --text-on-canvas (the editor/file canvas). These two tokens cover the
+   common cases. The utilities below cover elements that sit on an ACCENT
+   or otherwise inverted surface, where neither default pairing is correct.
+
+   Prefer these classes (or the tokens they wrap) over hardcoding #fff —
+   white is NOT always legible on --accent: light/high-contrast themes set
+   --accent-ink to a DARK color so the label stays AA-compliant. Routing
+   through --text-on-accent picks the right ink per theme automatically. */
+
+/* Text whose direct background is --accent / --accent-strong. */
+.text--on-accent {
+  color: var(--text-on-accent);
+}
+
+/* Text that explicitly inverts to the canvas ink (e.g. an element dropped
+   onto the dark file canvas in an otherwise light theme). */
+.text--on-dark {
+  color: var(--text-on-canvas);
+}
+
+/* Tinted accent surface — the reusable form of .btn--card-accent. The tint
+   (--accent-soft) is a low-alpha wash over the base surface in every theme,
+   so the readable ink is --text-on-panel, not --text-on-accent. */
+.surface--accent {
+  background: var(--accent-soft);
+  color: var(--text-on-panel);
+}
