@@ -27,3 +27,8 @@ native/sharer/sharer
 # Local secrets (PATs, tokens). Never commit.
 .env
 .env.local
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
