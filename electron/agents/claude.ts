@@ -101,6 +101,9 @@ class ClaudeAgent implements AgentRunner {
       '--verbose',
       '--permission-mode', 'acceptEdits',
       '--add-dir', cwd,
+      // TEMPORARY (fm-b5at experiment): every auto-run gets Claude-in-Chrome
+      // so tasks can drive the browser. Per-task flags mapping is fm-b5at.5.
+      '--chrome',
     ];
 
     await writeFile(
