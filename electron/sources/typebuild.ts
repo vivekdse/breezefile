@@ -26,7 +26,8 @@ import os from 'node:os';
 import { BrowserWindow } from 'electron';
 import { breezeHost } from '../core/host';
 import { getAuthState, getIdToken } from '../typebuild/auth';
-import { ensureTypebuildMcp } from '../typebuild/mcp';
+import { mintMcpToken } from '../typebuild/mcp-token';
+import { clearSession, registerSession } from '../typebuild/sessions';
 import type {
   RunNowOptions,
   SourcedTask,
@@ -38,6 +39,30 @@ import type { Task, TaskCreate, TaskFilter, TaskStatus, TaskUpdate } from '../ta
 
 const API_BASE = 'https://general.typebuild.com';
 const POLL_INTERVAL_MS = 30_000;
+
+// Env var the minted MCP token is injected under (PTY env only — never argv:
+// /proc/<pid>/cmdline is world-readable). The inline --mcp-config below
+// references it as ${TYPEBUILD_MCP_TOKEN}; claude expands it from the spawned
+// process env (verified empirically — the inline JSON form expands the same as
+// .mcp.json), so the literal token never appears on the command line.
+const MCP_TOKEN_ENV = 'TYPEBUILD_MCP_TOKEN';
+
+// Inline MCP config passed via `--mcp-config <string>`. It carries the ${VAR}
+// REFERENCE, not the secret, so it is argv-safe. Paired with
+// --strict-mcp-config so ONLY this server is loaded — sidestepping a name
+// collision with the typebuild plugin's header-free .mcp.json while the
+// plugin's skills/hooks still load.
+const MCP_INLINE_CONFIG = JSON.stringify({
+  mcpServers: {
+    typebuild: {
+      type: 'http',
+      url: 'https://general.typebuild.com/mcp',
+      headers: {
+        Authorization: `Bearer \${${MCP_TOKEN_ENV}}`,
+      },
+    },
+  },
+});
 
 const capabilities: TaskSourceCapabilities = {
   canSchedule: false,
@@ -288,27 +313,38 @@ export class TypeBuildTaskSource implements TaskSource {
     throw unsupported('deleteTask — TypeBuild tasks cannot be deleted here');
   }
 
-  // ─── runNow / Start (fm-b5at.5) ─────────────────────────────────────────
+  // ─── runNow / Start (fm-b5at.5, MCP auth handoff fm-b5at.9) ──────────────
   // "Start" launches an INTERACTIVE embedded-terminal claude session, pre-
-  // wired to this task. The user never types a command.
+  // wired to this task AND pre-authenticated. The user never types a command
+  // and never sees an MCP sign-in prompt.
   //
   // Flow:
-  //   1. Ensure the typebuild MCP server is configured in Claude Code
-  //      (idempotent, cached, non-fatal on failure — surfaced as a hint).
+  //   1. MINT FIRST (fm-b5at.9): exchange the Firebase ID token for a fresh,
+  //      short-lived MCP JWT. This GATES the spawn — the mint doubles as a
+  //      reachability + identity preflight. On a typed failure we throw the
+  //      structured code; the renderer maps it to one of three in-app messages
+  //      and NO terminal opens. With a static Authorization header there is no
+  //      in-session OAuth fallback, so a failed mint MUST stop us here.
   //   2. Spawn claude interactively with:
+  //        - the minted token in the PTY ENV (TYPEBUILD_MCP_TOKEN) — never in
+  //          argv (/proc/<pid>/cmdline is world-readable).
+  //        - --strict-mcp-config --mcp-config <inline JSON> referencing the
+  //          env var (not the literal token). claude expands ${VAR} from the
+  //          spawned env into the Authorization header → already authenticated.
   //        - prompt: "Run /mcp__typebuild__work and claim task <id>"
   //          (ONLY the opaque task id — no PHI).
   //        - args derived from the server `flags` (chrome → --chrome, etc.).
-  //          The interactive run STYLE is forced regardless of flags.
   //        - cwd: the home directory (folder hints are a later follow-up).
   //   3. NO local task_runs row — task_runs.task_id FKs the local `tasks`
   //      table and a remote id has no local row (recordRun:false).
   //   4. The tab label is GENERIC ("TypeBuild task <shortid>") — the title
   //      is PHI and the renderer can surface tab labels.
-  //   5. Claim is IN-SESSION (the /work prompt claims via MCP). We do NOT
+  //   5. Register the session (ptyId → token expiry + taskId) so the expiry
+  //      clock (fm-b5at.10) can warn before the token lapses; clear on exit.
+  //   6. Claim is IN-SESSION (the /work prompt claims via MCP). We do NOT
   //      pre-claim over REST (a REST pre-claim would 409 the in-session
   //      claim, which is conditional on status=open).
-  //   6. After the PTY exits: refresh + broadcast; if the task is still
+  //   7. After the PTY exits: refresh + broadcast; if the task is still
   //      claimed by THIS principal, broadcast a Release prompt.
   async runNow(id: string, _opts?: RunNowOptions): Promise<unknown> {
     // Routing fields (flags) come from the in-memory cache populated by the
@@ -316,10 +352,11 @@ export class TypeBuildTaskSource implements TaskSource {
     const cached = this.cache.get(id);
     const serverFlags = cached?.flags ?? [];
 
-    // Ensure the MCP server is wired up. Non-fatal — we still launch and let
-    // the in-session OAuth / MCP error guide the user. Surface any hint via
-    // the terminal-hint env so the renderer can show it.
-    const mcp = await ensureTypebuildMcp();
+    // 1. Mint the MCP token FIRST — success gates the spawn. mintMcpToken
+    //    throws a typed McpTokenError ({code}) on failure; we let it propagate
+    //    so the IPC layer carries the code to the renderer, which maps it to
+    //    the right in-app message. No terminal opens on a thrown mint.
+    const minted = await mintMcpToken();
 
     // Force the interactive run style; pass through the server's arg-producing
     // flags (e.g. chrome → --chrome). 'interactive' is a no-op for flagsToArgs
@@ -339,12 +376,22 @@ export class TypeBuildTaskSource implements TaskSource {
       // PHI: generic, content-free tab label.
       label: `TypeBuild task ${shortId(id)}`,
       source: this.id,
+      // --strict-mcp-config: load ONLY our inline server (header-injected),
+      // ignoring user/project scope and avoiding a name collision with the
+      // plugin's header-free .mcp.json. The inline config holds the ${VAR}
+      // reference, NOT the secret.
+      extraArgs: ['--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG],
       env: {
-        // Marker the renderer keys the OAuth hint off of. PHI-free.
+        // The minted token, PTY env only. claude expands ${TYPEBUILD_MCP_TOKEN}
+        // from here into the Authorization header. Never logged/persisted.
+        [MCP_TOKEN_ENV]: minted.accessToken,
+        // PHI-free marker so the renderer can gate TypeBuild-tab behavior.
         BREEZE_TYPEBUILD_TASK: '1',
-        ...(mcp.ok ? {} : { BREEZE_TYPEBUILD_MCP_HINT: '1' }),
       },
       onExit: () => {
+        // Drop the session from the expiry registry, then run the
+        // refresh/release-prompt flow.
+        clearSession(res.ptyId);
         void this.onSessionExit(id);
       },
     });
@@ -353,7 +400,12 @@ export class TypeBuildTaskSource implements TaskSource {
       // No GUI window to host the tab — interactive Start needs the app open.
       throw new Error('typebuild: Start needs an open Breeze window');
     }
-    return { ok: true, ptyId: res.ptyId, mcp: mcp.ok };
+
+    // 5. Register the live session for the expiry clock (fm-b5at.10). The token
+    //    itself never lands here — only its expiry + the (non-PHI) task id.
+    registerSession(res.ptyId, { expiresAt: minted.expiresAt, taskId: id });
+
+    return { ok: true, ptyId: res.ptyId };
   }
 
   // Build a minimal local-shape Task to feed runTaskInteractive. It NEVER

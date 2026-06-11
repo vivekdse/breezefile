@@ -14,5 +14,6 @@ Canonical list of capability flags exposed by `PlatformAdapter.capabilities()`. 
 | `quickLook`         | Space-bar quick preview via `qlmanage`.                              | ✓   | ✗     |
 | `openWithLauncher`  | "Open With" dialog and per-extension app binding.                    | ✓   | ✗ (todo: .desktop) |
 | `vibrancy`          | Translucent window background.                                       | ✓   | ✗     |
+| `windowArrange`     | Position another app's (Chrome's) top-level window for side-by-side. | ✓ (Accessibility grant) | ✓ X11 (wmctrl/xdotool) · ✗ Wayland (degraded: own window only) |
 
 `✗ (todo)` marks capabilities we intend to bring to parity. `✗` without `todo` is single-platform by design (no portable equivalent today).

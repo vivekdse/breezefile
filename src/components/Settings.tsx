@@ -3,6 +3,7 @@ import { useStore, DEFAULT_KEYBINDS } from '../store';
 import { fm } from '../bridge';
 import { formatOpError } from '../errorMessages';
 import { TypebuildAuthPanel } from './typebuild/TypebuildAuthPanel';
+import { SideBySideSettings } from './typebuild/SideBySideSettings';
 import './Settings.css';
 
 type Props = { onClose: () => void };
@@ -338,6 +339,7 @@ export function Settings({ onClose }: Props) {
             onToggle={() => toggle('typebuild')}
           >
             <TypebuildAuthPanel />
+            <SideBySideSettings />
           </AccordionSection>
         </div>
       </div>

@@ -16,6 +16,7 @@ const fm = {
       quickLook: boolean;
       openWithLauncher: boolean;
       vibrancy: boolean;
+      windowArrange: boolean;
     }>,
   homedir: () => ipcRenderer.invoke('fs:homedir') as Promise<string>,
   listLocations: () =>
@@ -404,6 +405,30 @@ const fm = {
       }>,
     installCommand: () =>
       ipcRenderer.invoke('typebuild:detect:installCommand') as Promise<string>,
+  },
+  // ─── TypeBuild side-by-side layout (fm-b5at.6) ────────────────────────
+  // Self-contained block. Chrome left / our window right while a TypeBuild
+  // session runs. `probe` tells the UI whether Chrome arranging is ok /
+  // needs a permission grant / is unsupported (Wayland → degraded mode).
+  sideBySide: {
+    enter: (split?: number) =>
+      ipcRenderer.invoke('window:sideBySide:enter', split) as Promise<{
+        ownWindow: boolean;
+        chrome: { ok: boolean; reason?: 'no-permission' | 'no-chrome-window' | 'unsupported' };
+      }>,
+    exit: () =>
+      ipcRenderer.invoke('window:sideBySide:exit') as Promise<{ restored: boolean }>,
+    toggle: (split?: number) =>
+      ipcRenderer.invoke('window:sideBySide:toggle', split) as Promise<{
+        active: boolean;
+        chrome?: { ok: boolean; reason?: 'no-permission' | 'no-chrome-window' | 'unsupported' };
+      }>,
+    state: () =>
+      ipcRenderer.invoke('window:sideBySide:state') as Promise<{ active: boolean }>,
+    probe: () =>
+      ipcRenderer.invoke('window:sideBySide:probe') as Promise<
+        'ok' | 'no-permission' | 'unsupported'
+      >,
   },
 };
 

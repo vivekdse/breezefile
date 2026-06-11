@@ -22,7 +22,25 @@ export type Capabilities = {
   quickLook: boolean;
   openWithLauncher: boolean;
   vibrancy: boolean;
+  // fm-b5at.6 — can we position *another* app's (Chrome's) top-level window?
+  // Mac: AppleScript/System Events (needs Accessibility). Linux X11:
+  // wmctrl/xdotool. Wayland: false (degraded — we still arrange our own
+  // window, see windowArrange.ts). When false the renderer explains the
+  // degraded path rather than hiding the side-by-side feature outright.
+  windowArrange: boolean;
 };
+
+// fm-b5at.6 — outcome of trying to move Chrome's window. `ok` means the
+// adapter believes it positioned the most-recently-active Chrome window.
+export type ArrangeResult = {
+  ok: boolean;
+  reason?: 'no-permission' | 'no-chrome-window' | 'unsupported';
+};
+
+// fm-b5at.6 — pixel rectangle in the display's work area (menu-bar / panel
+// excluded) where Chrome's window should land. Supplied by the orchestrator,
+// which owns the Electron `screen` module; the adapter just drives the OS.
+export type ArrangeRect = { x: number; y: number; width: number; height: number };
 
 export interface PlatformAdapter {
   readonly id: 'mac' | 'linux';
@@ -45,6 +63,22 @@ export interface PlatformAdapter {
   // Mac: standard /Applications path + mdfind fallback. Linux: command -v of
   // google-chrome / google-chrome-stable / chromium.
   chromePath(): Promise<string | null>;
+
+  // fm-b5at.6 — TypeBuild side-by-side. Position the MOST RECENTLY ACTIVE
+  // Google Chrome window into `rect` (a sub-rectangle of the current
+  // display's work area). MUST act on a single window (the frontmost /
+  // last-active one), never spray every Chrome window/profile. The
+  // orchestrator computes `rect`; the adapter just drives the OS tool.
+  arrangeChromeLeft(rect: ArrangeRect): Promise<ArrangeResult>;
+
+  // fm-b5at.6 — capability + permission probe for the above, surfaced to the
+  // Settings UI so it can offer the right affordance:
+  //   'ok'            — we can arrange Chrome right now
+  //   'no-permission' — supported but the OS grant is missing (mac
+  //                     Accessibility); UI offers the privacy-pane button
+  //   'unsupported'   — no portable mechanism (Wayland); UI explains the
+  //                     degraded "we move only our own window" mode
+  canArrangeWindows(): Promise<'ok' | 'no-permission' | 'unsupported'>;
 }
 
 import { MacAdapter } from './mac';

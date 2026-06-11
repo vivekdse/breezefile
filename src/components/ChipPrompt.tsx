@@ -37,6 +37,7 @@ import {
 import type { CustomTag, Entry, SortKey, TabKind, TagFilter, TagPaths } from '../types';
 import { getAllTags } from '../tags';
 import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
+import { loadSideBySidePrefs, splitFraction } from '../sideBySidePrefs';
 import { formatOpError } from '../errorMessages';
 import './ChipPrompt.css';
 
@@ -153,6 +154,7 @@ type Verb =
   | 'welcome'
   | 'task'
   | 'tasks'
+  | 'sidebyside'
   | 'settings';
 
 type Option = {
@@ -1284,6 +1286,41 @@ const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openTasksPage'));
+    },
+  },
+  {
+    // fm-b5at.6 — toggle the TypeBuild side-by-side layout: Chrome left,
+    // Breezefile right (restores previous bounds on toggle-off). App-level
+    // verb (no file/tab scope). Own-window arrangement always works; Chrome
+    // moves opportunistically — degraded parity on Wayland / missing
+    // Accessibility, so the verb stays usable rather than hidden.
+    id: 'sidebyside',
+    label: 'Side-by-side (Chrome left / here right)',
+    aliases: ['sidebyside', 'side by side', 'split', 'chrome', 'typebuild layout', 'arrange'],
+    icon: '◧',
+    describe: () => 'Toggle Chrome-left / Breezefile-right side-by-side layout',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      const split = splitFraction(loadSideBySidePrefs());
+      void fm.sideBySide.toggle(split).then(
+        (res) => {
+          if (!res.active) {
+            api.dispatch({ type: 'setStatus', msg: 'side-by-side off · window restored' });
+            return;
+          }
+          const c = res.chrome;
+          if (c?.ok) {
+            api.dispatch({ type: 'setStatus', msg: 'side-by-side on · Chrome left' });
+          } else if (c?.reason === 'no-permission') {
+            api.dispatch({ type: 'setStatus', msg: 'window snapped — grant Accessibility to also move Chrome (Settings → TypeBuild)' });
+          } else {
+            api.dispatch({ type: 'setStatus', msg: 'window snapped right — snap Chrome to the left manually' });
+          }
+        },
+        (err: unknown) => api.dispatch({ type: 'setStatus', msg: formatOpError('arrange', err) }),
+      );
     },
   },
   {

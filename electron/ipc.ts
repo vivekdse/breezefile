@@ -9,6 +9,13 @@ import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskFilter, TaskUpdate } from './tasks';
 import { platform } from './platform';
+import {
+  enterSideBySide,
+  exitSideBySide,
+  toggleSideBySide,
+  isSideBySide,
+  probeWindowArrange,
+} from './window-arrange';
 import { resolveRemote, shQuote, listRemoteTargets } from './remoteRoute';
 import { ensureRemoteHooks, readLocalApi, pickRemotePort } from './remoteHooks';
 import { mintSessionToken, revokeSessionToken } from './session-tokens';
@@ -513,6 +520,24 @@ export function registerIpc() {
     id: platform().id,
     ...platform().capabilities(),
   }));
+
+  // ─── TypeBuild side-by-side layout (fm-b5at.6) ────────────────────────
+  // Self-contained block: arrange Chrome left / our window right while a
+  // TypeBuild interactive session runs. The orchestrator (window-arrange.ts)
+  // owns `screen` + own-window bounds; the OS branch for moving Chrome lives
+  // in the PlatformAdapter. Renderer calls these via window.fm.sideBySide.*.
+  ipcMain.handle('window:sideBySide:enter', (_e, split?: number) =>
+    enterSideBySide(split),
+  );
+  ipcMain.handle('window:sideBySide:exit', () => exitSideBySide());
+  ipcMain.handle('window:sideBySide:toggle', (_e, split?: number) =>
+    toggleSideBySide(split),
+  );
+  ipcMain.handle('window:sideBySide:state', () => ({ active: isSideBySide() }));
+  // Permission/capability probe so Settings can show the right affordance
+  // ('no-permission' → privacy-pane button on mac; 'unsupported' → Wayland
+  // degraded-mode note).
+  ipcMain.handle('window:sideBySide:probe', () => probeWindowArrange());
 
   // Hydrate persisted "Open With" bindings on startup so `app:open` can
   // dispatch to the bound app without an extra async hop on each call.

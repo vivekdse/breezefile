@@ -36,6 +36,7 @@ import { IconSprite } from './components/icons';
 import { StoreProvider, useStore, makeTab } from './store';
 import { PlatformProvider } from './platform';
 import { formatOpError, humanizeError } from './errorMessages';
+import { loadSideBySidePrefs, splitFraction } from './sideBySidePrefs';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
 import { taskSourceAction } from './tasks';
@@ -405,9 +406,41 @@ function Shell() {
         type: 'setStatus',
         msg: `interactive run · ${payload.title}`,
       });
+
+      // fm-b5at.6 — auto side-by-side for TypeBuild sessions. When the user
+      // setting is on, snap our window to the right and Chrome to the left so
+      // they watch Claude drive the browser while approving here. Own-window
+      // arrangement always works; Chrome moves opportunistically (degraded
+      // parity on Wayland / missing Accessibility — no error surfaced here).
+      if (payload.source === 'typebuild') {
+        const prefs = loadSideBySidePrefs();
+        if (prefs.autoOnTaskStart) {
+          void fm.sideBySide.enter(splitFraction(prefs)).catch(() => {
+            /* best-effort; degraded mode leaves windows as-is */
+          });
+        }
+      }
     });
     return off;
   }, [dispatch]);
+
+  // fm-b5at.6 — auto-exit side-by-side when the last TypeBuild terminal tab
+  // closes. We track the count of open typebuild terminal tabs; on the
+  // >0 → 0 transition we restore the window's previous bounds. Manual toggle
+  // (:sidebyside) is independent — it flips state on the main side and this
+  // effect only acts on the closing edge, so it won't fight the user.
+  const prevTbTermCount = useRef(0);
+  useEffect(() => {
+    const count = state.tabs.filter(
+      (t) => t.terminal?.source === 'typebuild',
+    ).length;
+    if (prevTbTermCount.current > 0 && count === 0) {
+      void fm.sideBySide.state().then((s) => {
+        if (s.active) void fm.sideBySide.exit().catch(() => {});
+      });
+    }
+    prevTbTermCount.current = count;
+  }, [state.tabs]);
 
   // fm-b5at.5 — a TypeBuild session's PTY exited while the user still holds
   // the claim. Offer a gentle Release. PHI-free: only the task id crosses the

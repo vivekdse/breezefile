@@ -12,6 +12,7 @@ export type Capabilities = {
   quickLook: boolean;
   openWithLauncher: boolean;
   vibrancy: boolean;
+  windowArrange: boolean;
 };
 
 type Fm = {
@@ -220,6 +221,22 @@ type Fm = {
       chrome: { ok: boolean; path?: string };
     }>;
     installCommand: () => Promise<string>;
+  };
+  // fm-b5at.6 — TypeBuild side-by-side layout. Chrome left / our window
+  // right while a session runs. Self-contained namespaced block; the OS work
+  // lives in main (electron/window-arrange.ts + PlatformAdapter).
+  sideBySide: {
+    enter: (split?: number) => Promise<{
+      ownWindow: boolean;
+      chrome: { ok: boolean; reason?: 'no-permission' | 'no-chrome-window' | 'unsupported' };
+    }>;
+    exit: () => Promise<{ restored: boolean }>;
+    toggle: (split?: number) => Promise<{
+      active: boolean;
+      chrome?: { ok: boolean; reason?: 'no-permission' | 'no-chrome-window' | 'unsupported' };
+    }>;
+    state: () => Promise<{ active: boolean }>;
+    probe: () => Promise<'ok' | 'no-permission' | 'unsupported'>;
   };
 };
 

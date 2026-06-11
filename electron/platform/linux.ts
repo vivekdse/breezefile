@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
-import type { Capabilities, PlatformAdapter } from './index';
+import type { ArrangeRect, ArrangeResult, Capabilities, PlatformAdapter } from './index';
 import { bfsSearch } from './bfs';
 import * as indexDb from './index-db';
 
@@ -31,6 +32,10 @@ export class LinuxAdapter implements PlatformAdapter {
       quickLook: false,
       openWithLauncher: false,
       vibrancy: false,
+      // X11 with wmctrl/xdotool present → we can move Chrome's window.
+      // Wayland exposes no portable client API for moving foreign windows,
+      // so the capability is false there and the UI explains degraded mode.
+      windowArrange: !isWayland() && hasWmTool(),
     };
   }
 
@@ -92,6 +97,98 @@ export class LinuxAdapter implements PlatformAdapter {
     }
     return null;
   }
+
+  // fm-b5at.6 — Wayland gives us no foreign-window control; X11 needs a WM
+  // tool. Mirrors the synchronous capability flag so the renderer's gating
+  // and this async probe agree.
+  async canArrangeWindows(): Promise<'ok' | 'no-permission' | 'unsupported'> {
+    if (isWayland()) return 'unsupported';
+    return hasWmTool() ? 'ok' : 'unsupported';
+  }
+
+  // Position the most-recently-active Chrome window into `rect` using wmctrl
+  // (fallback xdotool). We match Chrome by window class so we don't touch our
+  // own window, and act on the single most-recently-active match — never
+  // every Chrome window. On Wayland this is structurally impossible → return
+  // 'unsupported' and let the orchestrator fall back to own-window-only.
+  async arrangeChromeLeft(rect: ArrangeRect): Promise<ArrangeResult> {
+    if (isWayland()) return { ok: false, reason: 'unsupported' };
+    const wmctrl = await which('wmctrl');
+    const { x, y, width, height } = rect;
+    if (wmctrl) {
+      // -l -x lists windows with WM_CLASS; Chrome's class is
+      // "*.Google-chrome". The last matching line is the most recently
+      // stacked/active window in wmctrl's listing order. We then -r by its
+      // 0x id and -e a gravity/geometry move-resize on exactly that window.
+      const id = await chromeWindowId(wmctrl);
+      if (!id) return { ok: false, reason: 'no-chrome-window' };
+      const geom = `0,${Math.round(x)},${Math.round(y)},${Math.round(width)},${Math.round(height)}`;
+      // Clear maximized state first so -e geometry is honored.
+      await run(wmctrl, ['-i', '-r', id, '-b', 'remove,maximized_vert,maximized_horz']);
+      const ok = await run(wmctrl, ['-i', '-r', id, '-e', geom]);
+      return ok ? { ok: true } : { ok: false, reason: 'no-chrome-window' };
+    }
+    const xdotool = await which('xdotool');
+    if (xdotool) {
+      // search returns ids oldest→newest; the last is most recently mapped.
+      const out = await runOut(xdotool, ['search', '--class', 'google-chrome']);
+      const ids = out.trim().split('\n').filter(Boolean);
+      const id = ids[ids.length - 1];
+      if (!id) return { ok: false, reason: 'no-chrome-window' };
+      await run(xdotool, ['windowmove', id, String(Math.round(x)), String(Math.round(y))]);
+      const ok = await run(xdotool, ['windowsize', id, String(Math.round(width)), String(Math.round(height))]);
+      return ok ? { ok: true } : { ok: false, reason: 'no-chrome-window' };
+    }
+    return { ok: false, reason: 'unsupported' };
+  }
+}
+
+// Wayland can't move foreign windows from a sandboxed client; X11 can.
+function isWayland(): boolean {
+  return (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland' ||
+    !!process.env.WAYLAND_DISPLAY;
+}
+
+// Synchronous PATH probe so the (sync) capability flag can include it. We
+// check the common bin dirs for wmctrl/xdotool. Cached after first call.
+let _wmToolCache: boolean | null = null;
+function hasWmTool(): boolean {
+  if (_wmToolCache !== null) return _wmToolCache;
+  const dirs = (process.env.PATH || '/usr/bin:/usr/local/bin:/bin').split(':');
+  const found = ['wmctrl', 'xdotool'].some((tool) =>
+    dirs.some((d) => {
+      try { return existsSync(`${d}/${tool}`); } catch { return false; }
+    }),
+  );
+  _wmToolCache = found;
+  return found;
+}
+
+function chromeWindowId(wmctrl: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(wmctrl, ['-l', '-x'], { timeout: 4000 }, (err, stdout) => {
+      if (err) { resolve(null); return; }
+      // Lines: "0x04200007  0 Google-chrome.Google-chrome host  Title"
+      const matches = stdout
+        .split('\n')
+        .filter((l) => /google-chrome|chromium/i.test(l));
+      const last = matches[matches.length - 1];
+      if (!last) { resolve(null); return; }
+      resolve(last.trim().split(/\s+/)[0] || null);
+    });
+  });
+}
+
+function run(cmd: string, args: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: 4000 }, (err) => resolve(!err));
+  });
+}
+
+function runOut(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: 4000 }, (err, stdout) => resolve(err ? '' : stdout || ''));
+  });
 }
 
 function which(name: string): Promise<string | null> {

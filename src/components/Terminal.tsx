@@ -13,7 +13,7 @@
 // fall back to BEL / OSC-9 / activity-stopped heuristics. The signal is
 // only meaningful when the tab is backgrounded, so the parent gates the
 // dispatch on `isActive`.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Terminal as XTerm, type ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -67,8 +67,10 @@ type Props = {
    *  consulted on the spawn path; reattach (existing ptyId) ignores it. */
   sessionLabel?: string;
   /** fm-b5at.5 — owning task source for terminals opened from an interactive
-   *  run. 'typebuild' surfaces a one-time OAuth hint in the toolbar. PHI-
-   *  free; the source id is not task content. */
+   *  run (e.g. 'typebuild'). Threaded through the tab for PHI-aware behavior;
+   *  the source id is not task content. As of fm-b5at.9 the TypeBuild session
+   *  starts already authenticated (token minted at launch), so there is no
+   *  in-session sign-in hint to show here. */
   source?: string;
 };
 
@@ -125,11 +127,7 @@ export function Terminal({
   isActive,
   initialCommand,
   sessionLabel,
-  source,
 }: Props) {
-  // fm-b5at.5 — one-time, dismissible OAuth hint for TypeBuild task tabs.
-  // The first MCP tool use pops an in-session sign-in; this primes the user.
-  const [showTbHint, setShowTbHint] = useState(source === 'typebuild');
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -516,26 +514,6 @@ export function Terminal({
       onDragEnter={onDragOver}
       onDrop={onDrop}
     >
-      {showTbHint && (
-        <div className="terminal-pane__hint" role="status">
-          <span className="terminal-pane__hint-text">
-            First run: approve the TypeBuild sign-in when Claude asks{' '}
-            (<code>/mcp</code>).
-          </span>
-          <button
-            type="button"
-            className="terminal-pane__hint-close"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowTbHint(false);
-            }}
-            aria-label="Dismiss hint"
-            title="Dismiss"
-          >
-            ×
-          </button>
-        </div>
-      )}
       <div className="terminal-pane__inner" ref={wrapRef} />
     </div>
   );

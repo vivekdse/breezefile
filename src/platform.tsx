@@ -21,6 +21,7 @@ const DEFAULTS: Capabilities = {
   quickLook: false,
   openWithLauncher: false,
   vibrancy: false,
+  windowArrange: false,
 };
 
 type Ctx = { caps: Capabilities; loaded: boolean };

@@ -41,6 +41,25 @@ import type { Task, TaskSourceCapabilities, TaskStatus } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './TasksPage.css';
 
+// fm-b5at.9 — map a thrown TypeBuild MCP-token mint failure to the bead's
+// three exact in-app messages. The main process encodes the typed code in the
+// error message as "[typebuild-mint:<code>]" (IPC strips custom Error props),
+// so we regex it back out here. Returns null for anything that isn't a mint
+// error, so the caller falls back to its generic formatter.
+const MINT_MESSAGES: Record<string, string> = {
+  // signed-out: the auth state has also flipped, so Settings → TypeBuild shows
+  // the sign-in form; this status line nudges the user there.
+  'signed-out': 'Please sign in again',
+  unreachable: "Can't reach TypeBuild right now",
+  'access-denied': 'Your access has changed, contact your admin',
+};
+function mintErrorMessage(err: unknown): string | null {
+  const raw = err instanceof Error ? err.message : String(err);
+  const m = /\[typebuild-mint:([a-z-]+)\]/.exec(raw);
+  if (!m) return null;
+  return MINT_MESSAGES[m[1]] ?? null;
+}
+
 type SortKey = 'due' | 'start' | 'created' | 'alpha';
 type GroupKey = 'source' | 'folder' | 'status' | 'due' | 'flat';
 type DerivedFilter = 'all' | 'this_week' | 'overdue' | 'scheduled';
@@ -520,7 +539,16 @@ export function TasksPage() {
       await runTaskNow(task.id, task.source);
       dispatch({ type: 'setStatus', msg: 'starting TypeBuild session…' });
     } catch (e) {
-      dispatch({ type: 'setStatus', msg: formatOpError('start', e) });
+      // fm-b5at.9 — the MCP token mint GATES the spawn; on failure NO terminal
+      // opens and runNow throws a typed error encoded in the message as
+      // "[typebuild-mint:<code>]". Map the three codes to the bead's exact
+      // in-app messages; for 'signed-out' the auth state has also flipped, so
+      // the Settings TypeBuild panel surfaces sign-in on its own.
+      const msg = mintErrorMessage(e);
+      dispatch({
+        type: 'setStatus',
+        msg: msg ?? formatOpError('start', e),
+      });
     }
   }
 
