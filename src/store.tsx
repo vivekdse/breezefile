@@ -249,6 +249,16 @@ type Action =
       type: 'setTerminalAttention';
       tabIndex: number;
       attention: 'idle' | 'busy' | 'bell' | null;
+    }
+  // fm-b5at.10 — repoint a tab's terminal onto a freshly-spawned pty after a
+  // TypeBuild expiry relaunch. Keyed by the OLD ptyId so the renderer doesn't
+  // need to know the tab index; resets attention since the pty is brand new.
+  | {
+      type: 'repointTerminal';
+      oldPtyId: number;
+      newPtyId: number;
+      cwd: string;
+      label?: string;
     };
 
 function makeTab(
@@ -574,6 +584,28 @@ function reducer(s: State, a: Action): State {
       tabs[a.tabIndex] = {
         ...t,
         terminal: { ...t.terminal, attention: a.attention },
+      };
+      return { ...s, tabs };
+    }
+    case 'repointTerminal': {
+      const idx = s.tabs.findIndex(
+        (t) => t.terminal?.ptyId === a.oldPtyId,
+      );
+      if (idx < 0) return s;
+      const tabs = s.tabs.slice();
+      const t = tabs[idx];
+      // Preserve the source ('typebuild') + label; swap the ptyId/cwd and
+      // clear attention. TerminalSplit keys its <Terminal> on ptyId, so the
+      // changed key remounts xterm onto the fresh pty automatically.
+      tabs[idx] = {
+        ...t,
+        terminal: {
+          ...t.terminal!,
+          ptyId: a.newPtyId,
+          cwd: a.cwd,
+          label: a.label ?? t.terminal!.label,
+          attention: null,
+        },
       };
       return { ...s, tabs };
     }

@@ -189,6 +189,17 @@ export type TaskSourceInfo = {
   capabilities: TaskSourceCapabilities;
 };
 
+// fm-b5at.8 — a PHI-free local cron overlay for a remote-source task. Carries
+// only opaque ids + a cron string; no titles/bodies. `nextRunAt` is the cached
+// next fire (ms epoch).
+export type RemoteSchedule = {
+  sourceId: string;
+  taskId: string;
+  cron: string;
+  nextRunAt: number;
+  createdAt: number;
+};
+
 export type TaskCreate = {
   title: string;
   folder: string;

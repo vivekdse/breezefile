@@ -1,4 +1,4 @@
-import type { Entry, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
+import type { Entry, RemoteSchedule, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
 
 export type Capabilities = {
   id: 'mac' | 'linux';
@@ -144,6 +144,14 @@ type Fm = {
     action: string,
     payload?: unknown,
   ) => Promise<unknown>;
+  // ── Schedule overlay for remote-source tasks (fm-b5at.8) ──
+  tasksOverlaySet: (
+    source: string,
+    taskId: string,
+    cron: string,
+  ) => Promise<RemoteSchedule>;
+  tasksOverlayClear: (source: string, taskId: string) => Promise<void>;
+  tasksOverlayList: () => Promise<RemoteSchedule[]>;
   // ── Multi-source (breezed P4) ──
   sourcesList: () => Promise<
     Array<{ id: string; kind: 'local' | 'remote'; status: 'connected' | 'connecting' }>
@@ -208,6 +216,34 @@ type Fm = {
   onTypebuildReleasePrompt: (
     cb: (payload: { taskId: string }) => void,
   ) => () => void;
+  // fm-b5at.10 — TypeBuild MCP session expiry. The 8h token can't refresh
+  // mid-session; main's expiry clock warns at T-15min and, at/after expiry,
+  // offers a one-click relaunch. PHI-free: opaque taskId + epoch only.
+  onTypebuildSessionExpiry: (
+    cb: (payload: {
+      ptyId: number;
+      taskId: string;
+      phase: 'warning' | 'expired';
+      expiresAt: number;
+    }) => void,
+  ) => () => void;
+  // Main repoints the session tab onto the freshly-minted PTY after a relaunch
+  // so the user keeps the same tab (no churn).
+  onTypebuildSessionRelaunched: (
+    cb: (payload: {
+      oldPtyId: number;
+      newPtyId: number;
+      cwd: string;
+      title: string;
+    }) => void,
+  ) => () => void;
+  // One-click relaunch trigger: kill the expired PTY, mint fresh, resume the
+  // conversation. Throws a typed `[typebuild-mint:<code>]` error on mint
+  // failure (renderer maps it to the same three in-app messages as launch).
+  typebuildRelaunchSession: (payload: {
+    ptyId: number;
+    taskId: string;
+  }) => Promise<{ ok: boolean; ptyId: number }>;
   // fm-b5at.2 — TypeBuild plugin Firebase auth. Self-contained namespaced
   // block; tokens live in main, the renderer only sees TypebuildAuthState.
   typebuild: {

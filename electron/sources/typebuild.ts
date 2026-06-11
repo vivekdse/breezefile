@@ -201,6 +201,13 @@ export class TypeBuildTaskSource implements TaskSource {
   private lastSignature = '';
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
+  // fm-b5at.10 — task ids whose session is mid-relaunch. The relaunch kills the
+  // old PTY, whose onExit would otherwise fire the "Release this task?" prompt
+  // (the user still holds the claim during the swap). We suppress that prompt
+  // while a relaunch for the same task is in flight; the fresh session re-uses
+  // the same claim, so there is nothing to release.
+  private relaunching = new Set<string>();
+
   // ─── REST helper ────────────────────────────────────────────────────────
   // One fetch with a Bearer token. On 401, retry once with a fresh token
   // (getIdToken auto-refreshes, but a token can be revoked mid-flight); a
@@ -347,6 +354,74 @@ export class TypeBuildTaskSource implements TaskSource {
   //   7. After the PTY exits: refresh + broadcast; if the task is still
   //      claimed by THIS principal, broadcast a Release prompt.
   async runNow(id: string, _opts?: RunNowOptions): Promise<unknown> {
+    const res = await this.launchSession(id, { resume: false });
+    return { ok: true, ptyId: res.ptyId };
+  }
+
+  // ─── expiry relaunch (fm-b5at.10) ────────────────────────────────────────
+  // The MCP JWT lives ~8h and CANNOT refresh mid-session (static header). When
+  // it lapses, the live PTY's MCP server goes dead with an opaque in-terminal
+  // error. The expiry clock (electron/typebuild/expiry-clock.ts) catches this
+  // BEFORE the user hits it and offers a one-click "restart task". This is that
+  // restart: gracefully kill the old (expired) PTY, mint a FRESH token, and
+  // respawn with the resume flag (--continue) so the SAME conversation
+  // continues — now re-authenticated. Mint failures gate the relaunch exactly
+  // as the initial launch does (same typed codes → same three in-app
+  // messages, no dead terminal). The renderer repoints the existing tab onto
+  // the new ptyId (no tab churn). Known v1 caveat: --continue resumes the most
+  // recent conversation in the cwd (home) — there is no per-session id to pin
+  // to in interactive mode, so a second TypeBuild session opened in home since
+  // could be the one resumed. Acceptable for v1.
+  async relaunchSession(oldPtyId: number, taskId: string): Promise<unknown> {
+    // Retire the old PTY first. Killing it fires its onExit (clearSession +
+    // the release/refresh flow); we tolerate it being already gone (the token
+    // may have died and the user closed the tab). Import lazily to avoid a
+    // main-startup import cycle (ipc.ts ⇄ sources).
+    const { killManagedPty } = await import('../ipc');
+    // Mark BEFORE the kill so the old PTY's onExit (which fires after kill)
+    // sees the flag and suppresses the spurious release prompt. Consumed by
+    // onSessionExit. If the mint below fails the session truly ends, so we
+    // re-allow the prompt in the catch.
+    this.relaunching.add(taskId);
+    killManagedPty(oldPtyId);
+
+    // Respawn resumed. A fresh mint gates this just like the initial launch.
+    let res: { ptyId: number };
+    try {
+      res = await this.launchSession(taskId, { resume: true });
+    } catch (err) {
+      // Relaunch failed (e.g. mint error). The old PTY is already dead; let a
+      // future genuine exit prompt for release again, and propagate the typed
+      // error so the renderer shows the right in-app message.
+      this.relaunching.delete(taskId);
+      throw err;
+    }
+
+    // Tell the renderer to repoint the tab that hosted oldPtyId onto the new
+    // ptyId — avoids closing/reopening a tab under the user. PHI-free payload.
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) {
+        w.webContents.send('typebuild:sessionRelaunched', {
+          oldPtyId,
+          newPtyId: res.ptyId,
+          cwd: os.homedir(),
+          title: `TypeBuild task ${shortId(taskId)}`,
+        });
+      }
+    }
+    return { ok: true, ptyId: res.ptyId };
+  }
+
+  // Shared launch core for both the initial Start (runNow) and the expiry
+  // relaunch. `resume` adds the `resume` flag → claude --continue and drops
+  // the positional /work-claim prompt (a resumed conversation already claimed
+  // the task; re-prompting would re-run the claim). Returns the live run
+  // result; throws (typed mint error / no-window) on failure so callers and
+  // the IPC layer surface the same in-app messages.
+  private async launchSession(
+    id: string,
+    opts: { resume: boolean },
+  ): Promise<{ ptyId: number }> {
     // Routing fields (flags) come from the in-memory cache populated by the
     // list poll; fall back to an empty flag set if the row isn't cached yet.
     const cached = this.cache.get(id);
@@ -360,16 +435,28 @@ export class TypeBuildTaskSource implements TaskSource {
 
     // Force the interactive run style; pass through the server's arg-producing
     // flags (e.g. chrome → --chrome). 'interactive' is a no-op for flagsToArgs
-    // but documents intent; runTaskInteractive ignores it for arg purposes.
-    const flags = Array.from(new Set([...serverFlags, 'interactive']));
+    // but documents intent; runTaskInteractive ignores it for arg purposes. On
+    // a relaunch we add 'resume' (→ --continue) so the prior conversation
+    // continues with the fresh token instead of starting cold.
+    const flags = Array.from(
+      new Set([
+        ...serverFlags,
+        'interactive',
+        ...(opts.resume ? ['resume'] : []),
+      ]),
+    );
 
     const { runTaskInteractive } = await import('../agents/interactive');
     const synthetic: Task = this.syntheticTask(id, flags);
 
+    let ptyId = 0;
     const res = await runTaskInteractive(synthetic, {
       agentId: 'claude',
       // ONLY the opaque task id — never a title/body (PHI).
       prompt: `Run /mcp__typebuild__work and claim task ${id}`,
+      // On resume, suppress the positional prompt so --continue resumes the
+      // existing conversation rather than seeding a new /work claim.
+      omitPrompt: opts.resume,
       cwd: os.homedir(),
       // No local run row: FK to tasks(id) would fail for a remote id.
       recordRun: false,
@@ -390,8 +477,9 @@ export class TypeBuildTaskSource implements TaskSource {
       },
       onExit: () => {
         // Drop the session from the expiry registry, then run the
-        // refresh/release-prompt flow.
-        clearSession(res.ptyId);
+        // refresh/release-prompt flow. `ptyId` is assigned synchronously
+        // below before any exit can fire.
+        clearSession(ptyId);
         void this.onSessionExit(id);
       },
     });
@@ -400,12 +488,15 @@ export class TypeBuildTaskSource implements TaskSource {
       // No GUI window to host the tab — interactive Start needs the app open.
       throw new Error('typebuild: Start needs an open Breeze window');
     }
+    ptyId = res.ptyId;
 
-    // 5. Register the live session for the expiry clock (fm-b5at.10). The token
-    //    itself never lands here — only its expiry + the (non-PHI) task id.
+    // Register the live session for the expiry clock (fm-b5at.10). The token
+    // itself never lands here — only its expiry + the (non-PHI) task id. A
+    // relaunch overwrites the old entry's expiry with the fresh horizon, so
+    // the clock re-arms automatically.
     registerSession(res.ptyId, { expiresAt: minted.expiresAt, taskId: id });
 
-    return { ok: true, ptyId: res.ptyId };
+    return { ptyId: res.ptyId };
   }
 
   // Build a minimal local-shape Task to feed runTaskInteractive. It NEVER
@@ -440,6 +531,13 @@ export class TypeBuildTaskSource implements TaskSource {
   // the broadcast carries only the task id.
   private async onSessionExit(id: string): Promise<void> {
     await this.refreshAndBroadcast();
+    // Mid-relaunch: the old PTY's exit is expected and the claim carries over
+    // to the fresh session — don't nag the user to release it. Consume the
+    // flag so a genuine later exit of the new session still prompts.
+    if (this.relaunching.has(id)) {
+      this.relaunching.delete(id);
+      return;
+    }
     const me = getAuthState().email;
     const row = this.cache.get(id);
     if (me && row?.claimedBy && row.claimedBy === me) {

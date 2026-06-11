@@ -31,6 +31,7 @@ import { EditShell } from './components/EditShell';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
+import { TypebuildSessionBanner } from './components/TypebuildSessionBanner';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
 import { StoreProvider, useStore, makeTab } from './store';
@@ -47,6 +48,25 @@ import type { CustomTagCriterion, Entry } from './types';
 import { TAG_PALETTE, assignTagKey, newTagId } from './tags';
 import './App.css';
 
+
+// fm-b5at.10 — map a thrown TypeBuild MCP-token mint failure to the bead's
+// three exact in-app messages. Main encodes the typed code in the error
+// message as "[typebuild-mint:<code>]" (IPC strips custom Error props). This
+// mirrors the canonical copy in TasksPage.tsx (mintErrorMessage) for the
+// relaunch path; the message text is intentionally identical so the user sees
+// the same wording whether a launch or a relaunch fails. Returns a friendly
+// fallback when the code isn't one of the three.
+const RELAUNCH_MINT_MESSAGES: Record<string, string> = {
+  'signed-out': 'Please sign in again',
+  unreachable: "Can't reach TypeBuild right now",
+  'access-denied': 'Your access has changed, contact your admin',
+};
+function relaunchErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const m = /\[typebuild-mint:([a-z-]+)\]/.exec(raw);
+  if (m && RELAUNCH_MINT_MESSAGES[m[1]]) return RELAUNCH_MINT_MESSAGES[m[1]];
+  return "Couldn't restart the session — try again";
+}
 
 function Shell() {
   const { state, activeTab, refreshActive, dispatch, setTab, focusEntryByName, navigateTo, loadDir } = useStore();
@@ -89,6 +109,20 @@ function Shell() {
   // fm-kaa / fm-yi85 — Tasks overview is now a singleton tab (kind='tasks'),
   // not a modal. The :tasks verb and the sidebar "See all" link dispatch
   // openTasksTab; rendering is inline in the main slot.
+
+  // fm-b5at.10 — TypeBuild MCP session-expiry phases, keyed by the session's
+  // ptyId. Main's expiry clock pushes 'warning' (T-15min) then 'expired'
+  // (at/after token lapse). The banner over the active session tab reads this;
+  // 'expired' offers a one-click relaunch. `dismissed` carries ptyIds whose
+  // 'warning' the user waved off (a later 'expired' for the same pty still
+  // shows — that one is actionable). `relaunch` tracks the in-flight restart.
+  const [expiryPhase, setExpiryPhase] = useState<
+    Map<number, { phase: 'warning' | 'expired'; taskId: string }>
+  >(new Map());
+  const [expiryDismissed, setExpiryDismissed] = useState<Set<number>>(new Set());
+  const [relaunch, setRelaunch] = useState<{ ptyId: number; error: string | null } | null>(
+    null,
+  );
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -466,6 +500,87 @@ function Shell() {
     return off;
   }, [dispatch]);
 
+  // fm-b5at.10 — TypeBuild MCP session-expiry phases. Main's expiry clock
+  // broadcasts 'warning' (T-15min) and 'expired' (at/after token lapse) per
+  // live session, keyed by ptyId. We stash the phase so the banner over the
+  // active session tab can render it. We never surface the raw MCP error — the
+  // banner sits over it with a friendly relaunch.
+  useEffect(() => {
+    const off = fm.onTypebuildSessionExpiry(({ ptyId, taskId, phase }) => {
+      setExpiryPhase((prev) => {
+        const next = new Map(prev);
+        next.set(ptyId, { phase, taskId });
+        return next;
+      });
+      // A fresh 'expired' supersedes a dismissed 'warning' for the same pty —
+      // that one is actionable, so clear the dismiss so the banner shows.
+      if (phase === 'expired') {
+        setExpiryDismissed((prev) => {
+          if (!prev.has(ptyId)) return prev;
+          const next = new Set(prev);
+          next.delete(ptyId);
+          return next;
+        });
+      }
+    });
+    return off;
+  }, []);
+
+  // fm-b5at.10 — when a session's PTY exits (user closed the tab / Ctrl-D /
+  // the relaunch killed the old pty), prune its expiry bookkeeping so a stale
+  // banner never lingers. The relaunch path also clears the OLD pty below;
+  // this is the catch-all for normal exits.
+  useEffect(() => {
+    const off = fm.onTermExit((id) => {
+      setExpiryPhase((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+      setExpiryDismissed((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setRelaunch((r) => (r?.ptyId === id ? null : r));
+    });
+    return off;
+  }, []);
+
+  // fm-b5at.10 — after a successful relaunch, main repoints the tab onto the
+  // new pty. Swap the terminal in place (no tab churn), then clear all expiry
+  // bookkeeping for the OLD pty (the new one starts with a fresh ~8h horizon;
+  // the clock re-arms server-side).
+  useEffect(() => {
+    const off = fm.onTypebuildSessionRelaunched(
+      ({ oldPtyId, newPtyId, cwd, title }) => {
+        dispatch({
+          type: 'repointTerminal',
+          oldPtyId,
+          newPtyId,
+          cwd,
+          label: title,
+        });
+        setExpiryPhase((prev) => {
+          if (!prev.has(oldPtyId)) return prev;
+          const next = new Map(prev);
+          next.delete(oldPtyId);
+          return next;
+        });
+        setExpiryDismissed((prev) => {
+          if (!prev.has(oldPtyId)) return prev;
+          const next = new Set(prev);
+          next.delete(oldPtyId);
+          return next;
+        });
+        setRelaunch((r) => (r?.ptyId === oldPtyId ? null : r));
+      },
+    );
+    return off;
+  }, [dispatch]);
+
   // Self-heal the permissionsPrimed flag on every launch so the Welcome
   // notice only appears when something is actually needed. primePermissions
   // is silent for already-granted folders (opendir succeeds without
@@ -649,6 +764,32 @@ function Shell() {
   }
   const tab = activeTab;
 
+  // fm-b5at.10 — expiry banner for the active TypeBuild session tab. Only the
+  // active tab gets the strip (backgrounded sessions still carry the phase in
+  // the map and surface it when focused); the warning is hidden once dismissed.
+  const activePtyId = tab.terminal?.ptyId;
+  const activeExpiry =
+    activePtyId != null ? expiryPhase.get(activePtyId) ?? null : null;
+  const activePhase = activeExpiry?.phase ?? null;
+  const showExpiryBanner =
+    !!activePhase &&
+    tab.terminal?.source === 'typebuild' &&
+    !(activePhase === 'warning' && activePtyId != null && expiryDismissed.has(activePtyId));
+
+  // One-click relaunch: kill the expired PTY, mint fresh, resume. A typed mint
+  // failure maps to the same in-app message as the initial launch and is shown
+  // inline on the banner so the user can retry; the tab repoints on success
+  // (handled by the onTypebuildSessionRelaunched effect above).
+  const doRelaunch = async (ptyId: number, taskId: string) => {
+    setRelaunch({ ptyId, error: null });
+    try {
+      await fm.typebuildRelaunchSession({ ptyId, taskId });
+      // Success path clears `relaunch` via the relaunched effect (repoint).
+    } catch (err) {
+      setRelaunch({ ptyId, error: relaunchErrorMessage(err) });
+    }
+  };
+
   const overlayApi: OverlayApi = {
     requestRename: (entry, mode = 'full') => setRenaming({ entry, mode }),
     requestMkdir: () => setMkdirOpen(true),
@@ -700,6 +841,28 @@ function Shell() {
           TerminalSplit wraps both so embedded terminals work in either
           mode. */}
       <main className="shell__main">
+        {/* fm-b5at.10 — TypeBuild MCP session-expiry strip, pinned over the
+            active session's terminal. 'warning' is a dismissible heads-up;
+            'expired' offers a one-click relaunch (the user never sees the raw
+            MCP error underneath). PHI-free. */}
+        {showExpiryBanner && activePtyId != null && activePhase && (
+          <TypebuildSessionBanner
+            phase={activePhase}
+            busy={relaunch?.ptyId === activePtyId && !relaunch.error}
+            error={relaunch?.ptyId === activePtyId ? relaunch.error : null}
+            onRestart={() => {
+              const taskId = activeExpiry?.taskId;
+              if (taskId) void doRelaunch(activePtyId, taskId);
+            }}
+            onDismiss={() =>
+              setExpiryDismissed((prev) => {
+                const next = new Set(prev);
+                next.add(activePtyId);
+                return next;
+              })
+            }
+          />
+        )}
         <TerminalSplit
           tabs={state.tabs}
           activeIndex={state.activeTab}

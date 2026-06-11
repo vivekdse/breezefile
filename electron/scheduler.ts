@@ -21,6 +21,10 @@ import { executeTaskRun, AgentNotAvailableError } from './agents/execute';
 import { defaultAgentId } from './agents/registry';
 import { isInteractive } from './agents/flags';
 import { nextFireFromExpr } from './cron';
+import * as overlay from './schedule-overlay';
+import type { RemoteSchedule } from './schedule-overlay';
+import { getTaskSource } from './sources/registry';
+import type { SourcedTask } from './core/task-source';
 
 const MAX_ATTEMPTS = 3;
 const MAX_CONCURRENT = 2;
@@ -47,6 +51,9 @@ export function startScheduler(): void {
   // and leaving them around makes "last run state" lie in the UI.
   reapStaleRuns();
   tasks.setTaskChangeHook(rearm);
+  // fm-b5at.8 — re-arm when the remote schedule overlay changes (a schedule
+  // set/cleared/rolled-forward may move the soonest fire).
+  overlay.setScheduleChangeHook(rearm);
   // First arm at startup. Catches missed fires from when the app was
   // closed: any task with next_run_at <= now fires immediately.
   rearm();
@@ -74,7 +81,12 @@ function rearm(): void {
     clearTimeout(timer);
     timer = null;
   }
-  const next = tasks.nextScheduledFire();
+  // Arm against the soonest fire across BOTH local auto tasks and the remote
+  // schedule overlay (fm-b5at.8). Either can be null; we want the earlier of
+  // the two when both exist.
+  const localNext = tasks.nextScheduledFire();
+  const overlayNext = safeNextOverlayFire();
+  const next = minDefined(localNext, overlayNext);
   if (next == null) return;
   const wait = Math.max(0, next - Date.now());
   // Node's setTimeout caps at ~24.8 days; clamp so we re-arm before
@@ -94,10 +106,153 @@ async function onTimer(): Promise<void> {
     if (inFlight.has(t.id)) continue;
     void dispatch(t);
   }
+
+  // fm-b5at.8 — remote schedule overlay fires. These dispatch through the
+  // owning TaskSource's runNow (interactive) rather than executeTaskRun. They
+  // share the MAX_CONCURRENT budget with local auto runs. dispatchOverlay
+  // ALWAYS rolls the cron forward (even on skip/notify) so a fire is never
+  // burned silently and never re-fires the same minute.
+  const dueOverlay = overlay.dueSchedules(now);
+  for (const s of dueOverlay) {
+    if (inFlight.size >= MAX_CONCURRENT) break;
+    const key = overlayKey(s);
+    if (inFlight.has(key)) continue;
+    void dispatchOverlay(s);
+  }
+
   // If we couldn't dispatch everything (concurrency cap), the timer
   // re-arms via inFlight cleanup below; otherwise re-arm for the next
   // future fire.
-  if (due.length === 0 || inFlight.size < MAX_CONCURRENT) rearm();
+  if (
+    (due.length === 0 && dueOverlay.length === 0) ||
+    inFlight.size < MAX_CONCURRENT
+  ) {
+    rearm();
+  }
+}
+
+// Overlay fires share the inFlight Set with local task ids; namespace them so
+// a remote task id can't collide with a local one.
+function overlayKey(s: { sourceId: string; taskId: string }): string {
+  return `overlay:${s.sourceId}:${s.taskId}`;
+}
+
+// A short, content-free fragment of an opaque task id for PHI-free labels /
+// notifications ("TypeBuild task a1b2c3"). The id is not PHI.
+function shortId(id: string): string {
+  return id.length <= 8 ? id : id.slice(0, 8);
+}
+
+/** Dispatch one due overlay schedule. Roll the cron forward UNCONDITIONALLY —
+ *  whether we launch, skip, or fail — so the schedule keeps its cadence and we
+ *  never burn a fire silently. The designed UX is: when registered (signed in)
+ *  AND a GUI window exists, call source.runNow(taskId) (interactive — opens a
+ *  tab and waits at the approval gate; the attention ping is the UX). When
+ *  signed out, no window, or runNow throws (e.g. a mint error): raise a
+ *  PHI-free notification pointing the user to sign in / open the app. */
+async function dispatchOverlay(s: RemoteSchedule): Promise<void> {
+  const key = overlayKey(s);
+  inFlight.add(key);
+  try {
+    // Lazily prune this row first: if the task is gone or terminal server-side,
+    // drop the schedule and skip the fire entirely.
+    if (await overlayRowIsStale(s)) {
+      overlay.clearSchedule(s.sourceId, s.taskId);
+      return; // cleared — nothing to roll forward.
+    }
+
+    const source = getTaskSource(s.sourceId);
+    const label = `${s.sourceId === 'typebuild' ? 'TypeBuild' : s.sourceId} task ${shortId(
+      s.taskId,
+    )}`;
+
+    // Signed out: the source isn't registered. Don't burn the schedule —
+    // roll forward and notify so the user knows to sign in.
+    if (!source) {
+      overlayNotify(
+        s.taskId,
+        `Scheduled ${label} could not start — open Breezefile and sign in`,
+      );
+      overlay.rollForward(s.sourceId, s.taskId);
+      return;
+    }
+
+    // Interactive runs need a GUI window to host the tab. Under headless
+    // breezed (no window) we can't open an interactive session — skip + notify.
+    if (!breezeHost().hasInteractiveWindow?.()) {
+      overlayNotify(
+        s.taskId,
+        `Scheduled ${label} could not start — open Breezefile to run it`,
+      );
+      overlay.rollForward(s.sourceId, s.taskId);
+      return;
+    }
+
+    try {
+      // runNow opens the interactive tab and waits at the approval gate (the
+      // ping is the designed attention UX). manualInvocation:false marks it
+      // as scheduler-driven for any source that cares.
+      await source.runNow(s.taskId, { manualInvocation: false });
+    } catch (e) {
+      // Includes mint failures ([typebuild-mint:<code>]) and "needs an open
+      // window" races. PHI-free message — only the opaque short id.
+      const detail = (e as Error)?.message ?? '';
+      const signedOut = /signed-out|signed out|401/i.test(detail);
+      overlayNotify(
+        s.taskId,
+        signedOut
+          ? `Scheduled ${label} could not start — open Breezefile and sign in`
+          : `Scheduled ${label} could not start — open Breezefile to run it`,
+      );
+    }
+    // Whether the launch succeeded or threw, advance the cron so we don't
+    // re-fire this same minute.
+    overlay.rollForward(s.sourceId, s.taskId);
+  } finally {
+    inFlight.delete(key);
+    rearm();
+  }
+}
+
+/** True when the overlay row's task no longer exists or is in a terminal state
+ *  server-side. Resolves via the owning source (getTask). A source that isn't
+ *  registered (signed out) or a transient lookup failure is NOT treated as
+ *  stale — we keep the row so an outage doesn't silently drop a schedule. */
+async function overlayRowIsStale(s: RemoteSchedule): Promise<boolean> {
+  const source = getTaskSource(s.sourceId);
+  if (!source) return false; // can't tell — keep it.
+  try {
+    const t = (await source.getTask(s.taskId)) as SourcedTask | null;
+    if (t == null) return true; // gone server-side.
+    return t.status === 'done' || t.status === 'cancelled';
+  } catch {
+    return false; // transient — keep it.
+  }
+}
+
+function overlayNotify(taskId: string, body: string): void {
+  // Reuse the host failure path. PHI-free: the synthetic "title" is the opaque
+  // short id only (never a real task title); the full message is the body.
+  try {
+    breezeHost().onRunFailed({ id: taskId, title: `task ${shortId(taskId)}` }, body);
+  } catch (e) {
+    console.error('[scheduler] overlay notify:', e);
+  }
+}
+
+function safeNextOverlayFire(): number | null {
+  try {
+    return overlay.nextOverlayFire();
+  } catch (e) {
+    console.error('[scheduler] nextOverlayFire:', e);
+    return null;
+  }
+}
+
+function minDefined(a: number | null, b: number | null): number | null {
+  if (a == null) return b;
+  if (b == null) return a;
+  return Math.min(a, b);
 }
 
 async function dispatch(task: Task, attempt = 1, existingRunId?: string): Promise<void> {

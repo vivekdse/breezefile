@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fm } from './bridge';
 import { humanizeError } from './errorMessages';
-import type { Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
+import type { RemoteSchedule, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
 
 export function useTasks(filter: TaskFilter = {}): {
   tasks: Task[];
@@ -90,6 +90,53 @@ export async function taskSourceAction(
   payload?: unknown,
 ): Promise<unknown> {
   return fm.tasksSourceAction(source, taskId, action, payload);
+}
+
+// fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. The overlay
+// stores a local cron (opaque ids + cron only) so a time-gated remote task can
+// fire on the local scheduler. setOverlaySchedule throws on an invalid cron
+// (the main-process validator); callers surface the message inline.
+export async function setOverlaySchedule(
+  source: string,
+  taskId: string,
+  cron: string,
+): Promise<RemoteSchedule> {
+  return fm.tasksOverlaySet(source, taskId, cron);
+}
+
+export async function clearOverlaySchedule(
+  source: string,
+  taskId: string,
+): Promise<void> {
+  return fm.tasksOverlayClear(source, taskId);
+}
+
+// All active overlay schedules, keyed "<source>:<task>" for cheap row lookup.
+// Re-pulls on tasks:changed (overlay writes broadcast it). Returns a map so a
+// row can render its ⏰ pill without scanning a list.
+export function useOverlaySchedules(): Record<string, RemoteSchedule> {
+  const [byKey, setByKey] = useState<Record<string, RemoteSchedule>>({});
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const list = await fm.tasksOverlayList();
+        if (cancelled) return;
+        const map: Record<string, RemoteSchedule> = {};
+        for (const s of list) map[`${s.sourceId}:${s.taskId}`] = s;
+        setByKey(map);
+      } catch {
+        /* keep the last-known set */
+      }
+    };
+    void load();
+    const unsub = fm.onTasksChanged(() => void load());
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+  return byKey;
 }
 
 // fm-b5at.1 — registered TaskSources + their capabilities. Re-pulls on

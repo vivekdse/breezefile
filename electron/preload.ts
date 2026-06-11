@@ -251,6 +251,12 @@ const fm = {
     action: string,
     payload?: unknown,
   ) => ipcRenderer.invoke('tasks:sourceAction', source, taskId, action, payload),
+  // ── Schedule overlay for remote-source tasks (fm-b5at.8) ──
+  tasksOverlaySet: (source: string, taskId: string, cron: string) =>
+    ipcRenderer.invoke('tasks:overlaySet', source, taskId, cron),
+  tasksOverlayClear: (source: string, taskId: string) =>
+    ipcRenderer.invoke('tasks:overlayClear', source, taskId),
+  tasksOverlayList: () => ipcRenderer.invoke('tasks:overlayList'),
   // ── Multi-source (breezed P4) ──
   sourcesList: () => ipcRenderer.invoke('sources:list'),
   sourcesConnect: (host: string) => ipcRenderer.invoke('sources:connect', host),
@@ -368,6 +374,54 @@ const fm = {
     ipcRenderer.on('typebuild:releasePrompt', handler);
     return () => ipcRenderer.off('typebuild:releasePrompt', handler);
   },
+  // ─── TypeBuild MCP session expiry (fm-b5at.10) ────────────────────────
+  // The 8h MCP token can't refresh mid-session. Main's expiry clock
+  // broadcasts a T-15min 'warning' and an at/after-expiry 'expired' phase per
+  // live session (keyed by ptyId; PHI-free — opaque taskId only). 'expired'
+  // drives a one-click relaunch: relaunchSession kills the old PTY, mints a
+  // fresh token, and resumes the conversation with --continue; on success
+  // sessionRelaunched tells the renderer to repoint the tab onto the new
+  // ptyId (no tab churn). Self-contained block.
+  onTypebuildSessionExpiry: (
+    cb: (payload: {
+      ptyId: number;
+      taskId: string;
+      phase: 'warning' | 'expired';
+      expiresAt: number;
+    }) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: {
+        ptyId: number;
+        taskId: string;
+        phase: 'warning' | 'expired';
+        expiresAt: number;
+      },
+    ) => cb(payload);
+    ipcRenderer.on('typebuild:sessionExpiry', handler);
+    return () => ipcRenderer.off('typebuild:sessionExpiry', handler);
+  },
+  onTypebuildSessionRelaunched: (
+    cb: (payload: {
+      oldPtyId: number;
+      newPtyId: number;
+      cwd: string;
+      title: string;
+    }) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: { oldPtyId: number; newPtyId: number; cwd: string; title: string },
+    ) => cb(payload);
+    ipcRenderer.on('typebuild:sessionRelaunched', handler);
+    return () => ipcRenderer.off('typebuild:sessionRelaunched', handler);
+  },
+  typebuildRelaunchSession: (payload: { ptyId: number; taskId: string }) =>
+    ipcRenderer.invoke('typebuild:relaunchSession', payload) as Promise<{
+      ok: boolean;
+      ptyId: number;
+    }>,
   // ─── TypeBuild auth (fm-b5at.2) ───────────────────────────────────
   // Self-contained namespaced block for the TypeBuild plugin's Firebase
   // sign-in. Token lifecycle lives entirely in main (electron/typebuild/

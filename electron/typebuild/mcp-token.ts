@@ -25,12 +25,14 @@
 // renderer. It is handed to exactly one caller (the source) which puts it in
 // the PTY env and nowhere else. We log only terse, token-free status.
 
+import { hostname } from 'node:os';
 import { getIdToken, signOut } from './auth';
 
 const MINT_URL = 'https://general.typebuild.com/mcp-token';
 // A stable, content-free device label. Server stores this for audit; it is not
-// PHI and carries no token material.
-const DEVICE_NAME = 'breezefile';
+// PHI and carries no token material. Including the hostname lets the audit log
+// distinguish which of the user's devices minted each session token.
+const DEVICE_NAME = `breezefile (${hostname()})`;
 
 /** A minted MCP token plus its absolute expiry. The token is secret — keep it
  *  out of logs, disk, and the renderer. */

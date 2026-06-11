@@ -174,6 +174,15 @@ function open(): Database.Database {
   return db;
 }
 
+/** Run the migration chain on an arbitrary connection. Exposed so a sibling
+ *  module (electron/schedule-overlay.ts) that opens its own handle to the same
+ *  tasks.db can ensure its table exists without racing tasks.ts's lazy open.
+ *  Idempotent — gated on schema_version, so calling it per-connection is safe
+ *  (WAL allows multiple connections to the same file). */
+export function ensureSchema(d: Database.Database): void {
+  migrate(d);
+}
+
 function migrate(d: Database.Database) {
   d.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -257,6 +266,27 @@ function migrate(d: Database.Database) {
     // (chrome/auto/resume/interactive). Default '[]' = plain headless run.
     (db) => {
       db.exec(`ALTER TABLE tasks ADD COLUMN flags TEXT NOT NULL DEFAULT '[]';`);
+    },
+
+    // v5 — PHI-free schedule overlay for remote-source tasks (fm-b5at.8).
+    // Lets a time-gated remote (TypeBuild) task fire on the local cron. The
+    // server owns the queue; Breezefile owns timing. STRICTLY PHI-free:
+    // opaque ids + cron only — never titles/bodies. The overlay module
+    // (electron/schedule-overlay.ts) owns all reads/writes; this migration
+    // just creates the table on the shared DB. No FK to `tasks` (the rows
+    // reference REMOTE ids that have no local task row).
+    (db) => {
+      db.exec(`
+        CREATE TABLE remote_schedule (
+          source_id   TEXT NOT NULL,
+          task_id     TEXT NOT NULL,
+          cron        TEXT NOT NULL,
+          next_run_at INTEGER NOT NULL,
+          created_at  INTEGER NOT NULL,
+          PRIMARY KEY (source_id, task_id)
+        );
+        CREATE INDEX idx_remote_schedule_next ON remote_schedule(next_run_at);
+      `);
     },
   ];
 

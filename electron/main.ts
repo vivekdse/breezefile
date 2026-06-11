@@ -17,6 +17,7 @@ import {
   onAuthStateChanged,
 } from './typebuild/auth';
 import { TypeBuildTaskSource } from './sources/typebuild';
+import { startExpiryClock, reconcileExpiry } from './typebuild/expiry-clock';
 import {
   registerTaskSource,
   unregisterTaskSource,
@@ -209,6 +210,12 @@ app.whenReady().then(() => {
   // useTaskSources() re-pulls the capability map, plus a `tasks:changed`
   // so the list re-pulls immediately.
   wireTypebuildTaskSource();
+  // fm-b5at.10 — TypeBuild MCP session-expiry clock. Watches the live-session
+  // registry (sessions.ts) and broadcasts a T-15min warning + an at-expiry
+  // prompt per session, re-evaluating on wake-from-sleep so a token that
+  // lapsed while suspended is caught the instant the machine resumes. The
+  // renderer turns 'expired' into a one-click relaunch via the IPC below.
+  startExpiryClock();
   // fm-fc0 — best-effort: register breeze-mcp into ~/.claude/settings.json
   // on every launch. Idempotent — does nothing if already present and
   // up-to-date. Failures (file unreadable, no MCP binary) are logged
@@ -295,6 +302,24 @@ function wireTypebuildTaskSource() {
       if (!w.isDestroyed()) w.webContents.send(channel);
     }
   }
+
+  // fm-b5at.10 — one-click expiry relaunch. The renderer's "restart task"
+  // button (shown when the expiry clock broadcasts 'expired') invokes this.
+  // We kill the old PTY, mint a fresh token, and respawn the SAME conversation
+  // with --continue. A typed mint failure propagates so the renderer maps it
+  // to the same three in-app messages as the initial launch (no dead
+  // terminal). After a successful relaunch we poke the clock to re-arm against
+  // the new token's horizon immediately. Registered once at module init; it
+  // no-ops gracefully when signed out (no source).
+  ipcMain.handle(
+    'typebuild:relaunchSession',
+    async (_e, payload: { ptyId: number; taskId: string }) => {
+      if (!source) throw new Error('typebuild: not signed in');
+      const result = await source.relaunchSession(payload.ptyId, payload.taskId);
+      reconcileExpiry();
+      return result;
+    },
+  );
 
   function register() {
     if (source) return;

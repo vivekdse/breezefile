@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
 import * as tasks from './tasks';
 import type { TaskCreate, TaskFilter, TaskUpdate } from './tasks';
+import * as overlaySchedule from './schedule-overlay';
 import { platform } from './platform';
 import {
   enterSideBySide,
@@ -510,7 +511,23 @@ function reservePtyId(): number {
   return nextPtyId++;
 }
 
-export { spawnManagedPty, reservePtyId };
+/** Gracefully terminate a managed PTY by id from the main process (no IPC
+ *  round-trip). Used by the TypeBuild expiry relaunch (fm-b5at.10) to retire
+ *  the old, expired session before respawning a fresh one. The proc's own
+ *  onExit handler removes it from the registry and fires term:exit; we also
+ *  delete defensively in case the kill races. No-op if the id is unknown. */
+function killManagedPty(id: number, signal?: string): void {
+  const r = ptys.get(id);
+  if (!r) return;
+  try {
+    r.proc.kill(signal);
+  } catch {
+    /* already gone */
+  }
+  ptys.delete(id);
+}
+
+export { spawnManagedPty, reservePtyId, killManagedPty };
 export type { SpawnManagedPtyOpts };
 
 export function registerIpc() {
@@ -2188,6 +2205,21 @@ end tell`;
       return src.sourceAction(taskId, action, payload);
     },
   );
+  // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. Lets a
+  // time-gated remote (TypeBuild) task fire on the local cron. Rows carry
+  // ONLY opaque ids + a cron string — never titles/bodies. setSchedule
+  // validates the cron (throws on invalid → surfaced inline by the renderer).
+  ipcMain.handle(
+    'tasks:overlaySet',
+    (_e, source: string, taskId: string, cron: string) =>
+      overlaySchedule.setSchedule(source, taskId, cron),
+  );
+  ipcMain.handle(
+    'tasks:overlayClear',
+    (_e, source: string, taskId: string) =>
+      overlaySchedule.clearSchedule(source, taskId),
+  );
+  ipcMain.handle('tasks:overlayList', () => overlaySchedule.listSchedules());
   ipcMain.handle('tasks:countByFolder', (_e, folder: string) => tasks.countByFolder(folder));
   ipcMain.handle('tasks:dbExists', () => tasks.dbExists());
   // fm-adc — drop a YAML-frontmatter+markdown sidecar at

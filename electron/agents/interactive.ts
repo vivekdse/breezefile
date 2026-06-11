@@ -28,6 +28,12 @@ export type InteractiveRunOptions = {
   agentId?: string;
   /** Override the resolved prompt (TypeBuild Start passes a custom one). */
   prompt?: string;
+  /** When true, NO positional prompt is passed to claude. Used by the
+   *  TypeBuild expiry relaunch (fm-b5at.10): it respawns with --continue
+   *  (resume flag) to pick up the existing conversation, and a positional
+   *  prompt alongside --continue would seed a NEW message (re-running the
+   *  /work claim). Omitting it makes --continue a clean resume. */
+  omitPrompt?: boolean;
   /** Override the working directory (else task.folder, else home). */
   cwd?: string;
   /** Extra claude args appended after the flags-derived args. */
@@ -126,12 +132,14 @@ export async function runTaskInteractive(
   }
   // Positional prompt arg launches claude interactively pre-seeded with the
   // task; flags map to CLI args; --add-dir grants the cwd. No -p (that's
-  // the headless one-shot mode).
+  // the headless one-shot mode). On a resume relaunch (omitPrompt) we drop
+  // the positional prompt entirely so --continue resumes the prior
+  // conversation cleanly instead of injecting a fresh message.
   const args = [
     ...flagArgs,
     ...(opts.extraArgs ?? []),
     '--add-dir', cwd,
-    prompt,
+    ...(opts.omitPrompt ? [] : [prompt]),
   ];
 
   const ptyId = reservePtyId();

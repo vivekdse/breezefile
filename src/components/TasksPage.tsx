@@ -24,11 +24,14 @@ import { fm } from '../bridge';
 import { invokeLauncher } from '../launchers';
 import { spawnTerminal } from '../terminalSpawn';
 import {
+  clearOverlaySchedule,
   deleteTask,
   runTaskNow,
+  setOverlaySchedule,
   taskSourceAction,
   todayISO,
   updateTask,
+  useOverlaySchedules,
   useRunCounts,
   useTaskSources,
   useTasks,
@@ -37,7 +40,7 @@ import {
 import { RunsView } from './RunsView';
 import type { ConfirmRequest } from './ConfirmDialog';
 import { formatOpError } from '../errorMessages';
-import type { Task, TaskSourceCapabilities, TaskStatus } from '../types';
+import type { RemoteSchedule, Task, TaskSourceCapabilities, TaskStatus } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './TasksPage.css';
 
@@ -220,6 +223,13 @@ export function TasksPage() {
   // Gates the Start button on TypeBuild rows; the disabled tooltip explains
   // what's missing.
   const tbReady = useTypebuildReadiness();
+  // fm-b5at.8 — active schedule overlays for remote tasks, keyed
+  // "<source>:<task>". Drives the ⏰ pill + the Schedule… modal.
+  const overlayByKey = useOverlaySchedules();
+  const overlayFor = (t: Task): RemoteSchedule | undefined =>
+    t.source ? overlayByKey[`${t.source}:${t.id}`] : undefined;
+  // The row whose Schedule… modal is open, or null.
+  const [scheduleFor, setScheduleFor] = useState<Task | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cursorId, setCursorId] = useState<string | null>(null);
@@ -549,6 +559,25 @@ export function TasksPage() {
         type: 'setStatus',
         msg: msg ?? formatOpError('start', e),
       });
+    }
+  }
+
+  // fm-b5at.8 — save / clear a remote task's local cron overlay. setOverlay-
+  // Schedule throws on an invalid cron (the main-process validator); the modal
+  // shows that inline, so here we just translate the result to a status line.
+  // PHI-free: only the opaque id + cron cross the wire.
+  async function saveSchedule(task: Task, cron: string) {
+    if (!task.source) return;
+    await setOverlaySchedule(task.source, task.id, cron);
+    dispatch({ type: 'setStatus', msg: `scheduled · ${cron}` });
+  }
+  async function clearSchedule(task: Task) {
+    if (!task.source) return;
+    try {
+      await clearOverlaySchedule(task.source, task.id);
+      dispatch({ type: 'setStatus', msg: 'schedule cleared' });
+    } catch (e) {
+      dispatch({ type: 'setStatus', msg: formatOpError('clear schedule', e) });
     }
   }
 
@@ -1389,6 +1418,7 @@ export function TasksPage() {
                   task={t}
                   caps={capsFor(t)}
                   tbReady={tbReady}
+                  schedule={overlayFor(t)}
                   runCount={runCounts[t.id] ?? 0}
                   hideFolder={group === 'folder'}
                   selected={selected.has(t.id)}
@@ -1438,6 +1468,7 @@ export function TasksPage() {
         <RowKebabMenu
           task={kebabFor.task}
           caps={capsFor(kebabFor.task)}
+          schedule={overlayFor(kebabFor.task)}
           x={kebabFor.x}
           y={kebabFor.y}
           onClose={() => setKebabFor(null)}
@@ -1506,10 +1537,31 @@ export function TasksPage() {
               case 'due-clear':
                 rowSetDueQuick(t, null);
                 break;
+              case 'schedule':
+                setScheduleFor(t);
+                break;
               case 'delete':
                 rowDelete(t);
                 break;
             }
+          }}
+        />
+      )}
+
+      {scheduleFor && (
+        <ScheduleModal
+          task={scheduleFor}
+          current={overlayFor(scheduleFor)}
+          onClose={() => setScheduleFor(null)}
+          onSave={async (cron) => {
+            const t = scheduleFor;
+            await saveSchedule(t, cron);
+            setScheduleFor(null);
+          }}
+          onClear={async () => {
+            const t = scheduleFor;
+            await clearSchedule(t);
+            setScheduleFor(null);
           }}
         />
       )}
@@ -1528,6 +1580,7 @@ function TaskRow({
   task,
   caps,
   tbReady,
+  schedule,
   runCount,
   hideFolder,
   selected,
@@ -1545,6 +1598,7 @@ function TaskRow({
   task: Task;
   caps?: TaskSourceCapabilities;
   tbReady: TbReadiness;
+  schedule?: RemoteSchedule;
   runCount: number;
   hideFolder?: boolean;
   selected: boolean;
@@ -1669,6 +1723,16 @@ function TaskRow({
               title={`Claimed by ${claimedBy}`}
             >
               ◆ {claimedBy}
+            </span>
+          )}
+          {schedule && (
+            <span
+              className="tasks__row-schedule"
+              title={`Scheduled (local cron): ${schedule.cron} · next ${new Date(
+                schedule.nextRunAt,
+              ).toLocaleString()}`}
+            >
+              ⏰ {schedule.cron}
             </span>
           )}
           {task.start_at && (
@@ -1836,6 +1900,7 @@ function TaskRow({
 function RowKebabMenu({
   task,
   caps,
+  schedule,
   x,
   y,
   onClose,
@@ -1843,6 +1908,7 @@ function RowKebabMenu({
 }: {
   task: Task;
   caps?: TaskSourceCapabilities;
+  schedule?: RemoteSchedule;
   x: number;
   y: number;
   onClose: () => void;
@@ -1850,6 +1916,11 @@ function RowKebabMenu({
 }) {
   const canEdit = caps ? caps.canEdit : true;
   const canDelete = caps ? caps.canDelete : true;
+  // fm-b5at.8 — a remote source that can't schedule natively (TypeBuild,
+  // canSchedule:false) can still get a LOCAL cron overlay. Offer Schedule…
+  // for non-local rows whose source lacks native scheduling.
+  const canOverlaySchedule =
+    !!task.source && task.source !== 'local' && !!caps && !caps.canSchedule;
   // Outside-click + Esc dismiss.
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -1940,6 +2011,11 @@ function RowKebabMenu({
       <button className="tasks__kebab-item" onClick={() => onAction('goto-folder')}>
         Go to folder
       </button>
+      {canOverlaySchedule && (
+        <button className="tasks__kebab-item" onClick={() => onAction('schedule')}>
+          {schedule ? `Schedule… (⏰ ${schedule.cron})` : 'Schedule…'}
+        </button>
+      )}
       {canDelete && (
         <>
           <div className="tasks__kebab-sep" />
@@ -1951,6 +2027,180 @@ function RowKebabMenu({
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+// fm-b5at.8 — minimal cron picker for a remote task's LOCAL schedule overlay.
+// A few presets cover the common cases; "Custom" exposes the raw 5-field cron.
+// The cron validates main-process side on save (setOverlaySchedule throws on a
+// bad expression); we surface that inline. PHI-free: only the opaque id + cron
+// ever leave this modal. Important caveat surfaced in the body: a cron-fired
+// interactive session needs Breezefile open + signed in, and TypeBuild's 2h
+// claim TTL means a session left at the approval gate too long can lose its
+// claim.
+const CRON_PRESETS: Array<{ label: string; cron: string }> = [
+  { label: 'Daily · 9:00am', cron: '0 9 * * *' },
+  { label: 'Weekdays · 9:00am', cron: '0 9 * * 1-5' },
+  { label: 'Hourly', cron: '0 * * * *' },
+];
+
+function ScheduleModal({
+  task,
+  current,
+  onClose,
+  onSave,
+  onClear,
+}: {
+  task: Task;
+  current?: RemoteSchedule;
+  onClose: () => void;
+  onSave: (cron: string) => Promise<void>;
+  onClear: () => Promise<void>;
+}) {
+  // Seed from the current overlay; if it matches a preset, select that, else
+  // open straight into the custom field.
+  const matchPreset = current
+    ? CRON_PRESETS.find((p) => p.cron === current.cron)
+    : undefined;
+  const [mode, setMode] = useState<'preset' | 'custom'>(
+    current && !matchPreset ? 'custom' : 'preset',
+  );
+  const [preset, setPreset] = useState<string>(
+    matchPreset?.cron ?? CRON_PRESETS[0].cron,
+  );
+  const [custom, setCustom] = useState<string>(
+    current && !matchPreset ? current.cron : '',
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const cron = mode === 'preset' ? preset : custom.trim();
+
+  async function save() {
+    if (!cron) {
+      setError('Enter a cron expression');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(cron);
+    } catch (e) {
+      // The main-process validator rejects an invalid expression; show it
+      // inline rather than dismissing the modal.
+      setError(formatOpError('schedule', e));
+      setBusy(false);
+    }
+  }
+
+  async function clear() {
+    setBusy(true);
+    try {
+      await onClear();
+    } catch {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="tasks__modal-backdrop" onClick={onClose}>
+      <div
+        className="tasks__modal tasks__schedule-modal"
+        role="dialog"
+        aria-label="Schedule task"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="tasks__modal-title">Schedule on a local cron</div>
+        <div className="tasks__modal-body">
+          This source has no scheduler, so Breezefile fires it locally on the
+          cron below. The run is interactive — Breezefile must be open and
+          signed in when it fires. Note: a session left at the approval gate
+          past the 2h claim TTL can lose its claim.
+        </div>
+
+        <label className="tasks__schedule-row">
+          <input
+            type="radio"
+            name="schedule-mode"
+            checked={mode === 'preset'}
+            onChange={() => setMode('preset')}
+          />
+          <select
+            value={preset}
+            disabled={mode !== 'preset'}
+            onChange={(e) => setPreset(e.target.value)}
+          >
+            {CRON_PRESETS.map((p) => (
+              <option key={p.cron} value={p.cron}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="tasks__schedule-row">
+          <input
+            type="radio"
+            name="schedule-mode"
+            checked={mode === 'custom'}
+            onChange={() => setMode('custom')}
+          />
+          <input
+            type="text"
+            className="tasks__schedule-cron"
+            placeholder="Custom cron · e.g. 30 8 * * 1"
+            value={custom}
+            disabled={mode !== 'custom'}
+            onChange={(e) => setCustom(e.target.value)}
+            onFocus={() => setMode('custom')}
+          />
+        </label>
+
+        {error && <div className="tasks__modal-error">{error}</div>}
+
+        <div className="tasks__modal-actions">
+          {current && (
+            <button
+              type="button"
+              className="tasks__row-btn tasks__row-btn--text"
+              onClick={() => void clear()}
+              disabled={busy}
+            >
+              Clear schedule
+            </button>
+          )}
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="tasks__row-btn tasks__row-btn--text"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="tasks__row-btn tasks__row-btn--done"
+            onClick={() => void save()}
+            disabled={busy}
+          >
+            {current ? 'Update' : 'Schedule'}
+          </button>
+        </div>
+        <div className="tasks__modal-hint">Task: {task.title}</div>
+      </div>
     </div>
   );
 }

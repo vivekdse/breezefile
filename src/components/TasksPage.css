@@ -976,3 +976,83 @@
   background: var(--rule-on-panel);
   margin: 4px 2px;
 }
+
+/* fm-b5at.8 — remote-task local-schedule overlay: the ⏰ pill on a row and the
+   minimal cron picker modal. The pill mirrors the claimed pill's styling. */
+.tasks__row-schedule {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--rule-on-panel);
+  background: var(--panel-2);
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks__modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.tasks__modal {
+  background: var(--panel);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  padding: 18px;
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text-on-panel);
+}
+.tasks__modal-title {
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.tasks__modal-body {
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+  line-height: 1.4;
+}
+.tasks__schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tasks__schedule-row select,
+.tasks__schedule-cron {
+  flex: 1;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--rule-on-panel);
+  background: var(--panel-2);
+  color: var(--text-on-panel);
+}
+.tasks__schedule-cron::placeholder {
+  color: var(--muted-on-panel);
+}
+.tasks__modal-error {
+  font-size: var(--fs-sm);
+  color: var(--danger, #c0392b);
+}
+.tasks__modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tasks__modal-hint {
+  font-size: 11px;
+  color: var(--muted-on-panel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
