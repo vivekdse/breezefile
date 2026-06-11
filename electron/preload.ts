@@ -299,6 +299,18 @@ const fm = {
     ipcRenderer.on('tasks:changed', handler);
     return () => ipcRenderer.off('tasks:changed', handler);
   },
+  // Per-source failures from the tasks:list aggregation. The list itself stays
+  // a bare array (so one source failing degrades gracefully rather than
+  // throwing the whole fetch), but subscribers can surface which source broke
+  // and why — instead of the failure vanishing into the main-process log.
+  onTaskSourceError: (cb: (e: { source: string; message: string }) => void) => {
+    const handler = (
+      _: unknown,
+      payload: { source: string; message: string },
+    ) => cb(payload);
+    ipcRenderer.on('tasks:sourceError', handler);
+    return () => ipcRenderer.off('tasks:sourceError', handler);
+  },
   // ─── Task runs (fm-zf3m) ──────────────────────────────────────────
   tasksRunsList: (taskId: string, limit?: number) =>
     ipcRenderer.invoke('tasks:runsList', taskId, limit),

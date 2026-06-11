@@ -2125,7 +2125,18 @@ end tell`;
         const rows = await getTaskSource(src.id)!.listTasks(filter ?? {});
         for (const t of rows) out.push({ ...t, source: src.id });
       } catch (e) {
-        console.warn('[tasks:list]', src.id, 'failed:', (e as Error).message);
+        // A single source failing must not silently vanish: a swallowed throw
+        // here is exactly how "task list renders empty, no error anywhere"
+        // happens. Keep the array return contract (renderer treats this as a
+        // bare array), but make the failure loud — error-level in the main log
+        // AND echoed to every renderer DevTools console via a debug channel.
+        const message = (e as Error).message;
+        console.error('[tasks:list]', src.id, 'failed:', message);
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed()) {
+            w.webContents.send('tasks:sourceError', { source: src.id, message });
+          }
+        }
       }
     }
     // breezed multi-host federation (unchanged): connected ssh daemons are

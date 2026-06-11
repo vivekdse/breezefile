@@ -250,13 +250,30 @@ export class TypeBuildTaskSource implements TaskSource {
     // rows. The renderer applies its own status filter on top.
     if (filter.includeDone !== false) params.set('all', '1');
 
-    const res = await this.request('GET', `/chromeext/tasks?${params}`);
-    if (!res.ok) {
-      // Surface a terse, PHI-free error — never log title/body content.
-      throw new Error(`typebuild: list failed (${res.status})`);
+    // A per-call fetch failure (transient 5xx, token blip, network) must NOT
+    // collapse this source's whole contribution to the aggregated list to
+    // zero — that surfaces to the user as a silently-empty task list. The
+    // background poll keeps `this.cache` fresh, so fall back to it on any
+    // failure and serve the last-known rows instead of throwing. We only throw
+    // when we have nothing cached to serve (cold start), so the caller can
+    // distinguish "genuinely no data" from "stale-but-present".
+    let rows: ListRow[];
+    try {
+      const res = await this.request('GET', `/chromeext/tasks?${params}`);
+      if (!res.ok) throw new Error(`typebuild: list failed (${res.status})`);
+      const data = (await res.json().catch(() => ({}))) as { tasks?: ListRow[] };
+      rows = Array.isArray(data.tasks) ? data.tasks : [];
+    } catch (err) {
+      if (this.cache.size > 0) {
+        // Serve stale-but-present cache; never log title/body content.
+        console.warn(
+          '[typebuild] list fetch failed, serving cache:',
+          (err as Error).message,
+        );
+        return this.applyFilter([...this.cache.values()], filter);
+      }
+      throw err;
     }
-    const data = (await res.json().catch(() => ({}))) as { tasks?: ListRow[] };
-    const rows = Array.isArray(data.tasks) ? data.tasks : [];
 
     // Refresh the in-memory cache from the fresh list.
     this.cache = new Map(rows.map((r) => [r.id, mapListRow(r)]));
