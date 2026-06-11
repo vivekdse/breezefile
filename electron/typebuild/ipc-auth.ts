@@ -1,9 +1,11 @@
-// TypeBuild auth IPC (bead fm-b5at.2).
+// TypeBuild auth IPC (bead fm-b5at.2, .11).
 //
 // Bridges the main-process auth module (auth.ts) to the renderer:
-//   - typebuild:auth:signIn  (email, password) -> AuthState   (throws on error)
-//   - typebuild:auth:signOut  ()               -> void
-//   - typebuild:auth:state    ()               -> AuthState
+//   - typebuild:auth:signIn         (email, password) -> AuthState (throws code)
+//   - typebuild:auth:signInBrowser  ()                -> AuthState (throws {code})
+//   - typebuild:auth:cancelBrowser  ()                -> void
+//   - typebuild:auth:signOut        ()                -> void
+//   - typebuild:auth:state          ()                -> AuthState
 //   - broadcast `typebuild:auth:changed` to every window on state change.
 //
 // Registered from electron/main.ts (not ipc.ts — that file is owned by a
@@ -19,6 +21,11 @@ import {
   signOut,
   type AuthState,
 } from './auth';
+import {
+  BrowserAuthError,
+  cancelBrowserSignIn,
+  signInViaBrowser,
+} from './browser-signin';
 
 let registered = false;
 
@@ -41,6 +48,24 @@ export function registerTypebuildAuthIpc(): void {
     'typebuild:auth:signIn',
     (_e, email: string, password: string) => signIn(email, password),
   );
+
+  // Browser sign-in (fm-b5at.11): reuse the server's OAuth flow + hosted
+  // sign-in page (Google or email/password). On a typed failure we rethrow a
+  // `[typebuild-browser:<code>]`-tagged Error so the renderer can map the code
+  // to a user-facing state without leaking any token material.
+  ipcMain.handle('typebuild:auth:signInBrowser', async () => {
+    try {
+      return await signInViaBrowser();
+    } catch (err) {
+      const code =
+        err instanceof BrowserAuthError ? err.code : 'rejected';
+      throw new Error(`[typebuild-browser:${code}]`);
+    }
+  });
+  ipcMain.handle('typebuild:auth:cancelBrowser', () => {
+    cancelBrowserSignIn();
+  });
+
   ipcMain.handle('typebuild:auth:signOut', () => signOut());
   ipcMain.handle('typebuild:auth:state', () => getAuthState());
 

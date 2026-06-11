@@ -31,7 +31,7 @@ import { app, safeStorage } from 'electron';
 // key is designed to ship in clients (it only gates the unauthenticated
 // Identity Toolkit surface — Firebase Auth rules, not this key, are the
 // security boundary), so hardcoding it here is the normal pattern.
-const FIREBASE_API_KEY = 'AIzaSyCvfuXXWy81cFM7JU3XwbDx_auIunL-C3c';
+export const FIREBASE_API_KEY = 'AIzaSyCvfuXXWy81cFM7JU3XwbDx_auIunL-C3c';
 
 const IDENTITY_TOOLKIT_URL =
   'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword';
@@ -160,6 +160,41 @@ export async function signIn(email: string, password: string): Promise<AuthState
   if (!idToken || !refreshToken) {
     throw new Error('sign-in returned no tokens');
   }
+
+  session = {
+    idToken,
+    refreshToken,
+    email: resolvedEmail,
+    expiresAtMs: Date.now() + expiresInSec * 1000,
+  };
+  await persistRefreshToken(refreshToken);
+  notify();
+  return currentState();
+}
+
+/**
+ * Adopt an already-minted Firebase session — used by the browser sign-in flow
+ * (browser-signin.ts), which reuses the TypeBuild server's OAuth flow + hosted
+ * sign-in page and receives {idToken, refreshToken, email} (firebase_* fields)
+ * from the /token response. Stores EXACTLY like signIn() does (memory ID token,
+ * encrypted refresh token, listener notify), so everything downstream
+ * (getIdToken auto-refresh, restoreSession, mint/chromeext) behaves identically
+ * regardless of which provider minted the session — the refresh token is a
+ * standard Firebase secure-token refresh token, refreshed via the SAME
+ * securetoken.googleapis.com endpoint. Throws on missing tokens.
+ */
+export async function adoptSession(input: {
+  idToken: string;
+  refreshToken: string;
+  email: string;
+  expiresIn?: number;
+}): Promise<AuthState> {
+  const { idToken, refreshToken } = input;
+  if (!idToken || !refreshToken) {
+    throw new Error('sign-in returned no tokens');
+  }
+  const expiresInSec = Number(input.expiresIn || 3600);
+  const resolvedEmail = input.email || emailFromIdToken(idToken) || '';
 
   session = {
     idToken,

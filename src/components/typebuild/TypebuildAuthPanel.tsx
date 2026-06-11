@@ -29,6 +29,13 @@ export function TypebuildAuthPanel() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Browser sign-in (fm-b5at.11): primary path. `waiting` is the in-flight
+  // state while the user completes sign-in in their browser.
+  const [waiting, setWaiting] = useState(false);
+  const [browserError, setBrowserError] = useState<string | null>(null);
+  // The email/password form is a fallback behind a disclosure; it auto-expands
+  // when the server handoff isn't deployed yet (server-pending).
+  const [showFallback, setShowFallback] = useState(false);
 
   // Hydrate from main on open, then subscribe to broadcast changes (sign
   // in/out, refresh revocation, startup restore).
@@ -65,6 +72,40 @@ export function TypebuildAuthPanel() {
       setPassword('');
       setBusy(false);
     }
+  }
+
+  async function onSignInBrowser() {
+    if (waiting) return;
+    setWaiting(true);
+    setBrowserError(null);
+    setError(null);
+    try {
+      const next = await fm.typebuild.signInBrowser();
+      setAuthState(next);
+    } catch (err) {
+      const code = browserErrorCode((err as Error).message);
+      if (code === 'cancelled') {
+        // User cancelled / timed out — quiet reset, no error noise.
+      } else if (code === 'server-pending') {
+        // Sign-in worked but the server handoff isn't live yet — point the
+        // user at the still-working email/password fallback and auto-open it.
+        setShowFallback(true);
+        setBrowserError(
+          'TypeBuild server update pending — use email & password below for now.',
+        );
+      } else {
+        setBrowserError(browserFriendlyError(code));
+      }
+    } finally {
+      setWaiting(false);
+    }
+  }
+
+  function onCancelBrowser() {
+    void fm.typebuild.cancelBrowser();
+    // The in-flight signInBrowser() promise rejects with 'cancelled', which the
+    // handler above treats as a quiet reset; this just stops the wait sooner.
+    setWaiting(false);
   }
 
   async function onSignOut() {
@@ -108,52 +149,112 @@ export function TypebuildAuthPanel() {
   return (
     <div className="tb-auth">
       <p className="settings__hint tb-auth__intro">
-        Sign in to the TypeBuild task backend with your Firebase email and
-        password. Your sign-in is remembered securely so you only do this once.
+        Sign in to the TypeBuild task backend. This opens your browser — sign in
+        with Google or your email &amp; password on the TypeBuild page. Your
+        sign-in is remembered securely so you only do this once.
       </p>
-      <form className="tb-auth__form" onSubmit={onSignIn}>
-        <label className="tb-auth__field">
-          <span className="tb-auth__label">Email</span>
-          <input
-            type="email"
-            className="tb-auth__input"
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            disabled={busy}
-          />
-        </label>
-        <label className="tb-auth__field">
-          <span className="tb-auth__label">Password</span>
-          <input
-            type="password"
-            className="tb-auth__input"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            disabled={busy}
-          />
-        </label>
-        {error && (
-          <div className="tb-auth__error" role="alert">
-            {error}
-          </div>
-        )}
-        <div className="tb-auth__actions">
+
+      <div className="tb-auth__actions">
+        {waiting ? (
+          <>
+            <span className="settings__hint tb-auth__waiting">
+              Waiting for your browser…
+            </span>
+            <button
+              type="button"
+              className="tb-auth__btn"
+              onClick={onCancelBrowser}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
           <button
-            type="submit"
+            type="button"
             className="tb-auth__btn tb-auth__btn--primary"
-            disabled={busy || !email.trim() || !password}
+            onClick={() => void onSignInBrowser()}
           >
-            {busy ? 'Signing in…' : 'Sign in'}
+            Sign in
           </button>
+        )}
+      </div>
+      {browserError && (
+        <div className="tb-auth__error" role="alert">
+          {browserError}
         </div>
-      </form>
+      )}
+
+      <details
+        className="tb-auth__fallback"
+        open={showFallback}
+        onToggle={(e) => setShowFallback((e.target as HTMLDetailsElement).open)}
+      >
+        <summary className="tb-auth__fallback-summary">
+          Use email &amp; password instead
+        </summary>
+        <form className="tb-auth__form" onSubmit={onSignIn}>
+          <label className="tb-auth__field">
+            <span className="tb-auth__label">Email</span>
+            <input
+              type="email"
+              className="tb-auth__input"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              disabled={busy}
+            />
+          </label>
+          <label className="tb-auth__field">
+            <span className="tb-auth__label">Password</span>
+            <input
+              type="password"
+              className="tb-auth__input"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              disabled={busy}
+            />
+          </label>
+          {error && (
+            <div className="tb-auth__error" role="alert">
+              {error}
+            </div>
+          )}
+          <div className="tb-auth__actions">
+            <button
+              type="submit"
+              className="tb-auth__btn tb-auth__btn--primary"
+              disabled={busy || !email.trim() || !password}
+            >
+              {busy ? 'Signing in…' : 'Sign in'}
+            </button>
+          </div>
+        </form>
+      </details>
+
       <TypebuildOnboarding signedIn={authState.signedIn} />
     </div>
   );
+}
+
+// Pull the typed code out of a `[typebuild-browser:<code>]` error message.
+function browserErrorCode(message: string): string {
+  const m = /\[typebuild-browser:([a-z-]+)\]/.exec(message);
+  return m ? m[1] : 'rejected';
+}
+
+// User-facing copy for the non-quiet, non-pending browser sign-in failures.
+function browserFriendlyError(code: string): string {
+  switch (code) {
+    case 'unreachable':
+      return "Couldn't reach TypeBuild. Check your connection and try again.";
+    case 'rejected':
+      return 'Sign-in was rejected. Please try again.';
+    default:
+      return 'Sign-in failed. Please try again.';
+  }
 }
 
 // Live-data wrapper around the presentational OnboardingChecklist. Owns

@@ -95,3 +95,30 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* Browser sign-in in-flight state (fm-b5at.11). */
+.tb-auth__waiting {
+  margin: 0;
+  align-self: center;
+}
+
+/* Email/password fallback disclosure (fm-b5at.11). Demoted below the primary
+   browser sign-in until the server handoff ships. */
+.tb-auth__fallback {
+  max-width: 360px;
+}
+
+.tb-auth__fallback-summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--accent);
+  user-select: none;
+}
+
+.tb-auth__fallback-summary:hover {
+  filter: brightness(1.1);
+}
+
+.tb-auth__fallback[open] .tb-auth__fallback-summary {
+  margin-bottom: var(--sp-3);
+}

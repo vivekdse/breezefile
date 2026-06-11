@@ -248,6 +248,11 @@ type Fm = {
   // block; tokens live in main, the renderer only sees TypebuildAuthState.
   typebuild: {
     signIn: (email: string, password: string) => Promise<TypebuildAuthState>;
+    // fm-b5at.11 — browser sign-in via the server's OAuth flow + hosted page
+    // (Google or email/password). Rejects with a `[typebuild-browser:<code>]`
+    // tagged Error (cancelled | unreachable | rejected | server-pending).
+    signInBrowser: () => Promise<TypebuildAuthState>;
+    cancelBrowser: () => Promise<void>;
     signOut: () => Promise<void>;
     authState: () => Promise<TypebuildAuthState>;
     onAuthChanged: (cb: (state: TypebuildAuthState) => void) => () => void;

@@ -432,6 +432,16 @@ const fm = {
         signedIn: boolean;
         email?: string;
       }>,
+    // fm-b5at.11 — browser sign-in via the server's OAuth flow + hosted
+    // page (Google or email/password). Rejects with a tagged
+    // `[typebuild-browser:<code>]` Error on a typed failure.
+    signInBrowser: () =>
+      ipcRenderer.invoke('typebuild:auth:signInBrowser') as Promise<{
+        signedIn: boolean;
+        email?: string;
+      }>,
+    cancelBrowser: () =>
+      ipcRenderer.invoke('typebuild:auth:cancelBrowser') as Promise<void>,
     signOut: () =>
       ipcRenderer.invoke('typebuild:auth:signOut') as Promise<void>,
     authState: () =>
