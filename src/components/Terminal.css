@@ -12,6 +12,44 @@
   border-top: 1px solid var(--rule, var(--border-1));
 }
 
+/* fm-b5at.5 — one-time OAuth hint banner for TypeBuild task terminals.
+   Sits above the xterm pane; dismissible. Kept subtle (info, not error). */
+.terminal-pane__hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text, var(--fg-1));
+  background: var(--accent-soft, rgba(97, 175, 239, 0.12));
+  border-bottom: 1px solid var(--rule, var(--border-1));
+  flex: 0 0 auto;
+}
+.terminal-pane__hint-text {
+  flex: 1 1 auto;
+}
+.terminal-pane__hint-text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 11px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--rule, rgba(127, 127, 127, 0.18));
+}
+.terminal-pane__hint-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--text-muted, #9aa0a6);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.terminal-pane__hint-close:hover {
+  color: var(--text, var(--fg-1));
+}
+
 .terminal-pane__inner {
   flex: 1 1 auto;
   min-height: 0;

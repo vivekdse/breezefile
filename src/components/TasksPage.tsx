@@ -25,12 +25,14 @@ import { invokeLauncher } from '../launchers';
 import { spawnTerminal } from '../terminalSpawn';
 import {
   deleteTask,
+  runTaskNow,
   taskSourceAction,
   todayISO,
   updateTask,
   useRunCounts,
   useTaskSources,
   useTasks,
+  useTypebuildReadiness,
 } from '../tasks';
 import { RunsView } from './RunsView';
 import type { ConfirmRequest } from './ConfirmDialog';
@@ -195,6 +197,10 @@ export function TasksPage() {
   const { byId: sourcesById } = useTaskSources();
   const capsFor = (t: Task): TaskSourceCapabilities | undefined =>
     sourcesById[t.source ?? 'local']?.capabilities;
+  // fm-b5at.5 — TypeBuild Start readiness (signed in + Claude + Chrome).
+  // Gates the Start button on TypeBuild rows; the disabled tooltip explains
+  // what's missing.
+  const tbReady = useTypebuildReadiness();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cursorId, setCursorId] = useState<string | null>(null);
@@ -502,6 +508,19 @@ export function TasksPage() {
       dispatch({ type: 'setStatus', msg: `${verbed[action]} · ${task.title}` });
     } catch (e) {
       dispatch({ type: 'setStatus', msg: formatOpError(action, e) });
+    }
+  }
+
+  // fm-b5at.5 — Start a TypeBuild task: launch an interactive claude session
+  // in a new tab, pre-wired to the task (the user never types a command).
+  // main spawns the PTY + broadcasts tasks:interactiveRun, which App.tsx
+  // turns into a new terminal tab. We only surface terse, PHI-free status.
+  async function rowStart(task: Task) {
+    try {
+      await runTaskNow(task.id, task.source);
+      dispatch({ type: 'setStatus', msg: 'starting TypeBuild session…' });
+    } catch (e) {
+      dispatch({ type: 'setStatus', msg: formatOpError('start', e) });
     }
   }
 
@@ -1341,6 +1360,7 @@ export function TasksPage() {
                   key={t.id}
                   task={t}
                   caps={capsFor(t)}
+                  tbReady={tbReady}
                   runCount={runCounts[t.id] ?? 0}
                   hideFolder={group === 'folder'}
                   selected={selected.has(t.id)}
@@ -1363,6 +1383,7 @@ export function TasksPage() {
                   onEdit={() => openEdit(t)}
                   onOpenInTab={() => rowOpenInTab(t)}
                   onSourceAction={(action) => void rowSourceAction(t, action)}
+                  onStart={() => void rowStart(t)}
                   onKebab={(x, y) => setKebabFor({ task: t, x, y })}
                 />
               ))}
@@ -1468,9 +1489,17 @@ export function TasksPage() {
   );
 }
 
+type TbReadiness = {
+  signedIn: boolean;
+  claudeOk: boolean;
+  chromeOk: boolean;
+  ready: boolean;
+};
+
 function TaskRow({
   task,
   caps,
+  tbReady,
   runCount,
   hideFolder,
   selected,
@@ -1482,10 +1511,12 @@ function TaskRow({
   onEdit,
   onOpenInTab,
   onSourceAction,
+  onStart,
   onKebab,
 }: {
   task: Task;
   caps?: TaskSourceCapabilities;
+  tbReady: TbReadiness;
   runCount: number;
   hideFolder?: boolean;
   selected: boolean;
@@ -1497,6 +1528,7 @@ function TaskRow({
   onEdit: () => void;
   onOpenInTab: () => void;
   onSourceAction: (action: 'claim' | 'release' | 'reopen') => void;
+  onStart: () => void;
   onKebab: (x: number, y: number) => void;
 }) {
   const today = todayISO();
@@ -1523,6 +1555,24 @@ function TaskRow({
   const showClaim = canClaim && !claimedBy && task.status === 'pending';
   const showRelease = canClaim && !!claimedBy;
   const showReopen = canClaim && task.rawStatus === 'blocked';
+
+  // fm-b5at.5 — Start (interactive launch) for TypeBuild tasks. The agent
+  // claims IN-SESSION, so a task is startable when it's pending and not held
+  // by someone else (a task we already hold is fine to resume). Enabled only
+  // when signed in AND the local prerequisites (Claude + Chrome) are present;
+  // the disabled tooltip says what's missing.
+  const isTypebuild = task.source === 'typebuild';
+  const startable =
+    isTypebuild && task.status === 'pending' && !task.rawStatus?.match(/blocked/);
+  const startBlockedReason = !tbReady.signedIn
+    ? 'Sign in to TypeBuild first (Settings → TypeBuild)'
+    : !tbReady.claudeOk
+      ? 'Install Claude Code first (Settings → TypeBuild onboarding)'
+      : !tbReady.chromeOk
+        ? 'Install Google Chrome first (Settings → TypeBuild onboarding)'
+        : null;
+  const showStart = startable;
+  const startEnabled = startBlockedReason === null;
 
   return (
     <div
@@ -1655,6 +1705,21 @@ function TaskRow({
         className="tasks__row-actions"
         onClick={(e) => e.stopPropagation()}
       >
+        {showStart && (
+          <button
+            type="button"
+            className="tasks__row-btn tasks__row-btn--text tasks__row-btn--start"
+            onClick={() => startEnabled && onStart()}
+            disabled={!startEnabled}
+            title={
+              startEnabled
+                ? 'Start an interactive Claude session for this task'
+                : startBlockedReason ?? undefined
+            }
+          >
+            ▸ Start
+          </button>
+        )}
         {showClaim && (
           <button
             type="button"

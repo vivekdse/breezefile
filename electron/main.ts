@@ -11,6 +11,7 @@ import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
+import { registerTypebuildDetectIpc } from './typebuild/detect';
 import {
   getAuthState,
   onAuthStateChanged,
@@ -196,6 +197,10 @@ app.whenReady().then(() => {
   // handlers + the auth-state broadcaster, and restores any persisted
   // (encrypted) session from a prior launch. Best-effort; never blocks.
   registerTypebuildAuthIpc();
+  // fm-b5at.3 — TypeBuild onboarding prerequisite detection IPC
+  // (claude/chrome presence + the Claude Code install command). Used by the
+  // onboarding checklist in Settings.
+  registerTypebuildDetectIpc();
   // fm-b5at.4 — register the TypeBuildTaskSource in the task-source registry
   // exactly while signed in, so TypeBuild tasks appear in the existing
   // TasksPage. Sign-in registers + starts polling; sign-out unregisters +

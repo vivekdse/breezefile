@@ -135,6 +135,62 @@ export function useTaskSources(): {
   return { sources, byId };
 }
 
+// fm-b5at.5 — TypeBuild Start readiness. A TypeBuild task is startable only
+// when the user is signed in AND the local prerequisites (Claude Code +
+// Chrome) are present. We read auth state + detect checks once, refresh the
+// detect checks on auth change (signing in is usually when onboarding
+// completes), and expose a single `ready` flag the Start gate consumes.
+// PHI-free: only booleans cross the wire.
+export function useTypebuildReadiness(): {
+  signedIn: boolean;
+  claudeOk: boolean;
+  chromeOk: boolean;
+  ready: boolean;
+} {
+  const [signedIn, setSignedIn] = useState(false);
+  const [claudeOk, setClaudeOk] = useState(false);
+  const [chromeOk, setChromeOk] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadChecks = async () => {
+      try {
+        const checks = await fm.typebuild.detectChecks();
+        if (!cancelled) {
+          setClaudeOk(!!checks.claude.ok);
+          setChromeOk(!!checks.chrome.ok);
+        }
+      } catch {
+        /* keep last-known; detect is best-effort */
+      }
+    };
+    void fm.typebuild
+      .authState()
+      .then((s) => {
+        if (!cancelled) setSignedIn(!!s.signedIn);
+      })
+      .catch(() => {});
+    void loadChecks();
+    const off = fm.typebuild.onAuthChanged((s) => {
+      if (cancelled) return;
+      setSignedIn(!!s.signedIn);
+      // Re-run detect on sign-in — the user likely just finished onboarding.
+      if (s.signedIn) void loadChecks();
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+
+  return {
+    signedIn,
+    claudeOk,
+    chromeOk,
+    ready: signedIn && claudeOk && chromeOk,
+  };
+}
+
 // fm-zf3m — runs API + hooks for the renderer.
 export async function runTaskNow(id: string, source?: string): Promise<void> {
   await fm.tasksRunNow(id, source);

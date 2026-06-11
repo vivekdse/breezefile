@@ -242,6 +242,7 @@ type Action =
       ptyId: number;
       cwd: string;
       label?: string;
+      source?: string;
     }
   | { type: 'closeTerminal'; tabIndex: number }
   | {
@@ -552,6 +553,7 @@ function reducer(s: State, a: Action): State {
           cwd: a.cwd,
           label: a.label,
           attention: null,
+          source: a.source,
         },
       };
       return { ...s, tabs };

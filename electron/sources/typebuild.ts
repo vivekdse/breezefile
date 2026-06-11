@@ -22,9 +22,11 @@
 //   - polling: every ~30s while registered; broadcast tasks-changed when the
 //     payload differs; paused when there is no BrowserWindow.
 
+import os from 'node:os';
 import { BrowserWindow } from 'electron';
 import { breezeHost } from '../core/host';
-import { getIdToken } from '../typebuild/auth';
+import { getAuthState, getIdToken } from '../typebuild/auth';
+import { ensureTypebuildMcp } from '../typebuild/mcp';
 import type {
   RunNowOptions,
   SourcedTask,
@@ -32,7 +34,7 @@ import type {
   TaskSourceCapabilities,
 } from '../core/task-source';
 import { unsupported } from '../core/task-source';
-import type { TaskCreate, TaskFilter, TaskStatus, TaskUpdate } from '../tasks';
+import type { Task, TaskCreate, TaskFilter, TaskStatus, TaskUpdate } from '../tasks';
 
 const API_BASE = 'https://general.typebuild.com';
 const POLL_INTERVAL_MS = 30_000;
@@ -150,6 +152,12 @@ function mapListRow(row: ListRow): SourcedTask {
     // Local Task.flags is a required string[] (fm-b5at.7); default to [].
     flags: Array.isArray(row.flags) ? row.flags : [],
   };
+}
+
+// A short, content-free fragment of an opaque task id for generic labels
+// ("TypeBuild task a1b2c3"). The id is not PHI; this just keeps labels tidy.
+function shortId(id: string): string {
+  return id.length <= 8 ? id : id.slice(0, 8);
 }
 
 // ─── Source implementation ───────────────────────────────────────────────
@@ -280,11 +288,115 @@ export class TypeBuildTaskSource implements TaskSource {
     throw unsupported('deleteTask — TypeBuild tasks cannot be deleted here');
   }
 
-  // ─── runNow (stub; fm-b5at.5) ───────────────────────────────────────────
-  // The interactive launch ("Start") lands with fm-b5at.5, which will replace
-  // this stub with a tab-spawning, in-session-claim flow.
-  async runNow(_id: string, _opts?: RunNowOptions): Promise<unknown> {
-    throw unsupported('runNow — lands with fm-b5at.5');
+  // ─── runNow / Start (fm-b5at.5) ─────────────────────────────────────────
+  // "Start" launches an INTERACTIVE embedded-terminal claude session, pre-
+  // wired to this task. The user never types a command.
+  //
+  // Flow:
+  //   1. Ensure the typebuild MCP server is configured in Claude Code
+  //      (idempotent, cached, non-fatal on failure — surfaced as a hint).
+  //   2. Spawn claude interactively with:
+  //        - prompt: "Run /mcp__typebuild__work and claim task <id>"
+  //          (ONLY the opaque task id — no PHI).
+  //        - args derived from the server `flags` (chrome → --chrome, etc.).
+  //          The interactive run STYLE is forced regardless of flags.
+  //        - cwd: the home directory (folder hints are a later follow-up).
+  //   3. NO local task_runs row — task_runs.task_id FKs the local `tasks`
+  //      table and a remote id has no local row (recordRun:false).
+  //   4. The tab label is GENERIC ("TypeBuild task <shortid>") — the title
+  //      is PHI and the renderer can surface tab labels.
+  //   5. Claim is IN-SESSION (the /work prompt claims via MCP). We do NOT
+  //      pre-claim over REST (a REST pre-claim would 409 the in-session
+  //      claim, which is conditional on status=open).
+  //   6. After the PTY exits: refresh + broadcast; if the task is still
+  //      claimed by THIS principal, broadcast a Release prompt.
+  async runNow(id: string, _opts?: RunNowOptions): Promise<unknown> {
+    // Routing fields (flags) come from the in-memory cache populated by the
+    // list poll; fall back to an empty flag set if the row isn't cached yet.
+    const cached = this.cache.get(id);
+    const serverFlags = cached?.flags ?? [];
+
+    // Ensure the MCP server is wired up. Non-fatal — we still launch and let
+    // the in-session OAuth / MCP error guide the user. Surface any hint via
+    // the terminal-hint env so the renderer can show it.
+    const mcp = await ensureTypebuildMcp();
+
+    // Force the interactive run style; pass through the server's arg-producing
+    // flags (e.g. chrome → --chrome). 'interactive' is a no-op for flagsToArgs
+    // but documents intent; runTaskInteractive ignores it for arg purposes.
+    const flags = Array.from(new Set([...serverFlags, 'interactive']));
+
+    const { runTaskInteractive } = await import('../agents/interactive');
+    const synthetic: Task = this.syntheticTask(id, flags);
+
+    const res = await runTaskInteractive(synthetic, {
+      agentId: 'claude',
+      // ONLY the opaque task id — never a title/body (PHI).
+      prompt: `Run /mcp__typebuild__work and claim task ${id}`,
+      cwd: os.homedir(),
+      // No local run row: FK to tasks(id) would fail for a remote id.
+      recordRun: false,
+      // PHI: generic, content-free tab label.
+      label: `TypeBuild task ${shortId(id)}`,
+      source: this.id,
+      env: {
+        // Marker the renderer keys the OAuth hint off of. PHI-free.
+        BREEZE_TYPEBUILD_TASK: '1',
+        ...(mcp.ok ? {} : { BREEZE_TYPEBUILD_MCP_HINT: '1' }),
+      },
+      onExit: () => {
+        void this.onSessionExit(id);
+      },
+    });
+
+    if (!res.launched) {
+      // No GUI window to host the tab — interactive Start needs the app open.
+      throw new Error('typebuild: Start needs an open Breeze window');
+    }
+    return { ok: true, ptyId: res.ptyId, mcp: mcp.ok };
+  }
+
+  // Build a minimal local-shape Task to feed runTaskInteractive. It NEVER
+  // carries the decrypted title/body (PHI) — the prompt and label are built
+  // from the opaque id only, so a benign placeholder title is safe and unused.
+  private syntheticTask(id: string, flags: string[]): Task {
+    const now = Date.now();
+    return {
+      id,
+      title: `TypeBuild task ${shortId(id)}`,
+      notes: null,
+      status: 'in_progress',
+      folder: os.homedir(),
+      start_at: null,
+      due_at: null,
+      pinned: false,
+      cron: null,
+      next_run_at: null,
+      auto_mode: false,
+      auto_agent: 'claude',
+      auto_prompt: null,
+      flags,
+      created_at: now,
+      updated_at: now,
+      completed_at: null,
+    };
+  }
+
+  // After an interactive session's PTY exits: refresh the list (status may
+  // have changed server-side via submit_task) and, if the task is still
+  // claimed by THIS principal, broadcast a gentle Release prompt. PHI-free —
+  // the broadcast carries only the task id.
+  private async onSessionExit(id: string): Promise<void> {
+    await this.refreshAndBroadcast();
+    const me = getAuthState().email;
+    const row = this.cache.get(id);
+    if (me && row?.claimedBy && row.claimedBy === me) {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) {
+          w.webContents.send('typebuild:releasePrompt', { taskId: id });
+        }
+      }
+    }
   }
 
   // ─── source-native verbs ────────────────────────────────────────────────

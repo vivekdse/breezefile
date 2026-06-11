@@ -194,11 +194,18 @@ type Fm = {
   onTasksInteractiveRun: (
     cb: (payload: {
       taskId: string;
-      runId: string;
+      runId: string | null;
       ptyId: number;
       title: string;
       cwd: string;
+      source?: string;
     }) => void,
+  ) => () => void;
+  // fm-b5at.5 — a TypeBuild interactive session's PTY exited while the user
+  // still holds the claim. The renderer surfaces a gentle "Release?" prompt.
+  // PHI-free: task id only, no title/body.
+  onTypebuildReleasePrompt: (
+    cb: (payload: { taskId: string }) => void,
   ) => () => void;
   // fm-b5at.2 — TypeBuild plugin Firebase auth. Self-contained namespaced
   // block; tokens live in main, the renderer only sees TypebuildAuthState.
@@ -207,6 +214,12 @@ type Fm = {
     signOut: () => Promise<void>;
     authState: () => Promise<TypebuildAuthState>;
     onAuthChanged: (cb: (state: TypebuildAuthState) => void) => () => void;
+    // fm-b5at.3/.5 — onboarding prerequisite detection (booleans + paths).
+    detectChecks: () => Promise<{
+      claude: { ok: boolean; path?: string };
+      chrome: { ok: boolean; path?: string };
+    }>;
+    installCommand: () => Promise<string>;
   };
 };
 

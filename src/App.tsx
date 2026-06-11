@@ -38,6 +38,7 @@ import { PlatformProvider } from './platform';
 import { formatOpError, humanizeError } from './errorMessages';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
+import { taskSourceAction } from './tasks';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
@@ -395,12 +396,39 @@ function Shell() {
         tabIndex: newTabIndex,
         ptyId: payload.ptyId,
         cwd: payload.cwd,
+        // PHI: for phiSensitive sources (TypeBuild) `title` is already the
+        // generic, content-free label main built; never the decrypted title.
         label: payload.title,
+        source: payload.source,
       });
       dispatch({
         type: 'setStatus',
         msg: `interactive run · ${payload.title}`,
       });
+    });
+    return off;
+  }, [dispatch]);
+
+  // fm-b5at.5 — a TypeBuild session's PTY exited while the user still holds
+  // the claim. Offer a gentle Release. PHI-free: only the task id crosses the
+  // wire; no title/body. Routes through the global confirm dialog.
+  useEffect(() => {
+    const off = fm.onTypebuildReleasePrompt(({ taskId }) => {
+      const req: ConfirmRequest = {
+        title: 'Release this TypeBuild task?',
+        body: 'The session ended but you still hold the claim. Release it so others can pick it up, or keep it to resume.',
+        confirmLabel: 'Release',
+        cancelLabel: 'Keep',
+        onConfirm: async () => {
+          try {
+            await taskSourceAction('typebuild', taskId, 'release');
+            dispatch({ type: 'setStatus', msg: 'released TypeBuild task' });
+          } catch {
+            dispatch({ type: 'setStatus', msg: 'could not release task' });
+          }
+        },
+      };
+      window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
     });
     return off;
   }, [dispatch]);

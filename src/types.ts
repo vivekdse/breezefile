@@ -76,6 +76,11 @@ export type Tab = {
     cwd: string;
     label?: string;
     attention?: 'idle' | 'busy' | 'bell' | null;
+    // fm-b5at.5 — owning task source for terminals opened from an interactive
+    // run ('typebuild' etc.). Drives PHI-aware tab behavior: the TypeBuild
+    // OAuth hint, and (belt-and-suspenders) a marker that this terminal's
+    // scrollback is PHI and must never be serialized to disk.
+    source?: string;
   };
 };
 

@@ -51,6 +51,7 @@ export function TerminalSplit({ tabs, activeIndex, children }: Props) {
                 key={t.terminal.ptyId}
                 ptyId={t.terminal.ptyId}
                 cwd={t.terminal.cwd}
+                source={t.terminal.source}
                 isActive={isActive}
                 onExit={() => dispatch({ type: 'closeTerminal', tabIndex: i })}
                 onAttention={(state) =>

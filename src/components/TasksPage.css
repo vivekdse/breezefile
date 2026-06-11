@@ -869,6 +869,21 @@
   color: var(--accent, #2d7ff9);
   border-color: var(--accent, #2d7ff9);
 }
+/* fm-b5at.5 — Start (interactive launch) on TypeBuild rows. Filled accent to
+   read as the primary affordance; disabled when prerequisites aren't met. */
+.tasks__row-btn--start {
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent, #2d7ff9);
+  border-color: var(--accent, #2d7ff9);
+}
+.tasks__row-btn--start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--text-on-panel);
+  background: var(--panel-2);
+  border-color: var(--rule-on-panel);
+}
 .tasks__status {
   font-size: var(--fs-xs);
   font-weight: 600;

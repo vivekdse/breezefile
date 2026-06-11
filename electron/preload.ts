@@ -339,18 +339,33 @@ const fm = {
   onTasksInteractiveRun: (
     cb: (payload: {
       taskId: string;
-      runId: string;
+      runId: string | null;
       ptyId: number;
       title: string;
       cwd: string;
+      source?: string;
     }) => void,
   ) => {
     const handler = (
       _e: unknown,
-      payload: { taskId: string; runId: string; ptyId: number; title: string; cwd: string },
+      payload: {
+        taskId: string;
+        runId: string | null;
+        ptyId: number;
+        title: string;
+        cwd: string;
+        source?: string;
+      },
     ) => cb(payload);
     ipcRenderer.on('tasks:interactiveRun', handler);
     return () => ipcRenderer.off('tasks:interactiveRun', handler);
+  },
+  // fm-b5at.5 — a TypeBuild session ended while the user still holds the
+  // claim; main broadcasts this so the renderer can offer Release. PHI-free.
+  onTypebuildReleasePrompt: (cb: (payload: { taskId: string }) => void) => {
+    const handler = (_e: unknown, payload: { taskId: string }) => cb(payload);
+    ipcRenderer.on('typebuild:releasePrompt', handler);
+    return () => ipcRenderer.off('typebuild:releasePrompt', handler);
   },
   // ─── TypeBuild auth (fm-b5at.2) ───────────────────────────────────
   // Self-contained namespaced block for the TypeBuild plugin's Firebase
@@ -379,6 +394,16 @@ const fm = {
       ipcRenderer.on('typebuild:auth:changed', handler);
       return () => ipcRenderer.off('typebuild:auth:changed', handler);
     },
+    // fm-b5at.3/.5 — onboarding prerequisite detection. Detection logic
+    // lives in main (electron/typebuild/detect.ts); the renderer only sees
+    // booleans + resolved paths (no PHI).
+    detectChecks: () =>
+      ipcRenderer.invoke('typebuild:detect:checks') as Promise<{
+        claude: { ok: boolean; path?: string };
+        chrome: { ok: boolean; path?: string };
+      }>,
+    installCommand: () =>
+      ipcRenderer.invoke('typebuild:detect:installCommand') as Promise<string>,
   },
 };
 

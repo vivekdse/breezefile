@@ -9,9 +9,17 @@
 // sign-in attempt and is cleared immediately afterwards (success or failure);
 // it is never persisted or logged.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fm, type TypebuildAuthState } from '../../bridge';
+import { useStore, makeTab } from '../../store';
+import { spawnTerminal } from '../../terminalSpawn';
+import { OnboardingChecklist } from './OnboardingChecklist';
 import './TypebuildAuthPanel.css';
+
+// Renderer-local, PHI-free flag: the user attests the Claude-in-Chrome
+// extension is installed (we can't reliably detect it). Boolean only — never
+// task content.
+const EXTENSION_CONFIRMED_KEY = 'fm.typebuild.extensionConfirmed';
 
 export function TypebuildAuthPanel() {
   const [authState, setAuthState] = useState<TypebuildAuthState>({
@@ -92,8 +100,7 @@ export function TypebuildAuthPanel() {
             Sign out
           </button>
         </div>
-        {/* Onboarding checklist mounts here in a later bead (fm-b5at.3). */}
-        {/* <TypebuildOnboardingChecklist /> */}
+        <TypebuildOnboarding signedIn={authState.signedIn} />
       </div>
     );
   }
@@ -144,9 +151,111 @@ export function TypebuildAuthPanel() {
           </button>
         </div>
       </form>
-      {/* Onboarding checklist mounts here in a later bead (fm-b5at.3). */}
-      {/* <TypebuildOnboardingChecklist /> */}
+      <TypebuildOnboarding signedIn={authState.signedIn} />
     </div>
+  );
+}
+
+// Live-data wrapper around the presentational OnboardingChecklist. Owns
+// prerequisite detection (Claude / Chrome via main), the renderer-local
+// "extension confirmed" attestation, and the Install action that opens a
+// terminal tab running the install command and re-checks when it exits.
+function TypebuildOnboarding({ signedIn }: { signedIn: boolean }) {
+  const { state, dispatch } = useStore();
+  const [claude, setClaude] = useState(false);
+  const [chrome, setChrome] = useState(false);
+  const [extensionConfirmed, setExtensionConfirmed] = useState(false);
+
+  const recheck = useCallback(async () => {
+    try {
+      const res = await fm.typebuild.detectChecks();
+      setClaude(res.claude.ok);
+      setChrome(res.chrome.ok);
+    } catch {
+      // Detection failure leaves the prior (or default-false) state; the
+      // user can Re-check again.
+    }
+  }, []);
+
+  // Detect on mount and read the persisted extension attestation.
+  useEffect(() => {
+    void recheck();
+    try {
+      if (typeof localStorage !== 'undefined') {
+        setExtensionConfirmed(
+          localStorage.getItem(EXTENSION_CONFIRMED_KEY) === '1',
+        );
+      }
+    } catch {
+      // ignore unavailable storage
+    }
+  }, [recheck]);
+
+  const onToggleExtensionConfirmed = useCallback((v: boolean) => {
+    setExtensionConfirmed(v);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(EXTENSION_CONFIRMED_KEY, v ? '1' : '0');
+      }
+    } catch {
+      // ignore unavailable storage
+    }
+  }, []);
+
+  // Open a terminal tab rooted at $HOME, run the install command in it, and
+  // re-run the prerequisite checks once that pty exits so the checklist
+  // reflects the freshly-installed Claude. Uses spawnTerminal (no shell
+  // override → user's login shell; respects the tmux setting) and writes the
+  // command in, so there is no platform-specific shell handling here.
+  const onInstallClaude = useCallback(async () => {
+    let command: string;
+    let home: string;
+    try {
+      [command, home] = await Promise.all([
+        fm.typebuild.installCommand(),
+        fm.homedir(),
+      ]);
+    } catch {
+      dispatch({ type: 'setStatus', msg: 'could not start Claude install' });
+      return;
+    }
+    try {
+      const ptyId = await spawnTerminal({
+        cwd: home,
+        sessionLabel: 'install-claude',
+      });
+      const tabIndex = state.tabs.length;
+      dispatch({ type: 'newTab', tab: makeTab(home) });
+      dispatch({
+        type: 'openTerminal',
+        tabIndex,
+        ptyId,
+        cwd: home,
+        label: 'Install Claude',
+      });
+      dispatch({ type: 'setStatus', msg: 'installing Claude Code…' });
+      // Re-check prerequisites once the install pty exits.
+      const off = fm.onTermExit((id) => {
+        if (id !== ptyId) return;
+        off();
+        void recheck();
+      });
+      // Let the shell finish its startup before feeding the command.
+      setTimeout(() => {
+        fm.termWrite(ptyId, command + '\r');
+      }, 250);
+    } catch {
+      dispatch({ type: 'setStatus', msg: 'could not open install terminal' });
+    }
+  }, [dispatch, state.tabs.length, recheck]);
+
+  return (
+    <OnboardingChecklist
+      checks={{ signedIn, claude, chrome, extensionConfirmed }}
+      onRecheck={() => void recheck()}
+      onInstallClaude={() => void onInstallClaude()}
+      onToggleExtensionConfirmed={onToggleExtensionConfirmed}
+    />
   );
 }
 
