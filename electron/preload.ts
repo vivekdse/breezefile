@@ -283,8 +283,10 @@ const fm = {
     result?: unknown;
     error?: string;
   }) => ipcRenderer.send('control:reply', payload),
-  tasksWriteActiveSidecar: (id: string) =>
-    ipcRenderer.invoke('tasks:writeActiveSidecar', id) as Promise<string | null>,
+  tasksWriteActiveSidecar: (id: string, source?: string) =>
+    ipcRenderer.invoke('tasks:writeActiveSidecar', id, source) as Promise<
+      string | null
+    >,
   onTasksChanged: (cb: () => void) => {
     const handler = () => cb();
     ipcRenderer.on('tasks:changed', handler);
@@ -329,6 +331,26 @@ const fm = {
     const handler = (_e: unknown, payload: { tabId: string }) => cb(payload.tabId);
     ipcRenderer.on('app:notification-clicked', handler);
     return () => ipcRenderer.off('app:notification-clicked', handler);
+  },
+  // ─── Interactive task runs (fm-b5at.7) ────────────────────────────
+  // Main spawns the claude PTY for an interactive run and broadcasts this
+  // so the renderer opens a tab attached to the existing ptyId. Self-
+  // contained entry — the renderer only attaches a tab; it never spawns.
+  onTasksInteractiveRun: (
+    cb: (payload: {
+      taskId: string;
+      runId: string;
+      ptyId: number;
+      title: string;
+      cwd: string;
+    }) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      payload: { taskId: string; runId: string; ptyId: number; title: string; cwd: string },
+    ) => cb(payload);
+    ipcRenderer.on('tasks:interactiveRun', handler);
+    return () => ipcRenderer.off('tasks:interactiveRun', handler);
   },
   // ─── TypeBuild auth (fm-b5at.2) ───────────────────────────────────
   // Self-contained namespaced block for the TypeBuild plugin's Firebase

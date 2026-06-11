@@ -839,6 +839,36 @@
   background: var(--panel-2);
   color: var(--muted-on-panel);
 }
+
+/* fm-b5at.4 — "claimed by <who>" pill for canClaim sources (TypeBuild). */
+.tasks__row-claimed {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--rule-on-panel);
+  background: var(--panel-2);
+  color: var(--muted-on-panel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+/* fm-b5at.4 — source-native verb buttons (Claim/Release/Reopen) carry a
+   text label, so they need auto width + padding rather than the 28px square
+   the glyph row-buttons use. */
+.tasks__row-btn--text {
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  border-color: var(--rule-on-panel);
+}
+.tasks__row-btn--claim {
+  font-weight: 600;
+  color: var(--accent, #2d7ff9);
+  border-color: var(--accent, #2d7ff9);
+}
 .tasks__status {
   font-size: var(--fs-xs);
   font-weight: 600;

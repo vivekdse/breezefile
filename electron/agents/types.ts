@@ -27,6 +27,10 @@ export type AgentRunInput = {
   signal: AbortSignal;
   /** Extra env. The runner adds its own (e.g. BREEZE_TASK_ID). */
   env?: Record<string, string>;
+  /** fm-b5at.7 — task flags vocabulary (chrome/auto/resume/...). Mapped to
+   *  claude CLI args via electron/agents/flags.ts. Empty/absent = a plain
+   *  headless run (prior behavior). */
+  flags?: string[];
 };
 
 export type AgentRunResult = {

@@ -128,6 +128,13 @@ const WHO_OPTIONS: { id: ExecutorId; label: string; hint?: string }[] = [
   { id: 'claude', label: 'Claude Code', hint: 'an AI agent does it' },
 ];
 
+// fm-b5at.7 — agent flags vocabulary (mirrors electron/agents/flags.ts).
+const FLAG_OPTIONS: { id: string; label: string; hint: string }[] = [
+  { id: 'interactive', label: 'Interactive', hint: 'open the run in a new tab with an embedded claude session you converse with' },
+  { id: 'chrome', label: 'Chrome', hint: 'let claude drive a Chrome browser session (--chrome)' },
+  { id: 'auto', label: 'Auto-accept', hint: 'permissive permission mode for unattended edits (still human-gated)' },
+];
+
 const STATUS_OPTIONS: { id: TaskStatus; label: string; hint?: string }[] = [
   { id: 'pending', label: 'Pending', hint: 'not started yet' },
   { id: 'in_progress', label: 'In progress', hint: 'actively working' },
@@ -233,6 +240,18 @@ export function TaskComposer(props: Props) {
   const [executor, setExecutor] = useState<ExecutorId>(
     initial?.auto_mode ? 'claude' : 'manual',
   );
+  // fm-b5at.7 — agent flags (chrome/auto/interactive). Only meaningful for
+  // Claude tasks; a Set keyed by flag name, persisted as the flags array.
+  const [flags, setFlags] = useState<Set<string>>(
+    () => new Set(initial?.flags ?? []),
+  );
+  const toggleFlag = (f: string) =>
+    setFlags((prev) => {
+      const next = new Set(prev);
+      if (next.has(f)) next.delete(f);
+      else next.add(f);
+      return next;
+    });
   const [status, setStatus] = useState<TaskStatus>(initial?.status ?? 'pending');
   const [pinned, setPinned] = useState<boolean>(initial?.pinned ?? false);
   // Notes doubles as the agent prompt for Claude tasks (one field, not two).
@@ -690,6 +709,9 @@ export function TaskComposer(props: Props) {
         // Notes is the prompt for Claude tasks via the default template;
         // we no longer expose a separate override field.
         auto_prompt: null,
+        // fm-b5at.7 — agent flags only apply to Claude tasks; a manual task
+        // saves an empty list so a downgraded task doesn't carry stale flags.
+        flags: isAgent ? [...flags] : [],
         ...(nextRunAt !== undefined ? { next_run_at: nextRunAt } : {}),
       };
 
@@ -1409,6 +1431,25 @@ export function TaskComposer(props: Props) {
           </section>
 
         </main>
+
+        {/* fm-b5at.7 — agent flags. Only shown for Claude tasks; toggles
+            map 1:1 to the task `flags` array. 'interactive' opens the run
+            in a new tab with an embedded claude session instead of running
+            headless. */}
+        {executor === 'claude' && !created && (
+          <div className="composer__flags" role="group" aria-label="Agent flags">
+            {FLAG_OPTIONS.map((o) => (
+              <label key={o.id} className="composer__flag" title={o.hint}>
+                <input
+                  type="checkbox"
+                  checked={flags.has(o.id)}
+                  onChange={() => toggleFlag(o.id)}
+                />
+                <span>{o.label}</span>
+              </label>
+            ))}
+          </div>
+        )}
 
         <footer
           className={

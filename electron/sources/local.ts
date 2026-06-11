@@ -5,6 +5,7 @@
 
 import * as tasks from '../tasks';
 import type { TaskCreate, TaskFilter, TaskUpdate } from '../tasks';
+import { isInteractive } from '../agents/flags';
 import type {
   RunNowOptions,
   SourcedTask,
@@ -49,6 +50,18 @@ export class LocalTaskSource implements TaskSource {
   async runNow(id: string, opts?: RunNowOptions): Promise<unknown> {
     const t = tasks.getTask(id);
     if (!t) throw new Error(`task not found: ${id}`);
+    // fm-b5at.7 — interactive run style: open a tab with an embedded claude
+    // session instead of a headless `claude -p`. Requires a GUI window to
+    // host the tab; under headless breezed (no window) fall back to the
+    // headless path so the run still executes.
+    if (isInteractive(t.flags)) {
+      const { runTaskInteractive } = await import('../agents/interactive');
+      const res = await runTaskInteractive(t, {
+        ...(opts?.overrideCwd ? { cwd: opts.overrideCwd } : {}),
+      });
+      if (res.launched) return res;
+      // No window — degrade to headless below.
+    }
     const { executeTaskRun } = await import('../agents/execute');
     return executeTaskRun(t, {
       manualInvocation: opts?.manualInvocation ?? true,

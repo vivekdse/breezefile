@@ -25,6 +25,7 @@ import { invokeLauncher } from '../launchers';
 import { spawnTerminal } from '../terminalSpawn';
 import {
   deleteTask,
+  taskSourceAction,
   todayISO,
   updateTask,
   useRunCounts,
@@ -470,6 +471,40 @@ export function TasksPage() {
     };
     window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
   }
+  // fm-b5at.4 — source-native verbs (claim / release / reopen) for tasks
+  // owned by a canClaim source (TypeBuild). Routes through the generic
+  // tasksSourceAction bridge. A claim can come back { ok:false } when the
+  // task is already claimed by someone else — surface that inline rather
+  // than as an error toast so the user understands it's a race, not a bug.
+  async function rowSourceAction(
+    task: Task,
+    action: 'claim' | 'release' | 'reopen',
+  ) {
+    const source = task.source;
+    if (!source) return;
+    try {
+      const res = (await taskSourceAction(source, task.id, action)) as
+        | { ok?: boolean; reason?: string; claimedBy?: string | null }
+        | undefined;
+      if (res && res.ok === false) {
+        const who = res.claimedBy ? ` by ${res.claimedBy}` : '';
+        dispatch({
+          type: 'setStatus',
+          msg: `couldn’t ${action} · ${res.reason ?? 'already claimed'}${who} · ${task.title}`,
+        });
+        return;
+      }
+      const verbed: Record<typeof action, string> = {
+        claim: 'claimed',
+        release: 'released',
+        reopen: 'reopened',
+      };
+      dispatch({ type: 'setStatus', msg: `${verbed[action]} · ${task.title}` });
+    } catch (e) {
+      dispatch({ type: 'setStatus', msg: formatOpError(action, e) });
+    }
+  }
+
   // fm-7fu — snooze: shift due_at by N days for the cursor row (or the
   // whole selection when one exists). Tasks without a due date pick up
   // "today + N" so the keybind always lands somewhere useful.
@@ -1327,6 +1362,7 @@ export function TasksPage() {
                   }
                   onEdit={() => openEdit(t)}
                   onOpenInTab={() => rowOpenInTab(t)}
+                  onSourceAction={(action) => void rowSourceAction(t, action)}
                   onKebab={(x, y) => setKebabFor({ task: t, x, y })}
                 />
               ))}
@@ -1445,6 +1481,7 @@ function TaskRow({
   onMarkDone,
   onEdit,
   onOpenInTab,
+  onSourceAction,
   onKebab,
 }: {
   task: Task;
@@ -1459,6 +1496,7 @@ function TaskRow({
   onMarkDone: () => void;
   onEdit: () => void;
   onOpenInTab: () => void;
+  onSourceAction: (action: 'claim' | 'release' | 'reopen') => void;
   onKebab: (x: number, y: number) => void;
 }) {
   const today = todayISO();
@@ -1476,6 +1514,15 @@ function TaskRow({
   // enum (e.g. TypeBuild 'failed' | 'partial' | 'blocked').
   const rawBadge =
     task.rawStatus && task.rawStatus !== task.status ? task.rawStatus : null;
+  // fm-b5at.4 — source-native claim/release/reopen affordances, gated on the
+  // owning source's canClaim capability (TypeBuild). Claim when the task is
+  // pending and unclaimed; release when someone holds it; reopen when the
+  // source status is 'blocked'.
+  const canClaim = !!caps?.canClaim;
+  const claimedBy = task.claimedBy ?? null;
+  const showClaim = canClaim && !claimedBy && task.status === 'pending';
+  const showRelease = canClaim && !!claimedBy;
+  const showReopen = canClaim && task.rawStatus === 'blocked';
 
   return (
     <div
@@ -1530,12 +1577,20 @@ function TaskRow({
           )}
         </div>
         <div className="tasks__row-sub">
-          {!hideFolder && (
+          {!hideFolder && task.folder && (
             <span
               className="tasks__row-folder"
-              title={task.folder || 'Runs from any folder'}
+              title={task.folder}
             >
-              {task.folder ? homeRel(task.folder) : 'Any folder'}
+              {homeRel(task.folder)}
+            </span>
+          )}
+          {claimedBy && (
+            <span
+              className="tasks__row-claimed"
+              title={`Claimed by ${claimedBy}`}
+            >
+              ◆ {claimedBy}
             </span>
           )}
           {task.start_at && (
@@ -1600,6 +1655,36 @@ function TaskRow({
         className="tasks__row-actions"
         onClick={(e) => e.stopPropagation()}
       >
+        {showClaim && (
+          <button
+            type="button"
+            className="tasks__row-btn tasks__row-btn--text tasks__row-btn--claim"
+            onClick={() => onSourceAction('claim')}
+            title="Claim this task"
+          >
+            Claim
+          </button>
+        )}
+        {showRelease && (
+          <button
+            type="button"
+            className="tasks__row-btn tasks__row-btn--text"
+            onClick={() => onSourceAction('release')}
+            title="Release this task"
+          >
+            Release
+          </button>
+        )}
+        {showReopen && (
+          <button
+            type="button"
+            className="tasks__row-btn tasks__row-btn--text"
+            onClick={() => onSourceAction('reopen')}
+            title="Reopen this blocked task"
+          >
+            Reopen
+          </button>
+        )}
         <button
           type="button"
           className={[

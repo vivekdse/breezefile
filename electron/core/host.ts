@@ -17,12 +17,19 @@ export interface BreezeHost {
   onRunsChanged(taskId: string): void;
   /** An auto/scheduled run terminally failed. */
   onRunFailed(task: { id: string; title: string }, body: string): void;
+  /** fm-b5at.7 — true when a GUI window is available to host an
+   *  interactive (embedded-terminal) run. The Electron host returns true
+   *  when a BrowserWindow exists; the headless breezed host returns false
+   *  so interactive tasks fall back to a headless run. Optional so old
+   *  hosts default to headless-only. */
+  hasInteractiveWindow?(): boolean;
 }
 
 const noop: BreezeHost = {
   onTasksChanged() {},
   onRunsChanged() {},
   onRunFailed() {},
+  hasInteractiveWindow() { return false; },
 };
 
 let current: BreezeHost = noop;

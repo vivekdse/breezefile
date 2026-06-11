@@ -11,6 +11,15 @@ import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
+import {
+  getAuthState,
+  onAuthStateChanged,
+} from './typebuild/auth';
+import { TypeBuildTaskSource } from './sources/typebuild';
+import {
+  registerTaskSource,
+  unregisterTaskSource,
+} from './sources/registry';
 import { platform } from './platform';
 // Side-effect import: registers built-in agent runners (Claude) so the
 // scheduler / run-now endpoints can dispatch by id (epic fm-zf3m).
@@ -187,6 +196,14 @@ app.whenReady().then(() => {
   // handlers + the auth-state broadcaster, and restores any persisted
   // (encrypted) session from a prior launch. Best-effort; never blocks.
   registerTypebuildAuthIpc();
+  // fm-b5at.4 — register the TypeBuildTaskSource in the task-source registry
+  // exactly while signed in, so TypeBuild tasks appear in the existing
+  // TasksPage. Sign-in registers + starts polling; sign-out unregisters +
+  // stops polling (which clears the in-memory PHI-light cache). Each
+  // transition fires a `sources:changed` broadcast so the renderer's
+  // useTaskSources() re-pulls the capability map, plus a `tasks:changed`
+  // so the list re-pulls immediately.
+  wireTypebuildTaskSource();
   // fm-fc0 — best-effort: register breeze-mcp into ~/.claude/settings.json
   // on every launch. Idempotent — does nothing if already present and
   // up-to-date. Failures (file unreadable, no MCP binary) are logged
@@ -258,6 +275,50 @@ app.whenReady().then(() => {
   buildAppMenu();
   createWindow();
 });
+
+// fm-b5at.4 — keep the TypeBuildTaskSource registered exactly while signed
+// in. Broadcasts sources:changed (so the renderer re-pulls the capability
+// map via useTaskSources) and tasks:changed (so the list re-pulls) on every
+// transition. Handles the initial state too: restoreSession() may have
+// already signed us in by the time this runs, and may also flip to signed-in
+// shortly after via the auth listener.
+function wireTypebuildTaskSource() {
+  let source: TypeBuildTaskSource | null = null;
+
+  function broadcast(channel: string) {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send(channel);
+    }
+  }
+
+  function register() {
+    if (source) return;
+    source = new TypeBuildTaskSource();
+    registerTaskSource(source);
+    source.startPolling();
+    broadcast('sources:changed');
+    broadcast('tasks:changed');
+  }
+
+  function unregister() {
+    if (!source) return;
+    source.stopPolling();
+    unregisterTaskSource(source.id);
+    source = null;
+    broadcast('sources:changed');
+    broadcast('tasks:changed');
+  }
+
+  function sync(signedIn: boolean) {
+    if (signedIn) register();
+    else unregister();
+  }
+
+  // Initial state (restoreSession in registerTypebuildAuthIpc is async, so we
+  // may be signed out now and flip later — the listener below catches that).
+  sync(getAuthState().signedIn);
+  onAuthStateChanged((state) => sync(state.signedIn));
+}
 
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';

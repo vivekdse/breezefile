@@ -33,7 +33,7 @@ import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
 import { IconSprite } from './components/icons';
-import { StoreProvider, useStore } from './store';
+import { StoreProvider, useStore, makeTab } from './store';
 import { PlatformProvider } from './platform';
 import { formatOpError, humanizeError } from './errorMessages';
 import { useKeyboard } from './useKeyboard';
@@ -380,6 +380,30 @@ function Shell() {
     window.addEventListener('fm:apiNavigate', onApiNav);
     return () => window.removeEventListener('fm:apiNavigate', onApiNav);
   }, [navigateTo]);
+
+  // fm-b5at.7 — interactive task run. Main has already spawned the claude
+  // PTY (into the shared term registry) and tells us the ptyId; we open a
+  // new tab and attach the existing terminal so the user lands in the live
+  // session. The fg-state attention tint then works for free (the pty is a
+  // normal managed terminal). We attach, not spawn — main owns the pty.
+  useEffect(() => {
+    const off = fm.onTasksInteractiveRun((payload) => {
+      const newTabIndex = tabsRef.current.length;
+      dispatch({ type: 'newTab', tab: makeTab(payload.cwd) });
+      dispatch({
+        type: 'openTerminal',
+        tabIndex: newTabIndex,
+        ptyId: payload.ptyId,
+        cwd: payload.cwd,
+        label: payload.title,
+      });
+      dispatch({
+        type: 'setStatus',
+        msg: `interactive run · ${payload.title}`,
+      });
+    });
+    return off;
+  }, [dispatch]);
 
   // Self-heal the permissionsPrimed flag on every launch so the Welcome
   // notice only appears when something is actually needed. primePermissions

@@ -153,7 +153,7 @@ type Fm = {
   tasksCountByFolder: (folder: string) => Promise<number>;
   tasksDbExists: () => Promise<boolean>;
   // fm-adc — write the per-task sidecar markdown for AI launchers
-  tasksWriteActiveSidecar: (id: string) => Promise<string | null>;
+  tasksWriteActiveSidecar: (id: string, source?: string) => Promise<string | null>;
   onTasksChanged: (cb: () => void) => () => void;
   // fm-zf3m — task runs
   tasksRunsList: (taskId: string, limit?: number) => Promise<TaskRun[]>;
@@ -189,6 +189,17 @@ type Fm = {
   onAppFocus: (cb: (focused: boolean) => void) => () => void;
   showAttentionNotification: (opts: { title: string; body: string; tabId: string }) => Promise<void>;
   onNotificationClicked: (cb: (tabId: string) => void) => () => void;
+  // fm-b5at.7 — interactive task run: main spawned a claude PTY and asks
+  // the renderer to open a tab attached to the existing ptyId.
+  onTasksInteractiveRun: (
+    cb: (payload: {
+      taskId: string;
+      runId: string;
+      ptyId: number;
+      title: string;
+      cwd: string;
+    }) => void,
+  ) => () => void;
   // fm-b5at.2 — TypeBuild plugin Firebase auth. Self-contained namespaced
   // block; tokens live in main, the renderer only sees TypebuildAuthState.
   typebuild: {

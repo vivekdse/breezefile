@@ -121,7 +121,7 @@ export async function invokeLauncher(args: InvokeLauncherArgs): Promise<void> {
   // Sidecar drop is fire-and-forget; the agent reads it on demand and
   // a write failure shouldn't block the launch.
   if (injectContext) {
-    void fm.tasksWriteActiveSidecar(task!.id).catch(() => {
+    void fm.tasksWriteActiveSidecar(task!.id, task!.source).catch(() => {
       /* logged in main */
     });
   }

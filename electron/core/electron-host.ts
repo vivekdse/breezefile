@@ -22,6 +22,10 @@ export const ElectronBreezeHost: BreezeHost = {
     }
   },
 
+  hasInteractiveWindow() {
+    return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed());
+  },
+
   onRunFailed(task: { id: string; title: string }, body: string) {
     // Prefer a system notification when supported; in headless / test
     // environments it's a no-op which is fine.

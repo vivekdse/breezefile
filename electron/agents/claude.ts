@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { TaskRunErrorClass } from '../tasks';
+import { flagsToArgs } from './flags';
 import type { AgentRunInput, AgentRunResult, AgentRunner } from './types';
 
 // When the app is launched from Dock / Finder / Spotlight, macOS gives
@@ -60,7 +61,7 @@ function probeLoginShell(): Promise<string | null> {
   });
 }
 
-async function resolveClaudeBin(): Promise<string> {
+export async function resolveClaudeBin(): Promise<string> {
   if (resolvedBin) return resolvedBin;
   resolvedBin = (async () => {
     const wk = probeWellKnown();
@@ -94,6 +95,16 @@ class ClaudeAgent implements AgentRunner {
     const stderrPath = path.join(outputDir, 'stderr.log');
     const metaPath = path.join(outputDir, 'meta.json');
 
+    // fm-b5at.7 — per-task flags (chrome/auto/resume/...) map to extra
+    // claude args here, superseding the prior hardcoded --chrome. A headless
+    // run with no flags is the original plain `claude -p` behavior. We
+    // always set --permission-mode acceptEdits for headless runs (the
+    // unattended baseline); the 'auto' flag re-emits the same mode and is
+    // a no-op overlap, by design — both mean "permissive but still gated".
+    const { args: flagArgs, unknown: unknownFlags } = flagsToArgs(input.flags);
+    if (unknownFlags.length) {
+      console.warn('[claude] ignoring unknown task flags:', unknownFlags.join(', '));
+    }
     const args = [
       '-p',
       buildPreamble(taskId, runId) + prompt,
@@ -101,9 +112,7 @@ class ClaudeAgent implements AgentRunner {
       '--verbose',
       '--permission-mode', 'acceptEdits',
       '--add-dir', cwd,
-      // TEMPORARY (fm-b5at experiment): every auto-run gets Claude-in-Chrome
-      // so tasks can drive the browser. Per-task flags mapping is fm-b5at.5.
-      '--chrome',
+      ...flagArgs,
     ];
 
     await writeFile(

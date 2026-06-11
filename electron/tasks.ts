@@ -42,6 +42,11 @@ export type Task = {
   auto_agent: AgentId | null;
   /** Optional override prompt; falls back to title + notes when null. */
   auto_prompt: string | null;
+  /** fm-b5at.7 — run-style + agent flags vocabulary (chrome/auto/resume/
+   *  interactive). Stored as a JSON array; an empty array (the default)
+   *  means a plain headless run. 'interactive' selects the embedded-tab
+   *  run style; the rest map to claude CLI args (electron/agents/flags.ts). */
+  flags: string[];
   created_at: number;
   updated_at: number;
   completed_at: number | null;
@@ -60,6 +65,7 @@ export type TaskCreate = {
   auto_mode?: boolean;
   auto_agent?: AgentId | null;
   auto_prompt?: string | null;
+  flags?: string[];
 };
 
 export type TaskUpdate = Partial<{
@@ -75,6 +81,7 @@ export type TaskUpdate = Partial<{
   auto_mode: boolean;
   auto_agent: AgentId | null;
   auto_prompt: string | null;
+  flags: string[];
 }>;
 
 export type TaskRunStatus =
@@ -245,6 +252,12 @@ function migrate(d: Database.Database) {
     (db) => {
       db.exec(`ALTER TABLE tasks DROP COLUMN ref_folder;`);
     },
+
+    // v4 — flags vocabulary (fm-b5at.7). JSON array of agent flags
+    // (chrome/auto/resume/interactive). Default '[]' = plain headless run.
+    (db) => {
+      db.exec(`ALTER TABLE tasks ADD COLUMN flags TEXT NOT NULL DEFAULT '[]';`);
+    },
   ];
 
   const runFrom = current; // 0-indexed, matches array
@@ -272,10 +285,27 @@ function rowToTask(r: Record<string, unknown>): Task {
     auto_mode: ((r.auto_mode as number) ?? 0) === 1,
     auto_agent: (r.auto_agent as string | null) ?? null,
     auto_prompt: (r.auto_prompt as string | null) ?? null,
+    flags: parseFlags(r.flags),
     created_at: r.created_at as number,
     updated_at: r.updated_at as number,
     completed_at: (r.completed_at as number | null) ?? null,
   };
+}
+
+/** flags is stored as a JSON array string. Tolerate legacy NULL / malformed
+ *  values by falling back to an empty list; keep only string entries. */
+function parseFlags(raw: unknown): string[] {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeFlags(flags: string[] | null | undefined): string {
+  return JSON.stringify(Array.isArray(flags) ? flags.filter((x) => typeof x === 'string') : []);
 }
 
 function rowToRun(r: Record<string, unknown>): TaskRun {
@@ -410,12 +440,12 @@ export function createTask(input: TaskCreate): Task {
     `INSERT INTO tasks (
       id, title, notes, status, folder,
       start_at, due_at, pinned,
-      cron, next_run_at, auto_mode, auto_agent, auto_prompt,
+      cron, next_run_at, auto_mode, auto_agent, auto_prompt, flags,
       created_at, updated_at, completed_at
     ) VALUES (
       @id, @title, @notes, @status, @folder,
       @start_at, @due_at, @pinned,
-      @cron, @next_run_at, @auto_mode, @auto_agent, @auto_prompt,
+      @cron, @next_run_at, @auto_mode, @auto_agent, @auto_prompt, @flags,
       @created_at, @updated_at, @completed_at
     )`,
   ).run({
@@ -432,6 +462,7 @@ export function createTask(input: TaskCreate): Task {
     auto_mode: autoMode,
     auto_agent: input.auto_agent ?? null,
     auto_prompt: input.auto_prompt ?? null,
+    flags: serializeFlags(input.flags),
     created_at: now,
     updated_at: now,
     completed_at: status === 'done' ? now : null,
@@ -509,6 +540,7 @@ export function updateTask(id: string, patch: TaskUpdate): Task {
        auto_mode = @auto_mode,
        auto_agent = @auto_agent,
        auto_prompt = @auto_prompt,
+       flags = @flags,
        updated_at = @updated_at,
        completed_at = @completed_at
      WHERE id = @id`,
@@ -526,6 +558,7 @@ export function updateTask(id: string, patch: TaskUpdate): Task {
     auto_mode: next.auto_mode ? 1 : 0,
     auto_agent: next.auto_agent ?? null,
     auto_prompt: next.auto_prompt ?? null,
+    flags: serializeFlags(next.flags),
     updated_at: now,
     completed_at: justCompleted ? now : reopened ? null : existing.completed_at,
   });

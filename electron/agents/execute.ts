@@ -155,6 +155,7 @@ export async function executeTaskRun(
       runId: run.id,
       outputDir,
       signal,
+      flags: task.flags,
     });
   } catch (e) {
     const err = e as Error;

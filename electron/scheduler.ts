@@ -19,6 +19,7 @@ import * as tasks from './tasks';
 import type { Task, TaskRun, TaskRunErrorClass } from './tasks';
 import { executeTaskRun, AgentNotAvailableError } from './agents/execute';
 import { defaultAgentId } from './agents/registry';
+import { isInteractive } from './agents/flags';
 import { nextFireFromExpr } from './cron';
 
 const MAX_ATTEMPTS = 3;
@@ -105,6 +106,29 @@ async function dispatch(task: Task, attempt = 1, existingRunId?: string): Promis
   // double-fire the same task. We'll set it again after the run if cron
   // dictates a future fire.
   tasks.updateTask(task.id, { next_run_at: null });
+
+  // fm-b5at.7 — interactive run style: a cron fire opens a tab with an
+  // embedded claude session and waits at the approval gate (the fg-state
+  // ping is the UX). Only when a GUI window exists; under headless breezed
+  // the host reports no window and we fall through to a headless run as
+  // today. We don't retry/backoff an interactive launch — the user owns
+  // the session once it's open.
+  if (isInteractive(task.flags) && breezeHost().hasInteractiveWindow?.()) {
+    try {
+      const { runTaskInteractive } = await import('./agents/interactive');
+      const res = await runTaskInteractive(task, { attempt });
+      if (res.launched) {
+        inFlight.delete(task.id);
+        rollForwardCron(task);
+        rearm();
+        return;
+      }
+      // No window after all (race) — fall through to headless.
+    } catch (e) {
+      notify(task, `Interactive launch failed: ${(e as Error).message}`);
+      // Fall through to headless rather than dropping the fire.
+    }
+  }
 
   let run: TaskRun;
   let outcome: { ok: boolean; errorClass?: TaskRunErrorClass };

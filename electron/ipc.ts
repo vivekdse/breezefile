@@ -418,6 +418,94 @@ export function dispatchTerminalFg(ptyId: number, state: ClaudeFgState) {
   _fgDispatcher?.(ptyId, state);
 }
 
+// ─── Managed PTY core (fm-jtu, hoisted in fm-b5at.7) ─────────────────
+// node-pty lives in the main process; the renderer drives it over IPC,
+// and task runs (interactive run style) spawn into the same registry so
+// the fg-state attention path and term:write/resize/kill all work
+// uniformly. The term:spawn IPC handler and runTaskInteractive both
+// delegate their final spawn to spawnManagedPty below.
+type PtyRecord = {
+  proc: import('@homebridge/node-pty-prebuilt-multiarch').IPty;
+  senderId: number;
+  cmd: string;
+};
+const ptys = new Map<number, PtyRecord>();
+let nextPtyId = 1;
+
+function ptyEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  // Electron sets ELECTRON_RUN_AS_NODE / NODE_OPTIONS that confuse user
+  // shells. Strip them. TERM_PROGRAM lets prompts (oh-my-zsh, starship)
+  // know we're a terminal so they enable rich UI.
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.ELECTRON_NO_ATTACH_CONSOLE;
+  env.TERM = env.TERM || 'xterm-256color';
+  env.COLORTERM = env.COLORTERM || 'truecolor';
+  env.TERM_PROGRAM = 'BreezeFile';
+  if (extra) Object.assign(env, extra);
+  return env;
+}
+
+type SpawnManagedPtyOpts = {
+  file: string;
+  args: string[];
+  cwd: string;
+  cols: number;
+  rows: number;
+  /** webContents id that owns the PTY (term:data / term:exit target). */
+  senderId: number;
+  /** Extra env layered on top of ptyEnv. BREEZE_PTY_ID is always set. */
+  env?: Record<string, string>;
+  /** Run when the PTY exits (after term:exit is sent). */
+  onExit?: (info: { exitCode: number; signal: number | null }) => void;
+  /** Pre-reserved id (from reservePtyId) when the caller needed it to
+   *  build env/args before spawning. Defaults to the next fresh id. */
+  id?: number;
+};
+
+/** Spawn a PTY, register it under a fresh id, and wire term:data /
+ *  term:exit to the owning webContents. Returns the new pty id. Shared by
+ *  the term:spawn IPC handler (shell/ssh) and runTaskInteractive (claude). */
+function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
+  const id = opts.id ?? nextPtyId;
+  if (id >= nextPtyId) nextPtyId = id + 1;
+  const proc = nodePty.spawn(opts.file, opts.args, {
+    name: 'xterm-256color',
+    cols: opts.cols,
+    rows: opts.rows,
+    cwd: opts.cwd,
+    env: ptyEnv({
+      ...opts.env,
+      BREEZE_PTY_ID: String(id),
+    }) as { [key: string]: string },
+  });
+  ptys.set(id, { proc, senderId: opts.senderId, cmd: opts.file });
+  proc.onData((data) => {
+    const wc = BrowserWindow.fromId(opts.senderId)?.webContents;
+    if (wc && !wc.isDestroyed()) wc.send('term:data', { id, data });
+  });
+  proc.onExit(({ exitCode, signal }) => {
+    const wc = BrowserWindow.fromId(opts.senderId)?.webContents;
+    if (wc && !wc.isDestroyed()) {
+      wc.send('term:exit', { id, code: exitCode, signal: signal ?? null });
+    }
+    ptys.delete(id);
+    try { opts.onExit?.({ exitCode, signal: signal ?? null }); } catch (e) {
+      console.error('[pty] onExit hook:', e);
+    }
+  });
+  return id;
+}
+
+/** Reserve a pty id without spawning. Used by callers that need the id to
+ *  thread into env/args before the spawn (pass it back as opts.id). */
+function reservePtyId(): number {
+  return nextPtyId++;
+}
+
+export { spawnManagedPty, reservePtyId };
+export type { SpawnManagedPtyOpts };
+
 export function registerIpc() {
   // Capability manifest — boot-time read by the renderer to gate verbs and UI
   // (see docs/cross-platform-strategy.md). Synchronous on the adapter side.
@@ -1584,31 +1672,11 @@ end tell`;
   });
 
   // ─── Embedded PTY (fm-jtu) ───────────────────────────────────────────
-  // node-pty lives in the main process; the renderer drives it over IPC.
   // High-frequency channels (write, resize, data) use ipcRenderer.send /
   // webContents.send so we never queue a Promise per keystroke. spawn,
-  // status, kill go through invoke because the caller wants a result.
-  type PtyRecord = {
-    proc: import('@homebridge/node-pty-prebuilt-multiarch').IPty;
-    senderId: number;
-    cmd: string;
-  };
-  const ptys = new Map<number, PtyRecord>();
-  let nextPtyId = 1;
-
-  function ptyEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    // Electron sets ELECTRON_RUN_AS_NODE / NODE_OPTIONS that confuse user
-    // shells. Strip them. TERM_PROGRAM lets prompts (oh-my-zsh, starship)
-    // know we're a terminal so they enable rich UI.
-    delete env.ELECTRON_RUN_AS_NODE;
-    delete env.ELECTRON_NO_ATTACH_CONSOLE;
-    env.TERM = env.TERM || 'xterm-256color';
-    env.COLORTERM = env.COLORTERM || 'truecolor';
-    env.TERM_PROGRAM = 'BreezeFile';
-    if (extra) Object.assign(env, extra);
-    return env;
-  }
+  // status, kill go through invoke because the caller wants a result. The
+  // PTY registry + spawn core live at module scope (spawnManagedPty) so
+  // task runs can spawn into the same registry.
 
   function defaultShell(): { file: string; args: string[] } {
     if (process.platform === 'win32') {
@@ -1644,7 +1712,7 @@ end tell`;
       let spawnCwd = cwd;
       const cols = Math.max(2, Math.min(opts.cols ?? 80, 1000));
       const rows = Math.max(2, Math.min(opts.rows ?? 24, 1000));
-      const id = nextPtyId++;
+      const id = reservePtyId();
 
       // ── remote-attach verb ──────────────────────────────────────────
       // Explicit target (not inferred from an sshfs cwd): open a login
@@ -1749,33 +1817,24 @@ end tell`;
       }
       // BREEZE_PTY_ID lets Claude Code hooks (fm-z7v) tell us which tab
       // a UserPromptSubmit/Stop event belongs to. Set before spawn so it
-      // propagates into the shell and any child it execs.
-      const proc = nodePty.spawn(file, args, {
-        name: 'xterm-256color',
+      // propagates into the shell and any child it execs. The PTY core
+      // (spawnManagedPty) sets BREEZE_PTY_ID itself from the reserved id.
+      const senderId = e.sender.id;
+      spawnManagedPty({
+        id,
+        file,
+        args,
+        cwd: spawnCwd,
         cols,
         rows,
-        cwd: spawnCwd,
-        env: ptyEnv({
+        senderId,
+        env: {
           ...opts.env,
-          BREEZE_PTY_ID: String(id),
           ...(remoteTarget ? { BREEZE_REMOTE_TARGET: remoteTarget } : {}),
-        }) as { [key: string]: string },
-      });
-      const senderId = e.sender.id;
-      ptys.set(id, { proc, senderId, cmd: file });
-      proc.onData((data) => {
-        const wc = BrowserWindow.fromId(senderId)?.webContents;
-        // sender stays valid even if window is hidden; just guard against
-        // the window being closed mid-stream.
-        if (wc && !wc.isDestroyed()) wc.send('term:data', { id, data });
-      });
-      proc.onExit(({ exitCode, signal }) => {
-        const wc = BrowserWindow.fromId(senderId)?.webContents;
-        if (wc && !wc.isDestroyed()) {
-          wc.send('term:exit', { id, code: exitCode, signal: signal ?? null });
-        }
-        if (attachSid) revokeSessionToken(attachSid);
-        ptys.delete(id);
+        },
+        onExit: () => {
+          if (attachSid) revokeSessionToken(attachSid);
+        },
       });
       // Kill orphan PTYs if the renderer process goes away (window reload,
       // crash). Otherwise the shell keeps the file_manager parent alive.
@@ -2149,16 +2208,26 @@ end tell`;
     const { cancelRun } = await import('./agents/execute');
     return cancelRun(runId);
   });
-  ipcMain.handle('tasks:writeActiveSidecar', (_e, id: string): string | null => {
-    try {
-      const t = tasks.getTask(id);
-      if (!t) return null;
-      return tasks.writeActiveTaskSidecar(t);
-    } catch (err) {
-      console.error('[tasks:writeActiveSidecar] failed:', err);
-      return null;
-    }
-  });
+  ipcMain.handle(
+    'tasks:writeActiveSidecar',
+    (_e, id: string, source?: string): string | null => {
+      try {
+        // fm-b5at.4 PHI gate: never persist a phiSensitive source's task
+        // (e.g. TypeBuild) to the on-disk active-task sidecar. The sidecar is
+        // written from the LOCAL sqlite store; a remote PHI task has no local
+        // row anyway, but gate explicitly so a future caller passing a source
+        // can't leak decrypted content to disk.
+        const src = getTaskSource(source);
+        if (src?.capabilities.phiSensitive) return null;
+        const t = tasks.getTask(id);
+        if (!t) return null;
+        return tasks.writeActiveTaskSidecar(t);
+      } catch (err) {
+        console.error('[tasks:writeActiveSidecar] failed:', err);
+        return null;
+      }
+    },
+  );
 }
 
 export function focusedWindow(): BrowserWindow | null {

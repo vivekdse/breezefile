@@ -441,3 +441,28 @@
   border-color: var(--accent-ink, white);
   opacity: 0.85;
 }
+
+/* fm-b5at.7 — agent flags row (interactive / chrome / auto). Compact row
+   above the footer, only rendered for Claude tasks. */
+.composer__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.2));
+  font-size: 13px;
+}
+.composer__flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.85;
+}
+.composer__flag:hover {
+  opacity: 1;
+}
+.composer__flag input {
+  cursor: pointer;
+}
