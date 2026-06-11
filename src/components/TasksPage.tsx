@@ -116,7 +116,10 @@ function shortDate(iso: string, today: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function homeRel(p: string): string {
+function homeRel(p: string | undefined | null): string {
+  // Source tasks (e.g. TypeBuild) carry no folder across the seam, so `p` can
+  // be undefined — never assume a string or we throw on `.replace`.
+  if (!p) return '';
   const home =
     typeof window !== 'undefined' && (window as unknown as { fm?: { home?: string } }).fm?.home;
   if (home && p === home) return '~';
@@ -2298,12 +2301,14 @@ function TaskDetailPanel({
       <h2 className="tasks__detail-title">{task.title}</h2>
 
       <dl className="tasks__detail-meta">
-        <div>
-          <dt>Folder</dt>
-          <dd className="tasks__detail-mono" title={task.folder}>
-            {homeRel(task.folder)}
-          </dd>
-        </div>
+        {task.folder && (
+          <div>
+            <dt>Folder</dt>
+            <dd className="tasks__detail-mono" title={task.folder}>
+              {homeRel(task.folder)}
+            </dd>
+          </div>
+        )}
         {task.start_at && (
           <div>
             <dt>Start</dt>

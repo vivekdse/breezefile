@@ -222,6 +222,12 @@ export class TypeBuildTaskSource implements TaskSource {
       const token = await getIdToken();
       const headers: Record<string, string> = {
         Authorization: `Bearer ${token}`,
+        // The server content-negotiates: without an explicit JSON Accept it
+        // serves the HTML task-list page, which we then fail to parse as JSON
+        // (data.tasks === undefined → silently-empty list). Ask for JSON on
+        // every chromeext call. (Its wants_json() requires application/json
+        // present AND text/html absent.)
+        Accept: 'application/json',
       };
       if (body !== undefined) headers['Content-Type'] = 'application/json';
       return fetch(`${API_BASE}${path}`, {
