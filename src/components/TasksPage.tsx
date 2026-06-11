@@ -28,12 +28,13 @@ import {
   todayISO,
   updateTask,
   useRunCounts,
+  useTaskSources,
   useTasks,
 } from '../tasks';
 import { RunsView } from './RunsView';
 import type { ConfirmRequest } from './ConfirmDialog';
 import { formatOpError } from '../errorMessages';
-import type { Task, TaskStatus } from '../types';
+import type { Task, TaskSourceCapabilities, TaskStatus } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
 import './TasksPage.css';
 
@@ -188,6 +189,11 @@ export function TasksPage() {
   // and replaces them with the cross-task RunsView component.
   const [view, setView] = useState<'tasks' | 'runs'>('tasks');
   const runCounts = useRunCounts();
+  // fm-b5at.1 — capability map keyed by source id. Gates row edit/delete
+  // affordances; the local source allows everything.
+  const { byId: sourcesById } = useTaskSources();
+  const capsFor = (t: Task): TaskSourceCapabilities | undefined =>
+    sourcesById[t.source ?? 'local']?.capabilities;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cursorId, setCursorId] = useState<string | null>(null);
@@ -1299,6 +1305,7 @@ export function TasksPage() {
                 <TaskRow
                   key={t.id}
                   task={t}
+                  caps={capsFor(t)}
                   runCount={runCounts[t.id] ?? 0}
                   hideFolder={group === 'folder'}
                   selected={selected.has(t.id)}
@@ -1345,6 +1352,7 @@ export function TasksPage() {
       {kebabFor && (
         <RowKebabMenu
           task={kebabFor.task}
+          caps={capsFor(kebabFor.task)}
           x={kebabFor.x}
           y={kebabFor.y}
           onClose={() => setKebabFor(null)}
@@ -1426,6 +1434,7 @@ export function TasksPage() {
 
 function TaskRow({
   task,
+  caps,
   runCount,
   hideFolder,
   selected,
@@ -1439,6 +1448,7 @@ function TaskRow({
   onKebab,
 }: {
   task: Task;
+  caps?: TaskSourceCapabilities;
   runCount: number;
   hideFolder?: boolean;
   selected: boolean;
@@ -1458,6 +1468,14 @@ function TaskRow({
     task.status !== 'done' &&
     task.status !== 'cancelled';
   const isClosed = task.status === 'done' || task.status === 'cancelled';
+  // fm-b5at.1 — gate the inline edit affordance on the owning source's
+  // capabilities. Delete lives in the kebab menu (gated there). Unknown
+  // caps (source not yet loaded) default to allowed.
+  const canEdit = caps ? caps.canEdit : true;
+  // Surface a source-native status that didn't map cleanly into the local
+  // enum (e.g. TypeBuild 'failed' | 'partial' | 'blocked').
+  const rawBadge =
+    task.rawStatus && task.rawStatus !== task.status ? task.rawStatus : null;
 
   return (
     <div
@@ -1502,6 +1520,14 @@ function TaskRow({
         <div className="tasks__row-title">
           <TaskStatusDot status={task.status} />
           <span className="tasks__row-title-text">{task.title}</span>
+          {rawBadge && (
+            <span
+              className="tasks__raw-status"
+              title={`Source status: ${rawBadge}`}
+            >
+              {rawBadge}
+            </span>
+          )}
         </div>
         <div className="tasks__row-sub">
           {!hideFolder && (
@@ -1586,15 +1612,17 @@ function TaskRow({
         >
           {isClosed ? '↺' : '✓'}
         </button>
-        <button
-          type="button"
-          className="tasks__row-btn"
-          onClick={onEdit}
-          title="Edit task"
-          aria-label="Edit"
-        >
-          ✎
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            className="tasks__row-btn"
+            onClick={onEdit}
+            title="Edit task"
+            aria-label="Edit"
+          >
+            ✎
+          </button>
+        )}
         <button
           type="button"
           className="tasks__row-btn"
@@ -1629,17 +1657,21 @@ function TaskRow({
 // selection.
 function RowKebabMenu({
   task,
+  caps,
   x,
   y,
   onClose,
   onAction,
 }: {
   task: Task;
+  caps?: TaskSourceCapabilities;
   x: number;
   y: number;
   onClose: () => void;
   onAction: (action: string) => void;
 }) {
+  const canEdit = caps ? caps.canEdit : true;
+  const canDelete = caps ? caps.canDelete : true;
   // Outside-click + Esc dismiss.
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -1671,9 +1703,11 @@ function RowKebabMenu({
 
   return (
     <div className="tasks__kebab" style={style} role="menu">
-      <button className="tasks__kebab-item" onClick={() => onAction('edit')}>
-        Edit…
-      </button>
+      {canEdit && (
+        <button className="tasks__kebab-item" onClick={() => onAction('edit')}>
+          Edit…
+        </button>
+      )}
       <button className="tasks__kebab-item" onClick={() => onAction('open-tab')}>
         Open in task tab
       </button>
@@ -1728,13 +1762,17 @@ function RowKebabMenu({
       <button className="tasks__kebab-item" onClick={() => onAction('goto-folder')}>
         Go to folder
       </button>
-      <div className="tasks__kebab-sep" />
-      <button
-        className="tasks__kebab-item tasks__kebab-item--danger"
-        onClick={() => onAction('delete')}
-      >
-        Delete…
-      </button>
+      {canDelete && (
+        <>
+          <div className="tasks__kebab-sep" />
+          <button
+            className="tasks__kebab-item tasks__kebab-item--danger"
+            onClick={() => onAction('delete')}
+          >
+            Delete…
+          </button>
+        </>
+      )}
     </div>
   );
 }

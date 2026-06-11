@@ -1,4 +1,4 @@
-import type { Entry, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskUpdate } from './types';
+import type { Entry, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
 
 export type Capabilities = {
   id: 'mac' | 'linux';
@@ -135,6 +135,14 @@ type Fm = {
   tasksCreate: (input: TaskCreate, source?: string) => Promise<Task>;
   tasksUpdate: (id: string, patch: TaskUpdate, source?: string) => Promise<Task>;
   tasksDelete: (id: string, source?: string) => Promise<void>;
+  // ── TaskSource providers (fm-b5at.1) ──
+  tasksSources: () => Promise<TaskSourceInfo[]>;
+  tasksSourceAction: (
+    source: string,
+    taskId: string,
+    action: string,
+    payload?: unknown,
+  ) => Promise<unknown>;
   // ── Multi-source (breezed P4) ──
   sourcesList: () => Promise<
     Array<{ id: string; kind: 'local' | 'remote'; status: 'connected' | 'connecting' }>
@@ -181,7 +189,17 @@ type Fm = {
   onAppFocus: (cb: (focused: boolean) => void) => () => void;
   showAttentionNotification: (opts: { title: string; body: string; tabId: string }) => Promise<void>;
   onNotificationClicked: (cb: (tabId: string) => void) => () => void;
+  // fm-b5at.2 — TypeBuild plugin Firebase auth. Self-contained namespaced
+  // block; tokens live in main, the renderer only sees TypebuildAuthState.
+  typebuild: {
+    signIn: (email: string, password: string) => Promise<TypebuildAuthState>;
+    signOut: () => Promise<void>;
+    authState: () => Promise<TypebuildAuthState>;
+    onAuthChanged: (cb: (state: TypebuildAuthState) => void) => () => void;
+  };
 };
+
+export type TypebuildAuthState = { signedIn: boolean; email?: string };
 
 export type Launcher = {
   id: string;

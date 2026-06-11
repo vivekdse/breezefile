@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fm } from './bridge';
 import { humanizeError } from './errorMessages';
-import type { Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskUpdate } from './types';
+import type { Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
 
 export function useTasks(filter: TaskFilter = {}): {
   tasks: Task[];
@@ -79,6 +79,60 @@ export async function deleteTask(id: string, source?: string): Promise<void> {
 }
 export async function getTask(id: string, source?: string): Promise<Task | null> {
   return fm.tasksGet(id, source);
+}
+
+// fm-b5at.1 — invoke a source-native verb (claim/release/reopen, ...) on
+// a task. Sources without the matching capability throw 'unsupported'.
+export async function taskSourceAction(
+  source: string,
+  taskId: string,
+  action: string,
+  payload?: unknown,
+): Promise<unknown> {
+  return fm.tasksSourceAction(source, taskId, action, payload);
+}
+
+// fm-b5at.1 — registered TaskSources + their capabilities. Re-pulls on
+// sources:changed so a source connecting/disconnecting (TypeBuild) keeps
+// the capability map fresh. The local source is always present.
+const LOCAL_SOURCE: TaskSourceInfo = {
+  id: 'local',
+  label: 'Local',
+  capabilities: {
+    canSchedule: true,
+    canClaim: false,
+    canEdit: true,
+    canDelete: true,
+    phiSensitive: false,
+    hasFolder: true,
+  },
+};
+
+export function useTaskSources(): {
+  sources: TaskSourceInfo[];
+  byId: Record<string, TaskSourceInfo>;
+} {
+  const [sources, setSources] = useState<TaskSourceInfo[]>([LOCAL_SOURCE]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const list = await fm.tasksSources();
+        if (!cancelled && list.length) setSources(list);
+      } catch {
+        /* keep the last-known set */
+      }
+    };
+    void load();
+    const unsub = fm.onSourcesChanged(() => void load());
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+  const byId: Record<string, TaskSourceInfo> = {};
+  for (const s of sources) byId[s.id] = s;
+  return { sources, byId };
 }
 
 // fm-zf3m — runs API + hooks for the renderer.

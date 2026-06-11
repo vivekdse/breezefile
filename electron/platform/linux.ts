@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import os from 'node:os';
 import type { Capabilities, PlatformAdapter } from './index';
 import { bfsSearch } from './bfs';
@@ -80,4 +81,26 @@ export class LinuxAdapter implements PlatformAdapter {
   playAttentionSound(): void {
     /* no-op until a bundled sound + paplay/canberra impl lands */
   }
+
+  async chromePath(): Promise<string | null> {
+    // GUI apps don't inherit the user's shell PATH, but Chrome installs land
+    // in system dirs already on the minimal PATH. Probe the common command
+    // names in priority order; first one `which` resolves wins.
+    for (const name of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+      const p = await which(name);
+      if (p) return p;
+    }
+    return null;
+  }
+}
+
+function which(name: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    // `command` is a shell builtin, so run it through sh. name is from a
+    // fixed allow-list (no user input), so the interpolation is safe.
+    execFile('/bin/sh', ['-c', `command -v ${name}`], (err, stdout) => {
+      const p = (stdout || '').trim().split('\n')[0] || '';
+      resolve(!err && p ? p : null);
+    });
+  });
 }

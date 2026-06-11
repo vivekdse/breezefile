@@ -147,6 +147,7 @@ type Verb =
   | 'newtag'
   | 'tag'
   | 'untag'
+  | 'run'
   | 'filter'
   | 'help'
   | 'welcome'

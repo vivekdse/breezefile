@@ -242,6 +242,14 @@ const fm = {
     ipcRenderer.invoke('tasks:update', id, patch, source),
   tasksDelete: (id: string, source?: string) =>
     ipcRenderer.invoke('tasks:delete', id, source),
+  // ── TaskSource providers (fm-b5at.1) ──
+  tasksSources: () => ipcRenderer.invoke('tasks:sources'),
+  tasksSourceAction: (
+    source: string,
+    taskId: string,
+    action: string,
+    payload?: unknown,
+  ) => ipcRenderer.invoke('tasks:sourceAction', source, taskId, action, payload),
   // ── Multi-source (breezed P4) ──
   sourcesList: () => ipcRenderer.invoke('sources:list'),
   sourcesConnect: (host: string) => ipcRenderer.invoke('sources:connect', host),
@@ -321,6 +329,34 @@ const fm = {
     const handler = (_e: unknown, payload: { tabId: string }) => cb(payload.tabId);
     ipcRenderer.on('app:notification-clicked', handler);
     return () => ipcRenderer.off('app:notification-clicked', handler);
+  },
+  // ─── TypeBuild auth (fm-b5at.2) ───────────────────────────────────
+  // Self-contained namespaced block for the TypeBuild plugin's Firebase
+  // sign-in. Token lifecycle lives entirely in main (electron/typebuild/
+  // auth.ts); the renderer only ever sees AuthState ({signedIn, email?}).
+  typebuild: {
+    signIn: (email: string, password: string) =>
+      ipcRenderer.invoke('typebuild:auth:signIn', email, password) as Promise<{
+        signedIn: boolean;
+        email?: string;
+      }>,
+    signOut: () =>
+      ipcRenderer.invoke('typebuild:auth:signOut') as Promise<void>,
+    authState: () =>
+      ipcRenderer.invoke('typebuild:auth:state') as Promise<{
+        signedIn: boolean;
+        email?: string;
+      }>,
+    onAuthChanged: (
+      cb: (state: { signedIn: boolean; email?: string }) => void,
+    ) => {
+      const handler = (
+        _e: unknown,
+        state: { signedIn: boolean; email?: string },
+      ) => cb(state);
+      ipcRenderer.on('typebuild:auth:changed', handler);
+      return () => ipcRenderer.off('typebuild:auth:changed', handler);
+    },
   },
 };
 

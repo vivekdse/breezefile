@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, Menu, protocol, Notification as ElectronNotification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
@@ -11,6 +10,7 @@ import { ElectronBreezeHost } from './core/electron-host';
 import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
+import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
 import { platform } from './platform';
 // Side-effect import: registers built-in agent runners (Claude) so the
 // scheduler / run-now endpoints can dispatch by id (epic fm-zf3m).
@@ -183,6 +183,10 @@ app.whenReady().then(() => {
   // Reconnect previously-connected remote breezed daemons (best-effort,
   // never blocks startup).
   restoreSources();
+  // fm-b5at.2 — TypeBuild Firebase auth IPC. Registers signIn/signOut/state
+  // handlers + the auth-state broadcaster, and restores any persisted
+  // (encrypted) session from a prior launch. Best-effort; never blocks.
+  registerTypebuildAuthIpc();
   // fm-fc0 — best-effort: register breeze-mcp into ~/.claude/settings.json
   // on every launch. Idempotent — does nothing if already present and
   // up-to-date. Failures (file unreadable, no MCP binary) are logged

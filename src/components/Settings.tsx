@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useStore, DEFAULT_KEYBINDS } from '../store';
 import { fm } from '../bridge';
 import { formatOpError } from '../errorMessages';
+import { TypebuildAuthPanel } from './typebuild/TypebuildAuthPanel';
 import './Settings.css';
 
 type Props = { onClose: () => void };
@@ -11,7 +12,8 @@ type SectionId =
   | 'task-management'
   | 'terminal'
   | 'notifications'
-  | 'bookmarks';
+  | 'bookmarks'
+  | 'typebuild';
 
 export function Settings({ onClose }: Props) {
   const { state, dispatch } = useStore();
@@ -327,6 +329,15 @@ export function Settings({ onClose }: Props) {
                 </li>
               ))}
             </ul>
+          </AccordionSection>
+
+          <AccordionSection
+            id="typebuild"
+            title="TypeBuild"
+            isOpen={openSection === 'typebuild'}
+            onToggle={() => toggle('typebuild')}
+          >
+            <TypebuildAuthPanel />
           </AccordionSection>
         </div>
       </div>

@@ -39,6 +39,12 @@ export interface PlatformAdapter {
 
   // Best-effort attention sound for background-task completion.
   playAttentionSound(): void;
+
+  // Absolute path to the Google Chrome (or Chromium) executable, or null if
+  // not installed. Used by the TypeBuild onboarding prerequisite check.
+  // Mac: standard /Applications path + mdfind fallback. Linux: command -v of
+  // google-chrome / google-chrome-stable / chromium.
+  chromePath(): Promise<string | null>;
 }
 
 import { MacAdapter } from './mac';

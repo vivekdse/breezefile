@@ -1,0 +1,97 @@
+/* TypeBuild sign-in panel (fm-b5at.2). Reuses Settings design tokens so it
+   sits consistently inside the Settings "TypeBuild" accordion section. */
+
+.tb-auth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.tb-auth__intro {
+  margin: 0;
+}
+
+.tb-auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 360px;
+}
+
+.tb-auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.tb-auth__label {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.tb-auth__input {
+  padding: 4px var(--sp-2);
+  background: var(--panel-2, var(--bg-2));
+  border: 1px solid var(--rule, var(--border-1));
+  border-radius: var(--r-sm);
+  color: var(--text-on-panel);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  outline: 0;
+}
+
+.tb-auth__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tb-auth__input:disabled {
+  opacity: 0.6;
+}
+
+.tb-auth__email {
+  font-family: var(--font-mono);
+}
+
+.tb-auth__error {
+  color: var(--danger, #ff6b6b);
+  font-size: var(--fs-sm);
+}
+
+.tb-auth__actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.tb-auth__btn {
+  padding: 4px var(--sp-3);
+  background: var(--panel-2, var(--bg-3));
+  border: 1px solid var(--rule, var(--border-1));
+  border-radius: var(--r-sm);
+  color: var(--text-on-panel);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.tb-auth__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.tb-auth__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+
+.tb-auth__btn--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.tb-auth__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

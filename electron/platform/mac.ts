@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import type { Capabilities, PlatformAdapter } from './index';
 
@@ -70,5 +71,27 @@ export class MacAdapter implements PlatformAdapter {
     } catch {
       /* best-effort */
     }
+  }
+
+  async chromePath(): Promise<string | null> {
+    const standard =
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    if (existsSync(standard)) return standard;
+    // Fallback: locate via Spotlight in case it lives elsewhere (e.g. a
+    // per-user ~/Applications install). Resolve the bundle to its binary.
+    return new Promise((resolve) => {
+      execFile(
+        'mdfind',
+        ['kMDItemCFBundleIdentifier == "com.google.Chrome"'],
+        { timeout: 3000 },
+        (err, stdout) => {
+          if (err) { resolve(null); return; }
+          const app = stdout.split('\n').find((l) => l.endsWith('.app'));
+          if (!app) { resolve(null); return; }
+          const bin = `${app}/Contents/MacOS/Google Chrome`;
+          resolve(existsSync(bin) ? bin : null);
+        },
+      );
+    });
   }
 }

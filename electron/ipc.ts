@@ -19,6 +19,11 @@ import {
   connectedHosts,
   remoteRequest,
 } from './sources';
+import {
+  getTaskSource,
+  listTaskSourceInfos,
+} from './sources/registry';
+import { unsupported } from './core/task-source';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2005,10 +2010,25 @@ end tell`;
     disconnectSource(host),
   );
 
+  // fm-b5at.1 — route through the TaskSource registry by source id. The
+  // breezed connected-host path (remoteRequest/resolveRemote) stays
+  // parallel: a `source` that names a connected ssh host is NOT a
+  // registered TaskSource, so it falls through to remoteRequest unchanged.
+  const isRegisteredSource = (id?: string): boolean => !!getTaskSource(id);
   ipcMain.handle('tasks:list', async (_e, filter?: TaskFilter) => {
-    const out = tasks
-      .listTasks(filter ?? {})
-      .map((t) => ({ ...t, source: 'local' }));
+    const out: Array<Record<string, unknown>> = [];
+    // Aggregate across every registered source (local + e.g. TypeBuild),
+    // tagging each row with its owning source id.
+    for (const src of listTaskSourceInfos()) {
+      try {
+        const rows = await getTaskSource(src.id)!.listTasks(filter ?? {});
+        for (const t of rows) out.push({ ...t, source: src.id });
+      } catch (e) {
+        console.warn('[tasks:list]', src.id, 'failed:', (e as Error).message);
+      }
+    }
+    // breezed multi-host federation (unchanged): connected ssh daemons are
+    // not registry sources — aggregate them alongside.
     const qs = taskQuery(filter);
     for (const host of connectedHosts()) {
       try {
@@ -2017,24 +2037,25 @@ end tell`;
           'GET',
           `/tasks${qs}`,
         );
-        for (const t of remote) out.push({ ...(t as object), source: host } as never);
+        for (const t of remote) out.push({ ...(t as object), source: host });
       } catch (e) {
         console.warn('[tasks:list]', host, 'failed:', (e as Error).message);
       }
     }
     return out;
   });
-  ipcMain.handle('tasks:get', (_e, id: string, source?: string) =>
-    source && source !== 'local'
-      ? remoteRequest(source, 'GET', `/tasks/${encodeURIComponent(id)}`)
-      : tasks.getTask(id),
-  );
+  ipcMain.handle('tasks:get', (_e, id: string, source?: string) => {
+    const src = getTaskSource(source);
+    if (src) return src.getTask(id);
+    return remoteRequest(source!, 'GET', `/tasks/${encodeURIComponent(id)}`);
+  });
   // Auto-by-folder routing: if the caller didn't pin a source and the
   // task's folder lives under a *connected* host's sshfs mount, the
   // task belongs to that machine — create it on its daemon with the
-  // folder rewritten to the real remote path. Otherwise local.
+  // folder rewritten to the real remote path. Otherwise route through the
+  // named (or default 'local') registered source.
   ipcMain.handle('tasks:create', async (_e, input: TaskCreate, source?: string) => {
-    if (source && source !== 'local') {
+    if (source && !isRegisteredSource(source)) {
       return remoteRequest(source, 'POST', '/tasks', input);
     }
     if (!source && input.folder) {
@@ -2046,19 +2067,42 @@ end tell`;
         });
       }
     }
-    return tasks.createTask(input);
+    return getTaskSource(source)!.createTask(input);
   });
   ipcMain.handle(
     'tasks:update',
-    (_e, id: string, patch: TaskUpdate, source?: string) =>
-      source && source !== 'local'
-        ? remoteRequest(source, 'PATCH', `/tasks/${encodeURIComponent(id)}`, patch)
-        : tasks.updateTask(id, patch),
+    (_e, id: string, patch: TaskUpdate, source?: string) => {
+      const src = getTaskSource(source);
+      if (src) return src.updateTask(id, patch);
+      return remoteRequest(source!, 'PATCH', `/tasks/${encodeURIComponent(id)}`, patch);
+    },
   );
-  ipcMain.handle('tasks:delete', (_e, id: string, source?: string) =>
-    source && source !== 'local'
-      ? remoteRequest(source, 'DELETE', `/tasks/${encodeURIComponent(id)}`)
-      : tasks.deleteTask(id),
+  ipcMain.handle('tasks:delete', (_e, id: string, source?: string) => {
+    const src = getTaskSource(source);
+    if (src) return src.deleteTask(id);
+    return remoteRequest(source!, 'DELETE', `/tasks/${encodeURIComponent(id)}`);
+  });
+  // fm-b5at.1 — registered sources + their capabilities (renderer gates
+  // edit/delete/schedule affordances on these).
+  ipcMain.handle('tasks:sources', () => listTaskSourceInfos());
+  // fm-b5at.1 — generic source-native verb (claim/release/reopen, ...).
+  // Routes to the owning source's sourceAction; throws if the source
+  // doesn't implement it.
+  ipcMain.handle(
+    'tasks:sourceAction',
+    (_e, source: string, taskId: string, action: string, payload?: unknown) => {
+      const src = getTaskSource(source);
+      if (!src) {
+        return remoteRequest(
+          source,
+          'POST',
+          `/tasks/${encodeURIComponent(taskId)}/action`,
+          { action, payload },
+        );
+      }
+      if (!src.sourceAction) throw unsupported(`action ${action}`);
+      return src.sourceAction(taskId, action, payload);
+    },
   );
   ipcMain.handle('tasks:countByFolder', (_e, folder: string) => tasks.countByFolder(folder));
   ipcMain.handle('tasks:dbExists', () => tasks.dbExists());
@@ -2077,20 +2121,17 @@ end tell`;
   ipcMain.handle('tasks:runsCountByTask', () => tasks.runCountsByTask());
   ipcMain.handle('tasks:lastRun', (_e, taskId: string) => tasks.getLastRun(taskId));
   ipcMain.handle('tasks:runNow', async (_e, taskId: string, source?: string) => {
-    // Remote: the run executes on that machine's daemon (its agent, its
-    // filesystem) — the whole point of per-machine ownership.
-    if (source && source !== 'local') {
-      return remoteRequest(
-        source,
-        'POST',
-        `/tasks/${encodeURIComponent(taskId)}/run`,
-        {},
-      );
-    }
-    const t = tasks.getTask(taskId);
-    if (!t) throw new Error(`task not found: ${taskId}`);
-    const { executeTaskRun } = await import('./agents/execute');
-    return executeTaskRun(t, { manualInvocation: true });
+    // Registered source (local + e.g. TypeBuild) runs through its own
+    // runNow. A connected ssh host is not a registry source: the run
+    // executes on that machine's daemon — fall through to remoteRequest.
+    const src = getTaskSource(source);
+    if (src) return src.runNow(taskId, { manualInvocation: true });
+    return remoteRequest(
+      source!,
+      'POST',
+      `/tasks/${encodeURIComponent(taskId)}/run`,
+      {},
+    );
   });
   // fm-femh — manual run with a caller-supplied cwd. Used by the
   // Run-task modal in folder tabs so a folder-agnostic task (or even

@@ -157,6 +157,31 @@ export type Task = {
   // breezed P4 — owning machine: 'local' or an ssh host. Tagged by the
   // aggregating IPC; absent on rows written/read directly.
   source?: string;
+  // fm-b5at.1 — optional fields a remote TaskSource (TypeBuild) may carry.
+  // Local rows leave these undefined.
+  rawStatus?: string;
+  priority?: number;
+  claimedBy?: string | null;
+  attempts?: number;
+  maxAttempts?: number;
+  flags?: string[];
+};
+
+// fm-b5at.1 — per-source capability flags. The UI gates row affordances
+// on these (same pattern as PlatformContext capability gating).
+export type TaskSourceCapabilities = {
+  canSchedule: boolean;
+  canClaim: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  phiSensitive: boolean;
+  hasFolder: boolean;
+};
+
+export type TaskSourceInfo = {
+  id: string;
+  label: string;
+  capabilities: TaskSourceCapabilities;
 };
 
 export type TaskCreate = {
