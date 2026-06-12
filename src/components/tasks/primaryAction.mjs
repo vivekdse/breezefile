@@ -12,8 +12,8 @@
 //                                    else view-run
 //   local auto, idle              → run-now (▸)
 //   typebuild, session running    → open-session  (focus the tab)
-//   typebuild done/partial        → none  (lives in DONE; reopen-from-done
-//                                    deferred to a kebab once server ships)
+//   typebuild done/partial/cancelled → none  (lives in DONE; Reopen is a
+//                                    kebab/detail action via PATCH {open})
 //   typebuild blocked             → reopen
 //   typebuild claimed by ME       → start ("you hold the claim")
 //   typebuild claimed by OTHER    → none + "◆ claimed by {email}"
@@ -29,7 +29,8 @@ function isLocalSource(source) {
 function isTerminal(task) {
   if (task.status === 'done' || task.status === 'cancelled') return true;
   const raw = task.rawStatus;
-  return raw === 'done' || raw === 'partial';
+  // fm-alfz (S1) — cancelled is a real server terminal status now.
+  return raw === 'done' || raw === 'partial' || raw === 'cancelled';
 }
 
 // Ported from the old TaskRow (lines 1652-1658): why Start is disabled.
@@ -88,7 +89,9 @@ export function primaryActionFor(task, ctx) {
   // ── TypeBuild ─────────────────────────────────────────────────────────
   if (isTypebuild) {
     if (isTerminal(task)) {
-      // In DONE; reopen-from-done is a kebab action once the server ships it.
+      // In DONE. Reopen-from-done/partial/cancelled/failed is a kebab/detail
+      // action now (PATCH {status:'open'}), not the row's primary — keep the
+      // primary `none` so the row stays calm in the collapsed DONE section.
       return { kind: 'none' };
     }
     if (task.rawStatus === 'blocked') {

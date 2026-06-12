@@ -1,12 +1,12 @@
 // fm-7909 — per-row "more actions" popover. The page now shows ONE primary
 // action per row; everything else lives here (pin, edit, open-tab,
 // status-cycle, due presets, go-to-folder, schedule, delete) plus the
-// source-native verbs for TypeBuild (Release when you hold it, Mark complete).
-// Fully capability-gated: an item that the owning source can't perform is
-// never rendered, so a click is never a silent no-op.
+// source-native verbs for TypeBuild (Release when you hold it, Mark complete,
+// Cancel, Reopen). Fully capability-gated: an item the owning source can't
+// perform is never rendered, so a click is never a silent no-op.
 //
-// Reopen-from-done is intentionally absent: the server endpoint is pending
-// (see docs/typebuild-complete-endpoint.md). Add it here once it ships.
+// fm-alfz (S1) — the v2 PATCH management verb shipped, so the previously
+// deferred reopen-from-done/cancelled is now a real kebab action.
 
 import { useEffect } from 'react';
 import type { RemoteSchedule, Task, TaskSourceCapabilities } from '../../types';
@@ -29,6 +29,9 @@ export type KebabAction =
   | 'schedule'
   | 'release'
   | 'complete'
+  // fm-alfz (S1) — TypeBuild source verbs via PATCH /chromeext/{id}.
+  | 'tb-cancel'
+  | 'tb-reopen'
   | 'delete';
 
 export function RowKebabMenu({
@@ -101,22 +104,46 @@ export function RowKebabMenu({
         Open terminal
       </button>
 
-      {/* fm-7909 — TypeBuild source verbs. Release only when YOU hold the
-          claim; Mark complete is always offered (server support is probed at
-          click time and degrades to a status message if absent). */}
-      {isTypebuild && (
-        <>
-          <div className="tasks__kebab-sep" />
-          {canClaim && claimedBy && claimedBy === myEmail && (
-            <button className="tasks__kebab-item" onClick={() => onAction('release')}>
-              Release claim
-            </button>
-          )}
-          <button className="tasks__kebab-item" onClick={() => onAction('complete')}>
-            Mark complete
-          </button>
-        </>
-      )}
+      {/* fm-7909 / fm-alfz (S1) — TypeBuild source verbs via PATCH. Release
+          only when YOU hold the claim. Mark complete + Cancel on non-terminal
+          rows; Reopen on terminal rows (done/partial/cancelled/failed/blocked). */}
+      {isTypebuild &&
+        (() => {
+          const raw = task.rawStatus ?? task.status;
+          const isTerminalRaw =
+            raw === 'done' || raw === 'partial' || raw === 'cancelled';
+          const canReopen =
+            raw === 'done' ||
+            raw === 'partial' ||
+            raw === 'cancelled' ||
+            raw === 'failed' ||
+            raw === 'blocked';
+          return (
+            <>
+              <div className="tasks__kebab-sep" />
+              {canClaim && claimedBy && claimedBy === myEmail && (
+                <button className="tasks__kebab-item" onClick={() => onAction('release')}>
+                  Release claim
+                </button>
+              )}
+              {!isTerminalRaw && (
+                <button className="tasks__kebab-item" onClick={() => onAction('complete')}>
+                  Mark complete
+                </button>
+              )}
+              {!isTerminalRaw && (
+                <button className="tasks__kebab-item" onClick={() => onAction('tb-cancel')}>
+                  Cancel
+                </button>
+              )}
+              {canReopen && (
+                <button className="tasks__kebab-item" onClick={() => onAction('tb-reopen')}>
+                  Reopen
+                </button>
+              )}
+            </>
+          );
+        })()}
 
       {canEdit && (
         <>

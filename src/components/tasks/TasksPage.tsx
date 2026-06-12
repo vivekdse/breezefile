@@ -21,6 +21,7 @@
 // Everything else is a verb in the chip prompt.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { fm } from '../../bridge';
 import { useStore } from '../../store';
 import { spawnTerminal } from '../../terminalSpawn';
 import {
@@ -77,6 +78,9 @@ function TasksPageInner() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [showDone, setShowDone] = useState(false);
+  // fm-lji6 (S2) — "Mine" toggle. Server-backed for TypeBuild (threads
+  // claimed_by=me into the list request); local tasks are unaffected.
+  const [mineOnly, setMineOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [view, setView] = useState<'tasks' | 'runs'>('tasks');
   const [doneExpanded, setDoneExpanded] = useState(false);
@@ -105,9 +109,16 @@ function TasksPageInner() {
   }, [searchInput]);
 
   // Pull everything (incl. done) once; partition + filter client-side.
+  // fm-lji6 (S2) — claimedByMe rides through to the TypeBuild source only
+  // (server-backed ?claimed_by=me); the local source ignores the member, so
+  // local rows stay unaffected by the toggle.
   const sqlFilter = useMemo(
-    () => ({ includeDone: true, search: search || undefined }),
-    [search],
+    () => ({
+      includeDone: true,
+      search: search || undefined,
+      claimedByMe: mineOnly || undefined,
+    }),
+    [search, mineOnly],
   );
   const { tasks: rawTasks, loading } = useTasks(sqlFilter);
 
@@ -315,6 +326,13 @@ function TasksPageInner() {
       case 'complete':
         void actions.sourceAction(task, 'complete');
         break;
+      // fm-alfz (S1) — TypeBuild cancel / reopen via the v2 PATCH verb.
+      case 'tb-cancel':
+        void actions.sourceAction(task, 'cancel');
+        break;
+      case 'tb-reopen':
+        void actions.sourceAction(task, 'reopen');
+        break;
       case 'delete':
         confirmDelete([task]);
         break;
@@ -466,6 +484,32 @@ function TasksPageInner() {
     window.addEventListener('fm:tasks:focus', onFocus);
     return () => window.removeEventListener('fm:tasks:focus', onFocus);
   }, []);
+
+  // fm-lji6 (S2) — surface per-source list failures in the status line. A
+  // dead/transient source (notably TypeBuild's 30s poll) used to vanish into
+  // the main-process log; show it once per failure burst and dedupe by
+  // source+message until the source recovers (a successful tasks:changed
+  // clears the seen set so a later failure surfaces again). PHI-free.
+  const sourceErrSeenRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const offErr = fm.onTaskSourceError(({ source, message }) => {
+      const prev = sourceErrSeenRef.current.get(source);
+      if (prev === message) return; // already announced this burst
+      sourceErrSeenRef.current.set(source, message);
+      const label = source === 'typebuild' ? 'TypeBuild' : source;
+      dispatch({
+        type: 'setStatus',
+        msg: `tasks from ${label} unavailable: ${message}`,
+      });
+    });
+    // A successful list refresh means the source recovered — forget the seen
+    // messages so a NEW failure later still announces itself.
+    const offOk = fm.onTasksChanged(() => sourceErrSeenRef.current.clear());
+    return () => {
+      offErr();
+      offOk();
+    };
+  }, [dispatch]);
 
   // ── verb event listeners (fm:tasks:*) — routed via bulkPatch ──────────────
   const isActive = state.tabs[state.activeTab]?.kind === 'tasks';
@@ -784,6 +828,19 @@ function TasksPageInner() {
                 onChange={(e) => setShowDone(e.target.checked)}
               />
               <span>Show done</span>
+            </label>
+            {/* fm-lji6 (S2) — "Mine": server-backed claimed_by=me for TypeBuild
+                rows; local tasks are unaffected. */}
+            <label
+              className="tasks__toggle"
+              title="Show only TypeBuild tasks you’ve claimed (local tasks unaffected)"
+            >
+              <input
+                type="checkbox"
+                checked={mineOnly}
+                onChange={(e) => setMineOnly(e.target.checked)}
+              />
+              <span>Mine</span>
             </label>
             <select
               className="tasks__select"

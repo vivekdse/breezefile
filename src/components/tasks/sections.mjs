@@ -21,11 +21,12 @@ function isLocalSource(source) {
 
 /** Terminal: hidden from the active sections, lives in DONE.
  *  Covers the local enum (done/cancelled) AND TypeBuild's rawStatus
- *  terminal states (done | partial). */
+ *  terminal states (done | partial | cancelled — fm-alfz/S1: cancelled is a
+ *  real server terminal status now, mapped to local 'cancelled'). */
 export function isDone(task) {
   if (task.status === 'done' || task.status === 'cancelled') return true;
   const raw = task.rawStatus;
-  if (raw === 'done' || raw === 'partial') return true;
+  if (raw === 'done' || raw === 'partial' || raw === 'cancelled') return true;
   return false;
 }
 
@@ -65,7 +66,10 @@ function sortForYou(a, b) {
 // FOR AGENTS sort: a running session first, then claimed-by-me, then by
 // rawStatus order (open, failed, blocked, others), then priority (lower
 // number = higher priority; nulls last), then created desc as a tiebreaker.
-const RAW_ORDER = ['open', 'failed', 'blocked'];
+// fm-alfz (S1) — cancelled is terminal (it lands in DONE, never FOR AGENTS),
+// but include it in the order for completeness so any stray cancelled row
+// sinks below the actionable states rather than ranking at the front.
+const RAW_ORDER = ['open', 'failed', 'blocked', 'cancelled'];
 function rawRank(task) {
   // Prefer the source-native rawStatus; fall back to a coarse mapping from
   // the local enum so local auto tasks sort sanely in this section too.

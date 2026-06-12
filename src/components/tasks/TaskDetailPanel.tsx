@@ -55,7 +55,7 @@ export function TaskDetailPanel({
   onSetStatus: (s: TaskStatus) => void;
   onTogglePin: () => void;
   onDelete: () => void;
-  onSourceAction: (action: 'release' | 'reopen' | 'complete') => void;
+  onSourceAction: (action: 'release' | 'reopen' | 'complete' | 'cancel') => void;
   onOpenRuns: () => void;
 }) {
   if (selectedCount > 1) {
@@ -360,7 +360,7 @@ function AgentDetail({
   onPrimary: (action: PrimaryAction) => void;
   onOpenInTab: () => void;
   onGotoFolder: () => void;
-  onSourceAction: (action: 'release' | 'reopen' | 'complete') => void;
+  onSourceAction: (action: 'release' | 'reopen' | 'complete' | 'cancel') => void;
 }) {
   // PHI: the decrypted body is fetched lazily and held in component state
   // ONLY. We clear it on task change / unmount and never write it anywhere.
@@ -395,7 +395,24 @@ function AgentDetail({
   const claimedBy = task.claimedBy ?? null;
   const claimedByMe = !!claimedBy && claimedBy === myEmail;
   const canClaim = !!caps?.canClaim;
-  const isBlocked = task.rawStatus === 'blocked';
+  // fm-alfz (S1) — lifecycle affordances. The smart `reopen` action routes
+  // 'blocked' through the legacy /reopen and every other terminal state
+  // through PATCH {status:'open'}.
+  const raw = task.rawStatus ?? task.status;
+  const isBlocked = raw === 'blocked';
+  // Terminal states the user can reopen: done | partial | cancelled | failed
+  // (blocked is handled by its own legacy path but uses the same Reopen verb).
+  const canReopen =
+    raw === 'done' ||
+    raw === 'partial' ||
+    raw === 'cancelled' ||
+    raw === 'failed' ||
+    isBlocked;
+  // Cancel is offered for any NON-terminal state (open/in_progress/blocked/
+  // failed). done/partial/cancelled are already terminal — nothing to cancel.
+  const isTerminalRaw =
+    raw === 'done' || raw === 'partial' || raw === 'cancelled';
+  const canCancel = !isTerminalRaw;
 
   return (
     <aside className="tasks__detail">
@@ -480,7 +497,27 @@ function AgentDetail({
             Release claim
           </button>
         )}
-        {isBlocked && (
+        {/* fm-alfz (S1) — Mark complete only while there's something to
+            complete (non-terminal); a terminal row offers Reopen instead. */}
+        {!isTerminalRaw && (
+          <button
+            type="button"
+            className="tasks__btn"
+            onClick={() => onSourceAction('complete')}
+          >
+            Mark complete
+          </button>
+        )}
+        {canCancel && (
+          <button
+            type="button"
+            className="tasks__btn"
+            onClick={() => onSourceAction('cancel')}
+          >
+            Cancel
+          </button>
+        )}
+        {canReopen && (
           <button
             type="button"
             className="tasks__btn"
@@ -489,13 +526,6 @@ function AgentDetail({
             Reopen
           </button>
         )}
-        <button
-          type="button"
-          className="tasks__btn"
-          onClick={() => onSourceAction('complete')}
-        >
-          Mark complete
-        </button>
       </div>
     </aside>
   );

@@ -164,6 +164,13 @@ type Fm = {
   // fm-adc — write the per-task sidecar markdown for AI launchers
   tasksWriteActiveSidecar: (id: string, source?: string) => Promise<string | null>;
   onTasksChanged: (cb: () => void) => () => void;
+  // fm-lji6 (S2) — per-source list failures (broadcast from the tasks:list
+  // aggregation). The list itself stays a bare array (one source failing
+  // degrades to its cache rather than throwing), but subscribers can surface
+  // which source broke + why. PHI-free: source id + a message, never content.
+  onTaskSourceError: (
+    cb: (e: { source: string; message: string }) => void,
+  ) => () => void;
   // fm-zf3m — task runs
   tasksRunsList: (taskId: string, limit?: number) => Promise<TaskRun[]>;
   tasksRunsListAll: (limit?: number) => Promise<TaskRunWithTitle[]>;
@@ -188,7 +195,7 @@ type Fm = {
     cb: (
       transitions: Array<{
         taskId: string;
-        kind: 'new' | 'completed' | 'partial' | 'blocked' | 'claim-lost';
+        kind: 'new' | 'completed' | 'partial' | 'cancelled' | 'blocked' | 'claim-lost';
         source: string;
       }>,
     ) => void,

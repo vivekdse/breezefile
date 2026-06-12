@@ -1,3 +1,5 @@
+> **Superseded (2026-06-12):** the server shipped `PATCH /chromeext/{id}` as the management verb instead — see docs/task-api-v2-ui-plan.md.
+
 # TypeBuild `complete` endpoint — server spec
 
 **Status:** proposed — implement on `general.typebuild.com`.

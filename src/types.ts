@@ -175,6 +175,14 @@ export type Task = {
   attempts?: number;
   maxAttempts?: number;
   flags?: string[];
+  // fm-lji6 (S2) — Task API v2 fields. `deferUntil` (ISO) drives the snooze
+  // pill; `parentTaskId` is an opaque container id. Detail-only dependency
+  // fields are memory-only (opaque non-PHI ids).
+  deferUntil?: string | null;
+  parentTaskId?: string | null;
+  dependsOn?: string[];
+  depsSatisfied?: boolean;
+  blockedBy?: string[];
 };
 
 // fm-b5at.1 — per-source capability flags. The UI gates row affordances
@@ -283,4 +291,7 @@ export type TaskFilter = {
   /** Show tasks with start_at <= today (or null) and not done/cancelled. */
   activeOnly?: boolean;
   includeDone?: boolean;
+  /** fm-lji6 (S2) — "Mine" toggle. Only the typebuild source consumes this
+   *  (server-backed via ?claimed_by=me); the local source ignores it. */
+  claimedByMe?: boolean;
 };

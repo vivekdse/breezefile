@@ -347,11 +347,13 @@ function Shell() {
           ? 'completed'
           : k === 'partial'
             ? 'partially completed'
-            : k === 'blocked'
-              ? 'blocked'
-              : k === 'claim-lost'
-                ? 'claim released'
-                : 'available';
+            : k === 'cancelled'
+              ? 'cancelled'
+              : k === 'blocked'
+                ? 'blocked'
+                : k === 'claim-lost'
+                  ? 'claim released'
+                  : 'available';
       const msg =
         transitions.length > 3
           ? `${transitions.length} TypeBuild tasks changed`

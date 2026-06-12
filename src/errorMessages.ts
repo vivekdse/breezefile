@@ -103,3 +103,44 @@ export function formatOpError(op: string, err: unknown): string {
   const f = humanizeError(err);
   return `${op} failed — ${f.message}`;
 }
+
+// fm-alfz (S1) — humanize the Task API v2 reason vocabulary. A source verb
+// (complete/cancel/reopen/…) that the server rejects returns a structured
+// { reason, claimedBy?, blockedBy? } rather than throwing; this turns the
+// machine reason into a sentence the statusbar can show. `blockedBy` (from
+// not_ready) supplies the count for the "waiting on N tasks" message.
+export function formatSourceReason(
+  reason: string | undefined,
+  ctx?: { claimedBy?: string | null; blockedBy?: string[] },
+): string {
+  switch (reason) {
+    case 'use_claim_task':
+      return 'Use Start to work on a task — in-progress is set by claiming';
+    case 'failed_is_agent_outcome':
+      return 'Only an agent run can mark a task failed';
+    case 'illegal_transition':
+      return "That status change isn't allowed from the task's current state";
+    case 'not_ready': {
+      const n = ctx?.blockedBy?.length ?? 0;
+      return n > 0
+        ? `Waiting on ${n} other task${n === 1 ? '' : 's'}`
+        : 'Waiting on other tasks';
+    }
+    case 'in_progress_elsewhere':
+      return 'Someone is working on this right now';
+    case 'not_owner':
+      return "Only the task's creator can do that";
+    case 'last_admin':
+      return "Can't remove the last admin";
+    case 'bad_status':
+      return 'Unknown status';
+    case 'not visible':
+      return "This task isn't visible to you anymore";
+    case 'already claimed': {
+      const who = ctx?.claimedBy ? ` by ${ctx.claimedBy}` : '';
+      return `Already claimed${who}`;
+    }
+    default:
+      return reason ?? 'rejected';
+  }
+}

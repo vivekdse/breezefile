@@ -17,7 +17,7 @@ import {
   updateTask,
   useTaskSources,
 } from '../../tasks';
-import { formatOpError } from '../../errorMessages';
+import { formatOpError, formatSourceReason } from '../../errorMessages';
 import type { Task, TaskSourceCapabilities, TaskStatus, TaskUpdate } from '../../types';
 
 // fm-b5at.9 — map a thrown TypeBuild MCP-token mint failure to the bead's
@@ -62,10 +62,10 @@ export type TaskActions = {
   ) => Promise<void>;
   /** Bulk delete (the confirm dialog owns the gate UI; this is the apply). */
   bulkDelete: (tasks: Task[]) => Promise<void>;
-  /** Source-native verb (release/reopen/complete). Surfaces {ok:false}. */
+  /** Source-native verb (release/reopen/complete/cancel). Surfaces {ok:false}. */
   sourceAction: (
     task: Task,
-    action: 'release' | 'reopen' | 'complete',
+    action: 'release' | 'reopen' | 'complete' | 'cancel',
   ) => Promise<void>;
   /** Start = claim-then-launch for TypeBuild; run-now for local auto. */
   start: (task: Task) => Promise<void>;
@@ -220,27 +220,33 @@ export function useTaskActions(): TaskActions {
   );
 
   const sourceAction = useCallback(
-    async (task: Task, action: 'release' | 'reopen' | 'complete') => {
+    async (task: Task, action: 'release' | 'reopen' | 'complete' | 'cancel') => {
       const source = task.source;
       if (!source) return;
       try {
         const res = (await taskSourceAction(source, task.id, action)) as
-          | { ok?: boolean; reason?: string; claimedBy?: string | null }
+          | {
+              ok?: boolean;
+              reason?: string;
+              claimedBy?: string | null;
+              blockedBy?: string[];
+            }
           | undefined;
         if (res && res.ok === false) {
-          // fm-7909 — the server doesn't yet support completing from here.
-          if (res.reason === 'complete-unsupported') {
-            say("TypeBuild server doesn't support completing tasks from here yet");
-            return;
-          }
-          const who = res.claimedBy ? ` by ${res.claimedBy}` : '';
-          say(`couldn’t ${action} · ${res.reason ?? 'rejected'}${who} · ${task.title}`);
+          // fm-alfz (S1) — humanize the v2 reason vocabulary so the statusbar
+          // shows friendly text rather than a machine reason.
+          const friendly = formatSourceReason(res.reason, {
+            claimedBy: res.claimedBy,
+            blockedBy: res.blockedBy,
+          });
+          say(`couldn’t ${action} · ${friendly} · ${task.title}`);
           return;
         }
         const verbed: Record<typeof action, string> = {
           release: 'released',
           reopen: 'reopened',
           complete: 'completed',
+          cancel: 'cancelled',
         };
         say(`${verbed[action]} · ${task.title}`);
       } catch (e) {
@@ -259,8 +265,12 @@ export function useTaskActions(): TaskActions {
         // throw (which is reserved for the mint gate failing).
         const res = (await runTaskNow(task.id, task.source)) as StartResult | undefined;
         if (res && res.ok === false) {
-          const who = res.claimedBy ? ` by ${res.claimedBy}` : '';
-          say(`couldn’t start · ${res.reason ?? 'already claimed'}${who}`);
+          // fm-alfz (S1) — friendly reason text (claimed by X / not visible …).
+          say(
+            `couldn’t start · ${formatSourceReason(res.reason ?? 'already claimed', {
+              claimedBy: res.claimedBy,
+            })}`,
+          );
           return;
         }
         say(

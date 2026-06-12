@@ -81,6 +81,27 @@ test('isDone treats typebuild done/partial as terminal', () => {
   assert.equal(isDone(task({ source: 'typebuild', rawStatus: 'open' })), false);
 });
 
+// fm-alfz (S1) — cancelled is a real terminal server status now.
+test('isDone treats typebuild cancelled as terminal', () => {
+  assert.equal(
+    isDone(task({ source: 'typebuild', rawStatus: 'cancelled', status: 'cancelled' })),
+    true,
+  );
+});
+
+test('a cancelled typebuild task lands in DONE, not FOR AGENTS', () => {
+  const c = task({
+    source: 'typebuild',
+    rawStatus: 'cancelled',
+    status: 'cancelled',
+    completed_at: 5,
+  });
+  const { forAgents, done, doneTotal } = partitionTasks([c]);
+  assert.equal(forAgents.length, 0);
+  assert.equal(doneTotal, 1);
+  assert.equal(done.length, 1);
+});
+
 test('FOR YOU sort: pinned first, then due asc nulls-last, then created desc', () => {
   const pinned = task({ id: 'p', pinned: true, due_at: '2030-01-01' });
   const dueSoon = task({ id: 'soon', due_at: '2020-01-01' });

@@ -62,6 +62,8 @@ const TRANSITION_BODY: Record<string, string> = {
   new: 'New task available',
   completed: 'Completed',
   partial: 'Partially completed',
+  // fm-alfz (S1) — cancelled is a real terminal transition now.
+  cancelled: 'Cancelled',
   blocked: 'Blocked — needs attention',
   'claim-lost': 'Your claim was released or taken over',
 };
@@ -136,7 +138,7 @@ export const ElectronBreezeHost: BreezeHost = {
   onTaskTransitions(
     transitions: Array<{
       taskId: string;
-      kind: 'new' | 'completed' | 'partial' | 'blocked' | 'claim-lost';
+      kind: 'new' | 'completed' | 'partial' | 'cancelled' | 'blocked' | 'claim-lost';
       source: string;
     }>,
   ) {

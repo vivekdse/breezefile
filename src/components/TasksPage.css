@@ -817,6 +817,12 @@
   border-color: var(--danger, #c0392b);
   background: transparent;
 }
+/* fm-lji6 (S2) — deferred (snoozed) TypeBuild task: muted, asleep look. */
+.tasks__date--deferred {
+  color: var(--muted, #8a8f98);
+  background: transparent;
+  font-style: italic;
+}
 
 /* fm-b5at.1 — source-native status that didn't map into the local enum
    (e.g. TypeBuild failed/partial/blocked). */

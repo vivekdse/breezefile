@@ -115,6 +115,18 @@ test('typebuild done/partial → none (lives in DONE)', () => {
   );
 });
 
+// fm-alfz (S1) — cancelled is terminal; the primary stays `none` (Reopen is a
+// kebab/detail action, not the row's primary).
+test('typebuild cancelled → none (reopen-from-done is a kebab action)', () => {
+  assert.equal(
+    primaryActionFor(
+      task({ source: 'typebuild', rawStatus: 'cancelled', status: 'cancelled' }),
+      {},
+    ).kind,
+    'none',
+  );
+});
+
 test('typebuild failed (unclaimed) → start', () => {
   const a = primaryActionFor(
     task({ source: 'typebuild', rawStatus: 'failed' }),

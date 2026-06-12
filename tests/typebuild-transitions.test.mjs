@@ -39,6 +39,28 @@ test('transition to partial → partial', () => {
   assert.deepEqual(out, [{ taskId: 'a', kind: 'partial' }]);
 });
 
+test('transition to cancelled → cancelled', () => {
+  const prev = [{ id: 'a', status: 'pending', rawStatus: 'open', claimedBy: null }];
+  const fresh = [{ id: 'a', status: 'cancelled', rawStatus: 'cancelled', claimedBy: null }];
+  const out = classifyTransitions(prev, fresh, ME, false);
+  assert.deepEqual(out, [{ taskId: 'a', kind: 'cancelled' }]);
+});
+
+test('cancelled held across polls does not re-fire', () => {
+  const prev = [{ id: 'a', status: 'cancelled', rawStatus: 'cancelled', claimedBy: null }];
+  const fresh = [{ id: 'a', status: 'cancelled', rawStatus: 'cancelled', claimedBy: null }];
+  const out = classifyTransitions(prev, fresh, ME, false);
+  assert.deepEqual(out, []);
+});
+
+test('cancel from in_progress fires cancelled + claim-lost', () => {
+  const prev = [{ id: 'a', status: 'in_progress', rawStatus: 'in_progress', claimedBy: ME }];
+  const fresh = [{ id: 'a', status: 'cancelled', rawStatus: 'cancelled', claimedBy: null }];
+  const out = classifyTransitions(prev, fresh, ME, false);
+  assert.ok(out.some((t) => t.taskId === 'a' && t.kind === 'cancelled'));
+  assert.ok(out.some((t) => t.taskId === 'a' && t.kind === 'claim-lost'));
+});
+
 test('transition to blocked → blocked', () => {
   const prev = [{ id: 'a', status: 'pending', rawStatus: 'open', claimedBy: null }];
   const fresh = [{ id: 'a', status: 'pending', rawStatus: 'blocked', claimedBy: null }];

@@ -143,6 +143,9 @@ export type TaskFilter = {
   activeOnly?: boolean;
   /** Include status='done'. Default true; UI filters separately. */
   includeDone?: boolean;
+  /** fm-lji6 (S2) — "Mine" toggle. Only the typebuild source consumes this
+   *  (server-backed via ?claimed_by=me); the local source ignores it. */
+  claimedByMe?: boolean;
 };
 
 let db: Database.Database | null = null;

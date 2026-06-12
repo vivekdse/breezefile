@@ -55,6 +55,13 @@ export function TaskRow({
     task.rawStatus && task.rawStatus !== task.status ? task.rawStatus : null;
   const claimedBy = task.claimedBy ?? null;
   const claimedByMe = !!claimedBy && claimedBy === myEmail;
+  // fm-lji6 (S2) — a deferred TypeBuild task (defer_until in the future) isn't
+  // claimable by claim-next until then; show a snooze pill so it reads as
+  // "asleep" rather than just idle. deferUntil is a full ISO timestamp.
+  const deferredUntil =
+    task.deferUntil && new Date(task.deferUntil).getTime() > Date.now()
+      ? task.deferUntil
+      : null;
 
   return (
     <div
@@ -136,6 +143,16 @@ export function TaskRow({
                 .join(' ')}
             >
               due {shortDate(task.due_at, today)}
+            </span>
+          )}
+          {deferredUntil && (
+            <span
+              className="tasks__date tasks__date--deferred"
+              title={`Deferred — not claimable until ${new Date(
+                deferredUntil,
+              ).toLocaleString()}`}
+            >
+              deferred until {shortDate(deferredUntil.slice(0, 10), today)}
             </span>
           )}
           {task.auto_mode && (

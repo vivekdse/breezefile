@@ -346,7 +346,7 @@ const fm = {
     cb: (
       transitions: Array<{
         taskId: string;
-        kind: 'new' | 'completed' | 'partial' | 'blocked' | 'claim-lost';
+        kind: 'new' | 'completed' | 'partial' | 'cancelled' | 'blocked' | 'claim-lost';
         source: string;
       }>,
     ) => void,

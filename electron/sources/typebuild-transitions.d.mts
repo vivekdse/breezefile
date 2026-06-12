@@ -13,6 +13,7 @@ export type TransitionKind =
   | 'new'
   | 'completed'
   | 'partial'
+  | 'cancelled'
   | 'blocked'
   | 'claim-lost';
 

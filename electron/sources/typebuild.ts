@@ -94,6 +94,11 @@ type ListRow = {
   flags?: string[] | null;
   title?: string;
   url?: string | null;
+  // fm-lji6 (S2) — v2 list+detail fields. `due_at` is an ISO timestamp;
+  // `defer_until` an ISO timestamp; `parent_task_id` an opaque (non-PHI) id.
+  due_at?: string | null;
+  defer_until?: string | null;
+  parent_task_id?: string | null;
 };
 
 /** Decrypted detail from GET /chromeext/<id>. `task` is the body (PHI). */
@@ -102,6 +107,11 @@ type DetailRow = ListRow & {
   notes?: string | null;
   claimed_at?: string | number | null;
   skills?: unknown;
+  // fm-lji6 (S2) — detail-only dependency fields. Memory-only; ids are
+  // opaque (non-PHI) so they're safe to carry, but never persisted/logged.
+  depends_on?: string[] | null;
+  deps_satisfied?: boolean | null;
+  blocked_by?: string[] | null;
 };
 
 // ─── Status mapping ──────────────────────────────────────────────────────
@@ -115,6 +125,9 @@ type DetailRow = ListRow & {
 //   in_progress         →  in_progress
 //   done                →  done
 //   partial             →  done
+//   cancelled           →  cancelled (fm-alfz/S1 — real terminal status now;
+//                          previously collapsed to pending and sat in FOR
+//                          AGENTS with a Start button)
 //   failed              →  pending   (rawStatus shows 'failed')
 //   blocked             →  pending   (rawStatus shows 'blocked')
 //   <anything else>     →  pending
@@ -125,6 +138,8 @@ function mapStatus(raw: string | undefined): TaskStatus {
     case 'done':
     case 'partial':
       return 'done';
+    case 'cancelled':
+      return 'cancelled';
     case 'open':
     case 'failed':
     case 'blocked':
@@ -140,12 +155,25 @@ function rawStatusOf(row: ListRow): string {
   return row.raw_status ?? row.status ?? 'open';
 }
 
+// fm-lji6 (S2) — normalize a server ISO timestamp to the local 'YYYY-MM-DD'
+// date part. Local rows store dates day-only; the due-date pill renders from
+// that shape, so we trim the time to keep both legs identical. Returns null
+// for nullish/empty input.
+function dateOnly(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  // 'YYYY-MM-DDTHH:MM:SSZ' or 'YYYY-MM-DD' → 'YYYY-MM-DD'. Cheap slice on the
+  // ISO 8601 'T' separator; pass through anything already day-only.
+  const t = iso.indexOf('T');
+  return t > 0 ? iso.slice(0, t) : iso.slice(0, 10);
+}
+
 function mapListRow(row: ListRow): SourcedTask {
   const raw = rawStatusOf(row);
-  // The list endpoint carries no timestamps — the local Task shape requires
-  // numeric created_at/updated_at. Use `now` as a benign placeholder so the
-  // renderer's sorts/filters don't choke; remote rows are grouped by source,
-  // not sorted on these. completed_at stays null unless the row is done.
+  // The list endpoint carries no created/updated timestamps — the local Task
+  // shape requires numeric created_at/updated_at. Use `now` as a benign
+  // placeholder so the renderer's sorts/filters don't choke; remote rows are
+  // grouped by source, not sorted on these. completed_at stays null unless
+  // the row is done.
   const now = Date.now();
   const status = mapStatus(row.status ?? row.raw_status);
   return {
@@ -157,7 +185,10 @@ function mapListRow(row: ListRow): SourcedTask {
     // hasFolder is false for this source — no folder across the seam.
     folder: undefined,
     start_at: null,
-    due_at: null,
+    // fm-lji6 (S2) — server `due_at` (ISO) → the EXISTING Task.due_at field,
+    // normalized to the local day-only shape so the row's due pill + overdue
+    // tinting work identically to local tasks.
+    due_at: dateOnly(row.due_at),
     pinned: false,
     cron: null,
     next_run_at: null,
@@ -165,8 +196,11 @@ function mapListRow(row: ListRow): SourcedTask {
     auto_agent: null,
     auto_prompt: null,
     created_at: now,
+    // fm-alfz (S1) — terminal rows (done | cancelled) get a completed_at so
+    // they sort sensibly in the DONE section (completed_at desc); non-terminal
+    // rows leave it null.
     updated_at: now,
-    completed_at: status === 'done' ? now : null,
+    completed_at: status === 'done' || status === 'cancelled' ? now : null,
     // Source-specific fields.
     source: 'typebuild',
     rawStatus: raw,
@@ -177,6 +211,10 @@ function mapListRow(row: ListRow): SourcedTask {
       typeof row.max_attempts === 'number' ? row.max_attempts : undefined,
     // Local Task.flags is a required string[] (fm-b5at.7); default to [].
     flags: Array.isArray(row.flags) ? row.flags : [],
+    // fm-lji6 (S2) — v2 fields. deferUntil keeps its full ISO (the snooze pill
+    // needs the time to decide "in the future"); parentTaskId is opaque.
+    deferUntil: row.defer_until ?? null,
+    parentTaskId: row.parent_task_id ?? null,
   };
 }
 
@@ -213,6 +251,18 @@ export class TypeBuildTaskSource implements TaskSource {
   // while a relaunch for the same task is in flight; the fresh session re-uses
   // the same claim, so there is nothing to release.
   private relaunching = new Set<string>();
+
+  // ─── claim keep-alive (fm-cveh/S8) ───────────────────────────────────────
+  // A re-claim by the current holder is an idempotent renew that refreshes the
+  // 2h claim TTL (spec §1.5). While a Breeze-launched session for task X is
+  // alive, we re-POST /claim once per ~90min so a long-running session (an
+  // agent paused at an approval gate, say) never loses its claim to a
+  // teammate mid-flight. Keyed by opaque task id → interval handle (PHI-free:
+  // no titles/bodies ever touch this map).
+  private keepAliveTimers = new Map<
+    string,
+    ReturnType<typeof setInterval>
+  >();
 
   // ─── REST helper ────────────────────────────────────────────────────────
   // One fetch with a Bearer token. On 401, retry once with a fresh token
@@ -258,9 +308,14 @@ export class TypeBuildTaskSource implements TaskSource {
   // ─── list ─────────────────────────────────────────────────────────────
   async listTasks(filter: TaskFilter): Promise<SourcedTask[]> {
     const params = new URLSearchParams({ titles: '1' });
-    // Pull terminal states (done/partial/blocked) when the filter wants done
-    // rows. The renderer applies its own status filter on top.
+    // Pull terminal states (done/partial/cancelled/blocked) when the filter
+    // wants done rows. all=1 now also returns cancelled (fm-lji6/S2). The
+    // renderer applies its own status filter on top.
     if (filter.includeDone !== false) params.set('all', '1');
+    // fm-lji6 (S2) — the "Mine" toggle is server-backed: thread claimed_by=me
+    // so the server returns only rows the signed-in principal holds. Only the
+    // typebuild source consumes this filter member; local ignores it.
+    if (filter.claimedByMe) params.set('claimed_by', 'me');
 
     // A per-call fetch failure (transient 5xx, token blip, network) must NOT
     // collapse this source's whole contribution to the aggregated list to
@@ -335,6 +390,14 @@ export class TypeBuildTaskSource implements TaskSource {
       ...base,
       // Decrypted body → notes (PHI; rendered from React state only).
       notes: detail.task ?? detail.notes ?? null,
+      // fm-lji6 (S2) — dependency fields (detail only). Memory-only; ids are
+      // opaque (non-PHI). Used by S3's "waiting on N tasks" presentation.
+      dependsOn: Array.isArray(detail.depends_on) ? detail.depends_on : undefined,
+      depsSatisfied:
+        typeof detail.deps_satisfied === 'boolean'
+          ? detail.deps_satisfied
+          : undefined,
+      blockedBy: Array.isArray(detail.blocked_by) ? detail.blocked_by : undefined,
     };
   }
 
@@ -575,7 +638,69 @@ export class TypeBuildTaskSource implements TaskSource {
     // the clock re-arms automatically.
     registerSession(res.ptyId, { expiresAt: minted.expiresAt, taskId: id });
 
+    // fm-cveh (S8) — arm the claim keep-alive for this task. A relaunch reuses
+    // the same task id; startKeepAlive is idempotent (it no-ops if a timer is
+    // already armed) so the renewal cadence survives the PTY swap.
+    this.startKeepAlive(id);
+
     return { ptyId: res.ptyId };
+  }
+
+  // ─── claim keep-alive (fm-cveh/S8) ───────────────────────────────────────
+  // Renewal cadence. Re-POST /claim is a no-op for the server EXCEPT it
+  // refreshes the 2h TTL; firing at ~90min keeps a 2h claim comfortably alive.
+  private static readonly KEEPALIVE_MS = 90 * 60_000;
+
+  // Arm a once-per-~90min renewal for a live, Breeze-launched session's claim.
+  // Idempotent: a second call for the same task (e.g. an expiry relaunch) is a
+  // no-op, so the cadence isn't reset under the user.
+  private startKeepAlive(taskId: string): void {
+    if (this.keepAliveTimers.has(taskId)) return;
+    const timer = setInterval(
+      () => void this.renewClaim(taskId),
+      TypeBuildTaskSource.KEEPALIVE_MS,
+    );
+    this.keepAliveTimers.set(taskId, timer);
+  }
+
+  // Disarm the renewal when the session ends (onExit/clearSession path).
+  private stopKeepAlive(taskId: string): void {
+    const timer = this.keepAliveTimers.get(taskId);
+    if (timer) {
+      clearInterval(timer);
+      this.keepAliveTimers.delete(taskId);
+    }
+  }
+
+  // Re-claim the task to renew the TTL. GUARD: only renew while we believe we
+  // still hold the claim (cache claimedBy === my email) — if the cache shows
+  // someone else (or nobody), the session already lost the claim and renewing
+  // would either 409 or steal a teammate's row, so we just stop renewing. A
+  // failed renew (409 = lost it) must NOT throw — we swallow it and
+  // refreshAndBroadcast so the UI reflects reality. PHI-free throughout.
+  private async renewClaim(taskId: string): Promise<void> {
+    const me = getAuthState().email ?? null;
+    const cached = this.cache.get(taskId);
+    if (!me || cached?.claimedBy !== me) {
+      this.stopKeepAlive(taskId);
+      return;
+    }
+    try {
+      const res = await this.request(
+        'POST',
+        `/chromeext/${encodeURIComponent(taskId)}/claim`,
+      );
+      if (!res.ok) {
+        // Lost the claim (409) or it's gone (404) — stop renewing and let the
+        // UI catch up. Never log/throw; the body may carry routing context we
+        // don't need here.
+        this.stopKeepAlive(taskId);
+        await this.refreshAndBroadcast();
+      }
+    } catch {
+      // Network blip — keep the timer armed; the next tick retries. A genuine
+      // sign-out unregisters the source (stopPolling clears everything).
+    }
   }
 
   // Build a minimal local-shape Task to feed runTaskInteractive. It NEVER
@@ -611,12 +736,15 @@ export class TypeBuildTaskSource implements TaskSource {
   private async onSessionExit(id: string): Promise<void> {
     await this.refreshAndBroadcast();
     // Mid-relaunch: the old PTY's exit is expected and the claim carries over
-    // to the fresh session — don't nag the user to release it. Consume the
+    // to the fresh session — don't nag the user to release it, and KEEP the
+    // keep-alive armed (the fresh session still holds the claim). Consume the
     // flag so a genuine later exit of the new session still prompts.
     if (this.relaunching.has(id)) {
       this.relaunching.delete(id);
       return;
     }
+    // fm-cveh (S8) — a genuine session end: disarm the claim keep-alive.
+    this.stopKeepAlive(id);
     const me = getAuthState().email;
     const row = this.cache.get(id);
     if (me && row?.claimedBy && row.claimedBy === me) {
@@ -629,14 +757,19 @@ export class TypeBuildTaskSource implements TaskSource {
   }
 
   // ─── source-native verbs ────────────────────────────────────────────────
+  // Task API v2 (fm-alfz/S1): PATCH /chromeext/<id> is THE management verb for
+  // status changes. claim/release keep their dedicated endpoints; everything
+  // else routes through patchTask().
+  //
   // claim → POST /chromeext/<id>/claim (200 returns decrypted task; 409 means
   //         already claimed → return { ok:false, reason, claimedBy } rather
   //         than throwing, so the UI can show a friendly inline message).
   // release → POST /chromeext/<id>/release  (body { reason? }).
-  // reopen  → POST /chromeext/<id>/reopen   (for blocked tasks).
-  // complete → POST /chromeext/<id>/complete (fm-v0rc; server route the user
-  //         is adding — see docs/typebuild-complete-endpoint.md. Degrades to
-  //         { ok:false, reason:'complete-unsupported' } on a route-404/405.)
+  // reopen  → SMART (fm-alfz/S1): a 'blocked' row uses the legacy
+  //         POST /chromeext/<id>/reopen (kept server-side); any other terminal
+  //         state (done/partial/cancelled/failed) uses PATCH {status:'open'}
+  //         (which also resets attempts + clears the last error server-side).
+  // complete → PATCH {status:'done'}.   cancel → PATCH {status:'cancelled'}.
   // After any mutation, patch the in-memory cache + broadcast tasks-changed
   // immediately (fm-kmhq optimistic), then refresh to reconcile.
   async sourceAction(
@@ -651,11 +784,51 @@ export class TypeBuildTaskSource implements TaskSource {
         return this.release(taskId, payload);
       case 'reopen':
         return this.reopen(taskId);
+      case 'cancel':
+        return this.cancel(taskId);
       case 'complete':
-        return this.complete(taskId, payload);
+        return this.complete(taskId);
       default:
         throw unsupported(`action ${action}`);
     }
+  }
+
+  // ─── PATCH /chromeext/<id> — the v2 management verb (fm-alfz/S1) ──────────
+  // Body may carry `status` and/or field edits (priority/assigned_to/…). On
+  // success we patch ONLY the fields we just changed into the cache (PHI-safe
+  // routing fields — never titles/bodies) and broadcast. The 409 reason
+  // vocabulary (use_claim_task, failed_is_agent_outcome, illegal_transition,
+  // bad_status, not_ready[+blocked_by], last_admin, in_progress_elsewhere,
+  // not_owner) is surfaced structurally so the renderer humanizes it; we never
+  // throw on a 409 (it's a normal "that's not allowed" answer, not an error).
+  private async patchTask(
+    taskId: string,
+    body: Record<string, unknown>,
+    cachePatch: Partial<SourcedTask>,
+  ): Promise<unknown> {
+    const res = await this.request(
+      'PATCH',
+      `/chromeext/${encodeURIComponent(taskId)}`,
+      body,
+    );
+    if (res.status === 404) return { ok: false, reason: 'not visible' };
+    if (res.status === 409 || res.status === 400) {
+      const data = (await res.json().catch(() => ({}))) as {
+        reason?: string;
+        claimed_by?: string | null;
+        blocked_by?: string[] | null;
+      };
+      return {
+        ok: false,
+        reason: data.reason ?? 'rejected',
+        claimedBy: data.claimed_by ?? null,
+        blockedBy: Array.isArray(data.blocked_by) ? data.blocked_by : undefined,
+      };
+    }
+    if (!res.ok) throw new Error(`typebuild: patch failed (${res.status})`);
+    // Reflect only the fields we just changed (fm-kmhq optimistic).
+    this.patchCacheAndBroadcast(taskId, cachePatch);
+    return { ok: true };
   }
 
   // ─── optimistic cache patch + broadcast (fm-kmhq) ────────────────────────
@@ -722,73 +895,65 @@ export class TypeBuildTaskSource implements TaskSource {
     return { ok: true };
   }
 
+  // Smart reopen (fm-alfz/S1). The legacy POST /reopen stays BLOCKED-ONLY by
+  // server design, so only a 'blocked' row uses it; every other terminal state
+  // (done/partial/cancelled/failed) reopens via PATCH {status:'open'} — which
+  // additionally resets attempts and clears the last error server-side.
   private async reopen(taskId: string): Promise<unknown> {
-    const res = await this.request(
-      'POST',
-      `/chromeext/${encodeURIComponent(taskId)}/reopen`,
+    const raw = this.cache.get(taskId)?.rawStatus;
+    if (raw === 'blocked') {
+      const res = await this.request(
+        'POST',
+        `/chromeext/${encodeURIComponent(taskId)}/reopen`,
+      );
+      if (res.status === 404) return { ok: false, reason: 'not visible' };
+      if (!res.ok) throw new Error(`typebuild: reopen failed (${res.status})`);
+      // Optimistically flip back to the 'open' equivalent (fm-kmhq): the local
+      // mapped status is 'pending' for 'open', and the badge tracks rawStatus.
+      this.patchCacheAndBroadcast(taskId, {
+        status: 'pending',
+        rawStatus: 'open',
+        completed_at: null,
+      });
+      return { ok: true };
+    }
+    // Terminal (done/partial/cancelled/failed) → reopen via the v2 verb.
+    return this.patchTask(
+      taskId,
+      { status: 'open' },
+      { status: 'pending', rawStatus: 'open', completed_at: null },
     );
-    if (res.status === 404) return { ok: false, reason: 'not visible' };
-    if (!res.ok) throw new Error(`typebuild: reopen failed (${res.status})`);
-    // Optimistically flip back to the 'open' equivalent (fm-kmhq): the local
-    // mapped status is 'pending' for 'open', and the badge tracks rawStatus.
-    this.patchCacheAndBroadcast(taskId, {
-      status: 'pending',
-      rawStatus: 'open',
-      completed_at: null,
-    });
-    return { ok: true };
   }
 
-  // ─── complete (fm-v0rc, Phase B2) ────────────────────────────────────────
-  // POST /chromeext/<id>/complete — the desktop's mark-done path for a remote
-  // TypeBuild task. The server route is being added by the user (spec:
-  // docs/typebuild-complete-endpoint.md); until it ships, the route 404/405s
-  // and we degrade gracefully so the UI can toast "not supported here yet"
-  // rather than throw. `payload` may carry an optional {note, outcome}
-  // passthrough; `note` is PHI (stored server-side under the same encryption
-  // as task bodies) so it is forwarded but NEVER logged.
-  private async complete(taskId: string, payload?: unknown): Promise<unknown> {
-    const p = (payload ?? {}) as { note?: string; outcome?: string };
-    const body: { note?: string; outcome?: string } = {};
-    if (typeof p.note === 'string') body.note = p.note;
-    if (typeof p.outcome === 'string') body.outcome = p.outcome;
-    const res = await this.request(
-      'POST',
-      `/chromeext/${encodeURIComponent(taskId)}/complete`,
-      body,
+  // ─── complete / cancel (fm-alfz/S1) ──────────────────────────────────────
+  // The desktop's mark-done / cancel paths for a remote TypeBuild task, both
+  // through the live v2 management verb. `done` and `cancelled` are allowed
+  // from any status (the server clears the claim + records an override
+  // submission), so neither carries a payload.
+  private async complete(taskId: string): Promise<unknown> {
+    return this.patchTask(
+      taskId,
+      { status: 'done' },
+      {
+        status: 'done',
+        rawStatus: 'done',
+        claimedBy: null,
+        completed_at: Date.now(),
+      },
     );
-    // The route doesn't exist yet on the server: a missing endpoint answers
-    // 404 (no route) or 405 (method not allowed). The `request()` helper can't
-    // distinguish "route missing" from "task not visible" — both are 404 — so
-    // we treat any 404/405 here as "complete not supported yet". Once the
-    // endpoint ships, a genuine 404 for a not-visible task is rare (the UI
-    // only offers complete on a visible row) and degrades the same benign way.
-    if (res.status === 404 || res.status === 405) {
-      return { ok: false, reason: 'complete-unsupported' };
-    }
-    if (res.status === 409) {
-      // Claimed by someone else → mirror claim()'s structured 409 result so
-      // the renderer renders the same friendly inline message.
-      const data = (await res.json().catch(() => ({}))) as {
-        reason?: string;
-        claimed_by?: string | null;
-      };
-      return {
-        ok: false,
-        reason: data.reason ?? 'already claimed',
-        claimedBy: data.claimed_by ?? null,
-      };
-    }
-    if (!res.ok) throw new Error(`typebuild: complete failed (${res.status})`);
-    // Done on the server: optimistically reflect terminal state + released
-    // claim immediately (fm-kmhq). The badge tracks rawStatus = 'done'.
-    this.patchCacheAndBroadcast(taskId, {
-      status: 'done',
-      rawStatus: 'done',
-      claimedBy: null,
-      completed_at: Date.now(),
-    });
-    return { ok: true };
+  }
+
+  private async cancel(taskId: string): Promise<unknown> {
+    return this.patchTask(
+      taskId,
+      { status: 'cancelled' },
+      {
+        status: 'cancelled',
+        rawStatus: 'cancelled',
+        claimedBy: null,
+        completed_at: Date.now(),
+      },
+    );
   }
 
   // ─── cache refresh + broadcast ──────────────────────────────────────────
@@ -819,6 +984,9 @@ export class TypeBuildTaskSource implements TaskSource {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    // fm-cveh (S8) — sign-out drops the source; disarm every claim keep-alive.
+    for (const timer of this.keepAliveTimers.values()) clearInterval(timer);
+    this.keepAliveTimers.clear();
     this.cache.clear();
     this.lastSignature = '';
     this.firstPoll = true;

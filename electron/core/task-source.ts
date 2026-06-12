@@ -52,6 +52,15 @@ export type SourcedTask = Omit<Task, 'folder'> & {
   attempts?: number;
   maxAttempts?: number;
   flags?: string[];
+  // fm-lji6 (S2) — Task API v2 fields. `deferUntil` is a full ISO timestamp
+  // (the snooze pill compares it against now); `parentTaskId` is an opaque
+  // container id. Detail-only: `dependsOn` / `depsSatisfied` / `blockedBy`
+  // (memory-only, opaque non-PHI ids).
+  deferUntil?: string | null;
+  parentTaskId?: string | null;
+  dependsOn?: string[];
+  depsSatisfied?: boolean;
+  blockedBy?: string[];
 };
 
 /** Options for a run-now request. Mirrors the local executeTaskRun knobs
