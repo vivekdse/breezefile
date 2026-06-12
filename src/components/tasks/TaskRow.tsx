@@ -20,6 +20,10 @@ export function TaskRow({
   selected,
   cursor,
   myEmail,
+  depth,
+  childCount,
+  doneChildCount,
+  blockedByTitles,
   onCheckbox,
   onClick,
   onDoubleClick,
@@ -36,6 +40,14 @@ export function TaskRow({
   selected: boolean;
   cursor: boolean;
   myEmail: string | null;
+  // fm-bq86 (S3) — parent/child grouping. depth 1 rows indent under a parent.
+  depth?: 0 | 1;
+  /** Parent rows: total children grouped beneath. */
+  childCount?: number;
+  /** Parent rows: how many of those children are terminal. */
+  doneChildCount?: number;
+  /** Dependency presentation: resolved titles of blocking tasks (if known). */
+  blockedByTitles?: string[];
   onCheckbox: () => void;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
@@ -63,6 +75,27 @@ export function TaskRow({
       ? task.deferUntil
       : null;
 
+  // fm-bq86 (S3) — parent child-progress chip ("2/5 ⮡"). Only on parent rows
+  // that actually have children grouped beneath them.
+  const isChild = depth === 1;
+  const hasChildren = typeof childCount === 'number' && childCount > 0;
+  const childProgress =
+    hasChildren && typeof doneChildCount === 'number'
+      ? `${doneChildCount}/${childCount}`
+      : null;
+  // fm-bq86 (S3) — dependency presentation: a passive "waits on N" pill for
+  // TypeBuild rows whose deps aren't satisfied. Title resolution (if any) is
+  // renderer-memory only (PHI-safe) and shows up in the tooltip.
+  const blocking = task.blockedBy ?? [];
+  const waitsOn =
+    task.depsSatisfied === false && blocking.length > 0 ? blocking.length : 0;
+  const waitsTooltip =
+    waitsOn > 0
+      ? blockedByTitles && blockedByTitles.length > 0
+        ? `Waiting on: ${blockedByTitles.join(', ')}`
+        : `Waiting on ${waitsOn} task${waitsOn === 1 ? '' : 's'}`
+      : undefined;
+
   return (
     <div
       role="listitem"
@@ -72,12 +105,18 @@ export function TaskRow({
         selected && 'tasks__row--selected',
         cursor && 'tasks__row--cursor',
         isClosed && 'tasks__row--muted',
+        isChild && 'tasks__row--child',
       ]
         .filter(Boolean)
         .join(' ')}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
+      {isChild && (
+        <span className="tasks__row-connector" aria-hidden="true">
+          ⮡
+        </span>
+      )}
       <label
         className="tasks__row-check"
         onClick={(e) => e.stopPropagation()}
@@ -101,6 +140,14 @@ export function TaskRow({
               title={`Source status: ${rawBadge}`}
             >
               {rawBadge}
+            </span>
+          )}
+          {childProgress && (
+            <span
+              className="tasks__child-progress"
+              title={`${childProgress} children done`}
+            >
+              {childProgress} ⮡
             </span>
           )}
         </div>
@@ -153,6 +200,11 @@ export function TaskRow({
               ).toLocaleString()}`}
             >
               deferred until {shortDate(deferredUntil.slice(0, 10), today)}
+            </span>
+          )}
+          {waitsOn > 0 && (
+            <span className="tasks__waits-on" title={waitsTooltip}>
+              ⛓ waits on {waitsOn}
             </span>
           )}
           {task.auto_mode && (

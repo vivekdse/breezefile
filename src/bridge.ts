@@ -1,4 +1,4 @@
-import type { Entry, RemoteSchedule, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
+import type { Entry, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 
 export type Capabilities = {
   id: 'mac' | 'linux';
@@ -286,6 +286,10 @@ type Fm = {
       chrome: { ok: boolean; path?: string };
     }>;
     installCommand: () => Promise<string>;
+    // fm-j7w0 (S4) — user registry for the assignee picker (NON-PHI).
+    listUsers: () => Promise<TaskUser[]>;
+    // fm-k6wz (S7) — per-task audit history (NON-PHI actor/action/detail/time).
+    audit: (taskId: string, limit?: number) => Promise<TaskAuditEvent[]>;
   };
   // fm-b5at.6 — TypeBuild side-by-side layout. Chrome left / our window
   // right while a session runs. Self-contained namespaced block; the OS work

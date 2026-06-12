@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { usePlatform } from '../platform';
 import { fm } from '../bridge';
-import { createTask, runTaskNow, todayISO, updateTask } from '../tasks';
+import { createTask, runTaskNow, todayISO, updateTask, useTaskSources } from '../tasks';
 import { humanizeError } from '../errorMessages';
 import {
   type RecurrenceForm,
@@ -47,6 +47,7 @@ type QuestionId =
   | 'when'
   | 'status'
   | 'start'
+  | 'priority'
   | 'pin'
   | 'notes';
 // Order is the keyboard ↓ flow. Name, folder, and notes come first — they
@@ -54,13 +55,51 @@ type QuestionId =
 // be created the moment they're filled (everything below is optional and
 // skippable). Start sits right before When so the two time questions read
 // as a pair — "when can it start? / when is it due?".
-const QUESTIONS: QuestionId[] = [
+// fm-m2s4 (S5) — `folder` is dropped and `priority` inserted for the TypeBuild
+// target (folder anchoring doesn't apply there; priority does). The active
+// question list is computed per-target via composerQuestions() so keyboard
+// navigation, activeIdx, and the past/future render all stay consistent.
+const QUESTIONS_LOCAL: QuestionId[] = [
   'title', 'folder', 'who', 'notes',
   'start', 'when',
   'status', 'pin',
 ];
+const QUESTIONS_TYPEBUILD: QuestionId[] = [
+  'title', 'who', 'notes',
+  'start', 'when', 'priority',
+  'status', 'pin',
+];
+function composerQuestions(target: string): QuestionId[] {
+  return target === TYPEBUILD_SOURCE ? QUESTIONS_TYPEBUILD : QUESTIONS_LOCAL;
+}
 
 type ExecutorId = 'manual' | 'claude';
+
+// fm-m2s4 (S5) — composer save target. 'local' is the Breeze store; a remote
+// source id (e.g. 'typebuild') routes the create through that source. Only the
+// chosen source *id* is ever persisted — never any task content (PHI). The id
+// is a non-sensitive routing key, so localStorage is fine for it.
+const TARGET_LS_KEY = 'fm.composer.target';
+const TYPEBUILD_SOURCE = 'typebuild';
+
+function loadSavedTarget(): string {
+  try {
+    return localStorage.getItem(TARGET_LS_KEY) || 'local';
+  } catch {
+    return 'local';
+  }
+}
+function persistTarget(id: string): void {
+  try {
+    localStorage.setItem(TARGET_LS_KEY, id);
+  } catch {
+    /* private mode / disabled storage — in-memory state still tracks it */
+  }
+}
+
+// fm-m2s4 (S5) — TypeBuild priority. Compact 0–10 select; unset by default so a
+// create that doesn't care leaves the server default untouched.
+const PRIORITY_VALUES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 type WhenOption = {
   id: string;
@@ -219,8 +258,35 @@ export function TaskComposer(props: Props) {
   const submitKbd = caps.id === 'mac' ? '⌘↵' : 'Ctrl+↵';
   const initial: Task | null = props.mode === 'edit' ? props.task : null;
 
+  // fm-m2s4 (S5) — save target. Editing an existing row stays pinned to that
+  // row's source (you can't move a task between stores from the composer); a
+  // fresh create starts from the remembered choice, defaulting to local.
+  const { sources } = useTaskSources();
+  const creatableSources = useMemo(
+    () => sources.filter((s) => s.capabilities.canCreate),
+    [sources],
+  );
+  const initialSource =
+    props.mode === 'edit' ? props.task.source ?? 'local' : loadSavedTarget();
+  const [target, setTarget] = useState<string>(initialSource);
+  // A target the user can't actually create into (e.g. a remembered 'typebuild'
+  // that's since disconnected) falls back to local so the composer stays usable.
+  useEffect(() => {
+    if (props.mode === 'edit') return;
+    if (creatableSources.length === 0) return;
+    if (!creatableSources.some((s) => s.id === target)) {
+      setTarget('local');
+    }
+  }, [creatableSources, target, props.mode]);
+  const isTypebuild = target === TYPEBUILD_SOURCE;
+
+  const QUESTIONS = useMemo(() => composerQuestions(target), [target]);
+
   const [activeIdx, setActiveIdx] = useState(0);
-  const active = QUESTIONS[activeIdx];
+  // Clamp the active index when the question list shrinks/grows on a target
+  // switch (TypeBuild drops 'folder', adds 'priority'), so we never index past
+  // the end and strand the keyboard cursor.
+  const active = QUESTIONS[Math.min(activeIdx, QUESTIONS.length - 1)];
 
   const [title, setTitle] = useState(initial?.title ?? '');
   const [folder, setFolder] = useState(
@@ -254,6 +320,12 @@ export function TaskComposer(props: Props) {
     });
   const [status, setStatus] = useState<TaskStatus>(initial?.status ?? 'pending');
   const [pinned, setPinned] = useState<boolean>(initial?.pinned ?? false);
+  // fm-m2s4 (S5) — TypeBuild priority (0–10, unset = leave server default).
+  // Only consumed when the target is TypeBuild; carried as a string so the
+  // <select> "Unset" option is representable.
+  const [priority, setPriority] = useState<string>(
+    initial?.priority != null ? String(initial.priority) : '',
+  );
   // Notes doubles as the agent prompt for Claude tasks (one field, not two).
   // If a legacy task only has auto_prompt set, surface it in notes so the
   // user can see and edit it; we'll save it back as notes (auto_prompt
@@ -350,7 +422,26 @@ export function TaskComposer(props: Props) {
   const [startHighlight, setStartHighlight] = useState(() =>
     Math.max(0, START_OPTIONS.findIndex((s) => s.id === startId)),
   );
+  const [priorityHighlight, setPriorityHighlight] = useState(() => {
+    // 0 = "Unset", then one entry per PRIORITY_VALUES element.
+    const v = initial?.priority;
+    return v != null ? PRIORITY_VALUES.indexOf(v) + 1 : 0;
+  });
   const [pinHighlight, setPinHighlight] = useState(() => (pinned ? 1 : 0));
+
+  // fm-m2s4 (S5) — priority is a flat option list ("Unset" + 0..10) so it
+  // matches the other option questions' keyboard model. Index 0 is "Unset".
+  const PRIORITY_OPTIONS = useMemo(
+    () => [
+      { value: '', label: 'Unset', hint: 'leave default' },
+      ...PRIORITY_VALUES.map((n) => ({
+        value: String(n),
+        label: String(n),
+        hint: n === 0 ? 'lowest' : n === 10 ? 'highest' : undefined,
+      })),
+    ],
+    [],
+  );
 
   // If executor changes and the current When pick is hidden, reset.
   useEffect(() => {
@@ -470,7 +561,9 @@ export function TaskComposer(props: Props) {
       setTimeout(() => cronInputRef.current?.focus(), 0);
       return;
     }
-    setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+    // fm-m2s4 (S5) — in TypeBuild mode the question after When is Priority.
+    if (isTypebuild) setPriorityHighlight(priorityHighlight);
+    else setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
     goNext();
   }
 
@@ -480,6 +573,16 @@ export function TaskComposer(props: Props) {
     setStatus(o.id);
     setStatusHighlight(i);
     setPinHighlight(pinned ? 1 : 0);
+    goNext();
+  }
+
+  // fm-m2s4 (S5) — TypeBuild priority pick. Index 0 is "Unset".
+  function choosePriority(i: number) {
+    const o = PRIORITY_OPTIONS[i];
+    if (!o) return;
+    setPriority(o.value);
+    setPriorityHighlight(i);
+    setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
     goNext();
   }
 
@@ -538,9 +641,18 @@ export function TaskComposer(props: Props) {
       if (whenHighlight < visibleWhenOptions.length - 1) {
         setWhenHighlight((i) => i + 1);
       } else {
-        setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+        // fm-m2s4 (S5) — When → Priority (TypeBuild) or → Status (local).
+        if (isTypebuild) setPriorityHighlight(priorityHighlight);
+        else setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
         goNext();
       }
+      return;
+    }
+    if (active === 'priority') {
+      if (priorityHighlight >= PRIORITY_OPTIONS.length - 1) {
+        setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+        goNext();
+      } else setPriorityHighlight((i) => i + 1);
       return;
     }
     if (active === 'status') {
@@ -585,9 +697,19 @@ export function TaskComposer(props: Props) {
       } else setWhenHighlight((i) => i - 1);
       return;
     }
+    if (active === 'priority') {
+      // fm-m2s4 (S5) — Priority ↑ → back to When.
+      if (priorityHighlight === 0) {
+        setWhenHighlight(visibleWhenOptions.length - 1);
+        goBack();
+      } else setPriorityHighlight((i) => i - 1);
+      return;
+    }
     if (active === 'status') {
       if (statusHighlight === 0) {
-        setWhenHighlight(visibleWhenOptions.length - 1);
+        // fm-m2s4 (S5) — Status ↑ → Priority (TypeBuild) or → When (local).
+        if (isTypebuild) setPriorityHighlight(priorityHighlight);
+        else setWhenHighlight(visibleWhenOptions.length - 1);
         goBack();
       } else setStatusHighlight((i) => i - 1);
       return;
@@ -632,7 +754,8 @@ export function TaskComposer(props: Props) {
       }
     }
     if (startId === 'pick-start' && !pickedStart) {
-      setError('Pick a start date.');
+      // fm-m2s4 (S5) — the start step is "Defer until" in TypeBuild mode.
+      setError(isTypebuild ? 'Pick a defer date.' : 'Pick a start date.');
       setActiveIdx(QUESTIONS.indexOf('start'));
       setTimeout(() => startDateRef.current?.focus(), 0);
       return;
@@ -695,11 +818,16 @@ export function TaskComposer(props: Props) {
           resolvedStart = d.toISOString().slice(0, 10);
         } else if (startOpt.none) resolvedStart = null;
       }
-      const payload = {
+      // fm-m2s4 (S5) — TypeBuild maps the composer's "start" pick onto the
+      // server's defer_until (and labels it "Defer until"); folder anchoring
+      // doesn't apply, so it sends an empty folder. The local path is left
+      // byte-for-byte unchanged: it still writes start_at and folder.
+      const parsedPriority =
+        priority !== '' ? Number(priority) : undefined;
+
+      const basePayload = {
         title: title.trim(),
-        folder: folder.trim(),
         notes: trimmedNotes ? trimmedNotes : null,
-        start_at: resolvedStart,
         due_at: dueAt,
         status,
         pinned,
@@ -715,12 +843,44 @@ export function TaskComposer(props: Props) {
         ...(nextRunAt !== undefined ? { next_run_at: nextRunAt } : {}),
       };
 
+      // fm-m2s4 (S5) — defer/priority are create-path fields (TaskCreate models
+      // them; TaskUpdate does not — TypeBuild edits to those go through the S4
+      // detail-panel PATCH, not the composer). So for the TypeBuild target we
+      // attach them only on create; an edit just keeps the shared base + empty
+      // folder.
+      const payload =
+        isTypebuild && props.mode === 'create'
+          ? {
+              ...basePayload,
+              folder: '',
+              // The chosen start date becomes defer_until for TypeBuild.
+              deferUntil: resolvedStart,
+              ...(parsedPriority !== undefined ? { priority: parsedPriority } : {}),
+            }
+          : isTypebuild
+            ? { ...basePayload, folder: '' }
+            : {
+                ...basePayload,
+                folder: folder.trim(),
+                start_at: resolvedStart,
+              };
+
       let savedId: string;
       if (props.mode === 'create') {
-        const t = await createTask(payload as TaskCreate);
+        // fm-m2s4 (S5) — route the create through the chosen source. 'local'
+        // (and undefined) keep the existing local path; 'typebuild' sends the
+        // create to the server (it encrypts title/notes — by design).
+        const t = await createTask(
+          payload as TaskCreate,
+          target === 'local' ? undefined : target,
+        );
         savedId = t.id;
       } else {
-        const t = await updateTask(props.task.id, payload as TaskUpdate);
+        const t = await updateTask(
+          props.task.id,
+          payload as TaskUpdate,
+          target === 'local' ? undefined : target,
+        );
         savedId = t.id;
       }
       if (isAgent && when?.runOnSave) {
@@ -842,6 +1002,16 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
+    if (active === 'priority') {
+      // fm-m2s4 (S5) — digits are ambiguous here (the labels are 0–10), so
+      // priority is arrow + Enter only; ↑/↓ already moved the highlight above.
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        choosePriority(priorityHighlight);
+        return;
+      }
+      return;
+    }
     if (active === 'status') {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -918,9 +1088,15 @@ export function TaskComposer(props: Props) {
   }
   function startSummary(): string {
     if (startId === 'pick-start') {
-      return pickedStart ? formatDateNice(pickedStart) : 'Pick a start date…';
+      const placeholder = isTypebuild ? 'Pick a defer date…' : 'Pick a start date…';
+      return pickedStart ? formatDateNice(pickedStart) : placeholder;
     }
+    // fm-m2s4 (S5) — "No start date" reads as "No defer" in TypeBuild mode.
+    if (isTypebuild && startId === 'none') return 'No defer';
     return START_OPTIONS.find((s) => s.id === startId)?.label ?? 'No start date';
+  }
+  function prioritySummary(): string {
+    return priority === '' ? 'Unset' : `Priority ${priority}`;
   }
   function pinSummary(): string {
     return pinned ? 'Pinned' : 'Not pinned';
@@ -939,6 +1115,7 @@ export function TaskComposer(props: Props) {
     if (q === 'when') return whenSummary();
     if (q === 'status') return statusSummary();
     if (q === 'start') return startSummary();
+    if (q === 'priority') return prioritySummary();
     if (q === 'pin') return pinSummary();
     if (q === 'notes') return notesSummary();
     return '';
@@ -951,9 +1128,11 @@ export function TaskComposer(props: Props) {
     if (q === 'title') return null;
     if (q === 'folder') return 'folder';
     if (q === 'who') return 'who';
-    if (q === 'start') return 'start';
+    // fm-m2s4 (S5) — the start step is the defer date in TypeBuild mode.
+    if (q === 'start') return isTypebuild ? 'defer' : 'start';
     if (q === 'when') return 'end';
     if (q === 'status') return 'status';
+    if (q === 'priority') return 'priority';
     if (q === 'pin') return 'pin';
     if (q === 'notes') return 'notes';
     return null;
@@ -965,7 +1144,9 @@ export function TaskComposer(props: Props) {
     if (q === 'who') return 'Who runs this?';
     if (q === 'when') return executor === 'claude' ? 'When should it run?' : 'When is it due?';
     if (q === 'status') return "What's the status?";
-    if (q === 'start') return 'When can it start?';
+    // fm-m2s4 (S5) — TypeBuild reframes "start" as "defer until".
+    if (q === 'start') return isTypebuild ? 'Defer until?' : 'When can it start?';
+    if (q === 'priority') return 'Priority?';
     if (q === 'pin') return 'Pin this task?';
     if (q === 'notes') {
       return executor === 'claude'
@@ -1024,6 +1205,33 @@ export function TaskComposer(props: Props) {
           <div className="composer__crumb" id="composer-title">
             {props.mode === 'edit' ? 'Edit task' : 'New task'}
           </div>
+          {/* fm-m2s4 (S5) — save-target picker. Shown only for a fresh create
+              with more than one creatable source (editing is pinned to the
+              task's own source). The chosen source id is persisted — never any
+              task content (PHI). */}
+          {props.mode === 'create' && creatableSources.length > 1 && (
+            <div className="composer__target" role="group" aria-label="Save to">
+              <span className="composer__target-label">Save to</span>
+              {creatableSources.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={
+                    'composer__target-btn' +
+                    (target === s.id ? ' composer__target-btn--active' : '')
+                  }
+                  aria-pressed={target === s.id}
+                  onClick={() => {
+                    if (target === s.id) return;
+                    setTarget(s.id);
+                    persistTarget(s.id);
+                  }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
         </header>
 
         <main className="composer__main">
@@ -1071,7 +1279,10 @@ export function TaskComposer(props: Props) {
             )}
           </section>
 
-          {/* Q2 — Folder */}
+          {/* Q2 — Folder. fm-m2s4 (S5) — hidden for the TypeBuild target:
+              folder anchoring doesn't apply there (it's also absent from
+              QUESTIONS_TYPEBUILD, so keyboard navigation skips it). */}
+          {!isTypebuild && (
           <section
             className={sectionClasses('folder')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('folder'))}
@@ -1127,6 +1338,7 @@ export function TaskComposer(props: Props) {
               renderInert('folder')
             )}
           </section>
+          )}
 
           {/* Q3 — Who */}
           <section
@@ -1349,6 +1561,50 @@ export function TaskComposer(props: Props) {
               renderInert('when')
             )}
           </section>
+
+          {/* Priority — fm-m2s4 (S5). TypeBuild only; a flat option list
+              ("Unset" + 0–10). Sits between When and Status, mirroring the
+              QUESTIONS_TYPEBUILD order. Arrow + Enter to pick (digits are
+              ambiguous against the 0–10 labels). */}
+          {isTypebuild && (
+            <section
+              className={sectionClasses('priority')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('priority'))}
+            >
+              {isActiveSection('priority') ? (
+                <div className="composer__q-active-body">
+                  <div className="composer__q-prompt">{promptFor('priority')}</div>
+                  <ul className="composer__options composer__options--wrap" role="listbox">
+                    {PRIORITY_OPTIONS.map((o, i) => (
+                      <li key={o.value || 'unset'}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === priorityHighlight}
+                          className={
+                            'composer__option composer__option--compact' +
+                            (i === priorityHighlight ? ' composer__option--active' : '')
+                          }
+                          onMouseEnter={() => setPriorityHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            choosePriority(i);
+                          }}
+                        >
+                          <span className="composer__option-label">{o.label}</span>
+                          {o.hint && (
+                            <span className="composer__option-hint">{o.hint}</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                renderInert('priority')
+              )}
+            </section>
+          )}
 
           {/* Q5 — Status */}
           <section

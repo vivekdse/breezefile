@@ -16,6 +16,8 @@ export interface PrimaryActionCtx {
   session?: { ptyId: number; tabIndex: number };
   /** Local auto-mode: a run is currently in flight. */
   lastRunRunning?: boolean;
+  /** fm-bq86 (S3) — a parent with non-terminal children loses Start. */
+  hasOpenChildren?: boolean;
 }
 
 export type PrimaryAction =

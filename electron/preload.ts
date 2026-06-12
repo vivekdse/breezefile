@@ -523,6 +523,16 @@ const fm = {
       }>,
     installCommand: () =>
       ipcRenderer.invoke('typebuild:detect:installCommand') as Promise<string>,
+    // fm-j7w0 (S4) — user registry for the assignee picker (NON-PHI identities).
+    listUsers: () =>
+      ipcRenderer.invoke('typebuild:listUsers') as Promise<
+        Array<{ principal: string; email?: string | null; display_name?: string | null }>
+      >,
+    // fm-k6wz (S7) — per-task audit history (NON-PHI actor/action/detail/time).
+    audit: (taskId: string, limit?: number) =>
+      ipcRenderer.invoke('typebuild:audit', taskId, limit) as Promise<
+        Array<{ user: string; action: string; detail: string; at: string }>
+      >,
   },
   // ─── TypeBuild side-by-side layout (fm-b5at.6) ────────────────────────
   // Self-contained block. Chrome left / our window right while a TypeBuild

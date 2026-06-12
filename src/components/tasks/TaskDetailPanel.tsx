@@ -15,13 +15,28 @@
 //   Agent — local auto: the manual layout plus an agent prompt block, run
 //     history, and the primary action (Run now / View run / Open session).
 
-import { useEffect, useRef, useState } from 'react';
-import { getTask, todayISO, useTaskRuns } from '../../tasks';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  getTask,
+  getTypebuildAudit,
+  listTypebuildUsers,
+  taskSourceAction,
+  todayISO,
+  useTaskRuns,
+} from '../../tasks';
+import { useStore } from '../../store';
+import { formatOpError, formatSourceReason } from '../../errorMessages';
 import { TaskRunIndicator, TaskStatusDot } from '../TaskIndicators';
 import { PrimaryActionButton } from './PrimaryActionButton';
 import { STATUS_LABEL, homeRel, shortDate } from './helpers';
 import type { PrimaryAction } from './primaryAction.mjs';
-import type { Task, TaskSourceCapabilities, TaskStatus } from '../../types';
+import type {
+  Task,
+  TaskAuditEvent,
+  TaskSourceCapabilities,
+  TaskStatus,
+  TaskUser,
+} from '../../types';
 
 const NOTES_COLLAPSE_LINES = 8;
 
@@ -98,6 +113,7 @@ export function TaskDetailPanel({
         onOpenInTab={onOpenInTab}
         onGotoFolder={onGotoFolder}
         onSourceAction={onSourceAction}
+        onDelete={onDelete}
       />
     );
   }
@@ -352,6 +368,7 @@ function AgentDetail({
   onOpenInTab,
   onGotoFolder,
   onSourceAction,
+  onDelete,
 }: {
   task: Task;
   caps?: TaskSourceCapabilities;
@@ -361,12 +378,44 @@ function AgentDetail({
   onOpenInTab: () => void;
   onGotoFolder: () => void;
   onSourceAction: (action: 'release' | 'reopen' | 'complete' | 'cancel') => void;
+  onDelete: () => void;
 }) {
+  const { dispatch } = useStore();
+  const say = useCallback(
+    (msg: string) => dispatch({ type: 'setStatus', msg }),
+    [dispatch],
+  );
+
   // PHI: the decrypted body is fetched lazily and held in component state
   // ONLY. We clear it on task change / unmount and never write it anywhere.
   const [body, setBody] = useState<string | null>(null);
   const [bodyLoading, setBodyLoading] = useState(false);
   const reqIdRef = useRef(0);
+
+  // fm-j7w0 (S4) — write a whitelisted field edit (assigned_to/priority/...)
+  // via the generic 'patch' source action. The typebuild source patches its
+  // cache + broadcasts on success, so the row re-pulls; a rejection comes back
+  // as { ok:false, reason } which we humanize into the status line.
+  const patchField = useCallback(
+    async (fields: Record<string, unknown>, label: string) => {
+      try {
+        const res = (await taskSourceAction(
+          'typebuild',
+          task.id,
+          'patch',
+          fields,
+        )) as { ok?: boolean; reason?: string; claimedBy?: string | null } | undefined;
+        if (res && res.ok === false) {
+          say(`couldn’t update · ${formatSourceReason(res.reason, { claimedBy: res.claimedBy })}`);
+          return;
+        }
+        say(label);
+      } catch (e) {
+        say(formatOpError('update', e));
+      }
+    },
+    [task.id, say],
+  );
 
   useEffect(() => {
     const myReq = ++reqIdRef.current;
@@ -447,12 +496,32 @@ function AgentDetail({
             <dd>{claimedByMe ? 'you' : claimedBy}</dd>
           </div>
         )}
-        {typeof task.priority === 'number' && (
-          <div>
-            <dt>Priority</dt>
-            <dd>{task.priority}</dd>
-          </div>
-        )}
+        {/* fm-j7w0 (S4) — assignee row + lazy picker. */}
+        <div>
+          <dt>Assignee</dt>
+          <dd>
+            <AssigneePicker
+              value={task.assignedTo ?? null}
+              myEmail={myEmail}
+              onChange={(principal) =>
+                void patchField(
+                  { assigned_to: principal },
+                  principal ? `assigned to ${principal}` : 'assignee cleared',
+                )
+              }
+            />
+          </dd>
+        </div>
+        {/* fm-j7w0 (S4) — editable priority via a compact stepper. */}
+        <div>
+          <dt>Priority</dt>
+          <dd>
+            <PriorityStepper
+              value={typeof task.priority === 'number' ? task.priority : 0}
+              onChange={(p) => void patchField({ priority: p }, `priority ${p}`)}
+            />
+          </dd>
+        </div>
         {(typeof task.attempts === 'number' || typeof task.maxAttempts === 'number') && (
           <div>
             <dt>Attempts</dt>
@@ -527,6 +596,236 @@ function AgentDetail({
           </button>
         )}
       </div>
+
+      {/* fm-k6wz (S7) — lazy audit history. */}
+      <AuditHistory taskId={task.id} />
+
+      {/* fm-iwlc (S6) — Delete (creator-only server-side; a 403 not_owner /
+          409 in_progress_elsewhere surfaces a distinct status-line reason).
+          Routed through the same fm:confirm destructive dialog as local. */}
+      {caps?.canDelete && (
+        <div className="tasks__detail-foot">
+          <button type="button" className="tasks__btn tasks__btn--danger" onClick={onDelete}>
+            Delete…
+          </button>
+        </div>
+      )}
     </aside>
   );
+}
+
+// ── assignee picker (fm-j7w0/S4) ────────────────────────────────────────────
+// A small select populated LAZILY from the user registry on first open. The
+// current value renders as the closed-state label even before the list loads
+// (so a known assignee shows immediately); the option list fills in on open.
+// "Unassigned" maps to '' which the patch action sends as a clear. Identities
+// are NON-PHI, so rendering emails is fine.
+function AssigneePicker({
+  value,
+  myEmail,
+  onChange,
+}: {
+  value: string | null;
+  myEmail: string | null;
+  onChange: (principal: string) => void;
+}) {
+  const [users, setUsers] = useState<TaskUser[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadUsers = useCallback(() => {
+    if (users !== null || loading) return;
+    setLoading(true);
+    void listTypebuildUsers()
+      .then((list) => setUsers(list))
+      .catch(() => setUsers([]))
+      .finally(() => setLoading(false));
+  }, [users, loading]);
+
+  // Build the option set: always include Unassigned + the current value (so
+  // the closed select shows it pre-load), then merge the fetched registry.
+  const seen = new Set<string>();
+  const options: Array<{ principal: string; label: string }> = [];
+  const push = (principal: string, label: string) => {
+    if (seen.has(principal)) return;
+    seen.add(principal);
+    options.push({ principal, label });
+  };
+  if (value) push(value, value === myEmail ? `${value} (you)` : value);
+  for (const u of users ?? []) {
+    const label = u.email || u.principal;
+    push(u.principal, u.principal === myEmail ? `${label} (you)` : label);
+  }
+
+  return (
+    <select
+      className="tasks__detail-assignee"
+      value={value ?? ''}
+      onFocus={loadUsers}
+      onMouseDown={loadUsers}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">Unassigned</option>
+      {options.map((o) => (
+        <option key={o.principal} value={o.principal}>
+          {o.label}
+        </option>
+      ))}
+      {loading && <option disabled>Loading…</option>}
+    </select>
+  );
+}
+
+// ── priority stepper (fm-j7w0/S4) ───────────────────────────────────────────
+// A compact − N + control. Clamped to a sane non-negative range; the server
+// stores any integer but the UI keeps it tidy. Writes on each step.
+function PriorityStepper({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (p: number) => void;
+}) {
+  const set = (next: number) => {
+    const clamped = Math.max(0, Math.min(99, next));
+    if (clamped !== value) onChange(clamped);
+  };
+  return (
+    <span className="tasks__detail-priority">
+      <button
+        type="button"
+        className="tasks__priority-step"
+        aria-label="Lower priority"
+        onClick={() => set(value - 1)}
+        disabled={value <= 0}
+      >
+        −
+      </button>
+      <span className="tasks__priority-value">{value}</span>
+      <button
+        type="button"
+        className="tasks__priority-step"
+        aria-label="Raise priority"
+        onClick={() => set(value + 1)}
+      >
+        +
+      </button>
+    </span>
+  );
+}
+
+// ── audit history (fm-k6wz/S7) ──────────────────────────────────────────────
+// A collapsed "History" section; on expand it lazily fetches the per-task audit
+// rows and renders compact lines "<relative time> · <actor short> · <action>"
+// with the detail string as a tooltip. Memory-only — rows live in component
+// state and are re-fetched on task change. Audit actions are NON-PHI.
+function AuditHistory({ taskId }: { taskId: string }) {
+  const [open, setOpen] = useState(false);
+  const [events, setEvents] = useState<TaskAuditEvent[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const reqRef = useRef(0);
+
+  // Re-fetch on task change while expanded; collapse-reset on task change so a
+  // newly-selected task doesn't show the prior task's history.
+  useEffect(() => {
+    setOpen(false);
+    setEvents(null);
+    setError(false);
+  }, [taskId]);
+
+  const load = useCallback(() => {
+    const myReq = ++reqRef.current;
+    setLoading(true);
+    setError(false);
+    void getTypebuildAudit(taskId, 20)
+      .then((rows) => {
+        if (reqRef.current === myReq) setEvents(rows);
+      })
+      .catch(() => {
+        if (reqRef.current === myReq) {
+          setEvents([]);
+          setError(true);
+        }
+      })
+      .finally(() => {
+        if (reqRef.current === myReq) setLoading(false);
+      });
+  }, [taskId]);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && events === null && !loading) load();
+  };
+
+  return (
+    <div className="tasks__detail-notes">
+      <button
+        type="button"
+        className="tasks__detail-section tasks__history-toggle"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        {open ? '▾' : '▸'} History
+      </button>
+      {open && (
+        <div className="tasks__history">
+          {loading && <p className="tasks__detail-muted">Loading…</p>}
+          {!loading && error && (
+            <p className="tasks__detail-muted">
+              Couldn’t load history.{' '}
+              <button type="button" className="tasks__history-retry" onClick={load}>
+                Retry
+              </button>
+            </p>
+          )}
+          {!loading && !error && events && events.length === 0 && (
+            <p className="tasks__detail-muted">No history yet.</p>
+          )}
+          {!loading && !error && events && events.length > 0 && (
+            <ul className="tasks__history-list">
+              {events.map((e, i) => (
+                <li
+                  key={`${e.at}-${i}`}
+                  className="tasks__history-row"
+                  title={e.detail || undefined}
+                >
+                  <span className="tasks__history-time">{relativeTime(e.at)}</span>
+                  <span className="tasks__history-sep">·</span>
+                  <span className="tasks__history-actor">{shortActor(e.user)}</span>
+                  <span className="tasks__history-sep">·</span>
+                  <span className="tasks__history-action">{e.action}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Short form of an actor principal: the local-part of an email, else the raw
+// principal. Non-PHI (an identity).
+function shortActor(user: string): string {
+  if (!user) return 'unknown';
+  const at = user.indexOf('@');
+  return at > 0 ? user.slice(0, at) : user;
+}
+
+// Coarse relative time from an ISO timestamp. Falls back to the raw string if
+// it can't be parsed.
+function relativeTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso || '—';
+  const diff = Date.now() - t;
+  const s = Math.round(diff / 1000);
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(t).toLocaleDateString();
 }

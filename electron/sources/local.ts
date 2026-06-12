@@ -18,6 +18,8 @@ const capabilities: TaskSourceCapabilities = {
   canClaim: false,
   canEdit: true,
   canDelete: true,
+  // fm-r8vj (S5 plumbing) — local tasks are creatable.
+  canCreate: true,
   phiSensitive: false,
   hasFolder: true,
 };

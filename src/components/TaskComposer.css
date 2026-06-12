@@ -466,3 +466,65 @@
 .composer__flag input {
   cursor: pointer;
 }
+
+/* fm-m2s4 (S5) — save-target picker (Breeze / TypeBuild). Compact segmented
+   control in the header, right-aligned opposite the crumb. Only rendered when
+   more than one source can create. */
+.composer__target {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.composer__target-label {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.composer__target-btn {
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 80ms ease, border-color 80ms ease, background 80ms ease;
+}
+.composer__target-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+.composer__target-btn--active {
+  background: var(--accent);
+  color: var(--accent-ink, white);
+  border-color: var(--accent);
+}
+.composer__target-btn--active:hover {
+  color: var(--accent-ink, white);
+  border-color: var(--accent);
+}
+
+/* fm-m2s4 (S5) — priority option list. The 0–10 + Unset set is short labels,
+   so it wraps into a compact grid rather than one tall column. */
+.composer__options--wrap {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.composer__option--compact {
+  width: auto;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.composer__option--compact.composer__option--active {
+  border-color: var(--accent);
+}
+.composer__option--compact.composer__option--active .composer__option-label {
+  text-decoration: none;
+}

@@ -54,6 +54,7 @@ function startBlockedReason(tbReady) {
  *   myEmail?: string|null,
  *   session?: { ptyId: number, tabIndex: number } | undefined,
  *   lastRunRunning?: boolean,
+ *   hasOpenChildren?: boolean,
  * }} ctx
  */
 export function primaryActionFor(task, ctx) {
@@ -96,6 +97,12 @@ export function primaryActionFor(task, ctx) {
     }
     if (task.rawStatus === 'blocked') {
       return { kind: 'reopen' };
+    }
+    // fm-bq86 (S3) — a parent/container with non-terminal children can't be
+    // started: the server won't hand out the container until its children
+    // resolve (readiness rule). Surface a calm note rather than a dead Start.
+    if (ctx && ctx.hasOpenChildren) {
+      return { kind: 'none', note: 'children first' };
     }
     const claimedBy = task.claimedBy ?? null;
     if (claimedBy && claimedBy !== myEmail) {

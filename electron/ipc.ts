@@ -32,6 +32,7 @@ import {
   listTaskSourceInfos,
 } from './sources/registry';
 import { unsupported } from './core/task-source';
+import type { TypeBuildTaskSource } from './sources/typebuild';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2216,6 +2217,27 @@ end tell`;
       return src.sourceAction(taskId, action, payload);
     },
   );
+  // fm-j7w0 (S4) / fm-k6wz (S7) — TypeBuild-specific reads that aren't part of
+  // the generic TaskSource interface: the user registry (assignee picker) and
+  // per-task audit history (detail History section). Both go through the live
+  // TypeBuildTaskSource instance from the registry; if the source isn't
+  // registered (signed out) we return an empty result rather than throwing, so
+  // the picker/history degrade quietly. Payloads are NON-PHI (user identities,
+  // audit actions).
+  const typebuildSource = (): TypeBuildTaskSource | undefined => {
+    const src = getTaskSource('typebuild');
+    return src && 'listUsers' in src
+      ? (src as unknown as TypeBuildTaskSource)
+      : undefined;
+  };
+  ipcMain.handle('typebuild:listUsers', () => {
+    const src = typebuildSource();
+    return src ? src.listUsers() : [];
+  });
+  ipcMain.handle('typebuild:audit', (_e, taskId: string, limit?: number) => {
+    const src = typebuildSource();
+    return src ? src.getAudit(taskId, limit ?? 20) : [];
+  });
   // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. Lets a
   // time-gated remote (TypeBuild) task fire on the local cron. Rows carry
   // ONLY opaque ids + a cron string — never titles/bodies. setSchedule

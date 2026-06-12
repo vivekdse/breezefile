@@ -134,3 +134,22 @@ test('typebuild failed (unclaimed) → start', () => {
   );
   assert.equal(a.kind, 'start');
 });
+
+// fm-bq86 (S3) — a parent/container with non-terminal children loses Start;
+// the server won't hand out the container until its children resolve.
+test('typebuild parent with open children → none (children first)', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'open' }),
+    { tbReady: READY, hasOpenChildren: true },
+  );
+  assert.equal(a.kind, 'none');
+  assert.match(a.note, /children first/);
+});
+
+test('typebuild parent with all children resolved → start', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'open' }),
+    { tbReady: READY, hasOpenChildren: false },
+  );
+  assert.equal(a.kind, 'start');
+});

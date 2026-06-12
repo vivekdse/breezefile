@@ -68,8 +68,16 @@ const MCP_INLINE_CONFIG = JSON.stringify({
 const capabilities: TaskSourceCapabilities = {
   canSchedule: false,
   canClaim: true,
+  // fm-j7w0 (S4) — assignment + priority edits route through the generic
+  // PATCH 'patch' verb (sourceAction), NOT the local-style updateTask path,
+  // so canEdit stays false (the manual status-chip/title editors don't apply
+  // to a remote PHI task).
   canEdit: false,
-  canDelete: false,
+  // fm-iwlc (S6) — DELETE /chromeext/{id} is live (creator-only; 403 not_owner,
+  // 409 in_progress_elsewhere). Light up the kebab/detail Delete affordances.
+  canDelete: true,
+  // fm-r8vj (S5 plumbing) — POST /chromeext/tasks creates a TypeBuild task.
+  canCreate: true,
   phiSensitive: true,
   hasFolder: false,
 };
@@ -206,6 +214,9 @@ function mapListRow(row: ListRow): SourcedTask {
     rawStatus: raw,
     priority: typeof row.priority === 'number' ? row.priority : undefined,
     claimedBy: row.claimed_by ?? null,
+    // fm-j7w0 (S4) — assignee (server `assigned_to`). Received-but-unmapped
+    // until now; the detail panel renders it + edits it via PATCH. Non-PHI.
+    assignedTo: row.assigned_to ?? null,
     attempts: typeof row.attempts === 'number' ? row.attempts : undefined,
     maxAttempts:
       typeof row.max_attempts === 'number' ? row.max_attempts : undefined,
@@ -401,15 +412,161 @@ export class TypeBuildTaskSource implements TaskSource {
     };
   }
 
-  // ─── mutations (unsupported) ────────────────────────────────────────────
-  createTask(_input: TaskCreate): never {
-    throw unsupported('createTask — TypeBuild tasks are read-only here');
+  // ─── create (fm-r8vj/S5 plumbing) ────────────────────────────────────────
+  // POST /chromeext/tasks. The v1 extension creates with { title, task,
+  // start_url?, skill_ids?, flags? }; v2 adds priority, due_at, defer_until,
+  // parent_task_id, depends_on (spec §3 create_task / _build_task_from_payload).
+  // We map the Breeze TaskCreate → that payload: title + notes → title/task
+  // body. Titles/bodies ARE sent to the server (it encrypts them at rest); the
+  // PHI invariant only forbids PERSISTING them locally — so we never write them
+  // to disk/logs, and the returned SourcedTask carries them in memory only.
+  // On 201 we patch the cache + broadcast and return the mapped row.
+  async createTask(input: TaskCreate): Promise<SourcedTask> {
+    const title = (input.title ?? '').trim();
+    const body = (input.notes ?? '')?.trim() ?? '';
+    if (!title && !body) {
+      throw new Error('typebuild: title or body is required');
+    }
+    const payload: Record<string, unknown> = { title, task: body };
+    // due_at: the composer passes day-only or ISO; pass it straight through
+    // (the server stores the ISO string verbatim). Omit when null/empty.
+    if (input.due_at) payload.due_at = input.due_at;
+    if (input.deferUntil) payload.defer_until = input.deferUntil;
+    if (typeof input.priority === 'number') payload.priority = input.priority;
+
+    const res = await this.request('POST', '/chromeext/tasks', payload);
+    if (!res.ok) {
+      // 400 (validation) / 403 (group membership). Surface the server reason
+      // without logging the PHI title/body.
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      throw new Error(
+        `typebuild: create failed (${res.status})${
+          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
+        }`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      status?: string;
+    };
+    const id = data.id ?? '';
+    if (!id) throw new Error('typebuild: create returned no id');
+
+    // Mint the SourcedTask from the input + returned id (the create response
+    // does NOT echo the title back). Seed the cache so the new row appears on
+    // the next pull, then broadcast.
+    const mapped = mapListRow({
+      id,
+      status: data.status ?? 'open',
+      raw_status: data.status ?? 'open',
+      title,
+      priority: typeof input.priority === 'number' ? input.priority : undefined,
+      due_at: input.due_at ?? null,
+      defer_until: input.deferUntil ?? null,
+    });
+    // notes (the body) is PHI-in-memory; attach it for the immediate return so
+    // the composer can show the just-created task without a re-fetch.
+    const seeded: SourcedTask = { ...mapped, notes: body || null };
+    this.cache.set(id, seeded);
+    breezeHost().onTasksChanged();
+    void this.refreshAndBroadcast();
+    return seeded;
   }
+
   updateTask(_id: string, _patch: TaskUpdate): never {
-    throw unsupported('updateTask — TypeBuild tasks are read-only here');
+    // Edits go through sourceAction('patch') (fm-j7w0/S4), not the local-style
+    // updateTask path — canEdit is false for this source.
+    throw unsupported('updateTask — use the patch source action for TypeBuild');
   }
-  deleteTask(_id: string): never {
-    throw unsupported('deleteTask — TypeBuild tasks cannot be deleted here');
+
+  // ─── delete (fm-iwlc/S6) ─────────────────────────────────────────────────
+  // DELETE /chromeext/{id}. Hard delete, creator-only (spec §1.9): 403 with
+  // reason `not_owner`, 409 with reason `in_progress_elsewhere`. deleteTask is
+  // the void/throwing TaskSource contract — the local source throws on failure
+  // and the renderer's catch (useTaskActions.remove → formatOpError) shows the
+  // message. We throw an Error whose message embeds the server reason as
+  // `[typebuild-delete:<reason>]` so the renderer can pull it out and route it
+  // through formatSourceReason (not_owner / in_progress_elsewhere humanize to
+  // distinct status-line text). On 200 we drop the row from the cache and
+  // broadcast so the list updates without waiting for the poll. PHI-free: no
+  // title/body is logged or carried.
+  async deleteTask(id: string): Promise<void> {
+    const res = await this.request(
+      'DELETE',
+      `/chromeext/${encodeURIComponent(id)}`,
+    );
+    if (res.status === 200 || res.status === 204) {
+      this.cache.delete(id);
+      breezeHost().onTasksChanged();
+      void this.refreshAndBroadcast();
+      return;
+    }
+    if (res.status === 403 || res.status === 409 || res.status === 404) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 403
+          ? 'not_owner'
+          : res.status === 409
+            ? 'in_progress_elsewhere'
+            : 'not visible');
+      throw new Error(`[typebuild-delete:${reason}]`);
+    }
+    throw new Error(`typebuild: delete failed (${res.status})`);
+  }
+
+  // ─── users registry (fm-j7w0/S4) ─────────────────────────────────────────
+  // GET /chromeext/users → { users: [{ principal, email, display_name, ... }] }.
+  // Non-PHI (identities, not patient data). The assignee picker fetches this
+  // lazily on open. We don't cache aggressively — a per-call fetch is fine
+  // (the list is small and rarely changes mid-session).
+  async listUsers(): Promise<
+    Array<{ principal: string; email?: string | null; display_name?: string | null }>
+  > {
+    const res = await this.request('GET', '/chromeext/users');
+    if (!res.ok) throw new Error(`typebuild: users failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as {
+      users?: Array<{
+        principal: string;
+        email?: string | null;
+        display_name?: string | null;
+      }>;
+    };
+    return Array.isArray(data.users) ? data.users : [];
+  }
+
+  // ─── per-task audit history (fm-k6wz/S7) ─────────────────────────────────
+  // GET /chromeext/audit?task_id=&limit= → { events: [{ user, action, detail,
+  // at }] }, newest first (spec §2). Audit actions + actor are NON-PHI (the
+  // server never puts the body in `detail`). Memory-only; the detail panel
+  // fetches lazily on History expand and holds the rows in component state.
+  async getAudit(
+    taskId: string,
+    limit = 20,
+  ): Promise<Array<{ user: string; action: string; detail: string; at: string }>> {
+    const params = new URLSearchParams({
+      task_id: taskId,
+      limit: String(limit),
+    });
+    const res = await this.request('GET', `/chromeext/audit?${params}`);
+    if (!res.ok) throw new Error(`typebuild: audit failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as {
+      events?: Array<{
+        user?: string;
+        action?: string;
+        detail?: string;
+        at?: string;
+      }>;
+    };
+    return (Array.isArray(data.events) ? data.events : []).map((e) => ({
+      user: e.user ?? '',
+      action: e.action ?? '',
+      detail: e.detail ?? '',
+      at: e.at ?? '',
+    }));
   }
 
   // ─── runNow / Start (fm-b5at.5, MCP auth handoff fm-b5at.9) ──────────────
@@ -788,9 +945,59 @@ export class TypeBuildTaskSource implements TaskSource {
         return this.cancel(taskId);
       case 'complete':
         return this.complete(taskId);
+      // fm-j7w0 (S4) — generic field edit. The renderer passes a whitelisted
+      // subset {assigned_to?, priority?, due_at?, defer_until?}; we route it
+      // to patchTask with a matching optimistic cache patch. Any field outside
+      // the whitelist is dropped (a renderer can't smuggle status/flags here).
+      case 'patch':
+        return this.patchFields(taskId, payload);
       default:
         throw unsupported(`action ${action}`);
     }
+  }
+
+  // ─── generic field patch (fm-j7w0/S4) ────────────────────────────────────
+  // The detail panel's assignee picker + priority stepper call
+  // taskSourceAction('typebuild', id, 'patch', { assigned_to | priority | ... }).
+  // We accept ONLY the management fields the v2 spec's update_task_fields edits
+  // and that the UI exposes; everything else is ignored. The server clears a
+  // clearable string field when sent '' (assigned_to/due_at/defer_until), so
+  // the picker's "Unassigned" maps to ''. We build a parallel optimistic cache
+  // patch over the corresponding SourcedTask fields so the row reflects the
+  // edit on the next render without waiting for the poll.
+  private async patchFields(taskId: string, payload?: unknown): Promise<unknown> {
+    const input = (payload ?? {}) as Record<string, unknown>;
+    const body: Record<string, unknown> = {};
+    const cachePatch: Partial<SourcedTask> = {};
+
+    if ('assigned_to' in input) {
+      const v = input.assigned_to;
+      // '' clears server-side; cache reflects null for the cleared case.
+      const s = typeof v === 'string' ? v : '';
+      body.assigned_to = s;
+      cachePatch.assignedTo = s === '' ? null : s;
+    }
+    if ('priority' in input && typeof input.priority === 'number') {
+      body.priority = input.priority;
+      cachePatch.priority = input.priority;
+    }
+    if ('due_at' in input) {
+      const v = input.due_at;
+      const s = typeof v === 'string' ? v : '';
+      body.due_at = s;
+      // due_at on the row is normalized to the day-only shape; '' clears it.
+      cachePatch.due_at = s === '' ? null : dateOnly(s);
+    }
+    if ('defer_until' in input) {
+      const v = input.defer_until;
+      const s = typeof v === 'string' ? v : '';
+      body.defer_until = s;
+      cachePatch.deferUntil = s === '' ? null : s;
+    }
+
+    // Nothing recognized — a no-op rather than a wasted round-trip.
+    if (Object.keys(body).length === 0) return { ok: true };
+    return this.patchTask(taskId, body, cachePatch);
   }
 
   // ─── PATCH /chromeext/<id> — the v2 management verb (fm-alfz/S1) ──────────

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   partitionTasks,
   isDone,
+  resolveBlockedBy,
   DONE_CAP,
 } from '../src/components/tasks/sections.mjs';
 
@@ -34,6 +35,10 @@ function task(over = {}) {
     claimedBy: over.claimedBy,
     attempts: over.attempts,
     maxAttempts: over.maxAttempts,
+    parentTaskId: over.parentTaskId,
+    dependsOn: over.dependsOn,
+    depsSatisfied: over.depsSatisfied,
+    blockedBy: over.blockedBy,
   };
 }
 
@@ -136,6 +141,97 @@ test('FOR AGENTS priority breaks ties within the same rawStatus', () => {
   const hi = task({ id: 'hi', source: 'typebuild', rawStatus: 'open', priority: 9 });
   const { forAgents } = partitionTasks([hi, lo]);
   assert.deepEqual(forAgents.map((t) => t.id), ['lo', 'hi']);
+});
+
+// ── fm-bq86 (S3) — parent/child grouping + dependency presentation ──────────
+
+function tb(over = {}) {
+  return task({ source: 'typebuild', rawStatus: over.rawStatus ?? 'open', ...over });
+}
+
+test('S3: children group under a visible parent, indented, parent first', () => {
+  const parent = tb({ id: 'P', created_at: 100 });
+  const c1 = tb({ id: 'c1', parentTaskId: 'P', created_at: 50 });
+  const c2 = tb({ id: 'c2', parentTaskId: 'P', created_at: 60 });
+  const other = tb({ id: 'O', created_at: 200 });
+  const { forAgents, forAgentsRows } = partitionTasks([c1, other, parent, c2]);
+  // Flat order: parent then its children grouped, contiguous.
+  const ids = forAgentsRows.map((r) => r.task.id);
+  const pIdx = ids.indexOf('P');
+  assert.deepEqual(ids.slice(pIdx, pIdx + 3), ['P', 'c2', 'c1']); // created desc among siblings
+  assert.deepEqual(forAgents, forAgentsRows.map((r) => r.task));
+  // Depth annotations.
+  const byId = new Map(forAgentsRows.map((r) => [r.task.id, r]));
+  assert.equal(byId.get('P').depth, 0);
+  assert.equal(byId.get('c1').depth, 1);
+  assert.equal(byId.get('c2').depth, 1);
+  assert.equal(byId.get('O').depth, 0);
+});
+
+test('S3: orphan child (parent not visible) renders as a top-level row', () => {
+  const orphan = tb({ id: 'orph', parentTaskId: 'GONE' });
+  const { forAgentsRows } = partitionTasks([orphan]);
+  assert.equal(forAgentsRows.length, 1);
+  assert.equal(forAgentsRows[0].depth, 0);
+  assert.equal(forAgentsRows[0].task.id, 'orph');
+});
+
+test('S3: child whose parent is in DONE is an orphan top-level row', () => {
+  const doneParent = tb({ id: 'P', rawStatus: 'done', status: 'in_progress' });
+  const child = tb({ id: 'c1', parentTaskId: 'P' });
+  const { forAgents, forAgentsRows, done } = partitionTasks([doneParent, child]);
+  assert.equal(done.length, 1); // parent lives in DONE
+  assert.equal(forAgents.length, 1);
+  assert.equal(forAgentsRows[0].task.id, 'c1');
+  assert.equal(forAgentsRows[0].depth, 0);
+});
+
+test('S3: parent progress counts (done vs total) + hasOpenChildren', () => {
+  const parent = tb({ id: 'P' });
+  const open1 = tb({ id: 'c1', parentTaskId: 'P' });
+  const open2 = tb({ id: 'c2', parentTaskId: 'P' });
+  const { forAgentsRows } = partitionTasks([parent, open1, open2]);
+  const prow = forAgentsRows.find((r) => r.task.id === 'P');
+  assert.equal(prow.childCount, 2);
+  assert.equal(prow.doneChildCount, 0);
+  assert.equal(prow.hasOpenChildren, true);
+});
+
+test('S3: progress counts include terminal children that moved to DONE', () => {
+  // Done/cancelled children leave FOR AGENTS, but the parent's chip must
+  // still count them — otherwise progress is stuck at 0/N and N shrinks as
+  // children complete. Counts come from the FULL list; only the open child
+  // renders indented.
+  const parent = tb({ id: 'P' });
+  const open1 = tb({ id: 'c1', parentTaskId: 'P' });
+  const doneChild = tb({ id: 'c2', parentTaskId: 'P', status: 'done' });
+  const cancelled = tb({ id: 'c3', parentTaskId: 'P', status: 'cancelled' });
+  const { forAgentsRows, done } = partitionTasks([parent, open1, doneChild, cancelled]);
+  assert.equal(done.length, 2);
+  const prow = forAgentsRows.find((r) => r.task.id === 'P');
+  assert.equal(prow.childCount, 3);
+  assert.equal(prow.doneChildCount, 2);
+  assert.equal(prow.hasOpenChildren, true);
+  const indented = forAgentsRows.filter((r) => r.depth === 1);
+  assert.deepEqual(indented.map((r) => r.task.id), ['c1']);
+});
+
+test('S3: parent with ALL children terminal keeps Start (no open children)', () => {
+  const parent = tb({ id: 'P' });
+  const doneChild = tb({ id: 'c1', parentTaskId: 'P', status: 'done' });
+  const { forAgentsRows } = partitionTasks([parent, doneChild]);
+  const prow = forAgentsRows.find((r) => r.task.id === 'P');
+  assert.equal(prow.childCount, 1);
+  assert.equal(prow.doneChildCount, 1);
+  assert.equal(prow.hasOpenChildren, false);
+});
+
+test('S3: resolveBlockedBy maps ids to titles, drops unknowns, keeps order', () => {
+  const a = task({ id: 'a', title: 'Alpha' });
+  const b = task({ id: 'b', title: 'Beta' });
+  assert.deepEqual(resolveBlockedBy(['b', 'a', 'zzz'], [a, b]), ['Beta', 'Alpha']);
+  assert.deepEqual(resolveBlockedBy([], [a, b]), []);
+  assert.deepEqual(resolveBlockedBy(undefined, [a, b]), []);
 });
 
 test('DONE sort: completed_at desc, capped at DONE_CAP', () => {

@@ -66,6 +66,12 @@ export type TaskCreate = {
   auto_agent?: AgentId | null;
   auto_prompt?: string | null;
   flags?: string[];
+  // fm-r8vj (S5 plumbing) — optional TypeBuild-create fields the composer may
+  // pass through. The local store ignores both (createTask builds its row from
+  // the fields above); declared here only so the shared TaskCreate shape
+  // type-checks across the source seam.
+  deferUntil?: string | null;
+  priority?: number;
 };
 
 export type TaskUpdate = Partial<{

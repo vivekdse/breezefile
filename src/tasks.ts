@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fm } from './bridge';
 import { humanizeError } from './errorMessages';
-import type { RemoteSchedule, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
+import type { RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 
 // ─── optimistic pending-patch overlay (fm-kmhq, Phase A3) ──────────────────
 // A small renderer-side overlay that holds the fields of a just-succeeded
@@ -183,6 +183,21 @@ export async function taskSourceAction(
   return fm.tasksSourceAction(source, taskId, action, payload);
 }
 
+// fm-j7w0 (S4) — the TypeBuild user registry for the assignee picker. Returns
+// [] when signed out (the picker degrades to "Unassigned" only). Non-PHI.
+export async function listTypebuildUsers(): Promise<TaskUser[]> {
+  return fm.typebuild.listUsers();
+}
+
+// fm-k6wz (S7) — per-task audit history for the detail History section. Memory
+// only — callers hold the rows in component state and never persist them.
+export async function getTypebuildAudit(
+  taskId: string,
+  limit = 20,
+): Promise<TaskAuditEvent[]> {
+  return fm.typebuild.audit(taskId, limit);
+}
+
 // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. The overlay
 // stores a local cron (opaque ids + cron only) so a time-gated remote task can
 // fire on the local scheduler. setOverlaySchedule throws on an invalid cron
@@ -241,6 +256,8 @@ const LOCAL_SOURCE: TaskSourceInfo = {
     canClaim: false,
     canEdit: true,
     canDelete: true,
+    // fm-r8vj (S5 plumbing) — local tasks are creatable.
+    canCreate: true,
     phiSensitive: false,
     hasFolder: true,
   },

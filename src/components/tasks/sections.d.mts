@@ -11,9 +11,26 @@ export interface PartitionOpts {
   runningTaskIds?: Set<string>;
 }
 
+// fm-bq86 (S3) — one FOR AGENTS render row. depth 1 rows are children indented
+// under their (visible) parent; parent rows carry child-progress + the
+// readiness flag that strips Start while children are open.
+export interface AgentRow {
+  task: Task;
+  depth: 0 | 1;
+  /** Number of children grouped under this parent (parent rows only). */
+  childCount?: number;
+  /** How many of those children are terminal (done/cancelled/partial). */
+  doneChildCount?: number;
+  /** True when at least one child is still open — parent can't Start yet. */
+  hasOpenChildren?: boolean;
+}
+
 export interface Partitioned {
   forYou: Task[];
+  /** Flat FOR AGENTS tasks in grouped render order (parent, then children). */
   forAgents: Task[];
+  /** Annotated FOR AGENTS rows for indented rendering; same order as forAgents. */
+  forAgentsRows: AgentRow[];
   /** Capped at DONE_CAP, sorted completed_at desc. */
   done: Task[];
   /** Full count before the cap — for the collapsed header. */
@@ -21,3 +38,9 @@ export interface Partitioned {
 }
 
 export function partitionTasks(tasks: Task[], opts?: PartitionOpts): Partitioned;
+
+/** Resolve blocked_by ids to titles from the in-memory list (renderer-only). */
+export function resolveBlockedBy(
+  ids: string[] | undefined | null,
+  tasks: Task[],
+): string[];

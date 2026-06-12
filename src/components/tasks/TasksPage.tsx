@@ -39,7 +39,8 @@ import { RunsView } from '../RunsView';
 import type { ConfirmRequest } from '../ConfirmDialog';
 import { formatOpError } from '../../errorMessages';
 import type { RemoteSchedule, Task, TaskStatus } from '../../types';
-import { partitionTasks } from './sections.mjs';
+import { partitionTasks, resolveBlockedBy } from './sections.mjs';
+import type { AgentRow } from './sections.mjs';
 import { primaryActionFor } from './primaryAction.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
 import { useTaskActions } from './useTaskActions';
@@ -132,10 +133,19 @@ function TasksPageInner() {
   }, [rawTasks, sourceFilter]);
 
   const runningTaskIds = useMemo(() => new Set(sessions.keys()), [sessions]);
-  const { forYou, forAgents, done, doneTotal } = useMemo(
+  const { forYou, forAgents, forAgentsRows, done, doneTotal } = useMemo(
     () => partitionTasks(sourceFiltered, { myEmail, runningTaskIds }),
     [sourceFiltered, myEmail, runningTaskIds],
   );
+
+  // fm-bq86 (S3) — map a task id → its FOR AGENTS grouping annotation, so the
+  // row render and primaryFor can pull depth / child-progress / the
+  // parent-loses-Start readiness flag without re-deriving the grouping.
+  const agentRowById = useMemo(() => {
+    const m = new Map<string, AgentRow>();
+    for (const r of forAgentsRows) m.set(r.task.id, r);
+    return m;
+  }, [forAgentsRows]);
 
   const showDoneSection = showDone || doneExpanded;
 
@@ -238,12 +248,16 @@ function TasksPageInner() {
   function primaryFor(task: Task): PrimaryAction {
     const session = sessions.get(task.id);
     const lastRunRunning = false; // refined per-row via the hook below for auto
+    // fm-bq86 (S3) — a parent with non-terminal children loses Start (server
+    // won't hand out the container). The grouping computed it; pass it through.
+    const hasOpenChildren = agentRowById.get(task.id)?.hasOpenChildren ?? false;
     return primaryActionFor(task, {
       caps: capsFor(task),
       tbReady,
       myEmail,
       session,
       lastRunRunning,
+      hasOpenChildren,
     });
   }
 
@@ -963,6 +977,8 @@ function TasksPageInner() {
                     title="For agents"
                     hint="TypeBuild + auto-execute tasks"
                     tasks={forAgents}
+                    rows={forAgentsRows}
+                    blockedByFor={(t) => resolveBlockedBy(t.blockedBy, rawTasks)}
                     emptyNote="No agent work queued."
                     today={todayISO()}
                     myEmail={myEmail}
@@ -1089,6 +1105,8 @@ function Section({
   title,
   hint,
   tasks,
+  rows,
+  blockedByFor,
   emptyNote,
   today,
   myEmail,
@@ -1107,6 +1125,11 @@ function Section({
   title: string;
   hint: string;
   tasks: Task[];
+  // fm-bq86 (S3) — annotated FOR AGENTS rows (parent/child grouping). When
+  // present they drive rendering (indent + child-progress); FOR YOU passes
+  // plain `tasks` only and falls back to depth-0 rows.
+  rows?: AgentRow[];
+  blockedByFor?: (t: Task) => string[];
   emptyNote: string;
   today: string;
   myEmail: string | null;
@@ -1122,6 +1145,9 @@ function Section({
   onKebab: (t: Task, x: number, y: number) => void;
   onOpenRuns: (t: Task) => void;
 }) {
+  // fm-bq86 (S3) — normalize to AgentRow[] so a single render path covers both
+  // the flat FOR YOU section and the grouped FOR AGENTS section.
+  const renderRows: AgentRow[] = rows ?? tasks.map((t) => ({ task: t, depth: 0 }));
   return (
     <div className="tasks__section">
       <div className="tasks__section-head">
@@ -1129,10 +1155,11 @@ function Section({
         <span className="tasks__section-count">{tasks.length}</span>
         <span className="tasks__section-hint">{hint}</span>
       </div>
-      {tasks.length === 0 ? (
+      {renderRows.length === 0 ? (
         <div className="tasks__section-empty">{emptyNote}</div>
       ) : (
-        tasks.map((t) => {
+        renderRows.map((row) => {
+          const t = row.task;
           // fm-7909 — refine the auto-mode "run in flight" signal per row via
           // the live last-run hook; pure primaryActionFor handles the rest.
           return (
@@ -1146,6 +1173,10 @@ function Section({
               selected={selected.has(t.id)}
               cursor={cursorId === t.id}
               myEmail={myEmail}
+              depth={row.depth}
+              childCount={row.childCount}
+              doneChildCount={row.doneChildCount}
+              blockedByTitles={blockedByFor ? blockedByFor(t) : undefined}
               onCheckbox={() => onCheckbox(t)}
               onClick={(e) => onRowClick(e, t)}
               onDoubleClick={() => onActivate(t)}
@@ -1176,6 +1207,10 @@ function AutoAwareRow({
   selected: boolean;
   cursor: boolean;
   myEmail: string | null;
+  depth?: 0 | 1;
+  childCount?: number;
+  doneChildCount?: number;
+  blockedByTitles?: string[];
   onCheckbox: () => void;
   onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;

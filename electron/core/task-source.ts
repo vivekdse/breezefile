@@ -25,6 +25,9 @@ export type TaskSourceCapabilities = {
   canEdit: boolean;
   /** Deletable. */
   canDelete: boolean;
+  /** Supports creating tasks. The composer gates its target picker on this
+   *  (fm-r8vj S5 plumbing). Local + TypeBuild both create. */
+  canCreate: boolean;
   /** Bodies are PHI-sensitive — decrypted text must never be persisted
    *  to disk, logs, or notifications. Gates those code paths off. */
   phiSensitive: boolean;
@@ -49,6 +52,9 @@ export type SourcedTask = Omit<Task, 'folder'> & {
   rawStatus?: string;
   priority?: number;
   claimedBy?: string | null;
+  // fm-j7w0 (S4) — assignee principal/email (server `assigned_to`). Non-PHI
+  // (a user identity); null/undefined when unassigned.
+  assignedTo?: string | null;
   attempts?: number;
   maxAttempts?: number;
   flags?: string[];

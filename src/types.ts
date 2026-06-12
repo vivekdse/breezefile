@@ -172,6 +172,10 @@ export type Task = {
   rawStatus?: string;
   priority?: number;
   claimedBy?: string | null;
+  // fm-j7w0 (S4) — assignee principal/email (server `assigned_to`). Non-PHI
+  // (a user identity, not patient data); safe to render. null/undefined when
+  // unassigned.
+  assignedTo?: string | null;
   attempts?: number;
   maxAttempts?: number;
   flags?: string[];
@@ -192,6 +196,9 @@ export type TaskSourceCapabilities = {
   canClaim: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  // fm-r8vj (S5 plumbing) — source supports creating tasks. The composer
+  // gates its target picker on this; local + typebuild both create.
+  canCreate: boolean;
   phiSensitive: boolean;
   hasFolder: boolean;
 };
@@ -200,6 +207,25 @@ export type TaskSourceInfo = {
   id: string;
   label: string;
   capabilities: TaskSourceCapabilities;
+};
+
+// fm-j7w0 (S4) — a row from the TypeBuild user registry (GET /chromeext/users).
+// Non-PHI: identities, not patient data. `principal` is the audited identity
+// (email or uid fallback); `email`/`display_name` may be blank.
+export type TaskUser = {
+  principal: string;
+  email?: string | null;
+  display_name?: string | null;
+};
+
+// fm-k6wz (S7) — a per-task audit row (GET /chromeext/audit?task_id=). Audit
+// actions + actor are NON-PHI by design (the server never puts the body in
+// `detail`). Rendered in the detail History section, memory-only.
+export type TaskAuditEvent = {
+  user: string;
+  action: string;
+  detail: string;
+  at: string; // ISO timestamp
 };
 
 // fm-b5at.8 — a PHI-free local cron overlay for a remote-source task. Carries
@@ -226,6 +252,12 @@ export type TaskCreate = {
   auto_mode?: boolean;
   auto_agent?: string | null;
   auto_prompt?: string | null;
+  // fm-r8vj (S5 plumbing) — optional fields the composer passes for a
+  // TypeBuild create. `deferUntil` is an ISO timestamp (server `defer_until`);
+  // `priority` an integer. The local source ignores both (its createTask
+  // builds the row from its own field set and drops unknown keys).
+  deferUntil?: string | null;
+  priority?: number;
 };
 
 export type TaskUpdate = Partial<{

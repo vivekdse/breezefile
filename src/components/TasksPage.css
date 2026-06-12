@@ -1309,3 +1309,143 @@
   color: var(--accent, #2d7ff9);
   border-color: var(--accent, #2d7ff9);
 }
+
+/* ── fm-bq86: parent/child grouping ── */
+
+/* Child rows indent under their parent. The row is a grid (checkbox · main ·
+   primary · kebab); indent via padding-left and absolutely position the
+   connector glyph in the gutter so the grid columns stay intact. Theme-safe:
+   CSS vars only. */
+.tasks__row--child {
+  position: relative;
+  padding-left: calc(var(--sp-5) + 22px);
+  border-left: 2px solid var(--rule-on-panel);
+}
+.tasks__row-connector {
+  position: absolute;
+  left: var(--sp-5);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm, 13px);
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Parent child-progress chip ("2/5 ⮡"). */
+.tasks__child-progress {
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--rule-on-panel);
+  background: var(--panel-2);
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+}
+
+/* Passive "waits on N" dependency pill (deps not satisfied). */
+.tasks__waits-on {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--rule-on-panel);
+  background: transparent;
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+}
+
+/* ── fm-j7w0/k6wz: detail assignment + audit ── */
+/* fm-j7w0 (S4) — assignee select + priority stepper in the TypeBuild detail. */
+.tasks__detail-assignee {
+  max-width: 100%;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--fg-on-panel);
+  background: var(--field-bg, transparent);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 4px;
+}
+.tasks__detail-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tasks__priority-step {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-on-panel);
+  cursor: pointer;
+}
+.tasks__priority-step:hover:not(:disabled) {
+  background: var(--hover-on-panel, rgba(127, 127, 127, 0.12));
+}
+.tasks__priority-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.tasks__priority-value {
+  min-width: 1.2em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* fm-k6wz (S7) — collapsible History section. */
+.tasks__history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  /* inherit the .tasks__detail-section typography it shares the class with */
+}
+.tasks__history {
+  margin-top: 6px;
+}
+.tasks__history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tasks__history-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.tasks__history-sep {
+  opacity: 0.5;
+}
+.tasks__history-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tasks__history-actor {
+  color: var(--fg-on-panel);
+}
+.tasks__history-action {
+  white-space: nowrap;
+}
+.tasks__history-retry {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent, #4a9eff);
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}

@@ -109,11 +109,103 @@ function sortDone(a, b) {
 /** Cap on the collapsed DONE section so a long history doesn't bloat the DOM. */
 export const DONE_CAP = 50;
 
+// fm-bq86 (S3) — group child rows (task.parentTaskId set) under their parent
+// when the parent is ALSO present in the section. Returns an ordered list of
+// annotated rows that preserves the top-level FOR AGENTS sort; children sort by
+// the same comparator among their siblings and render indented (depth 1)
+// directly beneath their parent. Orphans — children whose parent isn't visible
+// in this section (parent done/cancelled/hidden/not present) — render as
+// ordinary top-level rows in their natural sort position.
+//
+// A "container" parent with any non-terminal (open) child loses Start: the
+// server won't hand out the container until its children resolve. We surface
+// that via `hasOpenChildren` so the page can pass it into primaryActionFor.
+/**
+ * @param {Task[]} sortedAgents — already sorted by the FOR AGENTS comparator.
+ * @param {Task[]} allTasks — the FULL unpartitioned list. Progress counts must
+ *   come from here: terminal children leave the section (they live in DONE), so
+ *   counting only in-section children would pin every chip at 0/N and shrink N
+ *   as children complete.
+ * @returns {Array<{ task: Task, depth: 0|1, childCount?: number, doneChildCount?: number, hasOpenChildren?: boolean }>}
+ */
+function groupAgents(sortedAgents, sortCmp, allTasks) {
+  const presentIds = new Set(sortedAgents.map((t) => t.id));
+  // Bucket VISIBLE children by their (visible) parent id — these render
+  // indented. Progress counts come from allChildrenByParent below.
+  const childrenByParent = new Map();
+  for (const t of sortedAgents) {
+    const pid = t.parentTaskId;
+    if (pid && presentIds.has(pid)) {
+      const bucket = childrenByParent.get(pid);
+      if (bucket) bucket.push(t);
+      else childrenByParent.set(pid, [t]);
+    }
+  }
+  // ALL children (any status, any section) by parent id, for the progress
+  // chip and the readiness flag.
+  const allChildrenByParent = new Map();
+  for (const t of allTasks) {
+    const pid = t.parentTaskId;
+    if (pid) {
+      const bucket = allChildrenByParent.get(pid);
+      if (bucket) bucket.push(t);
+      else allChildrenByParent.set(pid, [t]);
+    }
+  }
+  const rows = [];
+  for (const t of sortedAgents) {
+    // A child whose parent is visible is emitted under that parent, not here.
+    if (t.parentTaskId && presentIds.has(t.parentTaskId)) continue;
+    const allKids = allChildrenByParent.get(t.id);
+    if (allKids && allKids.length > 0) {
+      const visible = (childrenByParent.get(t.id) ?? []).slice().sort(sortCmp);
+      const doneChildCount = allKids.filter((c) => isDone(c)).length;
+      const hasOpenChildren = doneChildCount < allKids.length;
+      rows.push({
+        task: t,
+        depth: 0,
+        childCount: allKids.length,
+        doneChildCount,
+        hasOpenChildren,
+      });
+      for (const c of visible) rows.push({ task: c, depth: 1 });
+    } else {
+      rows.push({ task: t, depth: 0 });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Resolve a list of blocked-by task ids to their titles using the in-memory
+ * task list (renderer memory only — fine for PHI). Ids with no match in the
+ * list cache are dropped (detail-only deps may not be in the visible list).
+ * @param {string[]|undefined|null} ids
+ * @param {Task[]} tasks
+ * @returns {string[]} resolved titles, in the order of `ids`
+ */
+export function resolveBlockedBy(ids, tasks) {
+  if (!ids || ids.length === 0) return [];
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const out = [];
+  for (const id of ids) {
+    const t = byId.get(id);
+    if (t && t.title) out.push(t.title);
+  }
+  return out;
+}
+
 /**
  * Partition + sort tasks into the three owner sections.
  * @param {Task[]} tasks
  * @param {{ myEmail?: string|null, runningTaskIds?: Set<string> }} [opts]
- * @returns {{ forYou: Task[], forAgents: Task[], done: Task[], doneTotal: number }}
+ * @returns {{
+ *   forYou: Task[],
+ *   forAgents: Task[],
+ *   forAgentsRows: Array<{ task: Task, depth: 0|1, childCount?: number, doneChildCount?: number, hasOpenChildren?: boolean }>,
+ *   done: Task[],
+ *   doneTotal: number,
+ * }}
  */
 export function partitionTasks(tasks, opts) {
   const forYou = [];
@@ -131,8 +223,20 @@ export function partitionTasks(tasks, opts) {
     else forYou.push(t);
   }
   forYou.sort(sortForYou);
-  forAgents.sort(makeSortForAgents(opts));
+  const sortCmp = makeSortForAgents(opts);
+  forAgents.sort(sortCmp);
+  // fm-bq86 (S3) — annotated parent/child rows for indented rendering. The
+  // flat `forAgents` is rebuilt from the grouped order so keyboard nav /
+  // selection scope (flatOrder in the page) matches what the user sees.
+  const forAgentsRows = groupAgents(forAgents, sortCmp, tasks);
+  const groupedFlat = forAgentsRows.map((r) => r.task);
   const doneTotal = done.length;
   done.sort(sortDone);
-  return { forYou, forAgents, done: done.slice(0, DONE_CAP), doneTotal };
+  return {
+    forYou,
+    forAgents: groupedFlat,
+    forAgentsRows,
+    done: done.slice(0, DONE_CAP),
+    doneTotal,
+  };
 }

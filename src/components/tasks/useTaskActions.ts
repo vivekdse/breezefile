@@ -36,6 +36,17 @@ function mintErrorMessage(err: unknown): string | null {
   return MINT_MESSAGES[m[1]] ?? null;
 }
 
+// fm-iwlc (S6) — the typebuild source throws a `[typebuild-delete:<reason>]`
+// tagged Error on a rejected delete (IPC strips custom Error props, so the
+// reason rides in the message). Pull the machine reason out so the caller can
+// route it through formatSourceReason (not_owner / in_progress_elsewhere → a
+// distinct status-line sentence). Returns null for any other error.
+function deleteReason(err: unknown): string | null {
+  const raw = err instanceof Error ? err.message : String(err);
+  const m = /\[typebuild-delete:([a-z_]+)\]/.exec(raw);
+  return m ? m[1] : null;
+}
+
 const STATUS_VERBED: Record<TaskStatus, string> = {
   pending: 'reopened',
   in_progress: 'set in-progress',
@@ -164,7 +175,15 @@ export function useTaskActions(): TaskActions {
         await deleteTask(task.id, task.source);
         say('task deleted');
       } catch (e) {
-        say(formatOpError('delete', e));
+        // fm-iwlc (S6) — a TypeBuild delete rejection (not_owner / 409
+        // in_progress_elsewhere) arrives as a tagged reason; humanize it
+        // distinctly rather than dumping the raw machine string.
+        const reason = deleteReason(e);
+        say(
+          reason
+            ? `couldn’t delete · ${formatSourceReason(reason)} · ${task.title}`
+            : formatOpError('delete', e),
+        );
       }
     },
     [capsFor, say],
@@ -208,12 +227,32 @@ export function useTaskActions(): TaskActions {
         if (caps && !caps.canDelete) skipped++;
         else doable.push(t);
       }
+      // fm-iwlc (S6) — track per-task delete failures so a rejected TypeBuild
+      // delete (not_owner / in_progress_elsewhere) doesn't get silently
+      // reported as "deleted". For a single-task delete (the detail/kebab path)
+      // we surface the specific friendly reason; in a batch we just count them.
+      const failures: Array<{ task: Task; reason: string | null; err: unknown }> = [];
       await Promise.all(
-        doable.map((t) => deleteTask(t.id, t.source).catch(() => {})),
+        doable.map((t) =>
+          deleteTask(t.id, t.source).catch((err) => {
+            failures.push({ task: t, reason: deleteReason(err), err });
+          }),
+        ),
       );
-      const n = doable.length;
-      let msg = `deleted ${n} task${n === 1 ? '' : 's'}`;
+      const ok = doable.length - failures.length;
+      // Single-task path: report the precise reason instead of a count.
+      if (doable.length === 1 && failures.length === 1) {
+        const { task, reason, err } = failures[0];
+        say(
+          reason
+            ? `couldn’t delete · ${formatSourceReason(reason)} · ${task.title}`
+            : formatOpError('delete', err),
+        );
+        return;
+      }
+      let msg = `deleted ${ok} task${ok === 1 ? '' : 's'}`;
       if (skipped > 0) msg += ` · ${skipped} skipped (read-only)`;
+      if (failures.length > 0) msg += ` · ${failures.length} failed`;
       say(msg);
     },
     [capsFor, say],
