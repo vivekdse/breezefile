@@ -138,6 +138,10 @@ const DEFAULT_KEYBINDS: Keybinds = {
   'quit.force': 'ZQ',
 };
 
+// fm-h8g7 — verbosity for task notifications. Mirrors the main-process
+// notify-settings enum.
+export type TaskNotifyVerbosity = 'all' | 'failures' | 'off';
+
 // Only durable preferences persist — tabs always start fresh at $HOME so a
 // stale trail never greets you on launch.
 type Persisted = {
@@ -166,6 +170,13 @@ type Persisted = {
   // default — the visual + dock badge is plenty unless the user opts in.
   notifyOnAttention: boolean;
   soundOnAttention: boolean;
+  // fm-h8g7 — verbosity for TASK notifications (agent run completions +
+  // remote TypeBuild task transitions). Distinct from the terminal-attention
+  // toggles above. 'all' = run successes/failures + remote changes; 'failures'
+  // = failures only; 'off' = none. Default 'all'. The value is mirrored to the
+  // main process (which owns the OS-notification gate) over the
+  // settings:taskNotifications IPC on boot + on every change.
+  taskNotifications: TaskNotifyVerbosity;
   // fm-hzo — when true, terminal spawns wrap in `tmux new-session -A -s
   // <tab-label>`. Two tabs with the same label share a tmux session;
   // closing & re-opening a terminal reattaches to the still-running
@@ -193,6 +204,11 @@ type State = Persisted & {
   pending: string; // multi-key buffer for vim-style chords
   lastFind: string; // for n/N repeat
   lastClosedTab: Tab | null; // for ga "restore tab"
+  // fm-h8g7 — unseen task-notification count for the sidebar badge. Bumped by
+  // run success/failure + remote transition events while the Tasks page tab is
+  // NOT active; cleared when the user opens/activates the Tasks page. Not
+  // persisted — it's an ephemeral attention signal.
+  tasksBadgeCount: number;
 };
 
 type Action =
@@ -233,6 +249,9 @@ type Action =
   | { type: 'addTagViz'; id: string }
   | { type: 'setNotifyOnAttention'; value: boolean }
   | { type: 'setSoundOnAttention'; value: boolean }
+  | { type: 'setTaskNotifications'; value: TaskNotifyVerbosity }
+  | { type: 'bumpTasksBadge'; by?: number }
+  | { type: 'clearTasksBadge' }
   | { type: 'setUseTmux'; value: boolean }
   | { type: 'setFolderPref'; path: string; patch: FolderPrefs }
   | { type: 'clearFolderPref'; path: string }
@@ -317,6 +336,7 @@ const initialState: State = {
   taskManagementEnabled: true,
   notifyOnAttention: true,
   soundOnAttention: true,
+  taskNotifications: 'all',
   useTmux: false,
   folderPrefs: {},
   entriesByPath: {},
@@ -328,6 +348,7 @@ const initialState: State = {
   pending: '',
   lastFind: '',
   lastClosedTab: null,
+  tasksBadgeCount: 0,
 };
 
 function reducer(s: State, a: Action): State {
@@ -537,6 +558,12 @@ function reducer(s: State, a: Action): State {
       return { ...s, notifyOnAttention: a.value };
     case 'setSoundOnAttention':
       return { ...s, soundOnAttention: a.value };
+    case 'setTaskNotifications':
+      return { ...s, taskNotifications: a.value };
+    case 'bumpTasksBadge':
+      return { ...s, tasksBadgeCount: s.tasksBadgeCount + (a.by ?? 1) };
+    case 'clearTasksBadge':
+      return s.tasksBadgeCount === 0 ? s : { ...s, tasksBadgeCount: 0 };
     case 'setUseTmux':
       return { ...s, useTmux: a.value };
     case 'setFolderPref': {
@@ -679,6 +706,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           taskManagementEnabled,
           notifyOnAttention,
           soundOnAttention,
+          taskNotifications,
           useTmux,
           folderPrefs,
         } = parsed as Partial<Persisted>;
@@ -698,6 +726,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : {}),
             ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
             ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
+            ...(taskNotifications === 'all' ||
+            taskNotifications === 'failures' ||
+            taskNotifications === 'off'
+              ? { taskNotifications }
+              : {}),
             ...(typeof useTmux === 'boolean' ? { useTmux } : {}),
             ...(folderPrefs && typeof folderPrefs === 'object' ? { folderPrefs } : {}),
           } as Partial<Persisted>,
@@ -751,6 +784,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       taskManagementEnabled: state.taskManagementEnabled,
       notifyOnAttention: state.notifyOnAttention,
       soundOnAttention: state.soundOnAttention,
+      taskNotifications: state.taskNotifications,
       useTmux: state.useTmux,
       folderPrefs: state.folderPrefs,
     };
@@ -767,10 +801,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.taskManagementEnabled,
     state.notifyOnAttention,
     state.soundOnAttention,
+    state.taskNotifications,
     state.useTmux,
     state.folderPrefs,
     hydrated,
   ]);
+
+  // fm-h8g7 — mirror the task-notification verbosity to the main process so
+  // the OS-notification gate (which runs in main) tracks the renderer's value.
+  // Push on boot (after hydration) and on every change. Fire-and-forget; main
+  // defaults to 'all' until the first push lands.
+  useEffect(() => {
+    if (!hydrated) return;
+    fm.setTaskNotifications?.(state.taskNotifications);
+  }, [state.taskNotifications, hydrated]);
 
   const activeTab = state.tabs[state.activeTab];
 

@@ -10,6 +10,7 @@ import * as tasks from '../tasks';
 import type { Task, TaskRun } from '../tasks';
 import { getAgent, defaultAgentId } from './registry';
 import type { AgentRunResult } from './types';
+import { breezeHost } from '../core/host';
 
 const RUNS_ROOT = path.join(os.homedir(), '.breezefile', 'runs');
 
@@ -41,6 +42,18 @@ export type ExecuteOutcome = {
   run: TaskRun;
   result: AgentRunResult;
 };
+
+// fm-h8g7 — PHI guard for run-success notifications. executeTaskRun only ever
+// runs LOCAL tasks (TypeBuild tasks run interactively via the source's runNow,
+// never through this headless path), so in practice `source` is local/
+// undefined here. We still guard structurally: a known PHI-sensitive source
+// id forces a generic, content-free notification. Kept as a tiny local table
+// rather than importing the source registry to avoid an import cycle and to
+// keep this module Electron-free (it also runs under headless breezed).
+const PHI_SENSITIVE_SOURCES = new Set<string>(['typebuild']);
+function isPhiSensitiveSource(source: string | undefined): boolean {
+  return !!source && PHI_SENSITIVE_SOURCES.has(source);
+}
 
 export class AgentNotAvailableError extends Error {
   constructor(public agentId: string) {
@@ -187,6 +200,34 @@ export async function executeTaskRun(
     error_class: result.errorClass ?? null,
     error_message: result.errorMessage ?? null,
   });
+
+  // fm-h8g7 — run-success notification, mirror of the scheduler's failure
+  // path. Fire on a SUCCESSFUL run so the user learns a long unattended run
+  // finished without staring at the app. The host decides OS-notification
+  // verbosity + the manual/focus suppression (manual run-now while a Breeze
+  // window is focused → no OS noise; unfocused → notify).
+  //
+  // PHI guard: executeTaskRun only ever runs LOCAL tasks (TypeBuild runs are
+  // interactive via the source's runNow, never here) — but guard anyway. A
+  // task whose `source` is a phiSensitive source forces a generic, content-
+  // free notification (no title/body in the OS notification or the body).
+  // Local task titles are NOT PHI (per fm-h8g7) so they may appear.
+  if (result.ok) {
+    const phiSensitive = isPhiSensitiveSource((task as { source?: string }).source);
+    // Short body: a generic line for now (run output isn't surfaced as text
+    // here, and reading it risks leaking content for PHI sources). Truncate
+    // defensively in case a future caller passes a richer body.
+    const body = 'Agent run finished';
+    try {
+      breezeHost().onRunSucceeded?.(
+        { id: task.id, title: task.title },
+        body.slice(0, 80),
+        { manualInvocation: opts.manualInvocation, phiSensitive },
+      );
+    } catch (e) {
+      console.error('[execute] onRunSucceeded:', e);
+    }
+  }
 
   // fm-zf3m / fm-femh — status follow-through:
   //   scheduler one-shot + success  → mark task done (run-once-on-save

@@ -153,10 +153,19 @@ function Shell() {
   const notifyOnAttentionRef = useRef(state.notifyOnAttention);
   const soundOnAttentionRef = useRef(state.soundOnAttention);
   const activeTabIdxRef = useRef(state.activeTab);
+  // fm-h8g7 — live refs read by the once-mounted task-notification handlers.
+  const taskNotificationsRef = useRef(state.taskNotifications);
   tabsRef.current = state.tabs;
   notifyOnAttentionRef.current = state.notifyOnAttention;
   soundOnAttentionRef.current = state.soundOnAttention;
   activeTabIdxRef.current = state.activeTab;
+  taskNotificationsRef.current = state.taskNotifications;
+
+  // fm-h8g7 — true when the currently-active tab is the Tasks page. The badge
+  // counts unseen task events only while the user is NOT looking at Tasks.
+  const tasksTabActiveRef = useRef(false);
+  tasksTabActiveRef.current =
+    state.tabs[state.activeTab]?.kind === 'tasks';
 
   useEffect(() => {
     const maybeNotify = (
@@ -312,6 +321,77 @@ function Shell() {
     });
     return off;
   }, []);
+
+  // fm-h8g7 — task-notification surfaces. Three event feeds drive the sidebar
+  // badge + (for transitions) an in-app statusbar toast:
+  //   task-runs:succeeded / task-runs:failed → bump badge (count only)
+  //   tasks:transitions (PHI-free) → bump badge + toast
+  // We bump the badge ONLY when the Tasks page isn't the active tab (a user
+  // looking at Tasks already sees the change). The OS-notification gate lives
+  // in main; the in-app toast gates on the renderer's own verbosity copy.
+  useEffect(() => {
+    const bumpIfHidden = (by = 1) => {
+      if (!tasksTabActiveRef.current) dispatch({ type: 'bumpTasksBadge', by });
+    };
+    const offSucceeded = fm.onTaskRunSucceeded(() => bumpIfHidden());
+    const offFailed = fm.onTaskRunFailed(() => bumpIfHidden());
+    const offTransitions = fm.onTaskTransitions((transitions) => {
+      if (!transitions || transitions.length === 0) return;
+      bumpIfHidden(transitions.length);
+      // In-app statusbar toast so a focused user sees the change without OS
+      // noise. Gate on the renderer's verbosity copy (transitions = 'all').
+      // PHI-free: only the opaque short id + kind.
+      if (taskNotificationsRef.current !== 'all') return;
+      const labelFor = (k: string) =>
+        k === 'completed'
+          ? 'completed'
+          : k === 'partial'
+            ? 'partially completed'
+            : k === 'blocked'
+              ? 'blocked'
+              : k === 'claim-lost'
+                ? 'claim released'
+                : 'available';
+      const msg =
+        transitions.length > 3
+          ? `${transitions.length} TypeBuild tasks changed`
+          : transitions
+              .map(
+                (t) =>
+                  `${t.source === 'typebuild' ? 'TypeBuild' : t.source} task ${t.taskId.slice(0, 8)} ${labelFor(t.kind)}`,
+              )
+              .join('; ');
+      dispatch({ type: 'setStatus', msg });
+    });
+    return () => {
+      offSucceeded();
+      offFailed();
+      offTransitions();
+    };
+  }, []);
+
+  // fm-h8g7 — main process emits this when the user clicks ANY task
+  // notification. Open/focus the Tasks page and, if a taskId is present,
+  // focus that row via the existing fm:tasks:focus mechanism.
+  useEffect(() => {
+    const off = fm.onTasksNotificationClicked(({ taskId }) => {
+      dispatch({ type: 'openTasksTab' });
+      if (taskId) {
+        window.dispatchEvent(
+          new CustomEvent('fm:tasks:focus', { detail: { taskId } }),
+        );
+      }
+    });
+    return off;
+  }, []);
+
+  // fm-h8g7 — clear the unseen-task badge once the user is looking at the
+  // Tasks page (opened or activated).
+  useEffect(() => {
+    if (state.tabs[state.activeTab]?.kind === 'tasks') {
+      dispatch({ type: 'clearTasksBadge' });
+    }
+  }, [state.activeTab, state.tabs]);
 
   // fm-c2w — dock badge reflects how many tabs currently demand
   // attention (idle waiting-for-input or explicit bell). 'busy' is

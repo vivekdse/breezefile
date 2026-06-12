@@ -623,6 +623,18 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
               {tasks.length}
             </span>
           )}
+          {/* fm-h8g7 — unseen task-notification badge (run completions +
+              remote TypeBuild transitions seen while the Tasks page wasn't
+              active). Clears when the user opens/activates the Tasks page. */}
+          {state.tasksBadgeCount > 0 && (
+            <span
+              className="tasks__badge"
+              aria-label={`${state.tasksBadgeCount} unseen task updates`}
+              title="Unseen task updates — open Tasks to review"
+            >
+              {state.tasksBadgeCount > 99 ? '99+' : state.tasksBadgeCount}
+            </span>
+          )}
         </span>
         <button
           type="button"

@@ -17,6 +17,28 @@ export interface BreezeHost {
   onRunsChanged(taskId: string): void;
   /** An auto/scheduled run terminally failed. */
   onRunFailed(task: { id: string; title: string }, body: string): void;
+  /** fm-h8g7 — a NON-manual (scheduled/auto) run completed successfully.
+   *  Mirror of onRunFailed: OS notification ("Task completed: <title>") +
+   *  `task-runs:succeeded` broadcast. `phiSensitive` tells the host to use a
+   *  generic, content-free body/title (the caller already passes a PHI-free
+   *  title in that case). Optional so old/headless hosts default to log-only. */
+  onRunSucceeded?(
+    task: { id: string; title: string },
+    body: string,
+    opts?: { manualInvocation?: boolean; phiSensitive?: boolean },
+  ): void;
+  /** fm-h8g7 — a batch of remote task transitions detected by a source poll
+   *  (TypeBuild). PHI-FREE: each entry carries only the opaque task id, a
+   *  transition kind, and the source id — never titles/bodies. The host turns
+   *  these into PHI-free OS notifications + a `tasks:transitions` broadcast for
+   *  the renderer's badge. Optional so old/headless hosts default to log-only. */
+  onTaskTransitions?(
+    transitions: Array<{
+      taskId: string;
+      kind: 'new' | 'completed' | 'partial' | 'blocked' | 'claim-lost';
+      source: string;
+    }>,
+  ): void;
   /** fm-b5at.7 — true when a GUI window is available to host an
    *  interactive (embedded-terminal) run. The Electron host returns true
    *  when a BrowserWindow exists; the headless breezed host returns false
@@ -29,6 +51,8 @@ const noop: BreezeHost = {
   onTasksChanged() {},
   onRunsChanged() {},
   onRunFailed() {},
+  onRunSucceeded() {},
+  onTaskTransitions() {},
   hasInteractiveWindow() { return false; },
 };
 

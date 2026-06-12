@@ -334,6 +334,48 @@ const fm = {
     ipcRenderer.on('task-runs:failed', handler);
     return () => ipcRenderer.off('task-runs:failed', handler);
   },
+  // fm-h8g7 — task-notification surfaces (run success + remote transitions +
+  // notification clicks). The transition feed is PHI-FREE: each entry carries
+  // only the opaque task id, a transition kind, and the source id.
+  onTaskRunSucceeded: (cb: (payload: { taskId: string }) => void) => {
+    const handler = (_e: unknown, p: { taskId: string }) => cb(p);
+    ipcRenderer.on('task-runs:succeeded', handler);
+    return () => ipcRenderer.off('task-runs:succeeded', handler);
+  },
+  onTaskTransitions: (
+    cb: (
+      transitions: Array<{
+        taskId: string;
+        kind: 'new' | 'completed' | 'partial' | 'blocked' | 'claim-lost';
+        source: string;
+      }>,
+    ) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      p: Array<{ taskId: string; kind: string; source: string }>,
+    ) =>
+      cb(
+        p as Array<{
+          taskId: string;
+          kind: 'new' | 'completed' | 'partial' | 'blocked' | 'claim-lost';
+          source: string;
+        }>,
+      );
+    ipcRenderer.on('tasks:transitions', handler);
+    return () => ipcRenderer.off('tasks:transitions', handler);
+  },
+  onTasksNotificationClicked: (
+    cb: (payload: { taskId?: string }) => void,
+  ) => {
+    const handler = (_e: unknown, p: { taskId?: string }) => cb(p);
+    ipcRenderer.on('tasks:notification-clicked', handler);
+    return () => ipcRenderer.off('tasks:notification-clicked', handler);
+  },
+  // Mirror the renderer's task-notification verbosity to main (the OS-
+  // notification gate runs in main). Fire-and-forget on boot + on change.
+  setTaskNotifications: (value: 'all' | 'failures' | 'off') =>
+    ipcRenderer.send('settings:taskNotifications', value),
   // ─── App-level attention (fm-c2w) ─────────────────────────────────
   setDockBadge: (text: string) =>
     ipcRenderer.invoke('app:setDockBadge', text) as Promise<void>,

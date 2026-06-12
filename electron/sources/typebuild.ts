@@ -25,6 +25,7 @@
 import os from 'node:os';
 import { BrowserWindow } from 'electron';
 import { breezeHost } from '../core/host';
+import { classifyTransitions } from './typebuild-transitions.mjs';
 import { getAuthState, getIdToken } from '../typebuild/auth';
 import { mintMcpToken } from '../typebuild/mcp-token';
 import { clearSession, registerSession } from '../typebuild/sessions';
@@ -200,6 +201,11 @@ export class TypeBuildTaskSource implements TaskSource {
   // without diffing structurally.
   private lastSignature = '';
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  // fm-h8g7 — true until the first poll completes after construction / sign-in.
+  // The first poll seeds the cache with the WHOLE existing inventory, which the
+  // transition classifier would otherwise report as a burst of "new task"
+  // notifications. We suppress 'new' on that first poll only.
+  private firstPoll = true;
 
   // fm-b5at.10 — task ids whose session is mid-relaunch. The relaunch kills the
   // old PTY, whose onExit would otherwise fire the "Release this task?" prompt
@@ -815,6 +821,7 @@ export class TypeBuildTaskSource implements TaskSource {
     }
     this.cache.clear();
     this.lastSignature = '';
+    this.firstPoll = true;
   }
 
   private async poll(): Promise<void> {
@@ -828,8 +835,44 @@ export class TypeBuildTaskSource implements TaskSource {
       const rows = Array.isArray(data.tasks) ? data.tasks : [];
       const sig = this.signatureOf(rows);
       if (sig === this.lastSignature) return; // nothing changed
+
+      // fm-h8g7 — classify remote transitions BEFORE replacing the cache.
+      // We diff the FRESH rows against the CURRENT cache (not the previous
+      // poll snapshot): any action THIS app took (claim/release/reopen/
+      // complete) already patched the cache via patchCacheAndBroadcast, so it
+      // produces NO transition here — only genuinely remote changes do. That
+      // is the self-suppression mechanism. Inputs are routing-only (PHI-free).
+      try {
+        const me = getAuthState().email ?? null;
+        const prev = [...this.cache.values()].map((t) => ({
+          id: t.id,
+          status: t.status,
+          rawStatus: t.rawStatus,
+          claimedBy: t.claimedBy ?? null,
+        }));
+        const fresh = rows.map((r) => {
+          const mapped = mapListRow(r);
+          return {
+            id: mapped.id,
+            status: mapped.status,
+            rawStatus: mapped.rawStatus,
+            claimedBy: mapped.claimedBy ?? null,
+          };
+        });
+        const transitions = classifyTransitions(prev, fresh, me, this.firstPoll);
+        if (transitions.length > 0) {
+          breezeHost().onTaskTransitions?.(
+            transitions.map((t) => ({ ...t, source: this.id })),
+          );
+        }
+      } catch {
+        // A classifier/notify failure must never break the poll's cache
+        // refresh — swallow and continue. Never log task content.
+      }
+
       this.cache = new Map(rows.map((r) => [r.id, mapListRow(r)]));
       this.lastSignature = sig;
+      this.firstPoll = false;
       breezeHost().onTasksChanged();
     } catch {
       // Signed-out / network blip — stay quiet; the next poll retries, and

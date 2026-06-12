@@ -55,6 +55,18 @@ const HeadlessBreezeHost: BreezeHost = {
   onRunFailed(task, body) {
     console.error(`[breezed] auto-run failed: ${task.title} — ${body}`);
   },
+  // fm-h8g7 — headless has no OS-notification surface; just log. The remote
+  // transition feed carries only opaque ids (PHI-free) so it's safe to log.
+  onRunSucceeded(task, body) {
+    console.log(`[breezed] auto-run succeeded: ${task.title} — ${body}`);
+  },
+  onTaskTransitions(transitions) {
+    if (transitions.length === 0) return;
+    console.log(
+      `[breezed] ${transitions.length} remote task transition(s): ` +
+        transitions.map((t) => `${t.taskId.slice(0, 8)}:${t.kind}`).join(', '),
+    );
+  },
 };
 
 // ─── Server ──────────────────────────────────────────────────────────

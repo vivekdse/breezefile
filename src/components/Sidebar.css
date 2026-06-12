@@ -319,6 +319,27 @@ button.sidebar__link:hover .sidebar__unpin {
   letter-spacing: 0;
   text-transform: none;
 }
+/* fm-h8g7 — unseen task-notification badge on the Active Tasks header. Uses
+   the accent var so it reads as "new activity" and stands apart from the
+   neutral section-count pill, in both themes. */
+.tasks__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border: 1px solid var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .sidebar__section-title--with-action::after {
   content: none;
 }

@@ -181,6 +181,22 @@ type Fm = {
   tasksCancelRun: (runId: string) => Promise<boolean>;
   onTaskRunsChanged: (cb: (taskId: string) => void) => () => void;
   onTaskRunFailed: (cb: (payload: { taskId: string; body: string }) => void) => () => void;
+  // fm-h8g7 — task-notification surfaces. The transition feed is PHI-FREE
+  // (opaque task id + kind + source id only).
+  onTaskRunSucceeded: (cb: (payload: { taskId: string }) => void) => () => void;
+  onTaskTransitions: (
+    cb: (
+      transitions: Array<{
+        taskId: string;
+        kind: 'new' | 'completed' | 'partial' | 'blocked' | 'claim-lost';
+        source: string;
+      }>,
+    ) => void,
+  ) => () => void;
+  onTasksNotificationClicked: (
+    cb: (payload: { taskId?: string }) => void,
+  ) => () => void;
+  setTaskNotifications: (value: 'all' | 'failures' | 'off') => void;
   // fm-9fd — control bridge between the HTTP API server (main) and the
   // renderer (which owns tab state + navigation). Renderer listens for
   // control:request events and replies via sendControlReply.

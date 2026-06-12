@@ -7,6 +7,7 @@ import { startApiServer } from './api-server';
 import { startScheduler } from './scheduler';
 import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
+import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
 import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks } from './hooks-register';
@@ -251,6 +252,14 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('app:playAttentionSound', () => {
     platform().playAttentionSound();
+  });
+  // fm-h8g7 — task-notification verbosity mirror. Settings are renderer-owned
+  // (localStorage), but the OS-notification gate runs in MAIN (electron-host
+  // builds the Notification). The renderer pushes its current value on boot
+  // and on every change; we cache it in the main-process notify-settings
+  // module. Default stays 'all' until the renderer reports in.
+  ipcMain.on('settings:taskNotifications', (_e, value: string) => {
+    setTaskNotifyVerbosity(value as 'all' | 'failures' | 'off');
   });
   // Attention notifications routed via main process so the click handler
   // is reliable on Linux libnotify daemons (the web Notification API

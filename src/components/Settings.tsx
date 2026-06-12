@@ -306,6 +306,30 @@ export function Settings({ onClose }: Props) {
                 }
               />
             </div>
+            {/* fm-h8g7 — task-notification verbosity. Distinct from the
+                terminal-attention toggles above: covers agent run completions
+                and remote TypeBuild task changes. */}
+            <div className="settings__row">
+              <span className="settings__action">
+                Task notifications
+                <small className="settings__hint" style={{ display: 'block' }}>
+                  Agent runs and remote task changes
+                </small>
+              </span>
+              <select
+                value={state.taskNotifications}
+                onChange={(e) =>
+                  dispatch({
+                    type: 'setTaskNotifications',
+                    value: e.target.value as 'all' | 'failures' | 'off',
+                  })
+                }
+              >
+                <option value="all">All</option>
+                <option value="failures">Failures only</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
           </AccordionSection>
 
           <AccordionSection
