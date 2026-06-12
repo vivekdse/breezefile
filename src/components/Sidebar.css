@@ -678,6 +678,20 @@ button.sidebar__link:hover .sidebar__unpin {
   background: var(--rule-on-panel, var(--rule));
   margin: 3px 4px;
 }
+/* fm-7909 — the top item mirrors the Tasks page primary action. */
+.sidebar__ctxmenu-item--primary {
+  font-weight: 600;
+  color: var(--accent, #2d7ff9);
+}
+.sidebar__ctxmenu-item--primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: var(--muted, var(--muted-on-panel));
+}
+/* fm-7909 — TypeBuild (remote) tasks get a tinted lead glyph. */
+.sidebar__task--remote .sidebar__task-lead {
+  color: var(--accent, #2d7ff9);
+}
 
 /* ─── Crest ────────────────────────────────────────────────────────── */
 

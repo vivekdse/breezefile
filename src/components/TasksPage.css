@@ -481,15 +481,19 @@
   border-color: var(--accent);
 }
 
+/* fm-7909 — row is now [checkbox] [main] [PRIMARY] [⋮]. Pin/edit/open-tab
+   moved into the kebab. */
 .tasks__row {
   display: grid;
-  grid-template-columns: 24px 26px 1fr auto auto;
+  grid-template-columns: 24px 1fr auto auto;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-5);
   border-bottom: 1px solid var(--rule-on-panel);
   cursor: pointer;
-  transition: background 100ms;
+  /* fm-7909 — subtle transition as a task moves between sections (re-render
+     re-orders the DOM; the background fade softens the jump). */
+  transition: background 160ms ease, opacity 160ms ease;
 }
 
 /* Per-row action cluster — quiet by default, revealed on hover or when
@@ -1055,4 +1059,247 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * fm-7909 — owner-section rebuild: single filter bar, sticky section heads,
+ * one primary action per row, collapsible notes.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/* ---- single filter bar (replaces the 3 chip rows) ---- */
+.tasks__filterbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--rule-on-panel);
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+.tasks__filterbar .tasks__input {
+  flex: 1 1 240px;
+}
+.tasks__filterbar-sel {
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+}
+.tasks__filterbar-sel kbd {
+  background: var(--panel-2);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* ---- owner sections ---- */
+.tasks__section {
+  display: block;
+}
+.tasks__section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--rule-on-panel);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: var(--fs-sm);
+}
+.tasks__section-head--toggle {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--rule-on-panel);
+  background: var(--panel-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.tasks__section-head--toggle:hover {
+  background: var(--accent-soft);
+}
+.tasks__section-disclosure {
+  color: var(--muted-on-panel);
+  width: 12px;
+  display: inline-block;
+}
+.tasks__section-title {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: var(--fs-xs);
+  color: var(--text-on-panel);
+}
+.tasks__section-count {
+  color: var(--muted-on-panel);
+  font-variant-numeric: tabular-nums;
+}
+.tasks__section-hint {
+  margin-left: auto;
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+.tasks__section-empty {
+  padding: var(--sp-3) var(--sp-5);
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm);
+  font-style: italic;
+  border-bottom: 1px solid var(--rule-on-panel);
+}
+
+/* ---- one primary action per row ---- */
+.tasks__row-primary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.tasks__row-pin-mark {
+  color: var(--accent);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+.tasks__primary {
+  white-space: nowrap;
+}
+/* Start / Run — filled accent (primary affordance). */
+.tasks__row-btn.tasks__primary--start,
+.tasks__row-btn.tasks__primary--run {
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent, #2d7ff9);
+  border-color: var(--accent, #2d7ff9);
+}
+.tasks__row-btn.tasks__primary--start:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--text-on-panel);
+  background: var(--panel-2);
+  border-color: var(--rule-on-panel);
+}
+/* Open session — outline accent (focus the live tab). */
+.tasks__row-btn.tasks__primary--session {
+  font-weight: 600;
+  color: var(--accent, #2d7ff9);
+  border-color: var(--accent, #2d7ff9);
+}
+.tasks__row-btn.tasks__primary--done:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.tasks__primary-note {
+  font-size: 11px;
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+/* "claimed by you" reads calmer than someone-else's claim. */
+.tasks__row-claimed--me {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The primary row button is always visible (not hover-gated) — it's the
+   point of the row. The kebab stays quiet until hover/cursor. */
+.tasks__row-primary { opacity: 1; }
+
+/* ---- detail panel: primary action + collapsible notes + agent block ---- */
+.tasks__detail-primary {
+  display: flex;
+}
+.tasks__detail-source-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--accent, #2d7ff9);
+  color: var(--accent, #2d7ff9);
+  background: transparent;
+}
+.tasks__detail-muted {
+  color: var(--muted-on-panel);
+  font-style: italic;
+}
+.tasks__detail-notes-body {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Collapsed: clamp to ~8 lines. Expanded: cap height + inner scroll so a
+   genuinely long body becomes readable without pushing the actions off. */
+.tasks__detail-notes-body--clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tasks__detail-notes-body--scroll {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+}
+.tasks__notes-toggle {
+  margin-top: 4px;
+  border: none;
+  background: transparent;
+  color: var(--accent, #2d7ff9);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  padding: 0;
+}
+.tasks__notes-toggle:hover {
+  text-decoration: underline;
+}
+.tasks__detail-runs {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tasks__detail-run {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.tasks__run-status {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--rule-on-panel);
+  background: var(--panel-2);
+  color: var(--muted-on-panel);
+}
+.tasks__run-status--succeeded {
+  color: var(--ok, #2e9e5b);
+  border-color: var(--ok, #2e9e5b);
+}
+.tasks__run-status--failed {
+  color: var(--danger, #c0392b);
+  border-color: var(--danger, #c0392b);
+}
+.tasks__run-status--running,
+.tasks__run-status--queued {
+  color: var(--accent, #2d7ff9);
+  border-color: var(--accent, #2d7ff9);
 }

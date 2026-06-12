@@ -81,6 +81,11 @@ export type Tab = {
     // OAuth hint, and (belt-and-suspenders) a marker that this terminal's
     // scrollback is PHI and must never be serialized to disk.
     source?: string;
+    // fm-7909 — the task this terminal session is working on. Set when the
+    // session was opened from a task Start / interactive run. Drives the
+    // session-per-task map (useRunningSessions) so the Tasks page can offer
+    // "Open session" (focus this tab) instead of starting a duplicate.
+    taskId?: string;
   };
 };
 

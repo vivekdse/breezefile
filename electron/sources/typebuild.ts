@@ -371,14 +371,56 @@ export class TypeBuildTaskSource implements TaskSource {
   //      is PHI and the renderer can surface tab labels.
   //   5. Register the session (ptyId → token expiry + taskId) so the expiry
   //      clock (fm-b5at.10) can warn before the token lapses; clear on exit.
-  //   6. Claim is IN-SESSION (the /work prompt claims via MCP). We do NOT
-  //      pre-claim over REST (a REST pre-claim would 409 the in-session
-  //      claim, which is conditional on status=open).
+  //   6. Start = CLAIM-THEN-LAUNCH (fm-v0rc, Phase B3). We claim over REST
+  //      FIRST so the row flips to "claimed by me" instantly and a contested
+  //      task is rejected before any terminal opens. The in-session MCP claim
+  //      is conditional on status=open (typebuild.ts:374-377) — once we hold
+  //      the claim, status is no longer 'open', so the spawned session must
+  //      NOT re-claim (it would 409). The preclaimed prompt tells the agent
+  //      to skip the claim and just run /work for the id.
   //   7. After the PTY exits: refresh + broadcast; if the task is still
   //      claimed by THIS principal, broadcast a Release prompt.
   async runNow(id: string, _opts?: RunNowOptions): Promise<unknown> {
-    const res = await this.launchSession(id, { resume: false });
-    return { ok: true, ptyId: res.ptyId };
+    const me = getAuthState().email ?? null;
+    const cached = this.cache.get(id);
+    // Fast-path: contested by someone else → reject inline, no network call.
+    if (cached?.claimedBy && cached.claimedBy !== me) {
+      return {
+        ok: false,
+        reason: 'already claimed',
+        claimedBy: cached.claimedBy,
+      };
+    }
+
+    // Claim over REST unless I already hold it. claim() returns a structured
+    // { ok:false, ... } on 409/404 (someone raced us / not visible); propagate
+    // that so the renderer shows the same friendly inline message.
+    const alreadyMine = !!me && cached?.claimedBy === me;
+    if (!alreadyMine) {
+      const claimed = (await this.claim(id)) as { ok?: boolean };
+      if (!claimed?.ok) return claimed;
+    }
+
+    // We hold the claim now (either freshly or from before). Launch the
+    // session pre-claimed so it does NOT re-claim.
+    try {
+      const res = await this.launchSession(id, { resume: false, preclaimed: true });
+      return { ok: true, ptyId: res.ptyId };
+    } catch (err) {
+      // The mint/spawn threw AFTER we just claimed in THIS call — the claim is
+      // now orphaned (no live session backs it). Fire the same Release prompt
+      // the PTY-exit path uses (typebuild.ts onSessionExit) so the user can
+      // release it, then rethrow so the renderer maps the typed mint error.
+      // PHI-free: the broadcast carries only the opaque task id.
+      if (!alreadyMine) {
+        for (const w of BrowserWindow.getAllWindows()) {
+          if (!w.isDestroyed()) {
+            w.webContents.send('typebuild:releasePrompt', { taskId: id });
+          }
+        }
+      }
+      throw err;
+    }
   }
 
   // ─── expiry relaunch (fm-b5at.10) ────────────────────────────────────────
@@ -443,7 +485,7 @@ export class TypeBuildTaskSource implements TaskSource {
   // the IPC layer surface the same in-app messages.
   private async launchSession(
     id: string,
-    opts: { resume: boolean },
+    opts: { resume: boolean; preclaimed?: boolean },
   ): Promise<{ ptyId: number }> {
     // Routing fields (flags) come from the in-memory cache populated by the
     // list poll; fall back to an empty flag set if the row isn't cached yet.
@@ -472,11 +514,19 @@ export class TypeBuildTaskSource implements TaskSource {
     const { runTaskInteractive } = await import('../agents/interactive');
     const synthetic: Task = this.syntheticTask(id, flags);
 
+    // Pre-claimed Start (fm-v0rc): we already hold the claim over REST, so the
+    // session must NOT re-claim (the in-session claim is conditional on
+    // status=open and would 409 now). Tell the agent the task is already mine
+    // and to run /work without claiming. ONLY the opaque task id — no PHI.
+    const prompt = opts.preclaimed
+      ? `Task ${id} is already claimed by me. Run /mcp__typebuild__work for task ${id} — do not claim it again.`
+      : `Run /mcp__typebuild__work and claim task ${id}`;
+
     let ptyId = 0;
     const res = await runTaskInteractive(synthetic, {
       agentId: 'claude',
       // ONLY the opaque task id — never a title/body (PHI).
-      prompt: `Run /mcp__typebuild__work and claim task ${id}`,
+      prompt,
       // On resume, suppress the positional prompt so --continue resumes the
       // existing conversation rather than seeding a new /work claim.
       omitPrompt: opts.resume,
@@ -578,7 +628,11 @@ export class TypeBuildTaskSource implements TaskSource {
   //         than throwing, so the UI can show a friendly inline message).
   // release → POST /chromeext/<id>/release  (body { reason? }).
   // reopen  → POST /chromeext/<id>/reopen   (for blocked tasks).
-  // After any mutation, refresh the cache and broadcast tasks-changed.
+  // complete → POST /chromeext/<id>/complete (fm-v0rc; server route the user
+  //         is adding — see docs/typebuild-complete-endpoint.md. Degrades to
+  //         { ok:false, reason:'complete-unsupported' } on a route-404/405.)
+  // After any mutation, patch the in-memory cache + broadcast tasks-changed
+  // immediately (fm-kmhq optimistic), then refresh to reconcile.
   async sourceAction(
     taskId: string,
     action: string,
@@ -591,9 +645,30 @@ export class TypeBuildTaskSource implements TaskSource {
         return this.release(taskId, payload);
       case 'reopen':
         return this.reopen(taskId);
+      case 'complete':
+        return this.complete(taskId, payload);
       default:
         throw unsupported(`action ${action}`);
     }
+  }
+
+  // ─── optimistic cache patch + broadcast (fm-kmhq) ────────────────────────
+  // After a mutation's POST has SUCCEEDED on the server, patch the in-memory
+  // cached row so every window reflects the new state on the very next pull —
+  // without waiting for the ~30s poll. We broadcast immediately, then kick a
+  // fire-and-forget refreshAndBroadcast() to reconcile against authoritative
+  // server state (the POST already succeeded, so the next list returns the
+  // same fields; this just folds in anything else that moved server-side).
+  // PHI-safe: we only ever patch routing fields (status/claimedBy/...), never
+  // titles or bodies, and never log them.
+  private patchCacheAndBroadcast(taskId: string, patch: Partial<SourcedTask>): void {
+    const row = this.cache.get(taskId);
+    if (row) this.cache.set(taskId, { ...row, ...patch });
+    // Immediate broadcast so the UI flips without the poll latency.
+    breezeHost().onTasksChanged();
+    // Reconcile against the server in the background. A failure here is
+    // non-fatal — the optimistic patch already reflects the succeeded POST.
+    void this.refreshAndBroadcast();
   }
 
   private async claim(taskId: string): Promise<unknown> {
@@ -617,7 +692,11 @@ export class TypeBuildTaskSource implements TaskSource {
     if (res.status === 404) return { ok: false, reason: 'not visible' };
     if (!res.ok) throw new Error(`typebuild: claim failed (${res.status})`);
     const detail = (await res.json().catch(() => ({}))) as DetailRow;
-    await this.refreshAndBroadcast();
+    // Optimistically reflect MY claim immediately (fm-kmhq) so the row flips
+    // to "claimed by me" without waiting for the poll. The signed-in email is
+    // the principal that just succeeded the claim.
+    const me = getAuthState().email ?? null;
+    this.patchCacheAndBroadcast(taskId, { claimedBy: me });
     // Return the mapped (decrypted) task so the caller can render it from
     // memory if it wants; the renderer treats the body as PHI-in-memory only.
     return { ok: true, task: this.mapDetail(detail, taskId) };
@@ -632,7 +711,8 @@ export class TypeBuildTaskSource implements TaskSource {
     );
     if (res.status === 404) return { ok: false, reason: 'not visible' };
     if (!res.ok) throw new Error(`typebuild: release failed (${res.status})`);
-    await this.refreshAndBroadcast();
+    // Optimistically drop the claim (fm-kmhq) so the row stops showing "me".
+    this.patchCacheAndBroadcast(taskId, { claimedBy: null });
     return { ok: true };
   }
 
@@ -643,7 +723,65 @@ export class TypeBuildTaskSource implements TaskSource {
     );
     if (res.status === 404) return { ok: false, reason: 'not visible' };
     if (!res.ok) throw new Error(`typebuild: reopen failed (${res.status})`);
-    await this.refreshAndBroadcast();
+    // Optimistically flip back to the 'open' equivalent (fm-kmhq): the local
+    // mapped status is 'pending' for 'open', and the badge tracks rawStatus.
+    this.patchCacheAndBroadcast(taskId, {
+      status: 'pending',
+      rawStatus: 'open',
+      completed_at: null,
+    });
+    return { ok: true };
+  }
+
+  // ─── complete (fm-v0rc, Phase B2) ────────────────────────────────────────
+  // POST /chromeext/<id>/complete — the desktop's mark-done path for a remote
+  // TypeBuild task. The server route is being added by the user (spec:
+  // docs/typebuild-complete-endpoint.md); until it ships, the route 404/405s
+  // and we degrade gracefully so the UI can toast "not supported here yet"
+  // rather than throw. `payload` may carry an optional {note, outcome}
+  // passthrough; `note` is PHI (stored server-side under the same encryption
+  // as task bodies) so it is forwarded but NEVER logged.
+  private async complete(taskId: string, payload?: unknown): Promise<unknown> {
+    const p = (payload ?? {}) as { note?: string; outcome?: string };
+    const body: { note?: string; outcome?: string } = {};
+    if (typeof p.note === 'string') body.note = p.note;
+    if (typeof p.outcome === 'string') body.outcome = p.outcome;
+    const res = await this.request(
+      'POST',
+      `/chromeext/${encodeURIComponent(taskId)}/complete`,
+      body,
+    );
+    // The route doesn't exist yet on the server: a missing endpoint answers
+    // 404 (no route) or 405 (method not allowed). The `request()` helper can't
+    // distinguish "route missing" from "task not visible" — both are 404 — so
+    // we treat any 404/405 here as "complete not supported yet". Once the
+    // endpoint ships, a genuine 404 for a not-visible task is rare (the UI
+    // only offers complete on a visible row) and degrades the same benign way.
+    if (res.status === 404 || res.status === 405) {
+      return { ok: false, reason: 'complete-unsupported' };
+    }
+    if (res.status === 409) {
+      // Claimed by someone else → mirror claim()'s structured 409 result so
+      // the renderer renders the same friendly inline message.
+      const data = (await res.json().catch(() => ({}))) as {
+        reason?: string;
+        claimed_by?: string | null;
+      };
+      return {
+        ok: false,
+        reason: data.reason ?? 'already claimed',
+        claimedBy: data.claimed_by ?? null,
+      };
+    }
+    if (!res.ok) throw new Error(`typebuild: complete failed (${res.status})`);
+    // Done on the server: optimistically reflect terminal state + released
+    // claim immediately (fm-kmhq). The badge tracks rawStatus = 'done'.
+    this.patchCacheAndBroadcast(taskId, {
+      status: 'done',
+      rawStatus: 'done',
+      claimedBy: null,
+      completed_at: Date.now(),
+    });
     return { ok: true };
   }
 

@@ -243,6 +243,10 @@ type Action =
       cwd: string;
       label?: string;
       source?: string;
+      // fm-7909 — owning task id for a session-per-task terminal. Lets
+      // useRunningSessions() map taskId → open session tab so the Tasks page
+      // can offer "Open session" instead of a second Start.
+      taskId?: string;
     }
   | { type: 'closeTerminal'; tabIndex: number }
   | {
@@ -564,6 +568,9 @@ function reducer(s: State, a: Action): State {
           label: a.label,
           attention: null,
           source: a.source,
+          // fm-7909 — carry the owning task id so useRunningSessions can map
+          // taskId → this session tab.
+          taskId: a.taskId,
         },
       };
       return { ...s, tabs };

@@ -20,9 +20,12 @@ import {
   todayISO,
   updateTask,
   useLastRun,
+  useTaskSources,
   useTasks,
+  useTypebuildReadiness,
 } from '../tasks';
 import type { Task } from '../types';
+import { primaryActionFor } from './tasks/primaryAction.mjs';
 import { deriveRunState } from './TaskIndicators';
 import { formatOpError } from '../errorMessages';
 import { useOpenResumeInTab } from '../openResumeInTab';
@@ -650,13 +653,24 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
             // opens it in a dedicated task tab.
             active={tabNumber !== null}
             tabNumber={tabNumber}
-            onClick={() =>
+            onClick={() => {
+              // fm-7909 — TypeBuild (remote, folderless, PHI) tasks have no
+              // local folder to open a task tab against. Route the click to
+              // the Tasks page focused on this row instead of spawning a
+              // folderless task tab.
+              if (t.source === 'typebuild') {
+                window.dispatchEvent(new CustomEvent('fm:openTasksPage'));
+                window.dispatchEvent(
+                  new CustomEvent('fm:tasks:focus', { detail: { taskId: t.id } }),
+                );
+                return;
+              }
               dispatch({
                 type: 'openTaskTab',
                 taskId: t.id,
                 folder: t.folder,
-              })
-            }
+              });
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               setMenuFor({ task: t, x: e.clientX, y: e.clientY });
@@ -731,12 +745,17 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
     window.addEventListener('fm:taskFlash', onFlash);
     return () => window.removeEventListener('fm:taskFlash', onFlash);
   }, [task.id]);
+  // fm-7909 — TypeBuild rows get a distinct lead glyph (link = remote source)
+  // so they're visually separable from local manual/auto tasks at a glance.
+  const isTypebuild = task.source === 'typebuild';
+  const leadIcon = isTypebuild ? 'link' : task.auto_mode ? 'bolt' : 'circle';
   const cls = [
     'sidebar__task',
     active ? 'sidebar__task--active' : '',
     task.pinned ? 'sidebar__task--pinned' : '',
     `sidebar__task--${tone}`,
     task.auto_mode ? 'sidebar__task--auto' : '',
+    isTypebuild ? 'sidebar__task--remote' : '',
     flashing ? 'sidebar__task--flash' : '',
   ]
     .filter(Boolean)
@@ -767,9 +786,11 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
         <span className="sidebar__task-title-row">
           <span
             className={`sidebar__ico sidebar__task-lead${running ? ' sidebar__task-lead--running' : ''}`}
-            aria-label={task.auto_mode ? 'Auto task' : 'Manual task'}
+            aria-label={
+              isTypebuild ? 'TypeBuild task' : task.auto_mode ? 'Auto task' : 'Manual task'
+            }
           >
-            <Icon name={task.auto_mode ? 'bolt' : 'circle'} size={18} />
+            <Icon name={leadIcon} size={18} />
           </span>
           {task.pinned && (
             <span className="sidebar__task-pin" aria-label="Pinned" title="Pinned">
@@ -800,6 +821,16 @@ interface TaskContextMenuProps {
 
 function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // fm-7909 — capability gating + primary action for the top item. Mutations
+  // route through task.source so TypeBuild rows don't silently no-op against
+  // the local store.
+  const { byId } = useTaskSources();
+  const caps = byId[task.source ?? 'local']?.capabilities;
+  const canEdit = caps ? caps.canEdit : true;
+  const canDelete = caps ? caps.canDelete : true;
+  const tbReady = useTypebuildReadiness();
+  const myEmail = (tbReady as { email?: string | null }).email ?? null;
+  const primary = primaryActionFor(task, { caps, tbReady, myEmail });
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -825,17 +856,58 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
       new CustomEvent('fm:openTask', { detail: { mode: 'edit', task } }),
     );
   });
-  const onDone = act(() => updateTask(task.id, { status: 'done' }));
-  const onTogglePin = act(() => updateTask(task.id, { pinned: !task.pinned }));
+  const onDone = act(() => updateTask(task.id, { status: 'done' }, task.source));
+  const onTogglePin = act(() =>
+    updateTask(task.id, { pinned: !task.pinned }, task.source),
+  );
   const onSnooze = act(() => {
     const base = task.due_at && task.due_at >= todayISO() ? task.due_at : todayISO();
-    return updateTask(task.id, { due_at: shiftISO(base, 1) });
+    return updateTask(task.id, { due_at: shiftISO(base, 1) }, task.source);
   });
-  const onDelete = act(() => deleteTask(task.id));
+  const onDelete = act(() => deleteTask(task.id, task.source));
   // fm-zf3m — auto-execute actions. "Run now" uses the same path the
   // scheduler uses (executeTaskRun via IPC) so it inherits agent
   // selection, retry classification, and history rows.
-  const onRunNow = act(() => runTaskNow(task.id));
+  const onRunNow = act(() => runTaskNow(task.id, task.source));
+  // fm-7909 — the top item mirrors the page's primary action.
+  const onPrimary = act(() => {
+    if (primary.kind === 'start' || primary.kind === 'run-now') {
+      if (primary.kind === 'start' && !primary.enabled) return;
+      return runTaskNow(task.id, task.source);
+    }
+    if (primary.kind === 'open-session') {
+      window.dispatchEvent(new CustomEvent('fm:openTasksPage'));
+      window.dispatchEvent(
+        new CustomEvent('fm:tasks:focus', { detail: { taskId: task.id } }),
+      );
+      return;
+    }
+    if (primary.kind === 'done-toggle') {
+      return updateTask(task.id, { status: 'done' }, task.source);
+    }
+    if (primary.kind === 'reopen') {
+      return updateTask(task.id, { status: 'pending' }, task.source);
+    }
+    if (primary.kind === 'view-run') {
+      window.dispatchEvent(
+        new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),
+      );
+    }
+  });
+  const primaryLabel =
+    primary.kind === 'start'
+      ? '▸ Start'
+      : primary.kind === 'run-now'
+        ? '▸ Run now'
+        : primary.kind === 'open-session'
+          ? '⧉ Open session'
+          : primary.kind === 'done-toggle'
+            ? '✓ Mark done'
+            : primary.kind === 'reopen'
+              ? '↺ Reopen'
+              : primary.kind === 'view-run'
+                ? '◷ View run'
+                : null;
   const onViewRuns = act(() => {
     window.dispatchEvent(
       new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),
@@ -864,36 +936,66 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
 
   return (
     <div ref={ref} className="sidebar__ctxmenu" style={style} role="menu">
-      <button type="button" className="sidebar__ctxmenu-item" onClick={onEdit}>
-        Edit
-      </button>
-      <button type="button" className="sidebar__ctxmenu-item" onClick={onDone}>
-        Mark done
-      </button>
-      <button type="button" className="sidebar__ctxmenu-item" onClick={onTogglePin}>
-        {task.pinned ? 'Unpin' : 'Pin'}
-      </button>
-      <button type="button" className="sidebar__ctxmenu-item" onClick={onSnooze}>
-        Snooze (+1 day)
-      </button>
-      <div className="sidebar__ctxmenu-sep" />
-      <button type="button" className="sidebar__ctxmenu-item" onClick={onRunNow}>
-        Run now
-      </button>
-      <button type="button" className="sidebar__ctxmenu-item" onClick={onViewRuns}>
-        View run history
-      </button>
-      <button type="button" className="sidebar__ctxmenu-item" onClick={onOpenTrace}>
-        Open last run in new tab
-      </button>
-      <div className="sidebar__ctxmenu-sep" />
-      <button
-        type="button"
-        className="sidebar__ctxmenu-item sidebar__ctxmenu-item--danger"
-        onClick={onDelete}
-      >
-        Delete
-      </button>
+      {primaryLabel && primary.kind !== 'none' && (
+        <>
+          <button
+            type="button"
+            className="sidebar__ctxmenu-item sidebar__ctxmenu-item--primary"
+            onClick={onPrimary}
+            disabled={primary.kind === 'start' && !primary.enabled}
+            title={primary.kind === 'start' ? primary.tooltip : undefined}
+          >
+            {primaryLabel}
+          </button>
+          <div className="sidebar__ctxmenu-sep" />
+        </>
+      )}
+      {canEdit && (
+        <button type="button" className="sidebar__ctxmenu-item" onClick={onEdit}>
+          Edit
+        </button>
+      )}
+      {canEdit && (
+        <button type="button" className="sidebar__ctxmenu-item" onClick={onDone}>
+          Mark done
+        </button>
+      )}
+      {canEdit && (
+        <button type="button" className="sidebar__ctxmenu-item" onClick={onTogglePin}>
+          {task.pinned ? 'Unpin' : 'Pin'}
+        </button>
+      )}
+      {canEdit && (
+        <button type="button" className="sidebar__ctxmenu-item" onClick={onSnooze}>
+          Snooze (+1 day)
+        </button>
+      )}
+      {task.auto_mode && (
+        <>
+          <div className="sidebar__ctxmenu-sep" />
+          <button type="button" className="sidebar__ctxmenu-item" onClick={onRunNow}>
+            Run now
+          </button>
+          <button type="button" className="sidebar__ctxmenu-item" onClick={onViewRuns}>
+            View run history
+          </button>
+          <button type="button" className="sidebar__ctxmenu-item" onClick={onOpenTrace}>
+            Open last run in new tab
+          </button>
+        </>
+      )}
+      {canDelete && (
+        <>
+          <div className="sidebar__ctxmenu-sep" />
+          <button
+            type="button"
+            className="sidebar__ctxmenu-item sidebar__ctxmenu-item--danger"
+            onClick={onDelete}
+          >
+            Delete
+          </button>
+        </>
+      )}
     </div>
   );
 }

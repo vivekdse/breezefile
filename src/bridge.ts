@@ -169,10 +169,11 @@ type Fm = {
   tasksRunsListAll: (limit?: number) => Promise<TaskRunWithTitle[]>;
   tasksRunsCountByTask: () => Promise<Record<string, number>>;
   tasksLastRun: (taskId: string) => Promise<TaskRun | null>;
-  tasksRunNow: (
-    taskId: string,
-    source?: string,
-  ) => Promise<{ run: TaskRun; result: unknown }>;
+  // fm-v0rc — the return shape is source-defined: the local source resolves
+  // { run, result }; TypeBuild's Start resolves a { ok, ptyId } success or a
+  // { ok:false, reason, claimedBy } rejection union. Typed as unknown here so
+  // the renderer narrows at the call site.
+  tasksRunNow: (taskId: string, source?: string) => Promise<unknown>;
   tasksRunNowAt: (
     taskId: string,
     cwd: string,

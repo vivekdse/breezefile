@@ -435,6 +435,9 @@ function Shell() {
         // generic, content-free label main built; never the decrypted title.
         label: payload.title,
         source: payload.source,
+        // fm-7909 — session-per-task: carry the task id so the Tasks page can
+        // map taskId → this open session tab (Open session, not a 2nd Start).
+        taskId: payload.taskId,
       });
       dispatch({
         type: 'setStatus',

@@ -7,6 +7,78 @@ import { fm } from './bridge';
 import { humanizeError } from './errorMessages';
 import type { RemoteSchedule, Task, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate } from './types';
 
+// ─── optimistic pending-patch overlay (fm-kmhq, Phase A3) ──────────────────
+// A small renderer-side overlay that holds the fields of a just-succeeded
+// mutation until the fetched list actually reflects them. Without it, a
+// mutation routed through a source whose broadcast lags (notably the TypeBuild
+// 30s poll) can flip a row back to its old state for a beat. Entries are
+// recorded ONLY after the IPC resolves (see updateTask) so a failed mutation
+// never shows phantom state, and they drop themselves once the server agrees
+// or after a 10s TTL (guards against a stale optimistic value outliving a
+// genuine server change the poll later carries).
+type PendingEntry = { patch: Partial<Task>; ts: number };
+const PENDING_TTL_MS = 10_000;
+const pendingPatches = new Map<string, PendingEntry>();
+const pendingListeners = new Set<() => void>();
+
+function pendingKey(source: string | undefined, id: string): string {
+  return `${source ?? 'local'}:${id}`;
+}
+
+function recordPendingPatch(
+  source: string | undefined,
+  id: string,
+  patch: Partial<Task>,
+): void {
+  pendingPatches.set(pendingKey(source, id), { patch, ts: Date.now() });
+  for (const cb of pendingListeners) {
+    try {
+      cb();
+    } catch {
+      /* a listener throwing must not break the others */
+    }
+  }
+}
+
+// True when `row` already reflects every field in `patch` — i.e. the server
+// has caught up and the overlay entry can be dropped.
+function rowSatisfiesPatch(row: Task, patch: Partial<Task>): boolean {
+  return (Object.keys(patch) as (keyof Task)[]).every(
+    (k) => row[k] === patch[k],
+  );
+}
+
+// Apply live overlay entries over a fetched list, dropping any entry the list
+// already satisfies or that has aged past the TTL. Mutates the module map
+// (prune) and returns a new array with patches folded in.
+function applyPendingPatches(list: Task[]): Task[] {
+  if (pendingPatches.size === 0) return list;
+  const now = Date.now();
+  // Index the fetched rows so we can both prune satisfied/expired entries and
+  // overlay the survivors in one pass.
+  const byKey = new Map<string, Task>();
+  for (const t of list) byKey.set(pendingKey(t.source, t.id), t);
+
+  for (const [key, entry] of pendingPatches) {
+    const row = byKey.get(key);
+    // Drop when the server row already reflects the patch, when the row is
+    // gone (deleted), or when the entry has aged past its TTL.
+    if (
+      now - entry.ts > PENDING_TTL_MS ||
+      !row ||
+      rowSatisfiesPatch(row, entry.patch)
+    ) {
+      pendingPatches.delete(key);
+    }
+  }
+  if (pendingPatches.size === 0) return list;
+
+  return list.map((t) => {
+    const entry = pendingPatches.get(pendingKey(t.source, t.id));
+    return entry ? { ...t, ...entry.patch } : t;
+  });
+}
+
 export function useTasks(filter: TaskFilter = {}): {
   tasks: Task[];
   loading: boolean;
@@ -23,6 +95,10 @@ export function useTasks(filter: TaskFilter = {}): {
   const filterRef = useRef(filter);
   filterRef.current = filter;
 
+  // Keep the last fetched list so a pending-patch notification (which arrives
+  // without a re-fetch) can re-apply the overlay over the same rows.
+  const lastListRef = useRef<Task[]>([]);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -30,7 +106,8 @@ export function useTasks(filter: TaskFilter = {}): {
         setLoading(true);
         const list = await fm.tasksList(filterRef.current);
         if (!cancelled) {
-          setTasks(list);
+          lastListRef.current = list;
+          setTasks(applyPendingPatches(list));
           setError(null);
         }
       } catch (e) {
@@ -41,9 +118,15 @@ export function useTasks(filter: TaskFilter = {}): {
     };
     load();
     const unsub = fm.onTasksChanged(load);
+    // Re-apply the overlay when a fresh patch is recorded (no re-fetch yet).
+    const onPending = () => {
+      if (!cancelled) setTasks(applyPendingPatches(lastListRef.current));
+    };
+    pendingListeners.add(onPending);
     return () => {
       cancelled = true;
       unsub();
+      pendingListeners.delete(onPending);
     };
   }, [filterKey]);
 
@@ -53,7 +136,8 @@ export function useTasks(filter: TaskFilter = {}): {
     error,
     refresh: async () => {
       const list = await fm.tasksList(filterRef.current);
-      setTasks(list);
+      lastListRef.current = list;
+      setTasks(applyPendingPatches(list));
     },
   };
 }
@@ -72,7 +156,14 @@ export async function updateTask(
   patch: TaskUpdate,
   source?: string,
 ): Promise<Task> {
-  return fm.tasksUpdate(id, patch, source);
+  const result = await fm.tasksUpdate(id, patch, source);
+  // fm-kmhq (Phase A3) — record an optimistic overlay so the row reflects the
+  // patch on the next render even if the backing source's broadcast lags (the
+  // TypeBuild source's 30s poll, in particular, can otherwise resurrect stale
+  // state for a beat). Recorded AFTER the IPC resolves — a failed mutation
+  // throws above and never reaches here, so we never show phantom state.
+  recordPendingPatch(source, id, patch as Partial<Task>);
+  return result;
 }
 export async function deleteTask(id: string, source?: string): Promise<void> {
   return fm.tasksDelete(id, source);
@@ -188,15 +279,19 @@ export function useTaskSources(): {
 // detect checks on auth change (signing in is usually when onboarding
 // completes), and expose a single `ready` flag the Start gate consumes.
 // PHI-free: only booleans cross the wire.
+// fm-v0rc (Phase B5): also expose `email` — the signed-in principal. Release
+// (and other claimed-by-me gates) compare a row's claimedBy against it.
 export function useTypebuildReadiness(): {
   signedIn: boolean;
   claudeOk: boolean;
   chromeOk: boolean;
+  email: string | null;
   ready: boolean;
 } {
   const [signedIn, setSignedIn] = useState(false);
   const [claudeOk, setClaudeOk] = useState(false);
   const [chromeOk, setChromeOk] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,13 +309,17 @@ export function useTypebuildReadiness(): {
     void fm.typebuild
       .authState()
       .then((s) => {
-        if (!cancelled) setSignedIn(!!s.signedIn);
+        if (!cancelled) {
+          setSignedIn(!!s.signedIn);
+          setEmail(s.email ?? null);
+        }
       })
       .catch(() => {});
     void loadChecks();
     const off = fm.typebuild.onAuthChanged((s) => {
       if (cancelled) return;
       setSignedIn(!!s.signedIn);
+      setEmail(s.email ?? null);
       // Re-run detect on sign-in — the user likely just finished onboarding.
       if (s.signedIn) void loadChecks();
     });
@@ -234,13 +333,19 @@ export function useTypebuildReadiness(): {
     signedIn,
     claudeOk,
     chromeOk,
+    email,
     ready: signedIn && claudeOk && chromeOk,
   };
 }
 
 // fm-zf3m — runs API + hooks for the renderer.
-export async function runTaskNow(id: string, source?: string): Promise<void> {
-  await fm.tasksRunNow(id, source);
+// fm-v0rc (Phase B4): return the source's run result instead of void. The
+// local source returns { run, result }; TypeBuild's Start returns a
+// { ok, ptyId } / { ok:false, reason, claimedBy } union so the Start handler
+// can surface "couldn't start · claimed by X" inline. Callers that don't care
+// can ignore the resolved value.
+export async function runTaskNow(id: string, source?: string): Promise<unknown> {
+  return fm.tasksRunNow(id, source);
 }
 // fm-femh — run a task against an explicit cwd (the active folder tab).
 // Used by the Run-task modal so folder-agnostic tasks can be triggered

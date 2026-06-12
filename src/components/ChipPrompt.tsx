@@ -2095,30 +2095,8 @@ function buildTaskVerbs(): VerbDef[] {
         api.closeOverlay();
       },
     },
-    {
-      id: 'group' as Verb,
-      label: 'Group by',
-      aliases: ['group', 'groupby', 'organize'],
-      icon: '⊞',
-      describe: () => 'Group the task list',
-      isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
-      slots: [
-        {
-          label: 'By',
-          getOptions: () => [
-            { id: 'folder', label: 'Folder', detail: 'group by anchored folder', available: true },
-            { id: 'status', label: 'Status', detail: 'group by status', available: true },
-            { id: 'due', label: 'Due', detail: 'overdue · today · this week · later · none', available: true },
-            { id: 'flat', label: 'Flat', detail: 'no grouping', available: true },
-          ],
-        },
-      ],
-      execute: (_c, [v], api) => {
-        fire('fm:tasks:group', { value: v });
-        api.closeOverlay();
-      },
-    },
+    // fm-7909 — the :group verb is retired. Tasks are organized by owner
+    // (FOR YOU / FOR AGENTS / DONE) now; there's no grouping selector.
     {
       id: 'sort-tasks' as Verb,
       label: 'Sort tasks',
