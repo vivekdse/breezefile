@@ -275,6 +275,9 @@ type Action =
       // useRunningSessions() map taskId → open session tab so the Tasks page
       // can offer "Open session" instead of a second Start.
       taskId?: string;
+      // Return to the Tasks tab when this terminal exits (set when launched
+      // from the Tasks tab). See the terminal field of the same name.
+      returnToTasksOnExit?: boolean;
     }
   | { type: 'closeTerminal'; tabIndex: number }
   | {
@@ -612,14 +615,43 @@ function reducer(s: State, a: Action): State {
           // fm-7909 — carry the owning task id so useRunningSessions can map
           // taskId → this session tab.
           taskId: a.taskId,
+          returnToTasksOnExit: a.returnToTasksOnExit,
         },
       };
       return { ...s, tabs };
     }
     case 'closeTerminal': {
-      const tabs = s.tabs.slice();
-      const t = tabs[a.tabIndex];
+      const t = s.tabs[a.tabIndex];
       if (!t) return s;
+      // A session launched from the Tasks tab returns there on exit rather
+      // than leaving a bare folder listing of the workspace dir. Prefer
+      // closing this session tab and focusing the surviving Tasks tab; if none
+      // survived, convert this tab into the Tasks view in place.
+      if (t.terminal?.returnToTasksOnExit) {
+        const tasksIdx = s.tabs.findIndex((tb) => tb.kind === 'tasks');
+        if (tasksIdx >= 0 && tasksIdx !== a.tabIndex && s.tabs.length > 1) {
+          const wasActive = s.activeTab === a.tabIndex;
+          const tabs = s.tabs.filter((_, i) => i !== a.tabIndex);
+          // Only yank focus to Tasks when the user was watching the session
+          // tab; otherwise preserve their current tab (index shifts down by
+          // one if it sat after the removed tab).
+          let activeTab = wasActive
+            ? tabs.findIndex((tb) => tb.kind === 'tasks')
+            : s.activeTab > a.tabIndex
+              ? s.activeTab - 1
+              : s.activeTab;
+          activeTab = Math.max(0, Math.min(activeTab, tabs.length - 1));
+          return { ...s, tabs, activeTab, lastClosedTab: t };
+        }
+        // No separate Tasks tab to return to — convert this one in place. The
+        // singleton invariant holds because we only reach here when none exists.
+        const tabs = s.tabs.slice();
+        const { terminal: _conv, ...rest } = t;
+        void _conv;
+        tabs[a.tabIndex] = { ...(rest as typeof t), kind: 'tasks', taskId: null };
+        return { ...s, tabs };
+      }
+      const tabs = s.tabs.slice();
       const { terminal: _drop, ...rest } = t;
       void _drop;
       tabs[a.tabIndex] = rest as typeof t;

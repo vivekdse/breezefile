@@ -509,6 +509,9 @@ function Shell() {
   // normal managed terminal). We attach, not spawn — main owns the pty.
   useEffect(() => {
     const off = fm.onTasksInteractiveRun((payload) => {
+      // Captured BEFORE we open/focus the new tab: if the user kicked this off
+      // from the Tasks tab, the session tab returns there on exit.
+      const fromTasksTab = tasksTabActiveRef.current;
       const newTabIndex = tabsRef.current.length;
       dispatch({ type: 'newTab', tab: makeTab(payload.cwd) });
       dispatch({
@@ -523,6 +526,7 @@ function Shell() {
         // fm-7909 — session-per-task: carry the task id so the Tasks page can
         // map taskId → this open session tab (Open session, not a 2nd Start).
         taskId: payload.taskId,
+        returnToTasksOnExit: fromTasksTab,
       });
       dispatch({
         type: 'setStatus',

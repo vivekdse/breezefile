@@ -86,6 +86,11 @@ export type Tab = {
     // session-per-task map (useRunningSessions) so the Tasks page can offer
     // "Open session" (focus this tab) instead of starting a duplicate.
     taskId?: string;
+    // When the session was launched from the Tasks tab, return there on exit
+    // (Ctrl-C / the agent finishing) instead of leaving a bare folder listing
+    // of the session's working dir. Closes this session tab and focuses the
+    // Tasks tab (or converts in place if no Tasks tab survived).
+    returnToTasksOnExit?: boolean;
   };
 };
 
