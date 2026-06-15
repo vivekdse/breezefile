@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell, Menu, protocol, Notification as ElectronNotification } from 'electron';
+import dns from 'node:dns';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -29,6 +30,17 @@ import { platform } from './platform';
 import './agents';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Prefer IPv4 when a host resolves to both A and AAAA records. Node 17+
+// defaults to "verbatim" ordering, so hosts that publish AAAA first (e.g.
+// Cloudflare-fronted general.typebuild.com) get an IPv6 connection attempt
+// first. On a machine with no working IPv6 route, undici (fetch) connects to
+// that dead address and HANGS until UND_ERR_CONNECT_TIMEOUT (10s) instead of
+// falling back to IPv4 the way curl's Happy-Eyeballs does — which surfaced as
+// "[typebuild-mint:unreachable] Could not reach the mint endpoint" even though
+// the endpoint is up. ipv4first restores the pre-v17 behaviour: IPv4 is tried
+// first, IPv6 still used when that's all a host has.
+dns.setDefaultResultOrder('ipv4first');
 
 // package.json's `name` is the npm-style slug "file-manager"; Electron
 // reads that for app.getName() in dev (before the bundle is built) and

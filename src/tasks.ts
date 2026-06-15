@@ -298,6 +298,36 @@ export function useTaskSources(): {
 // PHI-free: only booleans cross the wire.
 // fm-v0rc (Phase B5): also expose `email` — the signed-in principal. Release
 // (and other claimed-by-me gates) compare a row's claimedBy against it.
+// Lightweight auth-only subscription: just signed-in state + email, with no
+// prerequisite (claude/chrome) detection. Used by the sidebar sign-in
+// indicators where the shell-spawning detect checks aren't wanted.
+export function useTypebuildAuth(): { signedIn: boolean; email: string | null } {
+  const [signedIn, setSignedIn] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fm.typebuild
+      .authState()
+      .then((s) => {
+        if (!cancelled) {
+          setSignedIn(!!s.signedIn);
+          setEmail(s.email ?? null);
+        }
+      })
+      .catch(() => {});
+    const off = fm.typebuild.onAuthChanged((s) => {
+      if (cancelled) return;
+      setSignedIn(!!s.signedIn);
+      setEmail(s.email ?? null);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+  return { signedIn, email };
+}
+
 export function useTypebuildReadiness(): {
   signedIn: boolean;
   claudeOk: boolean;

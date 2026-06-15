@@ -22,6 +22,11 @@ let claudeCache: Promise<string | null> | null = null;
 
 function probeWellKnown(): string | null {
   const candidates = [
+    // Canonical Claude Code local install (the official install.sh target).
+    // This is commonly only reachable via a shell alias, which a
+    // non-interactive `command -v claude` can't see — so probe the path
+    // directly or we'd wrongly prompt the user to re-install.
+    path.join(os.homedir(), '.claude/local/claude'),
     path.join(os.homedir(), '.local/bin/claude'),
     '/opt/homebrew/bin/claude',
     '/usr/local/bin/claude',

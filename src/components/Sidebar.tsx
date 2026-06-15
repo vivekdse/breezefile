@@ -22,6 +22,7 @@ import {
   useLastRun,
   useTaskSources,
   useTasks,
+  useTypebuildAuth,
   useTypebuildReadiness,
 } from '../tasks';
 import type { Task } from '../types';
@@ -274,9 +275,34 @@ export function Sidebar() {
   }, [remoteSources, dispatch]);
   // fm-22o — gate the entire task subsystem behind the opt-in flag.
   const tasksEnabled = state.taskManagementEnabled;
+  // TypeBuild sign-in visibility: the dedicated nav row only appears when
+  // TypeBuild is enabled AND the user is signed out, so a dropped/expired
+  // session is impossible to miss. (The persistent status badge lives on the
+  // Active Tasks header below.)
+  const tbEnabled = state.typebuildEnabled;
+  const { signedIn: tbSignedIn } = useTypebuildAuth();
+  const openTypebuildSettings = () =>
+    window.dispatchEvent(
+      new CustomEvent('fm:openSettings', { detail: { section: 'typebuild' } }),
+    );
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
+      {tbEnabled && !tbSignedIn && (
+        <button
+          type="button"
+          className="sidebar__tb-signin"
+          onClick={openTypebuildSettings}
+          title="You're signed out of TypeBuild — click to sign in"
+        >
+          <span className="sidebar__tb-signin-dot" aria-hidden="true" />
+          <span className="sidebar__tb-signin-label">
+            TypeBuild · signed out
+          </span>
+          <span className="sidebar__tb-signin-action">Sign in</span>
+        </button>
+      )}
+
       {tasksEnabled && <ActiveTasksSection cwd={cwd} />}
 
       <h4 className="sidebar__section-title">Favorites</h4>
@@ -552,6 +578,10 @@ const AUTO_DONE_VISIBLE_MS = 5 * 60_000;
 
 function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
   const { state, dispatch } = useStore();
+  // Persistent TypeBuild sign-in status chip (both states), shown only when
+  // TypeBuild is enabled. Click routes to Settings → TypeBuild.
+  const { signedIn: tbSignedIn } = useTypebuildAuth();
+  const tbEnabled = state.typebuildEnabled;
   // Pull all tasks (not activeOnly) so we can include recently-completed
   // auto tasks; filter client-side. The list is small in practice.
   const { tasks: all } = useTasks({});
@@ -636,6 +666,30 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
             </span>
           )}
         </span>
+        {tbEnabled && (
+          <button
+            type="button"
+            className={`sidebar__tb-chip ${
+              tbSignedIn ? 'sidebar__tb-chip--on' : 'sidebar__tb-chip--off'
+            }`}
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent('fm:openSettings', {
+                  detail: { section: 'typebuild' },
+                }),
+              )
+            }
+            title={
+              tbSignedIn
+                ? 'TypeBuild: signed in — click to manage'
+                : 'TypeBuild: signed out — click to sign in'
+            }
+            aria-label={tbSignedIn ? 'TypeBuild signed in' : 'TypeBuild signed out'}
+          >
+            <span className="sidebar__tb-chip-dot" aria-hidden="true" />
+            TB
+          </button>
+        )}
         <button
           type="button"
           className="sidebar__section-action"

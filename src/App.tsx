@@ -74,6 +74,9 @@ function Shell() {
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [touchOpen, setTouchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Optional section to expand when Settings opens via fm:openSettings
+  // (e.g. the sidebar sign-in row deep-links to 'typebuild').
+  const [settingsSection, setSettingsSection] = useState<string | undefined>();
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -784,7 +787,9 @@ function Shell() {
     function onOpenTasksPage() {
       dispatch({ type: 'openTasksTab' });
     }
-    function onOpenSettings() {
+    function onOpenSettings(e: Event) {
+      const section = (e as CustomEvent).detail?.section as string | undefined;
+      setSettingsSection(section);
       setSettingsOpen(true);
     }
     async function onOpenWith(e: Event) {
@@ -1085,7 +1090,12 @@ function Shell() {
       {tutorialOpen && (
         <Tutorial key={tutorialNonce} onClose={() => setTutorialOpen(false)} />
       )}
-      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <Settings
+          onClose={() => setSettingsOpen(false)}
+          initialSection={settingsSection as never}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           {...confirm}

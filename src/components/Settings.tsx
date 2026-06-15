@@ -6,7 +6,7 @@ import { TypebuildAuthPanel } from './typebuild/TypebuildAuthPanel';
 import { SideBySideSettings } from './typebuild/SideBySideSettings';
 import './Settings.css';
 
-type Props = { onClose: () => void };
+type Props = { onClose: () => void; initialSection?: SectionId };
 
 type SectionId =
   | 'keybindings'
@@ -16,7 +16,7 @@ type SectionId =
   | 'bookmarks'
   | 'typebuild';
 
-export function Settings({ onClose }: Props) {
+export function Settings({ onClose, initialSection }: Props) {
   const { state, dispatch } = useStore();
   const [editing, setEditing] = useState<string | null>(null);
   const [draftKey, setDraftKey] = useState('');
@@ -27,7 +27,7 @@ export function Settings({ onClose }: Props) {
   // Single-open accordion. Keybindings opens by default since it's the
   // densest section and the most common reason to open Settings.
   const [openSection, setOpenSection] = useState<SectionId | null>(
-    'keybindings',
+    initialSection ?? 'keybindings',
   );
 
   useEffect(() => {
@@ -362,8 +362,35 @@ export function Settings({ onClose }: Props) {
             isOpen={openSection === 'typebuild'}
             onToggle={() => toggle('typebuild')}
           >
-            <TypebuildAuthPanel />
-            <SideBySideSettings />
+            <div className="settings__row">
+              <span className="settings__action">
+                <label className="settings__inline-label">
+                  <input
+                    type="checkbox"
+                    checked={state.typebuildEnabled}
+                    onChange={(e) =>
+                      dispatch({
+                        type: 'setTypebuildEnabled',
+                        enabled: e.target.checked,
+                      })
+                    }
+                  />
+                  <span>Enable TypeBuild</span>
+                </label>
+              </span>
+              <span className="settings__path settings__hint">
+                Connect the TypeBuild task backend. Adds sign-in here, the
+                onboarding checklist, side-by-side layout, and a sign-in
+                indicator in the left sidebar. Leave off if you don't use
+                TypeBuild.
+              </span>
+            </div>
+            {state.typebuildEnabled && (
+              <>
+                <TypebuildAuthPanel />
+                <SideBySideSettings />
+              </>
+            )}
           </AccordionSection>
         </div>
       </div>

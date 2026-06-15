@@ -164,6 +164,14 @@ type Persisted = {
   // Settings. Existing installs that already have a tasks DB are migrated
   // to true on first launch with this flag (see App.tsx hydrate path).
   taskManagementEnabled: boolean;
+  // Opt-in toggle for the TypeBuild task backend. When false the TypeBuild
+  // sign-in / onboarding (Settings → TypeBuild) and the sidebar sign-in
+  // indicators are hidden — a fresh install gets pure local file/task
+  // management and only sees TypeBuild once it's deliberately turned on.
+  // Lives in the TypeBuild Settings section above the sign-in panel.
+  // Migrated to true on first launch for users already signed in to
+  // TypeBuild (see App/store hydrate path) so we don't hide their backend.
+  typebuildEnabled: boolean;
   // fm-c2w — system notification when a backgrounded tab's terminal
   // demands attention (cursor reappears or BEL/OSC9). Default ON since
   // it's the differentiator over tmux/iTerm. Sound separate and OFF by
@@ -236,6 +244,7 @@ type Action =
   | { type: 'setTag'; path: string; tag: string | null }
   | { type: 'setKeybinds'; keybinds: Keybinds }
   | { type: 'setTaskManagementEnabled'; enabled: boolean }
+  | { type: 'setTypebuildEnabled'; enabled: boolean }
   | { type: 'setLastFind'; query: string }
   | { type: 'restoreTab' }
   | { type: 'pushRecent'; path: string }
@@ -334,6 +343,9 @@ const initialState: State = {
   // but didn't carry the field; the explicit-false path stays available
   // for users who turn it off in Settings.
   taskManagementEnabled: true,
+  // Default OFF — TypeBuild is opt-in. The hydrate migration flips it ON
+  // for users already signed in so existing setups keep their backend.
+  typebuildEnabled: false,
   notifyOnAttention: true,
   soundOnAttention: true,
   taskNotifications: 'all',
@@ -510,6 +522,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, keybinds: a.keybinds };
     case 'setTaskManagementEnabled':
       return { ...s, taskManagementEnabled: a.enabled };
+    case 'setTypebuildEnabled':
+      return { ...s, typebuildEnabled: a.enabled };
     case 'setLastFind':
       return { ...s, lastFind: a.query };
     case 'pushRecent': {
@@ -704,6 +718,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           customTags,
           tagPaths,
           taskManagementEnabled,
+          typebuildEnabled,
           notifyOnAttention,
           soundOnAttention,
           taskNotifications,
@@ -723,6 +738,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ...(tagPaths ? { tagPaths } : {}),
             ...(taskManagementEnabled !== undefined
               ? { taskManagementEnabled }
+              : {}),
+            ...(typeof typebuildEnabled === 'boolean'
+              ? { typebuildEnabled }
               : {}),
             ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
             ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
@@ -761,6 +779,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+
+    // Migration: if localStorage doesn't carry typebuildEnabled yet (older
+    // build) but the user is already signed in to TypeBuild, default ON so
+    // their backend doesn't vanish behind the new toggle. Fresh / signed-out
+    // installs stay OFF (the opt-in default).
+    try {
+      const tbFlag = raw
+        ? (JSON.parse(raw) as { typebuildEnabled?: boolean }).typebuildEnabled
+        : undefined;
+      if (tbFlag === undefined) {
+        void fm.typebuild
+          .authState()
+          .then((s) => {
+            if (s.signedIn) {
+              dispatch({ type: 'setTypebuildEnabled', enabled: true });
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
     // Mark hydration complete so the persist effect can start writing.
     setHydrated(true);
   }, []);
@@ -782,6 +822,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       customTags: state.customTags,
       tagPaths: state.tagPaths,
       taskManagementEnabled: state.taskManagementEnabled,
+      typebuildEnabled: state.typebuildEnabled,
       notifyOnAttention: state.notifyOnAttention,
       soundOnAttention: state.soundOnAttention,
       taskNotifications: state.taskNotifications,
@@ -799,6 +840,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.customTags,
     state.tagPaths,
     state.taskManagementEnabled,
+    state.typebuildEnabled,
     state.notifyOnAttention,
     state.soundOnAttention,
     state.taskNotifications,
