@@ -830,7 +830,9 @@ function TaskRow({ task, active, tabNumber, onClick, onContextMenu }: TaskRowPro
   // Single-line layout: lead glyph (⚡ auto / ● manual, colored by status)
   // + title + optional tab badge. Folder + due info move to the tooltip
   // since the second meta line was making the column feel crowded.
-  const folderLabel = basename(task.folder) || task.folder;
+  // task.folder is typed string but TypeBuild rows (hasFolder=false) leave it
+  // undefined at runtime — guard before basename() or the whole row crashes.
+  const folderLabel = task.folder ? basename(task.folder) || task.folder : '';
   const dueLabel = task.due_at ? formatDueLabel(task.due_at, today) : '';
   const autoLabel = task.auto_mode ? 'auto' : 'manual';
   const tipParts = [
