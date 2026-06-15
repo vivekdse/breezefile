@@ -23,6 +23,8 @@
 //     payload differs; paused when there is no BrowserWindow.
 
 import os from 'node:os';
+import path from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { BrowserWindow } from 'electron';
 import { breezeHost } from '../core/host';
 import { classifyTransitions } from './typebuild-transitions.mjs';
@@ -64,6 +66,53 @@ const MCP_INLINE_CONFIG = JSON.stringify({
     },
   },
 });
+
+// Every interactive TypeBuild session runs in this app-owned workspace rather
+// than the user's home dir. A single, stable cwd gives us one place to seed
+// (and let the user extend) the permission grant the session needs, and keeps
+// task sessions out of whatever folder happens to be focused.
+const TASKS_DIR = path.join(os.homedir(), '.breezefile', 'tasks');
+const TASKS_SETTINGS = path.join(TASKS_DIR, '.claude', 'settings.json');
+
+// Tools the /work flow must call unattended:
+//   mcp__typebuild        — the TypeBuild MCP server (task lifecycle verbs)
+//   mcp__claude-in-chrome — the browser tools the --chrome integration exposes
+// Server-level rules (no __tool suffix) cover every current + future tool on
+// each server, so the session never stalls on a per-tool permission prompt.
+const BASELINE_ALLOW = ['mcp__typebuild', 'mcp__claude-in-chrome'];
+
+// Ensure ~/.breezefile/tasks/.claude/settings.json exists and grants the
+// baseline allow-rules, MERGING into any rules the user added rather than
+// clobbering them. Returns the cwd + settings path for the launcher. We pass
+// the settings file to claude explicitly via --settings so the grant applies
+// regardless of whether the folder is "trusted".
+function ensureTasksWorkspace(): { cwd: string; settingsPath: string } {
+  mkdirSync(path.dirname(TASKS_SETTINGS), { recursive: true });
+  const existed = existsSync(TASKS_SETTINGS);
+  let settings: Record<string, any> = {};
+  if (existed) {
+    try {
+      settings = JSON.parse(readFileSync(TASKS_SETTINGS, 'utf8')) || {};
+    } catch {
+      // Corrupt/hand-edited file — start fresh rather than throwing on launch.
+      settings = {};
+    }
+  }
+  const perms = (settings.permissions ??= {});
+  const allow: string[] = Array.isArray(perms.allow) ? perms.allow : [];
+  let changed = !existed || !Array.isArray(perms.allow);
+  for (const rule of BASELINE_ALLOW) {
+    if (!allow.includes(rule)) {
+      allow.push(rule);
+      changed = true;
+    }
+  }
+  perms.allow = allow;
+  if (changed) {
+    writeFileSync(TASKS_SETTINGS, JSON.stringify(settings, null, 2) + '\n');
+  }
+  return { cwd: TASKS_DIR, settingsPath: TASKS_SETTINGS };
+}
 
 const capabilities: TaskSourceCapabilities = {
   canSchedule: false,
@@ -747,6 +796,10 @@ export class TypeBuildTaskSource implements TaskSource {
     const { runTaskInteractive } = await import('../agents/interactive');
     const synthetic: Task = this.syntheticTask(id, flags);
 
+    // App-owned workspace + permission grant (see ensureTasksWorkspace). The
+    // session runs here and loads the seeded settings via --settings below.
+    const { cwd: tasksCwd, settingsPath } = ensureTasksWorkspace();
+
     // Pre-claimed Start (fm-v0rc): we already hold the claim over REST, so the
     // session must NOT re-claim (the in-session claim is conditional on
     // status=open and would 409 now). Tell the agent the task is already mine
@@ -763,22 +816,22 @@ export class TypeBuildTaskSource implements TaskSource {
       // On resume, suppress the positional prompt so --continue resumes the
       // existing conversation rather than seeding a new /work claim.
       omitPrompt: opts.resume,
-      cwd: os.homedir(),
+      cwd: tasksCwd,
       // No local run row: FK to tasks(id) would fail for a remote id.
       recordRun: false,
       // PHI: generic, content-free tab label.
       label: `TypeBuild task ${shortId(id)}`,
       source: this.id,
-      // --allowedTools mcp__typebuild: pre-approve every tool the typebuild MCP
-      // server exposes so the session can run /work end-to-end without stalling
-      // on a per-tool permission prompt the user never sees coming. The
-      // server-level rule (no __tool suffix) covers all current + future tools.
+      // --settings: load the seeded permission grant explicitly (so it applies
+      // without depending on the cwd being "trusted"). It pre-approves the
+      // typebuild + claude-in-chrome MCP tools so /work runs end-to-end without
+      // stalling on a per-tool permission prompt the user never sees coming.
       // --strict-mcp-config: load ONLY our inline server (header-injected),
       // ignoring user/project scope and avoiding a name collision with the
       // plugin's header-free .mcp.json. The inline config holds the ${VAR}
       // reference, NOT the secret.
       extraArgs: [
-        '--allowedTools', 'mcp__typebuild',
+        '--settings', settingsPath,
         '--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG,
       ],
       env: {
