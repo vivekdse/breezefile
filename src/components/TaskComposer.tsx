@@ -24,14 +24,21 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { usePlatform } from '../platform';
 import { fm } from '../bridge';
-import { createTask, runTaskNow, todayISO, updateTask, useTaskSources } from '../tasks';
+import {
+  createTask,
+  runTaskNow,
+  todayISO,
+  updateTask,
+  useTaskSources,
+  useTypebuildAuth,
+} from '../tasks';
 import { humanizeError } from '../errorMessages';
 import {
   type RecurrenceForm,
   buildCronFromForm,
   defaultRecurrenceForm,
 } from '../recurrence';
-import type { Task, TaskCreate, TaskStatus, TaskUpdate } from '../types';
+import type { Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
@@ -76,26 +83,27 @@ function composerQuestions(target: string): QuestionId[] {
 type ExecutorId = 'manual' | 'claude';
 
 // fm-m2s4 (S5) — composer save target. 'local' is the Breeze store; a remote
-// source id (e.g. 'typebuild') routes the create through that source. Only the
-// chosen source *id* is ever persisted — never any task content (PHI). The id
-// is a non-sensitive routing key, so localStorage is fine for it.
-const TARGET_LS_KEY = 'fm.composer.target';
+// source id (e.g. 'typebuild') routes the create through that source.
 const TYPEBUILD_SOURCE = 'typebuild';
 
-function loadSavedTarget(): string {
-  try {
-    return localStorage.getItem(TARGET_LS_KEY) || 'local';
-  } catch {
-    return 'local';
-  }
-}
-function persistTarget(id: string): void {
-  try {
-    localStorage.setItem(TARGET_LS_KEY, id);
-  } catch {
-    /* private mode / disabled storage — in-memory state still tracks it */
-  }
-}
+// The TypeBuild source's create capabilities, used to synthesize a save-target
+// entry from the AUTH state directly. We don't wait for the source-registry
+// capability list to reach the renderer (a fresh sign-in can lag it) — if the
+// user is signed in to TypeBuild, the source is registered in main, so the
+// create will route fine; the picker should offer it immediately.
+const TYPEBUILD_TARGET: TaskSourceInfo = {
+  id: TYPEBUILD_SOURCE,
+  label: 'TypeBuild',
+  capabilities: {
+    canSchedule: false,
+    canClaim: true,
+    canEdit: false,
+    canDelete: true,
+    canCreate: true,
+    phiSensitive: true,
+    hasFolder: false,
+  },
+};
 
 // fm-m2s4 (S5) — TypeBuild priority. Compact 0–10 select; unset by default so a
 // create that doesn't care leaves the server default untouched.
@@ -259,25 +267,41 @@ export function TaskComposer(props: Props) {
   const initial: Task | null = props.mode === 'edit' ? props.task : null;
 
   // fm-m2s4 (S5) — save target. Editing an existing row stays pinned to that
-  // row's source (you can't move a task between stores from the composer); a
-  // fresh create starts from the remembered choice, defaulting to local.
+  // row's source (you can't move a task between stores from the composer).
   const { sources } = useTaskSources();
-  const creatableSources = useMemo(
-    () => sources.filter((s) => s.capabilities.canCreate),
+  // TypeBuild availability is driven by the auth state, not the source list:
+  // signed in ⇒ offer (and default to) TypeBuild; signed out ⇒ don't offer it.
+  const { signedIn: tbSignedIn } = useTypebuildAuth();
+  const localCreatables = useMemo(
+    () => sources.filter((s) => s.capabilities.canCreate && s.id !== TYPEBUILD_SOURCE),
     [sources],
   );
-  const initialSource =
-    props.mode === 'edit' ? props.task.source ?? 'local' : loadSavedTarget();
-  const [target, setTarget] = useState<string>(initialSource);
-  // A target the user can't actually create into (e.g. a remembered 'typebuild'
-  // that's since disconnected) falls back to local so the composer stays usable.
+  // The ordered list of save targets: local (+ any other non-TB creatables)
+  // first, TypeBuild appended when signed in. Drives both the picker and the
+  // valid-target check below.
+  const targets = useMemo<TaskSourceInfo[]>(
+    () => (tbSignedIn ? [...localCreatables, TYPEBUILD_TARGET] : localCreatables),
+    [localCreatables, tbSignedIn],
+  );
+
+  const [target, setTarget] = useState<string>(
+    props.mode === 'edit' ? props.task.source ?? 'local' : 'local',
+  );
+  // Once the user explicitly picks a target we stop auto-defaulting it (so a
+  // deliberate "save to local" while signed in isn't yanked back to TypeBuild).
+  const [targetTouched, setTargetTouched] = useState(props.mode === 'edit');
+  // Auto-default: TypeBuild when signed in, else local. Re-runs as auth
+  // resolves (the hook starts false then flips true on the async state read).
   useEffect(() => {
-    if (props.mode === 'edit') return;
-    if (creatableSources.length === 0) return;
-    if (!creatableSources.some((s) => s.id === target)) {
-      setTarget('local');
-    }
-  }, [creatableSources, target, props.mode]);
+    if (props.mode === 'edit' || targetTouched) return;
+    setTarget(tbSignedIn ? TYPEBUILD_SOURCE : 'local');
+  }, [tbSignedIn, targetTouched, props.mode]);
+  // A target that's no longer offered (e.g. TypeBuild after a sign-out) falls
+  // back to local so the composer stays usable.
+  useEffect(() => {
+    if (props.mode === 'edit' || targets.length === 0) return;
+    if (!targets.some((s) => s.id === target)) setTarget('local');
+  }, [targets, target, props.mode]);
   const isTypebuild = target === TYPEBUILD_SOURCE;
 
   const QUESTIONS = useMemo(() => composerQuestions(target), [target]);
@@ -1205,14 +1229,14 @@ export function TaskComposer(props: Props) {
           <div className="composer__crumb" id="composer-title">
             {props.mode === 'edit' ? 'Edit task' : 'New task'}
           </div>
-          {/* fm-m2s4 (S5) — save-target picker. Shown only for a fresh create
-              with more than one creatable source (editing is pinned to the
-              task's own source). The chosen source id is persisted — never any
-              task content (PHI). */}
-          {props.mode === 'create' && creatableSources.length > 1 && (
+          {/* fm-m2s4 (S5) — save-target picker. Shown for a fresh create with
+              more than one target (editing is pinned to the task's own source).
+              TypeBuild is offered + defaulted when signed in (see `targets`);
+              signed out, only local is creatable so the picker is hidden. */}
+          {props.mode === 'create' && targets.length > 1 && (
             <div className="composer__target" role="group" aria-label="Save to">
               <span className="composer__target-label">Save to</span>
-              {creatableSources.map((s) => (
+              {targets.map((s) => (
                 <button
                   key={s.id}
                   type="button"
@@ -1224,7 +1248,7 @@ export function TaskComposer(props: Props) {
                   onClick={() => {
                     if (target === s.id) return;
                     setTarget(s.id);
-                    persistTarget(s.id);
+                    setTargetTouched(true);
                   }}
                 >
                   {s.label}
