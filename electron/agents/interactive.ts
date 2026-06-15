@@ -135,11 +135,17 @@ export async function runTaskInteractive(
   // the headless one-shot mode). On a resume relaunch (omitPrompt) we drop
   // the positional prompt entirely so --continue resumes the prior
   // conversation cleanly instead of injecting a fresh message.
+  //
+  // The `--` is load-bearing: `--add-dir <directories...>` is variadic, so a
+  // bare positional prompt right after `--add-dir cwd` gets swallowed as a
+  // second directory and claude launches with NO prompt (empty box, nothing
+  // runs). `--` terminates option parsing so the prompt lands as the
+  // positional arg. Only emitted when we actually pass a prompt.
   const args = [
     ...flagArgs,
     ...(opts.extraArgs ?? []),
     '--add-dir', cwd,
-    ...(opts.omitPrompt ? [] : [prompt]),
+    ...(opts.omitPrompt ? [] : ['--', prompt]),
   ];
 
   const ptyId = reservePtyId();
