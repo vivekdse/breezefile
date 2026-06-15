@@ -725,14 +725,21 @@ export class TypeBuildTaskSource implements TaskSource {
     const minted = await mintMcpToken();
 
     // Force the interactive run style; pass through the server's arg-producing
-    // flags (e.g. chrome → --chrome). 'interactive' is a no-op for flagsToArgs
-    // but documents intent; runTaskInteractive ignores it for arg purposes. On
-    // a relaunch we add 'resume' (→ --continue) so the prior conversation
-    // continues with the fresh token instead of starting cold.
+    // flags. 'interactive' is a no-op for flagsToArgs but documents intent;
+    // runTaskInteractive ignores it for arg purposes. On a relaunch we add
+    // 'resume' (→ --continue) so the prior conversation continues with the
+    // fresh token instead of starting cold.
+    //
+    // 'chrome' (→ --chrome) is forced on, not merely passed through: TypeBuild
+    // is fundamentally a Claude-in-Chrome workflow (the server is the
+    // /chromeext/* API), so every interactive session needs the browser
+    // integration regardless of whether the server row happened to set the
+    // flag. The Set dedupes if the server already sent it.
     const flags = Array.from(
       new Set([
         ...serverFlags,
         'interactive',
+        'chrome',
         ...(opts.resume ? ['resume'] : []),
       ]),
     );
@@ -762,11 +769,18 @@ export class TypeBuildTaskSource implements TaskSource {
       // PHI: generic, content-free tab label.
       label: `TypeBuild task ${shortId(id)}`,
       source: this.id,
+      // --allowedTools mcp__typebuild: pre-approve every tool the typebuild MCP
+      // server exposes so the session can run /work end-to-end without stalling
+      // on a per-tool permission prompt the user never sees coming. The
+      // server-level rule (no __tool suffix) covers all current + future tools.
       // --strict-mcp-config: load ONLY our inline server (header-injected),
       // ignoring user/project scope and avoiding a name collision with the
       // plugin's header-free .mcp.json. The inline config holds the ${VAR}
       // reference, NOT the secret.
-      extraArgs: ['--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG],
+      extraArgs: [
+        '--allowedTools', 'mcp__typebuild',
+        '--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG,
+      ],
       env: {
         // The minted token, PTY env only. claude expands ${TYPEBUILD_MCP_TOKEN}
         // from here into the Authorization header. Never logged/persisted.
