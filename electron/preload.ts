@@ -5,7 +5,7 @@ const fm = {
   versions: process.versions,
   capabilities: () =>
     ipcRenderer.invoke('platform:capabilities') as Promise<{
-      id: 'mac' | 'linux';
+      id: 'mac' | 'linux' | 'windows';
       spotlightSearch: boolean;
       externalVolumes: boolean;
       cloudMounts: boolean;
@@ -142,7 +142,7 @@ const fm = {
   upgrade: () =>
     ipcRenderer.invoke('app:upgrade') as Promise<{
       ok: boolean;
-      mode: 'inline' | 'terminal';
+      mode: 'inline' | 'terminal' | 'browser';
     }>,
   // ─── Embedded terminal (fm-jtu) ───────────────────────────────────
   termSpawn: (opts: {

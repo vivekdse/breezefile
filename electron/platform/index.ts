@@ -43,7 +43,7 @@ export type ArrangeResult = {
 export type ArrangeRect = { x: number; y: number; width: number; height: number };
 
 export interface PlatformAdapter {
-  readonly id: 'mac' | 'linux';
+  readonly id: 'mac' | 'linux' | 'windows';
   capabilities(): Capabilities;
 
   // Folder-name search across the user's home (sidebar quick-jump). Returns
@@ -83,10 +83,13 @@ export interface PlatformAdapter {
 
 import { MacAdapter } from './mac';
 import { LinuxAdapter } from './linux';
+import { WindowsAdapter } from './windows';
 
 let _current: PlatformAdapter | null = null;
 export function platform(): PlatformAdapter {
   if (_current) return _current;
-  _current = process.platform === 'darwin' ? new MacAdapter() : new LinuxAdapter();
+  if (process.platform === 'darwin') _current = new MacAdapter();
+  else if (process.platform === 'win32') _current = new WindowsAdapter();
+  else _current = new LinuxAdapter();
   return _current;
 }

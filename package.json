@@ -111,6 +111,35 @@
           ]
         }
       ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "artifactName": "Breezefile-${version}-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "bin/breeze.cmd",
+          "to": "breeze.cmd"
+        },
+        {
+          "from": "bin/breeze.mjs",
+          "to": "breeze.mjs"
+        }
+      ],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }

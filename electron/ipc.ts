@@ -80,12 +80,17 @@ export type Entry = {
   isHidden: boolean;
 };
 
+const WIN_EXEC_EXTS = new Set(['.exe', '.bat', '.cmd', '.com', '.ps1', '.msi']);
+
 function classify(name: string, stat: import('node:fs').Stats, mode: number): Entry['kind'] {
   if (stat.isSymbolicLink()) return 'link';
   if (stat.isDirectory()) return 'dir';
+  // NTFS has no POSIX execute bit; "executable" is determined by extension.
+  if (process.platform === 'win32') {
+    return WIN_EXEC_EXTS.has(path.extname(name).toLowerCase()) ? 'exec' : 'file';
+  }
   const execBit = mode & 0o111;
   if (execBit && !stat.isDirectory()) return 'exec';
-  void name;
   return 'file';
 }
 
@@ -93,6 +98,25 @@ function expandHome(p: string): string {
   if (p === '~') return os.homedir();
   if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
   return p;
+}
+
+// Route a file to a specific application. The `app` argument is whatever
+// `app:pickApplication` returned for the platform:
+//   - macOS: a `.app` bundle path → `open -a <bundle> <file>`.
+//   - Windows / Linux: an absolute executable path → spawn it with the file
+//     as its first argument. (`open` does not exist off macOS.)
+function openWithApp(app: string, abs: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (process.platform === 'darwin') {
+      spawn('open', ['-a', app, abs], { stdio: 'ignore', detached: true })
+        .on('error', reject)
+        .on('spawn', () => resolve());
+      return;
+    }
+    spawn(app, [abs], { stdio: 'ignore', detached: true, windowsHide: false })
+      .on('error', reject)
+      .on('spawn', () => resolve());
+  });
 }
 
 // Translate raw Node.js fs errors into sentences the UI can surface verbatim.
@@ -279,11 +303,19 @@ async function diskStats(p: string): Promise<{ used: number; total: number } | n
 }
 
 async function bootLocation(): Promise<Location> {
-  const stats = await diskStats('/');
+  // Boot/system volume. On Windows the root is the system drive (the parent
+  // of the user's home, normally C:\); POSIX uses `/`.
+  const isWin = process.platform === 'win32';
+  const rootPath = isWin ? path.parse(os.homedir()).root : '/';
+  const stats = await diskStats(rootPath);
   const loc: Location = {
     id: 'boot',
-    label: 'Macintosh HD',
-    path: '/',
+    label: isWin
+      ? `Local Disk (${rootPath.replace(/\\$/, '')})`
+      : process.platform === 'darwin'
+        ? 'Macintosh HD'
+        : 'System',
+    path: rootPath,
     icon: 'drive',
     kind: 'boot',
     caption: 'Startup disk',
@@ -296,6 +328,7 @@ async function bootLocation(): Promise<Location> {
 }
 
 async function externalLocations(): Promise<Location[]> {
+  if (process.platform === 'win32') return windowsDriveLocations();
   if (process.platform !== 'darwin') return [];
   const out: Location[] = [];
   let names: string[] = [];
@@ -323,6 +356,40 @@ async function externalLocations(): Promise<Location[]> {
       icon: 'usb',
       kind: 'external',
       caption: 'External',
+    };
+    if (stats) {
+      loc.usedPct = Math.round((stats.used / stats.total) * 100);
+      loc.caption = `${fmtBytes(stats.used)} of ${fmtBytes(stats.total)} used`;
+    }
+    out.push(loc);
+  }
+  return out;
+}
+
+// Windows has no /Volumes — drives are letters (C:, D:, …). Probe each letter
+// for a mounted, accessible root, skipping the system drive (shown by
+// bootLocation). statfs gives us usage just like the POSIX path.
+async function windowsDriveLocations(): Promise<Location[]> {
+  const out: Location[] = [];
+  const systemRoot = path.parse(os.homedir()).root.toUpperCase(); // e.g. "C:\"
+  for (let c = 'A'.charCodeAt(0); c <= 'Z'.charCodeAt(0); c++) {
+    const letter = String.fromCharCode(c);
+    const root = `${letter}:\\`;
+    if (root.toUpperCase() === systemRoot) continue;
+    try {
+      // accessing the root throws if no media is mounted (e.g. empty DVD).
+      await fs.access(root);
+    } catch {
+      continue;
+    }
+    const stats = await diskStats(root);
+    const loc: Location = {
+      id: `vol:${letter}`,
+      label: `Local Disk (${letter}:)`,
+      path: root,
+      icon: 'usb',
+      kind: 'external',
+      caption: 'Drive',
     };
     if (stats) {
       loc.usedPct = Math.round((stats.used / stats.total) * 100);
@@ -570,13 +637,7 @@ export function registerIpc() {
       if (ext && bindings[ext]) bound = bindings[ext];
     }
     if (bound) {
-      // On macOS `open -a <app.app> <file>` is the canonical way to route
-      // a file to a specific application bundle.
-      return new Promise<void>((resolve, reject) => {
-        spawn('open', ['-a', bound!, abs], { stdio: 'ignore', detached: true })
-          .on('error', reject)
-          .on('spawn', () => resolve());
-      });
+      return openWithApp(bound, abs);
     }
     await shell.openPath(abs);
   });
@@ -607,24 +668,31 @@ export function registerIpc() {
     // the user perceived as "Open With goes into a subfolder of the app".
     // Without the flag, .app bundles are atomic — selectable but not
     // enterable — which is exactly what we want here.
+    const isWin = process.platform === 'win32';
+    const isMac = process.platform === 'darwin';
     const opts: Electron.OpenDialogOptions = {
       title: 'Choose an Application',
       buttonLabel: 'Choose',
-      defaultPath: '/Applications',
+      defaultPath: isMac
+        ? '/Applications'
+        : isWin
+          ? process.env['PROGRAMFILES'] || 'C:\\Program Files'
+          : '/usr/bin',
       properties: ['openFile'],
-      filters: process.platform === 'darwin'
+      filters: isMac
         ? [{ name: 'Applications', extensions: ['app'] }]
-        : undefined,
+        : isWin
+          ? [{ name: 'Programs', extensions: ['exe', 'bat', 'cmd', 'com'] }]
+          : undefined,
     };
     const res = win
       ? await dialog.showOpenDialog(win, opts)
       : await dialog.showOpenDialog(opts);
     if (res.canceled || res.filePaths.length === 0) return null;
     const picked = res.filePaths[0];
-    // Belt-and-suspenders: if somehow a non-.app path slips through (other
-    // platforms, future flag changes), reject so the renderer can surface
-    // a clear error rather than spawning `open -a` against a binary.
-    if (process.platform === 'darwin' && !picked.toLowerCase().endsWith('.app')) {
+    // Belt-and-suspenders: on macOS the picked path must be a .app bundle so
+    // `open -a` routes to it; a binary inside the bundle would mis-launch.
+    if (isMac && !picked.toLowerCase().endsWith('.app')) {
       throw new Error('Pick a .app bundle (not a file inside one)');
     }
     return picked;
@@ -908,6 +976,54 @@ end tell`;
     });
   }
 
+  // Open a native terminal in `abs` on Windows/Linux. No selection UI — we try
+  // the platform's best option and fall back to a guaranteed one.
+  function launchNativeTerminal(abs: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const trySpawn = (
+        candidates: Array<{ cmd: string; args: string[] }>,
+        i = 0,
+      ): void => {
+        if (i >= candidates.length) {
+          reject(new Error('no terminal emulator found'));
+          return;
+        }
+        const { cmd, args } = candidates[i];
+        const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+        let settled = false;
+        child.on('error', () => {
+          if (settled) return;
+          settled = true;
+          trySpawn(candidates, i + 1); // ENOENT etc. → next candidate
+        });
+        child.on('spawn', () => {
+          if (settled) return;
+          settled = true;
+          child.unref();
+          resolve();
+        });
+      };
+
+      if (process.platform === 'win32') {
+        // Windows Terminal (wt.exe) is the modern default; cmd.exe via the
+        // shell's `start` is the universal fallback. `start "" cmd /K cd /d`
+        // opens a fresh console window already in the folder.
+        trySpawn([
+          { cmd: 'wt.exe', args: ['-d', abs] },
+          { cmd: process.env.COMSPEC || 'cmd.exe', args: ['/C', 'start', '', 'cmd.exe', '/K', `cd /d "${abs}"`] },
+        ]);
+        return;
+      }
+      // Linux: try the common terminals' cwd flags in turn.
+      trySpawn([
+        { cmd: 'x-terminal-emulator', args: ['--working-directory', abs] },
+        { cmd: 'gnome-terminal', args: [`--working-directory=${abs}`] },
+        { cmd: 'konsole', args: ['--workdir', abs] },
+        { cmd: 'xterm', args: ['-e', `cd "${abs}" && ${process.env.SHELL || '/bin/sh'}`] },
+      ]);
+    });
+  }
+
   ipcMain.handle('shell:listTerminals', async (): Promise<string[]> => {
     return detectTerminals();
   });
@@ -922,6 +1038,12 @@ end tell`;
 
   ipcMain.handle('shell:openTerminal', async (_e, cwd: string) => {
     const abs = expandHome(cwd);
+    // Off macOS we don't have a `.app` catalog to choose from — launch a
+    // sensible native terminal in the folder directly (no selection step).
+    if (process.platform !== 'darwin') {
+      await launchNativeTerminal(abs);
+      return;
+    }
     const pref = await loadTerminalPref();
     if (!pref) {
       // Structured error so the renderer can open the chooser.
@@ -990,6 +1112,49 @@ end tell`;
     });
   }
 
+  // Build a .zip at `dest` containing `sources` (each kept under its basename).
+  // Windows: PowerShell's Compress-Archive (always present, no extra install).
+  // Linux: the `zip` CLI; falls back to a clear error if it isn't installed.
+  // (macOS uses ditto directly in the compress handler and never calls this.)
+  async function compressZip(sources: string[], dest: string): Promise<void> {
+    if (process.platform === 'win32') {
+      // -Path takes a comma-separated, single-quoted list. Single quotes in a
+      // PowerShell literal are escaped by doubling. -Force overwrites the dest
+      // we already deduped to a fresh name, so collisions can't happen.
+      const psList = sources
+        .map((s) => `'${s.replace(/'/g, "''")}'`)
+        .join(',');
+      const psDest = `'${dest.replace(/'/g, "''")}'`;
+      await runTool('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Compress-Archive -Path ${psList} -DestinationPath ${psDest} -Force`,
+      ]);
+      return;
+    }
+    // Linux: `zip -r <dest> <basenames>` run from the common parent so the
+    // archive holds plain names, not absolute paths. All sources of a single
+    // compress action share a directory (they're a multi-selection in one
+    // folder), so chdir to the first source's parent.
+    const cwd = path.dirname(sources[0]);
+    const names = sources.map((s) => path.basename(s));
+    await new Promise<void>((resolve, reject) => {
+      execFile('zip', ['-r', '-q', dest, ...names], { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, _o, stderr) => {
+        if (err) {
+          const e = err as NodeJS.ErrnoException;
+          if (e.code === 'ENOENT') {
+            reject(new Error('Install zip (e.g. apt install zip)'));
+            return;
+          }
+          reject(new Error(stderr?.toString().trim() || err.message));
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
   ipcMain.handle(
     'shell:compress',
     async (_e, sources: string[], cwd: string): Promise<string> => {
@@ -1001,17 +1166,26 @@ end tell`;
           ? `${path.basename(absSources[0])}.zip`
           : 'Archive.zip';
       const dest = await uniqueSiblingPath(path.join(absCwd, baseName));
-      // `ditto -c -k --sequesterRsrc --keepParent` preserves HFS metadata
-      // (resource forks, xattrs) and keeps the selected item's folder name
-      // at the archive root — the behavior macOS's Finder "Compress" uses.
-      await runTool('ditto', [
-        '-c',
-        '-k',
-        '--sequesterRsrc',
-        '--keepParent',
-        ...absSources,
-        dest,
-      ]);
+      if (process.platform === 'darwin') {
+        // `ditto -c -k --sequesterRsrc --keepParent` preserves HFS metadata
+        // (resource forks, xattrs) and keeps the selected item's folder name
+        // at the archive root — the behavior macOS's Finder "Compress" uses.
+        await runTool('ditto', [
+          '-c',
+          '-k',
+          '--sequesterRsrc',
+          '--keepParent',
+          ...absSources,
+          dest,
+        ]);
+        return dest;
+      }
+      // Windows ships bsdtar as `tar.exe`, which writes a real .zip with
+      // `-a` (auto-detect format from the destination extension). Linux's
+      // GNU tar lacks `-a`/zip, so use PowerShell's Compress-Archive there
+      // and on Windows we prefer it too for predictability. Items are passed
+      // relative to a common parent so the archive keeps their basenames.
+      await compressZip(absSources, dest);
       return dest;
     },
   );
@@ -1061,6 +1235,11 @@ end tell`;
         const kind = archiveKind(src);
         if (!kind) throw new Error(`not a recognized archive: ${path.basename(src)}`);
         if (kind === 'dmg') {
+          // .dmg is a macOS disk image; hdiutil exists only on macOS. Mounting
+          // is meaningless elsewhere — surface a clear error.
+          if (process.platform !== 'darwin') {
+            throw new Error('.dmg disk images can only be opened on macOS');
+          }
           // hdiutil attach prints a 3-column tab-separated table; the last
           // row's 3rd column is the mount point (e.g. "/Volumes/Foo").
           const { stdout } = await runTool('hdiutil', ['attach', '-plist', src]);
@@ -1075,26 +1254,60 @@ end tell`;
         const stem = archiveStem(src);
         const destDir = await uniqueSiblingPath(path.join(parentDir, stem));
         await fs.mkdir(destDir, { recursive: true });
+        const isWin = process.platform === 'win32';
+        const isMac = process.platform === 'darwin';
         try {
           if (kind === 'zip') {
-            await runTool('ditto', ['-x', '-k', src, destDir]);
+            if (isMac) {
+              await runTool('ditto', ['-x', '-k', src, destDir]);
+            } else if (isWin) {
+              // Expand-Archive is built into PowerShell 5+ (ships with
+              // Windows). -Force so a re-extract into our fresh dir is clean.
+              await runTool('powershell.exe', [
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                `Expand-Archive -LiteralPath '${src.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`,
+              ]);
+            } else {
+              // Linux: bsdtar / GNU `unzip` both common; prefer unzip.
+              try {
+                await runTool('unzip', ['-q', '-o', src, '-d', destDir]);
+              } catch (err) {
+                if ((err as Error).message.includes('not found on PATH')) {
+                  throw new Error('Install unzip (e.g. apt install unzip)');
+                }
+                throw err;
+              }
+            }
           } else if (kind === 'tar') {
+            // bsdtar ships as tar.exe on Windows 10+ and is standard on
+            // mac/Linux. Same invocation everywhere.
             await runTool('tar', ['-xf', src, '-C', destDir]);
           } else if (kind === '7z') {
+            // 7-Zip's CLI is `7z`/`7z.exe` on Windows, `7zz` on mac/Linux.
+            const bin = isWin ? '7z' : '7zz';
             try {
-              await runTool('7zz', ['x', `-o${destDir}`, '-y', src]);
+              await runTool(bin, ['x', `-o${destDir}`, '-y', src]);
             } catch (err) {
               if ((err as Error).message.includes('not found on PATH')) {
-                throw new Error('Install 7-Zip (brew install sevenzip)');
+                throw new Error(
+                  isWin ? 'Install 7-Zip and add it to PATH' : 'Install 7-Zip (brew install sevenzip)',
+                );
               }
               throw err;
             }
           } else if (kind === 'rar') {
+            // unar on mac/Linux; on Windows fall back to 7-Zip which reads rar.
+            const bin = isWin ? '7z' : 'unar';
+            const args = isWin ? ['x', `-o${destDir}`, '-y', src] : ['-o', destDir, src];
             try {
-              await runTool('unar', ['-o', destDir, src]);
+              await runTool(bin, args);
             } catch (err) {
               if ((err as Error).message.includes('not found on PATH')) {
-                throw new Error('Install unar (brew install unar)');
+                throw new Error(
+                  isWin ? 'Install 7-Zip to extract .rar' : 'Install unar (brew install unar)',
+                );
               }
               throw err;
             }
@@ -1167,12 +1380,7 @@ end tell`;
   });
 
   ipcMain.handle('shell:openWith', (_e, p: string, appName: string) => {
-    return new Promise<void>((resolve, reject) => {
-      execFile('open', ['-a', appName, expandHome(p)], (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    return openWithApp(appName, expandHome(p));
   });
 
   // Resolve the bundled `sharer` Swift helper. In a packaged Electron app
@@ -1353,7 +1561,10 @@ end tell`;
   ipcMain.handle('editor:bulkRename', async (_e, names: string[]) => {
     const tmp = path.join(os.tmpdir(), `fm-rename-${Date.now()}.txt`);
     await fs.writeFile(tmp, names.join('\n') + '\n', 'utf8');
-    const editor = process.env.EDITOR || 'vi';
+    // $EDITOR if set; else the platform's always-present console/GUI editor.
+    const editor =
+      process.env.EDITOR ||
+      (process.platform === 'win32' ? 'notepad.exe' : 'vi');
     await new Promise<void>((resolve, reject) => {
       const proc = spawn(editor, [tmp], { stdio: 'inherit' });
       proc.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`editor exited ${code}`))));
@@ -1402,7 +1613,8 @@ end tell`;
     for (const sub of FOLDER_EXCLUDE_SUBSTRINGS) {
       if (p.includes(sub)) return true;
     }
-    const parts = p.split('/');
+    // Split on both separators so Windows backslash paths segment correctly.
+    const parts = p.split(/[/\\]/);
     for (const part of parts) {
       if (FOLDER_EXCLUDE_SEGMENTS.has(part)) return true;
     }
@@ -1599,8 +1811,9 @@ end tell`;
         for (const p of spotHits) {
           if (out.length >= limit) break;
           if (seen.has(p)) continue;
-          // Filter out heavyweight noise paths.
-          const parts = p.split('/');
+          // Filter out heavyweight noise paths. Split on both separators so
+          // Windows backslash paths segment correctly.
+          const parts = p.split(/[/\\]/);
           let skip = false;
           for (const part of parts) {
             if (FIND_SKIP.has(part)) { skip = true; break; }
@@ -1648,6 +1861,13 @@ end tell`;
   // and then quit. If brew isn't at a known path, fall back to Terminal.app
   // where the user's login shell will resolve brew from their PATH.
   ipcMain.handle('app:upgrade', async () => {
+    // Homebrew-cask self-upgrade is macOS-only. On Windows/Linux the app is
+    // installed from a downloaded artifact (NSIS / AppImage), so the right
+    // action is to open the latest GitHub release for a manual reinstall.
+    if (process.platform !== 'darwin') {
+      await shell.openExternal('https://github.com/vivekdse/breezefile/releases/latest');
+      return { ok: true, mode: 'browser' } as const;
+    }
     const brewPaths = ['/opt/homebrew/bin/brew', '/usr/local/bin/brew'];
     const brew = brewPaths.find((p) => existsSync(p)) ?? null;
     const appName = 'Breeze File';
