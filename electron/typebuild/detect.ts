@@ -21,6 +21,19 @@ import { platform } from '../platform';
 let claudeCache: Promise<string | null> | null = null;
 
 function probeWellKnown(): string | null {
+  if (process.platform === 'win32') {
+    const home = os.homedir();
+    const appData = process.env['APPDATA'] || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env['LOCALAPPDATA'] || path.join(home, 'AppData', 'Local');
+    const candidates = [
+      path.join(appData, 'npm', 'claude.cmd'),
+      path.join(appData, 'npm', 'claude.exe'),
+      path.join(localAppData, 'Programs', 'claude', 'claude.exe'),
+      path.join(home, '.local', 'bin', 'claude.exe'),
+    ];
+    for (const p of candidates) if (existsSync(p)) return p;
+    return null;
+  }
   const candidates = [
     // Canonical Claude Code local install (the official install.sh target).
     // This is commonly only reachable via a shell alias, which a
@@ -38,18 +51,25 @@ function probeWellKnown(): string | null {
 
 function probeLoginShell(): Promise<string | null> {
   return new Promise((resolve) => {
-    // -l so the user's profile loads PATH (.zshrc/.bash_profile). $SHELL is
-    // the user's login shell; fall back to zsh if unset.
-    const shell = process.env.SHELL || '/bin/zsh';
-    const c = spawn(shell, ['-lc', 'command -v claude'], {
+    // Windows GUI apps inherit the system PATH; `where` resolves the global
+    // install directly. POSIX: -l so the profile loads PATH; $SHELL or zsh.
+    const isWin = process.platform === 'win32';
+    const [cmd, args] = isWin
+      ? ['where', ['claude']]
+      : [process.env.SHELL || '/bin/zsh', ['-lc', 'command -v claude']];
+    const c = spawn(cmd, args as string[], {
       stdio: ['ignore', 'pipe', 'ignore'],
+      shell: isWin,
     });
     let out = '';
     c.stdout.on('data', (b: Buffer) => { out += b.toString('utf8'); });
     c.on('error', () => resolve(null));
     c.on('exit', (code) => {
-      const p = out.trim().split('\n').pop() || '';
-      resolve(code === 0 && p && existsSync(p) ? p : null);
+      const lines = out.trim().split(/\r?\n/).filter(Boolean);
+      const p = isWin
+        ? lines.find((l) => existsSync(l.trim())) || ''
+        : lines.pop() || '';
+      resolve(code === 0 && p && existsSync(p.trim()) ? p.trim() : null);
     });
   });
 }
@@ -100,6 +120,11 @@ export async function getChecks(): Promise<Checks> {
  * installer isn't reachable.
  */
 export function installClaudeCommand(): string {
+  // The curl|bash installer is POSIX-only. On Windows the supported path is
+  // the npm-global install (or the PowerShell installer), so surface that.
+  if (process.platform === 'win32') {
+    return 'npm install -g @anthropic-ai/claude-code';
+  }
   return (
     'curl -fsSL https://claude.ai/install.sh | bash ' +
     '|| npm install -g @anthropic-ai/claude-code'

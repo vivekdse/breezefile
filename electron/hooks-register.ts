@@ -166,7 +166,12 @@ function withoutBreezeMatchers(blocks: HookMatcher[] | undefined): HookMatcher[]
   return cleaned;
 }
 
-export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' {
+export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' | 'skipped' {
+  // The hook bridge is a POSIX `sh` script invoked as `sh "${SCRIPT}" <arg>`.
+  // That can't run on Windows, and registering it would pollute the user's
+  // ~/.claude/settings.json with hooks that error every turn. Skip cleanly —
+  // the busy/idle tab tint is a degraded feature on Windows, not a crash.
+  if (process.platform === 'win32') return 'skipped';
   try {
     writeHookScript();
   } catch (e) {

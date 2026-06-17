@@ -1,6 +1,6 @@
-# Cross-Platform Strategy (Mac + Linux)
+# Cross-Platform Strategy (Mac + Linux + Windows)
 
-Breezefile started Mac-first. Linux is a first-class target going forward. This doc is the rule of the road for keeping both platforms healthy without scattering `process.platform` checks across the codebase.
+Breezefile started Mac-first. Linux and Windows are first-class targets going forward. This doc is the rule of the road for keeping all platforms healthy without scattering `process.platform` checks across the codebase.
 
 ## Principle
 
@@ -9,7 +9,9 @@ Breezefile started Mac-first. Linux is a first-class target going forward. This 
 ## Architecture
 
 ### 1. Platform adapter (`electron/platform/`)
-One interface — `PlatformAdapter` — captures every OS-coupled operation as a method (search, app launching, external volumes, sound, share, color tags, window chrome, excluded paths, etc.). Two implementations: `MacAdapter`, `LinuxAdapter`. Selected once at startup from `process.platform`. All IPC handlers call `platform.foo(...)` — they never branch on OS.
+One interface — `PlatformAdapter` — captures every OS-coupled operation as a method (search, app launching, external volumes, sound, share, color tags, window chrome, excluded paths, etc.). Three implementations: `MacAdapter`, `LinuxAdapter`, `WindowsAdapter`. Selected once at startup from `process.platform` (`win32` → Windows, `darwin` → Mac, else Linux). All IPC handlers call `platform.foo(...)` — they never branch on OS.
+
+Windows reuses the Linux search strategy (the shared SQLite name index at `~/.breezefile/index.db` + cold-start BFS), arranges Chrome via the Win32 `SetWindowPos` API driven from a one-shot PowerShell snippet, and resolves Chrome/Claude from the standard `%PROGRAMFILES%` / `%APPDATA%\npm` locations. OS-coupled IPC handlers that can't go through the adapter (compress/extract, Open With, the terminal verb, app upgrade, drive enumeration, the boot-volume label, executable classification) branch on `process.platform` *inside the handler* and pick a Windows-native tool: PowerShell `Compress-Archive`/`Expand-Archive` + bundled `tar.exe` for archives, the picked `.exe` for Open With, `wt.exe`/`cmd.exe` for the terminal, and the GitHub releases page for upgrade (no Homebrew).
 
 Unsupported operations return `null` (not throw). The handler reports the gap to the renderer; the UI hides the verb.
 

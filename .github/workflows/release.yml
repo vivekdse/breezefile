@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-mac:
     runs-on: macos-14
     # Hoist the tap PAT to job-level env so the tap-update step can gate
     # itself on its presence via `if: env.HOMEBREW_TAP_TOKEN != ''` (GH
@@ -111,3 +111,47 @@ jobs:
           fi
           git commit -m "breezefile ${VERSION}"
           git push origin HEAD
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # node-gyp needs distutils (removed in Python 3.12+) to rebuild
+      # better-sqlite3 against Electron's ABI. Pin 3.11.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (renderer + main)
+        # build:native is a no-op off macOS (the Swift sharer is mac-only);
+        # the chain still runs tsc -b + vite build.
+        run: npm run build
+
+      - name: Package with electron-builder
+        run: npx electron-builder --win nsis --x64 --publish=never
+
+      - name: Compute SHA256
+        shell: bash
+        run: |
+          cd release
+          for f in *.exe; do
+            [ -f "$f" ] || continue
+            echo "$f  $(sha256sum "$f" | awk '{print $1}')"
+          done | tee shasums-win.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.exe
+            release/shasums-win.txt
+          generate_release_notes: true

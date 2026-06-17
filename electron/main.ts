@@ -107,16 +107,26 @@ function mimeFor(p: string): string {
 let win: BrowserWindow | null = null;
 
 function createWindow() {
+  // Window chrome: the hidden-inset title bar, traffic-light inset, and
+  // under-window vibrancy are macOS-only. On Windows/Linux they're ignored or
+  // (vibrancy) unsupported, so we apply them conditionally and fall back to a
+  // standard frame elsewhere. The opaque backgroundColor stands in for the
+  // translucency on platforms without vibrancy.
+  const isMac = process.platform === 'darwin';
   win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 720,
     minHeight: 480,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#0f1114',
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
+    ...(isMac
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 16 },
+          vibrancy: 'under-window' as const,
+          visualEffectState: 'active' as const,
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       sandbox: true,
