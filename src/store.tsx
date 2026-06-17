@@ -299,9 +299,10 @@ type Action =
 function makeTab(
   path: string,
   opts?: {
-    kind?: 'folder' | 'task' | 'tasks' | 'edit';
+    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser';
     taskId?: string | null;
     editPath?: string | null;
+    browserUrl?: string;
   },
 ): Tab {
   return {
@@ -309,6 +310,7 @@ function makeTab(
     kind: opts?.kind ?? 'folder',
     taskId: opts?.taskId ?? null,
     editPath: opts?.editPath ?? null,
+    browserUrl: opts?.browserUrl,
     dirty: false,
     trail: [path],
     selected: { 0: 0 },

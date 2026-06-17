@@ -28,6 +28,7 @@ import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { EditShell } from './components/EditShell';
+import { BrowserPane } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -702,6 +703,17 @@ function Shell() {
         e.preventDefault();
         setSettingsOpen((v) => !v);
       }
+      // SPIKE (spike/playwright-cdp) — Cmd/Ctrl+B opens an embedded browser tab.
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        dispatch({
+          type: 'newTab',
+          tab: makeTab('/', {
+            kind: 'browser',
+            browserUrl: 'https://example.com',
+          }),
+        });
+      }
     }
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
@@ -899,6 +911,7 @@ function Shell() {
   const isTaskTab = tab.kind === 'task';
   const isTasksTab = tab.kind === 'tasks';
   const isEditTab = tab.kind === 'edit';
+  const isBrowserTab = tab.kind === 'browser'; // SPIKE (spike/playwright-cdp)
 
   return (
     <OverlayCtx.Provider value={overlayApi}><div
@@ -917,7 +930,7 @@ function Shell() {
           and let the task header own the top edge of the main pane. */}
       <div className="shell__chrome">
         <Tabbar />
-        {!isTaskTab && !isTasksTab && !isEditTab && (
+        {!isTaskTab && !isTasksTab && !isEditTab && !isBrowserTab && (
           <Pathbar
             path={tab.trail[tab.trail.length - 1]}
             onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
@@ -929,7 +942,7 @@ function Shell() {
           the real estate. Hidden in terminal mode (fm-jtu) so the
           terminal goes full-bleed. Stays visible in task mode — the
           tasks list is the user's pivot surface. */}
-      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && <Sidebar />}
+      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && <Sidebar />}
       {/* main slot — folder tabs render the recessed file plate; task
           tabs render TaskShell (header / actions / folder context).
           TerminalSplit wraps both so embedded terminals work in either
@@ -972,6 +985,8 @@ function Shell() {
             <TasksPage />
           ) : isEditTab ? (
             <EditShell tabIndex={state.activeTab} />
+          ) : isBrowserTab ? (
+            <BrowserPane url={tab.browserUrl || 'https://example.com'} />
           ) : (
             <>
               <FolderHeader />
@@ -987,12 +1002,12 @@ function Shell() {
           user can browse, toggle, and combine tags without leaving the file
           list. Hidden in terminal mode (fm-jtu) and in task mode (no
           file selected = nothing to preview). */}
-      {!tab.terminal && !isTaskTab && !isTasksTab && !isEditTab && (
+      {!tab.terminal && !isTaskTab && !isTasksTab && !isEditTab && !isBrowserTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
       {/* status slot — ModeLine stacked above Statusbar. Hidden in
           terminal mode so the terminal pane reaches the bottom edge. */}
-      {!tab.terminal && !isEditTab && (
+      {!tab.terminal && !isEditTab && !isBrowserTab && (
         <div className="shell__status">
           <ModeLine />
           <Statusbar />

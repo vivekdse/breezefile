@@ -126,6 +126,35 @@ type Fm = {
       state?: 'busy' | 'idle' | 'waiting',
     ) => void,
   ) => () => void;
+  // ─── SPIKE (spike/playwright-cdp): embedded browser-view control.
+  browserAttach: (opts: { url?: string }) => Promise<number>;
+  browserBounds: (
+    id: number,
+    rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      winW: number;
+      winH: number;
+    },
+  ) => void;
+  browserHide: (id: number) => void;
+  browserDestroy: (id: number) => Promise<void>;
+  browserNavigate: (id: number, url: string) => void;
+  browserBack: (id: number) => void;
+  browserForward: (id: number) => void;
+  browserReload: (id: number) => void;
+  browserDebug: (info: unknown) => void;
+  onBrowserState: (
+    cb: (s: {
+      id: number;
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+    }) => void,
+  ) => () => void;
   launchersList: () => Promise<Launcher[]>;
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;

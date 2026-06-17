@@ -49,6 +49,11 @@ dns.setDefaultResultOrder('ipv4first');
 // everywhere, dev and packaged alike.
 app.setName('Breeze File');
 
+// ─── SPIKE (spike/playwright-cdp): expose CDP so Playwright can drive an
+// embedded WebContentsView over the wire. Must be set before app is ready.
+// Remove this whole block (and the spikeView code in createWindow) to revert.
+app.commandLine.appendSwitch('remote-debugging-port', '9222');
+
 process.env.APP_ROOT = path.join(__dirname, '..');
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist');

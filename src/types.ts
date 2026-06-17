@@ -30,7 +30,9 @@ export type TagFilter = { mode: TagFilterMode; ids: string[] };
 // other text via a plain textarea). The trail is a single-element array
 // holding the file's parent dir (for breadcrumb consistency); `editPath`
 // carries the actual file path and `dirty` tracks unsaved changes.
-export type TabKind = 'folder' | 'task' | 'tasks' | 'edit';
+// SPIKE (spike/playwright-cdp): 'browser' is an embedded web view tab backed
+// by a main-process WebContentsView (see BrowserPane / electron browser:*).
+export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser';
 
 export type Tab = {
   id: string;
@@ -48,6 +50,9 @@ export type Tab = {
   /** fm-vu55 — when kind === 'edit', true while the editor has
    *  unsaved changes (tab title shows '• modified', closing prompts). */
   dirty?: boolean;
+  /** SPIKE (spike/playwright-cdp) — when kind === 'browser', the URL the
+   *  embedded WebContentsView loads. */
+  browserUrl?: string;
   trail: string[]; // absolute paths
   selected: Record<number, number>; // per-column selection index
   marks: Record<string, true>; // paths marked for selection (multi-select)

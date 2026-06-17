@@ -183,6 +183,45 @@ const fm = {
     ipcRenderer.on('term:exit', handler);
     return () => ipcRenderer.off('term:exit', handler);
   },
+  // ─── SPIKE (spike/playwright-cdp): embedded browser-view control. Mirrors
+  // the term:* shape — invoke for create/destroy, send for fire-and-forget
+  // bounds/nav, on() for state pushes. See electron/ipc.ts browser:* handlers.
+  browserAttach: (opts: { url?: string }) =>
+    ipcRenderer.invoke('browser:attach', opts) as Promise<number>,
+  browserBounds: (
+    id: number,
+    rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      winW: number;
+      winH: number;
+    },
+  ) => ipcRenderer.send('browser:bounds', id, rect),
+  browserHide: (id: number) => ipcRenderer.send('browser:hide', id),
+  browserDestroy: (id: number) =>
+    ipcRenderer.invoke('browser:destroy', id) as Promise<void>,
+  browserNavigate: (id: number, url: string) =>
+    ipcRenderer.send('browser:navigate', id, url),
+  browserBack: (id: number) => ipcRenderer.send('browser:back', id),
+  browserForward: (id: number) => ipcRenderer.send('browser:forward', id),
+  browserReload: (id: number) => ipcRenderer.send('browser:reload', id),
+  browserDebug: (info: unknown) => ipcRenderer.send('browser:debug', info),
+  onBrowserState: (
+    cb: (s: {
+      id: number;
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+    }) => void,
+  ) => {
+    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
+      cb(payload);
+    ipcRenderer.on('browser:state', handler);
+    return () => ipcRenderer.off('browser:state', handler);
+  },
   // fm-z7v — process-tree foreground transitions for tab busy/idle tint.
   // `state` is the rich tri-state ('busy'|'idle'|'waiting'); 'waiting'
   // is a mid-turn attention request (Claude permission prompt). `busy`

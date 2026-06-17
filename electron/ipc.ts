@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, BrowserWindow, webContents, clipboard, nativeImage, dialog } from 'electron';
+import { ipcMain, shell, app, BrowserWindow, WebContentsView, webContents, clipboard, nativeImage, dialog } from 'electron';
 import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -1918,6 +1918,128 @@ end tell`;
     if (!r) return;
     try { r.proc.kill(signal); } catch { /* noop */ }
     ptys.delete(id);
+  });
+
+  // ─── SPIKE (spike/playwright-cdp): embedded browser views, one per
+  // 'browser'-kind tab. A WebContentsView is an OS-level overlay parented to
+  // the window's contentView — it floats ABOVE the React DOM, so the renderer
+  // can't position or clip it. The BrowserPane component measures its
+  // placeholder div and streams bounds here via 'browser:bounds'; we mirror
+  // the view onto that rect and toggle visibility on tab switch. Each view is
+  // a real Chromium webContents, so Playwright drives it over CDP (port 9222).
+  type BrowserRec = { view: WebContentsView; win: BrowserWindow };
+  const browserViews = new Map<number, BrowserRec>();
+  let nextBrowserId = 1;
+
+  ipcMain.handle('browser:attach', (e, opts: { url?: string }): number => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return -1;
+    const id = nextBrowserId++;
+    const view = new WebContentsView();
+    view.setVisible(false); // stay hidden until the first bounds report
+    win.contentView.addChildView(view);
+    const wc = view.webContents;
+    const emit = () => {
+      if (win.webContents.isDestroyed()) return;
+      win.webContents.send('browser:state', {
+        id,
+        url: wc.getURL(),
+        title: wc.getTitle(),
+        canGoBack: wc.navigationHistory.canGoBack(),
+        canGoForward: wc.navigationHistory.canGoForward(),
+      });
+    };
+    wc.on('did-navigate', emit);
+    wc.on('did-navigate-in-page', emit);
+    wc.on('page-title-updated', emit);
+    // Open target=_blank / window.open in the same view rather than spawning a
+    // native child window (keeps everything inside the tab for the spike).
+    wc.setWindowOpenHandler(({ url }) => {
+      wc.loadURL(url);
+      return { action: 'deny' };
+    });
+    void wc.loadURL(opts?.url || 'https://example.com');
+    browserViews.set(id, { view, win });
+    const cb0 = win.getContentBounds();
+    console.log(`[browser] attach id=${id} window={w:${cb0.width},h:${cb0.height}}`);
+    return id;
+  });
+
+  const lastBoundsLog = new Map<number, string>();
+  ipcMain.on(
+    'browser:bounds',
+    (
+      _e,
+      id: number,
+      rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        winW: number;
+        winH: number;
+      },
+    ) => {
+      const rec = browserViews.get(id);
+      if (!rec) return;
+      // setBounds works in device-independent pixels (DIP); the renderer's
+      // getBoundingClientRect is in CSS pixels. On HiDPI / fractionally-scaled
+      // displays these differ, so scale the CSS-px corner into DIP using the
+      // ratio between the window's DIP size and the renderer's reported CSS
+      // size. Take the corner from the renderer, the extent from the window
+      // (a browser tab collapses every other panel → it runs to the edges).
+      const cb = rec.win.getContentBounds();
+      const sx = rect.winW > 0 ? cb.width / rect.winW : 1;
+      const sy = rect.winH > 0 ? cb.height / rect.winH : 1;
+      const x = Math.round(rect.x * sx);
+      const y = Math.round(rect.y * sy);
+      const b = {
+        x,
+        y,
+        width: Math.max(0, cb.width - x),
+        height: Math.max(0, cb.height - y),
+      };
+      rec.view.setBounds(b);
+      rec.view.setVisible(true);
+      // SPIKE diag — log only on change so we can compare the slot the renderer
+      // measured against the actual window content size.
+      const line = `[browser] bounds id=${id} view={x:${b.x},y:${b.y},w:${b.width},h:${b.height}} window={w:${cb.width},h:${cb.height}}`;
+      if (lastBoundsLog.get(id) !== line) {
+        lastBoundsLog.set(id, line);
+        console.log(line);
+      }
+    },
+  );
+
+  ipcMain.on('browser:hide', (_e, id: number) => {
+    browserViews.get(id)?.view.setVisible(false);
+  });
+
+  ipcMain.handle('browser:destroy', (_e, id: number) => {
+    const rec = browserViews.get(id);
+    if (!rec) return;
+    try { rec.win.contentView.removeChildView(rec.view); } catch { /* gone */ }
+    try { rec.view.webContents.close(); } catch { /* gone */ }
+    browserViews.delete(id);
+  });
+
+  ipcMain.on('browser:debug', (_e, info) => {
+    console.log('[browser:debug]', JSON.stringify(info));
+  });
+
+  ipcMain.on('browser:navigate', (_e, id: number, url: string) => {
+    void browserViews.get(id)?.view.webContents.loadURL(url);
+  });
+  ipcMain.on('browser:back', (_e, id: number) => {
+    const h = browserViews.get(id)?.view.webContents.navigationHistory;
+    if (h?.canGoBack()) h.goBack();
+  });
+  ipcMain.on('browser:forward', (_e, id: number) => {
+    const h = browserViews.get(id)?.view.webContents.navigationHistory;
+    if (h?.canGoForward()) h.goForward();
+  });
+  ipcMain.on('browser:reload', (_e, id: number) => {
+    browserViews.get(id)?.view.webContents.reload();
   });
 
   // fm-z7v — busy/idle signal comes from Claude Code hooks
