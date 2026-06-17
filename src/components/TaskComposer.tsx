@@ -330,6 +330,9 @@ export function TaskComposer(props: Props) {
   const [executor, setExecutor] = useState<ExecutorId>(
     initial?.auto_mode ? 'claude' : 'manual',
   );
+  // Once the user explicitly picks "who runs this" we stop auto-defaulting it
+  // (mirrors targetTouched). Edits start pinned to the saved value.
+  const [executorTouched, setExecutorTouched] = useState(props.mode === 'edit');
   // fm-b5at.7 — agent flags (chrome/auto/interactive). Only meaningful for
   // Claude tasks; a Set keyed by flag name, persisted as the flags array.
   const [flags, setFlags] = useState<Set<string>>(
@@ -436,6 +439,15 @@ export function TaskComposer(props: Props) {
   const [whoHighlight, setWhoHighlight] = useState(() =>
     Math.max(0, WHO_OPTIONS.findIndex((w) => w.id === executor)),
   );
+  // Auto-default the executor by target: a TypeBuild task is run by the
+  // default agent (Claude Code) via Start, so default "who" to Claude there;
+  // local tasks default to Manual. Stops once the user picks explicitly.
+  useEffect(() => {
+    if (props.mode === 'edit' || executorTouched) return;
+    const next: ExecutorId = isTypebuild ? 'claude' : 'manual';
+    setExecutor(next);
+    setWhoHighlight(Math.max(0, WHO_OPTIONS.findIndex((w) => w.id === next)));
+  }, [isTypebuild, executorTouched, props.mode]);
   const [folderHighlight, setFolderHighlight] = useState(() => {
     const i = visibleFolderPresets.findIndex((p) => p.v === folder);
     return i >= 0 ? i : 0;
@@ -554,6 +566,7 @@ export function TaskComposer(props: Props) {
     const o = WHO_OPTIONS[i];
     if (!o) return;
     setExecutor(o.id);
+    setExecutorTouched(true);
     setWhoHighlight(i);
     setStartHighlight(START_OPTIONS.findIndex((s) => s.id === startId));
     goNext();
