@@ -222,6 +222,13 @@ const fm = {
     ipcRenderer.on('browser:state', handler);
     return () => ipcRenderer.off('browser:state', handler);
   },
+  // SPIKE (spike/playwright-cdp): main → renderer request to OPEN a browser
+  // tab (e.g. the `playwright` task flag opens one for the agent to drive).
+  onBrowserOpen: (cb: (s: { url?: string }) => void) => {
+    const handler = (_e: unknown, payload: { url?: string }) => cb(payload);
+    ipcRenderer.on('browser:open', handler);
+    return () => ipcRenderer.off('browser:open', handler);
+  },
   // fm-z7v — process-tree foreground transitions for tab busy/idle tint.
   // `state` is the rich tri-state ('busy'|'idle'|'waiting'); 'waiting'
   // is a mid-turn attention request (Claude permission prompt). `busy`

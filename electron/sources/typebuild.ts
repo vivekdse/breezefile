@@ -31,6 +31,7 @@ import { classifyTransitions } from './typebuild-transitions.mjs';
 import { getAuthState, getIdToken } from '../typebuild/auth';
 import { mintMcpToken } from '../typebuild/mcp-token';
 import { clearSession, registerSession } from '../typebuild/sessions';
+import { browserCliAllowRules } from '../browser/automation';
 import type {
   RunNowOptions,
   SourcedTask,
@@ -76,10 +77,12 @@ const TASKS_SETTINGS = path.join(TASKS_DIR, '.claude', 'settings.json');
 
 // Tools the /work flow must call unattended:
 //   mcp__typebuild        — the TypeBuild MCP server (task lifecycle verbs)
-//   mcp__claude-in-chrome — the browser tools the --chrome integration exposes
+//   Bash(node <cli>:*)    — SPIKE (spike/playwright-cdp): the embedded-browser
+//                           helper, the in-app replacement for claude-in-chrome
 // Server-level rules (no __tool suffix) cover every current + future tool on
 // each server, so the session never stalls on a per-tool permission prompt.
-const BASELINE_ALLOW = ['mcp__typebuild', 'mcp__claude-in-chrome'];
+// browserCliAllowRules() is resolved at seed time (it embeds an absolute path).
+const BASELINE_ALLOW = ['mcp__typebuild', ...browserCliAllowRules()];
 
 // Ensure ~/.breezefile/tasks/.claude/settings.json exists and grants the
 // baseline allow-rules, MERGING into any rules the user added rather than
@@ -779,16 +782,17 @@ export class TypeBuildTaskSource implements TaskSource {
     // 'resume' (→ --continue) so the prior conversation continues with the
     // fresh token instead of starting cold.
     //
-    // 'chrome' (→ --chrome) is forced on, not merely passed through: TypeBuild
-    // is fundamentally a Claude-in-Chrome workflow (the server is the
-    // /chromeext/* API), so every interactive session needs the browser
-    // integration regardless of whether the server row happened to set the
-    // flag. The Set dedupes if the server already sent it.
+    // SPIKE (spike/playwright-cdp): drive the EMBEDDED Breeze browser tab via
+    // Playwright over CDP instead of the Claude-in-Chrome extension. 'playwright'
+    // is forced on (the in-app analog of the old forced 'chrome'): the launcher
+    // opens a browser tab, points the agent at the helper CLI, and pre-grants
+    // its permission (see ensureTasksWorkspace). We strip any server-sent
+    // 'chrome' so the two browser integrations never both load. The Set dedupes.
     const flags = Array.from(
       new Set([
-        ...serverFlags,
+        ...serverFlags.filter((f) => f !== 'chrome'),
         'interactive',
-        'chrome',
+        'playwright',
         ...(opts.resume ? ['resume'] : []),
       ]),
     );

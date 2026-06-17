@@ -68,7 +68,10 @@ type ControlKind =
   | { kind: 'navigate'; path: string }
   | { kind: 'openTaskTab'; taskId: string }
   | { kind: 'launch'; tabId: string; launcherId: string; variantId?: string }
-  | { kind: 'listTabs' };
+  | { kind: 'listTabs' }
+  // SPIKE (spike/playwright-cdp): open an embedded browser tab on demand, so
+  // an in-app agent can create the tab it then drives over CDP.
+  | { kind: 'openBrowser'; url?: string };
 
 function controlRenderer<T = unknown>(req: ControlKind, timeoutMs = 4000): Promise<T> {
   const reqId = crypto.randomUUID();
@@ -171,6 +174,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (p === '/app/tabs' && m === 'GET') {
       const result = await controlRenderer<unknown>({ kind: 'listTabs' });
       return sendJson(res, 200, result);
+    }
+    // SPIKE (spike/playwright-cdp): open an embedded browser tab on demand.
+    // Lets the in-app agent (via electron/browser/cli.mjs `open`) create the
+    // tab it then drives over CDP, instead of relying on Ctrl/Cmd+B.
+    if (p === '/app/open-browser' && m === 'POST') {
+      const body = await readJson<{ url?: string }>(req).catch(() => ({}) as { url?: string });
+      await controlRenderer({ kind: 'openBrowser', url: body.url });
+      return sendJson(res, 200, { ok: true });
     }
 
     return send(res, 404, 'not found');

@@ -155,6 +155,8 @@ type Fm = {
       canGoForward: boolean;
     }) => void,
   ) => () => void;
+  // SPIKE (spike/playwright-cdp): main → renderer "open a browser tab" request.
+  onBrowserOpen: (cb: (s: { url?: string }) => void) => () => void;
   launchersList: () => Promise<Launcher[]>;
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;

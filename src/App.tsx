@@ -465,6 +465,17 @@ function Shell() {
             // a clear error rather than hanging.
             throw new Error('launch via API not implemented in v1');
           }
+          // SPIKE (spike/playwright-cdp) — open an embedded browser tab on
+          // demand (api-server /app/open-browser). Lets an in-app agent create
+          // the tab it drives over CDP without a keypress.
+          case 'openBrowser': {
+            const url = (req.url as string) || 'https://example.com';
+            dispatch({
+              type: 'newTab',
+              tab: makeTab('/', { kind: 'browser', browserUrl: url }),
+            });
+            break;
+          }
           case 'listTabs': {
             result = state.tabs.map((t) => ({
               id: t.id,
@@ -717,6 +728,20 @@ function Shell() {
     }
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
+  }, []);
+
+  // SPIKE (spike/playwright-cdp) — main process asks us to open a browser tab
+  // (the `playwright` task flag opens one for the agent to drive over CDP).
+  useEffect(() => {
+    return fm.onBrowserOpen(({ url }) => {
+      dispatch({
+        type: 'newTab',
+        tab: makeTab('/', {
+          kind: 'browser',
+          browserUrl: url || 'https://example.com',
+        }),
+      });
+    });
   }, []);
 
   // Bridge events from ChipPrompt → the overlays owned by App
