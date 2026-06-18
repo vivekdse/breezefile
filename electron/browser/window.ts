@@ -1,33 +1,40 @@
-// ─── SPIKE (spike/playwright-cdp): the agent's browser as its OWN window ─────
+// ─── SPIKE (spike/playwright-cdp): the agent's browser window + chat widget ──
 //
-// The agent's browser is a dedicated BrowserWindow that loads the page directly
-// and is exposed over CDP (port 9222, app-wide) like any other webContents, so
-// electron/browser/cli.mjs drives it unchanged.
+// A dedicated BrowserWindow whose own webContents IS the page (full-window,
+// exposed over CDP so electron/browser/cli.mjs drives it). Floating ABOVE the
+// page, in the same window, is a small WebContentsView "chat bot" rendering the
+// agent's terminal (#overlay=<ptyId>) — draggable and collapsible to a bubble,
+// so the user sees the browser and what Claude is doing at the same time.
 //
-// Layout: the browser fills the screen (the dominant view). The Claude chat is
-// a SEPARATE always-on-top overlay window (electron/browser/overlay.ts) docked
-// on top — see runTaskInteractive. The main Breeze window is left as-is behind
-// the full-screen browser.
-//
-// Singleton: reused + focused on repeat opens (the agent may call `open` more
-// than once).
+// Singleton window + singleton chat view. The chat is driven from its renderer
+// (src/components/AgentOverlay.tsx) via overlay:move / overlay:resize.
 
-import { BrowserWindow, screen } from 'electron';
+import path from 'node:path';
+import { BrowserWindow, WebContentsView, ipcMain, screen } from 'electron';
+
+const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+const MARGIN = 24;
+const PANEL = { width: 380, height: 560 };
 
 let browserWin: BrowserWindow | null = null;
+let chatView: WebContentsView | null = null;
+// Chat widget rect in window-content (DIP) coords; mutated by drag/resize.
+let chatBounds = { x: 0, y: 0, width: PANEL.width, height: PANEL.height };
 
 /** The live browser window, or null if none is open. */
 export function getBrowserWindow(): BrowserWindow | null {
   return browserWin && !browserWin.isDestroyed() ? browserWin : null;
 }
 
-/** Open (or focus) the browser window, sized to fill the screen. Reuse does NOT
- *  renavigate — the agent drives navigation via the helper's `goto`. */
-export function openBrowserWindow(url?: string): void {
+/** Open (or focus) the full-screen browser window. When `ptyId` is given, dock
+ *  the agent chat widget over the page. Reuse does NOT renavigate — the agent
+ *  drives navigation via the helper's `goto`. */
+export function openBrowserWindow(url?: string, ptyId?: number): void {
   const existing = getBrowserWindow();
   if (existing) {
     if (existing.isMinimized()) existing.restore();
     existing.focus();
+    if (ptyId != null && !chatView) createChat(existing, ptyId);
     return;
   }
   const win = new BrowserWindow({
@@ -38,10 +45,57 @@ export function openBrowserWindow(url?: string): void {
   });
   browserWin = win;
   win.on('closed', () => {
-    if (browserWin === win) browserWin = null;
+    if (browserWin === win) {
+      browserWin = null;
+      chatView = null;
+    }
   });
   void win.webContents.loadURL(url || 'https://example.com');
   fillScreen(win);
+  if (ptyId != null) createChat(win, ptyId);
+  // Keep the chat docked when the window resizes.
+  win.on('resize', () => clampChat());
+}
+
+// Dock the agent chat widget (a WebContentsView) above the page, bottom-right.
+function createChat(win: BrowserWindow, ptyId: number): void {
+  const view = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      sandbox: true,
+      contextIsolation: true,
+    },
+  });
+  chatView = view;
+  win.contentView.addChildView(view); // added last → floats above the page
+
+  const hash = `overlay=${ptyId}`;
+  if (VITE_DEV_SERVER_URL) {
+    void view.webContents.loadURL(`${VITE_DEV_SERVER_URL}#${hash}`);
+  } else {
+    void view.webContents.loadFile(
+      path.join(process.env.APP_ROOT || '', 'dist', 'index.html'),
+      { hash },
+    );
+  }
+
+  const cb = win.getContentBounds();
+  chatBounds = {
+    width: PANEL.width,
+    height: PANEL.height,
+    x: cb.width - PANEL.width - MARGIN,
+    y: cb.height - PANEL.height - MARGIN,
+  };
+  view.setBounds(chatBounds);
+}
+
+// Re-apply chatBounds clamped to the current window size.
+function clampChat(): void {
+  if (!chatView || !browserWin) return;
+  const cb = browserWin.getContentBounds();
+  chatBounds.x = Math.max(0, Math.min(chatBounds.x, cb.width - chatBounds.width));
+  chatBounds.y = Math.max(0, Math.min(chatBounds.y, cb.height - chatBounds.height));
+  chatView.setBounds(chatBounds);
 }
 
 // Size the browser to the full work area of the display under the Breeze
@@ -59,3 +113,20 @@ function fillScreen(bwin: BrowserWindow): void {
     /* best-effort; leave the window free-floating on a degraded WM */
   }
 }
+
+// ─── chat widget control (from src/components/AgentOverlay.tsx) ──────────────
+// Drag: move the widget by a CSS-px delta (== DIP at zoom 1), clamped in-window.
+ipcMain.on('overlay:move', (_e, dx: number, dy: number) => {
+  if (!chatView || !browserWin) return;
+  chatBounds.x += dx;
+  chatBounds.y += dy;
+  clampChat();
+});
+// Resize: the renderer asks for a size (panel vs collapsed bubble); keep the
+// widget anchored to its current corner, clamped in-window.
+ipcMain.on('overlay:resize', (_e, width: number, height: number) => {
+  if (!chatView || !browserWin) return;
+  chatBounds.width = Math.max(48, width);
+  chatBounds.height = Math.max(48, height);
+  clampChat();
+});

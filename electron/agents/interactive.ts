@@ -23,7 +23,6 @@ import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
 import { CDP_URL, BROWSER_CLI, playwrightPromptAddendum } from '../browser/automation';
 import { openBrowserWindow } from '../browser/window';
-import { createAgentOverlay } from '../browser/overlay';
 
 export type InteractiveRunOptions = {
   /** Agent id for the run row. Defaults to task.auto_agent or the registry
@@ -141,9 +140,6 @@ export async function runTaskInteractive(
   // first run, and --continue must not be seeded with a fresh message.
   const effectivePrompt =
     playwright && !opts.omitPrompt ? prompt + '\n' + playwrightPromptAddendum() : prompt;
-  if (playwright) {
-    openBrowserWindow('https://example.com');
-  }
   // Positional prompt arg launches claude interactively pre-seeded with the
   // task; flags map to CLI args; --add-dir grants the cwd. No -p (that's
   // the headless one-shot mode). On a resume relaunch (omitPrompt) we drop
@@ -216,10 +212,10 @@ export async function runTaskInteractive(
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);
   }
 
-  // SPIKE (spike/playwright-cdp): for playwright tasks, pop the dedicated
-  // agent-chat overlay that mirrors this pty, so the user sees Claude's
-  // questions floating over the full-screen browser.
-  if (playwright) createAgentOverlay(ptyId);
+  // SPIKE (spike/playwright-cdp): for playwright tasks, open the full-screen
+  // browser window with the agent chat widget docked over the page (mirrors
+  // this pty), so the user sees the page AND what Claude is doing at once.
+  if (playwright) openBrowserWindow('https://example.com', ptyId);
 
   return { run, ptyId, launched: true };
 }

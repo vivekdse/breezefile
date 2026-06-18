@@ -1,4 +1,4 @@
-/* SPIKE (spike/playwright-cdp): dedicated agent-chat overlay window. */
+/* SPIKE (spike/playwright-cdp): in-browser agent chat widget. */
 .agent-overlay {
   display: flex;
   flex-direction: column;
@@ -6,22 +6,24 @@
   width: 100vw;
   background: #0f1114;
   color: #e6e6e6;
+  border: 1px solid #2a2f37;
+  border-radius: 10px;
   overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
-/* Draggable title strip (frameless-feel): lets the user reposition the overlay
-   over the browser. The badge flips on when Claude is waiting for input. */
+/* Draggable title strip. Cursor hint + no text selection while dragging. */
 .agent-overlay__bar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   font: 600 12px/1.4 system-ui, sans-serif;
   letter-spacing: 0.04em;
   background: #16191e;
   border-bottom: 1px solid #23272e;
-  -webkit-app-region: drag;
+  cursor: move;
   user-select: none;
 }
 
@@ -31,8 +33,6 @@
 }
 
 .agent-overlay__badge {
-  -webkit-app-region: no-drag;
-  margin-left: auto;
   padding: 2px 8px;
   border-radius: 999px;
   background: #d9822b;
@@ -42,7 +42,25 @@
   font-size: 10px;
 }
 
-/* When waiting, pulse the top border so it's obvious even in peripheral vision. */
+.agent-overlay__min {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #9aa3af;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.agent-overlay__min:hover {
+  background: #23272e;
+  color: #e6e6e6;
+}
+
 .agent-overlay--waiting .agent-overlay__bar {
   background: #2a1f0c;
   border-bottom-color: #d9822b;
@@ -52,4 +70,27 @@
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
+}
+
+/* Collapsed bubble: fills the 64x64 view; circular floating button. */
+.agent-bubble {
+  width: 100vw;
+  height: 100vh;
+  border: none;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.agent-bubble--waiting {
+  background: #d9822b;
+  color: #1b1300;
+  font-weight: 800;
+  animation: agent-bubble-pulse 1.2s ease-in-out infinite;
+}
+@keyframes agent-bubble-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 130, 43, 0.6); }
+  50% { box-shadow: 0 0 0 8px rgba(217, 130, 43, 0); }
 }

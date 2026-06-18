@@ -160,6 +160,11 @@ const fm = {
   // SPIKE (spike/playwright-cdp): agent-overlay window mirrors a pty's stream.
   termMirror: (id: number) => ipcRenderer.send('term:mirror', id),
   termUnmirror: (id: number) => ipcRenderer.send('term:unmirror', id),
+  // SPIKE (spike/playwright-cdp): the in-browser chat widget drives its own
+  // WebContentsView bounds — drag by a delta, resize to panel/bubble.
+  overlayMove: (dx: number, dy: number) => ipcRenderer.send('overlay:move', dx, dy),
+  overlayResize: (width: number, height: number) =>
+    ipcRenderer.send('overlay:resize', width, height),
   termResize: (id: number, cols: number, rows: number) =>
     ipcRenderer.send('term:resize', id, cols, rows),
   termKill: (id: number, signal?: string) =>
