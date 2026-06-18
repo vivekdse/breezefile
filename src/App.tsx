@@ -28,7 +28,7 @@ import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { EditShell } from './components/EditShell';
-import { BrowserPane } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
+import { BrowserPane, reapBrowserViews } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -744,6 +744,16 @@ function Shell() {
     });
   }, []);
 
+  // SPIKE (spike/playwright-cdp) — browser views persist across tab switches
+  // (BrowserPane hides instead of destroying). When a browser tab is actually
+  // closed it stops appearing here, so reap its now-orphaned native view.
+  useEffect(() => {
+    const live = new Set(
+      state.tabs.filter((t) => t.kind === 'browser').map((t) => t.id),
+    );
+    reapBrowserViews(live);
+  }, [state.tabs]);
+
   // Bridge events from ChipPrompt → the overlays owned by App
   useEffect(() => {
     function onRename(e: Event) {
@@ -1011,7 +1021,7 @@ function Shell() {
           ) : isEditTab ? (
             <EditShell tabIndex={state.activeTab} />
           ) : isBrowserTab ? (
-            <BrowserPane url={tab.browserUrl || 'https://example.com'} />
+            <BrowserPane tabId={tab.id} url={tab.browserUrl || 'https://example.com'} />
           ) : (
             <>
               <FolderHeader />

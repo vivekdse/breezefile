@@ -145,6 +145,7 @@ type Fm = {
   browserBack: (id: number) => void;
   browserForward: (id: number) => void;
   browserReload: (id: number) => void;
+  browserSync: (id: number) => void;
   browserDebug: (info: unknown) => void;
   onBrowserState: (
     cb: (s: {

@@ -8,9 +8,29 @@ import { fm } from '../bridge';
 // toolbar (address + nav, real DOM) and an empty placeholder for the page; we
 // measure the placeholder and stream its viewport rect to main
 // (`browser:bounds`), which mirrors the view onto exactly that rect. The view
-// therefore sits BELOW the toolbar and fills the rest of the tab. On unmount
-// (tab closed / switched away) we destroy the view.
-export function BrowserPane({ url }: { url: string }) {
+// sits BELOW the toolbar and fills the rest of the tab.
+//
+// The native view must OUTLIVE this component. App renders only the ACTIVE
+// tab's content, so this unmounts on every tab switch — if we destroyed the
+// view here, switching away would discard the page and switching back would
+// reload the ORIGINAL url, losing navigation and killing any live CDP/Playwright
+// session. Instead we key one persistent view per (stable) tab id: HIDE on
+// unmount, REUSE on remount. App calls reapBrowserViews() to destroy a view
+// only when its tab is actually closed.
+const viewByTab = new Map<string, number>();
+
+/** Destroy the native views of tabs that are no longer open. Called by App
+ *  whenever the tab set changes, so a closed browser tab releases its view. */
+export function reapBrowserViews(liveTabIds: Set<string>): void {
+  for (const [tabId, id] of viewByTab) {
+    if (!liveTabIds.has(tabId)) {
+      void fm.browserDestroy(id);
+      viewByTab.delete(tabId);
+    }
+  }
+}
+
+export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
   const viewRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -19,6 +39,8 @@ export function BrowserPane({ url }: { url: string }) {
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false });
   const addrFocused = useRef(false);
 
+  // Keyed on tabId, NOT url: the view persists across navigations, so we must
+  // not tear it down when the (initial) url prop changes.
   useEffect(() => {
     let disposed = false;
     let ro: ResizeObserver | null = null;
@@ -58,41 +80,34 @@ export function BrowserPane({ url }: { url: string }) {
       setNav({ canGoBack: s.canGoBack, canGoForward: s.canGoForward });
     });
 
-    fm.browserAttach({ url }).then((id) => {
-      if (disposed) {
-        void fm.browserDestroy(id);
-        return;
-      }
+    // Show the view (fresh or reused) at our slot and start tracking its rect.
+    const activate = (id: number) => {
       idRef.current = id;
-      // Measure once now and again next frame (after the grid settles).
       report();
       schedule();
       ro = new ResizeObserver(schedule);
       if (viewRef.current) ro.observe(viewRef.current);
       window.addEventListener('resize', schedule);
-      // SPIKE diag — after layout settles, dump where every element actually
-      // landed so we can see why the address bar isn't visible.
-      setTimeout(() => {
-        const rectOf = (el: HTMLElement | null) => {
-          if (!el) return null;
-          const r = el.getBoundingClientRect();
-          const cs = getComputedStyle(el);
-          return {
-            x: Math.round(r.x), y: Math.round(r.y),
-            w: Math.round(r.width), h: Math.round(r.height),
-            display: cs.display, bg: cs.backgroundColor,
-          };
-        };
-        fm.browserDebug({
-          dpr: window.devicePixelRatio,
-          win: { w: window.innerWidth, h: window.innerHeight },
-          bar: rectOf(barRef.current),
-          view: rectOf(viewRef.current),
-          pane: rectOf(paneRef.current),
-          main: rectOf(document.querySelector('.shell__main')),
-        });
-      }, 500);
-    });
+      // Pull the view's CURRENT url/nav: while we were unmounted it may have
+      // navigated (address bar, a click, or Playwright), so the prop is stale.
+      fm.browserSync(id);
+    };
+
+    const existing = viewByTab.get(tabId);
+    if (existing != null) {
+      activate(existing);
+    } else {
+      void fm.browserAttach({ url }).then((id) => {
+        viewByTab.set(tabId, id);
+        if (disposed) {
+          // Switched away before attach resolved — keep the view (the tab is
+          // still open) but hide it; activate happens on the next remount.
+          fm.browserHide(id);
+          return;
+        }
+        activate(id);
+      });
+    }
 
     return () => {
       disposed = true;
@@ -101,12 +116,12 @@ export function BrowserPane({ url }: { url: string }) {
       window.removeEventListener('resize', schedule);
       offState();
       const id = idRef.current;
-      if (id != null) {
-        void fm.browserDestroy(id);
-        idRef.current = null;
-      }
+      // HIDE, don't destroy — the view survives the tab switch. reapBrowserViews
+      // destroys it when the tab is actually closed.
+      if (id != null) fm.browserHide(id);
+      idRef.current = null;
     };
-  }, [url]);
+  }, [tabId]);
 
   const go = () => {
     const id = idRef.current;

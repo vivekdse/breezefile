@@ -2147,7 +2147,7 @@ end tell`;
   // placeholder div and streams bounds here via 'browser:bounds'; we mirror
   // the view onto that rect and toggle visibility on tab switch. Each view is
   // a real Chromium webContents, so Playwright drives it over CDP (port 9222).
-  type BrowserRec = { view: WebContentsView; win: BrowserWindow };
+  type BrowserRec = { view: WebContentsView; win: BrowserWindow; emit: () => void };
   const browserViews = new Map<number, BrowserRec>();
   let nextBrowserId = 1;
 
@@ -2179,7 +2179,7 @@ end tell`;
       return { action: 'deny' };
     });
     void wc.loadURL(opts?.url || 'https://example.com');
-    browserViews.set(id, { view, win });
+    browserViews.set(id, { view, win, emit });
     const cb0 = win.getContentBounds();
     console.log(`[browser] attach id=${id} window={w:${cb0.width},h:${cb0.height}}`);
     return id;
@@ -2230,6 +2230,14 @@ end tell`;
       }
     },
   );
+
+  // Re-broadcast a view's current url/title/nav on demand. The renderer calls
+  // this when a BrowserPane (re)mounts so its address bar reflects where the
+  // view actually IS — it may have navigated while the tab was inactive (and
+  // thus had no live state listener).
+  ipcMain.on('browser:sync', (_e, id: number) => {
+    browserViews.get(id)?.emit();
+  });
 
   ipcMain.on('browser:hide', (_e, id: number) => {
     browserViews.get(id)?.view.setVisible(false);
