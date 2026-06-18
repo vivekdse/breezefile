@@ -29,6 +29,10 @@
 //   click <selector>            click first match (css, text=, xpath=)
 //   fill <selector> <value>     clear + type into an input
 //   type <selector> <value>     type into an element (no clear)
+//   fill-ref <selector> <ref>   clear + fill with a TypeBuild task `data` value
+//                               resolved by ref — the literal value never enters
+//                               this command's argv/stdout or the agent's context
+//   type-ref <selector> <ref>   type a `data` value resolved by ref (no clear)
 //   press <key>                 keyboard press (e.g. Enter, Control+a)
 //   wait <selector>             wait for selector to attach
 //   eval <jsExpression>         page.evaluate a JS expression, print JSON result
@@ -47,11 +51,38 @@ import {
   resolvePage,
   listPages,
   loc,
+  readApi,
+  API_FILE,
 } from './connect.mjs';
 
 function fail(msg) {
   process.stderr.write(String(msg) + '\n');
   process.exit(1);
+}
+
+// Resolve a placeholder ref (a TypeBuild task `data` key, e.g. "patient.ssn")
+// to its real value via Breeze MAIN. Main fetches + decrypts the value and
+// returns it over the localhost control API; it lands in THIS helper process
+// only — it never appears in the agent's argv, stdout, or context. The task id
+// comes from $BREEZE_TYPEBUILD_TASK_ID (injected for TypeBuild sessions). See
+// docs/pii-data-injection-design.md. We never print the resolved value.
+async function resolveDataRef(ref) {
+  const taskId = (process.env.BREEZE_TYPEBUILD_TASK_ID || '').trim();
+  if (!taskId) {
+    fail('fill-ref/type-ref require $BREEZE_TYPEBUILD_TASK_ID (TypeBuild sessions only)');
+  }
+  const api = readApi();
+  if (!api) fail(`cannot read ${API_FILE} — is Breeze running?`);
+  const res = await fetch(
+    `http://127.0.0.1:${api.port}/app/task-data` +
+      `?taskId=${encodeURIComponent(taskId)}&ref=${encodeURIComponent(ref)}`,
+    { headers: { authorization: `Bearer ${api.token}` } },
+  ).catch((e) => fail(`task-data request failed: ${e.message}`));
+  // The error envelope from main carries only the opaque ref key, never a value.
+  if (!res.ok) fail(`could not resolve ref "${ref}" (${res.status}): ${await res.text()}`);
+  const body = await res.json().catch(() => ({}));
+  if (typeof body.value !== 'string') fail(`ref "${ref}" returned no value`);
+  return body.value;
 }
 
 async function main() {
@@ -122,6 +153,23 @@ async function main() {
         if (!sel) fail('type needs a selector and value');
         await loc(page, sel).pressSequentially(v.join(' '));
         process.stdout.write(`typed into ${sel}\n`);
+        break;
+      }
+      case 'fill-ref': {
+        const [sel, ref] = rest;
+        if (!sel || !ref) fail('fill-ref needs a selector and a data ref');
+        const value = await resolveDataRef(ref);
+        await loc(page, sel).fill(value);
+        // Print the OPAQUE ref, never the value.
+        process.stdout.write(`filled ${sel} (ref ${ref})\n`);
+        break;
+      }
+      case 'type-ref': {
+        const [sel, ref] = rest;
+        if (!sel || !ref) fail('type-ref needs a selector and a data ref');
+        const value = await resolveDataRef(ref);
+        await loc(page, sel).pressSequentially(value);
+        process.stdout.write(`typed into ${sel} (ref ${ref})\n`);
         break;
       }
       case 'press': {

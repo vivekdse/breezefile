@@ -87,6 +87,8 @@ export function playwrightPromptAddendum(): string {
     '  click <selector>      click first match',
     '  fill <selector> <v>   set an input value',
     '  type <selector> <v>   type into an element',
+    '  fill-ref <sel> <ref>  fill from a task data placeholder (see below)',
+    '  type-ref <sel> <ref>  type from a task data placeholder (see below)',
     '  press <key>           keyboard press (e.g. Enter)',
     '  wait <selector>       wait for a selector',
     '  eval <jsExpression>   evaluate JS in the page, prints JSON',
@@ -96,5 +98,12 @@ export function playwrightPromptAddendum(): string {
     '`goto`) → `snapshot` to read the page → act (click/fill/press) → `snapshot`',
     'or `screenshot` to confirm. When a step is ambiguous, `screenshot out.png`',
     'and Read the PNG to see the page visually before deciding.',
+    '',
+    'Sensitive data (PII): when the task lists data placeholders (keys like',
+    '`patient.ssn`), DO NOT ask for or type the real values. Use `fill-ref`/',
+    '`type-ref` with the KEY — Breeze resolves the real value privately and',
+    'fills it. The value never passes through you. Never try to read a filled',
+    'sensitive field back (eval/snapshot) or screenshot a filled form — that',
+    'would expose the value you were given a placeholder to avoid.',
   ].join('\n');
 }

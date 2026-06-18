@@ -216,6 +216,23 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       openBrowserWindow(body.url);
       return sendJson(res, 200, { ok: true });
     }
+    // Cooperative-boundary PII/data injection (docs/pii-data-injection-design.md).
+    // Resolve ONE placeholder ref (a TypeBuild task `data` key) to its decrypted
+    // value, in MAIN, and return it to the browser helper (cli.mjs `fill-ref`)
+    // so the agent's context never carries the value. The value crosses only
+    // this localhost hop (already 127.0.0.1 + bearer-token authed). We never log
+    // it. THREAT MODEL: cooperative, not a sandbox — PII tasks need trusted
+    // agents (the agent can still read/screenshot the filled field).
+    if (p === '/app/task-data' && m === 'GET') {
+      const taskId = url.searchParams.get('taskId') ?? '';
+      const ref = url.searchParams.get('ref') ?? '';
+      if (!taskId || !ref) {
+        throw Object.assign(new Error('taskId and ref required'), { status: 400 });
+      }
+      const { resolveTaskDataRef } = await import('./typebuild/task-data');
+      const value = await resolveTaskDataRef(taskId, ref);
+      return sendJson(res, 200, { ok: true, ref, value });
+    }
 
     // fm-awii — tagging API. Tags live in the renderer store, so every route
     // proxies through the control bridge to the focused window.

@@ -844,6 +844,11 @@ export class TypeBuildTaskSource implements TaskSource {
         [MCP_TOKEN_ENV]: minted.accessToken,
         // PHI-free marker so the renderer can gate TypeBuild-tab behavior.
         BREEZE_TYPEBUILD_TASK: '1',
+        // Cooperative-boundary PII/data injection (docs/pii-data-injection-design.md).
+        // The opaque task id (non-PHI) lets the browser helper's `fill-ref` ask
+        // Breeze main to resolve a `data` placeholder for THIS task. Env only —
+        // never argv (/proc/<pid>/cmdline is world-readable); never a title/body.
+        BREEZE_TYPEBUILD_TASK_ID: id,
       },
       onExit: () => {
         // Drop the session from the expiry registry, then run the
