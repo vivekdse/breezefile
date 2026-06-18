@@ -1,0 +1,314 @@
+<!doctype html>
+<!-- CHAI Going Broad — reflection matrix for Breezefile task-experience inspirations -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Breezefile · Task Experience — Going Broad</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --ink:#e8ebf0; --muted:#9aa3b2;
+    --line:#272c38; --accent:#6ea8fe; --good:#5ad19a; --warn:#f2c14e; --bad:#ff7a7a;
+    --chip:#222836;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  header{padding:34px 40px 18px;border-bottom:1px solid var(--line);}
+  h1{margin:0 0 6px;font-size:26px;letter-spacing:-.01em}
+  .sub{color:var(--muted);max-width:760px}
+  .hero{margin:18px 40px 0;padding:16px 20px;background:linear-gradient(90deg,#1b2330,#171a21);
+    border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;}
+  .hero b{color:#fff}
+  .wrap{padding:24px 40px 60px}
+  h2{font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    margin:34px 0 12px;font-weight:700}
+  /* cards */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  a.card{display:block;text-decoration:none;color:inherit;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:16px 16px 14px;transition:.15s}
+  a.card:hover{border-color:var(--accent);transform:translateY(-2px);background:var(--panel2)}
+  .card .n{font-size:12px;color:var(--accent);font-weight:700;letter-spacing:.04em}
+  .card .t{font-size:17px;font-weight:650;margin:3px 0 6px}
+  .card .p{font-size:12.5px;color:var(--muted);margin:0 0 10px;
+    text-transform:uppercase;letter-spacing:.05em}
+  .card .d{font-size:13.5px;color:#cdd4e0;margin:0}
+  .vals{margin-top:11px;display:flex;flex-wrap:wrap;gap:5px}
+  .v{font-size:11px;background:var(--chip);color:#bcc6d6;border:1px solid var(--line);
+    padding:2px 7px;border-radius:20px}
+  /* matrix */
+  .scroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+  table{border-collapse:collapse;width:100%;min-width:1080px;font-size:12.5px}
+  th,td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);
+    padding:10px 12px;vertical-align:top;text-align:left}
+  th{background:var(--panel2);color:var(--muted);position:sticky;top:0;font-weight:650;
+    text-transform:uppercase;letter-spacing:.04em;font-size:11px}
+  th:first-child,td:first-child{position:sticky;left:0;background:var(--panel);min-width:190px;
+    font-weight:600;color:#fff;z-index:1}
+  th:first-child{z-index:2}
+  td{color:#c7cedb}
+  td.lead{color:var(--good)}
+  tr:hover td{background:#191d26}
+  tr:hover td:first-child{background:#1d2230}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:10px 2px 0;color:var(--muted);font-size:12px}
+  .legend b{color:var(--ink)}
+  footer{color:var(--muted);font-size:12.5px;padding:0 40px 40px;max-width:820px}
+  code{background:#0b0d11;border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:#dbe3f0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Breezefile · Task Experience — Going Broad</h1>
+  <p class="sub">Phase 3 inspirations. Nine deliberately diverse, low-fidelity prototypes for making
+  the agentic task experience <b>simple and delightful</b> — calm by default, powerful on demand.
+  Each explores a distinct paradigm against the three jobs: <b>monitor running agents live · triage
+  the overview · create agentic tasks from intent.</b> Not pick-a-winner — these are for comparing,
+  combining, and converging in Phase 4.</p>
+</header>
+
+<div class="hero">
+  Same scenario runs through all nine, so you can compare paradigms on identical data:
+  <b>3 agents need you · "Nightly deploy" has been blocked 41 min on a failing <code>auth.spec.ts</code></b>
+  · "Migrate beads" is asking a y/n · Priya's "Refactor TaskRow" is on step 3/5 · the team shares the
+  encrypted TypeBuild queue.
+</div>
+
+<div class="wrap">
+
+  <h2>The nine explorations</h2>
+  <div class="grid">
+
+    <a class="card" href="variation-1-mission-control.html">
+      <div class="n">01</div><div class="t">Mission Control</div>
+      <div class="p">Live dashboard cockpit</div>
+      <p class="d">Dark command center: every running agent is a live tile with state pill, ticking
+      last-action, step trace and pulse. Bulk-select → stop/nudge across agents. To-dos in a quiet rail.</p>
+      <div class="vals"><span class="v">Live awareness★</span><span class="v">Direct control</span><span class="v">Calm clarity</span></div>
+    </a>
+
+    <a class="card" href="variation-2-command-bar.html">
+      <div class="n">02</div><div class="t">Command Bar</div>
+      <div class="p">Conversational single input</div>
+      <p class="d">One ⌘K input drives everything. Plain intent ("ship the auth PR after tests pass")
+      renders a structured task proposal inline — inferred agent/folder/trigger, one field it can't
+      infer, a step plan, and a runtime+token dry-run estimate. Leads with recipes.</p>
+      <div class="vals"><span class="v">Intent→action★</span><span class="v">Power w/o machinery</span><span class="v">Calm clarity</span></div>
+    </a>
+
+    <a class="card" href="variation-3-three-lane-kanban.html">
+      <div class="n">03</div><div class="t">Attention Lanes</div>
+      <div class="p">Calm three-lane board</div>
+      <p class="d">Lanes by who-must-act: <b>Needs you · Agents working · Done/FYI</b> — not a status
+      board. Cards minimal until focused; j/k/h/l nav; mine-vs-theirs avatars; PHI titles reveal on
+      focus. A clean empty-lane state surfaces the unclaimed P0.</p>
+      <div class="vals"><span class="v">Calm clarity★</span><span class="v">Team coord</span><span class="v">Confidentiality</span></div>
+    </a>
+
+    <a class="card" href="variation-4-inbox-zero.html">
+      <div class="n">04</div><div class="t">Agent Inbox</div>
+      <div class="p">Triage stream like email</div>
+      <p class="d">One urgency-sorted inbox: agent y/n prompts, blocked runs, finished runs awaiting
+      accept/redo, due to-dos. Inline reply box steers an agent in place. <code>e</code>/<code>r</code>/<code>enter</code>.
+      "What changed" summaries with Accept/Redo. Inbox-zero celebrated.</p>
+      <div class="vals"><span class="v">Triage★</span><span class="v">Direct control</span><span class="v">Trust/audit</span></div>
+    </a>
+
+    <a class="card" href="variation-5-timeline-stream.html">
+      <div class="n">05</div><div class="t">Living Timeline</div>
+      <div class="p">Activity stream / CI feed</div>
+      <p class="d">Time-ordered feed of agent actions with per-step "why" lines (the audit ledger).
+      Running agents pinned on top with live progress; a JS tick appends real events. Filter by agent
+      or "needs me"; click an event to drop into the run.</p>
+      <div class="vals"><span class="v">Live awareness★</span><span class="v">Trust/audit★</span><span class="v">Direct control</span></div>
+    </a>
+
+    <a class="card" href="variation-6-ambient-canvas.html">
+      <div class="n">06</div><div class="t">Ambient Canvas</div>
+      <div class="p">Spatial node graph / map</div>
+      <p class="d">Calm 2D canvas showing a workflow's containment (parent→child steps) and ordering
+      (blocked-by edge glows red Test→Promote) — power without Jira machinery. Zoom: far = constellation,
+      near = node detail with steer/answer/stop.</p>
+      <div class="vals"><span class="v">Power w/o machinery★</span><span class="v">Live awareness</span><span class="v">Calm clarity</span></div>
+    </a>
+
+    <a class="card" href="variation-7-single-focus.html">
+      <div class="n">07</div><div class="t">Single Focus</div>
+      <div class="p">One thing at a time</div>
+      <p class="d">Radical calm: the screen shows the single most important thing to handle — the
+      blocked deploy, full-bleed, with its trace, the failing test, and act/steer/skip/stop. Slim rail:
+      "1 of 3 need you." <code>enter</code>/<code>n</code>/<code>s</code>. All-clear terminal state.</p>
+      <div class="vals"><span class="v">Calm clarity★</span><span class="v">Direct control</span></div>
+    </a>
+
+    <a class="card" href="variation-8-split-monitor.html">
+      <div class="n">08</div><div class="t">Split Monitor</div>
+      <div class="p">Grounded list + live detail</div>
+      <p class="d">Fast attention-sorted list on the left (secondary controls revealed on focus only);
+      live session detail on the right with streaming actions, per-step "why", inline steer, Stop/Pause/
+      Retry, and "what changed" + Accept/Redo. Proves: keep the power, defer the clutter.</p>
+      <div class="vals"><span class="v">Calm clarity</span><span class="v">Live awareness</span><span class="v">Direct control</span><span class="v">Trust/audit</span></div>
+    </a>
+
+    <a class="card" href="variation-9-fleet-roster.html">
+      <div class="n">09</div><div class="t">Fleet Roster</div>
+      <div class="p">Agents-as-a-team mental model</div>
+      <p class="d">Reframes around the <b>agents</b>, not the task list. Humans (you/Priya/Sam) and
+      agents share one roster with health + track record. Hero flags idle vs overloaded vs stuck.
+      Creating work = "give this to an agent" picked from the roster.</p>
+      <div class="vals"><span class="v">Team coord★</span><span class="v">Intent→action</span><span class="v">Power w/o machinery</span></div>
+    </a>
+
+  </div>
+
+  <h2>Reflection matrix — variation × value</h2>
+  <div class="legend">
+    <span><b>V1</b> Calm Clarity</span><span><b>V2</b> Live Awareness</span><span><b>V3</b> Direct Control</span>
+    <span><b>V4</b> Intent→Action</span><span><b>V5</b> Trust/Audit</span><span><b>V6</b> Team Coord</span>
+    <span><b>V7</b> Confidentiality</span><span><b>V8</b> Power w/o Machinery</span>
+    <span style="color:var(--good)"><b>green</b> = the value this variation leads on</span>
+  </div>
+  <div class="scroll" style="margin-top:10px">
+  <table>
+    <thead><tr>
+      <th>Variation</th><th>V1 Calm Clarity</th><th>V2 Live Awareness</th><th>V3 Direct Control</th>
+      <th>V4 Intent→Action</th><th>V5 Trust/Audit</th><th>V6 Team Coord</th>
+      <th>V7 Confidentiality</th><th>V8 Power w/o Machinery</th>
+    </tr></thead>
+    <tbody>
+
+      <tr>
+        <td>01 Mission Control</td>
+        <td>To-dos exiled to a quiet rail; cockpit shows only live agents</td>
+        <td class="lead">Every agent a live tile — state, ticking action, pulse, progress</td>
+        <td class="lead">Bulk-select agents → one stop/nudge bar</td>
+        <td>Create is a secondary "+ New run" entry</td>
+        <td>Per-tile step trace with one-line "why"</td>
+        <td>TypeBuild tiles show claimant (Priya)</td>
+        <td>TypeBuild content blurred until clicked</td>
+        <td>No engine UI — just live state of thin tasks</td>
+      </tr>
+
+      <tr>
+        <td>02 Command Bar</td>
+        <td>Page is one input + a minimal list that obeys it</td>
+        <td>"show blocked" / status surfaces live agents on demand</td>
+        <td class="lead">"stop nightly deploy" as a typed command</td>
+        <td class="lead">Plain intent → inline structured task proposal + dry-run cost</td>
+        <td>Proposal shows the planned step trace before you run</td>
+        <td>Can address work to a person or agent in the bar</td>
+        <td>Proposal infers without exposing stored PHI</td>
+        <td class="lead">Infers everything inferable; asks only what it can't</td>
+      </tr>
+
+      <tr>
+        <td>03 Attention Lanes</td>
+        <td class="lead">Three calm lanes by who-must-act; cards minimal till focus</td>
+        <td>"Agents working" lane shows live progress pulses</td>
+        <td>Stop/steer revealed on card focus</td>
+        <td>"+" per lane to add work where it belongs</td>
+        <td>Focused card expands its trace + "why"</td>
+        <td class="lead">Mine-vs-theirs avatars; unclaimed P0 in empty state</td>
+        <td class="lead">PHI title + last-action blur until focus</td>
+        <td>Lanes are derived from state, not a configured board</td>
+      </tr>
+
+      <tr>
+        <td>04 Agent Inbox</td>
+        <td class="lead">One prioritized stream; top item is what to do first</td>
+        <td>Waiting/blocked/finished agents all land in the inbox</td>
+        <td class="lead">Inline reply box steers an agent without leaving</td>
+        <td>"Compose" a task like a new message</td>
+        <td class="lead">Finished runs = "what changed" summary + Accept/Redo</td>
+        <td>Team handoffs appear as inbox items</td>
+        <td>Encrypted items reveal body on open only</td>
+        <td>Inbox items are tasks; no workflow config UI</td>
+      </tr>
+
+      <tr>
+        <td>05 Living Timeline</td>
+        <td>History recedes below; running work pinned on top</td>
+        <td class="lead">Live JS-ticking feed of agent actions as they happen</td>
+        <td>Click a stream event to drop into that run</td>
+        <td>Quiet "due today" peek; create off the timeline</td>
+        <td class="lead">Per-step "why" lines = the audit ledger, visible inline</td>
+        <td>Stream attributes each action to its owner</td>
+        <td>Stream shows state/actions, not stored content</td>
+        <td>Timeline = the per-child ledger rendered, nothing more</td>
+      </tr>
+
+      <tr>
+        <td>06 Ambient Canvas</td>
+        <td class="lead">Far-zoom constellation is calm; detail on demand</td>
+        <td>Running node pulses; blocked edge glows red live</td>
+        <td>Near-zoom node panel: steer / answer / stop</td>
+        <td>Drop a new node onto the canvas</td>
+        <td>Node detail carries the step's status + "why"</td>
+        <td>Nodes show owner; shared workflow is visible to team</td>
+        <td>Node labels gate PHI behind reveal</td>
+        <td class="lead">Only two edge types (parent, blocked-by) — no DSL</td>
+      </tr>
+
+      <tr>
+        <td>07 Single Focus</td>
+        <td class="lead">Exactly one thing on screen; everything else hidden</td>
+        <td>"1 of 3 need you" rail conveys the live backlog</td>
+        <td class="lead">Act / steer / skip / stop on the focused item</td>
+        <td>Skipped/handled items advance; create is out of flow</td>
+        <td class="lead">Focused item shows full trace + failing test</td>
+        <td>Honors team ownership when surfacing the next item</td>
+        <td>Reveals focused PHI in-memory only</td>
+        <td>Item is a thin task; agent supplied the block reason</td>
+      </tr>
+
+      <tr>
+        <td>08 Split Monitor</td>
+        <td class="lead">Left list calm; secondary controls deferred to the pane</td>
+        <td class="lead">Right pane streams the live session (JS tick)</td>
+        <td class="lead">Inline steer + Stop/Pause/Retry in the pane</td>
+        <td>": " command verbs to add/run work</td>
+        <td class="lead">"What changed" result + Accept/Redo; per-step "why"</td>
+        <td>List sorts mine/theirs; pane shows claimant</td>
+        <td class="lead">PHI reveal gate before the pane shows content</td>
+        <td>Pane reflects task state; no workflow builder</td>
+      </tr>
+
+      <tr>
+        <td>09 Fleet Roster</td>
+        <td>Roster is scannable; health badges carry the signal</td>
+        <td class="lead">Each agent card shows what it's doing right now + health</td>
+        <td>Open an agent to reassign / pause its queue</td>
+        <td class="lead">"Give this to an agent" picks from the roster + recipes</td>
+        <td>Track record (12 runs, 1 failed) builds trust over time</td>
+        <td class="lead">Humans + agents in ONE roster; unified labor model</td>
+        <td>Agent queues show task state, gate content</td>
+        <td class="lead">Agents are the control plane made visible</td>
+      </tr>
+
+    </tbody>
+  </table>
+  </div>
+
+  <h2>Tensions each navigates</h2>
+  <div class="legend" style="display:block;line-height:1.7">
+    <div><b>Live awareness vs. clutter</b> — Mission Control (01), Timeline (05), Split (08) lean
+    information-dense; Single Focus (07) and Attention Lanes (03) suppress almost everything. The
+    convergence question: how much live signal before calm breaks?</div>
+    <div><b>Transparency vs. trust burden</b> — surfacing every per-step "why" (05, 08) makes agents
+    auditable but asks the operator to read more; Inbox (04) and Single Focus (07) summarize instead.</div>
+    <div><b>Intent freedom vs. structure</b> — Command Bar (02) and Fleet (09) let you say it in a
+    sentence; the proposal/roster supplies structure. Risk: over-inferring and getting it wrong —
+    both show the inferred plan before committing.</div>
+    <div><b>Tasks-centric vs. agents-centric</b> — eight variations organize around <i>work</i>; Fleet
+    (09) organizes around <i>workers</i> (human + agent). Worth testing which mental model the team adopts.</div>
+  </div>
+
+</div>
+
+<footer>
+  Built from <code>design-assets/Customer problem statement.md</code> + <code>Value Cards.md</code>.
+  Open any card above in a browser — no build step. Phase 4 (Going Deep) converges: pick the spine
+  (likely 03/04/08 for triage), graft the live-monitoring treatment (01/05) and the intent-first
+  creation (02/09) onto it, and pressure-test against the PHI invariant and the keyboard-first path.
+</footer>
+</body>
+</html>

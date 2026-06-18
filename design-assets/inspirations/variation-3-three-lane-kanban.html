@@ -1,0 +1,290 @@
+<!--
+  Variation 3 — "Attention Lanes" (NOT a status kanban)
+  Paradigm: Three calm lanes organised by WHO NEEDS TO ACT, not by status:
+            "NEEDS YOU" (manual to-dos fold in here naturally), "AGENTS WORKING", "DONE / FYI".
+            Cards are minimal until focused; keyboard-navigable (j/k/enter). Team ownership shown
+            by a small avatar; mine vs theirs legible at a glance. PHI: TypeBuild card shows STATE
+            with a locked title that reveals on focus/click. One empty lane done well.
+  Values served: V1 Calm Clarity (primary), V2 Live Situational Awareness, V6 Team Coordination,
+                 V7 Confidentiality (PHI reveal), V3 Direct Control.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breezefile — Attention Lanes</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --ink: #1a1d21;
+    --muted: #5f6672;
+    --dim: #9aa1ad;
+    --line: #e4e7ec;
+    --card: #ffffff;
+    --needs: #d9534f;     /* warm red — needs you */
+    --needs-bg: #fcefee;
+    --work: #2c6ecb;      /* blue — agents working */
+    --work-bg: #eaf1fc;
+    --done: #6b7280;      /* grey — done / fyi */
+    --done-bg: #f0f1f3;
+    --you: #2c6ecb; --priya: #8b5cf6; --sam: #d97706;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; -webkit-font-smoothing: antialiased; }
+  .top { padding: 22px 28px 0; }
+  .top .brand { font-weight: 700; color: var(--ink); }
+  .insight {
+    margin: 12px 0 4px; font-size: 16px; line-height: 1.5;
+    background: var(--needs-bg); border: 1px solid #f1d6d4; border-radius: 12px; padding: 13px 16px;
+  }
+  .insight b { color: var(--needs); }
+  .kbdhint { font-size: 12px; color: var(--dim); margin: 8px 2px 0; }
+  .kbdhint kbd { font-family: var(--mono); font-size: 11px; background: #fff; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; color: var(--muted); }
+
+  .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding: 16px 28px 48px; align-items: start; }
+  .lane { }
+  .lanehdr { display: flex; align-items: center; gap: 9px; padding: 4px 4px 12px; }
+  .lanehdr .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .lanehdr .ttl { font-size: 12px; text-transform: uppercase; letter-spacing: 1.4px; font-weight: 700; }
+  .lanehdr .ct { font-size: 12px; color: var(--dim); margin-left: auto; font-family: var(--mono); }
+  .lane.needs .dot { background: var(--needs); } .lane.needs .ttl { color: var(--needs); }
+  .lane.work  .dot { background: var(--work);  } .lane.work  .ttl { color: var(--work); }
+  .lane.done  .dot { background: var(--done);  } .lane.done  .ttl { color: var(--done); }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 10px; cursor: pointer;
+    transition: box-shadow .14s, border-color .14s, transform .08s;
+  }
+  .card:hover { border-color: #d4d8df; }
+  .card.focused { border-color: var(--work); box-shadow: 0 0 0 3px rgba(44,110,203,.12); transform: translateY(-1px); }
+  .lane.needs .card.focused { border-color: var(--needs); box-shadow: 0 0 0 3px rgba(217,83,79,.12); }
+
+  .card .top-row { display: flex; align-items: center; gap: 9px; }
+  .card .title { font-weight: 600; font-size: 14px; }
+  .card .ava { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; margin-left: auto; flex: 0 0 auto; }
+  .ava.you { background: var(--you); } .ava.priya { background: var(--priya); } .ava.sam { background: var(--sam); }
+  .mine-flag { font-size: 10px; color: var(--work); font-weight: 700; }
+
+  .card .why { font-size: 12.5px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+  .card .why .strong { color: var(--needs); font-weight: 600; }
+  .card .tagline { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 11px; color: var(--dim); }
+  .tag { font-family: var(--mono); font-size: 10px; border-radius: 5px; padding: 1px 5px; }
+  .tag.tb { color: var(--priya); border: 1px solid #e3d8fb; } .tag.lo { color: var(--work); border: 1px solid #d3e1f7; } .tag.man { color: var(--muted); border: 1px solid var(--line); }
+  .due { color: var(--needs); font-weight: 600; }
+  .pin { color: var(--sam); }
+
+  /* expand-on-focus detail (also revealed by click — not hover-gated) */
+  .detail { display: none; margin-top: 11px; padding-top: 11px; border-top: 1px dashed var(--line); }
+  .card.focused .detail, .card.open .detail { display: block; }
+  .trace { display: grid; gap: 5px; }
+  .tstep { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--muted); }
+  .tstep .n { font-family: var(--mono); font-size: 10px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto; align-self: center; }
+  .tstep.ok .n { background: #e6f4ec; color: #1f8a4c; }
+  .tstep.run .n { background: var(--work-bg); color: var(--work); border: 1px solid var(--work); }
+  .tstep.err .n { background: var(--needs-bg); color: var(--needs); }
+  .tstep.todo .n { border: 1px solid var(--line); color: var(--dim); }
+  .tstep .wy { color: var(--dim); font-size: 11px; }
+  .acts { display: flex; gap: 7px; margin-top: 11px; }
+  .b { font: inherit; font-size: 12px; border-radius: 8px; padding: 7px 11px; cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--ink); }
+  .b.primary { background: var(--needs); color: #fff; border-color: transparent; font-weight: 600; }
+  .lane.work .b.primary { background: var(--work); }
+  .b.stop { color: var(--needs); }
+
+  /* live pulse for working cards */
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--work); font-size: 11px; font-weight: 600; }
+  .live .p { width: 7px; height: 7px; border-radius: 50%; background: var(--work); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(44,110,203,.5)} 70%{box-shadow:0 0 0 6px rgba(44,110,203,0)} 100%{box-shadow:0 0 0 0 rgba(44,110,203,0)} }
+
+  /* PHI lock */
+  .locked .title-text { filter: blur(5px); user-select: none; transition: filter .18s; }
+  .card.focused .locked .title-text, .card.open .locked .title-text { filter: none; }
+  .lockicon { font-size: 11px; color: var(--dim); }
+
+  /* progress bar */
+  .pbar { height: 4px; background: #eef0f3; border-radius: 99px; overflow: hidden; margin-top: 9px; }
+  .pbar > i { display: block; height: 100%; background: var(--work); border-radius: 99px; transition: width .6s; }
+
+  /* empty lane */
+  .empty { border: 1.5px dashed var(--line); border-radius: 12px; padding: 26px 18px; text-align: center; color: var(--muted); background: #fbfbfc; }
+  .empty .em { font-size: 22px; }
+  .empty .eh { font-weight: 600; color: var(--ink); margin: 8px 0 4px; }
+  .empty .es { font-size: 12.5px; color: var(--muted); }
+  .empty .b { margin-top: 12px; }
+
+  .laneadd { width: 100%; text-align: left; color: var(--dim); border: 1px dashed var(--line); background: transparent; border-radius: 10px; padding: 9px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+  .laneadd:hover { color: var(--ink); border-color: #d4d8df; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand">Breezefile · Attention Lanes</div>
+  <div class="insight">
+    <b>2 things need you, and 1 is urgent.</b> The nightly deploy has been blocked 41 min on
+    <span style="font-family:var(--mono);font-size:14px">auth.spec.ts</span> — clear it before it
+    stalls tonight's release. 2 agents are moving on their own.
+  </div>
+  <div class="kbdhint">Navigate <kbd>j</kbd> <kbd>k</kbd> · open <kbd>enter</kbd> · across lanes <kbd>h</kbd> <kbd>l</kbd> · new task <kbd>n</kbd></div>
+</div>
+
+<div class="board">
+
+  <!-- LANE 1: NEEDS YOU -->
+  <section class="lane needs" data-lane="0">
+    <div class="lanehdr"><span class="dot"></span><span class="ttl">Needs you</span><span class="ct">4</span></div>
+
+    <div class="card" tabindex="0">
+      <div class="top-row"><span class="title">Nightly deploy</span><span class="ava you">Y</span></div>
+      <div class="why"><span class="strong">Blocked 41 min</span> — test <span style="font-family:var(--mono)">auth.spec.ts</span> returns 401, expected 200.</div>
+      <div class="tagline"><span class="tag lo">local · cron</span> · ~/git/api</div>
+      <div class="detail">
+        <div class="trace">
+          <div class="tstep ok"><span class="n">✓</span><span>Build bundle</span><span class="wy">— 12.4s</span></div>
+          <div class="tstep err"><span class="n">!</span><span>Run test suite</span><span class="wy">— 1 failing: auth.spec.ts</span></div>
+          <div class="tstep todo"><span class="n">3</span><span>Deploy to staging</span></div>
+        </div>
+        <div class="acts">
+          <button class="b primary">Retry without auth.spec</button>
+          <button class="b">View log</button>
+          <button class="b stop">■ Stop</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" tabindex="0">
+      <div class="top-row"><span class="title">Migrate beads → tasks</span><span class="ava you">Y</span></div>
+      <div class="why">Agent is paused, asking: <span class="strong">“Delete 12 stale issues? (y/n)”</span></div>
+      <div class="tagline"><span class="tag lo">local · auto</span> · waiting 6m</div>
+      <div class="detail">
+        <div class="acts">
+          <button class="b primary">Answer: yes</button>
+          <button class="b">Answer: no</button>
+          <button class="b">Show the 12</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" tabindex="0">
+      <div class="top-row"><span class="title">Reply to landlord about lease <span class="pin">📌</span></span></div>
+      <div class="why">Manual to-do — pinned.</div>
+      <div class="tagline"><span class="tag man">manual</span> · <span class="due">due today</span></div>
+      <div class="detail"><div class="acts"><button class="b primary">Mark done</button><button class="b">Open in folder</button><button class="b">Hand to agent</button></div></div>
+    </div>
+
+    <div class="card" tabindex="0">
+      <div class="top-row"><span class="title">Review Sam's PR #214</span><span class="ava sam">S</span></div>
+      <div class="why">Manual to-do — Sam is waiting.</div>
+      <div class="tagline"><span class="tag man">manual</span> · <span class="due">due today</span></div>
+      <div class="detail"><div class="acts"><button class="b primary">Mark done</button><button class="b">Open PR</button></div></div>
+    </div>
+
+    <button class="laneadd">+ Add a to-do or agent task…</button>
+  </section>
+
+  <!-- LANE 2: AGENTS WORKING -->
+  <section class="lane work" data-lane="1">
+    <div class="lanehdr"><span class="dot"></span><span class="ttl">Agents working</span><span class="ct">2</span></div>
+
+    <!-- PHI-locked TypeBuild card, mine -->
+    <div class="card locked" tabindex="0">
+      <div class="top-row">
+        <span class="title"><span class="title-text">Triage inbox → tasks</span> <span class="lockicon">🔒</span></span>
+        <span class="mine-flag">MINE</span><span class="ava you">Y</span>
+      </div>
+      <div class="why"><span class="live"><span class="p"></span>Working</span> · last action: <span class="title-text">drafted 4 tasks from Acme thread</span></div>
+      <div class="pbar"><i id="pb1" style="width:62%"></i></div>
+      <div class="tagline"><span class="tag tb">TypeBuild · encrypted</span></div>
+      <div class="detail">
+        <div style="font-size:11px;color:var(--dim);margin-bottom:7px">Content decrypted in memory only — visible while focused.</div>
+        <div class="acts"><button class="b">View full trace</button><button class="b">Reassign</button><button class="b stop">■ Stop</button></div>
+      </div>
+    </div>
+
+    <!-- Priya's card — theirs -->
+    <div class="card" tabindex="0">
+      <div class="top-row"><span class="title">Refactor TaskRow</span><span class="ava priya">P</span></div>
+      <div class="why"><span class="live"><span class="p"></span>Working</span> · step 3 of 5 — extracting subcomponents.</div>
+      <div class="pbar"><i id="pb2" style="width:60%"></i></div>
+      <div class="tagline"><span class="tag tb">TypeBuild · P1</span> · Priya's</div>
+      <div class="detail">
+        <div class="trace">
+          <div class="tstep ok"><span class="n">✓</span><span>Read TaskRow.tsx</span></div>
+          <div class="tstep ok"><span class="n">✓</span><span>Plan extraction</span></div>
+          <div class="tstep run"><span class="n">3</span><span>Extract &lt;StatusPill/&gt;</span><span class="wy">— 3 files touched</span></div>
+          <div class="tstep todo"><span class="n">4</span><span>Update imports</span></div>
+          <div class="tstep todo"><span class="n">5</span><span>Run tests</span></div>
+        </div>
+        <div class="acts"><button class="b">Watch live</button><button class="b">Message Priya</button></div>
+      </div>
+    </div>
+
+    <button class="laneadd">+ Start an agent task…</button>
+  </section>
+
+  <!-- LANE 3: DONE / FYI  (includes an empty-state demo when filtered, plus real done items) -->
+  <section class="lane done" data-lane="2">
+    <div class="lanehdr"><span class="dot"></span><span class="ttl">Done / FYI</span><span class="ct">1</span></div>
+
+    <div class="card" tabindex="0" style="opacity:.85">
+      <div class="top-row"><span class="title">Weekly report</span><span class="ava you">Y</span></div>
+      <div class="why">Done 2h ago — summarized 18 PRs into report.md.</div>
+      <div class="tagline"><span class="tag lo">cron · Fri 9am</span></div>
+      <div class="detail"><div class="acts"><button class="b primary">Open report.md</button><button class="b">Run again now</button></div></div>
+    </div>
+
+    <!-- EMPTY-STATE done well: the unclaimed sub-zone -->
+    <div class="empty">
+      <div class="em">🟢</div>
+      <div class="eh">Nothing else in the team queue</div>
+      <div class="es">Every TypeBuild task is claimed — except one. <b>Fix flaky CI (P0)</b> is unclaimed and ready.</div>
+      <button class="b primary" style="background:var(--work)">Claim &amp; hand to an agent</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  // keyboard nav across lanes (j/k within lane, h/l across, enter opens)
+  const lanes = [...document.querySelectorAll('.lane')].map(l => [...l.querySelectorAll('.card')]);
+  let li = 0, ci = 0;
+
+  function clearFocus() { document.querySelectorAll('.card.focused').forEach(c => c.classList.remove('focused')); }
+  function focusCard() {
+    clearFocus();
+    const card = lanes[li][ci];
+    if (card) { card.classList.add('focused'); card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+  }
+
+  document.addEventListener('keydown', e => {
+    if (['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'j') { ci = Math.min(ci + 1, lanes[li].length - 1); focusCard(); e.preventDefault(); }
+    else if (k === 'k') { ci = Math.max(ci - 1, 0); focusCard(); e.preventDefault(); }
+    else if (k === 'l') { li = Math.min(li + 1, lanes.length - 1); ci = Math.min(ci, lanes[li].length - 1); focusCard(); e.preventDefault(); }
+    else if (k === 'h') { li = Math.max(li - 1, 0); ci = Math.min(ci, lanes[li].length - 1); focusCard(); e.preventDefault(); }
+    else if (k === 'enter') { const c = lanes[li][ci]; if (c) c.classList.toggle('open'); e.preventDefault(); }
+  });
+
+  // click toggles open (reveals detail + PHI) — not hover-gated
+  document.querySelectorAll('.card').forEach((c, idx) => {
+    c.addEventListener('click', e => {
+      if (e.target.closest('.b')) return; // let buttons act
+      // sync keyboard cursor to clicked card
+      lanes.forEach((arr, l) => { const found = arr.indexOf(c); if (found > -1) { li = l; ci = found; } });
+      clearFocus(); c.classList.toggle('open');
+    });
+  });
+
+  // live progress bars
+  let p1 = 62, p2 = 60;
+  setInterval(() => { p1 = p1 >= 92 ? 62 : p1 + 3; document.getElementById('pb1').style.width = p1 + '%'; }, 1500);
+  setInterval(() => { p2 = p2 >= 78 ? 60 : p2 + 2; document.getElementById('pb2').style.width = p2 + '%'; }, 1900);
+
+  // start with the urgent card focused
+  focusCard();
+</script>
+</body>
+</html>

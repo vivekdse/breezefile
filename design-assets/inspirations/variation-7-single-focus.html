@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<!--
+  VARIATION 7 — "Single-focus / one-thing-at-a-time"
+  PARADIGM: Radical calm. The screen shows exactly ONE thing to handle right now,
+  full-bleed, with everything needed to act on it and a clear Next to advance.
+  A slim progress rail shows "N things need you · this is X of N". Everything else
+  is hidden until you finish or skip. Keyboard: enter=act, n=next, s=skip.
+  VALUES SERVED: V1 Calm Clarity (extreme), V3 Direct Control, V5 Trust & Auditability
+  (step trace + failing test inline), V2 Live Situational Awareness (slim rail).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breezefile — Focus</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#161b25; --ink:#e9eef5; --muted:#8a95a6;
+    --line:#222a38; --accent:#5b8cff; --warn:#ff8a4b; --bad:#ff5d6c;
+    --ok:#3ecf8e; --chip:#1d2533;
+    --shadow:0 30px 80px rgba(0,0,0,.55);
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:radial-gradient(1200px 700px at 50% -10%, #18202e 0%, var(--bg) 60%);
+    color:var(--ink); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; min-height:100%;
+  }
+  /* progress rail */
+  .rail{
+    display:flex; align-items:center; gap:18px; padding:14px 26px;
+    border-bottom:1px solid var(--line); background:rgba(14,17,23,.6); backdrop-filter:blur(8px);
+  }
+  .rail .brand{font-weight:700; letter-spacing:.3px; color:var(--muted); font-size:13px}
+  .rail .brand b{color:var(--ink)}
+  .pips{display:flex; gap:8px; flex:1; max-width:520px}
+  .pip{height:6px; border-radius:99px; flex:1; background:var(--line); position:relative; overflow:hidden}
+  .pip.done{background:var(--ok)}
+  .pip.current{background:var(--accent)}
+  .pip.current::after{content:""; position:absolute; inset:0; background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent); animation:sweep 2.2s linear infinite}
+  @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+  .railcount{font-size:13px; color:var(--muted); white-space:nowrap}
+  .railcount b{color:var(--ink)}
+
+  /* stage */
+  .stage{flex:1; display:grid; place-items:center; padding:40px 24px}
+  .card{
+    width:min(820px,100%); background:var(--panel); border:1px solid var(--line);
+    border-radius:22px; box-shadow:var(--shadow); overflow:hidden;
+  }
+  .card.hidden{display:none}
+
+  /* hero insight */
+  .hero{
+    padding:26px 30px 18px; border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(255,138,75,.10), transparent);
+  }
+  .status-tag{
+    display:inline-flex; align-items:center; gap:8px; font-size:12px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.6px; color:var(--warn);
+    background:rgba(255,138,75,.12); border:1px solid rgba(255,138,75,.35);
+    padding:5px 11px; border-radius:999px;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 0 rgba(255,138,75,.6);animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,138,75,.55)}70%{box-shadow:0 0 0 10px rgba(255,138,75,0)}100%{box-shadow:0 0 0 0 rgba(255,138,75,0)}}
+  .hero h1{margin:14px 0 6px; font-size:26px; line-height:1.2}
+  .hero .insight{font-size:16px; color:#ffd9c2; margin:0}
+  .hero .meta{margin-top:10px; font-size:13px; color:var(--muted); display:flex; gap:18px; flex-wrap:wrap}
+  .hero .meta code{background:var(--chip); padding:2px 7px; border-radius:6px; color:#cdd6e3}
+
+  /* body */
+  .body{padding:24px 30px}
+  .section-label{font-size:11px; letter-spacing:.9px; text-transform:uppercase; color:var(--muted); margin:0 0 12px}
+
+  /* step trace */
+  .trace{list-style:none; margin:0 0 22px; padding:0}
+  .trace li{display:grid; grid-template-columns:22px 1fr; gap:12px; padding:9px 0; border-bottom:1px dashed var(--line)}
+  .trace li:last-child{border-bottom:none}
+  .tk{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:11px;margin-top:2px}
+  .tk.ok{background:rgba(62,207,142,.15);color:var(--ok);border:1px solid rgba(62,207,142,.4)}
+  .tk.fail{background:rgba(255,93,108,.15);color:var(--bad);border:1px solid rgba(255,93,108,.45)}
+  .tk.run{background:rgba(91,140,255,.15);color:var(--accent);border:1px solid rgba(91,140,255,.4)}
+  .ts .what{font-weight:600}
+  .ts .why{color:var(--muted); font-size:13px}
+
+  /* failing test panel */
+  .codepanel{
+    background:#0b0e14; border:1px solid var(--line); border-radius:12px;
+    font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#cdd6e3;
+    padding:14px 16px; margin-bottom:22px; overflow:auto;
+  }
+  .codepanel .file{color:var(--muted); margin-bottom:8px}
+  .codepanel .red{color:var(--bad)}
+  .codepanel .dim{color:#5b6675}
+
+  /* actions */
+  .actions{display:flex; gap:12px; flex-wrap:wrap; align-items:center}
+  button{font:inherit; cursor:pointer; border-radius:12px; border:1px solid var(--line); padding:13px 20px; font-weight:600; color:var(--ink); background:var(--chip); transition:.15s}
+  button:hover{transform:translateY(-1px)}
+  .primary{background:var(--accent); border-color:var(--accent); color:#08111f; box-shadow:0 8px 24px rgba(91,140,255,.35)}
+  .danger{background:rgba(255,93,108,.12); border-color:rgba(255,93,108,.4); color:#ffb3bb}
+  .ghost{background:transparent}
+  .kbd{font:11px ui-monospace,monospace; background:#0b0e14; border:1px solid var(--line); border-bottom-width:2px; padding:1px 6px; border-radius:5px; color:var(--muted); margin-left:8px}
+  .spacer{flex:1}
+
+  /* steer box */
+  .steer{margin-top:18px; display:none}
+  .steer.open{display:block}
+  .steer textarea{width:100%; min-height:76px; resize:vertical; background:#0b0e14; border:1px solid var(--line); border-radius:12px; color:var(--ink); padding:12px 14px; font:inherit}
+  .steer .hint{font-size:12px; color:var(--muted); margin:6px 2px}
+
+  /* dry-run estimate */
+  .estimate{margin-top:14px; font-size:13px; color:var(--muted); background:var(--chip); border:1px dashed var(--line); border-radius:10px; padding:10px 14px}
+  .estimate b{color:var(--ink)}
+
+  /* running overlay state */
+  .running{display:none; align-items:center; gap:12px; margin-top:18px; font-size:14px; color:var(--accent)}
+  .running.show{display:flex}
+  .spin{width:16px;height:16px;border:2px solid rgba(91,140,255,.3);border-top-color:var(--accent);border-radius:50%;animation:rot .8s linear infinite}
+  @keyframes rot{to{transform:rotate(360deg)}}
+
+  /* inbox zero terminal state */
+  .zero{text-align:center; padding:70px 30px}
+  .zero .glyph{font-size:54px}
+  .zero h1{font-size:28px; margin:14px 0 8px}
+  .zero p{color:var(--muted); max-width:440px; margin:0 auto 22px; font-size:15px}
+  .zero .next{display:flex; flex-direction:column; gap:8px; max-width:340px; margin:0 auto; text-align:left}
+  .zero .nrow{display:flex; justify-content:space-between; align-items:center; background:var(--chip); border:1px solid var(--line); border-radius:10px; padding:10px 14px; font-size:13px; color:var(--muted)}
+  .zero .nrow b{color:var(--ink)}
+
+  .footnote{text-align:center; padding:16px; color:var(--muted); font-size:12px}
+  .footnote .kbd{margin:0 4px}
+</style>
+</head>
+<body>
+  <div class="rail">
+    <div class="brand"><b>Breezefile</b> · Focus</div>
+    <div class="pips" id="pips"></div>
+    <div class="railcount"><b id="railIdx">1</b> of <b id="railTot">3</b> things need you</div>
+  </div>
+
+  <main class="stage">
+    <!-- ===================== ITEM 1: BLOCKED nightly deploy ===================== -->
+    <section class="card" id="cardFocus">
+      <div class="hero">
+        <span class="status-tag"><span class="dot"></span> Blocked · 41 min</span>
+        <h1>Nightly deploy is stuck</h1>
+        <p class="insight">It can't ship — <b>auth.spec.ts</b> has failed 3 times running.
+          The agent has paused and is waiting for you to act or steer it.</p>
+        <div class="meta">
+          <span>local auto agent</span>
+          <span>folder <code>~/git/api</code></span>
+          <span>attempt 3 of 3</span>
+          <span>last action 2 min ago</span>
+        </div>
+      </div>
+
+      <div class="body">
+        <p class="section-label">What it did (step trace)</p>
+        <ul class="trace">
+          <li><span class="tk ok">✓</span><div class="ts"><div class="what">Pulled latest <code>main</code></div><div class="why">why · ensure deploy reflects newest commits</div></div></li>
+          <li><span class="tk ok">✓</span><div class="ts"><div class="what">Installed deps &amp; built bundle</div><div class="why">why · build must pass before tests run</div></div></li>
+          <li><span class="tk fail">✕</span><div class="ts"><div class="what">Ran test suite — <b style="color:var(--bad)">1 failing</b></div><div class="why">why · deploy gate requires a green suite; stopped here</div></div></li>
+          <li><span class="tk run">·</span><div class="ts"><div class="what" style="color:var(--muted)">Deploy to production — held</div><div class="why">why · will not ship while tests are red</div></div></li>
+        </ul>
+
+        <p class="section-label">The failing test</p>
+        <div class="codepanel">
+          <div class="file">auth.spec.ts › "rejects an expired session token"</div>
+          <div><span class="dim">expect(</span>res.status<span class="dim">).toBe(</span>401<span class="dim">)</span></div>
+          <div class="red">- Expected: 401</div>
+          <div class="red">+ Received: 200</div>
+          <div class="dim">at src/auth/session.ts:88 — token TTL check skipped when clock skew &gt; 0</div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="btnRetry">Re-run the test <span class="kbd">↵ enter</span></button>
+          <button class="ghost" id="btnSteer">Steer the agent</button>
+          <button class="danger" id="btnSkip">Skip for now <span class="kbd">s</span></button>
+          <div class="spacer"></div>
+          <button class="ghost" id="btnStop">Stop agent</button>
+        </div>
+
+        <div class="running" id="runState"><span class="spin"></span> Re-running <code>auth.spec.ts</code> in <code>~/git/api</code>… <span style="color:var(--muted)">live, no terminal needed</span></div>
+
+        <div class="estimate">Dry run · re-running the suite uses <b>~1 build minute</b> and won't deploy on its own — you'll review the result before it ships.</div>
+
+        <div class="steer" id="steerBox">
+          <textarea placeholder="Tell the agent what to do — e.g. 'Skip the expired-token test for now and open a follow-up issue', or 'Fix the clock-skew check in session.ts:88 and re-run.'"></textarea>
+          <div class="hint">The agent will plan its steps, show them here, and ask before anything irreversible.</div>
+          <div class="actions" style="margin-top:8px">
+            <button class="primary" id="btnSend">Send instruction</button>
+            <button class="ghost" id="btnCancelSteer">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== INBOX ZERO TERMINAL STATE ===================== -->
+    <section class="card hidden" id="cardZero">
+      <div class="zero">
+        <div class="glyph">✿</div>
+        <h1>All clear.</h1>
+        <p>Nothing needs you right now. 2 agents are still working in the background — you'll be pulled back here the moment one gets blocked or asks a question.</p>
+        <div class="next">
+          <div class="nrow"><span>Triage inbox → tasks</span><b style="color:var(--accent)">working · drafted 4 tasks</b></div>
+          <div class="nrow"><span>Refactor TaskRow · Priya</span><b style="color:var(--accent)">working · step 3 of 5</b></div>
+          <div class="nrow"><span>Weekly report</span><b style="color:var(--ok)">done 2h ago · summarized 18 PRs</b></div>
+        </div>
+        <div class="actions" style="justify-content:center;margin-top:26px">
+          <button class="primary" id="btnNew">Give an agent something new</button>
+          <button class="ghost" id="btnReset">Replay the queue</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="footnote">
+    <span class="kbd">↵</span> act · <span class="kbd">n</span> next · <span class="kbd">s</span> skip · everything else stays out of your way
+  </div>
+
+<script>
+  // Three things need you; we focus #1 (deploy). n/s advance through the queue,
+  // then land on inbox-zero. This is a low-fi prototype of the focus loop.
+  const TOTAL = 3;
+  let idx = 0; // 0-based index of current "thing"
+  const pips = document.getElementById('pips');
+  function renderPips(){
+    pips.innerHTML='';
+    for(let i=0;i<TOTAL;i++){
+      const d=document.createElement('div'); d.className='pip';
+      if(i<idx) d.classList.add('done'); else if(i===idx) d.classList.add('current');
+      pips.appendChild(d);
+    }
+    document.getElementById('railIdx').textContent=Math.min(idx+1,TOTAL);
+  }
+  document.getElementById('railTot').textContent=TOTAL;
+
+  const cardFocus=document.getElementById('cardFocus');
+  const cardZero=document.getElementById('cardZero');
+  const runState=document.getElementById('runState');
+  const steerBox=document.getElementById('steerBox');
+
+  function advance(){
+    idx++;
+    runState.classList.remove('show');
+    steerBox.classList.remove('open');
+    if(idx>=TOTAL){
+      cardFocus.classList.add('hidden');
+      cardZero.classList.remove('hidden');
+      pips.querySelectorAll('.pip').forEach(p=>{p.className='pip done';});
+      document.getElementById('railIdx').textContent=TOTAL;
+    } else {
+      renderPips();
+    }
+  }
+
+  document.getElementById('btnRetry').onclick=()=>{
+    runState.classList.add('show');
+    // simulate live re-run then auto-advance
+    setTimeout(()=>{ runState.innerHTML='<span style="color:var(--ok)">✓</span> Suite green — deploy resumed. Handing back…'; },2600);
+    setTimeout(advance,4200);
+  };
+  document.getElementById('btnSkip').onclick=advance;
+  document.getElementById('btnStop').onclick=()=>{ runState.classList.add('show'); runState.innerHTML='<span style="color:var(--bad)">■</span> Agent stopped. Nothing deployed.'; setTimeout(advance,1600); };
+  document.getElementById('btnSteer').onclick=()=>steerBox.classList.toggle('open');
+  document.getElementById('btnCancelSteer').onclick=()=>steerBox.classList.remove('open');
+  document.getElementById('btnSend').onclick=()=>{ steerBox.classList.remove('open'); runState.classList.add('show'); runState.innerHTML='<span class="spin"></span> Agent re-planning with your instruction…'; setTimeout(advance,2400); };
+
+  document.getElementById('btnReset').onclick=()=>{ idx=0; cardZero.classList.add('hidden'); cardFocus.classList.remove('hidden'); runState.classList.remove('show'); runState.innerHTML='<span class="spin"></span> Re-running…'; renderPips(); };
+  document.getElementById('btnNew').onclick=()=>alert('Create from intent: “Ship a PR”, “Nightly deploy”, “Triage inbox”, “Summarize a repo” — or type a sentence.');
+
+  document.addEventListener('keydown',e=>{
+    if(e.target.tagName==='TEXTAREA') return;
+    if(e.key==='Enter'){ if(!cardFocus.classList.contains('hidden')) document.getElementById('btnRetry').click(); }
+    if(e.key==='n') advance();
+    if(e.key==='s'){ if(!cardFocus.classList.contains('hidden')) advance(); }
+  });
+
+  renderPips();
+</script>
+</body>
+</html>

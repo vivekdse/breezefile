@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<!--
+  Variation 4 — "Agent Inbox" (Inbox Zero)
+  PARADIGM: The whole task surface reframed as a single prioritized triage inbox, like email.
+            ONE stream of things that want your attention, sorted most-urgent-first. Inline
+            reply box steers agents in place. Finished runs show a structured "what changed"
+            summary with Accept / Redo. Inbox-zero empty state celebrated.
+  VALUES SERVED:
+    V1 Calm Clarity        — one list, one focus, one hero line; everything else folds away.
+    V2 Live Awareness      — live status pills + age counters on each item, ticking.
+    V3 Direct Control      — inline reply/steer box per agent; e/r/enter keyboard verbs.
+    V5 Trust & Auditability— "what changed" structured diff with per-step trace + why lines.
+    V6 Team Coordination   — owner avatars (you / Priya / Sam) on TypeBuild items.
+    V7 Confidentiality     — TypeBuild bodies blurred until focused (hover/focus reveal).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Breezefile — Agent Inbox</title>
+<style>
+  :root{
+    --bg:#0e1014; --panel:#171a21; --panel2:#1d212b; --line:#272c38;
+    --ink:#e8ebf2; --dim:#8b93a7; --faint:#5c647a;
+    --accent:#6ea8fe; --accent-d:#3d6fd6;
+    --urgent:#ff6b6b; --warn:#ffb454; --ok:#54d18c; --working:#7aa2ff;
+    --radius:14px; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 600px at 80% -10%,#1a1f2e,#0e1014 60%);
+    color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45;
+    -webkit-font-smoothing:antialiased}
+  .app{max-width:840px;margin:0 auto;padding:26px 22px 80px}
+
+  /* Header */
+  .top{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:6px}
+  .brand{font-weight:700;letter-spacing:.2px;font-size:15px}
+  .brand .dot{color:var(--accent)}
+  .count{font-variant-numeric:tabular-nums;color:var(--dim);font-size:13px}
+  .count b{color:var(--ink)}
+
+  /* Hero insight */
+  .hero{background:linear-gradient(180deg,#221218,#191116);border:1px solid #4a2730;
+    border-left:3px solid var(--urgent);border-radius:var(--radius);
+    padding:14px 16px;margin:14px 0 18px;display:flex;gap:12px;align-items:flex-start}
+  .hero .icon{font-size:18px;line-height:1.2}
+  .hero h1{font-size:15px;margin:0 0 2px;font-weight:650}
+  .hero p{margin:0;color:#e7c2c2;font-size:13px}
+  .hero .jump{margin-left:auto;white-space:nowrap;align-self:center}
+
+  /* Filters */
+  .filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);background:var(--panel);color:var(--dim);
+    padding:5px 11px;border-radius:999px;font-size:12.5px;cursor:pointer;user-select:none}
+  .chip[aria-pressed="true"]{background:var(--accent-d);border-color:var(--accent);color:#fff}
+  .chip b{color:inherit;font-variant-numeric:tabular-nums}
+
+  /* List */
+  .stream{display:flex;flex-direction:column;gap:10px}
+  .item{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    overflow:hidden;transition:border-color .15s,transform .08s}
+  .item.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 8px 30px -12px #000}
+  .item.archiving{opacity:0;transform:translateX(40px);height:0;margin:-5px 0;padding:0}
+  .row{display:flex;gap:13px;padding:13px 15px;cursor:pointer;align-items:flex-start}
+  .rail{width:8px;flex:0 0 8px;align-self:stretch;border-radius:8px;margin:-13px 0 -13px -15px}
+  .r-urgent{background:var(--urgent)} .r-warn{background:var(--warn)}
+  .r-ok{background:var(--ok)} .r-work{background:var(--working)}
+  .ic{font-size:18px;width:24px;text-align:center;flex:0 0 24px}
+  .body{flex:1;min-width:0}
+  .line1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .title{font-weight:600;font-size:14px}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:2px}
+  .sub .why{color:var(--faint)}
+  .meta{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:0 0 auto}
+  .age{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  /* Status pill */
+  .pill{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;letter-spacing:.2px;
+    display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .p-wait{background:#3a2a12;color:var(--warn)} .p-block{background:#3a1820;color:var(--urgent)}
+  .p-work{background:#1b2750;color:var(--working)} .p-done{background:#11331f;color:var(--ok)}
+  .p-todo{background:#2a2030;color:#d7a8ff}
+  .blink{width:7px;height:7px;border-radius:50%;background:currentColor;
+    animation:blink 1.2s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+  /* Owner chips */
+  .who{display:inline-flex;align-items:center;gap:5px;color:var(--dim);font-size:12px}
+  .av{width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;
+    font-size:10px;font-weight:700;color:#0e1014}
+  .av-you{background:var(--accent)} .av-priya{background:#f2a3c7} .av-sam{background:#9fe3a8}
+  .tb{font-size:10px;color:var(--faint);border:1px solid var(--line);border-radius:5px;
+    padding:1px 5px;letter-spacing:.3px}
+
+  /* Confidential reveal */
+  .conf{filter:blur(5px);transition:filter .15s;cursor:default}
+  .item:hover .conf,.item.sel .conf{filter:none}
+  .lock{font-size:11px;color:var(--faint)}
+
+  /* Expand region */
+  .expand{border-top:1px solid var(--line);background:var(--panel2);padding:0 15px;
+    max-height:0;overflow:hidden;transition:max-height .2s ease,padding .2s}
+  .item.open .expand{max-height:560px;padding:14px 15px}
+
+  /* steer reply box */
+  .reply{display:flex;gap:8px;align-items:stretch}
+  .reply input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:9px;
+    color:var(--ink);padding:9px 12px;font-size:13px;font-family:var(--sans)}
+  .reply input:focus{outline:none;border-color:var(--accent)}
+  .quick{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+  .quick .chip{background:var(--bg)}
+  .quick .chip:hover{border-color:var(--accent);color:var(--ink)}
+
+  /* trace */
+  .trace{margin:0 0 12px;padding:0;list-style:none;font-size:12.5px}
+  .trace li{display:flex;gap:9px;padding:3px 0;align-items:flex-start}
+  .trace .st{font-size:12px;width:16px;flex:0 0 16px;text-align:center}
+  .trace .tx b{color:var(--ink)} .trace .tx{color:var(--dim)}
+  .trace .twhy{color:var(--faint);font-size:11.5px}
+
+  /* what changed */
+  .changed{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:12px}
+  .changed h4{margin:0 0 7px;font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+  .diff{font-family:var(--mono);font-size:12px;line-height:1.7}
+  .diff .add{color:var(--ok)} .diff .del{color:var(--urgent)} .diff .ctx{color:var(--faint)}
+
+  /* buttons */
+  .btn{border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+    padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;
+    font-family:var(--sans);white-space:nowrap}
+  .btn:hover{border-color:var(--accent)}
+  .btn.pri{background:var(--accent);border-color:var(--accent);color:#0b1320}
+  .btn.pri:hover{background:#85b6ff}
+  .btn.danger{color:var(--urgent);border-color:#5a2a30}
+  .btn.ghost{background:transparent}
+  .btn.sm{padding:5px 10px;font-size:12px}
+  .actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .estimate{color:var(--faint);font-size:12px}
+
+  /* keyboard hints inline */
+  kbd{font-family:var(--mono);font-size:11px;background:#0a0c11;border:1px solid var(--line);
+    border-bottom-width:2px;border-radius:5px;padding:1px 5px;color:var(--dim)}
+
+  /* empty / inbox zero */
+  .zero{text-align:center;padding:60px 20px;display:none}
+  .zero.show{display:block}
+  .zero .big{font-size:46px;margin-bottom:6px}
+  .zero h2{margin:0 0 6px}
+  .zero p{color:var(--dim);margin:0 0 18px}
+
+  /* footer keymap */
+  .keymap{position:fixed;left:0;right:0;bottom:0;background:#0b0d12cc;backdrop-filter:blur(8px);
+    border-top:1px solid var(--line);padding:9px 22px;font-size:12px;color:var(--dim);
+    display:flex;gap:18px;justify-content:center;flex-wrap:wrap}
+  .keymap span{display:inline-flex;gap:6px;align-items:center}
+  .toast{position:fixed;bottom:54px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--panel2);border:1px solid var(--accent);border-radius:10px;
+    padding:9px 16px;font-size:13px;opacity:0;transition:.2s;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">breeze<span class="dot">·</span>inbox</div>
+    <div class="count"><b id="needcount">3</b> need you · <b id="totcount">6</b> in inbox</div>
+  </div>
+
+  <div class="hero" id="hero">
+    <div class="icon">🛑</div>
+    <div>
+      <h1>Handle <b>Nightly deploy</b> first.</h1>
+      <p>Blocked <b id="heroAge">41 min</b> on a failing test <code>auth.spec.ts</code> — nothing downstream ships until you unblock it. The two other agents waiting on you can wait.</p>
+    </div>
+    <button class="btn pri jump" onclick="openTop()">Open ↵</button>
+  </div>
+
+  <div class="filters">
+    <div class="chip" aria-pressed="true" data-f="all">All <b>(6)</b></div>
+    <div class="chip" aria-pressed="false" data-f="need">Needs me <b>(3)</b></div>
+    <div class="chip" aria-pressed="false" data-f="moving">Moving <b>(2)</b></div>
+    <div class="chip" aria-pressed="false" data-f="done">Done <b>(1)</b></div>
+  </div>
+
+  <div class="stream" id="stream"><!-- items injected --></div>
+
+  <div class="zero" id="zero">
+    <div class="big">🌅</div>
+    <h2>Inbox zero. Nothing needs you.</h2>
+    <p>2 agents are still working in the background — they'll land here when they want you.</p>
+    <button class="btn pri" onclick="newTask()">＋ Describe a new task</button>
+  </div>
+</div>
+
+<div class="keymap">
+  <span><kbd>j</kbd>/<kbd>k</kbd> move</span>
+  <span><kbd>↵</kbd> open</span>
+  <span><kbd>r</kbd> reply / steer</span>
+  <span><kbd>e</kbd> archive</span>
+  <span><kbd>a</kbd> accept</span>
+  <span><kbd>c</kbd> create task</span>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---- data: reuse the brief's representative items ---- */
+const ITEMS = [
+  {
+    id:'deploy', kind:'block', rail:'r-urgent', ic:'🛑',
+    title:'Nightly deploy', tb:false, agent:'local auto',
+    pill:['p-block','blocked','41 min'], live:true, ageBase:41*60,
+    sub:'Failing test <code>auth.spec.ts</code> · folder <code>~/git/api</code>',
+    why:'Step 4/6 — deploy gate refuses to promote while CI is red.',
+    needs:true, type:'agent',
+    trace:[
+      ['✓','Pulled <b>main</b> @ a91f2c','clean working tree'],
+      ['✓','Ran <b>build</b>','passed in 38s'],
+      ['✓','Ran <b>lint</b>','0 errors'],
+      ['✗','Ran <b>test suite</b>','<code>auth.spec.ts</code> "rejects expired token" failing — got 200, expected 401'],
+      ['◦','Promote to staging','blocked on test'],
+      ['◦','Notify #releases','pending'],
+    ],
+    quick:['Skip auth.spec.ts and continue','Re-run the suite','Show me the failing diff','Stop the run'],
+    cancel:true
+  },
+  {
+    id:'beads', kind:'wait', rail:'r-warn', ic:'🤔',
+    title:'Migrate beads → tasks', tb:false, agent:'local auto',
+    pill:['p-wait','waiting on you','12 min'], live:true, ageBase:12*60,
+    sub:'Asking: <b>“Delete 12 stale issues older than 90 days? (y/n)”</b>',
+    why:'It found 12 issues with no activity since March; deleting is irreversible.',
+    needs:true, type:'agent', question:true,
+    trace:[
+      ['✓','Scanned beads db','312 issues, 12 stale (>90d)'],
+      ['✓','Mapped open issues → tasks','280 mapped, 20 skipped (no folder)'],
+      ['?','Awaiting your call on 12 stale issues','irreversible — needs y/n'],
+    ],
+    quick:['Yes, delete them','No, keep them','Archive instead of delete','Show me the 12'],
+    cancel:true, irreversible:true
+  },
+  {
+    id:'review', kind:'todo', rail:'r-warn', ic:'👀',
+    title:"Review Sam's PR #214", tb:false, agent:null,
+    pill:['p-todo','to-do · due today',''], live:false,
+    sub:'Manual task · due <b>today</b> · #214 "Throttle thumbnail decode"',
+    why:'Sam is blocked on your review to merge before the deploy window.',
+    needs:true, type:'todo',
+  },
+  {
+    id:'triage', kind:'work', rail:'r-work', ic:'⚙️',
+    title:'Triage inbox → tasks', tb:true, agent:'TypeBuild',
+    owner:'you', pill:['p-work','working','3 min'], live:true, ageBase:3*60,
+    sub:'<span class="conf">Last: drafted 4 tasks from 11 emails — 2 flagged PHI</span> <span class="lock">🔒 reveal on focus</span>',
+    why:'Working autonomously; will land in inbox when the 4 drafts are ready to confirm.',
+    needs:false, type:'agent',
+    trace:[
+      ['✓','Read 11 unread threads','TypeBuild encrypted session'],
+      ['✓','Classified intent','4 actionable, 5 FYI, 2 spam'],
+      ['⟳','Drafting tasks','4/4 — writing folders + due dates'],
+    ],
+    quick:['Hold for my review before saving','Auto-save low-risk ones','Stop the run'],
+    cancel:true
+  },
+  {
+    id:'refactor', kind:'work', rail:'r-work', ic:'⚙️',
+    title:'Refactor TaskRow', tb:true, agent:'TypeBuild',
+    owner:'priya', pill:['p-work','working · step 3/5','19 min'], live:true, ageBase:19*60,
+    sub:'<span class="conf">Priya\'s claim · extracting <code>useRowSelection</code></span> <span class="lock">🔒</span>',
+    why:'Claimed by Priya — surfaced here so you know it\'s touching shared code.',
+    needs:false, type:'agent',
+    trace:[
+      ['✓','Read TaskRow.tsx + 6 callers','TypeBuild'],
+      ['✓','Extracted useRowSelection hook','step 2/5'],
+      ['⟳','Rewiring callers','3/5 · 4 of 6 files updated'],
+    ],
+    quick:['Ping Priya','Watch this run','Leave it to Priya'],
+    cancel:false
+  },
+  {
+    id:'weekly', kind:'done', rail:'r-ok', ic:'✅',
+    title:'Weekly report', tb:false, agent:'local auto · cron Fri 9am',
+    pill:['p-done','done · 2h ago',''], live:false,
+    sub:'Summarized 18 PRs into <code>~/reports/2026-06-13.md</code> — awaiting your accept',
+    why:'Finished cleanly; review the summary then accept or ask for a redo.',
+    needs:false, type:'result',
+    trace:[
+      ['✓','Collected merged PRs','18 across 3 repos'],
+      ['✓','Grouped by theme','5 themes'],
+      ['✓','Wrote summary','142 lines'],
+    ],
+    changed:[
+      ['add','+ ~/reports/2026-06-13.md (new, 142 lines)'],
+      ['ctx','  • 18 PRs · 3 repos · 5 themes'],
+      ['ctx','  • Top theme: "thumbnail performance" (6 PRs)'],
+      ['del','- last week\'s draft left at /tmp (cleaned up)'],
+    ],
+  },
+];
+
+let sel = 0, filter='all', tick=0;
+const stream = document.getElementById('stream');
+
+function fmtAge(s){
+  if(s<60) return s+'s';
+  const m=Math.floor(s/60);
+  if(m<60) return m+' min';
+  const h=Math.floor(m/60); return h+'h '+(m%60)+'m';
+}
+function avatar(o){
+  const map={you:['av-you','Y','you'],priya:['av-priya','P','Priya'],sam:['av-sam','S','Sam']};
+  const a=map[o]; if(!a) return '';
+  return `<span class="who"><span class="av ${a[0]}">${a[1]}</span>${a[2]}</span>`;
+}
+
+function visible(){
+  return ITEMS.filter(it=>{
+    if(filter==='all') return true;
+    if(filter==='need') return it.needs;
+    if(filter==='moving') return it.kind==='work';
+    if(filter==='done') return it.kind==='done';
+  });
+}
+
+function render(){
+  const vis=visible();
+  stream.innerHTML='';
+  if(vis.filter(i=>i.needs).length===0 && filter==='need'){
+    // pretend cleared
+  }
+  vis.forEach((it,vi)=>{
+    const isSel = vi===sel;
+    const el=document.createElement('div');
+    el.className='item'+(isSel?' sel open':'');
+    el.dataset.id=it.id;
+    const ageStr = it.live ? fmtAge((it.ageBase||0)+tick) : (it.pill[2]||'');
+    const pillAge = it.live ? `<span class="age">${ageStr}</span>` : '';
+    const tbBadge = it.tb ? `<span class="tb">TYPEBUILD · 🔒 enc</span>` : '';
+
+    el.innerHTML = `
+      <div class="row" onclick="pick('${it.id}')">
+        <div class="rail ${it.rail}"></div>
+        <div class="ic">${it.ic}</div>
+        <div class="body">
+          <div class="line1">
+            <span class="title">${it.title}</span>
+            <span class="pill ${it.pill[0]}">${it.live?'<span class="blink"></span>':''}${it.pill[1]}</span>
+            ${it.owner?avatar(it.owner):''} ${tbBadge}
+          </div>
+          <div class="sub">${it.sub} ${it.why?`<span class="why">— ${it.why}</span>`:''}</div>
+        </div>
+        <div class="meta">${pillAge}</div>
+      </div>
+      <div class="expand">${expandHTML(it)}</div>`;
+    stream.appendChild(el);
+  });
+  document.getElementById('needcount').textContent = ITEMS.filter(i=>i.needs).length;
+  document.getElementById('totcount').textContent = ITEMS.length;
+  const z=document.getElementById('zero');
+  z.classList.toggle('show', ITEMS.length===0);
+  stream.style.display = ITEMS.length===0?'none':'flex';
+}
+
+function expandHTML(it){
+  let h='';
+  if(it.trace){
+    h+='<ul class="trace">';
+    it.trace.forEach(t=>{
+      const stcol = t[0]==='✓'?'var(--ok)':t[0]==='✗'?'var(--urgent)':t[0]==='?'?'var(--warn)':t[0]==='⟳'?'var(--working)':'var(--faint)';
+      h+=`<li><span class="st" style="color:${stcol}">${t[0]}</span><span class="tx"><b>${t[1]}</b> <span class="twhy">— ${t[2]}</span></span></li>`;
+    });
+    h+='</ul>';
+  }
+  if(it.changed){
+    h+='<div class="changed"><h4>What changed</h4><div class="diff">';
+    it.changed.forEach(d=> h+=`<div class="${d[0]}">${d[1]}</div>`);
+    h+='</div></div>';
+  }
+  if(it.type==='agent'){
+    h+=`<div class="reply">
+          <input id="reply-${it.id}" placeholder="Steer ${it.title} — type and ↵ (e.g. ${it.quick?it.quick[0].toLowerCase():'…'})">
+          <button class="btn pri" onclick="sendReply('${it.id}')">Send</button>
+        </div>`;
+    if(it.quick){
+      h+='<div class="quick">';
+      it.quick.forEach(q=> h+=`<div class="chip" onclick="setReply('${it.id}','${q.replace(/'/g,"\\'")}')">${q}</div>`);
+      h+='</div>';
+    }
+    h+='<div class="actions" style="margin-top:11px">';
+    if(it.question){
+      h+=`<button class="btn pri" onclick="answer('${it.id}','yes')">Yes ↵</button>
+          <button class="btn" onclick="answer('${it.id}','no')">No</button>`;
+      if(it.irreversible) h+='<span class="estimate">⚠ Irreversible — deletes 12 issues, no undo. <a href="#" onclick="return false" style="color:var(--accent)">dry-run first</a></span>';
+    }
+    if(it.cancel) h+=`<button class="btn danger ghost sm" onclick="stopRun('${it.id}')">■ Stop run</button>`;
+    h+='</div>';
+  }
+  if(it.type==='result'){
+    h+=`<div class="actions">
+          <button class="btn pri" onclick="accept('${it.id}')">Accept ↵</button>
+          <button class="btn" onclick="redo('${it.id}')">↻ Redo with notes…</button>
+          <button class="btn ghost sm" onclick="openFile('${it.id}')">Open file</button>
+          <span class="estimate">Redo re-runs the cron now (~40s, uses 1 agent slot)</span>
+        </div>`;
+  }
+  if(it.type==='todo'){
+    h+=`<div class="actions">
+          <button class="btn pri" onclick="done('${it.id}')">Mark done ↵</button>
+          <button class="btn" onclick="openFile('${it.id}')">Open PR #214</button>
+          <button class="btn ghost sm" onclick="snooze('${it.id}')">Snooze to tomorrow</button>
+        </div>`;
+  }
+  return h;
+}
+
+/* interactions */
+function pick(id){ const vis=visible(); sel=vis.findIndex(i=>i.id===id); render(); }
+function openTop(){ sel=0; filter='all'; setChips(); render(); toast('Opened Nightly deploy'); }
+function setReply(id,v){ const i=document.getElementById('reply-'+id); if(i){i.value=v;i.focus();} }
+function sendReply(id){
+  const i=document.getElementById('reply-'+id); const v=i&&i.value.trim();
+  if(!v) return;
+  toast('Steered → "'+v+'"  (agent re-planning…)');
+  if(i) i.value='';
+}
+function answer(id,a){
+  toast(a==='yes'?'Confirmed — deleting 12 stale issues…':'Kept — agent will continue without deleting.');
+  removeItem(id);
+}
+function accept(id){ toast('Accepted Weekly report ✓'); removeItem(id); }
+function redo(id){ toast('Re-running Weekly report cron now…'); }
+function done(id){ toast('Marked done ✓'); removeItem(id); }
+function snooze(id){ toast('Snoozed to tomorrow'); removeItem(id); }
+function stopRun(id){ toast('■ Stop signal sent — agent winding down…'); }
+function openFile(id){ toast('Opening…'); }
+function newTask(){ toast('＋ Describe a task: "Ship a PR", "Triage inbox"…'); }
+
+function removeItem(id){
+  const el=stream.querySelector(`[data-id="${id}"]`);
+  if(el){ el.classList.add('archiving'); }
+  setTimeout(()=>{
+    const idx=ITEMS.findIndex(i=>i.id===id);
+    if(idx>=0) ITEMS.splice(idx,1);
+    sel=Math.min(sel,Math.max(0,visible().length-1));
+    render();
+  },200);
+}
+
+/* filters */
+function setChips(){
+  document.querySelectorAll('.chip[data-f]').forEach(c=>
+    c.setAttribute('aria-pressed', c.dataset.f===filter));
+}
+document.querySelectorAll('.chip[data-f]').forEach(c=>{
+  c.onclick=()=>{ filter=c.dataset.f; sel=0; setChips(); render(); };
+});
+
+function toast(t){
+  const el=document.getElementById('toast'); el.textContent=t; el.classList.add('show');
+  clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),2200);
+}
+
+/* keyboard */
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'){
+    if(e.key==='Enter'){ const id=e.target.id.replace('reply-',''); sendReply(id); }
+    if(e.key==='Escape'){ e.target.blur(); }
+    return;
+  }
+  const vis=visible(); if(!vis.length) return;
+  const cur=vis[sel];
+  if(e.key==='j'){ sel=Math.min(sel+1,vis.length-1); render(); }
+  else if(e.key==='k'){ sel=Math.max(sel-1,0); render(); }
+  else if(e.key==='Enter'){
+    if(cur.type==='result') accept(cur.id);
+    else if(cur.type==='todo') done(cur.id);
+    else if(cur.question) answer(cur.id,'yes');
+    else toast('Opened '+cur.title);
+  }
+  else if(e.key==='r'){ e.preventDefault(); const i=document.getElementById('reply-'+cur.id); if(i)i.focus(); }
+  else if(e.key==='e'){ toast('Archived '+cur.title); removeItem(cur.id); }
+  else if(e.key==='a' && cur.type==='result'){ accept(cur.id); }
+  else if(e.key==='c'){ newTask(); }
+});
+
+/* live tick — ages count up, triage step advances */
+setInterval(()=>{
+  tick++;
+  // advance the triage run subtly
+  if(tick===4){
+    const t=ITEMS.find(i=>i.id==='triage');
+    if(t){ t.sub='<span class="conf">Last: 4 task drafts ready to confirm — 2 PHI-flagged</span> <span class="lock">🔒 reveal on focus</span>'; }
+  }
+  render();
+},1000);
+
+render();
+</script>
+</body>
+</html>

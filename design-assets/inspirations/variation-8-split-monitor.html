@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<!--
+  VARIATION 8 — "Split live monitor"
+  PARADIGM: Fast attention-sorted list on the LEFT (needs-you → working → done,
+  minimal chrome, secondary controls revealed on focus only). LIVE DETAIL on the
+  RIGHT: streaming last actions, step trace with per-step "why", inline STEER box,
+  Stop/Pause/Retry for running agents; "what changed" result + Accept/Redo for
+  finished runs. Keyboard-first: j/k to move, : for command verbs. JS tick makes
+  the right pane feel live.
+  VALUES SERVED: V1 Calm Triage, V2 Live Situational Awareness, V3 Direct Control,
+  V5 Trust & Auditability, V7 Confidentiality (TypeBuild content gated behind reveal).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breezefile — Live Monitor</title>
+<style>
+  :root{
+    --bg:#0f1014; --side:#14161c; --panel:#181b22; --ink:#eceef3; --muted:#868d9c;
+    --line:#23262f; --accent:#7c5cff; --accent2:#39d3b2; --warn:#ffb020; --bad:#ff5470;
+    --ok:#39d3b2; --chip:#1e2229; --sel:#241f3d;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:grid; grid-template-rows:auto 1fr; height:100vh; overflow:hidden;
+  }
+  /* topbar with hero insight */
+  .topbar{display:flex; align-items:center; gap:16px; padding:11px 18px; border-bottom:1px solid var(--line); background:linear-gradient(90deg,#15161d,#121319)}
+  .logo{font-weight:800; letter-spacing:.3px}
+  .logo .sub{color:var(--muted); font-weight:500; margin-left:8px; font-size:12px}
+  .hero{flex:1; font-size:13.5px; color:var(--muted); text-align:center}
+  .hero b{color:#ffd58a}
+  .hero a{color:var(--accent2); text-decoration:none; border-bottom:1px dotted var(--accent2); cursor:pointer}
+  .cmd{font:12px ui-monospace,monospace; background:var(--chip); border:1px solid var(--line); padding:5px 10px; border-radius:7px; color:var(--muted)}
+  .cmd b{color:var(--ink)}
+
+  .split{display:grid; grid-template-columns:360px 1fr; min-height:0}
+
+  /* ---------------- LEFT LIST ---------------- */
+  .list{border-right:1px solid var(--line); background:var(--side); overflow:auto; padding:8px 0}
+  .grouphead{font-size:11px; letter-spacing:.8px; text-transform:uppercase; color:var(--muted); padding:14px 18px 6px; display:flex; gap:8px; align-items:center}
+  .grouphead .n{background:var(--chip); border-radius:99px; padding:0 8px; line-height:18px; font-size:11px}
+  .grouphead.alert{color:var(--warn)}
+  .row{display:flex; flex-direction:column; gap:3px; padding:10px 16px; margin:0 8px; border-radius:10px; cursor:pointer; border:1px solid transparent; position:relative}
+  .row:hover{background:#181b22}
+  .row.sel{background:var(--sel); border-color:#3a3261}
+  .row .l1{display:flex; align-items:center; gap:8px}
+  .stbox{width:8px;height:8px;border-radius:2px;flex:none}
+  .s-block{background:var(--bad)} .s-wait{background:var(--warn)} .s-work{background:var(--accent2)} .s-done{background:var(--muted)}
+  .row .title{font-weight:600; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .row .when{font-size:11px; color:var(--muted)}
+  .row .l2{font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .row .owner{display:inline-flex; align-items:center; gap:5px}
+  .av{width:15px;height:15px;border-radius:50%;font-size:9px;display:grid;place-items:center;color:#0c0d11;font-weight:700}
+  .av.you{background:#7c5cff} .av.priya{background:#39d3b2} .av.sam{background:#ffb020} .av.bot{background:#3a3f4d;color:#cfd5e0}
+  .work-anim{font-size:11px;color:var(--accent2)}
+  /* secondary controls revealed only on focus/hover */
+  .quick{display:none; gap:6px; margin-top:6px}
+  .row:hover .quick,.row.sel .quick{display:flex}
+  .quick button{font:11px inherit; padding:3px 9px; border-radius:7px; border:1px solid var(--line); background:var(--chip); color:var(--muted); cursor:pointer}
+  .quick button:hover{color:var(--ink); border-color:#3a3f4d}
+
+  /* ---------------- RIGHT DETAIL ---------------- */
+  .detail{overflow:auto; padding:0; background:var(--panel); display:flex; flex-direction:column}
+  .dhead{padding:18px 24px 14px; border-bottom:1px solid var(--line)}
+  .dhead .tagrow{display:flex; align-items:center; gap:10px; margin-bottom:8px}
+  .tag{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; padding:4px 10px; border-radius:99px}
+  .tag.block{color:var(--bad);background:rgba(255,84,112,.12);border:1px solid rgba(255,84,112,.35)}
+  .tag.work{color:var(--accent2);background:rgba(57,211,178,.12);border:1px solid rgba(57,211,178,.35)}
+  .tag.done{color:var(--muted);background:var(--chip);border:1px solid var(--line)}
+  .tag.wait{color:var(--warn);background:rgba(255,176,32,.12);border:1px solid rgba(255,176,32,.35)}
+  .dhead h2{margin:0 0 4px; font-size:21px}
+  .dhead .dmeta{color:var(--muted); font-size:12.5px; display:flex; gap:16px; flex-wrap:wrap}
+  .dhead .dmeta code{background:var(--chip);padding:1px 6px;border-radius:5px}
+
+  /* live stream */
+  .dbody{padding:18px 24px; flex:1}
+  .blocktitle{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin:0 0 10px;display:flex;align-items:center;gap:8px}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);animation:lp 1.4s infinite}
+  @keyframes lp{0%,100%{opacity:.3}50%{opacity:1}}
+  .stream{background:#0c0e13;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:12.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;color:#cfd5e0;margin-bottom:20px;max-height:150px;overflow:auto}
+  .stream .ln{opacity:0;animation:fadein .4s forwards}
+  .stream .t{color:var(--muted)}
+  @keyframes fadein{to{opacity:1}}
+
+  /* step trace */
+  .trace{list-style:none;margin:0 0 20px;padding:0}
+  .trace li{display:grid;grid-template-columns:20px 1fr;gap:11px;padding:8px 0;border-bottom:1px dashed var(--line)}
+  .trace li:last-child{border-bottom:none}
+  .tk{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-size:10px;margin-top:1px}
+  .tk.ok{background:rgba(57,211,178,.16);color:var(--ok)} .tk.fail{background:rgba(255,84,112,.16);color:var(--bad)} .tk.run{background:rgba(124,92,255,.18);color:var(--accent)} .tk.todo{background:var(--chip);color:var(--muted)}
+  .ts .w{font-weight:600} .ts .y{color:var(--muted);font-size:12px}
+
+  /* steer + controls */
+  .steer textarea{width:100%;min-height:60px;resize:vertical;background:#0c0e13;border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:10px 12px;font:inherit}
+  .controls{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);padding-top:16px}
+  button.b{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line);padding:9px 16px;font-weight:600;color:var(--ink);background:var(--chip)}
+  button.b:hover{border-color:#3a3f4d}
+  .b.primary{background:var(--accent);border-color:var(--accent);color:#0c0d11}
+  .b.ok{background:var(--ok);border-color:var(--ok);color:#06241c}
+  .b.danger{color:#ffb3c0;border-color:rgba(255,84,112,.4);background:rgba(255,84,112,.1)}
+  .grow{flex:1}
+  .est{font-size:12px;color:var(--muted);background:var(--chip);border:1px dashed var(--line);border-radius:9px;padding:8px 12px;margin-top:12px}
+  .est b{color:var(--ink)}
+
+  /* PHI confidentiality gate */
+  .phi{background:#0c0e13;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:20px}
+  .phi .lock{display:flex;align-items:center;gap:8px;color:var(--warn);font-size:12.5px}
+  .phi .content{margin-top:10px;display:none;font-size:13px;color:#cfd5e0;line-height:1.6}
+  .phi.revealed .content{display:block}
+  .phi.revealed .reveal{display:none}
+  .reveal{margin-top:8px;font-size:12px;background:var(--chip);border:1px solid var(--line);color:var(--accent2);padding:5px 12px;border-radius:7px;cursor:pointer}
+
+  /* result summary (finished run) */
+  .result{background:rgba(57,211,178,.06);border:1px solid rgba(57,211,178,.25);border-radius:12px;padding:14px 16px;margin-bottom:18px}
+  .result h4{margin:0 0 8px;font-size:13px;color:var(--ok)}
+  .result ul{margin:0;padding-left:18px;color:#cfd5e0;font-size:13px;line-height:1.7}
+
+  ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#2a2e38;border-radius:8px;border:2px solid var(--bg)}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="logo">Breezefile<span class="sub">live monitor</span></div>
+    <div class="hero" id="hero"><b>1 agent is blocked.</b> Nightly deploy has been stuck 41 min on <b>auth.spec.ts</b> — <a id="heroJump">open it first ↵</a></div>
+    <div class="cmd"><b>j/k</b> move · <b>:</b> command</div>
+  </div>
+
+  <div class="split">
+    <!-- LEFT -->
+    <div class="list" id="list">
+      <div class="grouphead alert">Needs you <span class="n">2</span></div>
+
+      <div class="row sel" data-id="deploy" tabindex="0">
+        <div class="l1"><span class="stbox s-block"></span><span class="title">Nightly deploy</span><span class="when">41m</span></div>
+        <div class="l2"><span class="owner"><span class="av bot">⚙</span>local auto · ~/git/api · blocked on test</span></div>
+        <div class="quick"><button>Re-run</button><button>Steer</button><button>Stop</button></div>
+      </div>
+
+      <div class="row" data-id="beads" tabindex="0">
+        <div class="l1"><span class="stbox s-wait"></span><span class="title">Migrate beads → tasks</span><span class="when">now</span></div>
+        <div class="l2"><span class="owner"><span class="av bot">⚙</span>local auto · asks: “Delete 12 stale issues? (y/n)”</span></div>
+        <div class="quick"><button>Yes</button><button>No</button><button>Open</button></div>
+      </div>
+
+      <div class="grouphead">Working <span class="n">2</span></div>
+
+      <div class="row" data-id="triage" tabindex="0">
+        <div class="l1"><span class="stbox s-work"></span><span class="title">Triage inbox → tasks</span><span class="work-anim">●●●</span></div>
+        <div class="l2"><span class="owner"><span class="av you">Y</span>you · TypeBuild · last: drafted 4 tasks</span></div>
+        <div class="quick"><button>Watch</button><button>Pause</button></div>
+      </div>
+
+      <div class="row" data-id="refactor" tabindex="0">
+        <div class="l1"><span class="stbox s-work"></span><span class="title">Refactor TaskRow</span><span class="work-anim">●●●</span></div>
+        <div class="l2"><span class="owner"><span class="av priya">P</span>Priya · TypeBuild · step 3 of 5</span></div>
+        <div class="quick"><button>Watch</button><button>Reassign</button></div>
+      </div>
+
+      <div class="grouphead">Done <span class="n">1</span></div>
+
+      <div class="row" data-id="weekly" tabindex="0">
+        <div class="l1"><span class="stbox s-done"></span><span class="title">Weekly report</span><span class="when">2h</span></div>
+        <div class="l2"><span class="owner"><span class="av bot">⚙</span>local auto · cron Fri 9am · summarized 18 PRs</span></div>
+        <div class="quick"><button>Accept</button><button>Redo</button></div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="detail" id="detail"><!-- filled by JS --></div>
+  </div>
+
+<script>
+/* ---- data ---- */
+const DATA = {
+  deploy:{
+    tag:'block', tagtxt:'Blocked · 41 min', title:'Nightly deploy',
+    meta:['local auto agent','folder <code>~/git/api</code>','attempt 3 of 3'],
+    live:true,
+    stream:[
+      'pulled origin/main (e3a1c2)','npm ci — 412 pkgs, 18s','vite build — ok, 1.2MB',
+      'vitest run …','✕ auth.spec.ts "rejects expired session token"','expected 401, received 200',
+      'paused — deploy gate red, waiting for you'
+    ],
+    trace:[
+      ['ok','Pulled latest main','ensure deploy reflects newest commits'],
+      ['ok','Installed deps & built bundle','build must pass before tests'],
+      ['fail','Ran tests — 1 failing','deploy gate requires green suite; stopped here'],
+      ['todo','Deploy to production — held','will not ship while tests are red']
+    ],
+    err:'auth.spec.ts failed: token TTL check skipped when clock skew &gt; 0 (session.ts:88). Re-run, or steer the agent to fix or skip.',
+    controls:'running', est:'Re-running the suite ≈ <b>1 build minute</b> and won’t deploy on its own — you review the result first.'
+  },
+  beads:{
+    tag:'wait', tagtxt:'Waiting on you', title:'Migrate beads → tasks',
+    meta:['local auto agent','folder <code>~/.breezefile</code>','step 4 of 6'],
+    live:false,
+    question:'Delete 12 stale issues? (y/n) — they’ve been closed &gt; 90 days and have no open deps.',
+    trace:[
+      ['ok','Read 64 beads issues','source of truth for migration'],
+      ['ok','Mapped 52 to tasks','1:1 where status maps cleanly'],
+      ['run','Reviewing 12 stale issues','paused — needs your call before deleting'],
+      ['todo','Write tasks.json','only after you confirm deletions']
+    ],
+    controls:'yesno', est:'Deleting 12 issues is <b>reversible for 30 days</b> via the trash. Preview the list before you confirm.'
+  },
+  triage:{
+    tag:'work', tagtxt:'Working', title:'Triage inbox → tasks',
+    meta:['TypeBuild · claimed by you','encrypted queue','running 6 min'],
+    live:true, phi:true,
+    stream:['scanning inbox (37 threads)','clustering by sender + intent','drafting task: “Reply to landlord…”','drafting task: “Review Sam’s PR #214”','drafted 4 tasks — refining titles'],
+    trace:[
+      ['ok','Decrypted queue in memory','content never written to disk'],
+      ['ok','Read inbox threads','source for task extraction'],
+      ['run','Drafting tasks','4 drafted; grouping duplicates'],
+      ['todo','Submit for your review','you confirm before anything is created']
+    ],
+    controls:'running', est:'Drafts only — <b>nothing is created or sent</b> until you accept.'
+  },
+  refactor:{
+    tag:'work', tagtxt:'Working', title:'Refactor TaskRow',
+    meta:['TypeBuild · claimed by Priya','encrypted queue','step 3 of 5'],
+    live:true,
+    stream:['Priya’s agent: split TaskRow into Row + Meta','extracting status badge','updating 6 call sites','running component tests…'],
+    trace:[
+      ['ok','Read TaskRow.tsx','identify split boundaries'],
+      ['ok','Extracted <Meta/>','reduce row to layout only'],
+      ['run','Updating call sites','3 of 6 done'],
+      ['todo','Run tests + open PR','gate before handoff']
+    ],
+    controls:'watch', est:'Owned by Priya — you can <b>watch or request a handoff</b>, but won’t interrupt her run by default.'
+  },
+  weekly:{
+    tag:'done', tagtxt:'Done · 2h ago', title:'Weekly report',
+    meta:['local auto · cron Fri 9am','folder <code>~/git</code>','ran 4 min'],
+    live:false,
+    result:['Summarized <b>18 merged PRs</b> across api, web, infra','Flagged <b>2 risky changes</b> (auth, billing) for review','Wrote <code>~/git/reports/2026-06-13.md</code>','Drafted a 6-line Slack digest (not sent)'],
+    trace:[
+      ['ok','Listed merged PRs (since last Fri)','scope = one week'],
+      ['ok','Summarized each + grouped by repo','readable digest'],
+      ['ok','Flagged risky diffs','surface what needs human eyes'],
+      ['ok','Wrote report + draft digest','deliverables ready']
+    ],
+    controls:'accept'
+  }
+};
+
+const detail=document.getElementById('detail');
+function metaHTML(m){return m.map(x=>`<span>${x}</span>`).join('')}
+function traceHTML(t){return t.map(([k,w,y])=>{
+  const ic={ok:'✓',fail:'✕',run:'·',todo:'·'}[k];
+  return `<li><span class="tk ${k}">${ic}</span><div class="ts"><div class="w">${w}</div><div class="y">why · ${y}</div></div></li>`;
+}).join('')}
+
+let tick=null;
+function render(id){
+  if(tick){clearInterval(tick);tick=null;}
+  const d=DATA[id];
+  let controls='';
+  if(d.controls==='running') controls=`
+    <div class="steer"><textarea placeholder="Steer the agent — e.g. 'Skip the expired-token test and open a follow-up', or 'Fix the clock-skew check and re-run.'"></textarea></div>
+    ${d.est?`<div class="est">Dry run · ${d.est}</div>`:''}
+    <div class="controls"><button class="b primary">Send steer</button><button class="b">Re-run</button><button class="b">Pause</button><div class="grow"></div><button class="b danger">Stop agent</button></div>`;
+  else if(d.controls==='yesno') controls=`
+    ${d.est?`<div class="est">${d.est}</div>`:''}
+    <div class="controls"><button class="b ok">Yes — delete 12</button><button class="b">No — keep them</button><button class="b">Preview the 12 issues</button><div class="grow"></div><button class="b danger">Stop agent</button></div>`;
+  else if(d.controls==='watch') controls=`
+    ${d.est?`<div class="est">${d.est}</div>`:''}
+    <div class="controls"><button class="b">Request handoff</button><button class="b">Reassign</button><div class="grow"></div><button class="b">Open session</button></div>`;
+  else if(d.controls==='accept') controls=`
+    <div class="controls"><button class="b ok">Accept result</button><button class="b">Redo with changes</button><div class="grow"></div><button class="b">Open report</button></div>`;
+
+  let mid='';
+  if(d.question) mid=`<div class="phi" style="border-color:rgba(255,176,32,.3)"><div class="lock" style="color:var(--warn)">⚠ Waiting on your answer</div><div class="content" style="display:block;margin-top:10px">${d.question}</div></div>`;
+  if(d.result) mid=`<div class="result"><h4>✓ What changed</h4><ul>${d.result.map(r=>`<li>${r}</li>`).join('')}</ul></div>`;
+  if(d.err) mid=`<div class="phi" style="border-color:rgba(255,84,112,.3)"><div class="lock" style="color:var(--bad)">✕ What happened &amp; what to do</div><div class="content" style="display:block;margin-top:10px">${d.err}</div></div>`;
+
+  let phiBlock='';
+  if(d.phi) phiBlock=`<div class="phi" id="phiBox"><div class="lock">🔒 Encrypted TypeBuild content — decrypted in memory only</div><div class="reveal" id="revealBtn">Reveal task content</div><div class="content">Inbox triage covers a thread from <b>Dr. Lin’s office</b> re: a patient referral, and 3 ops threads. Drafts stay in memory and are never written to disk.</div></div>`;
+
+  detail.innerHTML=`
+    <div class="dhead">
+      <div class="tagrow"><span class="tag ${d.tag}">${d.tagtxt}</span><span style="color:var(--muted);font-size:12px">${id==='deploy'?'open first':''}</span></div>
+      <h2>${d.title}</h2>
+      <div class="dmeta">${metaHTML(d.meta)}</div>
+    </div>
+    <div class="dbody">
+      ${d.live?`<p class="blocktitle"><span class="live-dot"></span> Live session — last actions</p><div class="stream" id="stream"></div>`:''}
+      ${phiBlock}
+      ${mid}
+      <p class="blocktitle">Step trace</p>
+      <ul class="trace">${traceHTML(d.trace)}</ul>
+      ${controls}
+    </div>`;
+
+  if(d.live){
+    const s=document.getElementById('stream'); let i=0;
+    const seed=d.stream.slice(0,Math.max(0,d.stream.length-1));
+    seed.forEach(l=>{const e=document.createElement('div');e.className='ln';e.style.animation='none';e.style.opacity=1;e.innerHTML=`<span class="t">›</span> ${l}`;s.appendChild(e);});
+    // keep ticking the last line to feel live
+    tick=setInterval(()=>{
+      const e=document.createElement('div');e.className='ln';
+      const lines=d.stream;const txt=lines[(lines.length-1+i)%lines.length];
+      const now=new Date();const ts=now.toLocaleTimeString([], {hour12:false});
+      e.innerHTML=`<span class="t">${ts}</span> ${txt}`;
+      s.appendChild(e); s.scrollTop=s.scrollHeight;
+      while(s.children.length>9) s.removeChild(s.firstChild);
+      i++;
+    },2200);
+  }
+
+  const rb=document.getElementById('revealBtn');
+  if(rb) rb.onclick=()=>document.getElementById('phiBox').classList.add('revealed');
+}
+
+/* selection + keyboard */
+const rows=[...document.querySelectorAll('.row')];
+let cur=0;
+function select(i){
+  cur=(i+rows.length)%rows.length;
+  rows.forEach(r=>r.classList.remove('sel'));
+  rows[cur].classList.add('sel');
+  rows[cur].scrollIntoView({block:'nearest'});
+  render(rows[cur].dataset.id);
+}
+rows.forEach((r,i)=>r.onclick=()=>select(i));
+document.getElementById('heroJump').onclick=()=>select(0);
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='TEXTAREA')return;
+  if(e.key==='j')select(cur+1);
+  if(e.key==='k')select(cur-1);
+  if(e.key===':'){e.preventDefault();const v=prompt('Command verb — e.g. :rerun, :stop, :steer, :reassign, :accept, :new');if(v)alert('Would run '+v+' on “'+rows[cur].querySelector('.title').textContent+'”');}
+  if(e.key==='Enter')select(0);
+});
+
+render('deploy');
+</script>
+</body>
+</html>
