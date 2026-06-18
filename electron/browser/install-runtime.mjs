@@ -59,6 +59,7 @@ const HELPERS = [
   ['electron', 'browser', 'connect.mjs'],
   ['electron', 'browser', 'scrub.mjs'],
   ['electron', 'browser', 'tools', 'registry.mjs'],
+  ['electron', 'browser', 'tools', 'memory.mjs'],
 ];
 
 // Heavy deps — copied once (skipped when the destination already exists).

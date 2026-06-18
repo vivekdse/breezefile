@@ -10,6 +10,10 @@
 //   node breeze-tools.mjs help <tool-id>         full metadata for one tool
 //   node breeze-tools.mjs list [--json]          every tool + health
 //   node breeze-tools.mjs run <tool-id> [--p v]  execute a tool over CDP
+//   node breeze-tools.mjs create <id> --meta f --script f   author a new tool
+//   node breeze-tools.mjs update <id> [--meta f] [--script f]
+//   node breeze-tools.mjs delete <id>
+//   node breeze-tools.mjs memory get|add|delete|list  --site <url>|--task <id>
 //
 // run() honors the OUTPUT CONTRACT (docs: "CLI Design"): structured JSON to
 // stdout, a human-readable step log to stderr, and a meaningful exit code
@@ -20,6 +24,7 @@
 // browser, log, loc, EXIT, ToolError }. Returning a value (or {}) is success;
 // throwing a ToolError maps its category to an exit code.
 
+import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import {
@@ -33,7 +38,16 @@ import {
   validateTool,
   recordRun,
   toolHealth,
+  writeTool,
+  deleteTool,
 } from '../electron/browser/tools/registry.mjs';
+import {
+  getMemory,
+  addMemory,
+  deleteMemory,
+  listMemory,
+  memoryDir,
+} from '../electron/browser/tools/memory.mjs';
 // NOTE: connect.mjs is imported LAZILY inside cmdRun() only. It pulls in
 // playwright-core; discovery (available/help/list) must work without a browser
 // library present, since the agent runs `available <url>` first on every task.
@@ -267,17 +281,156 @@ function redact(params, declared) {
   return safe;
 }
 
+// ─── create / update / delete — the "learning" half (docs Phase 5) ───────────
+// Inputs come from files the agent writes: --meta <tool.json> and/or
+// --script <tool.mjs>, or --from <dir> holding both. (File-based, not inline,
+// so a multi-line tool.mjs survives the shell cleanly.)
+function readFileArg(p) {
+  if (!p || p === true) return undefined;
+  try {
+    return readFileSync(p, 'utf8');
+  } catch (e) {
+    return { __err: `cannot read ${p}: ${e.message}` };
+  }
+}
+
+function resolveAuthoringInputs(args) {
+  let metaRaw, scriptRaw;
+  if (args.from && args.from !== true) {
+    metaRaw = readFileArg(path.join(args.from, 'tool.json'));
+    scriptRaw = readFileArg(path.join(args.from, 'tool.mjs'));
+  }
+  if (args.meta !== undefined) metaRaw = readFileArg(args.meta);
+  if (args.script !== undefined) scriptRaw = readFileArg(args.script);
+  return { metaRaw, scriptRaw };
+}
+
+function parseMeta(metaRaw) {
+  if (metaRaw === undefined) return { meta: undefined };
+  if (metaRaw.__err) return { error: metaRaw.__err };
+  try {
+    return { meta: JSON.parse(metaRaw) };
+  } catch (e) {
+    return { error: `tool.json is not valid JSON: ${e.message}` };
+  }
+}
+
+function cmdWrite(args, { overwrite }) {
+  const verb = overwrite ? 'update' : 'create';
+  const id = args._[1];
+  if (!id) {
+    process.stderr.write(`usage: ${verb} <tool-id> --meta <tool.json> --script <tool.mjs>  (or --from <dir>)\n`);
+    return EXIT.USAGE;
+  }
+  const { metaRaw, scriptRaw } = resolveAuthoringInputs(args);
+  const { meta, error: metaErr } = parseMeta(metaRaw);
+  if (metaErr) { out({ status: 'error', error: metaErr }); return EXIT.FAILURE; }
+  if (scriptRaw && scriptRaw.__err) { out({ status: 'error', error: scriptRaw.__err }); return EXIT.FAILURE; }
+  // create needs both; update needs at least one.
+  if (!overwrite && (meta === undefined || scriptRaw === undefined)) {
+    out({ status: 'error', error: 'create needs both --meta <tool.json> and --script <tool.mjs> (or --from <dir>)' });
+    return EXIT.USAGE;
+  }
+  if (overwrite && meta === undefined && scriptRaw === undefined) {
+    out({ status: 'error', error: 'update needs --meta and/or --script (or --from <dir>)' });
+    return EXIT.USAGE;
+  }
+  let r;
+  try {
+    r = writeTool(id, { meta, script: scriptRaw }, { overwrite });
+  } catch (e) {
+    out({ status: 'error', error: e.message });
+    return EXIT.FAILURE;
+  }
+  if (!r.ok) { out({ status: 'error', errors: r.errors }); return EXIT.FAILURE; }
+  out({ status: 'success', action: r.action, id: r.id, path: r.path });
+  return EXIT.SUCCESS;
+}
+
+function cmdDelete(args) {
+  const id = args._[1];
+  if (!id) { process.stderr.write('usage: delete <tool-id>\n'); return EXIT.USAGE; }
+  let r;
+  try {
+    r = deleteTool(id);
+  } catch (e) {
+    out({ status: 'error', error: e.message });
+    return EXIT.FAILURE;
+  }
+  if (!r.ok) { out({ status: 'error', errors: r.errors }); return EXIT.FAILURE; }
+  out({ status: 'success', action: 'deleted', id: r.removed });
+  return EXIT.SUCCESS;
+}
+
+// ─── memory — durable NON-PHI notes, scoped by site or task ───────────────────
+function cmdMemory(args) {
+  const sub = args._[1];
+  const scope =
+    args.site !== undefined ? 'site' : args.task !== undefined ? 'task' : null;
+  const key = scope === 'site' ? args.site : scope === 'task' ? args.task : null;
+  const needScope = () => {
+    process.stderr.write('memory needs a scope: --site <url|domain> or --task <id>\n');
+    return EXIT.USAGE;
+  };
+  try {
+    switch (sub) {
+      case 'list':
+        out({ dir: memoryDir(), ...listMemory() });
+        return EXIT.SUCCESS;
+      case 'get':
+        if (!scope || key === true) return needScope();
+        out(getMemory(scope, key));
+        return EXIT.SUCCESS;
+      case 'add': {
+        if (!scope || key === true) return needScope();
+        const text = args._[2];
+        if (!text) {
+          process.stderr.write('usage: memory add --site <url>|--task <id> "<note>"\n');
+          return EXIT.USAGE;
+        }
+        out(addMemory(scope, key, text));
+        return EXIT.SUCCESS;
+      }
+      case 'delete': {
+        if (!scope || key === true) return needScope();
+        const r = deleteMemory(scope, key, { index: args.index });
+        out(r);
+        return r.ok ? EXIT.SUCCESS : EXIT.FAILURE;
+      }
+      default:
+        process.stderr.write('usage: memory get|add|delete|list  --site <url>|--task <id>\n');
+        return EXIT.USAGE;
+    }
+  } catch (e) {
+    out({ status: 'error', error: e.message });
+    return EXIT.FAILURE;
+  }
+}
+
 function usage() {
   process.stderr.write(
     [
-      'breeze-tools — reusable Playwright tool repository',
+      'breeze-tools — reusable Playwright tool repository + memory',
       '',
+      'Discover & run:',
       '  available <url>            tools matching a URL (JSON)',
       '  help <tool-id>             full metadata for one tool (JSON)',
       '  list [--json]             every tool + health',
       '  run <tool-id> [--p v ...]  execute a tool over CDP',
       '',
-      `tools dir: ${toolsDir()}`,
+      'Author (learn): tool = a dir with tool.json + tool.mjs (exports run(ctx,params))',
+      '  create <id> --meta <tool.json> --script <tool.mjs>   (or --from <dir>)',
+      '  update <id> [--meta <f>] [--script <f>]              (or --from <dir>)',
+      '  delete <id>',
+      '',
+      'Memory (NON-PHI notes; scope by --site <url|domain> or --task <id>):',
+      '  memory get    --site <url>|--task <id>',
+      '  memory add    --site <url>|--task <id> "<note>"',
+      '  memory delete --site <url>|--task <id> [--index N]',
+      '  memory list',
+      '',
+      `tools dir:  ${toolsDir()}`,
+      `memory dir: ${memoryDir()}`,
     ].join('\n') + '\n',
   );
 }
@@ -290,6 +443,10 @@ async function main() {
     case 'help': return cmdHelp(args);
     case 'list': return cmdList(args);
     case 'run': return await cmdRun(args);
+    case 'create': return cmdWrite(args, { overwrite: false });
+    case 'update': return cmdWrite(args, { overwrite: true });
+    case 'delete': return cmdDelete(args);
+    case 'memory': return cmdMemory(args);
     case undefined:
     case 'help-cli':
       usage();

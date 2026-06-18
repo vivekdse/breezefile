@@ -17,11 +17,32 @@
 
 import os from 'node:os';
 import path from 'node:path';
-import { readFileSync, readdirSync, existsSync, statSync, appendFileSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  existsSync,
+  statSync,
+  appendFileSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 
 /** Root of the tool repository. Override with $BREEZE_TOOLS_DIR (tests use it). */
 export function toolsDir() {
   return process.env.BREEZE_TOOLS_DIR || path.join(os.homedir(), '.breezefile', 'tools');
+}
+
+/** A tool id is also its directory name, so it must be a safe path segment.
+ *  Throws on anything that could traverse or collide. */
+const TOOL_ID_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+export function safeToolId(id) {
+  if (typeof id !== 'string' || !TOOL_ID_RE.test(id)) {
+    throw new Error(
+      `invalid tool id ${JSON.stringify(id)} — use letters, digits, '-' and '_' (no slashes, must start alphanumeric)`,
+    );
+  }
+  return id;
 }
 
 // ─── Exit codes (docs/Playwright agent.md "Status Codes & Exit Codes") ───────
@@ -172,6 +193,67 @@ export function toolsForUrl(url, dir = toolsDir()) {
   return listTools(dir).filter(
     (t) => t.meta && t.meta.status !== 'deprecated' && toolMatchesUrl(t.meta, url),
   );
+}
+
+// ─── Tool authoring (create / update / delete) — the "learning" half ─────────
+// docs/Playwright agent.md Phase 5 (Tool Creation & Packaging): turn a solved
+// task into a reusable tool. These WRITE the repository; discovery above only
+// reads it.
+
+/** Create or update a tool on disk: ~/.breezefile/tools/<id>/{tool.json,tool.mjs}.
+ *  - create (overwrite=false): fails if the tool already exists.
+ *  - update (overwrite=true):  fails if it does NOT exist; `meta`/`script` are
+ *    each optional — an omitted one keeps the existing file.
+ *  `meta` is validated against TOOL_SCHEMA (id is forced to the dir name). The
+ *  script must be a non-empty string exporting `run(ctx, params)` (we don't
+ *  import it here — `run` validates at execution). Returns { ok, errors, path,
+ *  id, action }. Never throws on validation; throws only on a bad id. */
+export function writeTool(id, { meta, script } = {}, { dir = toolsDir(), overwrite = false } = {}) {
+  safeToolId(id);
+  const base = path.join(dir, id);
+  const exists = existsSync(path.join(base, 'tool.json'));
+  if (exists && !overwrite) {
+    return { ok: false, errors: [`tool '${id}' already exists — use update`], path: base };
+  }
+  if (!exists && overwrite) {
+    return { ok: false, errors: [`tool '${id}' does not exist — use create`], path: base };
+  }
+
+  // For an update, fall back to the existing meta/script when one isn't given.
+  let finalMeta = meta;
+  let finalScript = script;
+  if (exists && overwrite) {
+    const cur = loadTool(id, dir);
+    if (finalMeta === undefined) finalMeta = cur?.meta ?? {};
+    if (finalScript === undefined) {
+      try { finalScript = readFileSync(cur.scriptPath, 'utf8'); } catch { finalScript = undefined; }
+    }
+  }
+
+  finalMeta = { ...(finalMeta || {}), id }; // dir name is authoritative for id
+  const v = validateTool(finalMeta);
+  if (!v.ok) return { ok: false, errors: v.errors, path: base };
+  if (typeof finalScript !== 'string' || !finalScript.trim()) {
+    return { ok: false, errors: ['tool.mjs script is required (non-empty string)'], path: base };
+  }
+
+  mkdirSync(base, { recursive: true });
+  writeFileSync(path.join(base, 'tool.json'), JSON.stringify(finalMeta, null, 2) + '\n');
+  writeFileSync(
+    path.join(base, 'tool.mjs'),
+    finalScript.endsWith('\n') ? finalScript : finalScript + '\n',
+  );
+  return { ok: true, errors: [], path: base, id, action: exists ? 'updated' : 'created' };
+}
+
+/** Delete a tool directory (and its run history). Returns { ok, removed } or
+ *  { ok:false, errors }. Throws only on a bad id. */
+export function deleteTool(id, dir = toolsDir()) {
+  safeToolId(id);
+  const base = path.join(dir, id);
+  if (!existsSync(base)) return { ok: false, errors: [`no such tool: ${id}`] };
+  rmSync(base, { recursive: true, force: true });
+  return { ok: true, removed: id };
 }
 
 /** Append a run record to a tool's runs.jsonl (one JSON object per line).
