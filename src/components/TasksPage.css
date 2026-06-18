@@ -474,7 +474,50 @@
 .tasks__detail-statusrow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+}
+/* fm-mhtz — icon-only set-status controls: a colored status dot on a raised,
+   clearly-clickable button. Elevation (border + shadow + hover lift) reads as
+   "button", and the current status sits pressed/inset so it's obvious which
+   one is active. */
+.tasks__status-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 80ms ease, box-shadow 80ms ease, border-color 80ms ease,
+    background 80ms ease;
+}
+.tasks__status-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
+  border-color: var(--accent);
+}
+.tasks__status-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2) inset;
+}
+/* The current status: pressed/inset, accented ring, no lift on hover. */
+.tasks__status-btn--on {
+  background: var(--accent-soft, var(--hi));
+  border-color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18) inset;
+}
+.tasks__status-btn--on:hover {
+  transform: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18) inset;
+}
+/* Bump the dot a touch inside the button so the color reads at a glance. */
+.tasks__status-btn .task-dot {
+  width: 12px;
+  height: 12px;
 }
 .tasks__detail-foot {
   margin-top: auto;
@@ -867,19 +910,8 @@
   font-style: italic;
 }
 
-/* fm-b5at.1 — source-native status that didn't map into the local enum
-   (e.g. TypeBuild failed/partial/blocked). */
-.tasks__raw-status {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-radius: 4px;
-  padding: 1px 6px;
-  color: var(--danger, #c0392b);
-  border: 1px solid var(--danger, #c0392b);
-  background: transparent;
-}
+/* fm-mhtz — the source-native status text badge (.tasks__raw-status) was
+   removed from rows; the raw status now rides in the status dot's tooltip. */
 
 .tasks__tag {
   font-size: 10px;

@@ -162,21 +162,16 @@ export function TaskRow({
 
       <div className="tasks__row-main">
         <div className="tasks__row-title">
-          <TaskStatusDot status={task.status} />
+          {/* fm-mhtz — status is the colored dot alone; the source-native raw
+              status (failed/partial/…) rides in its tooltip instead of a
+              separate text badge that read differently from the dot. */}
+          <TaskStatusDot status={task.status} rawStatus={rawBadge} />
           {task.pinned && (
             <span className="tasks__row-pin-mark" aria-label="Pinned" title="Pinned">
               ★
             </span>
           )}
           <span className="tasks__row-title-text">{task.title}</span>
-          {rawBadge && (
-            <span
-              className="tasks__raw-status"
-              title={`Source status: ${rawBadge}`}
-            >
-              {rawBadge}
-            </span>
-          )}
           {childProgress && (
             <span
               className="tasks__child-progress"

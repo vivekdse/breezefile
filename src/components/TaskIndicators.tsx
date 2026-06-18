@@ -26,18 +26,28 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 export function TaskStatusDot({
   status,
   className = '',
+  rawStatus = null,
 }: {
   status: TaskStatus;
   className?: string;
+  // fm-mhtz — when a source-native status (e.g. TypeBuild "open"/"failed"/
+  // "partial") differs from the mapped local status, surface it in the tooltip
+  // so the colored dot stays the single status signal — no separate text label
+  // that could read differently from the dot.
+  rawStatus?: string | null;
 }) {
+  const label =
+    rawStatus && rawStatus !== status
+      ? `${STATUS_LABEL[status]} · ${rawStatus}`
+      : STATUS_LABEL[status];
   return (
     <span
       className={['task-dot', `task-dot--${status}`, className]
         .filter(Boolean)
         .join(' ')}
       role="img"
-      aria-label={STATUS_LABEL[status]}
-      title={STATUS_LABEL[status]}
+      aria-label={label}
+      title={label}
     />
   );
 }

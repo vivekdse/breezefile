@@ -211,8 +211,12 @@ function ManualDetail({
     <aside className="tasks__detail">
       <header className="tasks__detail-head">
         <div className="tasks__detail-status">
-          <TaskStatusDot status={task.status} />
-          <span>{STATUS_LABEL[task.status]}</span>
+          {/* fm-mhtz — status is the colored dot + tooltip only; the text label
+              was the redundant half of the old two-semantic display. */}
+          <TaskStatusDot
+            status={task.status}
+            rawStatus={task.rawStatus ?? null}
+          />
           {task.auto_mode && (
             <TaskRunIndicator task={task} onClick={onOpenRuns} />
           )}
@@ -330,17 +334,24 @@ function ManualDetail({
       {canEdit && (
         <>
           <div className="tasks__detail-section tasks__detail-section--spaced">Status</div>
-          <div className="tasks__detail-statusrow">
+          {/* fm-mhtz — set-status controls are icon-only too: a colored dot per
+              status with the label in the tooltip. They carry an elevated /
+              raised button look (and a pressed state for the current status) so
+              they still read clearly as clickable, not as passive dots. */}
+          <div className="tasks__detail-statusrow" role="group" aria-label="Set status">
             {(['pending', 'in_progress', 'done', 'cancelled'] as TaskStatus[]).map((s) => (
               <button
                 key={s}
                 type="button"
-                className={['tasks__chip', task.status === s && 'tasks__chip--on']
+                className={['tasks__status-btn', task.status === s && 'tasks__status-btn--on']
                   .filter(Boolean)
                   .join(' ')}
                 onClick={() => onSetStatus(s)}
+                aria-pressed={task.status === s}
+                aria-label={`Set ${STATUS_LABEL[s]}`}
+                title={`Set ${STATUS_LABEL[s]}`}
               >
-                {STATUS_LABEL[s]}
+                <TaskStatusDot status={s} />
               </button>
             ))}
           </div>
@@ -467,7 +478,10 @@ function AgentDetail({
     <aside className="tasks__detail">
       <header className="tasks__detail-head">
         <div className="tasks__detail-status">
-          <TaskStatusDot status={task.status} />
+          {/* fm-mhtz — status dot carries the raw TypeBuild status in its
+              tooltip; the "Status" meta row below is dropped (it was the text
+              duplicate that conflicted with the dot). */}
+          <TaskStatusDot status={task.status} rawStatus={task.rawStatus ?? null} />
           <span className="tasks__detail-source-badge">TypeBuild</span>
         </div>
       </header>
@@ -486,10 +500,8 @@ function AgentDetail({
       )}
 
       <dl className="tasks__detail-meta">
-        <div>
-          <dt>Status</dt>
-          <dd>{task.rawStatus ?? task.status}</dd>
-        </div>
+        {/* fm-mhtz — the "Status" text row was dropped; the colored dot in the
+            header (with the raw status in its tooltip) is the status signal. */}
         {claimedBy && (
           <div>
             <dt>Claimed by</dt>
