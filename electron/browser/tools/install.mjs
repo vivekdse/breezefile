@@ -29,17 +29,26 @@ export function toolsDir() {
 }
 
 /** Locate the bundled seed directory across dev + packaged layouts.
- *  - dev / tsc build: this file sits at electron/browser/tools/install.mjs and
- *    the seeds are the sibling ./seed.
+ *  - dev: main.ts dynamically imports this file, so the bundler emits it into
+ *    dist-electron/ and `__dirname` is dist-electron/ — there is NO sibling
+ *    ./seed there. The seeds live in the SOURCE tree, so we resolve them under
+ *    APP_ROOT (the repo root in dev), the same way automation.ts resolves the
+ *    raw CLI / tools CLI.
  *  - packaged: electron-builder ships the automation tree under
  *    Resources/automation preserving structure, so the seeds live at
- *    Resources/automation/electron/browser/tools/seed — which is ALSO the
- *    sibling ./seed when this file runs from there. The resourcesPath fallback
- *    below covers the case where install.mjs is loaded from inside the asar
- *    (main.ts's dynamic import) rather than from Resources/automation. */
+ *    Resources/automation/electron/browser/tools/seed. install.mjs is loaded
+ *    from inside the asar, so the sibling ./seed doesn't exist either; the
+ *    resourcesPath fallback finds them. (APP_ROOT points inside app.asar when
+ *    packaged, so we skip the dev candidate then.) */
 export function seedDir() {
   const sibling = path.join(__dirname, 'seed');
   if (existsSync(sibling)) return sibling;
+  // dev: install.mjs runs bundled from dist-electron/; the seeds are in source.
+  const appRoot = process.env.APP_ROOT;
+  if (appRoot && !/[\\/]app\.asar([\\/]|$)/.test(appRoot)) {
+    const dev = path.join(appRoot, 'electron', 'browser', 'tools', 'seed');
+    if (existsSync(dev)) return dev;
+  }
   if (process.resourcesPath) {
     const packaged = path.join(
       process.resourcesPath, 'automation', 'electron', 'browser', 'tools', 'seed',
