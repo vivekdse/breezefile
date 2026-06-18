@@ -49,6 +49,42 @@ dns.setDefaultResultOrder('ipv4first');
 // everywhere, dev and packaged alike.
 app.setName('Breeze File');
 
+// ─── Fail-soft safety net ────────────────────────────────────────────────────
+// A network / TLS / auth failure deep in an async path (a TypeBuild mint or
+// poll whose fetch rejects, a revoked token, a Chromium TLS handshake) must
+// DEGRADE, never take the whole app down. Node treats an unhandled promise
+// rejection as fatal by default, so one stray reject from a transient outage or
+// a changed login mechanism would crash Breeze. We log terse, token/PHI-free
+// context and keep running: the affected feature surfaces its own in-app error
+// (e.g. the mint's typed signed-out / unreachable message), the rest stays up.
+process.on('unhandledRejection', (reason) => {
+  const e = reason as { name?: string; message?: string } | undefined;
+  console.error(
+    '[main] unhandled rejection (non-fatal):',
+    e?.name || '',
+    e?.message || String(reason),
+  );
+});
+process.on('uncaughtException', (err) => {
+  // Survive by policy (the user wants graceful degradation, not a crash). Log
+  // loudly so the failure is still diagnosable in the terminal.
+  console.error('[main] uncaught exception (non-fatal):', err?.name, err?.message);
+});
+
+// TLS certificate failures: surface WHICH url failed (instead of opaque
+// Chromium boringssl noise) and KEEP rejecting. We deliberately do NOT bypass
+// verification — Breeze fills PII (SSNs, etc.) into pages, so an untrusted cert
+// MUST stay rejected. This only makes the failure observable + explicitly
+// handled, so a bad cert degrades the affected page rather than spamming
+// anonymous errors. callback(false) preserves Chromium's secure default.
+app.on(
+  'certificate-error',
+  (_event, _webContents, url, error, _certificate, callback) => {
+    console.error(`[main] TLS certificate rejected: ${url} (${error})`);
+    callback(false);
+  },
+);
+
 // ─── SPIKE (spike/playwright-cdp): expose CDP so Playwright can drive an
 // embedded WebContentsView over the wire. Must be set before app is ready.
 // Remove this whole block (and the spikeView code in createWindow) to revert.
