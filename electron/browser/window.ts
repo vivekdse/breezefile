@@ -10,7 +10,13 @@
 // (src/components/AgentOverlay.tsx) via overlay:move / overlay:resize.
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BrowserWindow, WebContentsView, ipcMain, screen } from 'electron';
+
+// The bundle is ESM — `__dirname` doesn't exist. Derive it from this chunk's
+// URL (resolves to dist-electron/, where preload.mjs lives) so the chat view
+// gets the same preload as the main window.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const MARGIN = 24;
