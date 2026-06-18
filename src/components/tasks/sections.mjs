@@ -166,6 +166,11 @@ function groupAgents(sortedAgents, sortCmp, allTasks) {
         depth: 0,
         childCount: allKids.length,
         doneChildCount,
+        // fm-8yky — how many children actually render under this parent in this
+        // section (the rest are terminal / live in DONE). The page keys the
+        // collapse toggle off this so a parent whose kids are all done doesn't
+        // show a disclosure that expands to nothing.
+        visibleChildCount: visible.length,
         hasOpenChildren,
       });
       for (const c of visible) rows.push({ task: c, depth: 1 });

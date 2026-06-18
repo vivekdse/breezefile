@@ -7,7 +7,7 @@
 import type { PrimaryAction } from './primaryAction.mjs';
 import { PrimaryActionButton } from './PrimaryActionButton';
 import { homeRel, shortDate } from './helpers';
-import { TaskRunIndicator, TaskStatusDot } from '../TaskIndicators';
+import { TaskStatusDot } from '../TaskIndicators';
 import type { RemoteSchedule, Task } from '../../types';
 
 export function TaskRow({
@@ -23,6 +23,9 @@ export function TaskRow({
   depth,
   childCount,
   doneChildCount,
+  visibleChildCount,
+  expanded,
+  onToggleExpand,
   blockedByTitles,
   onCheckbox,
   onClick,
@@ -46,6 +49,13 @@ export function TaskRow({
   childCount?: number;
   /** Parent rows: how many of those children are terminal. */
   doneChildCount?: number;
+  /** fm-8yky — parent rows: children that actually render in-section (drives
+   *  the disclosure toggle; the chip still shows done/total via childCount). */
+  visibleChildCount?: number;
+  /** fm-8yky — parent rows: whether the child subtree is expanded. */
+  expanded?: boolean;
+  /** fm-8yky — parent rows: toggle the child subtree open/closed. */
+  onToggleExpand?: () => void;
   /** Dependency presentation: resolved titles of blocking tasks (if known). */
   blockedByTitles?: string[];
   onCheckbox: () => void;
@@ -78,7 +88,11 @@ export function TaskRow({
   // fm-bq86 (S3) — parent child-progress chip ("2/5 ⮡"). Only on parent rows
   // that actually have children grouped beneath them.
   const isChild = depth === 1;
-  const hasChildren = typeof childCount === 'number' && childCount > 0;
+  // fm-8yky — the disclosure toggle appears only when there are children that
+  // actually render in this section (terminal kids live in DONE). The N/M chip
+  // below still uses childCount/doneChildCount (the full totals).
+  const hasChildren =
+    typeof visibleChildCount === 'number' && visibleChildCount > 0;
   const childProgress =
     hasChildren && typeof doneChildCount === 'number'
       ? `${doneChildCount}/${childCount}`
@@ -114,8 +128,29 @@ export function TaskRow({
     >
       {isChild && (
         <span className="tasks__row-connector" aria-hidden="true">
-          ⮡
+          └
         </span>
+      )}
+      {/* fm-8yky — first grid cell is the disclosure column. Parent rows get a
+          toggle (subtree collapses by default; expand to see children in
+          context); every other row renders an empty cell of the same width so
+          titles stay aligned. */}
+      {hasChildren ? (
+        <button
+          type="button"
+          className="tasks__row-disclosure"
+          aria-expanded={!!expanded}
+          aria-label={expanded ? 'Collapse children' : 'Expand children'}
+          title={expanded ? 'Collapse children' : 'Expand children'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpand?.();
+          }}
+        >
+          {expanded ? '▾' : '▸'}
+        </button>
+      ) : (
+        <span className="tasks__row-disclosure-spacer" aria-hidden="true" />
       )}
       <label
         className="tasks__row-check"
@@ -147,7 +182,7 @@ export function TaskRow({
               className="tasks__child-progress"
               title={`${childProgress} children done`}
             >
-              {childProgress} ⮡
+              {childProgress} done
             </span>
           )}
         </div>
@@ -211,9 +246,11 @@ export function TaskRow({
               ⛓ waits on {waitsOn}
             </span>
           )}
-          {task.auto_mode && (
-            <TaskRunIndicator task={task} onClick={onOpenRuns} />
-          )}
+          {/* fm-8yky — the per-row run-state pill (⚡/◴ + "running/failed/…")
+              duplicated what the primary action button already conveys
+              (Run now / View run / Open session), giving every auto row two
+              competing run signals. Dropped from the row; the detail panel
+              keeps the full run state + history. */}
           {runCount > 0 && (
             <button
               type="button"

@@ -21,6 +21,9 @@ export interface AgentRow {
   childCount?: number;
   /** How many of those children are terminal (done/cancelled/partial). */
   doneChildCount?: number;
+  /** fm-8yky — children that actually render under this parent in-section
+   *  (drives the collapse toggle; terminal kids live in DONE, not here). */
+  visibleChildCount?: number;
   /** True when at least one child is still open — parent can't Start yet. */
   hasOpenChildren?: boolean;
 }

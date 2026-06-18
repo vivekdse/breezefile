@@ -56,13 +56,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--sp-4) var(--sp-5);
+  /* fm-8yky — tighter header band (was --sp-4 block padding). */
+  padding: var(--sp-2) var(--sp-5);
   border-bottom: 1px solid var(--rule-on-panel);
 }
 
 .tasks__title {
   margin: 0;
-  font-size: var(--fs-xl);
+  /* fm-8yky — slightly smaller title so the header band reads tighter. */
+  font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--text-on-panel);
   display: flex;
@@ -235,7 +237,8 @@
   background: var(--panel-2);
   color: var(--text-on-panel);
   border-radius: 8px;
-  padding: 5px 12px;
+  /* fm-8yky — tighter header buttons (was 5px 12px). */
+  padding: 4px 10px;
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: 500;
@@ -494,15 +497,43 @@
    moved into the kebab. */
 .tasks__row {
   display: grid;
-  grid-template-columns: 24px 1fr auto auto;
+  /* fm-8yky — leading disclosure column (parent expand toggle / empty spacer)
+     before the checkbox; then main / primary / kebab. */
+  grid-template-columns: 16px 24px 1fr auto auto;
   align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-5);
+  gap: var(--sp-2);
+  /* fm-8yky — tighter rows (was --sp-2 block padding). Denser, email-inbox feel. */
+  padding: 4px var(--sp-5);
   border-bottom: 1px solid var(--rule-on-panel);
   cursor: pointer;
   /* fm-7909 — subtle transition as a task moves between sections (re-render
      re-orders the DOM; the background fade softens the jump). */
   transition: background 160ms ease, opacity 160ms ease;
+}
+
+/* fm-8yky — disclosure toggle (parent rows) + the empty spacer every other row
+   renders so the grid column is always occupied and titles line up. */
+.tasks__row-disclosure,
+.tasks__row-disclosure-spacer {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tasks__row-disclosure {
+  border: none;
+  background: transparent;
+  color: var(--muted-on-panel);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+}
+.tasks__row-disclosure:hover {
+  color: var(--text-on-panel);
+  background: var(--panel-2);
 }
 
 /* Per-row action cluster — quiet by default, revealed on hover or when
@@ -884,6 +915,18 @@
   font-size: 12px;
   font-weight: 500;
   border-color: var(--rule-on-panel);
+}
+/* fm-8yky — icon-only primary action in rows: a compact square glyph (label in
+   tooltip + aria-label) instead of "▸ Start" / "⧉ Open session" text, so the
+   row's right edge stays tight. The detail panel keeps the full text button. */
+.tasks__row-btn--text.tasks__primary--icononly {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .tasks__row-btn--claim {
   font-weight: 600;
@@ -1324,9 +1367,11 @@
    primary · kebab); indent via padding-left and absolutely position the
    connector glyph in the gutter so the grid columns stay intact. Theme-safe:
    CSS vars only. */
+/* fm-8yky — child rows indent via the leading gutter + a left accent rule, and
+   show a corner connector glyph (└) in the disclosure column. */
 .tasks__row--child {
   position: relative;
-  padding-left: calc(var(--sp-5) + 22px);
+  padding-left: calc(var(--sp-5) + 18px);
   border-left: 2px solid var(--rule-on-panel);
 }
 .tasks__row-connector {
@@ -1340,7 +1385,8 @@
   pointer-events: none;
 }
 
-/* Parent child-progress chip ("2/5 ⮡"). */
+/* fm-8yky — child-progress chip ("2/5 done") on a collapsed parent. The old
+   ⮡ glyph rendered as a missing-glyph box in the app font; use plain text. */
 .tasks__child-progress {
   font-size: 10px;
   font-weight: 600;
