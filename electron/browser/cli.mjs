@@ -18,10 +18,10 @@
 //                   (a substring matched against the page URL or title).
 //
 // Usage:  node cli.mjs <verb> [args...]
-//   open [url]                  open a NEW Breeze browser tab (via the control
-//                               API) and wait for it to attach; then drive it
+//   open [url]                  open/focus the Breeze browser window (via the
+//                               control API), wait for it, then drive it
 //   pages                       list attachable pages (debug)
-//   url                         print the embedded tab's current URL
+//   url                         print the browser window's current URL
 //   title                       print the page title
 //   goto <url>                  navigate the tab
 //   snapshot [selector]         ARIA snapshot (the agent's "eyes"; default body)
@@ -106,8 +106,8 @@ async function resolvePage(browser) {
     if (candidates.length) return candidates[candidates.length - 1];
     if (Date.now() > deadline) {
       fail(
-        `no embedded browser tab found over CDP at ${CDP}.\n` +
-          `Open a Breeze browser tab (Ctrl/Cmd+B) first.\n` +
+        `no Breeze browser window found over CDP at ${CDP}.\n` +
+          `Run \`open\` first to create it.\n` +
           (TARGET ? `(filtering by BREEZE_BROWSER_TARGET="${TARGET}")\n` : '') +
           `pages seen: ${JSON.stringify(lastSeen)}`,
       );
@@ -137,7 +137,7 @@ async function main() {
   try {
     if (verb === 'open') {
       const page = await resolvePage(browser);
-      process.stdout.write(`opened browser tab: ${page.url()}\n`);
+      process.stdout.write(`opened browser window: ${page.url()}\n`);
       return;
     }
     // `pages` is the one verb that inspects all targets, not a single tab.

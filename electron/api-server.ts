@@ -19,6 +19,7 @@ import { writeFileSync, unlinkSync, chmodSync, mkdirSync, existsSync } from 'nod
 import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { dispatchTerminalFg } from './ipc';
+import { openBrowserWindow } from './browser/window';
 import { clearSessionTokens } from './session-tokens';
 import { createTaskApi, sendJson, send, readJson } from './core/task-http';
 
@@ -175,12 +176,12 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const result = await controlRenderer<unknown>({ kind: 'listTabs' });
       return sendJson(res, 200, result);
     }
-    // SPIKE (spike/playwright-cdp): open an embedded browser tab on demand.
-    // Lets the in-app agent (via electron/browser/cli.mjs `open`) create the
-    // tab it then drives over CDP, instead of relying on Ctrl/Cmd+B.
+    // SPIKE (spike/playwright-cdp): open the browser WINDOW on demand. Lets the
+    // in-app agent (via electron/browser/cli.mjs `open`) create the side-by-side
+    // browser window it then drives over CDP.
     if (p === '/app/open-browser' && m === 'POST') {
       const body = await readJson<{ url?: string }>(req).catch(() => ({}) as { url?: string });
-      await controlRenderer({ kind: 'openBrowser', url: body.url });
+      openBrowserWindow(body.url);
       return sendJson(res, 200, { ok: true });
     }
 

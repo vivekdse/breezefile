@@ -22,6 +22,7 @@ import { flagsToArgs } from './flags';
 import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
 import { CDP_URL, BROWSER_CLI, playwrightPromptAddendum } from '../browser/automation';
+import { openBrowserWindow } from '../browser/window';
 
 export type InteractiveRunOptions = {
   /** Agent id for the run row. Defaults to task.auto_agent or the registry
@@ -133,17 +134,14 @@ export async function runTaskInteractive(
   }
 
   // SPIKE (spike/playwright-cdp): the `playwright` flag is the in-app analog of
-  // `chrome`. Open an embedded browser tab for the agent to drive and teach it
-  // (via the prompt) how to drive it. The CLI reads BREEZE_CDP_URL from env.
-  // omitPrompt = resume relaunch: the addendum was already delivered on the
+  // `chrome`. Open the side-by-side browser WINDOW for the agent to drive and
+  // teach it (via the prompt) how to drive it. The CLI reads BREEZE_CDP_URL from
+  // env. omitPrompt = resume relaunch: the addendum was already delivered on the
   // first run, and --continue must not be seeded with a fresh message.
   const effectivePrompt =
     playwright && !opts.omitPrompt ? prompt + '\n' + playwrightPromptAddendum() : prompt;
   if (playwright) {
-    const browserOpen = { url: 'https://example.com' };
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('browser:open', browserOpen);
-    }
+    openBrowserWindow('https://example.com');
   }
   // Positional prompt arg launches claude interactively pre-seeded with the
   // task; flags map to CLI args; --add-dir grants the cwd. No -p (that's
