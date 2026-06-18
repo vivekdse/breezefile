@@ -2156,6 +2156,19 @@ end tell`;
     if (!win) return -1;
     const id = nextBrowserId++;
     const view = new WebContentsView();
+    // Give the page a REAL viewport immediately, sized to the window, so it
+    // lays out and can be screenshotted/driven even when the browser tab is not
+    // the active Breeze tab. Without this the view stays 0×0 until BrowserPane
+    // reports on-screen bounds — so a tab the agent opened but the user isn't
+    // looking at renders nothing (innerWidth=0, screenshots fail "0 width").
+    // We keep it parked off-screen + hidden until BrowserPane positions it.
+    const cb0init = win.getContentBounds();
+    view.setBounds({
+      x: -(cb0init.width + 100),
+      y: 0,
+      width: cb0init.width,
+      height: cb0init.height,
+    });
     view.setVisible(false); // stay hidden until the first bounds report
     win.contentView.addChildView(view);
     const wc = view.webContents;
@@ -2240,7 +2253,20 @@ end tell`;
   });
 
   ipcMain.on('browser:hide', (_e, id: number) => {
-    browserViews.get(id)?.view.setVisible(false);
+    const rec = browserViews.get(id);
+    if (!rec) return;
+    // Park the view OFF-SCREEN at full size rather than setVisible(false): the
+    // page keeps a real viewport (and keeps rendering) while the tab is in the
+    // background, so the agent can still drive + screenshot it. BrowserPane
+    // brings it back on-screen via bounds when the tab is shown again.
+    const cb = rec.win.getContentBounds();
+    rec.view.setBounds({
+      x: -(cb.width + 100),
+      y: 0,
+      width: cb.width,
+      height: cb.height,
+    });
+    rec.view.setVisible(false);
   });
 
   ipcMain.handle('browser:destroy', (_e, id: number) => {

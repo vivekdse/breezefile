@@ -470,10 +470,17 @@ function Shell() {
           // the tab it drives over CDP without a keypress.
           case 'openBrowser': {
             const url = (req.url as string) || 'https://example.com';
-            dispatch({
-              type: 'newTab',
-              tab: makeTab('/', { kind: 'browser', browserUrl: url }),
-            });
+            // Reuse + focus an existing browser tab rather than spawning a
+            // second view (the agent may call `open` more than once).
+            const existing = tabsRef.current.findIndex((t) => t.kind === 'browser');
+            if (existing >= 0) {
+              dispatch({ type: 'selectTab', index: existing });
+            } else {
+              dispatch({
+                type: 'newTab',
+                tab: makeTab('/', { kind: 'browser', browserUrl: url }),
+              });
+            }
             break;
           }
           case 'listTabs': {
@@ -734,6 +741,13 @@ function Shell() {
   // (the `playwright` task flag opens one for the agent to drive over CDP).
   useEffect(() => {
     return fm.onBrowserOpen(({ url }) => {
+      // Reuse + focus an existing browser tab rather than spawning a second
+      // view (the playwright flag and the agent's `open` can both fire).
+      const existing = tabsRef.current.findIndex((t) => t.kind === 'browser');
+      if (existing >= 0) {
+        dispatch({ type: 'selectTab', index: existing });
+        return;
+      }
       dispatch({
         type: 'newTab',
         tab: makeTab('/', {
