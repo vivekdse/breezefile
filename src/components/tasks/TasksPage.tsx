@@ -91,6 +91,9 @@ function TasksPageInner() {
   // user can tell filters are active even while the bar is collapsed.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [doneExpanded, setDoneExpanded] = useState(false);
+  // fm-8yky — parent tasks whose child subtree is expanded. Collapsed by
+  // default so a group reads as one row (with N/M done) until you drill in.
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
   // selection / cursor
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -153,14 +156,43 @@ function TasksPageInner() {
     return m;
   }, [forAgentsRows]);
 
+  // fm-8yky — collapse child rows under parents that aren't expanded. A child
+  // (depth 1) is hidden unless its parent id is in expandedParents. This
+  // filtered list drives BOTH the render and flatOrder, so collapsed children
+  // are also out of keyboard nav / selection scope (they can't be acted on
+  // while hidden — expand to reach them).
+  const visibleAgentRows = useMemo(
+    () =>
+      forAgentsRows.filter(
+        (r) =>
+          r.depth !== 1 ||
+          (r.task.parentTaskId
+            ? expandedParents.has(r.task.parentTaskId)
+            : true),
+      ),
+    [forAgentsRows, expandedParents],
+  );
+  const visibleForAgents = useMemo(
+    () => visibleAgentRows.map((r) => r.task),
+    [visibleAgentRows],
+  );
+  function toggleExpand(parentId: string) {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
+  }
+
   const showDoneSection = showDone || doneExpanded;
 
   // Flat order across the visible sections — drives arrow nav + selection scope.
   const flatOrder = useMemo(() => {
-    const out = [...forYou, ...forAgents];
+    const out = [...forYou, ...visibleForAgents];
     if (showDoneSection) out.push(...done);
     return out;
-  }, [forYou, forAgents, done, showDoneSection]);
+  }, [forYou, visibleForAgents, done, showDoneSection]);
 
   // Drop selection ids no longer visible; re-anchor cursor.
   useEffect(() => {
@@ -696,6 +728,16 @@ function TasksPageInner() {
       }
       if (inField) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // fm-8yky — ":" opens command mode so the chip-prompt verbs (:done, :due,
+      // :delete, …) act on the current selection. The global useKeyboard
+      // handler bails out for non-folder tabs (tab.kind !== 'folder'), so the
+      // Tasks page has to wire its own ":" — without this, the "press : to act"
+      // hint on a multi-selection did nothing.
+      if (e.key === ':') {
+        e.preventDefault();
+        dispatch({ type: 'setMode', mode: 'command', buffer: '' });
+        return;
+      }
       if (e.key === 'ArrowDown' || e.key === 'j') {
         e.preventDefault();
         moveCursor(1, e.shiftKey);
@@ -987,8 +1029,8 @@ function TasksPageInner() {
                   <Section
                     title="For agents"
                     hint="TypeBuild + auto-execute tasks"
-                    tasks={forAgents}
-                    rows={forAgentsRows}
+                    tasks={visibleForAgents}
+                    rows={visibleAgentRows}
                     blockedByFor={(t) => resolveBlockedBy(t.blockedBy, rawTasks)}
                     emptyNote="No agent work queued."
                     today={todayISO()}
@@ -998,6 +1040,8 @@ function TasksPageInner() {
                     runCounts={runCounts}
                     selected={selected}
                     cursorId={cursorId}
+                    expandedParents={expandedParents}
+                    onToggleExpand={toggleExpand}
                     onCheckbox={(t) => {
                       toggleSelect(t.id);
                       lastSelectedRef.current = t.id;
@@ -1125,6 +1169,8 @@ function Section({
   runCounts,
   selected,
   cursorId,
+  expandedParents,
+  onToggleExpand,
   onCheckbox,
   onRowClick,
   onActivate,
@@ -1148,6 +1194,10 @@ function Section({
   runCounts: Record<string, number>;
   selected: Set<string>;
   cursorId: string | null;
+  // fm-8yky — parent expansion state + toggle (FOR AGENTS only; undefined for
+  // the flat FOR YOU section).
+  expandedParents?: Set<string>;
+  onToggleExpand?: (parentId: string) => void;
   onCheckbox: (t: Task) => void;
   onRowClick: (e: React.MouseEvent, t: Task) => void;
   onActivate: (t: Task) => void;
@@ -1186,6 +1236,9 @@ function Section({
               depth={row.depth}
               childCount={row.childCount}
               doneChildCount={row.doneChildCount}
+              visibleChildCount={row.visibleChildCount}
+              expanded={expandedParents?.has(t.id)}
+              onToggleExpand={onToggleExpand ? () => onToggleExpand(t.id) : undefined}
               blockedByTitles={blockedByFor ? blockedByFor(t) : undefined}
               onCheckbox={() => onCheckbox(t)}
               onClick={(e) => onRowClick(e, t)}
@@ -1220,6 +1273,9 @@ function AutoAwareRow({
   depth?: 0 | 1;
   childCount?: number;
   doneChildCount?: number;
+  visibleChildCount?: number;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
   blockedByTitles?: string[];
   onCheckbox: () => void;
   onClick: (e: React.MouseEvent) => void;

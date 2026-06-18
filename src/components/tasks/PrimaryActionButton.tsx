@@ -2,6 +2,9 @@
 // primaryActionFor descriptor. Shared by TaskRow and TaskDetailPanel so the
 // row button and the mirrored detail button never drift. The 'none' case
 // renders either a quiet note (e.g. "◆ claimed by X") or nothing.
+//
+// fm-8yky — the ROW variant is icon-only (glyph + tooltip/aria-label) to keep
+// rows tight; the DETAIL variant keeps the full "glyph + label" text.
 
 import type { PrimaryAction } from './primaryAction.mjs';
 
@@ -15,8 +18,10 @@ export function PrimaryActionButton({
   onInvoke: (action: PrimaryAction) => void;
   variant?: 'row' | 'detail';
 }) {
-  const base =
-    variant === 'detail' ? 'tasks__btn' : 'tasks__row-btn tasks__row-btn--text';
+  const isRow = variant === 'row';
+  const base = isRow
+    ? 'tasks__row-btn tasks__row-btn--text tasks__primary--icononly'
+    : 'tasks__btn';
 
   switch (action.kind) {
     case 'done-toggle':
@@ -28,7 +33,7 @@ export function PrimaryActionButton({
           title="Mark done"
           aria-label="Mark done"
         >
-          {variant === 'detail' ? '✓ Mark done' : '✓ Done'}
+          {isRow ? '✓' : '✓ Mark done'}
         </button>
       );
     case 'reopen':
@@ -38,8 +43,9 @@ export function PrimaryActionButton({
           className={`${base} tasks__primary tasks__primary--reopen`}
           onClick={() => onInvoke(action)}
           title="Reopen (back to pending)"
+          aria-label="Reopen"
         >
-          ↺ Reopen
+          {isRow ? '↺' : '↺ Reopen'}
         </button>
       );
     case 'start':
@@ -50,8 +56,9 @@ export function PrimaryActionButton({
           onClick={() => action.enabled && onInvoke(action)}
           disabled={!action.enabled}
           title={action.tooltip}
+          aria-label="Start"
         >
-          ▸ Start
+          {isRow ? '▸' : '▸ Start'}
         </button>
       );
     case 'open-session':
@@ -61,8 +68,9 @@ export function PrimaryActionButton({
           className={`${base} tasks__primary tasks__primary--session`}
           onClick={() => onInvoke(action)}
           title="Focus the running session tab"
+          aria-label="Open session"
         >
-          ⧉ Open session
+          {isRow ? '⧉' : '⧉ Open session'}
         </button>
       );
     case 'run-now':
@@ -72,8 +80,9 @@ export function PrimaryActionButton({
           className={`${base} tasks__primary tasks__primary--run`}
           onClick={() => onInvoke(action)}
           title="Run this task now"
+          aria-label="Run now"
         >
-          ▸ Run now
+          {isRow ? '▸' : '▸ Run now'}
         </button>
       );
     case 'view-run':
@@ -83,8 +92,9 @@ export function PrimaryActionButton({
           className={`${base} tasks__primary tasks__primary--run`}
           onClick={() => onInvoke(action)}
           title="A run is in flight — view its history"
+          aria-label="View run"
         >
-          ◷ View run
+          {isRow ? '◷' : '◷ View run'}
         </button>
       );
     case 'none':
