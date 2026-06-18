@@ -12,6 +12,7 @@ import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
 import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
 import { registerBreezeHooks, ensureBreezeCli } from './hooks-register';
+import { installBrowserSubagent } from './browser/subagent';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
 import { registerTypebuildDetectIpc } from './typebuild/detect';
 import {
@@ -354,6 +355,16 @@ app.whenReady().then(() => {
       if (errors.length) console.warn('[automation] errors:', errors.join('; '));
     })
     .catch((e) => console.warn('[automation] failed:', (e as Error).message));
+  // Browser playbook: install/refresh the `breeze-browser` subagent into
+  // ~/.claude/agents/ so a task session can DELEGATE its browser work to one
+  // vetted agent that holds all the details (electron/browser/subagent.ts).
+  // Best-effort; never blocks startup.
+  try {
+    const { written, path: agentPath } = installBrowserSubagent();
+    if (written) console.log('[subagent] installed breeze-browser →', agentPath);
+  } catch (e) {
+    console.warn('[subagent] failed:', (e as Error).message);
+  }
   // Tool Repository (docs/Playwright agent.md): install the bundled seed
   // tools into ~/.breezefile/tools/ on every launch. Idempotent — only copies
   // tools that aren't already present, so user/agent edits are never clobbered.
