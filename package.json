@@ -169,6 +169,27 @@
         }
       ]
     },
+    "linux": {
+      "extraResources": [
+        {
+          "from": "bin/breeze-tools",
+          "to": "automation/bin/breeze-tools"
+        },
+        {
+          "from": "bin/breeze-tools.mjs",
+          "to": "automation/bin/breeze-tools.mjs"
+        },
+        {
+          "from": "electron/browser",
+          "to": "automation/electron/browser",
+          "filter": ["**/*.mjs", "**/*.json"]
+        },
+        {
+          "from": "node_modules/playwright-core",
+          "to": "automation/node_modules/playwright-core"
+        }
+      ]
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
