@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<!--
+  VARIATION 9 — "Agent fleet roster"
+  PARADIGM: Reframe around the AGENTS (and human teammates) as a TEAM you manage,
+  not tasks as a list. Each agent/human is a roster card: who they are, what they're
+  doing now, current task, health (working/idle/waiting/blocked), and recent track
+  record. Humans (you, Priya, Sam) sit in the same roster — unified human+agent labor.
+  Click a card to assign/reassign or see its queue. Creating work = "give this to an
+  agent" picks from the roster. Hero insight: who's idle vs overloaded vs stuck.
+  VALUES SERVED: V6 Team Coordination, V2 Live Situational Awareness, V4 Intent→Action,
+  V8 Power Without Machinery (thin data, agent supplies control flow).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breezefile — Fleet</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --ink:#1b2030; --muted:#6b7488; --line:#e4e7f0; --card:#ffffff;
+    --block:#e8483f; --wait:#e69300; --work:#1f9e6b; --idle:#9aa3b5; --done:#7c84a0;
+    --accent:#3a55ff; --accentsoft:#eef1ff; --shadow:0 1px 2px rgba(20,30,60,.06),0 8px 24px rgba(20,30,60,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0f1118;--ink:#e9ecf4;--muted:#8a93a8;--line:#232838;--card:#161a24;--accentsoft:#1a2140;--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35)}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 60px}
+
+  /* header + hero */
+  header{display:flex;align-items:flex-start;gap:18px;margin-bottom:18px;flex-wrap:wrap}
+  .brand{font-weight:800;font-size:18px}
+  .brand .sub{display:block;font-size:12px;color:var(--muted);font-weight:500}
+  .hero{flex:1;min-width:280px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 18px;box-shadow:var(--shadow);font-size:14.5px}
+  .hero b{color:var(--block)} .hero .w{color:var(--work)} .hero .i{color:var(--accent);cursor:pointer;font-weight:600}
+  .newbtn{background:var(--accent);color:#fff;border:none;border-radius:11px;padding:12px 18px;font:inherit;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(58,85,255,.3);white-space:nowrap}
+
+  /* fleet summary strip */
+  .strip{display:flex;gap:10px;margin:6px 0 22px;flex-wrap:wrap}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:10px 16px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow)}
+  .stat .num{font-size:20px;font-weight:800} .stat .lbl{font-size:11.5px;color:var(--muted);line-height:1.2}
+  .stat .pill{width:9px;height:9px;border-radius:50%}
+
+  .secthead{font-size:12px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin:24px 4px 12px;font-weight:700}
+
+  /* roster grid */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:16px}
+  .agent{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow);cursor:pointer;transition:.15s;border-left:4px solid var(--line);position:relative}
+  .agent:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,60,.12)}
+  .agent.block{border-left-color:var(--block)} .agent.wait{border-left-color:var(--wait)}
+  .agent.work{border-left-color:var(--work)} .agent.idle{border-left-color:var(--idle)} .agent.done{border-left-color:var(--done)}
+
+  .ahead{display:flex;align-items:center;gap:11px;margin-bottom:12px}
+  .avatar{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff;flex:none}
+  .a-you{background:#3a55ff} .a-priya{background:#1f9e6b} .a-sam{background:#e69300}
+  .a-bot{background:#3a3f55;font-size:18px} .a-bot2{background:#5b3aff} .a-bot3{background:#0d9aa8}
+  .who{flex:1;min-width:0}
+  .who .name{font-weight:700;font-size:15px;display:flex;align-items:center;gap:7px}
+  .kind{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .badge{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:3px 8px;border-radius:99px;display:inline-flex;align-items:center;gap:5px}
+  .b-block{background:rgba(232,72,63,.12);color:var(--block)} .b-wait{background:rgba(230,147,0,.14);color:var(--wait)}
+  .b-work{background:rgba(31,158,107,.13);color:var(--work)} .b-idle{background:rgba(154,163,181,.18);color:var(--idle)} .b-done{background:rgba(124,132,160,.16);color:var(--done)}
+  .bdot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .badge.b-work .bdot,.badge.b-wait .bdot{animation:bp 1.3s infinite}
+  @keyframes bp{0%,100%{opacity:.35}50%{opacity:1}}
+
+  .nowdoing{font-size:13.5px;margin:0 0 10px;min-height:38px}
+  .nowdoing .lbl{color:var(--muted);font-size:11px;display:block;margin-bottom:2px}
+  .nowdoing .task{font-weight:600}
+  .nowdoing code{background:var(--accentsoft);color:var(--accent);padding:1px 6px;border-radius:5px;font-size:12px}
+
+  .record{display:flex;gap:14px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:11px;margin-top:11px}
+  .record b{color:var(--ink)}
+  .record .fail b{color:var(--block)}
+  .miniq{font-size:11.5px;color:var(--muted);margin-top:8px;display:none}
+  .agent:hover .miniq{display:block}
+
+  /* drawer */
+  .scrim{position:fixed;inset:0;background:rgba(10,14,28,.5);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:.2s;z-index:10}
+  .scrim.open{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(460px,100%);background:var(--card);border-left:1px solid var(--line);box-shadow:-20px 0 60px rgba(10,14,28,.3);transform:translateX(100%);transition:.25s;z-index:11;overflow:auto;padding:24px}
+  .drawer.open{transform:none}
+  .drawer h2{margin:6px 0 2px;font-size:20px}
+  .drawer .dsub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .close{position:absolute;top:18px;right:18px;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px}
+  .qhead{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:18px 0 8px;font-weight:700}
+  .qitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-size:13px}
+  .qitem .pri{font-size:10.5px;font-weight:800;padding:2px 6px;border-radius:5px}
+  .p0{background:rgba(232,72,63,.14);color:var(--block)} .p1{background:rgba(230,147,0,.16);color:var(--wait)} .p2{background:var(--accentsoft);color:var(--accent)} .p3{background:rgba(154,163,181,.18);color:var(--idle)}
+  .qitem .qt{flex:1}
+  .dbtns{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px;border-top:1px solid var(--line);padding-top:16px}
+  .dbtns button{font:inherit;font-weight:600;border-radius:9px;padding:9px 15px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--ink)}
+  .dbtns .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .est{font-size:12px;color:var(--muted);background:var(--accentsoft);border-radius:9px;padding:9px 12px;margin-top:12px}
+
+  /* assign / create modal */
+  .modal{position:fixed;inset:0;display:none;place-items:center;z-index:20;background:rgba(10,14,28,.5);padding:20px}
+  .modal.open{display:grid}
+  .mbox{background:var(--card);border:1px solid var(--line);border-radius:16px;width:min(560px,100%);padding:22px;box-shadow:var(--shadow)}
+  .mbox h3{margin:0 0 4px;font-size:18px}
+  .mbox p.sub{color:var(--muted);margin:0 0 16px;font-size:13px}
+  .mbox input[type=text]{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);font:inherit;margin-bottom:14px}
+  .reciperow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .recipe{font-size:12.5px;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:99px;padding:6px 12px;cursor:pointer}
+  .recipe:hover{border-color:var(--accent);color:var(--accent)}
+  .recent{font-size:11px;color:var(--muted);margin:10px 0 6px}
+  .assignlist{display:grid;gap:8px;margin:12px 0}
+  . assigncard{}
+  .acard{display:flex;align-items:center;gap:11px;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:pointer}
+  .acard:hover{border-color:var(--accent);background:var(--accentsoft)}
+  .acard .avatar{width:32px;height:32px;border-radius:9px;font-size:13px}
+  .acard .ai{flex:1}.acard .an{font-weight:700;font-size:13.5px}.acard .as{font-size:11.5px;color:var(--muted)}
+  .acard .rec{font-size:11px;color:var(--muted)}
+  .mbtns{display:flex;justify-content:flex-end;gap:9px;margin-top:8px}
+  .mbtns button{font:inherit;font-weight:600;border-radius:9px;padding:9px 16px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--ink)}
+  .mbtns .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">Breezefile<span class="sub">Fleet · your team of humans &amp; agents</span></div>
+    <div class="hero">
+      <b>1 agent is stuck</b> (Nightly deploy, 41 min on a failing test) and
+      <span class="w">2 are working</span>. <b style="color:var(--idle)">“Summarize” bot is idle</b> while Priya is overloaded —
+      <span class="i" id="rebalance">rebalance the fleet →</span>
+    </div>
+    <button class="newbtn" id="newWork">+ Give an agent work</button>
+  </header>
+
+  <div class="strip">
+    <div class="stat"><span class="pill" style="background:var(--block)"></span><span><span class="num">1</span><span class="lbl">blocked</span></span></div>
+    <div class="stat"><span class="pill" style="background:var(--wait)"></span><span><span class="num">1</span><span class="lbl">waiting on you</span></span></div>
+    <div class="stat"><span class="pill" style="background:var(--work)"></span><span><span class="num">2</span><span class="lbl">working now</span></span></div>
+    <div class="stat"><span class="pill" style="background:var(--idle)"></span><span><span class="num">1</span><span class="lbl">idle / free</span></span></div>
+    <div class="stat"><span class="pill" style="background:var(--done)"></span><span><span class="num">1</span><span class="lbl">done today</span></span></div>
+  </div>
+
+  <div class="secthead">Needs attention</div>
+  <div class="grid">
+    <!-- BLOCKED bot -->
+    <div class="agent block" data-id="deploybot">
+      <div class="ahead">
+        <div class="avatar a-bot">⚙</div>
+        <div class="who"><div class="name">Deploy bot <span class="kind">local auto</span></div></div>
+        <span class="badge b-block"><span class="bdot"></span>Blocked 41m</span>
+      </div>
+      <div class="nowdoing"><span class="lbl">Right now</span><span class="task">Nightly deploy — held on <code>auth.spec.ts</code></span><div style="color:var(--muted);font-size:12px;margin-top:3px">attempt 3/3 · folder ~/git/api · paused, waiting for you</div></div>
+      <div class="record"><span>This week: <b>9 runs</b></span><span class="fail">failed: <b>1</b></span><span>uptime <b>98%</b></span></div>
+      <div class="miniq">Click to act: re-run · steer · skip · stop</div>
+    </div>
+
+    <!-- WAITING bot -->
+    <div class="agent wait" data-id="beadsbot">
+      <div class="ahead">
+        <div class="avatar a-bot2">⚙</div>
+        <div class="who"><div class="name">Migrate bot <span class="kind">local auto</span></div></div>
+        <span class="badge b-wait"><span class="bdot"></span>Waiting on you</span>
+      </div>
+      <div class="nowdoing"><span class="lbl">Asking</span><span class="task">“Delete 12 stale issues? (y/n)”</span><div style="color:var(--muted);font-size:12px;margin-top:3px">Migrate beads → tasks · step 4/6</div></div>
+      <div class="record"><span>This week: <b>3 runs</b></span><span>failed: <b>0</b></span><span>avg <b>4 min</b></span></div>
+      <div class="miniq">Click to answer y/n or preview the 12 issues</div>
+    </div>
+  </div>
+
+  <div class="secthead">Working</div>
+  <div class="grid">
+    <!-- YOU (human) -->
+    <div class="agent work" data-id="you">
+      <div class="ahead">
+        <div class="avatar a-you">Y</div>
+        <div class="who"><div class="name">You <span class="kind">human</span></div></div>
+        <span class="badge b-work"><span class="bdot"></span>Working</span>
+      </div>
+      <div class="nowdoing"><span class="lbl">On your plate</span><span class="task">Triage inbox → tasks · + 2 due today</span><div style="color:var(--muted);font-size:12px;margin-top:3px">supervising 1 TypeBuild run · last: drafted 4 tasks</div></div>
+      <div class="record"><span>Owns <b>3 tasks</b></span><span>2 due <b>today</b></span><span>1 pinned</span></div>
+      <div class="miniq">Click to see your queue or hand work to a bot</div>
+    </div>
+
+    <!-- PRIYA (human, overloaded) -->
+    <div class="agent work" data-id="priya">
+      <div class="ahead">
+        <div class="avatar a-priya">P</div>
+        <div class="who"><div class="name">Priya <span class="kind">human · teammate</span></div></div>
+        <span class="badge b-work"><span class="bdot"></span>Working · loaded</span>
+      </div>
+      <div class="nowdoing"><span class="lbl">Right now</span><span class="task">Refactor TaskRow · step 3/5</span><div style="color:var(--muted);font-size:12px;margin-top:3px">TypeBuild · also owns 2 P1 tasks in queue</div></div>
+      <div class="record"><span>Owns <b>3 tasks</b></span><span>2 <b>P1</b></span><span style="color:var(--wait)">over capacity</span></div>
+      <div class="miniq">Click to reassign one of Priya’s tasks to a free agent</div>
+    </div>
+
+    <!-- TRIAGE bot working -->
+    <div class="agent work" data-id="triagebot">
+      <div class="ahead">
+        <div class="avatar a-bot3">⚙</div>
+        <div class="who"><div class="name">Triage bot <span class="kind">TypeBuild</span></div></div>
+        <span class="badge b-work"><span class="bdot"></span><span id="triageState">Working</span></span>
+      </div>
+      <div class="nowdoing"><span class="lbl">Right now</span><span class="task" id="triageNow">drafted 4 tasks — refining titles</span><div style="color:var(--muted);font-size:12px;margin-top:3px">claimed by you · encrypted queue 🔒</div></div>
+      <div class="record"><span>This week: <b>7 runs</b></span><span>failed: <b>0</b></span><span>avg <b>5 min</b></span></div>
+      <div class="miniq">Click to watch live, pause, or stop</div>
+    </div>
+  </div>
+
+  <div class="secthead">Idle &amp; recently done</div>
+  <div class="grid">
+    <!-- IDLE bot -->
+    <div class="agent idle" data-id="summarybot">
+      <div class="ahead">
+        <div class="avatar a-bot">⚙</div>
+        <div class="who"><div class="name">Summarize bot <span class="kind">local auto</span></div></div>
+        <span class="badge b-idle"><span class="bdot"></span>Idle · free now</span>
+      </div>
+      <div class="nowdoing"><span class="lbl">Right now</span><span class="task">Nothing — available to take work</span><div style="color:var(--muted);font-size:12px;margin-top:3px">good at: summarize a repo, digest PRs, read docs</div></div>
+      <div class="record"><span>This week: <b>4 runs</b></span><span>failed: <b>0</b></span><span>idle <b>2h</b></span></div>
+      <div class="miniq">Click to assign work — start with “Summarize a repo”</div>
+    </div>
+
+    <!-- SAM human idle-ish -->
+    <div class="agent idle" data-id="sam">
+      <div class="ahead">
+        <div class="avatar a-sam">S</div>
+        <div class="who"><div class="name">Sam <span class="kind">human · teammate</span></div></div>
+        <span class="badge b-idle"><span class="bdot"></span>Light load</span>
+      </div>
+      <div class="nowdoing"><span class="lbl">On Sam’s plate</span><span class="task">Nothing claimed · 1 unclaimed nearby</span><div style="color:var(--muted);font-size:12px;margin-top:3px">could take “Fix flaky CI” (unclaimed, P2)</div></div>
+      <div class="record"><span>Owns <b>0 tasks</b></span><span>closed <b>5</b> this wk</span><span>free</span></div>
+      <div class="miniq">Click to assign or @mention Sam on a task</div>
+    </div>
+
+    <!-- DONE bot -->
+    <div class="agent done" data-id="weeklybot">
+      <div class="ahead">
+        <div class="avatar a-bot2">⚙</div>
+        <div class="who"><div class="name">Report bot <span class="kind">local auto · cron</span></div></div>
+        <span class="badge b-done"><span class="bdot"></span>Done 2h ago</span>
+      </div>
+      <div class="nowdoing"><span class="lbl">Last result</span><span class="task">Weekly report — summarized 18 PRs</span><div style="color:var(--muted);font-size:12px;margin-top:3px">cron Fri 9am · next run in 6 days</div></div>
+      <div class="record"><span>This week: <b>1 run</b></span><span>failed: <b>0</b></span><span>on schedule</span></div>
+      <div class="miniq">Click to accept result, redo, or change schedule</div>
+    </div>
+  </div>
+</div>
+
+<!-- DRAWER (agent detail / queue / reassign) -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer">
+  <button class="close" id="closeDrawer">×</button>
+  <div id="drawerBody"></div>
+</aside>
+
+<!-- CREATE / ASSIGN MODAL -->
+<div class="modal" id="modal">
+  <div class="mbox">
+    <h3 id="mtitle">Give an agent work</h3>
+    <p class="sub" id="msub">Describe it in a sentence — we’ll propose the agent, folder, schedule and steps, and ask only what we can’t infer.</p>
+    <input type="text" id="intent" placeholder="e.g. “Every weekday 7am, summarize new PRs in ~/git/web and post a digest”" />
+    <div class="recent">Start from a recipe</div>
+    <div class="reciperow">
+      <button class="recipe">Ship a PR</button>
+      <button class="recipe">Nightly deploy</button>
+      <button class="recipe">Triage inbox</button>
+      <button class="recipe">Summarize a repo</button>
+    </div>
+    <div class="recent">Recently used · Summarize a repo (2h ago) · Triage inbox (today)</div>
+    <div class="recent" style="margin-top:14px;color:var(--ink);font-weight:700">…then give it to:</div>
+    <div class="assignlist">
+      <div class="acard"><div class="avatar a-bot">⚙</div><div class="ai"><div class="an">Summarize bot <span style="font-weight:500;color:var(--work)">· recommended</span></div><div class="as">idle now · best at summaries · 0 fails this week</div></div></div>
+      <div class="acard"><div class="avatar a-sam">S</div><div class="ai"><div class="an">Sam</div><div class="as">light load · human teammate</div></div><div class="rec">notify on assign</div></div>
+      <div class="acard"><div class="avatar a-priya">P</div><div class="ai"><div class="an">Priya <span style="font-weight:500;color:var(--wait)">· over capacity</span></div><div class="as">already owns 3 tasks</div></div></div>
+    </div>
+    <div class="est">Dry run · this creates 1 scheduled local-auto run. First run is a <b>preview only</b> — nothing is posted until you accept it.</div>
+    <div class="mbtns"><button id="mcancel">Cancel</button><button class="primary" id="mcreate">Create &amp; assign</button></div>
+  </div>
+</div>
+
+<script>
+const DRAWERS = {
+  deploybot:{title:'Deploy bot',sub:'local auto · ~/git/api · BLOCKED 41 min',state:'block',
+    q:[['P0','Nightly deploy — held on auth.spec.ts (attempt 3/3)','block']],
+    detail:'<p style="font-size:13px;color:var(--muted);margin:0 0 6px">Why it stopped</p><div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px">auth.spec.ts: expected <b>401</b>, received <b>200</b> — token TTL check skipped when clock skew &gt; 0 (session.ts:88). Deploy gate is red.</div>',
+    btns:[['primary','Re-run test'],['','Steer agent'],['','Skip & open issue'],['','Stop']],
+    est:'Re-running ≈ <b>1 build minute</b>; won’t deploy on its own — you review first.'},
+  beadsbot:{title:'Migrate bot',sub:'local auto · waiting on you · step 4/6',state:'wait',
+    q:[['P1','Migrate beads → tasks','wait']],
+    detail:'<div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px"><b>Delete 12 stale issues?</b> Closed &gt; 90 days, no open deps. Deletion is reversible for 30 days.</div>',
+    btns:[['primary','Yes — delete 12'],['','No — keep'],['','Preview the 12']],
+    est:'Reversible for 30 days via trash. Preview before confirming.'},
+  you:{title:'You',sub:'human · owns 3 tasks, 2 due today',state:'work',
+    q:[['P0','Reply to landlord about lease · due today 📌','block'],['P1','Review Sam’s PR #214 · due today','wait'],['P3','Plan Q3 roadmap · no date','idle']],
+    detail:'<p style="font-size:13px;color:var(--muted);margin:0">You’re also supervising Triage bot (TypeBuild). Hand any of these to a free agent below.</p>',
+    btns:[['primary','Hand a task to Summarize bot'],['','Pin / reschedule'],['','New task']]},
+  priya:{title:'Priya',sub:'human · over capacity · owns 3 tasks',state:'work',
+    q:[['P1','Refactor TaskRow · step 3/5 (running)','work'],['P1','Update billing schema','wait'],['P2','Docs pass on API','idle']],
+    detail:'<div style="background:rgba(230,147,0,.12);border-radius:10px;padding:12px;font-size:13px;color:var(--wait)">Priya is over capacity. Reassign a P1 to a free agent or to Sam (light load) to unblock the team.</div>',
+    btns:[['primary','Reassign “Update billing schema” → Sam'],['','Reassign → Summarize bot'],['','Message Priya']]},
+  triagebot:{title:'Triage bot',sub:'TypeBuild · claimed by you · 🔒 encrypted',state:'work',
+    q:[['P1','Triage inbox → tasks (running)','work']],
+    detail:'<div style="border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px">🔒 Task content is encrypted (decrypted in memory only). <button id="revBtn" style="margin-left:6px;font:inherit;border:1px solid var(--line);background:transparent;color:var(--accent);border-radius:7px;padding:4px 10px;cursor:pointer">Reveal content</button><div id="revC" style="display:none;margin-top:8px;color:var(--muted)">Covers a thread from Dr. Lin’s office (referral) + 3 ops threads. Drafts are not written to disk.</div></div>',
+    btns:[['primary','Watch live'],['','Pause'],['','Stop'],['','Accept drafts']],
+    est:'Drafts only — nothing is created until you accept.'},
+  summarybot:{title:'Summarize bot',sub:'local auto · IDLE · free to take work',state:'idle',
+    q:[],
+    detail:'<p style="font-size:13px;color:var(--muted)">No queue. This agent is free — assign it work now. Good at: summarize a repo, digest PRs, read docs.</p>',
+    btns:[['primary','Assign work'],['','Set a cron schedule']]},
+  sam:{title:'Sam',sub:'human · light load · owns 0 tasks',state:'idle',
+    q:[['P2','Fix flaky CI · unclaimed nearby','wait']],
+    detail:'<p style="font-size:13px;color:var(--muted)">Sam has capacity. Assign a task or @mention on the unclaimed “Fix flaky CI”.</p>',
+    btns:[['primary','Assign “Fix flaky CI” → Sam'],['','@mention Sam']]},
+  weeklybot:{title:'Report bot',sub:'local auto · cron Fri 9am · DONE 2h ago',state:'done',
+    q:[],
+    detail:'<div style="background:rgba(31,158,107,.1);border:1px solid rgba(31,158,107,.25);border-radius:10px;padding:12px;font-size:13px"><b>What changed:</b> summarized 18 merged PRs, flagged 2 risky diffs (auth, billing), wrote ~/git/reports/2026-06-13.md, drafted a Slack digest (not sent).</div>',
+    btns:[['primary','Accept result'],['','Redo'],['','Change schedule']]},
+};
+
+const scrim=document.getElementById('scrim'), drawer=document.getElementById('drawer'), body=document.getElementById('drawerBody');
+function openDrawer(id){
+  const d=DRAWERS[id]; if(!d)return;
+  const qhtml = d.q.length
+    ? d.q.map(([p,t,s])=>`<div class="qitem"><span class="pri ${p.toLowerCase()}">${p}</span><span class="qt">${t}</span></div>`).join('')
+    : '<p style="color:var(--muted);font-size:13px">Queue is empty — this agent is free.</p>';
+  body.innerHTML=`
+    <h2>${d.title}</h2><div class="dsub">${d.sub}</div>
+    ${d.detail||''}
+    <div class="qhead">Queue</div>${qhtml}
+    <div class="dbtns">${d.btns.map(([c,l])=>`<button class="${c}">${l}</button>`).join('')}</div>
+    ${d.est?`<div class="est">Dry run · ${d.est}</div>`:''}`;
+  scrim.classList.add('open'); drawer.classList.add('open');
+  const rb=document.getElementById('revBtn'); if(rb) rb.onclick=()=>{document.getElementById('revC').style.display='block';rb.style.display='none';};
+}
+function closeDrawer(){scrim.classList.remove('open');drawer.classList.remove('open');}
+document.querySelectorAll('.agent').forEach(a=>a.onclick=()=>openDrawer(a.dataset.id));
+document.getElementById('closeDrawer').onclick=closeDrawer;
+scrim.onclick=closeDrawer;
+document.getElementById('rebalance').onclick=(e)=>{e.stopPropagation();openDrawer('priya');};
+
+/* modal */
+const modal=document.getElementById('modal');
+function openModal(prefill){document.getElementById('intent').value=prefill||'';modal.classList.add('open');document.getElementById('intent').focus();}
+document.getElementById('newWork').onclick=()=>openModal('');
+document.getElementById('mcancel').onclick=()=>modal.classList.remove('open');
+document.getElementById('mcreate').onclick=()=>{modal.classList.remove('open');alert('Created. First run is a preview — you accept before anything posts.');};
+document.querySelectorAll('.recipe').forEach(r=>r.onclick=()=>{
+  const map={'Ship a PR':'Open a PR for the current branch in ~/git/api with a generated summary','Nightly deploy':'Every night at 2am, build + test + deploy ~/git/api if green','Triage inbox':'Read my inbox and draft tasks for anything that needs a reply','Summarize a repo':'Summarize what changed in ~/git/web this week'};
+  document.getElementById('intent').value=map[r.textContent]||'';
+});
+document.querySelectorAll('.acard').forEach(c=>c.onclick=()=>{c.style.borderColor='var(--accent)';c.style.background='var(--accentsoft)';});
+
+/* live tick on the triage bot card */
+const states=['drafted 4 tasks — refining titles','deduping 2 similar threads','tagging by folder','grouping 4 → 3 tasks','ready for your review'];
+let s=0;setInterval(()=>{s=(s+1)%states.length;const el=document.getElementById('triageNow');if(el)el.textContent=states[s];},2600);
+
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrawer();modal.classList.remove('open');}if(e.key==='n'&&!modal.classList.contains('open')){openModal('');e.preventDefault();}});
+</script>
+</body>
+</html>
