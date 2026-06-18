@@ -37,7 +37,6 @@ export function getBrowserWindow(): BrowserWindow | null {
  *  drives navigation via the helper's `goto`. */
 export function openBrowserWindow(url?: string, ptyId?: number): void {
   const existing = getBrowserWindow();
-  console.log(`[browser:win] open url=${url} ptyId=${ptyId} existing=${!!existing} chatView=${!!chatView}`);
   if (existing) {
     if (existing.isMinimized()) existing.restore();
     existing.focus();
@@ -80,8 +79,6 @@ function createChat(win: BrowserWindow, ptyId: number): void {
   });
 
   const hash = `overlay=${ptyId}`;
-  const target = VITE_DEV_SERVER_URL ? `${VITE_DEV_SERVER_URL}#${hash}` : '(file)';
-  console.log(`[browser:chat] createChat ptyId=${ptyId} -> ${target}`);
   if (VITE_DEV_SERVER_URL) {
     void view.webContents.loadURL(`${VITE_DEV_SERVER_URL}#${hash}`);
   } else {
@@ -100,7 +97,6 @@ function createChat(win: BrowserWindow, ptyId: number): void {
   };
   view.setBounds(chatBounds);
   view.setVisible(true);
-  console.log(`[browser:chat] bounds=${JSON.stringify(chatBounds)} content={w:${cb.width},h:${cb.height}}`);
 }
 
 // Re-apply chatBounds clamped to the current window size.

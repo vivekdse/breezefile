@@ -2319,12 +2319,9 @@ end tell`;
     });
     void wc.loadURL(opts?.url || 'https://example.com');
     browserViews.set(id, { view, win, emit });
-    const cb0 = win.getContentBounds();
-    console.log(`[browser] attach id=${id} window={w:${cb0.width},h:${cb0.height}}`);
     return id;
   });
 
-  const lastBoundsLog = new Map<number, string>();
   ipcMain.on(
     'browser:bounds',
     (
@@ -2360,13 +2357,6 @@ end tell`;
       };
       rec.view.setBounds(b);
       rec.view.setVisible(true);
-      // SPIKE diag — log only on change so we can compare the slot the renderer
-      // measured against the actual window content size.
-      const line = `[browser] bounds id=${id} view={x:${b.x},y:${b.y},w:${b.width},h:${b.height}} window={w:${cb.width},h:${cb.height}}`;
-      if (lastBoundsLog.get(id) !== line) {
-        lastBoundsLog.set(id, line);
-        console.log(line);
-      }
     },
   );
 
@@ -2401,10 +2391,6 @@ end tell`;
     try { rec.win.contentView.removeChildView(rec.view); } catch { /* gone */ }
     try { rec.view.webContents.close(); } catch { /* gone */ }
     browserViews.delete(id);
-  });
-
-  ipcMain.on('browser:debug', (_e, info) => {
-    console.log('[browser:debug]', JSON.stringify(info));
   });
 
   ipcMain.on('browser:navigate', (_e, id: number, url: string) => {

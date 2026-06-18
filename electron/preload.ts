@@ -237,7 +237,6 @@ const fm = {
   browserForward: (id: number) => ipcRenderer.send('browser:forward', id),
   browserReload: (id: number) => ipcRenderer.send('browser:reload', id),
   browserSync: (id: number) => ipcRenderer.send('browser:sync', id),
-  browserDebug: (info: unknown) => ipcRenderer.send('browser:debug', info),
   onBrowserState: (
     cb: (s: {
       id: number;

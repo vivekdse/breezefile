@@ -159,7 +159,6 @@ type Fm = {
   browserForward: (id: number) => void;
   browserReload: (id: number) => void;
   browserSync: (id: number) => void;
-  browserDebug: (info: unknown) => void;
   onBrowserState: (
     cb: (s: {
       id: number;

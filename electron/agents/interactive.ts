@@ -215,7 +215,6 @@ export async function runTaskInteractive(
   // SPIKE (spike/playwright-cdp): for playwright tasks, open the full-screen
   // browser window with the agent chat widget docked over the page (mirrors
   // this pty), so the user sees the page AND what Claude is doing at once.
-  console.log(`[interactive] flags=${JSON.stringify(task.flags)} playwright=${playwright} ptyId=${ptyId}`);
   if (playwright) openBrowserWindow('https://example.com', ptyId);
 
   return { run, ptyId, launched: true };
