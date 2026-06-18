@@ -65,3 +65,4 @@
 {"id":"int-98d2a1d8","kind":"field_change","created_at":"2026-06-18T15:00:06.731192944Z","actor":"Vivek S","issue_id":"fm-vlmj","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-fa694c86","kind":"field_change","created_at":"2026-06-18T15:41:07.387704476Z","actor":"Vivek S","issue_id":"fm-jw9m","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-96d9074a","kind":"field_change","created_at":"2026-06-18T19:37:14.878151067Z","actor":"Vivek S","issue_id":"fm-8yky","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-bbb3d6ea","kind":"field_change","created_at":"2026-06-18T20:43:22.394997175Z","actor":"Vivek S","issue_id":"fm-mhtz","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
