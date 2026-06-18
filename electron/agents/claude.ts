@@ -36,6 +36,20 @@ import type { AgentRunInput, AgentRunResult, AgentRunner } from './types';
 let resolvedBin: Promise<string> | null = null;
 
 function probeWellKnown(): string | null {
+  if (process.platform === 'win32') {
+    const home = os.homedir();
+    const appData = process.env['APPDATA'] || path.join(home, 'AppData', 'Roaming');
+    const localAppData = process.env['LOCALAPPDATA'] || path.join(home, 'AppData', 'Local');
+    // Claude Code on Windows installs as claude.cmd (npm global) or claude.exe.
+    const candidates = [
+      path.join(appData, 'npm', 'claude.cmd'),
+      path.join(appData, 'npm', 'claude.exe'),
+      path.join(localAppData, 'Programs', 'claude', 'claude.exe'),
+      path.join(home, '.local', 'bin', 'claude.exe'),
+    ];
+    for (const p of candidates) if (existsSync(p)) return p;
+    return null;
+  }
   const candidates = [
     path.join(os.homedir(), '.local/bin/claude'),
     '/opt/homebrew/bin/claude',
@@ -48,15 +62,26 @@ function probeWellKnown(): string | null {
 
 function probeLoginShell(): Promise<string | null> {
   return new Promise((resolve) => {
-    const c = spawn('/bin/zsh', ['-lc', 'command -v claude'], {
+    // Windows GUI apps inherit the system PATH, so `where` resolves a global
+    // install directly — no login shell needed (and zsh doesn't exist).
+    const [cmd, args] =
+      process.platform === 'win32'
+        ? ['where', ['claude']]
+        : ['/bin/zsh', ['-lc', 'command -v claude']];
+    const c = spawn(cmd, args as string[], {
       stdio: ['ignore', 'pipe', 'ignore'],
+      shell: process.platform === 'win32',
     });
     let out = '';
     c.stdout.on('data', (b: Buffer) => { out += b.toString('utf8'); });
     c.on('error', () => resolve(null));
     c.on('exit', (code) => {
-      const p = out.trim().split('\n').pop() || '';
-      resolve(code === 0 && p && existsSync(p) ? p : null);
+      // `where` may print several matches; take the first existing one.
+      const lines = out.trim().split(/\r?\n/).filter(Boolean);
+      const p = process.platform === 'win32'
+        ? lines.find((l) => existsSync(l.trim())) || ''
+        : lines.pop() || '';
+      resolve(code === 0 && p && existsSync(p.trim()) ? p.trim() : null);
     });
   });
 }

@@ -1,7 +1,7 @@
 import type { Entry, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 
 export type Capabilities = {
-  id: 'mac' | 'linux';
+  id: 'mac' | 'linux' | 'windows';
   spotlightSearch: boolean;
   externalVolumes: boolean;
   cloudMounts: boolean;
@@ -99,7 +99,7 @@ type Fm = {
     body: string;
     publishedAt: string | null;
   } | null>;
-  upgrade: () => Promise<{ ok: boolean; mode: 'inline' | 'terminal' }>;
+  upgrade: () => Promise<{ ok: boolean; mode: 'inline' | 'terminal' | 'browser' }>;
   termSpawn: (opts: {
     cwd: string;
     cols?: number;
