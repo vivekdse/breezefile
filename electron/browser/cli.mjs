@@ -54,6 +54,7 @@ import {
   readApi,
   API_FILE,
 } from './connect.mjs';
+import { scrubError } from './scrub.mjs';
 
 function fail(msg) {
   process.stderr.write(String(msg) + '\n');
@@ -159,7 +160,14 @@ async function main() {
         const [sel, ref] = rest;
         if (!sel || !ref) fail('fill-ref needs a selector and a data ref');
         const value = await resolveDataRef(ref);
-        await loc(page, sel).fill(value);
+        // The fill itself is the value-bearing step: a Playwright failure here
+        // (selector timeout, non-editable element, …) carries the value in its
+        // "Call log:". Scrub before it can reach stderr.
+        try {
+          await loc(page, sel).fill(value);
+        } catch (e) {
+          fail(`could not fill ${sel} (ref ${ref}): ${scrubError(e, value)}`);
+        }
         // Print the OPAQUE ref, never the value.
         process.stdout.write(`filled ${sel} (ref ${ref})\n`);
         break;
@@ -168,7 +176,11 @@ async function main() {
         const [sel, ref] = rest;
         if (!sel || !ref) fail('type-ref needs a selector and a data ref');
         const value = await resolveDataRef(ref);
-        await loc(page, sel).pressSequentially(value);
+        try {
+          await loc(page, sel).pressSequentially(value);
+        } catch (e) {
+          fail(`could not type into ${sel} (ref ${ref}): ${scrubError(e, value)}`);
+        }
         process.stdout.write(`typed into ${sel} (ref ${ref})\n`);
         break;
       }

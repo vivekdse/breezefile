@@ -103,8 +103,15 @@ Pieces:
 Even under the cooperative model these defeat the purpose if left open:
 
 - **stdout/stderr** — `fill` must never echo the value; resolve errors must not
-  print it either (`could not fill SSN=123-…`). `fill` today prints
-  `filled <sel>` only (`cli.mjs:193`) — keep it that way.
+  print it either (`could not fill SSN=123-…`). `fill`/`fill-ref` print only the
+  selector + opaque ref.
+- **Playwright "Call log:" on a failed fill (found + fixed)** — a fill/type that
+  fails *after* the value is in hand (routine selector timeout, non-editable
+  element) throws an error whose "Call log:" block interpolates the literal typed
+  value (`fill("123-45-6789")`). Unscrubbed, that reaches the agent via stderr.
+  `fill-ref`/`type-ref` now wrap the action in a try/catch and run the error
+  through `scrubError(e, value)` (redacts the value, drops the call-log block,
+  keeps one bounded line) so it never reaches the generic `main().catch`.
 - **argv** — carries the placeholder/ref, never the value (the design already
   does this).
 - **screenshot of filled forms** — see the trust constraint. Needs a rule:

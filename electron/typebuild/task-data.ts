@@ -36,11 +36,25 @@ export async function resolveTaskDataRef(taskId: string, ref: string): Promise<s
   if (!taskId) throw new Error('taskId required');
   if (!ref) throw new Error('ref required');
 
-  const token = await getIdToken();
-  const res = await fetch(
-    `${API_BASE}/chromeext/${encodeURIComponent(taskId)}/data?ref=${encodeURIComponent(ref)}`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
-  );
+  // Mirror TypeBuildTaskSource.request()'s 401 handling: getIdToken refreshes
+  // proactively, but a token can be revoked mid-session — retry once with a
+  // fresh token before giving up, so a transient auth blip doesn't fail an
+  // otherwise-fillable field.
+  const doFetch = async (): Promise<Response> => {
+    const token = await getIdToken();
+    return fetch(
+      `${API_BASE}/chromeext/${encodeURIComponent(taskId)}/data?ref=${encodeURIComponent(ref)}`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } },
+    );
+  };
+
+  let res = await doFetch();
+  if (res.status === 401) {
+    res = await doFetch();
+    if (res.status === 401) {
+      throw Object.assign(new Error('typebuild: signed out (401)'), { status: 401 });
+    }
+  }
   if (res.status === 404) {
     // Don't echo the ref's value (there is none) — just the opaque key.
     throw Object.assign(new Error(`no data for ref "${ref}"`), { status: 404 });
@@ -55,6 +69,12 @@ export async function resolveTaskDataRef(taskId: string, ref: string): Promise<s
     throw Object.assign(new Error(`data ref "${ref}" is not a string value`), {
       status: 502,
     });
+  }
+  // An empty value would silently fill a field with nothing and report success
+  // — treat it as "no data" so the agent gets an actionable error rather than a
+  // blank-but-"filled" form. (Pinned in the contract: empty is not a fill.)
+  if (body.value === '') {
+    throw Object.assign(new Error(`no data for ref "${ref}" (empty)`), { status: 404 });
   }
   return body.value;
 }

@@ -223,6 +223,8 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     // this localhost hop (already 127.0.0.1 + bearer-token authed). We never log
     // it. THREAT MODEL: cooperative, not a sandbox — PII tasks need trusted
     // agents (the agent can still read/screenshot the filled field).
+    // REGRESSION GUARD: never log this response body, and do not add HTTP
+    // access logging that would capture the `value` query result.
     if (p === '/app/task-data' && m === 'GET') {
       const taskId = url.searchParams.get('taskId') ?? '';
       const ref = url.searchParams.get('ref') ?? '';
