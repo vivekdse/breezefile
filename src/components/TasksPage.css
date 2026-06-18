@@ -319,6 +319,16 @@
   min-width: 0;
 }
 
+/* fm-vlmj — with the global Sidebar gone the list reclaims ~240px. On a wide
+   window that would stretch task rows to uncomfortable line lengths, so cap
+   each section to a readable width and centre it within the list column. The
+   header / filter bar / detail panel stay full-bleed; only the row content is
+   bounded. */
+.tasks__list > .tasks__section {
+  max-width: 880px;
+  margin-inline: auto;
+}
+
 /* ---- detail panel ---- */
 .tasks__detail {
   width: clamp(320px, 32%, 460px);

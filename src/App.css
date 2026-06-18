@@ -50,13 +50,21 @@
 }
 
 /* fm-a9j — task tabs hide the preview slot (no file to preview), so the
-   main area can stretch into that column. Sidebar stays — tasks live
-   there, and a task tab is naturally a "pick what to work on next"
-   surface. */
-.shell[data-tab-kind="task"],
-.shell[data-tab-kind="tasks"] {
+   main area can stretch into that column. The single-task shell keeps the
+   Sidebar — it's a "pick what to work on next" surface. */
+.shell[data-tab-kind="task"] {
   --preview-w: 0px;
   grid-template-columns: var(--sidebar-w) 1fr 0px var(--chat-w);
+}
+
+/* fm-vlmj — the all-tasks page is its own inbox (list + detail panel), so the
+   global Sidebar (Favorites / Pinned / Locations / Active Tasks) is redundant
+   clutter here. Zero its column so the inbox claims the full width. The
+   Sidebar is also not rendered on this tab (see App.tsx). */
+.shell[data-tab-kind="tasks"] {
+  --sidebar-w: 0px;
+  --preview-w: 0px;
+  grid-template-columns: 0px 1fr 0px var(--chat-w);
 }
 
 /* fm-dly3 — edit tabs render neither Sidebar nor Preview, but those columns
