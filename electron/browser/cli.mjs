@@ -39,88 +39,19 @@
 // The process always detaches cleanly (browser.close() drops the CDP client;
 // it does NOT close Breeze or the tab).
 
-import os from 'node:os';
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
-import { chromium } from 'playwright-core';
-
-const CDP = process.env.BREEZE_CDP_URL || 'http://localhost:9222';
-const TARGET = (process.env.BREEZE_BROWSER_TARGET || '').trim();
-// Breeze's localhost control API: ~/.breezefile/api.json holds {port, token}.
-const API_FILE = path.join(os.homedir(), '.breezefile', 'api.json');
+import {
+  CDP_URL as CDP,
+  connect,
+  openBrowserTab,
+  resolvePage,
+  listPages,
+  loc,
+} from './connect.mjs';
 
 function fail(msg) {
   process.stderr.write(String(msg) + '\n');
   process.exit(1);
-}
-
-// Ask Breeze to OPEN an embedded browser tab (the helper can't create one over
-// CDP — Electron refuses CDP target creation). Goes through the same localhost
-// /app/* control API the `breeze` CLI uses, authed with the api.json token.
-async function openBrowserTab(url) {
-  let api;
-  try {
-    api = JSON.parse(readFileSync(API_FILE, 'utf8'));
-  } catch {
-    fail(`cannot read ${API_FILE} — is Breeze running?`);
-  }
-  const res = await fetch(`http://127.0.0.1:${api.port}/app/open-browser`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${api.token}` },
-    body: JSON.stringify(url ? { url } : {}),
-  }).catch((e) => fail(`open-browser request failed: ${e.message}`));
-  if (!res.ok) fail(`open-browser returned ${res.status}: ${await res.text()}`);
-}
-
-// Is this one of Breeze's OWN pages (the React renderer or DevTools) rather
-// than the user-facing embedded browser tab? We never want to drive those.
-function isOwnPage(url) {
-  if (!url) return true;
-  if (url.startsWith('devtools://')) return true;
-  // Renderer in dev: http://localhost:<vite-port>/. In a packaged build it's a
-  // file:// URL ending in index.html.
-  if (/^https?:\/\/localhost:\d+\/?($|#|\?)/.test(url)) return true;
-  if (url.startsWith('file://') && /index\.html/.test(url)) return true;
-  return false;
-}
-
-// Find the embedded browser-tab page. Retries briefly: when the agent acts the
-// instant its session boots, the tab's WebContentsView may still be attaching.
-async function resolvePage(browser) {
-  const deadline = Date.now() + 10_000;
-  let lastSeen = [];
-  for (;;) {
-    const pages = browser.contexts().flatMap((c) => c.pages());
-    lastSeen = pages.map((p) => p.url());
-    let candidates = pages.filter((p) => !isOwnPage(p.url()));
-    if (TARGET) {
-      const hits = [];
-      for (const p of candidates) {
-        const u = p.url();
-        let t = '';
-        try { t = await p.title(); } catch { /* page gone */ }
-        if (u.includes(TARGET) || t.includes(TARGET)) hits.push(p);
-      }
-      candidates = hits;
-    }
-    if (candidates.length) return candidates[candidates.length - 1];
-    if (Date.now() > deadline) {
-      fail(
-        `no Breeze browser window found over CDP at ${CDP}.\n` +
-          `Run \`open\` first to create it.\n` +
-          (TARGET ? `(filtering by BREEZE_BROWSER_TARGET="${TARGET}")\n` : '') +
-          `pages seen: ${JSON.stringify(lastSeen)}`,
-      );
-    }
-    await new Promise((r) => setTimeout(r, 400));
-  }
-}
-
-// Playwright treats a bare string selector as CSS but also understands engine
-// prefixes (text=, xpath=, role=…). `.first()` keeps strict-mode happy when a
-// selector matches several nodes.
-function loc(page, selector) {
-  return page.locator(selector).first();
 }
 
 async function main() {
@@ -130,10 +61,10 @@ async function main() {
   // `open` reaches Breeze BEFORE attaching over CDP: ask it to create the tab,
   // then attach + wait for the new page to show up.
   if (verb === 'open') {
-    await openBrowserTab(rest[0]);
+    await openBrowserTab(rest[0]).catch((e) => fail(e.message));
   }
 
-  const browser = await chromium.connectOverCDP(CDP);
+  const browser = await connect(CDP);
   try {
     if (verb === 'open') {
       const page = await resolvePage(browser);
@@ -142,14 +73,7 @@ async function main() {
     }
     // `pages` is the one verb that inspects all targets, not a single tab.
     if (verb === 'pages') {
-      const pages = browser.contexts().flatMap((c) => c.pages());
-      const rows = [];
-      for (const p of pages) {
-        let t = '';
-        try { t = await p.title(); } catch { /* ignore */ }
-        rows.push({ url: p.url(), title: t, own: isOwnPage(p.url()) });
-      }
-      process.stdout.write(JSON.stringify(rows, null, 2) + '\n');
+      process.stdout.write(JSON.stringify(await listPages(browser), null, 2) + '\n');
       return;
     }
 

@@ -1,0 +1,27 @@
+{
+  "id": "web-form-login",
+  "name": "Generic Web Form Login",
+  "description": "Logs into a standard username/password web form. Auto-detects the username, password, and submit controls using accessibility-first heuristics, so it works across many sites without per-site selectors. The doc's 'consolidated Web form login' tool (see docs/Playwright agent.md 'Generalization Over Time').",
+  "match": ["*"],
+  "version": "1.0",
+  "status": "active",
+  "params": {
+    "url": { "required": false, "type": "string", "description": "login page URL; if omitted, uses the current page" },
+    "username": { "required": true, "type": "string", "description": "username or email" },
+    "password": { "required": true, "secret": true, "type": "string", "description": "account password" },
+    "success": { "required": false, "type": "string", "description": "CSS/text selector that should appear ONLY when logged in (e.g. text=Sign out). Used to confirm success." },
+    "user_selector": { "required": false, "type": "string", "description": "override for the username field selector" },
+    "pass_selector": { "required": false, "type": "string", "description": "override for the password field selector" },
+    "submit_selector": { "required": false, "type": "string", "description": "override for the submit control" }
+  },
+  "output": {
+    "logged_in": "true when the success check passed (or, if no --success given, when the password field is gone)",
+    "final_url": "URL after submitting"
+  },
+  "dependencies": "None. Works on a fresh session. For MFA-protected accounts this gets you past the password step only.",
+  "known_issues": [
+    "MFA / 'verify it's you' steps are NOT handled — falls back to reporting precondition.",
+    "Multi-step logins (username on page 1, password on page 2) need the field overrides or two runs.",
+    "Without --success, success is inferred from the password field disappearing, which can false-positive on SPA redraws."
+  ]
+}

@@ -305,6 +305,18 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('[breeze-cli] failed:', (e as Error).message);
   }
+  // Tool Repository (docs/Playwright agent.md): install the bundled seed
+  // tools into ~/.breezefile/tools/ on every launch. Idempotent — only copies
+  // tools that aren't already present, so user/agent edits are never clobbered.
+  // Dynamic import keeps the .mjs out of the tsc graph (it pulls no TS deps).
+  import('./browser/tools/install.mjs')
+    .then(({ installSeedTools }) => {
+      const { installed, errors } = installSeedTools();
+      if (installed.length) console.log('[tool-seeds] installed:', installed.join(', '));
+      if (errors.length) console.warn('[tool-seeds] errors:', errors.join('; '));
+    })
+    .catch((e) => console.warn('[tool-seeds] failed:', (e as Error).message));
+
   // fm-c2w — dock badge IPC. Renderer passes a string ('' clears, '!' or
   // a count for active attention). On non-darwin, app.dock is undefined
   // and we silently no-op.

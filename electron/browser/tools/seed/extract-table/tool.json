@@ -1,0 +1,23 @@
+{
+  "id": "extract-table",
+  "name": "Extract HTML Table",
+  "description": "Extracts a tabular dataset from the current page into structured JSON (array of row objects keyed by header). Works on real <table> elements and on ARIA grid/role-based tables. Includes data sanity checks (the doc's 'validation beyond binary success/failure').",
+  "match": ["*"],
+  "version": "1.0",
+  "status": "active",
+  "params": {
+    "selector": { "required": false, "type": "string", "description": "CSS selector for the table; defaults to the first/largest table on the page" },
+    "max_rows": { "required": false, "type": "number", "description": "cap on rows returned (default 500)" },
+    "headers": { "required": false, "type": "string", "description": "comma-separated header names to use instead of auto-detecting them" }
+  },
+  "output": {
+    "rows": "array of objects, one per data row, keyed by column header",
+    "columns": "the detected/used column headers",
+    "row_count": "number of rows extracted"
+  },
+  "dependencies": "None.",
+  "known_issues": [
+    "Tables built from nested divs without role=grid/row/cell are not detected; use --selector and the table must use real <tr>/<td> or ARIA roles.",
+    "Merged cells (colspan/rowspan) are flattened naively and may misalign columns."
+  ]
+}

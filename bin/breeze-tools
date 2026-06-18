@@ -1,0 +1,56 @@
+#!/bin/sh
+# breeze-tools — runtime shim. Resolves the Node-compatible runtime and execs
+# breeze-tools.mjs. Silent no-op (exit 0) if no runtime is available so this
+# never blocks a Claude Code SessionStart hook.
+#
+# Runtime priority:
+#   1. Bundled Electron via ELECTRON_RUN_AS_NODE — when this script is
+#      installed inside a packaged .app, the sibling Electron binary is
+#      a self-contained Node runtime. Lets brew-installed users run the
+#      CLI without any system Node.
+#   2. System `node` on PATH — for dev (`node bin/breeze-tools.mjs ...`) and
+#      for users who already have Node.
+#
+# The .mjs lives next to this script in both layouts:
+#   .../bin/breeze   +  .../bin/breeze-tools.mjs                      (repo)
+#   .../Resources/breeze + .../Resources/breeze-tools.mjs             (.app)
+
+set -e
+
+# Resolve $0 through any symlinks. macOS sh has readlink but not -f, so
+# walk the chain manually. Needed because brew/dev installs symlink the
+# launcher (e.g. /opt/homebrew/bin/breeze → Resources/breeze) and the
+# .mjs sits next to the *real* file, not the symlink.
+resolved=$0
+while [ -L "$resolved" ]; do
+  link=$(readlink "$resolved")
+  case "$link" in
+    /*) resolved=$link ;;
+     *) resolved=$(dirname "$resolved")/$link ;;
+  esac
+done
+
+self_dir=$(cd "$(dirname "$resolved")" && pwd)
+script="$self_dir/breeze-tools.mjs"
+[ -f "$script" ] || exit 0
+
+# 1. Bundled Electron when packaged: Contents/Resources/breeze →
+#    Contents/MacOS/<exec>. There's only one binary in MacOS/ for an
+#    Electron app, so glob-pick it; named "Breeze File" today, may rename.
+appbin=""
+mac_dir="$self_dir/../MacOS"
+if [ -d "$mac_dir" ]; then
+  for cand in "$mac_dir"/*; do
+    [ -x "$cand" ] && [ -f "$cand" ] && { appbin="$cand"; break; }
+  done
+fi
+if [ -n "$appbin" ]; then
+  exec env ELECTRON_RUN_AS_NODE=1 "$appbin" "$script" "$@"
+fi
+
+# 2. System node.
+if command -v node >/dev/null 2>&1; then
+  exec node "$script" "$@"
+fi
+
+exit 0

@@ -21,7 +21,7 @@ import { defaultAgentId } from './registry';
 import { flagsToArgs } from './flags';
 import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
-import { CDP_URL, BROWSER_CLI, playwrightPromptAddendum } from '../browser/automation';
+import { CDP_URL, BROWSER_CLI, TOOLS_CLI, playwrightPromptAddendum } from '../browser/automation';
 import { openBrowserWindow } from '../browser/window';
 
 export type InteractiveRunOptions = {
@@ -170,8 +170,11 @@ export async function runTaskInteractive(
     env: {
       BREEZE_TASK_ID: task.id,
       ...(run ? { BREEZE_RUN_ID: run.id } : {}),
-      // SPIKE (spike/playwright-cdp): point the helper CLI at Breeze's CDP.
-      ...(playwright ? { BREEZE_CDP_URL: CDP_URL, BREEZE_BROWSER_CLI: BROWSER_CLI } : {}),
+      // SPIKE (spike/playwright-cdp): point the helper CLIs at Breeze's CDP.
+      // BREEZE_TOOLS_CLI is the tool-repository CLI the agent consults first.
+      ...(playwright
+        ? { BREEZE_CDP_URL: CDP_URL, BREEZE_BROWSER_CLI: BROWSER_CLI, BREEZE_TOOLS_CLI: TOOLS_CLI }
+        : {}),
       ...(opts.env ?? {}),
     },
     onExit: ({ exitCode, signal }) => {

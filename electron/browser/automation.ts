@@ -11,39 +11,74 @@ import path from 'node:path';
 /** CDP endpoint Breeze exposes (electron/main.ts --remote-debugging-port). */
 export const CDP_URL = 'http://localhost:9222';
 
-/** Absolute path to the helper CLI. APP_ROOT is the repo root in dev; the
- *  source .mjs lives there so the agent's `node` resolves playwright-core from
- *  the repo node_modules. (Packaging note: bundle electron/browser +
- *  playwright-core and repoint this before this leaves spike status.) */
-export const BROWSER_CLI = path.join(
-  process.env.APP_ROOT || process.cwd(),
-  'electron',
-  'browser',
-  'cli.mjs',
-);
+/** Root the automation helpers resolve against.
+ *  - dev / tsc build: APP_ROOT is the repo root, so electron/browser/*.mjs and
+ *    bin/*.mjs sit under it and `node` resolves playwright-core from the repo
+ *    node_modules.
+ *  - packaged: electron-builder ships the automation tree (bin/, electron/
+ *    browser/ and a bundled playwright-core) under Resources/automation,
+ *    preserving the relative layout so the .mjs imports (`../electron/browser`)
+ *    and the playwright-core resolution both still hold. */
+function automationRoot(): string {
+  if (process.env.APP_ROOT && !/[\\/]app\.asar([\\/]|$)/.test(process.env.APP_ROOT)) {
+    return process.env.APP_ROOT;
+  }
+  if (process.resourcesPath) return path.join(process.resourcesPath, 'automation');
+  return process.env.APP_ROOT || process.cwd();
+}
 
-/** Permission allow-rules a playwright session needs to run the helper
- *  unattended. The path is unquoted on purpose: claude matches Bash rules by
- *  command prefix, and the CLI path has no spaces. */
+/** Absolute path to the raw browser-driver CLI (the fallback verbs). */
+export const BROWSER_CLI = path.join(automationRoot(), 'electron', 'browser', 'cli.mjs');
+
+/** Absolute path to the Tool Repository CLI (docs/Playwright agent.md). The
+ *  agent consults this FIRST to reuse an existing tool, falling back to the
+ *  raw BROWSER_CLI verbs only when no tool fits. */
+export const TOOLS_CLI = path.join(automationRoot(), 'bin', 'breeze-tools.mjs');
+
+/** Permission allow-rules a playwright session needs to run the helpers
+ *  unattended. Paths are unquoted on purpose: claude matches Bash rules by
+ *  command prefix, and the CLI paths have no spaces. */
 export function browserCliAllowRules(): string[] {
-  return [`Bash(node ${BROWSER_CLI}:*)`];
+  return [`Bash(node ${BROWSER_CLI}:*)`, `Bash(node ${TOOLS_CLI}:*)`];
 }
 
 /** Instructions appended to the agent's prompt when the `playwright` flag is
- *  set: how to drive the embedded Breeze browser tab via the helper CLI. */
+ *  set. Implements the docs/Playwright agent.md workflow: TRY TO REUSE an
+ *  existing tool first (the tool repository), and fall back to raw DOM driving
+ *  only when no tool fits. Your actions show live in the side-by-side window. */
 export function playwrightPromptAddendum(): string {
   return [
     '',
     '---',
-    'Browser automation (Playwright). Drive the side-by-side Breeze browser',
-    'window by running this helper via Bash — your actions show live in that',
-    'window. This is already installed: do NOT install Playwright, download',
-    'browsers, write your own driver script, or use any claude-in-chrome tools.',
-    'Use ONLY:',
+    'Browser automation (Playwright). You drive a live, side-by-side Breeze',
+    'browser window. Everything is already installed: do NOT install Playwright,',
+    'download browsers, write your own driver script, or use any',
+    'claude-in-chrome tools. Two Bash helpers only.',
+    '',
+    '## 1. FIRST: try a reusable tool',
+    '',
+    'A tool repository holds vetted, parameterized automations. Always check it',
+    'BEFORE writing custom steps — reuse is faster and more reliable.',
+    '',
+    `  node ${TOOLS_CLI} available <url>      tools that match a URL (JSON)`,
+    `  node ${TOOLS_CLI} help <tool-id>       a tool's params + docs (JSON)`,
+    `  node ${TOOLS_CLI} run <tool-id> --p v  run it`,
+    `  node ${TOOLS_CLI} list                 every tool`,
+    '',
+    'Workflow: get the current `url` (below) → `available <url>` → if a tool',
+    'fits, `help` it, then `run` it. `run` prints JSON {status, code, result,...}',
+    'and exits with a code that tells you what happened:',
+    '  0 success · 1 failure · 2 bad output · 3 timeout (retry) · 4 auth failed',
+    '  5 page changed (tool needs updating) · 6 partial · 7 precondition unmet',
+    'On 0, you are done — report result. On 4/7, fix the precondition (e.g. log',
+    'in) and retry. On 1/2/5, fall back to step 2.',
+    '',
+    '## 2. FALLBACK: drive the page directly',
+    '',
+    'Only when no tool fits or a tool fails. Raw verbs:',
     '',
     `  node ${BROWSER_CLI} <verb> [args]`,
     '',
-    'Verbs:',
     '  open [url]            open/focus the browser window (creates it if none)',
     '  goto <url>            navigate the page',
     '  snapshot [selector]   ARIA tree of the page — your primary "eyes"',

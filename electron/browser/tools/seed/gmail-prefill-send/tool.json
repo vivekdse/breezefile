@@ -1,0 +1,26 @@
+{
+  "id": "gmail-prefill-send",
+  "name": "Gmail — Compose via Prefill URL",
+  "description": "Opens a Gmail compose window pre-filled with to/subject/body using Gmail's prefill URL, instead of clicking Compose and filling fields one by one. Optionally clicks Send. This is the canonical 'prefer a faster path than UI' tool (see docs/Playwright agent.md).",
+  "match": ["mail.google.com"],
+  "opens": "https://mail.google.com/mail/u/0/#inbox",
+  "version": "1.0",
+  "status": "active",
+  "params": {
+    "to": { "required": true, "type": "string", "description": "recipient email(s), comma-separated" },
+    "subject": { "required": false, "type": "string", "description": "subject line" },
+    "body": { "required": false, "type": "string", "description": "message body (plain text)" },
+    "cc": { "required": false, "type": "string", "description": "cc email(s)" },
+    "bcc": { "required": false, "type": "string", "description": "bcc email(s)" },
+    "send": { "required": false, "type": "boolean", "description": "if set, click Send after composing; otherwise leave the draft open for review" }
+  },
+  "output": {
+    "composed": "true once the compose window is open and prefilled",
+    "sent": "true if --send was given and Send succeeded"
+  },
+  "dependencies": "Requires an authenticated Gmail session in the Breeze browser. Validate login before use.",
+  "known_issues": [
+    "Send button selector relies on aria-label='Send' (English UI). Localized UIs need a different selector.",
+    "Very long bodies can exceed URL length limits; for large messages, type into the body field instead."
+  ]
+}

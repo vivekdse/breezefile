@@ -14,7 +14,7 @@
     "start": "npm run dev",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "test": "node --test tests/",
+    "test": "node --test 'tests/**/*.test.mjs'",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "devDependencies": {
@@ -79,6 +79,23 @@
         {
           "from": "bin/breeze.mjs",
           "to": "breeze.mjs"
+        },
+        {
+          "from": "bin/breeze-tools",
+          "to": "automation/bin/breeze-tools"
+        },
+        {
+          "from": "bin/breeze-tools.mjs",
+          "to": "automation/bin/breeze-tools.mjs"
+        },
+        {
+          "from": "electron/browser",
+          "to": "automation/electron/browser",
+          "filter": ["**/*.mjs", "**/*.json"]
+        },
+        {
+          "from": "node_modules/playwright-core",
+          "to": "automation/node_modules/playwright-core"
         }
       ],
       "icon": "build/icon.icns",
@@ -124,6 +141,23 @@
         {
           "from": "bin/breeze.mjs",
           "to": "breeze.mjs"
+        },
+        {
+          "from": "bin/breeze-tools.cmd",
+          "to": "automation/bin/breeze-tools.cmd"
+        },
+        {
+          "from": "bin/breeze-tools.mjs",
+          "to": "automation/bin/breeze-tools.mjs"
+        },
+        {
+          "from": "electron/browser",
+          "to": "automation/electron/browser",
+          "filter": ["**/*.mjs", "**/*.json"]
+        },
+        {
+          "from": "node_modules/playwright-core",
+          "to": "automation/node_modules/playwright-core"
         }
       ],
       "target": [
