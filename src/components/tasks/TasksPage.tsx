@@ -1,9 +1,12 @@
 // fm-7909 — Tasks overview, rebuilt around OWNER sections + one primary
 // action per row. Container responsibilities: filter state, selection/cursor,
-// keyboard, the fm:tasks:* verb listeners, the Tasks/Runs toggle, the layout,
-// and routing every mutation through the capability-aware useTaskActions hook
-// (the old page called updateTask/deleteTask without task.source — the bug
-// this fixes).
+// keyboard, the fm:tasks:* verb listeners, the layout, and routing every
+// mutation through the capability-aware useTaskActions hook (the old page
+// called updateTask/deleteTask without task.source — the bug this fixes).
+//
+// fm-jw9m — decluttered top bar: filters collapse behind a Filter button
+// (header action row, next to + New task) instead of an always-on row, and the
+// Tasks/Runs toggle is gone — runs are reached per-task from the detail panel.
 //
 // Sections (pure, see sections.mjs):
 //   FOR YOU    — manual local tasks you act on by hand
@@ -35,7 +38,6 @@ import {
   useTypebuildReadiness,
   useLastRun,
 } from '../../tasks';
-import { RunsView } from '../RunsView';
 import type { ConfirmRequest } from '../ConfirmDialog';
 import { formatOpError } from '../../errorMessages';
 import type { RemoteSchedule, Task, TaskStatus } from '../../types';
@@ -75,7 +77,7 @@ function TasksPageInner() {
     t.source ? overlayByKey[`${t.source}:${t.id}`] : undefined;
   const capsFor = (t: Task) => sourcesById[t.source ?? 'local']?.capabilities;
 
-  // ── filter / view state ──────────────────────────────────────────────────
+  // ── filter state ──────────────────────────────────────────────────────────
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [showDone, setShowDone] = useState(false);
@@ -83,7 +85,11 @@ function TasksPageInner() {
   // claimed_by=me into the list request); local tasks are unaffected.
   const [mineOnly, setMineOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
-  const [view, setView] = useState<'tasks' | 'runs'>('tasks');
+  // fm-jw9m — filters are hidden behind a toggle now (the row was always-on
+  // chrome). Open via the Filter button on the header action row. A non-default
+  // filter (search / mine / done / source) is reflected on the button so the
+  // user can tell filters are active even while the bar is collapsed.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [doneExpanded, setDoneExpanded] = useState(false);
 
   // selection / cursor
@@ -679,8 +685,13 @@ function TasksPageInner() {
         target?.isContentEditable;
       if (e.key === '/' && !inField) {
         e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        // fm-jw9m — filters are collapsed by default; "/" opens the bar (if
+        // closed) and focuses search on the next tick once it's mounted.
+        setFiltersOpen(true);
+        requestAnimationFrame(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        });
         return;
       }
       if (inField) return;
@@ -744,6 +755,11 @@ function TasksPageInner() {
   const total = forYou.length + forAgents.length;
   const empty = !loading && total === 0 && doneTotal === 0;
 
+  // fm-jw9m — is any filter scoped away from its default? Drives the dot on the
+  // collapsed Filter button so active scoping is never invisible.
+  const filtersActive =
+    search.trim() !== '' || mineOnly || showDone || sourceFilter !== 'all';
+
   return (
     <div className="tasks tasks--inline">
       <header className="tasks__head">
@@ -781,31 +797,22 @@ function TasksPageInner() {
           )}
         </div>
         <div className="tasks__head-actions">
-          <div className="tasks__view-toggle" role="tablist" aria-label="Tasks or Runs">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === 'tasks'}
-              className={['tasks__view-toggle-btn', view === 'tasks' && 'tasks__view-toggle-btn--on']
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => setView('tasks')}
-            >
-              Tasks
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === 'runs'}
-              className={['tasks__view-toggle-btn', view === 'runs' && 'tasks__view-toggle-btn--on']
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => setView('runs')}
-              title="See past auto-task runs across every task"
-            >
-              Runs
-            </button>
-          </div>
+          {/* fm-jw9m — Filter toggle. Filters live behind this button now
+              rather than as an always-on row. The dot marks a non-default
+              filter so the user knows scoping is active while it's collapsed. */}
+          <button
+            type="button"
+            className={['tasks__btn tasks__btn--ghost', filtersOpen && 'tasks__btn--on']
+              .filter(Boolean)
+              .join(' ')}
+            aria-pressed={filtersOpen}
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((v) => !v)}
+            title="Show search and filters"
+          >
+            <span aria-hidden="true">⫶⫶</span> Filter
+            {filtersActive && <span className="tasks__filter-dot" aria-label="filters active" />}
+          </button>
           <button
             type="button"
             className="tasks__btn"
@@ -821,10 +828,13 @@ function TasksPageInner() {
         </div>
       </header>
 
-      {view === 'runs' && <RunsView />}
-      {view === 'tasks' && (
-        <>
-          {/* fm-7909 — single filter row replaces the old three chip rows. */}
+      {/* fm-jw9m — runs are reached per-task (detail panel → run history), so
+          the page no longer carries a Tasks/Runs toggle. The body is always the
+          task list. */}
+      <>
+          {/* fm-jw9m — filters collapsed behind the header Filter button.
+              fm-7909 — a single filter row replaced the old three chip rows. */}
+          {filtersOpen && (
           <div className="tasks__filterbar">
             <input
               ref={searchInputRef}
@@ -873,6 +883,7 @@ function TasksPageInner() {
               </span>
             )}
           </div>
+          )}
 
           {datePicker && (
             <div className="tasks__datebar" role="dialog" aria-label="Set date">
@@ -1061,8 +1072,7 @@ function TasksPageInner() {
               onOpenRuns={() => detailTask && openRuns(detailTask)}
             />
           </div>
-        </>
-      )}
+      </>
 
       {kebabFor && (
         <RowKebabMenu

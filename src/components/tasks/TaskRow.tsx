@@ -158,6 +158,9 @@ export function TaskRow({
             </span>
           )}
           {claimedBy && (
+            // fm-jw9m — icon-only claimed marker. The text "you" / email used to
+            // tack a second token onto every claimed row; collapse it to a
+            // single glyph (accent when it's mine) with the who in the tooltip.
             <span
               className={[
                 'tasks__row-claimed',
@@ -165,9 +168,10 @@ export function TaskRow({
               ]
                 .filter(Boolean)
                 .join(' ')}
+              aria-label={claimedByMe ? 'Claimed by you' : `Claimed by ${claimedBy}`}
               title={claimedByMe ? 'Claimed by you' : `Claimed by ${claimedBy}`}
             >
-              ◆ {claimedByMe ? 'you' : claimedBy}
+              ◆
             </span>
           )}
           {schedule && (
