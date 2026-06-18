@@ -6,34 +6,36 @@
 // (electron/agents/interactive.ts) and the TypeBuild source
 // (electron/sources/typebuild.ts) so the two run styles stay in sync.
 
+import os from 'node:os';
 import path from 'node:path';
 
 /** CDP endpoint Breeze exposes (electron/main.ts --remote-debugging-port). */
 export const CDP_URL = 'http://localhost:9222';
 
-/** Root the automation helpers resolve against.
- *  - dev / tsc build: APP_ROOT is the repo root, so electron/browser/*.mjs and
- *    bin/*.mjs sit under it and `node` resolves playwright-core from the repo
- *    node_modules.
- *  - packaged: electron-builder ships the automation tree (bin/, electron/
- *    browser/ and a bundled playwright-core) under Resources/automation,
- *    preserving the relative layout so the .mjs imports (`../electron/browser`)
- *    and the playwright-core resolution both still hold. */
-function automationRoot(): string {
-  if (process.env.APP_ROOT && !/[\\/]app\.asar([\\/]|$)/.test(process.env.APP_ROOT)) {
-    return process.env.APP_ROOT;
-  }
-  if (process.resourcesPath) return path.join(process.resourcesPath, 'automation');
-  return process.env.APP_ROOT || process.cwd();
+/** Stable, user-owned dir the automation helpers are INSTALLED into on launch
+ *  (electron/browser/install-runtime.mjs copies them there + a bundled
+ *  playwright-core). os.homedir()-based on purpose:
+ *   - the path is correct regardless of WHEN this module evaluates — it no
+ *     longer depends on process.env.APP_ROOT, which main.ts sets only AFTER
+ *     this module is first imported (the old repo-relative consts resolved to a
+ *     nonexistent node_modules/.../resources/automation and every helper failed
+ *     with MODULE_NOT_FOUND);
+ *   - it is identical in dev + packaged, and the user can inspect/edit it.
+ *  Honors $BREEZE_AUTOMATION_DIR (kept in sync with install-runtime.mjs). */
+function automationDir(): string {
+  return (
+    process.env.BREEZE_AUTOMATION_DIR ||
+    path.join(os.homedir(), '.breezefile', 'automation')
+  );
 }
 
 /** Absolute path to the raw browser-driver CLI (the fallback verbs). */
-export const BROWSER_CLI = path.join(automationRoot(), 'electron', 'browser', 'cli.mjs');
+export const BROWSER_CLI = path.join(automationDir(), 'electron', 'browser', 'cli.mjs');
 
 /** Absolute path to the Tool Repository CLI (docs/Playwright agent.md). The
  *  agent consults this FIRST to reuse an existing tool, falling back to the
  *  raw BROWSER_CLI verbs only when no tool fits. */
-export const TOOLS_CLI = path.join(automationRoot(), 'bin', 'breeze-tools.mjs');
+export const TOOLS_CLI = path.join(automationDir(), 'bin', 'breeze-tools.mjs');
 
 /** Permission allow-rules a playwright session needs to run the helpers
  *  unattended. Paths are unquoted on purpose: claude matches Bash rules by

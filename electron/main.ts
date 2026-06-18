@@ -341,6 +341,19 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('[breeze-cli] failed:', (e as Error).message);
   }
+  // Browser-automation RUNTIME: install the helper CLIs (+ a bundled
+  // playwright-core) into ~/.breezefile/automation/ on launch, so the agent's
+  // `node <cli>` commands resolve from a stable user-owned path instead of a
+  // repo/resources path (which broke with MODULE_NOT_FOUND — see
+  // install-runtime.mjs). Runs here (APP_ROOT is set, the copy SOURCE) and well
+  // before any agent session can start. Best-effort; never blocks startup.
+  import('./browser/install-runtime.mjs')
+    .then(({ installAutomation }) => {
+      const { dir, installed, errors } = installAutomation();
+      if (installed.length) console.log(`[automation] installed into ${dir}:`, installed.join(', '));
+      if (errors.length) console.warn('[automation] errors:', errors.join('; '));
+    })
+    .catch((e) => console.warn('[automation] failed:', (e as Error).message));
   // Tool Repository (docs/Playwright agent.md): install the bundled seed
   // tools into ~/.breezefile/tools/ on every launch. Idempotent — only copies
   // tools that aren't already present, so user/agent edits are never clobbered.
