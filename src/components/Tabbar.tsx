@@ -155,6 +155,7 @@ export function Tabbar() {
     const isTask = t.kind === 'task';
     const isTasksOverview = t.kind === 'tasks';
     const isEdit = t.kind === 'edit';
+    const isBrowser = t.kind === 'browser'; // SPIKE (spike/playwright-cdp)
     // Defensive: a task tab without a resolvable id/title falls back to
     // the folder basename, then to the literal "Task" — never crash.
     // fm-yi85 — tasks-overview tab gets a fixed "All tasks" label.
@@ -162,11 +163,13 @@ export function Tabbar() {
     const editName = isEdit && t.editPath ? basename(t.editPath) : '';
     const label = isTasksOverview
       ? 'All tasks'
-      : isEdit
-        ? editName || 'Untitled'
-        : isTask
-          ? (t.taskId && taskById.get(t.taskId)) || folderName || 'Task'
-          : folderName;
+      : isBrowser
+        ? 'Browser'
+        : isEdit
+          ? editName || 'Untitled'
+          : isTask
+            ? (t.taskId && taskById.get(t.taskId)) || folderName || 'Task'
+            : folderName;
     const active = i === state.activeTab;
     const canClose = state.tabs.length > 1;
     const isDropTarget = dropIdx === i;

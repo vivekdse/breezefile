@@ -157,6 +157,14 @@ const fm = {
   remoteListTargets: () =>
     ipcRenderer.invoke('remote:list-targets') as Promise<string[]>,
   termWrite: (id: number, data: string) => ipcRenderer.send('term:write', id, data),
+  // SPIKE (spike/playwright-cdp): agent-overlay window mirrors a pty's stream.
+  termMirror: (id: number) => ipcRenderer.send('term:mirror', id),
+  termUnmirror: (id: number) => ipcRenderer.send('term:unmirror', id),
+  // SPIKE (spike/playwright-cdp): the in-browser chat widget drives its own
+  // WebContentsView bounds — drag by a delta, resize to panel/bubble.
+  overlayMove: (dx: number, dy: number) => ipcRenderer.send('overlay:move', dx, dy),
+  overlayResize: (width: number, height: number) =>
+    ipcRenderer.send('overlay:resize', width, height),
   termResize: (id: number, cols: number, rows: number) =>
     ipcRenderer.send('term:resize', id, cols, rows),
   termKill: (id: number, signal?: string) =>
@@ -182,6 +190,53 @@ const fm = {
     ) => cb(payload.id, payload.code, payload.signal);
     ipcRenderer.on('term:exit', handler);
     return () => ipcRenderer.off('term:exit', handler);
+  },
+  // ─── SPIKE (spike/playwright-cdp): embedded browser-view control. Mirrors
+  // the term:* shape — invoke for create/destroy, send for fire-and-forget
+  // bounds/nav, on() for state pushes. See electron/ipc.ts browser:* handlers.
+  browserAttach: (opts: { url?: string }) =>
+    ipcRenderer.invoke('browser:attach', opts) as Promise<number>,
+  browserBounds: (
+    id: number,
+    rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      winW: number;
+      winH: number;
+    },
+  ) => ipcRenderer.send('browser:bounds', id, rect),
+  browserHide: (id: number) => ipcRenderer.send('browser:hide', id),
+  browserDestroy: (id: number) =>
+    ipcRenderer.invoke('browser:destroy', id) as Promise<void>,
+  browserNavigate: (id: number, url: string) =>
+    ipcRenderer.send('browser:navigate', id, url),
+  browserBack: (id: number) => ipcRenderer.send('browser:back', id),
+  browserForward: (id: number) => ipcRenderer.send('browser:forward', id),
+  browserReload: (id: number) => ipcRenderer.send('browser:reload', id),
+  browserSync: (id: number) => ipcRenderer.send('browser:sync', id),
+  browserDebug: (info: unknown) => ipcRenderer.send('browser:debug', info),
+  onBrowserState: (
+    cb: (s: {
+      id: number;
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+    }) => void,
+  ) => {
+    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
+      cb(payload);
+    ipcRenderer.on('browser:state', handler);
+    return () => ipcRenderer.off('browser:state', handler);
+  },
+  // SPIKE (spike/playwright-cdp): main → renderer request to OPEN a browser
+  // tab (e.g. the `playwright` task flag opens one for the agent to drive).
+  onBrowserOpen: (cb: (s: { url?: string }) => void) => {
+    const handler = (_e: unknown, payload: { url?: string }) => cb(payload);
+    ipcRenderer.on('browser:open', handler);
+    return () => ipcRenderer.off('browser:open', handler);
   },
   // fm-z7v — process-tree foreground transitions for tab busy/idle tint.
   // `state` is the rich tri-state ('busy'|'idle'|'waiting'); 'waiting'

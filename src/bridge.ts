@@ -111,6 +111,10 @@ type Fm = {
   }) => Promise<number>;
   remoteListTargets: () => Promise<string[]>;
   termWrite: (id: number, data: string) => void;
+  termMirror: (id: number) => void;
+  termUnmirror: (id: number) => void;
+  overlayMove: (dx: number, dy: number) => void;
+  overlayResize: (width: number, height: number) => void;
   termResize: (id: number, cols: number, rows: number) => void;
   termKill: (id: number, signal?: string) => Promise<void>;
   termStatus: (id: number) => Promise<{ alive: boolean; pid: number | null }>;
@@ -126,6 +130,38 @@ type Fm = {
       state?: 'busy' | 'idle' | 'waiting',
     ) => void,
   ) => () => void;
+  // ─── SPIKE (spike/playwright-cdp): embedded browser-view control.
+  browserAttach: (opts: { url?: string }) => Promise<number>;
+  browserBounds: (
+    id: number,
+    rect: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      winW: number;
+      winH: number;
+    },
+  ) => void;
+  browserHide: (id: number) => void;
+  browserDestroy: (id: number) => Promise<void>;
+  browserNavigate: (id: number, url: string) => void;
+  browserBack: (id: number) => void;
+  browserForward: (id: number) => void;
+  browserReload: (id: number) => void;
+  browserSync: (id: number) => void;
+  browserDebug: (info: unknown) => void;
+  onBrowserState: (
+    cb: (s: {
+      id: number;
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+    }) => void,
+  ) => () => void;
+  // SPIKE (spike/playwright-cdp): main → renderer "open a browser tab" request.
+  onBrowserOpen: (cb: (s: { url?: string }) => void) => () => void;
   launchersList: () => Promise<Launcher[]>;
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;

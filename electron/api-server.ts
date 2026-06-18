@@ -19,6 +19,7 @@ import { writeFileSync, unlinkSync, chmodSync, mkdirSync, existsSync } from 'nod
 import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { dispatchTerminalFg } from './ipc';
+import { openBrowserWindow } from './browser/window';
 import { clearSessionTokens } from './session-tokens';
 import { createTaskApi, sendJson, send, readJson } from './core/task-http';
 
@@ -68,7 +69,10 @@ type ControlKind =
   | { kind: 'navigate'; path: string }
   | { kind: 'openTaskTab'; taskId: string }
   | { kind: 'launch'; tabId: string; launcherId: string; variantId?: string }
-  | { kind: 'listTabs' };
+  | { kind: 'listTabs' }
+  // SPIKE (spike/playwright-cdp): open an embedded browser tab on demand, so
+  // an in-app agent can create the tab it then drives over CDP.
+  | { kind: 'openBrowser'; url?: string };
 
 function controlRenderer<T = unknown>(req: ControlKind, timeoutMs = 4000): Promise<T> {
   const reqId = crypto.randomUUID();
@@ -171,6 +175,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (p === '/app/tabs' && m === 'GET') {
       const result = await controlRenderer<unknown>({ kind: 'listTabs' });
       return sendJson(res, 200, result);
+    }
+    // SPIKE (spike/playwright-cdp): open the browser WINDOW on demand. Lets the
+    // in-app agent (via electron/browser/cli.mjs `open`) create the side-by-side
+    // browser window it then drives over CDP.
+    if (p === '/app/open-browser' && m === 'POST') {
+      const body = await readJson<{ url?: string }>(req).catch(() => ({}) as { url?: string });
+      openBrowserWindow(body.url);
+      return sendJson(res, 200, { ok: true });
     }
 
     return send(res, 404, 'not found');

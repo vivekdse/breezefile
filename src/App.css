@@ -137,6 +137,83 @@
 .shell[data-mode="terminal"] .shell__main::before {
   display: none;
 }
+/* SPIKE (spike/playwright-cdp) — browser tabs collapse sidebar / preview /
+   status (like terminal mode) so the embedded WebContentsView gets the full
+   main area below the tab chrome. Tabbar stays for tab switching. */
+.shell[data-tab-kind="browser"] {
+  --sidebar-w: 0px;
+  --preview-w: 0px;
+  grid-template-columns: 0px 1fr 0px;
+  grid-template-rows: 48px auto 1fr;
+  grid-template-areas:
+    "title  title  title"
+    "chrome chrome chrome"
+    "main   main   main";
+}
+.shell[data-tab-kind="browser"] .shell__main {
+  background: var(--panel, var(--bg-1));
+  box-shadow: none;
+}
+.shell[data-tab-kind="browser"] .shell__main::before {
+  display: none;
+}
+/* SPIKE (spike/playwright-cdp) — browser tab toolbar + page region. The page
+   itself is the floating WebContentsView; __view is just the measured slot it
+   mirrors onto, so it stays transparent. */
+.browser-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.browser-pane__bar {
+  flex: 0 0 auto; /* never shrink — a shrunk bar clips the address input */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  min-height: 40px;
+  box-sizing: border-box;
+  background: var(--panel, var(--bg-1));
+  border-bottom: 1px solid var(--rule, var(--border-1));
+}
+.browser-pane__btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink, var(--fg-1));
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.browser-pane__btn:hover:not(:disabled) {
+  background: var(--bg-2, rgba(255, 255, 255, 0.08));
+}
+.browser-pane__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.browser-pane__addr {
+  flex: 1;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--rule, var(--border-1));
+  border-radius: 6px;
+  background: var(--bg-0, #0f1114);
+  color: var(--ink, var(--fg-1));
+  font-size: 13px;
+  outline: none;
+}
+.browser-pane__addr:focus {
+  border-color: var(--accent, #6ea8fe);
+}
+.browser-pane__view {
+  flex: 1;
+  min-height: 0;
+}
 /* fm-a9j — task tabs use a flat canvas. The recessed-plate styling
    reads as "files live in this frame," which mis-frames an operational
    surface. Drop the inset shadow + radial accent. */

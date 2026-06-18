@@ -179,6 +179,9 @@ const WHO_OPTIONS: { id: ExecutorId; label: string; hint?: string }[] = [
 const FLAG_OPTIONS: { id: string; label: string; hint: string }[] = [
   { id: 'interactive', label: 'Interactive', hint: 'open the run in a new tab with an embedded claude session you converse with' },
   { id: 'chrome', label: 'Chrome', hint: 'let claude drive a Chrome browser session (--chrome)' },
+  // SPIKE (spike/playwright-cdp): in-app analog of Chrome — opens an embedded
+  // Breeze browser tab and lets claude drive it via Playwright over CDP.
+  { id: 'playwright', label: 'Playwright (in-app browser)', hint: 'open a Breeze browser tab and let claude drive it with Playwright (no Chrome extension)' },
   { id: 'auto', label: 'Auto-accept', hint: 'permissive permission mode for unattended edits (still human-gated)' },
 ];
 

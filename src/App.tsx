@@ -28,6 +28,7 @@ import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
 import { EditShell } from './components/EditShell';
+import { BrowserPane, reapBrowserViews } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -464,6 +465,24 @@ function Shell() {
             // a clear error rather than hanging.
             throw new Error('launch via API not implemented in v1');
           }
+          // SPIKE (spike/playwright-cdp) — open an embedded browser tab on
+          // demand (api-server /app/open-browser). Lets an in-app agent create
+          // the tab it drives over CDP without a keypress.
+          case 'openBrowser': {
+            const url = (req.url as string) || 'https://example.com';
+            // Reuse + focus an existing browser tab rather than spawning a
+            // second view (the agent may call `open` more than once).
+            const existing = tabsRef.current.findIndex((t) => t.kind === 'browser');
+            if (existing >= 0) {
+              dispatch({ type: 'selectTab', index: existing });
+            } else {
+              dispatch({
+                type: 'newTab',
+                tab: makeTab('/', { kind: 'browser', browserUrl: url }),
+              });
+            }
+            break;
+          }
           case 'listTabs': {
             result = state.tabs.map((t) => ({
               id: t.id,
@@ -702,10 +721,52 @@ function Shell() {
         e.preventDefault();
         setSettingsOpen((v) => !v);
       }
+      // SPIKE (spike/playwright-cdp) — Cmd/Ctrl+B opens an embedded browser tab.
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        dispatch({
+          type: 'newTab',
+          tab: makeTab('/', {
+            kind: 'browser',
+            browserUrl: 'https://example.com',
+          }),
+        });
+      }
     }
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
+
+  // SPIKE (spike/playwright-cdp) — main process asks us to open a browser tab
+  // (the `playwright` task flag opens one for the agent to drive over CDP).
+  useEffect(() => {
+    return fm.onBrowserOpen(({ url }) => {
+      // Reuse + focus an existing browser tab rather than spawning a second
+      // view (the playwright flag and the agent's `open` can both fire).
+      const existing = tabsRef.current.findIndex((t) => t.kind === 'browser');
+      if (existing >= 0) {
+        dispatch({ type: 'selectTab', index: existing });
+        return;
+      }
+      dispatch({
+        type: 'newTab',
+        tab: makeTab('/', {
+          kind: 'browser',
+          browserUrl: url || 'https://example.com',
+        }),
+      });
+    });
+  }, []);
+
+  // SPIKE (spike/playwright-cdp) — browser views persist across tab switches
+  // (BrowserPane hides instead of destroying). When a browser tab is actually
+  // closed it stops appearing here, so reap its now-orphaned native view.
+  useEffect(() => {
+    const live = new Set(
+      state.tabs.filter((t) => t.kind === 'browser').map((t) => t.id),
+    );
+    reapBrowserViews(live);
+  }, [state.tabs]);
 
   // Bridge events from ChipPrompt → the overlays owned by App
   useEffect(() => {
@@ -899,6 +960,7 @@ function Shell() {
   const isTaskTab = tab.kind === 'task';
   const isTasksTab = tab.kind === 'tasks';
   const isEditTab = tab.kind === 'edit';
+  const isBrowserTab = tab.kind === 'browser'; // SPIKE (spike/playwright-cdp)
 
   return (
     <OverlayCtx.Provider value={overlayApi}><div
@@ -917,7 +979,7 @@ function Shell() {
           and let the task header own the top edge of the main pane. */}
       <div className="shell__chrome">
         <Tabbar />
-        {!isTaskTab && !isTasksTab && !isEditTab && (
+        {!isTaskTab && !isTasksTab && !isEditTab && !isBrowserTab && (
           <Pathbar
             path={tab.trail[tab.trail.length - 1]}
             onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
@@ -929,7 +991,7 @@ function Shell() {
           the real estate. Hidden in terminal mode (fm-jtu) so the
           terminal goes full-bleed. Stays visible in task mode — the
           tasks list is the user's pivot surface. */}
-      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && <Sidebar />}
+      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && <Sidebar />}
       {/* main slot — folder tabs render the recessed file plate; task
           tabs render TaskShell (header / actions / folder context).
           TerminalSplit wraps both so embedded terminals work in either
@@ -972,6 +1034,8 @@ function Shell() {
             <TasksPage />
           ) : isEditTab ? (
             <EditShell tabIndex={state.activeTab} />
+          ) : isBrowserTab ? (
+            <BrowserPane tabId={tab.id} url={tab.browserUrl || 'https://example.com'} />
           ) : (
             <>
               <FolderHeader />
@@ -987,12 +1051,12 @@ function Shell() {
           user can browse, toggle, and combine tags without leaving the file
           list. Hidden in terminal mode (fm-jtu) and in task mode (no
           file selected = nothing to preview). */}
-      {!tab.terminal && !isTaskTab && !isTasksTab && !isEditTab && (
+      {!tab.terminal && !isTaskTab && !isTasksTab && !isEditTab && !isBrowserTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
       {/* status slot — ModeLine stacked above Statusbar. Hidden in
           terminal mode so the terminal pane reaches the bottom edge. */}
-      {!tab.terminal && !isEditTab && (
+      {!tab.terminal && !isEditTab && !isBrowserTab && (
         <div className="shell__status">
           <ModeLine />
           <Statusbar />

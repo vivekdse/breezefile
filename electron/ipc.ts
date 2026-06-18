@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, BrowserWindow, webContents, clipboard, nativeImage, dialog } from 'electron';
+import { ipcMain, shell, app, BrowserWindow, WebContentsView, webContents, clipboard, nativeImage, dialog } from 'electron';
 import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -508,6 +508,26 @@ type PtyRecord = {
 const ptys = new Map<number, PtyRecord>();
 let nextPtyId = 1;
 
+// SPIKE (spike/playwright-cdp): extra webContents that MIRROR a pty's
+// term:data/term:exit/term:fg, on top of the owning senderId. The dedicated
+// agent-overlay window registers here (term:mirror) so it shows the same live
+// terminal as the main window's tab. Keyed by pty id → set of webContents ids.
+const ptyMirrors = new Map<number, Set<number>>();
+
+/** Fan a pty event out to the owning window + any registered mirrors. */
+function sendToPtyClients(
+  id: number,
+  primarySenderId: number,
+  channel: string,
+  payload: unknown,
+): void {
+  const ids = new Set<number>([primarySenderId, ...(ptyMirrors.get(id) ?? [])]);
+  for (const wid of ids) {
+    const wc = webContents.fromId(wid);
+    if (wc && !wc.isDestroyed()) wc.send(channel, payload);
+  }
+}
+
 function ptyEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   // Electron sets ELECTRON_RUN_AS_NODE / NODE_OPTIONS that confuse user
@@ -557,15 +577,16 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
   });
   ptys.set(id, { proc, senderId: opts.senderId, cmd: opts.file });
   proc.onData((data) => {
-    const wc = BrowserWindow.fromId(opts.senderId)?.webContents;
-    if (wc && !wc.isDestroyed()) wc.send('term:data', { id, data });
+    // Read the CURRENT owner from the record (not the closure) so a future
+    // retarget would be honored, and fan out to any overlay mirrors.
+    const sid = ptys.get(id)?.senderId ?? opts.senderId;
+    sendToPtyClients(id, sid, 'term:data', { id, data });
   });
   proc.onExit(({ exitCode, signal }) => {
-    const wc = BrowserWindow.fromId(opts.senderId)?.webContents;
-    if (wc && !wc.isDestroyed()) {
-      wc.send('term:exit', { id, code: exitCode, signal: signal ?? null });
-    }
+    const sid = ptys.get(id)?.senderId ?? opts.senderId;
+    sendToPtyClients(id, sid, 'term:exit', { id, code: exitCode, signal: signal ?? null });
     ptys.delete(id);
+    ptyMirrors.delete(id);
     try { opts.onExit?.({ exitCode, signal: signal ?? null }); } catch (e) {
       console.error('[pty] onExit hook:', e);
     }
@@ -2140,6 +2161,162 @@ end tell`;
     ptys.delete(id);
   });
 
+  // ─── SPIKE (spike/playwright-cdp): embedded browser views, one per
+  // 'browser'-kind tab. A WebContentsView is an OS-level overlay parented to
+  // the window's contentView — it floats ABOVE the React DOM, so the renderer
+  // can't position or clip it. The BrowserPane component measures its
+  // placeholder div and streams bounds here via 'browser:bounds'; we mirror
+  // the view onto that rect and toggle visibility on tab switch. Each view is
+  // a real Chromium webContents, so Playwright drives it over CDP (port 9222).
+  type BrowserRec = { view: WebContentsView; win: BrowserWindow; emit: () => void };
+  const browserViews = new Map<number, BrowserRec>();
+  let nextBrowserId = 1;
+
+  ipcMain.handle('browser:attach', (e, opts: { url?: string }): number => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return -1;
+    const id = nextBrowserId++;
+    const view = new WebContentsView();
+    // Give the page a REAL viewport immediately, sized to the window, so it
+    // lays out and can be screenshotted/driven even when the browser tab is not
+    // the active Breeze tab. Without this the view stays 0×0 until BrowserPane
+    // reports on-screen bounds — so a tab the agent opened but the user isn't
+    // looking at renders nothing (innerWidth=0, screenshots fail "0 width").
+    // We keep it parked off-screen + hidden until BrowserPane positions it.
+    const cb0init = win.getContentBounds();
+    view.setBounds({
+      x: -(cb0init.width + 100),
+      y: 0,
+      width: cb0init.width,
+      height: cb0init.height,
+    });
+    view.setVisible(false); // stay hidden until the first bounds report
+    win.contentView.addChildView(view);
+    const wc = view.webContents;
+    const emit = () => {
+      if (win.webContents.isDestroyed()) return;
+      win.webContents.send('browser:state', {
+        id,
+        url: wc.getURL(),
+        title: wc.getTitle(),
+        canGoBack: wc.navigationHistory.canGoBack(),
+        canGoForward: wc.navigationHistory.canGoForward(),
+      });
+    };
+    wc.on('did-navigate', emit);
+    wc.on('did-navigate-in-page', emit);
+    wc.on('page-title-updated', emit);
+    // Open target=_blank / window.open in the same view rather than spawning a
+    // native child window (keeps everything inside the tab for the spike).
+    wc.setWindowOpenHandler(({ url }) => {
+      wc.loadURL(url);
+      return { action: 'deny' };
+    });
+    void wc.loadURL(opts?.url || 'https://example.com');
+    browserViews.set(id, { view, win, emit });
+    const cb0 = win.getContentBounds();
+    console.log(`[browser] attach id=${id} window={w:${cb0.width},h:${cb0.height}}`);
+    return id;
+  });
+
+  const lastBoundsLog = new Map<number, string>();
+  ipcMain.on(
+    'browser:bounds',
+    (
+      _e,
+      id: number,
+      rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        winW: number;
+        winH: number;
+      },
+    ) => {
+      const rec = browserViews.get(id);
+      if (!rec) return;
+      // setBounds works in device-independent pixels (DIP); the renderer's
+      // getBoundingClientRect is in CSS pixels. On HiDPI / fractionally-scaled
+      // displays these differ, so scale the CSS-px corner into DIP using the
+      // ratio between the window's DIP size and the renderer's reported CSS
+      // size. Take the corner from the renderer, the extent from the window
+      // (a browser tab collapses every other panel → it runs to the edges).
+      const cb = rec.win.getContentBounds();
+      const sx = rect.winW > 0 ? cb.width / rect.winW : 1;
+      const sy = rect.winH > 0 ? cb.height / rect.winH : 1;
+      const x = Math.round(rect.x * sx);
+      const y = Math.round(rect.y * sy);
+      const b = {
+        x,
+        y,
+        width: Math.max(0, cb.width - x),
+        height: Math.max(0, cb.height - y),
+      };
+      rec.view.setBounds(b);
+      rec.view.setVisible(true);
+      // SPIKE diag — log only on change so we can compare the slot the renderer
+      // measured against the actual window content size.
+      const line = `[browser] bounds id=${id} view={x:${b.x},y:${b.y},w:${b.width},h:${b.height}} window={w:${cb.width},h:${cb.height}}`;
+      if (lastBoundsLog.get(id) !== line) {
+        lastBoundsLog.set(id, line);
+        console.log(line);
+      }
+    },
+  );
+
+  // Re-broadcast a view's current url/title/nav on demand. The renderer calls
+  // this when a BrowserPane (re)mounts so its address bar reflects where the
+  // view actually IS — it may have navigated while the tab was inactive (and
+  // thus had no live state listener).
+  ipcMain.on('browser:sync', (_e, id: number) => {
+    browserViews.get(id)?.emit();
+  });
+
+  ipcMain.on('browser:hide', (_e, id: number) => {
+    const rec = browserViews.get(id);
+    if (!rec) return;
+    // Park the view OFF-SCREEN at full size rather than setVisible(false): the
+    // page keeps a real viewport (and keeps rendering) while the tab is in the
+    // background, so the agent can still drive + screenshot it. BrowserPane
+    // brings it back on-screen via bounds when the tab is shown again.
+    const cb = rec.win.getContentBounds();
+    rec.view.setBounds({
+      x: -(cb.width + 100),
+      y: 0,
+      width: cb.width,
+      height: cb.height,
+    });
+    rec.view.setVisible(false);
+  });
+
+  ipcMain.handle('browser:destroy', (_e, id: number) => {
+    const rec = browserViews.get(id);
+    if (!rec) return;
+    try { rec.win.contentView.removeChildView(rec.view); } catch { /* gone */ }
+    try { rec.view.webContents.close(); } catch { /* gone */ }
+    browserViews.delete(id);
+  });
+
+  ipcMain.on('browser:debug', (_e, info) => {
+    console.log('[browser:debug]', JSON.stringify(info));
+  });
+
+  ipcMain.on('browser:navigate', (_e, id: number, url: string) => {
+    void browserViews.get(id)?.view.webContents.loadURL(url);
+  });
+  ipcMain.on('browser:back', (_e, id: number) => {
+    const h = browserViews.get(id)?.view.webContents.navigationHistory;
+    if (h?.canGoBack()) h.goBack();
+  });
+  ipcMain.on('browser:forward', (_e, id: number) => {
+    const h = browserViews.get(id)?.view.webContents.navigationHistory;
+    if (h?.canGoForward()) h.goForward();
+  });
+  ipcMain.on('browser:reload', (_e, id: number) => {
+    browserViews.get(id)?.view.webContents.reload();
+  });
+
   // fm-z7v — busy/idle signal comes from Claude Code hooks
   // (UserPromptSubmit → busy, Stop/StopFailure → idle), routed through
   // the api-server and dispatched here as 'term:fg' keyed by ptyId.
@@ -2147,17 +2324,27 @@ end tell`;
   registerFgDispatcher((id, state) => {
     const rec = ptys.get(id);
     if (!rec) return;
-    // senderId is a webContents id (from e.sender.id at spawn time);
-    // webContents.fromId is the correct lookup. The term:data path uses
-    // BrowserWindow.fromId by historical accident — both work in the
-    // single-window case but the webContents form is the right API.
-    const wc = webContents.fromId(rec.senderId);
-    if (wc && !wc.isDestroyed()) {
-      // `busy` retained for legacy preload/renderer compat (pre-waiting).
-      // New `state` carries the full tri-state so renderer can branch on
-      // 'waiting' without inferring from a bool.
-      wc.send('term:fg', { id, busy: state === 'busy', state, comm: null });
-    }
+    // `busy` retained for legacy preload/renderer compat (pre-waiting). New
+    // `state` carries the full tri-state so the renderer can branch on
+    // 'waiting' without inferring from a bool. Fan out to the agent overlay
+    // mirror too, so it can flag "Claude needs you".
+    sendToPtyClients(id, rec.senderId, 'term:fg', {
+      id,
+      busy: state === 'busy',
+      state,
+      comm: null,
+    });
+  });
+
+  // SPIKE (spike/playwright-cdp): the agent-overlay window registers/unregisters
+  // as a mirror of a pty's term:* stream so it renders the same live terminal.
+  ipcMain.on('term:mirror', (e, id: number) => {
+    let set = ptyMirrors.get(id);
+    if (!set) ptyMirrors.set(id, (set = new Set()));
+    set.add(e.sender.id);
+  });
+  ipcMain.on('term:unmirror', (e, id: number) => {
+    ptyMirrors.get(id)?.delete(e.sender.id);
   });
 
   // ─── Launchers (fm-g6r) ──────────────────────────────────────────────

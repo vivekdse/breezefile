@@ -21,6 +21,8 @@ import { defaultAgentId } from './registry';
 import { flagsToArgs } from './flags';
 import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
+import { CDP_URL, BROWSER_CLI, playwrightPromptAddendum } from '../browser/automation';
+import { openBrowserWindow } from '../browser/window';
 
 export type InteractiveRunOptions = {
   /** Agent id for the run row. Defaults to task.auto_agent or the registry
@@ -126,10 +128,18 @@ export async function runTaskInteractive(
   if (run) tasks.updateRun(run.id, { started_at: Date.now() });
 
   const bin = await resolveClaudeBin();
-  const { args: flagArgs, unknown } = flagsToArgs(task.flags);
+  const { args: flagArgs, unknown, playwright } = flagsToArgs(task.flags);
   if (unknown.length) {
     console.warn('[interactive] ignoring unknown task flags:', unknown.join(', '));
   }
+
+  // SPIKE (spike/playwright-cdp): the `playwright` flag is the in-app analog of
+  // `chrome`. Open the side-by-side browser WINDOW for the agent to drive and
+  // teach it (via the prompt) how to drive it. The CLI reads BREEZE_CDP_URL from
+  // env. omitPrompt = resume relaunch: the addendum was already delivered on the
+  // first run, and --continue must not be seeded with a fresh message.
+  const effectivePrompt =
+    playwright && !opts.omitPrompt ? prompt + '\n' + playwrightPromptAddendum() : prompt;
   // Positional prompt arg launches claude interactively pre-seeded with the
   // task; flags map to CLI args; --add-dir grants the cwd. No -p (that's
   // the headless one-shot mode). On a resume relaunch (omitPrompt) we drop
@@ -145,7 +155,7 @@ export async function runTaskInteractive(
     ...flagArgs,
     ...(opts.extraArgs ?? []),
     '--add-dir', cwd,
-    ...(opts.omitPrompt ? [] : ['--', prompt]),
+    ...(opts.omitPrompt ? [] : ['--', effectivePrompt]),
   ];
 
   const ptyId = reservePtyId();
@@ -160,6 +170,8 @@ export async function runTaskInteractive(
     env: {
       BREEZE_TASK_ID: task.id,
       ...(run ? { BREEZE_RUN_ID: run.id } : {}),
+      // SPIKE (spike/playwright-cdp): point the helper CLI at Breeze's CDP.
+      ...(playwright ? { BREEZE_CDP_URL: CDP_URL, BREEZE_BROWSER_CLI: BROWSER_CLI } : {}),
       ...(opts.env ?? {}),
     },
     onExit: ({ exitCode, signal }) => {
@@ -199,6 +211,12 @@ export async function runTaskInteractive(
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);
   }
+
+  // SPIKE (spike/playwright-cdp): for playwright tasks, open the full-screen
+  // browser window with the agent chat widget docked over the page (mirrors
+  // this pty), so the user sees the page AND what Claude is doing at once.
+  console.log(`[interactive] flags=${JSON.stringify(task.flags)} playwright=${playwright} ptyId=${ptyId}`);
+  if (playwright) openBrowserWindow('https://example.com', ptyId);
 
   return { run, ptyId, launched: true };
 }
