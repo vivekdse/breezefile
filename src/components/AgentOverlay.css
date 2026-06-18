@@ -1,0 +1,55 @@
+/* SPIKE (spike/playwright-cdp): dedicated agent-chat overlay window. */
+.agent-overlay {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: #0f1114;
+  color: #e6e6e6;
+  overflow: hidden;
+}
+
+/* Draggable title strip (frameless-feel): lets the user reposition the overlay
+   over the browser. The badge flips on when Claude is waiting for input. */
+.agent-overlay__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font: 600 12px/1.4 system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  background: #16191e;
+  border-bottom: 1px solid #23272e;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.agent-overlay__title {
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.agent-overlay__badge {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #d9822b;
+  color: #1b1300;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+/* When waiting, pulse the top border so it's obvious even in peripheral vision. */
+.agent-overlay--waiting .agent-overlay__bar {
+  background: #2a1f0c;
+  border-bottom-color: #d9822b;
+}
+
+.agent-overlay__term {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}

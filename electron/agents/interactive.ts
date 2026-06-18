@@ -23,6 +23,7 @@ import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
 import { CDP_URL, BROWSER_CLI, playwrightPromptAddendum } from '../browser/automation';
 import { openBrowserWindow } from '../browser/window';
+import { createAgentOverlay } from '../browser/overlay';
 
 export type InteractiveRunOptions = {
   /** Agent id for the run row. Defaults to task.auto_agent or the registry
@@ -214,6 +215,11 @@ export async function runTaskInteractive(
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);
   }
+
+  // SPIKE (spike/playwright-cdp): for playwright tasks, pop the dedicated
+  // agent-chat overlay that mirrors this pty, so the user sees Claude's
+  // questions floating over the full-screen browser.
+  if (playwright) createAgentOverlay(ptyId);
 
   return { run, ptyId, launched: true };
 }

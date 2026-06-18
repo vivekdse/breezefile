@@ -508,6 +508,26 @@ type PtyRecord = {
 const ptys = new Map<number, PtyRecord>();
 let nextPtyId = 1;
 
+// SPIKE (spike/playwright-cdp): extra webContents that MIRROR a pty's
+// term:data/term:exit/term:fg, on top of the owning senderId. The dedicated
+// agent-overlay window registers here (term:mirror) so it shows the same live
+// terminal as the main window's tab. Keyed by pty id → set of webContents ids.
+const ptyMirrors = new Map<number, Set<number>>();
+
+/** Fan a pty event out to the owning window + any registered mirrors. */
+function sendToPtyClients(
+  id: number,
+  primarySenderId: number,
+  channel: string,
+  payload: unknown,
+): void {
+  const ids = new Set<number>([primarySenderId, ...(ptyMirrors.get(id) ?? [])]);
+  for (const wid of ids) {
+    const wc = webContents.fromId(wid);
+    if (wc && !wc.isDestroyed()) wc.send(channel, payload);
+  }
+}
+
 function ptyEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   // Electron sets ELECTRON_RUN_AS_NODE / NODE_OPTIONS that confuse user
@@ -557,15 +577,16 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
   });
   ptys.set(id, { proc, senderId: opts.senderId, cmd: opts.file });
   proc.onData((data) => {
-    const wc = BrowserWindow.fromId(opts.senderId)?.webContents;
-    if (wc && !wc.isDestroyed()) wc.send('term:data', { id, data });
+    // Read the CURRENT owner from the record (not the closure) so a future
+    // retarget would be honored, and fan out to any overlay mirrors.
+    const sid = ptys.get(id)?.senderId ?? opts.senderId;
+    sendToPtyClients(id, sid, 'term:data', { id, data });
   });
   proc.onExit(({ exitCode, signal }) => {
-    const wc = BrowserWindow.fromId(opts.senderId)?.webContents;
-    if (wc && !wc.isDestroyed()) {
-      wc.send('term:exit', { id, code: exitCode, signal: signal ?? null });
-    }
+    const sid = ptys.get(id)?.senderId ?? opts.senderId;
+    sendToPtyClients(id, sid, 'term:exit', { id, code: exitCode, signal: signal ?? null });
     ptys.delete(id);
+    ptyMirrors.delete(id);
     try { opts.onExit?.({ exitCode, signal: signal ?? null }); } catch (e) {
       console.error('[pty] onExit hook:', e);
     }
@@ -2303,17 +2324,27 @@ end tell`;
   registerFgDispatcher((id, state) => {
     const rec = ptys.get(id);
     if (!rec) return;
-    // senderId is a webContents id (from e.sender.id at spawn time);
-    // webContents.fromId is the correct lookup. The term:data path uses
-    // BrowserWindow.fromId by historical accident — both work in the
-    // single-window case but the webContents form is the right API.
-    const wc = webContents.fromId(rec.senderId);
-    if (wc && !wc.isDestroyed()) {
-      // `busy` retained for legacy preload/renderer compat (pre-waiting).
-      // New `state` carries the full tri-state so renderer can branch on
-      // 'waiting' without inferring from a bool.
-      wc.send('term:fg', { id, busy: state === 'busy', state, comm: null });
-    }
+    // `busy` retained for legacy preload/renderer compat (pre-waiting). New
+    // `state` carries the full tri-state so the renderer can branch on
+    // 'waiting' without inferring from a bool. Fan out to the agent overlay
+    // mirror too, so it can flag "Claude needs you".
+    sendToPtyClients(id, rec.senderId, 'term:fg', {
+      id,
+      busy: state === 'busy',
+      state,
+      comm: null,
+    });
+  });
+
+  // SPIKE (spike/playwright-cdp): the agent-overlay window registers/unregisters
+  // as a mirror of a pty's term:* stream so it renders the same live terminal.
+  ipcMain.on('term:mirror', (e, id: number) => {
+    let set = ptyMirrors.get(id);
+    if (!set) ptyMirrors.set(id, (set = new Set()));
+    set.add(e.sender.id);
+  });
+  ipcMain.on('term:unmirror', (e, id: number) => {
+    ptyMirrors.get(id)?.delete(e.sender.id);
   });
 
   // ─── Launchers (fm-g6r) ──────────────────────────────────────────────

@@ -157,6 +157,9 @@ const fm = {
   remoteListTargets: () =>
     ipcRenderer.invoke('remote:list-targets') as Promise<string[]>,
   termWrite: (id: number, data: string) => ipcRenderer.send('term:write', id, data),
+  // SPIKE (spike/playwright-cdp): agent-overlay window mirrors a pty's stream.
+  termMirror: (id: number) => ipcRenderer.send('term:mirror', id),
+  termUnmirror: (id: number) => ipcRenderer.send('term:unmirror', id),
   termResize: (id: number, cols: number, rows: number) =>
     ipcRenderer.send('term:resize', id, cols, rows),
   termKill: (id: number, signal?: string) =>
