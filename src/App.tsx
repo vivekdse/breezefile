@@ -1235,9 +1235,12 @@ function Shell() {
       {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot.
           Hidden in preview mode (fm-wq6) so the preview pane can claim
           the real estate. Hidden in terminal mode (fm-jtu) so the
-          terminal goes full-bleed. Stays visible in task mode — the
-          tasks list is the user's pivot surface. */}
-      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && <Sidebar />}
+          terminal goes full-bleed. Stays visible on a single task tab — the
+          tasks list is the user's pivot surface. fm-vlmj — hidden on the
+          all-tasks page (isTasksTab): that page is its own inbox (list +
+          detail), so the global Sidebar was redundant clutter; skipping the
+          render also avoids mounting its location/source-polling effects. */}
+      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && !isTasksTab && <Sidebar />}
       {/* main slot — folder tabs render the recessed file plate; task
           tabs render TaskShell (header / actions / folder context).
           TerminalSplit wraps both so embedded terminals work in either
