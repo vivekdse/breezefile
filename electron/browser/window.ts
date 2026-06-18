@@ -132,11 +132,16 @@ ipcMain.on('overlay:move', (_e, dx: number, dy: number) => {
   chatBounds.y += dy;
   clampChat();
 });
-// Resize: the renderer asks for a size (panel vs collapsed bubble); keep the
-// widget anchored to its current corner, clamped in-window.
+// Resize: the renderer asks for a size (panel/bubble preset, or a live drag).
+// Keep the widget's BOTTOM-RIGHT corner pinned so it grows up-and-left into the
+// screen interior (it's docked bottom-right) instead of off the right edge.
 ipcMain.on('overlay:resize', (_e, width: number, height: number) => {
   if (!chatView || !browserWin) return;
+  const right = chatBounds.x + chatBounds.width;
+  const bottom = chatBounds.y + chatBounds.height;
   chatBounds.width = Math.max(48, width);
   chatBounds.height = Math.max(48, height);
+  chatBounds.x = right - chatBounds.width;
+  chatBounds.y = bottom - chatBounds.height;
   clampChat();
 });

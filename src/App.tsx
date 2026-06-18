@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { OverlayCtx, type OverlayApi, type RenameMode } from './overlays';
 import { Titlebar } from './components/Titlebar';
 import { Pathbar } from './components/Pathbar';
@@ -78,6 +79,27 @@ function relaunchErrorMessage(err: unknown): string {
   return "Couldn't restart the session — try again";
 }
 
+// fm-dly3 — the right-docked chat panel is drag-resizable; its width persists
+// across tabs and sessions. 380px matches the original fixed width / the
+// --chat-w fallback in App.css. Clamp keeps it readable and leaves room for the
+// file list (the OS window grows to fit via window:chatResize, but we still
+// cap so a stored value can't be absurd).
+const CHAT_DEFAULT_W = 380;
+const CHAT_MIN_W = 280;
+const CHAT_MAX_W = 1200;
+const CHAT_WIDTH_KEY = 'breeze.chatPanelWidth';
+const clampChatWidth = (w: number) =>
+  Math.max(CHAT_MIN_W, Math.min(CHAT_MAX_W, Math.round(w)));
+function readChatWidth(): number {
+  try {
+    const raw = localStorage.getItem(CHAT_WIDTH_KEY);
+    if (raw) return clampChatWidth(parseFloat(raw));
+  } catch {
+    /* localStorage unavailable — fall back to default */
+  }
+  return CHAT_DEFAULT_W;
+}
+
 function Shell() {
   const { state, activeTab, refreshActive, dispatch, setTab, focusEntryByName, navigateTo, loadDir } = useStore();
   const [renaming, setRenaming] = useState<{ entry: Entry; mode: RenameMode } | null>(null);
@@ -149,6 +171,11 @@ function Shell() {
   const [relaunch, setRelaunch] = useState<{ ptyId: number; error: string | null } | null>(
     null,
   );
+  // fm-dly3 — persisted width of the right-docked chat panel (px). The ref lets
+  // the once-mounted open/close effect read the live value without re-running.
+  const [chatWidth, setChatWidth] = useState<number>(() => readChatWidth());
+  const chatWidthRef = useRef(chatWidth);
+  chatWidthRef.current = chatWidth;
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -578,12 +605,40 @@ function Shell() {
   }, [dispatch]);
 
   // fm-dly3 — widen the OS window while the active tab shows a chat panel so
-  // the editor / file list keeps its width (380px matches --chat-w in
-  // App.css). Restores when the chat closes or you switch to a chat-less tab.
+  // the editor / file list keeps its width. Restores when the chat closes or
+  // you switch to a chat-less tab. Reads the live panel width via ref so it
+  // grows the window to the user's resized width on open, without re-running
+  // on every drag (the drag handler below re-grows the window directly).
   const chatVisible = !!state.tabs[state.activeTab]?.chat;
   useEffect(() => {
-    void fm.windowChatResize(chatVisible, 380);
+    void fm.windowChatResize(chatVisible, chatWidthRef.current);
   }, [chatVisible]);
+
+  // fm-dly3 — live drag-resize of the chat panel. ChatPanel's left-edge gutter
+  // reports horizontal pointer deltas (dragging left ⇒ wider). We update the
+  // persisted width and re-grow the OS window so the file list keeps its size;
+  // window:chatResize caps at the screen edge, past which CSS lets the file
+  // area yield. Coalesced to one window-grow per frame.
+  const chatResizeRaf = useRef<number | null>(null);
+  const onChatResizeDelta = (dx: number) => {
+    const next = clampChatWidth(chatWidthRef.current - dx);
+    if (next === chatWidthRef.current) return;
+    chatWidthRef.current = next;
+    setChatWidth(next);
+    if (chatResizeRaf.current == null) {
+      chatResizeRaf.current = requestAnimationFrame(() => {
+        chatResizeRaf.current = null;
+        void fm.windowChatResize(true, chatWidthRef.current);
+      });
+    }
+  };
+  const onChatResizeEnd = () => {
+    try {
+      localStorage.setItem(CHAT_WIDTH_KEY, String(chatWidthRef.current));
+    } catch {
+      /* localStorage unavailable — width still applies for this session */
+    }
+  };
 
   // fm-c2w — dock badge reflects how many tabs currently demand
   // attention (idle waiting-for-input or explicit bell). 'busy' is
@@ -1214,6 +1269,9 @@ function Shell() {
       data-mode={tab.terminal ? 'terminal' : 'files'}
       data-tab-kind={tab.kind}
       data-chat={tab.chat ? 'open' : undefined}
+      // fm-dly3 — inline --chat-w wins over the static 380px rule in App.css so
+      // the user's dragged/persisted width drives the grid column when open.
+      style={tab.chat ? ({ ['--chat-w']: `${chatWidth}px` } as CSSProperties) : undefined}
     >
       <IconSprite />
       {/* title slot — owned by fm-9w0 */}
@@ -1310,7 +1368,14 @@ function Shell() {
       )}
       {/* chat slot — fm-dly3 agent chat panel, docked right. Renders for the
           active tab when its chat is open (works in folder + edit modes). */}
-      {tab.chat && <ChatPanel tabIndex={state.activeTab} chat={tab.chat} />}
+      {tab.chat && (
+        <ChatPanel
+          tabIndex={state.activeTab}
+          chat={tab.chat}
+          onResizeDelta={onChatResizeDelta}
+          onResizeEnd={onChatResizeEnd}
+        />
+      )}
       {/* status slot — ModeLine stacked above Statusbar. Hidden in
           terminal mode so the terminal pane reaches the bottom edge. */}
       {!tab.terminal && !isEditTab && !isBrowserTab && (

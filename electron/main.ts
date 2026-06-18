@@ -424,8 +424,10 @@ app.whenReady().then(() => {
   // editor / file list keeps the width it had before, then restore on close.
   // Clamped to the current display's work area (and skipped while maximized /
   // fullscreen, where we can't grow and the CSS handles the squeeze). Keyed
-  // per-window so multi-window stays sane.
-  const chatGrow = new Map<number, number>(); // win.id → width before growing
+  // per-window so multi-window stays sane. The stored value is the *ungrown*
+  // base width; repeated open calls (the user drag-resizing the panel) re-grow
+  // to base + panelWidth, so the file list keeps its width as the panel widens.
+  const chatGrow = new Map<number, number>(); // win.id → ungrown base width
   ipcMain.handle(
     'window:chatResize',
     (e, open: boolean, panelWidth: number) => {
@@ -438,10 +440,12 @@ app.whenReady().then(() => {
       const [width, height] = w.getSize();
       const wa = screen.getDisplayMatching(w.getBounds()).workArea;
       if (open) {
-        if (chatGrow.has(id)) return; // already grown
-        const target = Math.min(width + pad, wa.width);
-        if (target <= width) return; // no room to grow — CSS copes
-        chatGrow.set(id, width);
+        // Anchor off the ungrown base: capture it on first open, reuse it on
+        // every later resize so the window tracks the panel without drifting.
+        const base = chatGrow.has(id) ? chatGrow.get(id)! : width;
+        chatGrow.set(id, base);
+        const target = Math.min(base + pad, wa.width);
+        if (target === width) return; // already at the right size
         // Keep the (now wider) window inside the work area.
         const nx = Math.max(wa.x, Math.min(x, wa.x + wa.width - target));
         w.setBounds({ x: nx, y, width: target, height });

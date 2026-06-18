@@ -12,6 +12,26 @@
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
+/* fm-dly3 — top-left resize grip. The widget is docked bottom-right, so this
+   corner is the one that moves as it grows. Sits above the title bar. */
+.agent-overlay__resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  z-index: 5;
+  cursor: nwse-resize;
+  touch-action: none;
+  background:
+    linear-gradient(135deg, transparent 50%, #4a525e 50%, #4a525e 70%, transparent 70%);
+  border-top-left-radius: 10px;
+}
+.agent-overlay__resize:hover {
+  background:
+    linear-gradient(135deg, transparent 50%, #7d8794 50%, #7d8794 72%, transparent 72%);
+}
+
 /* Draggable title strip. Cursor hint + no text selection while dragging. */
 .agent-overlay__bar {
   flex: 0 0 auto;

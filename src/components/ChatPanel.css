@@ -44,3 +44,20 @@
   min-height: 0;
   position: relative;
 }
+
+/* fm-dly3 — left-edge resize gutter. A thin invisible strip straddling the
+   panel's border-left, widened a little for an easy grab target. Sits above
+   the terminal but clear of the close button (top-right). */
+.chat-panel__resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  z-index: 4;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.chat-panel__resize:hover {
+  background: var(--accent, rgba(120, 160, 255, 0.35));
+}
