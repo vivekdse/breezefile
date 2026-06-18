@@ -1,0 +1,46 @@
+/* fm-dly3 — agent chat side-panel, docked in the `chat` grid slot. */
+.chat-panel {
+  position: relative;
+  grid-area: chat;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel, var(--bg-1));
+  border-left: 1px solid var(--rule, var(--border-1));
+}
+
+/* No header row — the chat panel is full-bleed terminal. The only chrome is
+   a small floating close button in the top-right corner, overlaid on the
+   terminal so the panel stays clean (and free of the title's emoji glyph,
+   which used to render as a tofu rectangle). It clears the terminal's
+   right-edge scrollbar. */
+.chat-panel__close {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  z-index: 3;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: var(--panel, rgba(0, 0, 0, 0.35));
+  color: var(--fg-2, var(--muted));
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.chat-panel__close:hover {
+  opacity: 1;
+  background: var(--bg-1, rgba(0, 0, 0, 0.08));
+  color: var(--fg-1, var(--ink));
+}
+
+.chat-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}

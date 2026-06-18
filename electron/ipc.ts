@@ -3,7 +3,7 @@ import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, watch as fsWatch, type FSWatcher } from 'node:fs';
 import crypto from 'node:crypto';
 import * as nodePty from '@homebridge/node-pty-prebuilt-multiarch';
 import * as tasks from './tasks';
@@ -26,6 +26,7 @@ import {
   disconnectSource,
   connectedHosts,
   remoteRequest,
+  autoAttachForPath,
 } from './sources';
 import {
   getTaskSource,
@@ -824,6 +825,15 @@ export function registerIpc() {
     for (const p of paths) await shell.trashItem(expandHome(p));
   });
 
+  // fm-7klh — irreversible delete (no Trash). Gated behind a typed
+  // confirmation in the renderer; there is no keyboard chord for it. `force`
+  // ignores already-gone paths so a partial selection still completes.
+  ipcMain.handle('fs:permanent-delete', async (_e, paths: string[]) => {
+    for (const p of paths) {
+      await fs.rm(expandHome(p), { recursive: true, force: true });
+    }
+  });
+
   ipcMain.handle(
     'fs:paste',
     async (
@@ -1579,6 +1589,87 @@ end tell`;
     },
   );
 
+  // fm-mdwatch — watch an open editor file for external changes (e.g. an
+  // agent editing it from the chat panel). We watch the *parent directory*
+  // rather than the file itself: atomic saves (tmp-file + rename, used by
+  // this editor and by Claude Code) replace the inode, which silently kills
+  // a watch bound to the old file. A directory watch survives that and we
+  // filter by basename. Keyed by senderId+path so each editor tab owns its
+  // own watcher and re-watching the same file is idempotent.
+  const editorWatchers = new Map<
+    string,
+    { w: FSWatcher; timer: NodeJS.Timeout | null; senderId: number }
+  >();
+  const watchKey = (senderId: number, abs: string) => `${senderId} ${abs}`;
+
+  const stopEditorWatch = (key: string) => {
+    const rec = editorWatchers.get(key);
+    if (!rec) return;
+    if (rec.timer) clearTimeout(rec.timer);
+    try { rec.w.close(); } catch { /* noop */ }
+    editorWatchers.delete(key);
+  };
+
+  // One shared 'destroyed' listener per WebContents reaps all of that
+  // sender's file watchers — attaching one per watch would trip Node's
+  // MaxListeners warning (same lesson as ensurePtyDestroyHook below).
+  const editorWatchHooked = new WeakSet<Electron.WebContents>();
+  const ensureEditorWatchDestroyHook = (wc: Electron.WebContents) => {
+    if (editorWatchHooked.has(wc)) return;
+    editorWatchHooked.add(wc);
+    wc.once('destroyed', () => {
+      for (const [key, rec] of editorWatchers) {
+        if (rec.senderId === wc.id) stopEditorWatch(key);
+      }
+    });
+  };
+
+  ipcMain.handle('editor:watch', async (e, p: string): Promise<void> => {
+    const abs = expandHome(p);
+    const key = watchKey(e.sender.id, abs);
+    if (editorWatchers.has(key)) return;
+    const dir = path.dirname(abs);
+    const base = path.basename(abs);
+    let watcher: FSWatcher;
+    try {
+      watcher = fsWatch(dir, { persistent: false }, (_event, filename) => {
+        // filename can be null on some platforms; if present, filter to ours.
+        if (filename && path.basename(filename.toString()) !== base) return;
+        const rec = editorWatchers.get(key);
+        if (!rec) return;
+        // Debounce: a single save can emit rename+change in quick succession.
+        if (rec.timer) clearTimeout(rec.timer);
+        rec.timer = setTimeout(() => {
+          rec.timer = null;
+          void fs.stat(abs).then(
+            (st) => {
+              const wc = webContents.fromId(e.sender.id);
+              if (wc && !wc.isDestroyed()) {
+                wc.send('editor:fileChanged', { path: p, mtimeMs: st.mtimeMs });
+              }
+            },
+            () => {
+              // File vanished (mid-rename or deleted) — notify with mtime 0.
+              const wc = webContents.fromId(e.sender.id);
+              if (wc && !wc.isDestroyed()) {
+                wc.send('editor:fileChanged', { path: p, mtimeMs: 0 });
+              }
+            },
+          );
+        }, 120);
+      });
+    } catch {
+      return; // directory unwatchable — silently degrade (no live refresh)
+    }
+    editorWatchers.set(key, { w: watcher, timer: null, senderId: e.sender.id });
+    // Reap the watcher if the renderer goes away.
+    ensureEditorWatchDestroyHook(e.sender);
+  });
+
+  ipcMain.handle('editor:unwatch', async (e, p: string): Promise<void> => {
+    stopEditorWatch(watchKey(e.sender.id, expandHome(p)));
+  });
+
   ipcMain.handle('editor:bulkRename', async (_e, names: string[]) => {
     const tmp = path.join(os.tmpdir(), `fm-rename-${Date.now()}.txt`);
     await fs.writeFile(tmp, names.join('\n') + '\n', 'utf8');
@@ -1959,8 +2050,24 @@ end tell`;
   // High-frequency channels (write, resize, data) use ipcRenderer.send /
   // webContents.send so we never queue a Promise per keystroke. spawn,
   // status, kill go through invoke because the caller wants a result. The
-  // PTY registry + spawn core live at module scope (spawnManagedPty) so
-  // task runs can spawn into the same registry.
+  // PTY registry + spawn core (PtyRecord, ptys, nextPtyId, ptyEnv,
+  // spawnManagedPty, reservePtyId) live at module scope so task runs can
+  // spawn into the same registry.
+  //
+  // One 'destroyed' listener per WebContents — earlier code attached one per
+  // PTY spawn, which tripped Node's MaxListeners warning after ~10 terminals.
+  const ptyDestroyHooked = new WeakSet<Electron.WebContents>();
+  function ensurePtyDestroyHook(wc: Electron.WebContents) {
+    if (ptyDestroyHooked.has(wc)) return;
+    ptyDestroyHooked.add(wc);
+    wc.once('destroyed', () => {
+      for (const [id, r] of ptys) {
+        if (r.senderId !== wc.id) continue;
+        try { r.proc.kill(); } catch { /* noop */ }
+        ptys.delete(id);
+      }
+    });
+  }
 
   function defaultShell(): { file: string; args: string[] } {
     if (process.platform === 'win32') {
@@ -2081,7 +2188,11 @@ end tell`;
             .join(' ');
           inner = `${envPrefix} tmux ${remoteArgs}`;
         } else {
-          inner = `${envPrefix} sh -c 'cd ${shQuote(remote.remoteCwd)} && exec $SHELL -l'`;
+          // shQuote the *whole* sh -c payload — naively wrapping in literal
+          // single quotes breaks when remoteCwd itself contains a space,
+          // because shQuote(remoteCwd) injects its own single quotes and
+          // closes the outer quote prematurely.
+          inner = `${envPrefix} sh -c ${shQuote(`cd ${shQuote(remote.remoteCwd)} && exec $SHELL -l`)}`;
         }
 
         const sshArgs = ['-t'];
@@ -2121,15 +2232,9 @@ end tell`;
         },
       });
       // Kill orphan PTYs if the renderer process goes away (window reload,
-      // crash). Otherwise the shell keeps the file_manager parent alive.
-      e.sender.once('destroyed', () => {
-        const r = ptys.get(id);
-        if (r) {
-          try { r.proc.kill(); } catch { /* noop */ }
-          if (attachSid) revokeSessionToken(attachSid);
-          ptys.delete(id);
-        }
-      });
+      // crash). One shared 'destroyed' listener per WebContents reaps all
+      // PTYs it owns; proc.onExit then revokes any attach token.
+      ensurePtyDestroyHook(e.sender);
       return id;
     },
   );
@@ -2367,6 +2472,11 @@ end tell`;
     description?: string;
     // fm-e66 — named flag combinations layered atop `args`.
     variants?: LauncherVariant[];
+    // fm-dly3 — flag this agent uses to receive background context (folder /
+    // document) as a system-prompt addendum, e.g. '--append-system-prompt'.
+    // The chat panel passes context via this flag instead of typing it as a
+    // first message. Launchers without it fall back to the typed preamble.
+    contextFlag?: string;
   };
   // fm-e66 — defaults seed the common modifier modes for each AI CLI.
   // Real users don't run `claude` once and forget; they run it three ways
@@ -2379,6 +2489,7 @@ end tell`;
       aliases: ['claude', 'cc'],
       command: 'claude',
       description: 'Anthropic Claude Code CLI',
+      contextFlag: '--append-system-prompt',
       variants: [
         {
           id: 'continue',
@@ -2431,11 +2542,21 @@ end tell`;
   } {
     let changed = false;
     const next = list.map((l) => {
-      if (l.variants !== undefined) return l;
       const seed = DEFAULT_LAUNCHERS.find((d) => d.id === l.id);
-      if (!seed || !seed.variants) return l;
-      changed = true;
-      return { ...l, variants: seed.variants };
+      if (!seed) return l;
+      let out = l;
+      // fm-e66 — backfill default variants for pre-variants configs.
+      if (out.variants === undefined && seed.variants) {
+        out = { ...out, variants: seed.variants };
+        changed = true;
+      }
+      // fm-dly3 — backfill the context flag so existing claude launchers get
+      // background-context injection without a manual edit.
+      if (out.contextFlag === undefined && seed.contextFlag) {
+        out = { ...out, contextFlag: seed.contextFlag };
+        changed = true;
+      }
+      return out;
     });
     return { list: next, changed };
   }
@@ -2515,6 +2636,11 @@ end tell`;
   };
   ipcMain.handle('sources:list', () => listSources());
   ipcMain.handle('sources:connect', (_e, host: string) => connectSource(host));
+  // Navigation hook: if `cwd` lives under an active sshfs mount, attach its
+  // host automatically (idempotent + once-per-host-per-session inside).
+  ipcMain.handle('sources:auto-attach', (_e, cwd: string) =>
+    autoAttachForPath(cwd).catch(() => null),
+  );
   ipcMain.handle('sources:disconnect', (_e, host: string) =>
     disconnectSource(host),
   );
@@ -2524,6 +2650,20 @@ end tell`;
   // parallel: a `source` that names a connected ssh host is NOT a
   // registered TaskSource, so it falls through to remoteRequest unchanged.
   const isRegisteredSource = (id?: string): boolean => !!getTaskSource(id);
+
+  // fm-at5 — let the user cleanly back out of the auto-registered Claude
+  // Code integration (MCP server + settings.json hooks + hook script).
+  // Re-registration runs on next app launch, so this is a reset, not a
+  // permanent opt-out.
+  ipcMain.handle('claude:unregister-mcp', async () => {
+    const { unregisterBreezeMcp } = await import('./mcp-register');
+    return unregisterBreezeMcp();
+  });
+  ipcMain.handle('claude:unregister-hooks', async () => {
+    const { unregisterBreezeHooks } = await import('./hooks-register');
+    return unregisterBreezeHooks();
+  });
+
   ipcMain.handle('tasks:list', async (_e, filter?: TaskFilter) => {
     const out: Array<Record<string, unknown>> = [];
     // Aggregate across every registered source (local + e.g. TypeBuild),

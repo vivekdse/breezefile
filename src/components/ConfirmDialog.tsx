@@ -11,7 +11,7 @@
 //   • Tab cycles between the two action buttons (focus is trapped).
 //   • Confirm button autofocuses on mount.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import './ConfirmDialog.css';
 
@@ -24,6 +24,10 @@ export type ConfirmRequest = {
   // Single-character shortcuts (case-insensitive) that also trigger confirm.
   // Enter and Y are always accepted.
   confirmShortcuts?: string[];
+  // fm-7klh — type-to-confirm for irreversible actions (GitHub-style). When
+  // set, the user must type this exact phrase before confirm enables; the
+  // one-key Enter/Y shortcuts are suppressed. Used for permanent delete.
+  requireType?: string;
   onConfirm: () => void | Promise<void>;
 };
 
@@ -36,21 +40,29 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   destructive = false,
   confirmShortcuts = [],
+  requireType,
   onConfirm,
   onClose,
 }: Props) {
   const { exit, state } = useOverlayExit(onClose);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
+  const [typed, setTyped] = useState('');
+
+  const matched =
+    !requireType || typed.trim().toLowerCase() === requireType.trim().toLowerCase();
 
   // Always accept Enter and Y for confirm; merge in caller-supplied chars.
+  // Suppressed entirely while a type-to-confirm phrase is unmet.
   const confirmKeys = new Set<string>(
     ['enter', 'y', ...confirmShortcuts.map((s) => s.toLowerCase())],
   );
 
   async function fire() {
     if (busyRef.current) return;
+    if (requireType && !matched) return;
     busyRef.current = true;
     try {
       await onConfirm();
@@ -60,8 +72,11 @@ export function ConfirmDialog({
   }
 
   useEffect(() => {
-    // autofocus the destructive/primary action so Enter just works
-    confirmRef.current?.focus();
+    // With type-to-confirm, focus the input so the user can start typing the
+    // phrase immediately; otherwise autofocus the action so Enter just works.
+    if (requireType) inputRef.current?.focus();
+    else confirmRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -123,6 +138,27 @@ export function ConfirmDialog({
         </button>
         <div id="confirm-title" className="confirm__title">{title}</div>
         {body && <div className="confirm__body">{body}</div>}
+        {requireType && (
+          <input
+            ref={inputRef}
+            className="confirm__type-input"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={`Type "${requireType}" to confirm`}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (matched) void fire();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                exit();
+              }
+            }}
+          />
+        )}
         <div className="confirm__actions">
           <button
             ref={cancelRef}
@@ -136,6 +172,7 @@ export function ConfirmDialog({
           <button
             ref={confirmRef}
             type="button"
+            disabled={!matched}
             className={[
               'confirm__btn',
               destructive ? 'confirm__btn--destructive' : 'confirm__btn--primary',
@@ -143,7 +180,7 @@ export function ConfirmDialog({
             onClick={() => void fire()}
           >
             <span>{confirmLabel}</span>
-            <kbd className="confirm__btn__kbd">Y</kbd>
+            {!requireType && <kbd className="confirm__btn__kbd">Y</kbd>}
           </button>
         </div>
       </div>

@@ -112,6 +112,7 @@ type Verb =
   | 'paste'
   | 'sort'
   | 'delete'
+  | 'permanent-delete'
   | 'rename'
   | 'open'
   | 'goto'
@@ -140,9 +141,14 @@ type Verb =
   | 'copy-path'
   | 'open-with'
   | 'edit'
+  | 'open-editor'
+  | 'editor-save'
+  | 'editor-revert'
+  | 'editor-close'
   | 'openTerminal'
   | 'term'
   | 'term-close'
+  | 'chat'
   | 'remote-attach'
   | 'disconnect'
   | 'newtag'
@@ -151,11 +157,15 @@ type Verb =
   | 'run'
   | 'filter'
   | 'help'
+  | 'maximize'
+  | 'fullscreen'
   | 'welcome'
   | 'task'
   | 'tasks'
   | 'sidebyside'
-  | 'settings';
+  | 'settings'
+  | 'note'
+  | 'notes';
 
 type Option = {
   id: string;
@@ -376,7 +386,14 @@ const VERBS: VerbDef[] = [
       }
       return { ok: true };
     },
-    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c) }],
+    // fm-958a — give move the full goto/find destination picker: ancestors
+    // (parent folders), descendants, recents, bookmarks, common dirs, the
+    // current folder, and live Spotlight folder hits. Previously this passed
+    // no flags, so parent folders weren't first-class candidates and the
+    // current folder couldn't be chosen. `includeFiles` stays off — a file
+    // is never a valid move destination — but folder sourcing is now
+    // identical to goto's `destinationOptions(c, true, true)`.
+    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true) }],
     // fm-3km: stage + navigate. The user lands at the destination and a
     // floating PasteChip prompts them to confirm — they can also keep
     // navigating into a sub-folder before pasting.
@@ -413,7 +430,8 @@ const VERBS: VerbDef[] = [
       }
       return { ok: true };
     },
-    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c) }],
+    // fm-958a — match Move: full goto-style folder picker (parents included).
+    slots: [{ label: 'Where', getOptions: (c) => destinationOptions(c, true) }],
     // fm-3km: stage + navigate. Same pattern as Move — the user lands at
     // the destination, the PasteChip floats above the statusbar, and they
     // confirm with pp / click. Yank persists across copy paste so they can
@@ -541,6 +559,68 @@ const VERBS: VerbDef[] = [
                 api.dispatch({
                   type: 'setStatus',
                   msg: formatOpError('trash', err),
+                });
+              }
+            },
+          },
+        }),
+      );
+    },
+  },
+  {
+    // fm-7klh — irreversible delete, no Trash. Deliberately harder to reach
+    // than :delete: no chord, palette-only, and a typed "delete N" phrase
+    // (GitHub repo-delete pattern) before the confirm button enables.
+    id: 'permanent-delete',
+    availableInTaskMode: false,
+    label: 'Delete permanently',
+    aliases: ['permanent-delete', 'delete-forever', 'destroy', 'shred'],
+    icon: '⨯',
+    describe: (c) =>
+      c.markedPaths.length > 0
+        ? `Permanently delete ${c.markedPaths.length} item${c.markedPaths.length === 1 ? '' : 's'} (no Trash)`
+        : `Permanently delete ${c.cursor?.name ?? 'item'} (no Trash)`,
+    isAvailable: (c) => {
+      if (c.markedPaths.length === 0 && !c.cursor) {
+        return { ok: false, reason: 'Select files first or put cursor on one' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    execute: (c, _picks, api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      const names = sources.map((p) => basename(p));
+      const noun = sources.length === 1 ? `“${names[0]}”` : `${sources.length} items`;
+      window.dispatchEvent(
+        new CustomEvent('fm:confirm', {
+          detail: {
+            title: 'Permanently delete?',
+            body: (
+              <>
+                <div>
+                  Permanently delete {noun}. This bypasses the Trash and{' '}
+                  <strong>cannot be undone</strong>.
+                </div>
+                {sources.length > 1 && summarizeNamesNode(names)}
+              </>
+            ),
+            confirmLabel: 'Delete permanently',
+            destructive: true,
+            requireType: `delete ${sources.length}`,
+            onConfirm: async () => {
+              try {
+                await fm.permanentDelete(sources);
+                api.setTab({ marks: {} });
+                await api.refreshActive();
+                api.dispatch({
+                  type: 'setStatus',
+                  msg: `permanently deleted ${sources.length} item${sources.length === 1 ? '' : 's'}`,
+                });
+              } catch (err) {
+                api.dispatch({
+                  type: 'setStatus',
+                  msg: formatOpError('delete', err),
                 });
               }
             },
@@ -768,7 +848,7 @@ const VERBS: VerbDef[] = [
     id: 'edit',
     availableInTaskMode: false,
     label: 'Edit',
-    aliases: ['edit', 'edit-file'],
+    aliases: ['edit', 'e', 'edit-file'],
     icon: '✎',
     describe: (c) =>
       `Edit ${c.cursor?.name ?? 'item'} in a new tab (markdown formatted, others plain)`,
@@ -783,6 +863,85 @@ const VERBS: VerbDef[] = [
     execute: (c, _p, api) => {
       if (!c.cursor) return;
       api.dispatch({ type: 'openEditTab', path: c.cursor.path });
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — explicit "open in the in-app editor" override. Same effect as
+    // :edit, but framed as a deliberate bypass of default-app routing (e.g.
+    // a .json you'd normally open in your IDE).
+    id: 'open-editor',
+    availableInTaskMode: false,
+    label: 'Open in editor',
+    aliases: ['open-editor', 'edit-here', 'edit-in-app'],
+    icon: '✎',
+    describe: (c) =>
+      `Open ${c.cursor?.name ?? 'item'} in the in-app editor (override default app)`,
+    isAvailable: (c) => {
+      if (!c.cursor) return { ok: false, reason: 'Put the cursor on a file first' };
+      if (c.cursor.kind === 'dir') return { ok: false, reason: 'Needs a file, not a folder' };
+      return { ok: true };
+    },
+    slots: [],
+    execute: (c, _p, api) => {
+      if (!c.cursor) return;
+      api.dispatch({ type: 'openEditTab', path: c.cursor.path });
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — save the active edit tab (⌘S equivalent). The active
+    // EditShell owns doSave; we signal it via a window event.
+    id: 'editor-save',
+    availableInTaskMode: false,
+    label: 'Save',
+    aliases: ['save', 'w', 'write'],
+    icon: '💾',
+    describe: () => 'Save the current file to disk',
+    isAvailable: (c) =>
+      c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Only on an edit tab — open one with :edit' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:editor-save'));
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — discard unsaved edits and re-read from disk. EditShell prompts
+    // first when the buffer is dirty.
+    id: 'editor-revert',
+    availableInTaskMode: false,
+    label: 'Revert to disk',
+    aliases: ['revert', 'revert-to-disk', 'discard-changes'],
+    icon: '↺',
+    describe: () => 'Discard unsaved changes and reload from disk',
+    isAvailable: (c) =>
+      c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Only on an edit tab — open one with :edit' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:editor-revert'));
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-xpk7 — close the active edit tab. EditShell warns when dirty.
+    id: 'editor-close',
+    availableInTaskMode: false,
+    label: 'Close edit tab',
+    aliases: ['close', 'close-edit', 'close-tab'],
+    icon: '✕',
+    describe: () => 'Close the current edit tab (warns if unsaved)',
+    isAvailable: (c) =>
+      c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Only on an edit tab' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:editor-close'));
       api.closeOverlay();
     },
   },
@@ -1097,6 +1256,28 @@ const VERBS: VerbDef[] = [
           msg: formatOpError('disconnect', err),
         }),
       );
+    },
+  },
+  {
+    // fm-dly3 — toggle the agent chat side-panel. App owns the open/close +
+    // folder-vs-document target; we just fire the event. Available on folder
+    // and edit tabs (where there's a folder or document to put in context).
+    id: 'chat',
+    label: 'Chat with this folder / document',
+    aliases: ['chat', 'ask', 'agent', 'claude-chat', 'gemini'],
+    icon: '💬',
+    describe: (c) =>
+      c.activeTabKind === 'edit'
+        ? 'Open an agent chat with this document in context'
+        : `Open an agent chat in ${basename(c.cwd) || '/'}`,
+    isAvailable: (c) =>
+      c.activeTabKind === 'folder' || c.activeTabKind === 'edit'
+        ? { ok: true }
+        : { ok: false, reason: 'Chat works on a folder or a document tab' },
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:toggle-chat'));
+      api.closeOverlay();
     },
   },
   {
@@ -1586,6 +1767,64 @@ const VERBS: VerbDef[] = [
       if (kind === 'file') api.openTouch();
     },
   },
+  // ── Notes (fm-notes) ──────────────────────────────────────────────
+  // `:note` creates a new markdown file in ~/.breezefile/breeze notes/
+  // named YYYY-MM-DD-N.md (N = next available for today) and opens it
+  // for editing. The point is to capture the thought first; the file
+  // gets a meaningful name later — either by typing into the title or
+  // by the on-save heading-rename in EditShell. `:notes` jumps to the
+  // notes folder so the user can browse everything they've jotted.
+  {
+    id: 'note',
+    availableInTaskMode: true,
+    label: 'New note',
+    aliases: ['note', 'new note', 'newnote', 'jot', 'scratch'],
+    icon: '✎',
+    describe: () => 'Create a new note (markdown, date-named)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: async (c, _picks, api) => {
+      try {
+        const dir = await ensureNotesDir(c.homedir);
+        const filePath = await nextNotePath(dir);
+        await fm.touch(filePath);
+        // Seed the file with an empty `# ` so the editor opens on a title
+        // line the user can fill in. EditShell uses the presence of the
+        // heading on save to derive the filename — until the user types
+        // something after `# `, the slug is empty and the rename is a
+        // no-op, so this stays invisible.
+        await fm.editorSave(filePath, '# \n', null);
+        api.dispatch({ type: 'openEditTab', path: filePath, focus: true });
+        api.dispatch({ type: 'pushRecentFile', path: filePath });
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `new note failed: ${(err as Error).message ?? String(err)}`,
+        });
+      }
+    },
+  },
+  {
+    id: 'notes',
+    availableInTaskMode: true,
+    label: 'Notes folder',
+    aliases: ['notes', 'all notes', 'browse notes', 'goto notes', 'show notes', 'open notes'],
+    icon: '📓',
+    describe: () => 'Open the breeze notes folder',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: async (c, _picks, api) => {
+      try {
+        const dir = await ensureNotesDir(c.homedir);
+        api.navigateTo(dir);
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `open notes failed: ${(err as Error).message ?? String(err)}`,
+        });
+      }
+    },
+  },
   {
     id: 'showHidden',
     availableInTaskMode: false,
@@ -1667,6 +1906,32 @@ const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openSettings'));
+    },
+  },
+  {
+    id: 'maximize',
+    label: 'Maximize window',
+    aliases: ['maximize', 'maximise', 'max', 'unmaximize', 'restore', 'window'],
+    icon: '⛶',
+    describe: () => 'Toggle window maximize (works around WM Alt+Space conflicts)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      void fm.windowToggleMaximize();
+    },
+  },
+  {
+    id: 'fullscreen',
+    label: 'Fullscreen',
+    aliases: ['fullscreen', 'full-screen', 'fs', 'full'],
+    icon: '⤢',
+    describe: () => 'Toggle fullscreen',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      void fm.windowToggleFullscreen();
     },
   },
   {
@@ -2384,6 +2649,34 @@ function destinationOptions(c: Ctx, includeCurrent = false, includeFiles = false
     });
   }
 
+  // 1b) Ancestor chain — every parent folder up to root. Without this the
+  //     picker could only ever go *down* (children + BFS descendants) or
+  //     sideways (recents/bookmarks/Spotlight); the immediate parent of a
+  //     deep folder often isn't a recent and may not be Spotlight-indexed,
+  //     so "move/go up one folder" had no candidate to land on. Listing the
+  //     ancestors makes parent folders first-class destinations for both
+  //     goto and move/copy. Walk from cwd's parent up to '/'.
+  // Normalize a trailing slash so dirnameOf walks to the real parent
+  // ('/a/b/' → '/a/b' is the same folder, not its parent).
+  const cwdNorm = c.cwd.length > 1 && c.cwd.endsWith('/') ? c.cwd.replace(/\/+$/, '') : c.cwd;
+  let anc = dirnameOf(cwdNorm);
+  let up = 1;
+  // Guard against degenerate paths; dirnameOf('/') === '/'.
+  while (anc && anc !== cwdNorm && up <= 64) {
+    push({
+      id: anc,
+      label: basename(anc) || anc,
+      detail: up === 1
+        ? 'parent folder · ' + prettyPath(anc, c.homedir)
+        : `${up} levels up · ${prettyPath(anc, c.homedir)}`,
+      available: true,
+    });
+    const next = dirnameOf(anc);
+    if (next === anc) break; // reached root
+    anc = next;
+    up++;
+  }
+
   // 2) Deeper descendants found via BFS (depth ~3). Calculate how many
   //    levels down each path is from cwd to give the user a rough sense of
   //    where they're going. Skip any that are already in the immediate set.
@@ -2443,7 +2736,7 @@ function destinationOptions(c: Ctx, includeCurrent = false, includeFiles = false
     push({
       id: p,
       label: basename(p) || p,
-      detail: prettyPath(p, c.homedir) + '  ·  spotlight',
+      detail: prettyPath(p, c.homedir) + '  ·  search',
       available: true,
     });
   }
@@ -2487,6 +2780,61 @@ function prettyPath(p: string, home: string): string {
   if (p === home) return '~';
   if (p.startsWith(home + '/')) return '~' + p.slice(home.length);
   return p;
+}
+
+// fm-notes — the breeze notes folder lives under the user's home config
+// dir (~/.breezefile/breeze notes). Exported helpers so the `:note` and
+// `:notes` verbs share path logic and EditShell can recognize "this file
+// was created by :note" when deciding whether to rename on save.
+export const NOTES_SUBDIR = '.breezefile/breeze notes';
+
+export function notesDirFor(home: string): string {
+  return `${home}/${NOTES_SUBDIR}`;
+}
+
+export function isDefaultNoteName(name: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}-\d+\.md$/.test(name);
+}
+
+async function ensureNotesDir(home: string): Promise<string> {
+  const dir = notesDirFor(home);
+  try {
+    const st = await fm.stat(dir);
+    if (st.isDir) return dir;
+  } catch {
+    // not present — fall through and create it
+  }
+  try {
+    await fm.mkdir(dir);
+  } catch (err) {
+    // Race / pre-existing: a second stat resolves the ambiguity. If the
+    // folder is there now (some other code path created it between our
+    // stat and mkdir), proceed; otherwise surface the original error.
+    try {
+      const st = await fm.stat(dir);
+      if (st.isDir) return dir;
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+  return dir;
+}
+
+async function nextNotePath(dir: string): Promise<string> {
+  const d = new Date();
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  let names: string[] = [];
+  try {
+    const entries = await fm.readdir(dir);
+    names = entries.map((e) => e.name);
+  } catch {
+    /* empty folder is fine */
+  }
+  const used = new Set(names);
+  let n = 1;
+  while (used.has(`${date}-${n}.md`)) n++;
+  return `${dir}/${date}-${n}.md`;
 }
 
 function resolveDestination(c: Ctx, destId: string): string | null {
@@ -2547,6 +2895,9 @@ export function ChipPrompt({
   useEffect(() => {
     highlightedRef.current?.scrollIntoView({ block: 'nearest' });
   }, [highlightIdx]);
+  // Sticky highlight by option id — declared here so the keydown handler
+  // can capture it; the matches-restore effect lives just below `matches`.
+  const stickyHighlightIdRef = useRef<string | null>(null);
   const [homedir, setHomedir] = useState('');
   const [hoverReason, setHoverReason] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<string[]>([]);
@@ -2979,7 +3330,8 @@ export function ChipPrompt({
         // destinationOptions — keeps the scorer source-agnostic.
         if (detail.includes('in this folder')) score += 25;
         else if (detail.includes('levels down')) score += 20;
-        else if (detail.includes('· spotlight')) score -= 15;
+        else if (detail.includes('parent folder') || detail.includes('levels up')) score += 22;
+        else if (detail.includes('· search')) score -= 15;
 
         // In the verb picker, verbs always rank above find results. Without
         // this a folder named "move" can outrank the Move verb on a typed
@@ -3007,6 +3359,21 @@ export function ChipPrompt({
   useEffect(() => {
     if (highlightIdx >= matches.length) setHighlightIdx(0);
   }, [matches.length, highlightIdx]);
+
+  // When async results re-rank `matches`, pull the cursor back to the row
+  // the user was deliberately aiming at. Without this, arrow-keying to a
+  // folder while Spotlight is still walking could land Enter on a
+  // different row once results streamed in 200ms later. The sticky id is
+  // only set on explicit user moves (Arrow / hover), so result arrivals
+  // before the user has touched the list don't strand the highlight on a
+  // stale row.
+  useLayoutEffect(() => {
+    const id = stickyHighlightIdRef.current;
+    if (!id) return;
+    const idx = matches.findIndex((m) => m.id === id);
+    if (idx >= 0 && idx !== highlightIdx) setHighlightIdx(idx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches]);
 
   // (Removed) Natural-language auto-fallthrough into the goto verb. Find
   // results now blend into the verb picker directly, so the user doesn't
@@ -3048,6 +3415,7 @@ export function ChipPrompt({
       setPicks([]);
       setFilter('');
       setHighlightIdx(0);
+      stickyHighlightIdRef.current = null;
       // If verb has zero slots — execute immediately
       if (v.slots.length === 0) {
         void executeWith(v, []);
@@ -3074,6 +3442,7 @@ export function ChipPrompt({
         setPicks(nextPicks);
         setFilter('');
         setHighlightIdx(0);
+        stickyHighlightIdRef.current = null;
       }
     }
   }
@@ -3099,6 +3468,7 @@ export function ChipPrompt({
       setPicks(nextPicks);
       setFilter('');
       setHighlightIdx(0);
+      stickyHighlightIdRef.current = null;
     }
   }
 
@@ -3197,6 +3567,7 @@ export function ChipPrompt({
           setPicks([]);
           setFilter('');
           setHighlightIdx(0);
+          stickyHighlightIdRef.current = null;
           if (status) dispatch({ type: 'setStatus', msg: status });
         },
       });
@@ -3285,12 +3656,16 @@ export function ChipPrompt({
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlightIdx((i) => Math.min(i + 1, matches.length - 1));
+      const next = Math.min(highlightIdx + 1, matches.length - 1);
+      setHighlightIdx(next);
+      stickyHighlightIdRef.current = matches[next]?.id ?? null;
       return;
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setHighlightIdx((i) => Math.max(i - 1, 0));
+      const next = Math.max(highlightIdx - 1, 0);
+      setHighlightIdx(next);
+      stickyHighlightIdRef.current = matches[next]?.id ?? null;
       return;
     }
     if (e.key === 'Backspace' && !filter) {
@@ -3369,7 +3744,7 @@ export function ChipPrompt({
             autoFocus
             className="chip-input"
             value={filter}
-            onChange={(e) => { setFilter(e.target.value); setHighlightIdx(0); setHoverReason(null); }}
+            onChange={(e) => { setFilter(e.target.value); setHighlightIdx(0); stickyHighlightIdRef.current = null; setHoverReason(null); }}
             onKeyDown={onKeyDown}
             placeholder={
               verb === null
@@ -3418,6 +3793,7 @@ export function ChipPrompt({
                 ].filter(Boolean).join(' ')}
                 onMouseEnter={() => {
                   setHighlightIdx(i);
+                  stickyHighlightIdRef.current = opt.id;
                   setHoverReason(opt.available ? null : opt.reason ?? null);
                 }}
                 onMouseLeave={() => setHoverReason(null)}

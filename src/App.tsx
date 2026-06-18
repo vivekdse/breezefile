@@ -27,8 +27,16 @@ import { RunTaskModal } from './components/RunTaskModal';
 import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { TaskShell } from './components/TaskShell';
-import { EditShell } from './components/EditShell';
+import { EditSplit } from './components/EditShell';
 import { BrowserPane, reapBrowserViews } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
+import { ChatPanel } from './components/ChatPanel';
+import { openChatPanel, resolveAgent, isClaudeAgent, type ChatTarget } from './openChat';
+import {
+  ChatLaunchOptions,
+  claudeChatOptions,
+  type ChatLaunchOption,
+} from './components/ChatLaunchOptions';
+import { handleTagControl, isTagControl, type TagControlReq } from './tagControl';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { TerminalSplit } from './components/TerminalSplit';
@@ -43,6 +51,7 @@ import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
 import { taskSourceAction } from './tasks';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
+import { isTextEntryTarget } from './textFocus';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
 import type { CustomTagCriterion, Entry } from './types';
@@ -76,7 +85,8 @@ function Shell() {
   const [touchOpen, setTouchOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Optional section to expand when Settings opens via fm:openSettings
-  // (e.g. the sidebar sign-in row deep-links to 'typebuild').
+  // (e.g. the sidebar sign-in row deep-links to 'typebuild'; the chat-agent
+  // prompt deep-links to 'chat-agent' when no default agent is set — fm-xt1g).
   const [settingsSection, setSettingsSection] = useState<string | undefined>();
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
@@ -110,6 +120,18 @@ function Shell() {
   const [runHistoryFor, setRunHistoryFor] = useState<string | null>(null);
   // fm-femh — Run-task modal: pick a task to run in the active folder tab.
   const [runTaskCwd, setRunTaskCwd] = useState<string | null>(null);
+  // Inline-chat launch options: when the user opens a chat we first show a
+  // small picker (Continue / Skip permissions for Claude). The chosen flags
+  // are threaded into openChatPanel. Holds the resolved spawn args while the
+  // picker is open; null when no picker is showing.
+  const [chatLaunch, setChatLaunch] = useState<{
+    tabIndex: number;
+    target: ChatTarget;
+    agentId: string;
+    agentLabel: string;
+    targetLabel: string;
+    options: ChatLaunchOption[];
+  } | null>(null);
   // fm-kaa / fm-yi85 — Tasks overview is now a singleton tab (kind='tasks'),
   // not a modal. The :tasks verb and the sidebar "See all" link dispatch
   // openTasksTab; rendering is inline in the main slot.
@@ -160,6 +182,10 @@ function Shell() {
   // fm-h8g7 — live refs read by the once-mounted task-notification handlers.
   const taskNotificationsRef = useRef(state.taskNotifications);
   tabsRef.current = state.tabs;
+  // Expose the open-tab count so the main process can warn before a full
+  // BrowserWindow reload (Cmd/Ctrl+Shift+R) blows away every tab + pty.
+  (window as unknown as { __fmTabCount?: number }).__fmTabCount =
+    state.tabs.length;
   notifyOnAttentionRef.current = state.notifyOnAttention;
   soundOnAttentionRef.current = state.soundOnAttention;
   activeTabIdxRef.current = state.activeTab;
@@ -170,6 +196,10 @@ function Shell() {
   const tasksTabActiveRef = useRef(false);
   tasksTabActiveRef.current =
     state.tabs[state.activeTab]?.kind === 'tasks';
+  // fm-9iha — live ref so the (once-subscribed) chat toggle reads the current
+  // default agent without re-subscribing.
+  const defaultAgentRef = useRef(state.defaultAgentId);
+  defaultAgentRef.current = state.defaultAgentId;
 
   useEffect(() => {
     const maybeNotify = (
@@ -215,21 +245,40 @@ function Shell() {
       void fm.showAttentionNotification({ title, body, tabId: tab.id });
     };
 
-    // term:data BEL/OSC9 detection was removed: Claude's TUI emits BEL
-    // bytes on every redraw, which clobbered the hook-driven busy state
-    // with a sticky 'bell'. Busy/idle now comes purely from Claude Code
-    // hooks (fm-z7v, term:fg).
+    // Busy/idle is driven by Claude Code hooks (fm-z7v, term:fg), which
+    // are authoritative. Two safety nets cover MISSED hook events
+    // (fm-9iyx) — they matter more now that recent Claude Code releases
+    // (2.1.69 spinner isolation, 2.1.117 idle re-render fix, …) emit far
+    // fewer PTY bytes during a turn, so a working session can sit silent
+    // for many seconds:
     //
-    // Silence watchdog: when Claude is interrupted manually (Esc, Ctrl-C,
-    // crash, network drop), Claude Code does not always fire a Stop
-    // hook — the tab can stay green forever. As a safety net, while a
-    // pty is in 'busy' state we arm a silence timer; any term:data byte
-    // resets it. If no output flows for SILENCE_MS, we transition the
-    // tab to idle. 20s is long enough to span tool-call stalls and short
-    // network hiccups, short enough that an interrupted session goes
-    // grey within half a minute.
-    const SILENCE_MS = 20_000;
+    //  1. Silence watchdog — while a pty is 'busy' we arm a timer that any
+    //     term:data byte resets. If no output flows for SILENCE_MS the tab
+    //     is *provisionally* flipped to idle (interrupt/crash where Stop
+    //     never fired). It's only a guess, so we DON'T banner — and we
+    //     remember the pty in `watchdogIdle` so the flip can be undone.
+    //  2. Output recovery — if a watchdog-idled pty emits ANY byte again,
+    //     it was alive all along (slow tool call / long thinking), so we
+    //     restore 'busy' immediately. This is why the dot no longer sticks
+    //     red while Claude is quietly working.
+    //
+    // A coarse RECONCILE_MS poll re-checks both directions in case an
+    // event was dropped entirely, so a stale dot can't wedge for longer
+    // than one tick. term:data still can't *originate* busy (it goes silent
+    // under heavy TUI streaming, fm-81n) — it only sustains or recovers a
+    // state the hooks established. SILENCE_MS is generous (45s) because a
+    // quiet-but-working turn is now common; an interrupt still resolves
+    // within a tick once output stops.
+    const SILENCE_MS = 45_000;
+    const RECONCILE_MS = 15_000;
     const silenceTimers = new Map<number, ReturnType<typeof setTimeout>>();
+    // ptys the watchdog provisionally flipped to idle — eligible for
+    // output-driven recovery back to 'busy'. Any authoritative hook event
+    // clears the marker.
+    const watchdogIdle = new Set<number>();
+    // last term:data timestamp per pty, for the reconcile poll's staleness
+    // check. Cheap to maintain; only read on the tick.
+    const lastDataAt = new Map<number, number>();
     const clearSilence = (ptyId: number) => {
       const t = silenceTimers.get(ptyId);
       if (t) {
@@ -245,21 +294,40 @@ function Shell() {
         const idx = tabs.findIndex((t) => t.terminal?.ptyId === ptyId);
         if (idx < 0) return;
         if (tabs[idx].terminal?.attention !== 'busy') return;
+        // Provisional flip: silence only *guesses* the turn ended (it could
+        // be a slow tool call). Turn the dot red but suppress the banner —
+        // a guess shouldn't interrupt — and remember the pty so resumed
+        // output can restore 'busy'.
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
-        maybeNotify(idx, 'busy', 'idle');
+        watchdogIdle.add(ptyId);
       }, SILENCE_MS);
       silenceTimers.set(ptyId, t);
     };
     const offData = fm.onTermData((id) => {
-      // Only refresh if we're already tracking this pty as busy. Cheap
-      // map lookup; avoids work on the active tab's idle prompt.
-      if (silenceTimers.has(id)) armSilence(id);
+      lastDataAt.set(id, Date.now());
+      if (silenceTimers.has(id)) {
+        // Already tracked as busy — sustain it (resets the watchdog).
+        armSilence(id);
+      } else if (watchdogIdle.has(id)) {
+        // Output resumed after the watchdog gave up: the session was alive
+        // all along (slow tool call / long thinking). Restore busy.
+        watchdogIdle.delete(id);
+        const tabs = tabsRef.current;
+        const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
+        if (idx >= 0 && tabs[idx].terminal?.attention === 'idle') {
+          dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
+          armSilence(id);
+        }
+      }
     });
 
     const offFg = fm.onTermFg((id, busy, _comm, state) => {
       const tabs = tabsRef.current;
       const idx = tabs.findIndex((t) => t.terminal?.ptyId === id);
       if (idx < 0) return;
+      // An authoritative hook event supersedes the watchdog's guess: clear
+      // the recovery marker so a real Stop can't be undone by stray output.
+      watchdogIdle.delete(id);
       const cur = tabs[idx].terminal?.attention ?? null;
       // Tri-state from the hook bridge. Older hook scripts that only
       // know 'busy'/'idle' keep working via the legacy `busy` bool.
@@ -289,11 +357,52 @@ function Shell() {
         maybeNotify(idx, cur, 'idle');
       }
     });
+    // fm-9iyx — coarse safety-net poll. The event handlers above react
+    // instantly; this only catches the rare case where a term:data or
+    // term:fg event was dropped entirely, so a stale dot can't wedge for
+    // more than one tick. A handful of map lookups every 15s.
+    const reconcile = setInterval(() => {
+      const now = Date.now();
+      const tabs = tabsRef.current;
+      for (let idx = 0; idx < tabs.length; idx++) {
+        const term = tabs[idx].terminal;
+        if (!term) continue;
+        const id = term.ptyId;
+        const att = term.attention ?? null;
+        const last = lastDataAt.get(id);
+        if (att === 'busy' && !silenceTimers.has(id)) {
+          // Busy but no live watchdog (a term:fg/data event was dropped).
+          // Flip now if already stale, else re-arm so the silence path
+          // resumes governing it.
+          if (last && now - last > SILENCE_MS) {
+            dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
+            watchdogIdle.add(id);
+          } else {
+            armSilence(id);
+          }
+        } else if (
+          att === 'idle' &&
+          watchdogIdle.has(id) &&
+          last &&
+          now - last < RECONCILE_MS
+        ) {
+          // Watchdog-idled but produced output within the last tick — a
+          // recovery term:data event must have been dropped. Restore busy.
+          watchdogIdle.delete(id);
+          dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'busy' });
+          armSilence(id);
+        }
+      }
+    }, RECONCILE_MS);
+
     return () => {
       offFg();
       offData();
+      clearInterval(reconcile);
       for (const t of silenceTimers.values()) clearTimeout(t);
       silenceTimers.clear();
+      watchdogIdle.clear();
+      lastDataAt.clear();
     };
     // Subscribe ONCE on mount. State is read through refs so the handler
     // sees current values without triggering re-subscription. Earlier
@@ -399,6 +508,83 @@ function Shell() {
     }
   }, [state.activeTab, state.tabs]);
 
+  // Native menu items forward a verb id here. Open ChipPrompt pre-loaded
+  // with that verb — zero-slot verbs auto-execute, multi-slot verbs land
+  // on the first option list so the user picks. Mirrors the keyboard
+  // path that types ':<verb>'.
+  useEffect(() => {
+    const off = fm.onMenuVerb((verbId) => {
+      dispatch({ type: 'setMode', mode: 'command', verb: verbId });
+    });
+    return off;
+  }, [dispatch]);
+
+  // fm-dly3 — toggle the agent chat panel for the active tab. Centralized
+  // here (rather than in the verb / header icons) so the folder-vs-document
+  // target and the open/close decision live in one place; the chip verb and
+  // the header chat icons just fire `fm:toggle-chat`. Subscribes once and
+  // reads live state through refs.
+  useEffect(() => {
+    const onToggle = () => {
+      const idx = activeTabIdxRef.current;
+      const t = tabsRef.current[idx];
+      if (!t) return;
+      if (t.chat) {
+        void fm.termKill(t.chat.ptyId).catch(() => {});
+        dispatch({ type: 'closeChat', tabIndex: idx });
+        return;
+      }
+      // fm-xt1g — no per-chat picker; the Settings default is authoritative.
+      // If it's unset, surface it (jump to the Chat agent setting) instead of
+      // silently guessing an agent.
+      const surfaceDefault = (msg: string) => {
+        dispatch({ type: 'setStatus', msg });
+        setSettingsSection('chat-agent');
+        setSettingsOpen(true);
+      };
+      if (!defaultAgentRef.current) {
+        surfaceDefault('Pick a default chat agent in Settings to start chatting');
+        return;
+      }
+      const target: ChatTarget =
+        t.kind === 'edit' && t.editPath
+          ? { kind: 'document', filePath: t.editPath }
+          : { kind: 'folder', cwd: t.trail[lastCol(t)] };
+      // Resolve the agent up front so the picker can offer agent-specific
+      // launch flags (Claude's --continue / skip-permissions) and degrade to a
+      // bare confirm for everything else. If the default agent no longer
+      // resolves, surface the Settings prompt — same as openChatPanel's
+      // needsAgent path — instead of guessing.
+      const agentId = defaultAgentRef.current!;
+      void resolveAgent(agentId).then((agent) => {
+        if (!agent) {
+          surfaceDefault('Your default chat agent is unavailable — pick another');
+          return;
+        }
+        const targetLabel =
+          target.kind === 'document' ? target.filePath : target.cwd;
+        setChatLaunch({
+          tabIndex: idx,
+          target,
+          agentId,
+          agentLabel: agent.label,
+          targetLabel,
+          options: isClaudeAgent(agent) ? claudeChatOptions() : [],
+        });
+      });
+    };
+    window.addEventListener('fm:toggle-chat', onToggle);
+    return () => window.removeEventListener('fm:toggle-chat', onToggle);
+  }, [dispatch]);
+
+  // fm-dly3 — widen the OS window while the active tab shows a chat panel so
+  // the editor / file list keeps its width (380px matches --chat-w in
+  // App.css). Restores when the chat closes or you switch to a chat-less tab.
+  const chatVisible = !!state.tabs[state.activeTab]?.chat;
+  useEffect(() => {
+    void fm.windowChatResize(chatVisible, 380);
+  }, [chatVisible]);
+
   // fm-c2w — dock badge reflects how many tabs currently demand
   // attention (idle waiting-for-input or explicit bell). 'busy' is
   // generating-only and doesn't count — we don't want a badge while
@@ -450,6 +636,39 @@ function Shell() {
             );
             break;
           }
+          case 'open': {
+            // `breeze open <path>` — classify the path and route it to the
+            // right surface. Folders open as a tab; markdown opens in the
+            // in-app editor; everything else defers to the OS default app
+            // (mirrors the Enter/goRight behaviour in useKeyboard.ts).
+            const p = req.path as string;
+            if (typeof p !== 'string' || !p) throw new Error('path required');
+            let st: { isDir: boolean };
+            try {
+              st = await fm.stat(p);
+            } catch {
+              throw new Error(`cannot open: no such file or folder: ${p}`);
+            }
+            if (st.isDir) {
+              dispatch({ type: 'openOrFocusFolderTab', path: p, focus: true });
+              result = { ok: true, kind: 'folder' };
+            } else {
+              const ext = p.split('.').pop()?.toLowerCase() ?? '';
+              if (ext === 'md' || ext === 'mdx') {
+                dispatch({ type: 'openEditTab', path: p, focus: true });
+                result = { ok: true, kind: 'edit' };
+              } else {
+                // Fire-and-forget, like goRight in useKeyboard.ts: the OS
+                // open can block (Linux xdg-open) far past the control
+                // timeout, so don't await it or the CLI reports a spurious
+                // failure for a launch that actually succeeded.
+                dispatch({ type: 'pushRecentFile', path: p });
+                void fm.open(p);
+                result = { ok: true, kind: 'external' };
+              }
+            }
+            break;
+          }
           case 'openTaskTab': {
             const taskId = req.taskId as string;
             if (!taskId) throw new Error('taskId required');
@@ -494,6 +713,17 @@ function Shell() {
             break;
           }
           default:
+            // fm-awii — agent tagging API. Tags live in this store, so the
+            // HTTP API proxies tag ops here.
+            if (isTagControl(req.kind)) {
+              result = handleTagControl(req as unknown as TagControlReq, {
+                customTags: state.customTags,
+                tagPaths: state.tagPaths,
+                dispatch,
+                now: Date.now(),
+              });
+              break;
+            }
             throw new Error(`unknown control kind: ${req.kind}`);
         }
         fm.sendControlReply({ reqId: req.reqId, ok: true, result });
@@ -506,7 +736,7 @@ function Shell() {
       }
     });
     return off;
-  }, [dispatch, state.tabs]);
+  }, [dispatch, state.tabs, state.customTags, state.tagPaths]);
 
   // Bridge fm:apiNavigate → store.navigateTo so the API navigate command
   // routes through the same code path as user-driven nav (history, marks,
@@ -715,8 +945,12 @@ function Shell() {
 
   useEffect(() => {
     function h(e: KeyboardEvent) {
-      const tgt = e.target as HTMLElement | null;
-      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA')) return;
+      // Don't hijack `?` while the user is typing — any text field (search,
+      // rename, the new-task form), or a contenteditable surface like the
+      // Milkdown markdown editor. Also bail while the task composer owns the
+      // keyboard, so `?` is inert even on its non-field elements.
+      if (isTextEntryTarget(e) || document.body.dataset.composerOpen === 'true')
+        return;
       if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         setSettingsOpen((v) => !v);
@@ -849,8 +1083,19 @@ function Shell() {
       const detail = (e as CustomEvent).detail as { msg?: string } | undefined;
       if (detail?.msg) dispatch({ type: 'setStatus', msg: detail.msg });
     }
-    function onOpenTasksPage() {
+    function onOpenTasksPage(e: Event) {
+      // fm-39969baf — optional folder filter deep-link. Stash it on window so
+      // a freshly-mounted TasksPage can pick it up as its initial filter, and
+      // also re-broadcast so an already-mounted page applies it immediately.
+      const folder = (e as CustomEvent).detail?.folder as string | undefined;
+      const w = window as unknown as { __fmTasksFolderFilter?: string };
+      if (folder !== undefined) w.__fmTasksFolderFilter = folder;
       dispatch({ type: 'openTasksTab' });
+      if (folder !== undefined) {
+        window.dispatchEvent(
+          new CustomEvent('fm:tasks:folder-filter', { detail: { folder } }),
+        );
+      }
     }
     function onOpenSettings(e: Event) {
       const section = (e as CustomEvent).detail?.section as string | undefined;
@@ -968,6 +1213,7 @@ function Shell() {
       data-view={tab.viewMode}
       data-mode={tab.terminal ? 'terminal' : 'files'}
       data-tab-kind={tab.kind}
+      data-chat={tab.chat ? 'open' : undefined}
     >
       <IconSprite />
       {/* title slot — owned by fm-9w0 */}
@@ -1033,7 +1279,9 @@ function Shell() {
           ) : isTasksTab ? (
             <TasksPage />
           ) : isEditTab ? (
-            <EditShell tabIndex={state.activeTab} />
+            // Edit tabs render in the persistent EditSplit layer below so
+            // they survive tab switches; nothing to draw here.
+            null
           ) : isBrowserTab ? (
             <BrowserPane tabId={tab.id} url={tab.browserUrl || 'https://example.com'} />
           ) : (
@@ -1045,6 +1293,9 @@ function Shell() {
             </>
           )}
         </TerminalSplit>
+        {/* Persistent edit-tab layer (mirrors TerminalSplit): keeps every
+            edit tab's Milkdown editor mounted so switching back is instant. */}
+        <EditSplit tabs={state.tabs} activeIndex={state.activeTab} />
       </main>
       {/* preview slot — Preview (fm-fda) fills the reserved 340px slot.
           In tag view (fm-uns) the slot hosts TagInspector instead, so the
@@ -1054,6 +1305,9 @@ function Shell() {
       {!tab.terminal && !isTaskTab && !isTasksTab && !isEditTab && !isBrowserTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
+      {/* chat slot — fm-dly3 agent chat panel, docked right. Renders for the
+          active tab when its chat is open (works in folder + edit modes). */}
+      {tab.chat && <ChatPanel tabIndex={state.activeTab} chat={tab.chat} />}
       {/* status slot — ModeLine stacked above Statusbar. Hidden in
           terminal mode so the terminal pane reaches the bottom edge. */}
       {!tab.terminal && !isEditTab && !isBrowserTab && (
@@ -1160,7 +1414,10 @@ function Shell() {
       )}
       {settingsOpen && (
         <Settings
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            setSettingsSection(undefined);
+          }}
           initialSection={settingsSection as never}
         />
       )}
@@ -1216,6 +1473,34 @@ function Shell() {
       )}
       {runTaskCwd && (
         <RunTaskModal cwd={runTaskCwd} onClose={() => setRunTaskCwd(null)} />
+      )}
+      {chatLaunch && (
+        <ChatLaunchOptions
+          agentLabel={chatLaunch.agentLabel}
+          targetLabel={chatLaunch.targetLabel}
+          options={chatLaunch.options}
+          onClose={() => setChatLaunch(null)}
+          onStart={(flags) => {
+            const req = chatLaunch;
+            setChatLaunch(null);
+            void openChatPanel({
+              tabIndex: req.tabIndex,
+              target: req.target,
+              agentId: req.agentId,
+              extraFlags: flags,
+              dispatch,
+            }).then((res) => {
+              if (!res.ok && res.needsAgent) {
+                dispatch({
+                  type: 'setStatus',
+                  msg: 'Your default chat agent is unavailable — pick another',
+                });
+                setSettingsSection('chat-agent');
+                setSettingsOpen(true);
+              }
+            });
+          }}
+        />
       )}
     </div>
     </OverlayCtx.Provider>

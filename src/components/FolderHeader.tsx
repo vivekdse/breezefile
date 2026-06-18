@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
+import { fm } from '../bridge';
 import { basename, dirname, lastCol, visibleEntries } from '../actions';
 import type { Entry } from '../types';
 import './FolderHeader.css';
@@ -36,7 +37,78 @@ export function FolderHeader() {
   const countLine = summarize(entries);
 
   return (
+    <FolderHeaderView
+      cwd={cwd}
+      head={head}
+      tail={tail}
+      parentName={parentName}
+      mtimeLabel={mtimeLabel}
+      countLine={countLine}
+    />
+  );
+}
+
+interface FolderHeaderViewProps {
+  cwd: string;
+  head: string;
+  tail: string;
+  parentName: string;
+  mtimeLabel: string;
+  countLine: string;
+}
+
+function FolderHeaderView({
+  cwd,
+  head,
+  tail,
+  parentName,
+  mtimeLabel,
+  countLine,
+}: FolderHeaderViewProps) {
+  const { state } = useStore();
+  const tasksEnabled = state.taskManagementEnabled;
+  const chatOpen = !!state.tabs[state.activeTab]?.chat;
+
+  // fm-39969baf — count of active tasks anchored to this folder. Mirrors the
+  // sidebar's "active" rule (countByFolder excludes done/cancelled and
+  // start-deferred tasks). Re-pulls on cwd change and on any task write.
+  const [taskCount, setTaskCount] = useState(0);
+  useEffect(() => {
+    if (!tasksEnabled || !cwd) {
+      setTaskCount(0);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      fm.tasksCountByFolder(cwd)
+        .then((n) => { if (!cancelled) setTaskCount(n); })
+        .catch(() => { if (!cancelled) setTaskCount(0); });
+    };
+    load();
+    const unsub = fm.onTasksChanged(load);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [cwd, tasksEnabled]);
+
+  const openTasksForFolder = () => {
+    window.dispatchEvent(
+      new CustomEvent('fm:openTasksPage', { detail: { folder: cwd } }),
+    );
+  };
+
+  return (
     <header className="folder-header">
+      <button
+        type="button"
+        className={`folder-header__chat${chatOpen ? ' folder-header__chat--on' : ''}`}
+        onClick={() => window.dispatchEvent(new CustomEvent('fm:toggle-chat'))}
+        title="Chat with this folder (agent)"
+        aria-label="Chat with this folder"
+      >
+        💬
+      </button>
       <div className="folder-header__kicker">
         {parentName && (
           <>
@@ -60,7 +132,22 @@ export function FolderHeader() {
         {tail && <span className="folder-header__title-accent">{tail}</span>}
       </h1>
 
-      <p className="folder-header__dek">{countLine}</p>
+      <p className="folder-header__dek">
+        {countLine}
+        {tasksEnabled && taskCount > 0 && (
+          <>
+            {' '}
+            <button
+              type="button"
+              className="folder-header__tasks"
+              onClick={openTasksForFolder}
+              title="Open the Tasks tab filtered to this folder"
+            >
+              {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+            </button>
+          </>
+        )}
+      </p>
 
       <div className="ornament" role="presentation">
         <span className="mark">❦</span>

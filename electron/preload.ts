@@ -36,6 +36,8 @@ const fm = {
   mkdir: (p: string) => ipcRenderer.invoke('fs:mkdir', p),
   rename: (from: string, to: string) => ipcRenderer.invoke('fs:rename', from, to),
   trash: (paths: string[]) => ipcRenderer.invoke('fs:trash', paths),
+  permanentDelete: (paths: string[]) =>
+    ipcRenderer.invoke('fs:permanent-delete', paths),
   touch: (p: string) => ipcRenderer.invoke('fs:touch', p),
   paste: (
     ops: {
@@ -59,6 +61,12 @@ const fm = {
     ipcRenderer.invoke('shell:extract', archives, cwd) as Promise<string[]>,
   open: (p: string, appPath?: string) => ipcRenderer.invoke('app:open', p, appPath),
   openUrl: (url: string) => ipcRenderer.invoke('app:openUrl', url) as Promise<void>,
+  windowToggleMaximize: () =>
+    ipcRenderer.invoke('window:toggleMaximize') as Promise<void>,
+  windowToggleFullscreen: () =>
+    ipcRenderer.invoke('window:toggleFullscreen') as Promise<void>,
+  windowChatResize: (open: boolean, panelWidth: number) =>
+    ipcRenderer.invoke('window:chatResize', open, panelWidth) as Promise<void>,
   openWith: (p: string, appName: string) => ipcRenderer.invoke('shell:openWith', p, appName),
   pickApplication: () => ipcRenderer.invoke('app:pickApplication') as Promise<string | null>,
   pickFolder: (defaultPath?: string) =>
@@ -108,6 +116,19 @@ const fm = {
       conflict?: boolean;
       error?: string;
     }>,
+  // fm-mdwatch — watch/unwatch an open editor file for external edits, and
+  // subscribe to change notifications. The editor uses this to live-refresh
+  // when an agent edits the file from the chat panel.
+  editorWatch: (p: string) =>
+    ipcRenderer.invoke('editor:watch', p) as Promise<void>,
+  editorUnwatch: (p: string) =>
+    ipcRenderer.invoke('editor:unwatch', p) as Promise<void>,
+  onEditorFileChanged: (cb: (p: string, mtimeMs: number) => void) => {
+    const handler = (_e: unknown, payload: { path: string; mtimeMs: number }) =>
+      cb(payload.path, payload.mtimeMs);
+    ipcRenderer.on('editor:fileChanged', handler);
+    return () => ipcRenderer.off('editor:fileChanged', handler);
+  },
   dragStart: (paths: string[]) => ipcRenderer.send('drag:start', paths),
   // Electron 32+ removed the `path` field from renderer File objects; the
   // sanctioned replacement is webUtils.getPathForFile, which lives in the
@@ -315,8 +336,19 @@ const fm = {
   // ── Multi-source (breezed P4) ──
   sourcesList: () => ipcRenderer.invoke('sources:list'),
   sourcesConnect: (host: string) => ipcRenderer.invoke('sources:connect', host),
+  sourcesAutoAttach: (cwd: string) =>
+    ipcRenderer.invoke('sources:auto-attach', cwd) as Promise<string | null>,
   sourcesDisconnect: (host: string) =>
     ipcRenderer.invoke('sources:disconnect', host),
+  // fm-at5 — Claude Code integration reset
+  claudeUnregisterMcp: () =>
+    ipcRenderer.invoke('claude:unregister-mcp') as Promise<
+      'removed' | 'absent' | 'error'
+    >,
+  claudeUnregisterHooks: () =>
+    ipcRenderer.invoke('claude:unregister-hooks') as Promise<
+      'removed' | 'absent' | 'error'
+    >,
   onSourcesChanged: (cb: () => void) => {
     const handler = () => cb();
     ipcRenderer.on('sources:changed', handler);
@@ -612,6 +644,14 @@ const fm = {
       ipcRenderer.invoke('window:sideBySide:probe') as Promise<
         'ok' | 'no-permission' | 'unsupported'
       >,
+  },
+  // Native-menu → renderer bridge. Main process menu items click() forward
+  // a verb id here so the renderer can open ChipPrompt pre-loaded with
+  // that verb (zero-slot verbs execute immediately).
+  onMenuVerb: (cb: (verbId: string) => void) => {
+    const handler = (_e: unknown, payload: { verbId: string }) => cb(payload.verbId);
+    ipcRenderer.on('app:menu-verb', handler);
+    return () => ipcRenderer.off('app:menu-verb', handler);
   },
 };
 

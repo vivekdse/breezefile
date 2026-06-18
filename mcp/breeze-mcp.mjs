@@ -338,6 +338,21 @@ const tools = [
       callBreeze('POST', '/app/navigate', { body: { path: args.path } }),
   },
   {
+    name: 'app_open',
+    description:
+      'Open a path in Breeze: a folder opens as a (new or focused) tab, a markdown file opens in the in-app editor, and anything else opens via the OS default app. Brings the app to the foreground.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path to a folder or file.' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    handler: async (args) =>
+      callBreeze('POST', '/app/open', { body: { path: args.path } }),
+  },
+  {
     name: 'app_open_task_tab',
     description:
       'Open or focus the task tab for a given task in Breeze. Defaults to $BREEZE_TASK_ID if `task_id` is omitted.',
@@ -350,6 +365,88 @@ const tools = [
       const taskId = defaultTaskId(args.task_id);
       return callBreeze('POST', '/app/open-task-tab', { body: { taskId } });
     },
+  },
+  // ── Tags (fm-awii) ──
+  {
+    name: 'tag_list',
+    description:
+      'List all tags in Breeze (builtin + custom) with their colors and how many files each is manually applied to.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    handler: async () => callBreeze('GET', '/tags'),
+  },
+  {
+    name: 'tag_apply',
+    description:
+      'Apply a tag to one or more files by absolute path. Resolves the tag by name (case-insensitive) or id, and auto-creates it if missing (set create=false to require an existing tag).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tag: { type: 'string', description: 'Tag name or id.' },
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Absolute file paths to tag.',
+        },
+        create: {
+          type: 'boolean',
+          description: 'Auto-create the tag if it does not exist (default true).',
+        },
+      },
+      required: ['tag', 'paths'],
+      additionalProperties: false,
+    },
+    handler: async (args) =>
+      callBreeze('POST', '/tags/apply', {
+        body: {
+          tag: args.tag,
+          paths: args.paths,
+          ...(args.create !== undefined ? { create: args.create } : {}),
+        },
+      }),
+  },
+  {
+    name: 'tag_untag',
+    description: 'Remove a tag from one or more files by absolute path.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tag: { type: 'string', description: 'Tag name or id.' },
+        paths: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['tag', 'paths'],
+      additionalProperties: false,
+    },
+    handler: async (args) =>
+      callBreeze('POST', '/tags/untag', { body: { tag: args.tag, paths: args.paths } }),
+  },
+  {
+    name: 'tag_create',
+    description:
+      'Create a custom tag. Returns the existing tag (created=false) if one with that name already exists.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        color: { type: 'string', description: 'Optional hex color, e.g. "#e0567a".' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+    handler: async (args) =>
+      callBreeze('POST', '/tags', {
+        body: { name: args.name, ...(args.color ? { color: args.color } : {}) },
+      }),
+  },
+  {
+    name: 'tag_of',
+    description: 'List the tags manually applied to a given absolute file path.',
+    inputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+    handler: async (args) => callBreeze('GET', '/tags/of', { query: { path: args.path } }),
   },
 ];
 

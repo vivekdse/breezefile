@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 0 18px;
+  padding: 0 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--panel-rule, var(--rule));
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset;
@@ -20,16 +20,20 @@
 }
 
 .titlebar__traffic {
-  /* leaves space for macOS hiddenInset traffic lights */
-  width: 68px;
+  /* leaves space for macOS hiddenInset traffic lights; off-Mac there's
+     nothing to dodge so the spacer collapses */
+  width: 0;
   height: 100%;
   flex-shrink: 0;
+}
+.titlebar.platform-mac .titlebar__traffic {
+  width: 68px;
 }
 
 /* Brand wordmark — Fraunces italic name + a small Inter tagline so first-
    time users immediately see what the app is for. */
 .titlebar__brand {
-  margin-left: 4px;
+  margin-left: 0;
   display: flex;
   align-items: baseline;
   gap: 10px;

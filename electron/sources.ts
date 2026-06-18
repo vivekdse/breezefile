@@ -17,6 +17,7 @@ import {
   connectRemoteDaemon,
   type RemoteConnection,
 } from './remoteDaemon';
+import { resolveRemote } from './remoteRoute';
 
 const STATE_DIR = path.join(os.homedir(), '.breezefile');
 const SOURCES_FILE = path.join(STATE_DIR, 'sources.json');
@@ -188,6 +189,41 @@ export async function disconnectSource(host: string): Promise<void> {
   persist();
   broadcast('sources:changed');
   broadcast('tasks:changed');
+}
+
+// Hosts we've already auto-attached (or tried to) this session. Auto-attach
+// fires on every navigation, so without this guard a host that's slow or
+// refuses to install breezed would be retried on every keystroke-driven cwd
+// change. `connectSource` is itself idempotent for the in-flight/connected
+// case; this set additionally suppresses retries after a *failed* attempt
+// until the app restarts (the user can still attach manually via the verb).
+const autoAttempted = new Set<string>();
+
+/** Auto-attach the remote behind `cwd` if that path lives under an active
+ *  sshfs/macFUSE mount and we haven't already connected (or tried) it this
+ *  session. Reuses the exact manual-attach path (`connectSource`). Best
+ *  effort: returns the target it (started) attaching, or null when `cwd`
+ *  isn't under a remote mount, mount detection is unavailable, or the host
+ *  was already handled. Never throws into the caller. */
+export async function autoAttachForPath(cwd: string): Promise<string | null> {
+  let rr;
+  try {
+    rr = await resolveRemote(cwd);
+  } catch {
+    // Mount detection failed/unavailable (e.g. no `mount`, no /proc) —
+    // degrade silently; manual attach still works.
+    return null;
+  }
+  if (!rr) return null;
+  const host = rr.target;
+  if (remotes.has(host) || connecting.has(host) || autoAttempted.has(host)) {
+    return null;
+  }
+  autoAttempted.add(host);
+  connectSource(host).catch((e) =>
+    console.warn('[sources] auto-attach failed for', host, (e as Error).message),
+  );
+  return host;
 }
 
 /** Best-effort reconnect of previously-connected hosts at app startup.

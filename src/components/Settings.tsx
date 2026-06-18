@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useStore, DEFAULT_KEYBINDS } from '../store';
-import { fm } from '../bridge';
+import { fm, type Launcher } from '../bridge';
 import { formatOpError } from '../errorMessages';
 import { TypebuildAuthPanel } from './typebuild/TypebuildAuthPanel';
 import { SideBySideSettings } from './typebuild/SideBySideSettings';
@@ -12,7 +12,9 @@ type SectionId =
   | 'keybindings'
   | 'task-management'
   | 'terminal'
+  | 'chat-agent'
   | 'notifications'
+  | 'claude-integration'
   | 'bookmarks'
   | 'typebuild';
 
@@ -24,15 +26,46 @@ export function Settings({ onClose, initialSection }: Props) {
   // (userData/terminal.json), so we fetch on open and write back on change.
   const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
   const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
+  // fm-9iha — agent launchers for the "Default chat agent" picker.
+  const [launchers, setLaunchers] = useState<Launcher[]>([]);
   // Single-open accordion. Keybindings opens by default since it's the
   // densest section and the most common reason to open Settings.
   const [openSection, setOpenSection] = useState<SectionId | null>(
     initialSection ?? 'keybindings',
   );
+  // fm-at5 — inline result of the "Reset Claude integration" action.
+  const [claudeResetMsg, setClaudeResetMsg] = useState<string | null>(null);
+  const [claudeResetting, setClaudeResetting] = useState(false);
+
+  async function resetClaudeIntegration() {
+    if (claudeResetting) return;
+    setClaudeResetting(true);
+    setClaudeResetMsg(null);
+    try {
+      const [mcp, hooks] = await Promise.all([
+        fm.claudeUnregisterMcp(),
+        fm.claudeUnregisterHooks(),
+      ]);
+      if (mcp === 'error' || hooks === 'error') {
+        setClaudeResetMsg('Reset failed — see logs. Some entries may remain.');
+      } else if (mcp === 'removed' || hooks === 'removed') {
+        setClaudeResetMsg(
+          'Removed Breeze MCP + hooks from ~/.claude. They re-register on next launch.',
+        );
+      } else {
+        setClaudeResetMsg('Already clean — nothing of Breeze was registered.');
+      }
+    } catch (err) {
+      setClaudeResetMsg(formatOpError('reset', err));
+    } finally {
+      setClaudeResetting(false);
+    }
+  }
 
   useEffect(() => {
     void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
     void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
+    void fm.launchersList().then(setLaunchers).catch(() => {});
   }, []);
 
   // ESC closes — also handled by the chip prompt's overlay manager elsewhere,
@@ -271,6 +304,44 @@ export function Settings({ onClose, initialSection }: Props) {
           </AccordionSection>
 
           <AccordionSection
+            id="chat-agent"
+            title="Chat agent"
+            isOpen={openSection === 'chat-agent'}
+            onToggle={() => toggle('chat-agent')}
+          >
+            <div className="settings__row">
+              <span className="settings__action">Default chat agent</span>
+              <select
+                className="settings__select"
+                value={state.defaultAgentId ?? ''}
+                onChange={(e) =>
+                  dispatch({
+                    type: 'setDefaultAgentId',
+                    id: e.target.value || null,
+                  })
+                }
+              >
+                <option value="">— not set —</option>
+                {launchers
+                  .filter((l) => l.id !== 'term')
+                  .map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.label}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="settings__row">
+              <span className="settings__path settings__hint">
+                The agent the 💬 chat panel (<kbd>:chat</kbd>) launches for a
+                folder or document. Agents come from your launchers config.
+                While this is unset, opening a chat brings you here to choose
+                one.
+              </span>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection
             id="notifications"
             title="Notifications"
             isOpen={openSection === 'notifications'}
@@ -330,6 +401,33 @@ export function Settings({ onClose, initialSection }: Props) {
                 <option value="off">Off</option>
               </select>
             </div>
+          </AccordionSection>
+
+          <AccordionSection
+            id="claude-integration"
+            title="Claude integration"
+            isOpen={openSection === 'claude-integration'}
+            onToggle={() => toggle('claude-integration')}
+          >
+            <div className="settings__row">
+              <span className="settings__action">
+                Breeze auto-registers a Claude Code MCP server and busy/idle
+                hooks in <code>~/.claude</code> on launch. Reset to strip them
+                (and the hook script); they re-register next launch.
+              </span>
+              <button
+                className="settings__reset"
+                disabled={claudeResetting}
+                onClick={() => void resetClaudeIntegration()}
+              >
+                {claudeResetting ? 'Resetting…' : 'Reset Claude integration'}
+              </button>
+            </div>
+            {claudeResetMsg && (
+              <div className="settings__row">
+                <span className="settings__path">{claudeResetMsg}</span>
+              </div>
+            )}
           </AccordionSection>
 
           <AccordionSection

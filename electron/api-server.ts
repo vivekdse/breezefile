@@ -67,12 +67,19 @@ function clearApiFile() {
 // or rejects after a timeout.
 type ControlKind =
   | { kind: 'navigate'; path: string }
+  | { kind: 'open'; path: string }
   | { kind: 'openTaskTab'; taskId: string }
   | { kind: 'launch'; tabId: string; launcherId: string; variantId?: string }
   | { kind: 'listTabs' }
   // SPIKE (spike/playwright-cdp): open an embedded browser tab on demand, so
   // an in-app agent can create the tab it then drives over CDP.
-  | { kind: 'openBrowser'; url?: string };
+  | { kind: 'openBrowser'; url?: string }
+  // fm-awii — agent tagging API (proxied to the renderer's tag store)
+  | { kind: 'tagsList' }
+  | { kind: 'tagApply'; tag: string; paths: string[]; create?: boolean }
+  | { kind: 'tagUntag'; tag: string; paths: string[] }
+  | { kind: 'tagCreate'; name: string; color?: string }
+  | { kind: 'tagsForPath'; path: string };
 
 function controlRenderer<T = unknown>(req: ControlKind, timeoutMs = 4000): Promise<T> {
   const reqId = crypto.randomUUID();
@@ -89,6 +96,20 @@ function controlRenderer<T = unknown>(req: ControlKind, timeoutMs = 4000): Promi
     });
     win.webContents.send('control:request', { reqId, ...req });
   });
+}
+
+// Bring the app to the foreground after an external `breeze open`, the
+// way `code <file>` raises VS Code. Best-effort; never throws.
+function focusMainWindow() {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  if (!win || win.isDestroyed()) return;
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } catch {
+    /* non-fatal */
+  }
 }
 
 function registerControlReply() {
@@ -128,6 +149,17 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       if (!body.path) throw Object.assign(new Error('path required'), { status: 400 });
       await controlRenderer({ kind: 'navigate', path: body.path });
       return sendJson(res, 200, { ok: true });
+    }
+    // `breeze open <path>` — folders open as a (new or focused) tab,
+    // markdown opens in the in-app editor, anything else falls back to
+    // the OS default app. The renderer classifies the path (it owns
+    // tab state + filesystem access) and returns which surface it used.
+    if (p === '/app/open' && m === 'POST') {
+      const body = await readJson<{ path: string }>(req);
+      if (!body.path) throw Object.assign(new Error('path required'), { status: 400 });
+      const result = await controlRenderer<{ kind: string }>({ kind: 'open', path: body.path });
+      focusMainWindow();
+      return sendJson(res, 200, { ok: true, ...(result ?? {}) });
     }
     if (p === '/app/open-task-tab' && m === 'POST') {
       const body = await readJson<{ taskId: string }>(req);
@@ -183,6 +215,53 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const body = await readJson<{ url?: string }>(req).catch(() => ({}) as { url?: string });
       openBrowserWindow(body.url);
       return sendJson(res, 200, { ok: true });
+    }
+
+    // fm-awii — tagging API. Tags live in the renderer store, so every route
+    // proxies through the control bridge to the focused window.
+    if (p === '/tags' && m === 'GET') {
+      return sendJson(res, 200, await controlRenderer({ kind: 'tagsList' }));
+    }
+    if (p === '/tags' && m === 'POST') {
+      const body = await readJson<{ name: string; color?: string }>(req);
+      if (!body.name) throw Object.assign(new Error('name required'), { status: 400 });
+      return sendJson(
+        res,
+        201,
+        await controlRenderer({ kind: 'tagCreate', name: body.name, color: body.color }),
+      );
+    }
+    if (p === '/tags/apply' && m === 'POST') {
+      const body = await readJson<{ tag: string; paths: string[]; create?: boolean }>(req);
+      if (!body.tag || !Array.isArray(body.paths)) {
+        throw Object.assign(new Error('tag and paths required'), { status: 400 });
+      }
+      return sendJson(
+        res,
+        200,
+        await controlRenderer({
+          kind: 'tagApply',
+          tag: body.tag,
+          paths: body.paths,
+          create: body.create,
+        }),
+      );
+    }
+    if (p === '/tags/untag' && m === 'POST') {
+      const body = await readJson<{ tag: string; paths: string[] }>(req);
+      if (!body.tag || !Array.isArray(body.paths)) {
+        throw Object.assign(new Error('tag and paths required'), { status: 400 });
+      }
+      return sendJson(
+        res,
+        200,
+        await controlRenderer({ kind: 'tagUntag', tag: body.tag, paths: body.paths }),
+      );
+    }
+    if (p === '/tags/of' && m === 'GET') {
+      const target = url.searchParams.get('path');
+      if (!target) throw Object.assign(new Error('path required'), { status: 400 });
+      return sendJson(res, 200, await controlRenderer({ kind: 'tagsForPath', path: target }));
     }
 
     return send(res, 404, 'not found');

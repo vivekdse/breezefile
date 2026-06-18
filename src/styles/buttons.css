@@ -113,10 +113,11 @@
   border-color: var(--accent-soft, var(--accent));
 }
 
-/* Primary — filled accent, white text. ALWAYS legible because we set
-   color explicitly to white (or near-white) regardless of theme. */
+/* Primary — filled accent text. Routes through --text-on-accent (the
+   per-theme accent ink) rather than a hardcoded white: light/high-contrast
+   themes set --accent-ink dark so the label stays AA on the accent fill. */
 .btn--primary {
-  color: #ffffff;
+  color: var(--text-on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }

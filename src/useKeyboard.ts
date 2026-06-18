@@ -12,6 +12,7 @@ import {
 import type { Entry, SortKey, YankMode } from './types';
 import { runPaste } from './clipboard';
 import { formatOpError } from './errorMessages';
+import { isTextEntryTarget } from './textFocus';
 
 // Canonical key name — Ctrl chords prefixed with C-, like ranger's <C-x>.
 function keyName(e: KeyboardEvent): string {
@@ -119,15 +120,17 @@ export function useKeyboard(
       // keys don't double-fire as global verbs (e.g., `1` opening goto).
       if (document.body.dataset.composerOpen === 'true') return;
 
-      const target = e.target as HTMLElement;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+      if (isTextEntryTarget(e)) {
         // Tab-management mod-chords must escape focused inputs (notably
-        // xterm's hidden textarea on task tabs — otherwise ⌘1…9 / ⌘T / ⌘W
-        // would only work when a folder tab had focus).
+        // xterm's hidden textarea on task tabs, and the Milkdown markdown
+        // editor's contenteditable surface — otherwise ⌘1…9 / ⌘T / ⌘W
+        // would only work when a folder tab had focus). Everything else
+        // (plain `?`, j/k navigation, …) stays with the editor.
         const mod = e.metaKey || e.ctrlKey;
         const isTabChord =
           mod &&
           (/^[1-9]$/.test(e.key) ||
+            e.key === 'Tab' ||
             e.key === 't' ||
             e.key === 'T' ||
             e.key === 'w' ||

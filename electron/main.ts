@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, protocol, Notification as ElectronNotification } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, screen, Notification as ElectronNotification } from 'electron';
 import dns from 'node:dns';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
@@ -11,7 +11,7 @@ import { ElectronBreezeHost } from './core/electron-host';
 import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
 import { restoreSources } from './sources';
 import { registerBreezeMcp } from './mcp-register';
-import { registerBreezeHooks } from './hooks-register';
+import { registerBreezeHooks, ensureBreezeCli } from './hooks-register';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
 import { registerTypebuildDetectIpc } from './typebuild/detect';
 import {
@@ -123,6 +123,13 @@ function createWindow() {
     height: 800,
     minWidth: 720,
     minHeight: 480,
+    // Don't paint until first frame is ready. In dev (vite-plugin-electron
+    // relaunches the process on every code change) we then show the window
+    // *inactive* so it reappears in place without stealing focus from
+    // whatever app you're working in. Production launch focuses normally.
+    // titleBarStyle/trafficLightPosition are applied mac-only in the spread
+    // below (Windows/Linux get a standard frame).
+    show: false,
     backgroundColor: '#0f1114',
     ...(isMac
       ? {
@@ -136,6 +143,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.mjs'),
       sandbox: true,
       contextIsolation: true,
+      // Electron throttles a backgrounded renderer (paused timers, dropped
+      // GPU surface), which is what makes Breeze paint blank for a beat when
+      // you switch back from another app. We're a foreground productivity
+      // tool, not a background tab — keep rendering at full rate so refocus
+      // is instant.
+      backgroundThrottling: false,
     },
   });
 
@@ -177,9 +190,22 @@ function createWindow() {
   win.on('focus', () => win?.webContents.send('app:focus', true));
   win.on('blur', () => win?.webContents.send('app:focus', false));
 
+  win.once('ready-to-show', () => {
+    if (!win || win.isDestroyed()) return;
+    // showInactive() avoids raising the window above other apps / stealing
+    // keyboard focus on every dev reload. A real production launch should
+    // come to the front like a normal app.
+    if (VITE_DEV_SERVER_URL) win.showInactive();
+    else win.show();
+  });
+
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
-    win.webContents.openDevTools({ mode: 'detach' });
+    // DevTools is opt-in during dev so it stops popping on every reload.
+    // Set BREEZE_DEVTOOLS=1 to auto-open it, or use the View menu /
+    // Cmd-Alt-I (Ctrl-Shift-I) any time.
+    if (process.env.BREEZE_DEVTOOLS === '1')
+      win.webContents.openDevTools({ mode: 'detach' });
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'));
   }
@@ -267,6 +293,18 @@ app.whenReady().then(() => {
   } catch (e) {
     console.warn('[hooks-register] failed:', (e as Error).message);
   }
+  // Put `breeze` on PATH automatically (symlink ~/.local/bin/breeze →
+  // bundled/dev shim). Idempotent; covers both `npm run dev` and the
+  // packaged .app so users never need ./cli/install.sh. Best-effort —
+  // failures are logged and never block startup.
+  try {
+    const result = ensureBreezeCli();
+    if (result === 'written') {
+      console.log('[breeze-cli] linked ~/.local/bin/breeze');
+    }
+  } catch (e) {
+    console.warn('[breeze-cli] failed:', (e as Error).message);
+  }
   // fm-c2w — dock badge IPC. Renderer passes a string ('' clears, '!' or
   // a count for active attention). On non-darwin, app.dock is undefined
   // and we silently no-op.
@@ -288,6 +326,62 @@ app.whenReady().then(() => {
   ipcMain.on('settings:taskNotifications', (_e, value: string) => {
     setTaskNotifyVerbosity(value as 'all' | 'failures' | 'off');
   });
+  // Window state verbs. Linux WMs commonly bind Alt+Space to a menu that
+  // owns maximize / fullscreen, but Breezefile's chip prompt also uses
+  // Alt+Space, so we expose explicit verbs (and accelerators) instead of
+  // depending on the WM.
+  function focusedWindow(): BrowserWindow | null {
+    return (
+      BrowserWindow.getFocusedWindow() ??
+      BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+      null
+    );
+  }
+  ipcMain.handle('window:toggleMaximize', () => {
+    const w = focusedWindow();
+    if (!w) return;
+    if (w.isMaximized()) w.unmaximize();
+    else w.maximize();
+  });
+  ipcMain.handle('window:toggleFullscreen', () => {
+    const w = focusedWindow();
+    if (!w) return;
+    w.setFullScreen(!w.isFullScreen());
+  });
+  // fm-dly3 — grow the window by the chat panel's width when chat opens so the
+  // editor / file list keeps the width it had before, then restore on close.
+  // Clamped to the current display's work area (and skipped while maximized /
+  // fullscreen, where we can't grow and the CSS handles the squeeze). Keyed
+  // per-window so multi-window stays sane.
+  const chatGrow = new Map<number, number>(); // win.id → width before growing
+  ipcMain.handle(
+    'window:chatResize',
+    (e, open: boolean, panelWidth: number) => {
+      const w = BrowserWindow.fromWebContents(e.sender);
+      if (!w || w.isDestroyed()) return;
+      if (w.isMaximized() || w.isFullScreen()) return;
+      const id = w.id;
+      const pad = Math.max(0, Math.round(panelWidth));
+      const [x, y] = w.getPosition();
+      const [width, height] = w.getSize();
+      const wa = screen.getDisplayMatching(w.getBounds()).workArea;
+      if (open) {
+        if (chatGrow.has(id)) return; // already grown
+        const target = Math.min(width + pad, wa.width);
+        if (target <= width) return; // no room to grow — CSS copes
+        chatGrow.set(id, width);
+        // Keep the (now wider) window inside the work area.
+        const nx = Math.max(wa.x, Math.min(x, wa.x + wa.width - target));
+        w.setBounds({ x: nx, y, width: target, height });
+      } else {
+        const prev = chatGrow.get(id);
+        if (prev == null) return; // we didn't grow it
+        chatGrow.delete(id);
+        const minW = w.getMinimumSize()[0] || 0;
+        w.setBounds({ x, y, width: Math.max(prev, minW), height });
+      }
+    },
+  );
   // Attention notifications routed via main process so the click handler
   // is reliable on Linux libnotify daemons (the web Notification API
   // delivered clicks unreliably across daemons, and any "View" button
@@ -386,21 +480,132 @@ function wireTypebuildTaskSource() {
   onAuthStateChanged((state) => sync(state.signedIn));
 }
 
+function sendVerbToFocused(verbId: string) {
+  const w =
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+    null;
+  if (!w || w.isDestroyed()) return;
+  w.webContents.send('app:menu-verb', { verbId });
+}
+
+// Forward a renderer verb from a native menu item. The renderer opens
+// ChipPrompt with this verb pre-selected; zero-slot verbs execute
+// immediately. Accelerators here are advisory display only — the actual
+// key binding lives in useKeyboard.ts. We omit accelerator on items
+// whose chord is multi-key (e.g. "gh", "wt"), since Electron menus only
+// support single chords.
+function verbItem(
+  label: string,
+  verbId: string,
+  accelerator?: string,
+): Electron.MenuItemConstructorOptions {
+  return {
+    label,
+    ...(accelerator ? { accelerator } : {}),
+    click: () => sendVerbToFocused(verbId),
+  };
+}
+
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac
       ? ([{ role: 'appMenu' }] as Electron.MenuItemConstructorOptions[])
       : []),
+    {
+      label: 'File',
+      submenu: [
+        verbItem('New Tab', 'newTab', 'CmdOrCtrl+T'),
+        verbItem('Close Tab', 'closeTab', 'CmdOrCtrl+W'),
+        verbItem('Reopen Closed Tab', 'restoreTab', 'CmdOrCtrl+Shift+T'),
+        { type: 'separator' },
+        verbItem('New Folder…', 'folder'),
+        verbItem('New File…', 'file'),
+        verbItem('New Note', 'note'),
+        { type: 'separator' },
+        verbItem('Rename…', 'rename', 'F2'),
+        verbItem('Edit File', 'edit'),
+        verbItem('Open', 'open'),
+        verbItem('Open With…', 'open-with'),
+        verbItem('Reveal in File Manager', 'reveal'),
+        { type: 'separator' },
+        verbItem('Move to Trash', 'delete'),
+        verbItem('Compress…', 'compress'),
+        verbItem('Extract', 'extract'),
+      ],
+    },
     { role: 'editMenu' },
+    {
+      label: 'Navigate',
+      submenu: [
+        verbItem('Back', 'back'),
+        verbItem('Forward', 'forward'),
+        verbItem('Up', 'up'),
+        { type: 'separator' },
+        verbItem('Go to…', 'goto', 'CmdOrCtrl+F'),
+        verbItem('Notes Folder', 'notes'),
+        verbItem('Switch Tab…', 'switchTab'),
+        { type: 'separator' },
+        verbItem('Pin Folder', 'pin'),
+        verbItem('Unpin Folder', 'unpin'),
+      ],
+    },
+    {
+      label: 'Selection',
+      submenu: [
+        verbItem('Select…', 'select'),
+        verbItem('Copy', 'copy', 'CmdOrCtrl+C'),
+        verbItem('Move (cut)', 'move', 'CmdOrCtrl+X'),
+        verbItem('Paste', 'paste', 'CmdOrCtrl+V'),
+        { type: 'separator' },
+        verbItem('Copy Path', 'copy-path'),
+        verbItem('Share…', 'share'),
+      ],
+    },
     {
       label: 'View',
       submenu: [
         // Cmd/Ctrl+R is deliberately NOT a full BrowserWindow reload —
         // that nukes every tab + the terminal ptys. The renderer binds
         // C-r to a tab-scoped refresh (store.refreshActive). A full
-        // reload is still reachable for dev under Cmd/Ctrl+Shift+R.
-        { role: 'forceReload', accelerator: 'CmdOrCtrl+Shift+R' },
+        // reload is still reachable under Cmd/Ctrl+Shift+R, but since it
+        // discards every tab + pty we confirm first (and spell out the
+        // cost when more than one tab is open).
+        {
+          label: 'Force Reload (discards tabs)',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          async click() {
+            const target =
+              BrowserWindow.getFocusedWindow() ??
+              BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+              null;
+            if (!target || target.isDestroyed()) return;
+            let tabCount = 0;
+            try {
+              tabCount = Number(
+                await target.webContents.executeJavaScript(
+                  'window.__fmTabCount ?? 0',
+                ),
+              );
+            } catch {
+              tabCount = 0;
+            }
+            const many = tabCount > 1;
+            const { response } = await dialog.showMessageBox(target, {
+              type: 'warning',
+              buttons: ['Cancel', 'Reload'],
+              defaultId: 0,
+              cancelId: 0,
+              title: 'Force Reload',
+              message: 'Reload the whole window?',
+              detail: many
+                ? `This will close all ${tabCount} open tabs and their terminals. Unsaved work and running terminal sessions will be lost.`
+                : 'This closes the current tab and its terminal. Unsaved work and any running terminal session will be lost.',
+            });
+            if (response === 1) target.webContents.reloadIgnoringCache();
+          },
+        },
         { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
@@ -408,7 +613,49 @@ function buildAppMenu() {
         { role: 'zoomIn', accelerator: 'CmdOrCtrl+=' },
         { role: 'zoomOut' },
         { type: 'separator' },
+        {
+          label: 'Toggle Maximize',
+          accelerator: 'CmdOrCtrl+Shift+M',
+          click() {
+            const w =
+              BrowserWindow.getFocusedWindow() ??
+              BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+              null;
+            if (!w) return;
+            if (w.isMaximized()) w.unmaximize();
+            else w.maximize();
+          },
+        },
         { role: 'togglefullscreen' },
+        { type: 'separator' },
+        verbItem('Change View…', 'view'),
+        verbItem('Sort…', 'sort'),
+        verbItem('Toggle Hidden Files', 'showHidden', 'CmdOrCtrl+Shift+.'),
+        verbItem('Theme…', 'theme'),
+        { type: 'separator' },
+        verbItem('Tag…', 'tag'),
+        verbItem('Untag…', 'untag'),
+        verbItem('New Tag…', 'newtag'),
+        verbItem('Filter by Tag…', 'filter'),
+      ],
+    },
+    {
+      label: 'Tools',
+      submenu: [
+        verbItem('Terminal in this Folder', 'term'),
+        verbItem('Open External Terminal', 'openTerminal'),
+        verbItem('Close Terminal', 'term-close'),
+        { type: 'separator' },
+        verbItem('Attach Remote (SSH)…', 'remote-attach'),
+        verbItem('Disconnect Remote', 'disconnect'),
+        { type: 'separator' },
+        verbItem('Run…', 'run'),
+        verbItem('New Task', 'task'),
+        verbItem('Tasks View', 'tasks'),
+        { type: 'separator' },
+        verbItem('Settings', 'settings'),
+        verbItem('Permissions', 'permissions'),
+        verbItem('Check for Update', 'upgrade'),
       ],
     },
     // Custom Window menu — the default 'windowMenu' role binds ⌘W to
@@ -427,6 +674,15 @@ function buildAppMenu() {
               { role: 'front' },
             ] as Electron.MenuItemConstructorOptions[])
           : []),
+      ],
+    },
+    {
+      role: 'help',
+      submenu: [
+        verbItem('Help', 'help', 'F1'),
+        verbItem('Tutorial', 'tutorial'),
+        verbItem('Tips', 'tips'),
+        verbItem('Welcome', 'welcome'),
       ],
     },
   ];

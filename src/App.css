@@ -19,19 +19,26 @@
 .shell {
   --sidebar-w: 240px;
   --preview-w: 340px;
+  /* fm-dly3 — right-docked agent chat slot. 0 when closed (every existing
+     mode is unaffected); widens only when data-chat="open". */
+  --chat-w: 0px;
 
   position: relative;
   height: 100vh;
   display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr var(--preview-w);
+  grid-template-columns: var(--sidebar-w) 1fr var(--preview-w) var(--chat-w);
   grid-template-rows: 48px auto 1fr auto;
   grid-template-areas:
-    "title  title  title"
-    "chrome chrome chrome"
-    "side   main   preview"
-    "status status status";
+    "title  title  title   title"
+    "chrome chrome chrome  chrome"
+    "side   main   preview chat"
+    "status status status  status";
   background: var(--bg, var(--bg-0));
   color: var(--ink, var(--fg-1));
+}
+
+.shell[data-chat="open"] {
+  --chat-w: 380px;
 }
 
 /* fm-wq6 — preview mode reshapes the shell: sidebar collapses to 0,
@@ -39,7 +46,7 @@
    Triggered by data-view="preview" on .shell (set in App.tsx). */
 .shell[data-view="preview"] {
   --sidebar-w: 0px;
-  grid-template-columns: 0px 1fr 2fr;
+  grid-template-columns: 0px 1fr 2fr var(--chat-w);
 }
 
 /* fm-a9j — task tabs hide the preview slot (no file to preview), so the
@@ -49,7 +56,44 @@
 .shell[data-tab-kind="task"],
 .shell[data-tab-kind="tasks"] {
   --preview-w: 0px;
-  grid-template-columns: var(--sidebar-w) 1fr 0px;
+  grid-template-columns: var(--sidebar-w) 1fr 0px var(--chat-w);
+}
+
+/* fm-dly3 — edit tabs render neither Sidebar nor Preview, but those columns
+   still reserve width. That's harmless on its own (the no-chat editor centres
+   in the leftover space), but once the chat panel opens the editor would be
+   squished between two empty rails. So when chat is open on an edit tab,
+   collapse both rails and give the whole row to editor + chat. */
+.shell[data-tab-kind="edit"][data-chat="open"] {
+  --sidebar-w: 0px;
+  --preview-w: 0px;
+  grid-template-columns: 0px 1fr 0px var(--chat-w);
+}
+
+/* fm-dly3 — folder tabs: when the agent chat opens, collapse the left
+   Sidebar (tasks / favourites / locations). The chat is the active surface
+   and the sidebar's navigation is rarely needed mid-conversation, so giving
+   its 240px to the file list + chat is the uncluttered default. Applies to
+   every folder view; closing chat — same 💬 toggle — restores the sidebar.
+   Terminal mode already zeroes both rails. */
+.shell[data-tab-kind="folder"][data-chat="open"] {
+  --sidebar-w: 0px;
+}
+.shell[data-tab-kind="folder"][data-chat="open"] .shell__side {
+  display: none;
+}
+
+/* In the plain list / grid views the right Preview pane is a secondary
+   glance surface — when chat opens it claims that space instead, so the
+   file list sits directly beside the chat with no idle pane between them.
+   Excludes the preview/zoom view (the preview IS that view) and the tag
+   view (its right pane is the TagInspector tagging surface, not a file
+   preview) — both keep their right pane and dock chat beyond it. */
+.shell[data-tab-kind="folder"][data-chat="open"]:not([data-view="preview"]):not([data-view="tag"]) {
+  --preview-w: 0px;
+}
+.shell[data-tab-kind="folder"][data-chat="open"]:not([data-view="preview"]):not([data-view="tag"]) .shell__preview {
+  display: none;
 }
 
 .shell__title   { grid-area: title;   min-width: 0; }
@@ -119,12 +163,12 @@
 .shell[data-mode="terminal"] {
   --sidebar-w: 0px;
   --preview-w: 0px;
-  grid-template-columns: 0px 1fr 0px;
+  grid-template-columns: 0px 1fr 0px var(--chat-w);
   grid-template-rows: 48px auto 1fr;
   grid-template-areas:
-    "title  title  title"
-    "chrome chrome chrome"
-    "main   main   main";
+    "title  title  title  title"
+    "chrome chrome chrome chrome"
+    "main   main   main   chat";
 }
 /* The recessed-plate styling on shell__main (inset shadow + accent
    gradient) reads as a frame around the *file plate*; in terminal mode
@@ -256,7 +300,7 @@
 @media (max-width: 1100px) {
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) {
     --preview-w: 0px;
-    grid-template-columns: var(--sidebar-w) 1fr 0px;
+    grid-template-columns: var(--sidebar-w) 1fr 0px var(--chat-w);
   }
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) .shell__preview {
     display: none;
@@ -266,7 +310,7 @@
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) {
     --sidebar-w: 0px;
     --preview-w: 0px;
-    grid-template-columns: 0px 1fr 0px;
+    grid-template-columns: 0px 1fr 0px var(--chat-w);
   }
   .shell:not([data-view="preview"]):not([data-mode="terminal"]) .shell__side {
     display: none;

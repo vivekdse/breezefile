@@ -27,6 +27,10 @@ import {
   existsSync,
   copyFileSync,
   chmodSync,
+  lstatSync,
+  readlinkSync,
+  symlinkSync,
+  unlinkSync,
 } from 'node:fs';
 
 type HookEntry = { type?: 'command'; command: string };
@@ -147,6 +151,72 @@ function breezeBinPath(): string {
     : path.join(app.getAppPath(), 'bin', 'breeze');
 }
 
+// Put `breeze` on the user's PATH automatically, on every launch, so
+// `breeze` works from any shell without a manual ./cli/install.sh step
+// — for both `npm run dev` (source) and the packaged .app (cask).
+// Idempotent: symlink ~/.local/bin/breeze → breezeBinPath() (the POSIX
+// shim, which itself resolves a Node runtime). This is the in-app
+// equivalent of cli/install.sh and the single source of truth for how
+// the launcher reaches the user's PATH.
+//
+// ~/.local/bin is the right target on both macOS and Linux: it's the
+// XDG-ish per-user bin dir, needs no sudo, and is on PATH in typical
+// shell setups. We never write to /usr/local/bin (would need sudo and
+// is system-global). Best-effort: any failure is returned, not thrown,
+// so it can never block startup.
+function localBinDir(): string {
+  return path.join(os.homedir(), '.local', 'bin');
+}
+
+export function ensureBreezeCli():
+  | 'written'
+  | 'unchanged'
+  | 'missing-source'
+  | 'error' {
+  try {
+    const src = breezeBinPath();
+    if (!existsSync(src)) return 'missing-source';
+
+    const dir = localBinDir();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const link = path.join(dir, 'breeze');
+
+    // Already a symlink pointing exactly where we want → nothing to do.
+    let existing: { isLink: boolean; target?: string } = { isLink: false };
+    try {
+      if (lstatSync(link).isSymbolicLink()) {
+        existing = { isLink: true, target: readlinkSync(link) };
+      } else if (existsSync(link)) {
+        // A real file (or non-symlink) is squatting the name. Don't
+        // clobber something the user may have put there deliberately.
+        return 'error';
+      }
+    } catch {
+      /* link doesn't exist yet — fall through to create it */
+    }
+    if (existing.isLink && existing.target === src) return 'unchanged';
+    if (existing.isLink) unlinkSync(link); // stale/wrong target → replace
+
+    symlinkSync(src, link);
+
+    // Surface (log only) when the dir we just linked into isn't on PATH,
+    // mirroring cli/install.sh's note — the symlink is useless otherwise.
+    const onPath = (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .includes(dir);
+    if (!onPath) {
+      console.warn(
+        `[breeze-cli] linked ${link} but ${dir} is not on PATH; ` +
+          `add it to your shell rc to use the \`breeze\` command.`,
+      );
+    }
+    return 'written';
+  } catch (e) {
+    console.warn('[breeze-cli] ensureBreezeCli failed:', (e as Error).message);
+    return 'error';
+  }
+}
+
 // We own any hook entry whose command runs claude-hook.sh OR
 // `breeze prime` — re-register replaces them rather than appending so
 // idempotency holds even when we evolve the command shape (e.g. the
@@ -243,6 +313,49 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' | 'skip
     return 'written';
   } catch (e) {
     console.warn('[hooks-register] write failed:', (e as Error).message);
+    return 'error';
+  }
+}
+
+// fm-at5 — inverse of registerBreezeHooks: strip every Breeze-owned hook
+// entry from ~/.claude/settings.json (matched by isBreezeHook) and delete
+// the dropped ~/.breezefile/claude-hook.sh. Idempotent: 'absent' when there
+// was nothing of ours to remove. Foreign hooks/events are preserved; an
+// event we empty out is dropped so we don't leave dangling `"Stop": []`.
+export function unregisterBreezeHooks(): 'removed' | 'absent' | 'error' {
+  const existed = existsSync(settingsPath());
+  const scriptExists = existsSync(hookScriptPath());
+  const settings = existed ? readSettings() : {};
+  if (settings === null) return 'error';
+
+  const oldHooks = settings.hooks ?? {};
+  const nextHooks: Record<string, HookMatcher[]> = {};
+  for (const event of Object.keys(oldHooks)) {
+    const cleaned = withoutBreezeMatchers(oldHooks[event]);
+    if (cleaned.length > 0) nextHooks[event] = cleaned;
+  }
+  const hooksChanged = JSON.stringify(oldHooks) !== JSON.stringify(nextHooks);
+
+  // Nothing of ours anywhere → already absent.
+  if (!hooksChanged && !scriptExists) return 'absent';
+
+  try {
+    if (hooksChanged) {
+      const next: ClaudeSettings = { ...settings };
+      if (Object.keys(nextHooks).length > 0) next.hooks = nextHooks;
+      else delete next.hooks;
+      writeSettings(next, existed);
+    }
+    if (scriptExists) {
+      try {
+        unlinkSync(hookScriptPath());
+      } catch {
+        /* best-effort: settings already cleaned */
+      }
+    }
+    return 'removed';
+  } catch (e) {
+    console.warn('[hooks-register] unregister failed:', (e as Error).message);
     return 'error';
   }
 }

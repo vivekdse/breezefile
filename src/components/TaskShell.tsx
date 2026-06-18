@@ -370,10 +370,11 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
 }
 
 function NotesBlock({ notes }: { notes: string }) {
-  const [expanded, setExpanded] = useState(false);
-  // Two-line clamp by default; click to expand. Even short notes get the
-  // click affordance for consistency — preview-on-click is more
-  // discoverable than "sometimes you can click, sometimes not."
+  const [expanded, setExpanded] = useState(true);
+  // Expanded by default so notes are readable the moment a task opens from
+  // the sidebar (a 2-line teaser was too short for real notes). Long notes
+  // grow only up to a cap, then scroll inside the block — see the
+  // .taskshell__notes--expanded rule. Click toggles back to the teaser.
   return (
     <div
       className={`taskshell__notes${expanded ? ' taskshell__notes--expanded' : ''}`}

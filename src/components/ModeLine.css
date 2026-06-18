@@ -20,6 +20,39 @@
   color: var(--fg-2);
 }
 
+.modeline__status--error {
+  color: var(--danger, #e5484d);
+  /* errors can be long (stack-ish) — let them wrap + be selectable */
+  white-space: pre-wrap;
+  user-select: text;
+  cursor: text;
+}
+
+.modeline__actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-left: auto;
+  align-items: center;
+  flex: none;
+}
+
+.modeline__btn {
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: 4px;
+  padding: 0 var(--sp-2);
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.modeline__btn:hover {
+  color: var(--fg-1);
+  border-color: var(--border-2);
+}
+
 /* fm-30p — status messages slide up into place. JS (ModeLine.tsx) controls
    dismissal by nulling the local msg after 3s; the exit is a React-unmount
    rather than an animation so we don't need to manage two-phase state. */

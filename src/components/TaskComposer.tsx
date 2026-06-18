@@ -27,6 +27,7 @@ import { fm } from '../bridge';
 import {
   createTask,
   runTaskNow,
+  shiftISO,
   todayISO,
   updateTask,
   useTaskSources,
@@ -241,6 +242,22 @@ function pickWhenIdFromTask(task: Task): string {
   }
   return 'none';
 }
+
+// Due-date quick-picks shown as chips next to the When field (manual
+// tasks). "1 week" = today+7. "Friday"/"Monday" = the COMING weekday using
+// the same convention as parseDateInput: if today already is that weekday,
+// jump to next week (delta 7) rather than picking today.
+type DueQuickPick = { id: string; label: string; key: string; iso: (today: string) => string };
+function nextWeekdayISO(today: string, targetDow: number): string {
+  const todayDow = new Date(today + 'T00:00:00').getDay(); // 0=Sun..6=Sat
+  const delta = ((targetDow - todayDow + 7) % 7) || 7;
+  return shiftISO(today, delta);
+}
+const DUE_QUICK_PICKS: DueQuickPick[] = [
+  { id: 'qp-week', label: '1 week', key: 'W', iso: (t) => shiftISO(t, 7) },
+  { id: 'qp-fri', label: 'this Friday', key: 'F', iso: (t) => nextWeekdayISO(t, 5) },
+  { id: 'qp-mon', label: 'Monday', key: 'M', iso: (t) => nextWeekdayISO(t, 1) },
+];
 
 function prettyFolder(p: string): string {
   if (!p) return 'Any folder';
@@ -604,6 +621,19 @@ export function TaskComposer(props: Props) {
     // fm-m2s4 (S5) — in TypeBuild mode the question after When is Priority.
     if (isTypebuild) setPriorityHighlight(priorityHighlight);
     else setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+    goNext();
+  }
+
+  function chooseDueQuickPick(qp: DueQuickPick) {
+    // Quick-picks resolve to a concrete date and reuse the pick-date path
+    // so save() emits a due_at. Set the highlight to the pick-date row so
+    // the selection reads consistently, then advance.
+    const iso = qp.iso(todayISO());
+    setWhenId('pick-date');
+    setPickedDate(iso);
+    const pdIdx = visibleWhenOptions.findIndex((w) => w.id === 'pick-date');
+    if (pdIdx >= 0) setWhenHighlight(pdIdx);
+    setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
     goNext();
   }
 
@@ -1034,6 +1064,19 @@ export function TaskComposer(props: Props) {
         chooseWhen(whenHighlight);
         return;
       }
+      // Due quick-pick letter shortcuts (W / F / M) — manual tasks only.
+      // Safe here because the When section has no text input focused (the
+      // inText() guard above already returned for the date/cron inputs).
+      if (executor === 'manual' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const qp = DUE_QUICK_PICKS.find(
+          (q) => q.key.toLowerCase() === e.key.toLowerCase(),
+        );
+        if (qp) {
+          e.preventDefault();
+          chooseDueQuickPick(qp);
+          return;
+        }
+      }
       const n = parseInt(e.key, 10);
       if (!Number.isNaN(n) && n >= 1 && n <= visibleWhenOptions.length) {
         e.preventDefault();
@@ -1437,6 +1480,21 @@ export function TaskComposer(props: Props) {
                   className="composer__notes-input"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Plain Enter inserts a newline (default — leave it).
+                    // ⌘/Ctrl+Enter inside notes advances to the next field
+                    // (Start) rather than submitting; stop the event so the
+                    // window-level handler doesn't fire save().
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      notesRef.current?.blur();
+                      setStartHighlight(
+                        START_OPTIONS.findIndex((s) => s.id === startId),
+                      );
+                      goNext();
+                    }
+                  }}
                   placeholder={
                     executor === 'claude'
                       ? 'Describe the work for the agent. This text becomes its prompt.'
@@ -1553,6 +1611,26 @@ export function TaskComposer(props: Props) {
                     </li>
                   ))}
                 </ul>
+                {executor === 'manual' && (
+                  <div className="composer__quickpicks">
+                    <span className="composer__quickpicks-label">quick due:</span>
+                    {DUE_QUICK_PICKS.map((qp) => (
+                      <button
+                        key={qp.id}
+                        type="button"
+                        className="composer__quickpick"
+                        title={`Due ${formatDateNice(qp.iso(todayISO()))}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chooseDueQuickPick(qp);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{qp.key}</kbd>
+                        <span className="composer__quickpick-label">{qp.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {whenId === 'pick-date' && (
                   <div className="composer__date-row">
                     <input

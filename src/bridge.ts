@@ -36,6 +36,8 @@ type Fm = {
   mkdir: (p: string) => Promise<void>;
   rename: (from: string, to: string) => Promise<void>;
   trash: (paths: string[]) => Promise<void>;
+  // fm-7klh — irreversible delete (renderer gates this behind type-to-confirm)
+  permanentDelete: (paths: string[]) => Promise<void>;
   touch: (p: string) => Promise<void>;
   paste: (
     ops: {
@@ -55,6 +57,10 @@ type Fm = {
   extract: (archives: string[], cwd: string) => Promise<string[]>;
   open: (p: string, appPath?: string) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
+  windowToggleMaximize: () => Promise<void>;
+  windowToggleFullscreen: () => Promise<void>;
+  // fm-dly3 — grow/restore the OS window when the chat panel opens/closes
+  windowChatResize: (open: boolean, panelWidth: number) => Promise<void>;
   openWith: (p: string, appName: string) => Promise<void>;
   pickApplication: () => Promise<string | null>;
   pickFolder: (defaultPath?: string) => Promise<string | null>;
@@ -81,6 +87,9 @@ type Fm = {
     content: string,
     expectedMtimeMs: number | null,
   ) => Promise<{ mtimeMs: number; conflict?: boolean; error?: string }>;
+  editorWatch: (p: string) => Promise<void>;
+  editorUnwatch: (p: string) => Promise<void>;
+  onEditorFileChanged: (cb: (p: string, mtimeMs: number) => void) => () => void;
   dragStart: (paths: string[]) => void;
   pathForFile: (file: File) => string;
   findFolders: (query: string, limit?: number) => Promise<string[]>;
@@ -193,7 +202,14 @@ type Fm = {
     Array<{ id: string; kind: 'local' | 'remote'; status: 'connected' | 'connecting' }>
   >;
   sourcesConnect: (host: string) => Promise<void>;
+  /** Auto-attach the remote behind `cwd` if it's under an active sshfs
+   *  mount; resolves to the attached host or null (already attached / not a
+   *  remote path / detection unavailable). Idempotent, never throws. */
+  sourcesAutoAttach: (cwd: string) => Promise<string | null>;
   sourcesDisconnect: (host: string) => Promise<void>;
+  // fm-at5 — reset the auto-registered Claude Code integration
+  claudeUnregisterMcp: () => Promise<'removed' | 'absent' | 'error'>;
+  claudeUnregisterHooks: () => Promise<'removed' | 'absent' | 'error'>;
   onSourcesChanged: (cb: () => void) => () => void;
   tasksCountByFolder: (folder: string) => Promise<number>;
   tasksDbExists: () => Promise<boolean>;
@@ -343,6 +359,8 @@ type Fm = {
     state: () => Promise<{ active: boolean }>;
     probe: () => Promise<'ok' | 'no-permission' | 'unsupported'>;
   };
+  // Native-menu → renderer bridge: a native menu item forwards a verb id.
+  onMenuVerb: (cb: (verbId: string) => void) => () => void;
 };
 
 export type TypebuildAuthState = { signedIn: boolean; email?: string };
@@ -365,6 +383,10 @@ export type Launcher = {
     args?: string[];
     description?: string;
   }>;
+  // fm-dly3 — flag this agent takes background context through (e.g.
+  // '--append-system-prompt'). The chat panel uses it to inject the folder /
+  // document as a system prompt instead of a typed first message.
+  contextFlag?: string;
 };
 
 declare global {

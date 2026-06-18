@@ -74,6 +74,12 @@ test('add → list → done → rm round trip', { skip: !existsSync(apiFile) }, 
   assert.ok(!l2.stdout.includes(id), 'task still listed after rm');
 });
 
+test('open with no path exits 1 with a clear message', () => {
+  const r = run(['open']);
+  assert.equal(r.status, 1, `exit ${r.status}; stderr=${r.stderr}`);
+  assert.match(r.stderr, /path required/);
+});
+
 test('prime exits 0 silently when api.json absent', () => {
   // Simulate "app not running" by pointing HOME at an empty dir. Hook
   // contract: SessionStart must never block, so prime must exit 0 with

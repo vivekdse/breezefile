@@ -192,6 +192,53 @@ export async function ensureRemoteDaemon(target: string): Promise<boolean> {
   }
 }
 
+type ResolvedSsh = {
+  hostname: string;
+  user: string;
+  port: string;
+  identityFiles: string[];
+};
+
+/** Resolve `~/.ssh/config` for `target` via `ssh -G` and pluck the connection
+ *  settings the tunnel needs. We re-pass these explicitly under `-F /dev/null`
+ *  so user-level `LocalForward` lines on the Host block don't take down our
+ *  forward — see the call site in connectRemoteDaemon for the full rationale. */
+async function resolveSshConfig(target: string): Promise<ResolvedSsh> {
+  const out = await new Promise<string>((resolve, reject) => {
+    const child = spawn('ssh', ['-G', target], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let so = '';
+    let se = '';
+    child.stdout.on('data', (d) => (so += d));
+    child.stderr.on('data', (d) => (se += d));
+    child.on('error', reject);
+    child.on('exit', (code) =>
+      code === 0 ? resolve(so) : reject(new Error(`ssh -G exit ${code}: ${se}`)),
+    );
+  });
+  const res: ResolvedSsh = {
+    hostname: target,
+    user: os.userInfo().username,
+    port: '22',
+    identityFiles: [],
+  };
+  for (const line of out.split('\n')) {
+    const sp = line.indexOf(' ');
+    if (sp < 0) continue;
+    const k = line.slice(0, sp).toLowerCase();
+    const v = line.slice(sp + 1).trim();
+    if (k === 'hostname') res.hostname = v;
+    else if (k === 'user') res.user = v;
+    else if (k === 'port') res.port = v;
+    else if (k === 'identityfile') {
+      // ssh -G emits ~ literally; expand it so -F /dev/null doesn't lose it.
+      res.identityFiles.push(v.replace(/^~(?=\/|$)/, os.homedir()));
+    }
+  }
+  return res;
+}
+
 function freeLocalPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -222,20 +269,38 @@ export async function connectRemoteDaemon(
     throw new Error(`bad api.json on ${target}`);
   }
   const localPort = await freeLocalPort();
-  const tunnel = spawn(
-    'ssh',
-    [
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ExitOnForwardFailure=yes',
-      '-N',
-      '-L',
-      `${localPort}:127.0.0.1:${api.port}`,
-      target,
-    ],
-    { stdio: ['ignore', 'ignore', 'pipe'] },
-  );
+  // Bypass ~/.ssh/config for the tunnel via `-F /dev/null`, then re-supply
+  // the user's resolved connection settings (HostName/User/Port/IdentityFile)
+  // from `ssh -G <target>`. We do this because a `Host <target>` block that
+  // declares LocalForward entries (very common for dev boxes: 3000, 5173,
+  // 8000, etc.) will try to apply ALL of those on every connection. If any
+  // of them is already bound on the laptop, our `-L` would be dropped too
+  // (ExitOnForwardFailure=yes), surfacing as a misleading "tunnel did not
+  // come up". `-o ClearAllForwardings=yes` is not a fix — per OpenSSH it
+  // also clears the command-line `-L`. `-F /dev/null` is the clean answer.
+  const resolved = await resolveSshConfig(target);
+  const sshArgs = [
+    '-F',
+    '/dev/null',
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'ExitOnForwardFailure=yes',
+    '-o',
+    `HostName=${resolved.hostname}`,
+    '-o',
+    `User=${resolved.user}`,
+    '-o',
+    `Port=${resolved.port}`,
+    ...resolved.identityFiles.flatMap((f) => ['-o', `IdentityFile=${f}`]),
+    '-o',
+    'StrictHostKeyChecking=accept-new',
+    '-N',
+    '-L',
+    `${localPort}:127.0.0.1:${api.port}`,
+    target,
+  ];
+  const tunnel = spawn('ssh', sshArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
   // Wait until the forwarded port accepts a connection (tunnel ready).
   const base = `http://127.0.0.1:${localPort}`;
   const deadline = Date.now() + 8000;

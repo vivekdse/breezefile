@@ -172,6 +172,9 @@ type Persisted = {
   // Migrated to true on first launch for users already signed in to
   // TypeBuild (see App/store hydrate path) so we don't hide their backend.
   typebuildEnabled: boolean;
+  // fm-9iha — default agent launcher id for the chat panel (fm-dly3). null =
+  // fall back to a 'claude' launcher, else the first AI launcher.
+  defaultAgentId: string | null;
   // fm-c2w — system notification when a backgrounded tab's terminal
   // demands attention (cursor reappears or BEL/OSC9). Default ON since
   // it's the differentiator over tmux/iTerm. Sound separate and OFF by
@@ -245,6 +248,7 @@ type Action =
   | { type: 'setKeybinds'; keybinds: Keybinds }
   | { type: 'setTaskManagementEnabled'; enabled: boolean }
   | { type: 'setTypebuildEnabled'; enabled: boolean }
+  | { type: 'setDefaultAgentId'; id: string | null }
   | { type: 'setLastFind'; query: string }
   | { type: 'restoreTab' }
   | { type: 'pushRecent'; path: string }
@@ -294,6 +298,21 @@ type Action =
       newPtyId: number;
       cwd: string;
       label?: string;
+    }
+  // fm-dly3 — agent chat side-panel
+  | {
+      type: 'openChat';
+      tabIndex: number;
+      ptyId: number;
+      cwd: string;
+      agentId: string;
+      label?: string;
+    }
+  | { type: 'closeChat'; tabIndex: number }
+  | {
+      type: 'setChatAttention';
+      tabIndex: number;
+      attention: 'idle' | 'busy' | 'bell' | null;
     };
 
 function makeTab(
@@ -351,6 +370,7 @@ const initialState: State = {
   // Default OFF — TypeBuild is opt-in. The hydrate migration flips it ON
   // for users already signed in so existing setups keep their backend.
   typebuildEnabled: false,
+  defaultAgentId: null,
   notifyOnAttention: true,
   soundOnAttention: true,
   taskNotifications: 'all',
@@ -529,6 +549,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, taskManagementEnabled: a.enabled };
     case 'setTypebuildEnabled':
       return { ...s, typebuildEnabled: a.enabled };
+    case 'setDefaultAgentId':
+      return { ...s, defaultAgentId: a.id };
     case 'setLastFind':
       return { ...s, lastFind: a.query };
     case 'pushRecent': {
@@ -691,6 +713,41 @@ function reducer(s: State, a: Action): State {
       };
       return { ...s, tabs };
     }
+    case 'openChat': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t) return s;
+      tabs[a.tabIndex] = {
+        ...t,
+        chat: {
+          ptyId: a.ptyId,
+          cwd: a.cwd,
+          agentId: a.agentId,
+          label: a.label,
+          attention: null,
+        },
+      };
+      return { ...s, tabs };
+    }
+    case 'closeChat': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t) return s;
+      const { chat: _drop, ...rest } = t;
+      void _drop;
+      tabs[a.tabIndex] = rest as typeof t;
+      return { ...s, tabs };
+    }
+    case 'setChatAttention': {
+      const tabs = s.tabs.slice();
+      const t = tabs[a.tabIndex];
+      if (!t || !t.chat) return s;
+      tabs[a.tabIndex] = {
+        ...t,
+        chat: { ...t.chat, attention: a.attention },
+      };
+      return { ...s, tabs };
+    }
   }
 }
 
@@ -753,6 +810,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tagPaths,
           taskManagementEnabled,
           typebuildEnabled,
+          defaultAgentId,
           notifyOnAttention,
           soundOnAttention,
           taskNotifications,
@@ -775,6 +833,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               : {}),
             ...(typeof typebuildEnabled === 'boolean'
               ? { typebuildEnabled }
+              : {}),
+            ...(typeof defaultAgentId === 'string' || defaultAgentId === null
+              ? { defaultAgentId }
               : {}),
             ...(typeof notifyOnAttention === 'boolean' ? { notifyOnAttention } : {}),
             ...(typeof soundOnAttention === 'boolean' ? { soundOnAttention } : {}),
@@ -857,6 +918,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tagPaths: state.tagPaths,
       taskManagementEnabled: state.taskManagementEnabled,
       typebuildEnabled: state.typebuildEnabled,
+      defaultAgentId: state.defaultAgentId,
       notifyOnAttention: state.notifyOnAttention,
       soundOnAttention: state.soundOnAttention,
       taskNotifications: state.taskNotifications,
@@ -875,6 +937,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.tagPaths,
     state.taskManagementEnabled,
     state.typebuildEnabled,
+    state.defaultAgentId,
     state.notifyOnAttention,
     state.soundOnAttention,
     state.taskNotifications,
@@ -912,6 +975,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           shownPrivacyFor.add(p);
           window.dispatchEvent(new CustomEvent('fm:openPrivacyHelp'));
         }
+      } else if (/^ENOENT\b/.test(msg)) {
+        dispatch({ type: 'setStatus', msg: `folder deleted: ${p}` });
       } else {
         dispatch({ type: 'setStatus', msg: `error reading ${p}: ${msg}` });
       }
@@ -1056,6 +1121,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (activeTab.kind !== 'folder') return;
     const leaf = activeTab.trail[activeTab.trail.length - 1];
     if (!leaf) return;
+    // Auto-attach: if this folder lives under an active sshfs mount, connect
+    // its host as a task source so its tasks appear and creates route to it —
+    // no manual :remote-attach needed. Idempotent + guarded in the main
+    // process (once per host/session), and a no-op on platforms / paths
+    // without a remote mount. Fire-and-forget; never blocks navigation.
+    void fm.sourcesAutoAttach(leaf).catch(() => {});
     const pref = state.folderPrefs[leaf];
     if (!pref) return;
     const patch: Partial<Tab> = {};

@@ -1,0 +1,134 @@
+/* fm — inline-chat launch options picker. Reuses .overlay / .overlay__box
+   base styles (App.css) for the backdrop, blur, and enter/exit animation. */
+
+.chatlaunch {
+  min-width: 400px;
+  max-width: 460px;
+  gap: var(--sp-3);
+}
+
+.chatlaunch__target {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--fg-2, var(--muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* keep the tail (file/folder name) visible when clipped */
+  text-align: left;
+}
+
+.chatlaunch__opts {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+.chatlaunch__opt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--border-1, var(--rule));
+  border-radius: var(--r-md);
+  background: var(--bg-1, var(--panel));
+  cursor: pointer;
+  transition: border-color var(--motion-hover), background var(--motion-hover);
+}
+.chatlaunch__opt:hover {
+  border-color: var(--accent-soft);
+}
+
+.chatlaunch__opt input[type='checkbox'] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.chatlaunch__opt-text {
+  display: grid;
+  gap: 2px;
+}
+.chatlaunch__opt-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--fg-1, var(--ink));
+}
+.chatlaunch__opt-hint {
+  font-size: var(--fs-xs);
+  color: var(--fg-3, var(--muted));
+  line-height: 1.35;
+}
+
+.chatlaunch__none {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--fg-2, var(--ink));
+  line-height: 1.45;
+}
+
+.chatlaunch__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+.chatlaunch__btn {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition:
+    background var(--motion-hover),
+    border-color var(--motion-hover),
+    transform var(--motion-hover),
+    box-shadow var(--motion-focus-ring),
+    filter var(--motion-hover);
+}
+.chatlaunch__btn:hover {
+  background: var(--hi);
+}
+.chatlaunch__btn:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  transform: translateY(-1px);
+}
+
+.chatlaunch__btn--cancel:hover {
+  background: var(--hi);
+  border-color: var(--accent-soft);
+}
+
+.chatlaunch__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.chatlaunch__btn--primary:hover {
+  filter: brightness(1.06);
+}
+
+.chatlaunch__kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.1);
+  color: inherit;
+  opacity: 0.85;
+  letter-spacing: 0.05em;
+}
+.chatlaunch__btn--primary .chatlaunch__kbd {
+  background: rgba(255, 255, 255, 0.22);
+}
