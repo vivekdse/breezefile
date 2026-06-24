@@ -1,34 +1,44 @@
-# Breeze File
+# TypeBuild
 
-A breezy, ranger-inspired file manager for macOS and Linux. Built because I
-missed ranger's keyboard-first workflow but wanted **native drag-out to web
-apps like Slack and Gmail** — something ranger and the Linux helpers
-(`ripdrag`, `dragon`) can't do on macOS.
+The desktop client for **getting work done with AI agents.** Tasks are the
+primitive: you see the tasks you (and your team) have, run them yourself or hand
+them to an agent, and watch the automated work happen — across your machines and
+across your team. The keyboard-first file manager this project started as lives
+on as one of the abilities the client and its agents use.
 
-> Status: early personal build. Unsigned, distributed via my own Homebrew
-> tap. Use at your own pace.
+> Status: early personal build, mid-rename. Started as **Breeze File**, a
+> ranger-inspired file manager; pivoting to the **TypeBuild client**. Unsigned,
+> distributed via my own Homebrew tap. Internal identifiers (the `breezefile`
+> package/cask/bundle id) still say "breeze" while the rename is in progress.
 
-## What's in v1
+## What it does
+
+- **Tasks, online and shared** — one task system (TypeBuild). Tasks live online,
+  so they're shared across a team and across one person's multiple machines.
+  No separate local task list to keep in sync.
+- **Run tasks, or hand them to an agent** — execute a task yourself, or let an
+  AI agent do it. Agents operate your browser (Playwright-driven), touch files,
+  and open apps to complete the work, with sensitive submissions gated on
+  explicit human confirmation.
+- **Watch automation happen** — see what's ready, what's running, what an agent
+  is doing right now, and what's blocked. Automated work is resumable and
+  auditable: every step records state and a one-line "why".
+- **PII stays out of the agent's context** — sensitive values ride a task `data`
+  field as placeholder keys; real values are decrypted server-side at fill time
+  (see [`docs/typebuild-data-field-contract.md`](docs/typebuild-data-field-contract.md)).
+
+### The file-manager abilities (still here)
 
 - **Verb-first command prompt** — start typing anywhere (`copy`, `move`,
   `sort`, `theme`, `goto`/`find`, `delete`, …). No memorized chords needed.
 - **Vim-style navigation** alongside the prompt: `h j k l`, arrows,
   `gg`/`G`, `H`/`L` for back/forward, bookmarks (`m<key>` / `'<key>`),
   tabs, sort/view shortcuts.
-- **Stage-then-explore copy/move** — pick a destination, the app navigates
-  you there, a floating chip lets you `ph` (paste here) once you've found
-  the exact subfolder. Move is gated by a confirm dialog.
 - **Native drag-out to other apps** — drag a row to Slack, Gmail, Finder,
   whatever. Multi-file drag carries the whole marked set with a `+N` chip.
-- **Spotlight + local subfolder search** — typing in the goto/find prompt
-  ranks current-folder children, then descendants, then recents and
-  bookmarks, with Spotlight hits last.
-- **Editorial themes** — Paper / Pastel / Peony / Plum / Clay / Moss /
-  Linen / Rose / Dawn / Dusk. Pick via the `theme` verb (live-preview as
-  you arrow through).
-- **Confirm dialogs** for destructive ops with `Y` / `N` keyboard shortcuts.
-- **Single-file create**, bulk rename, "Open With…" with sensible
-  defaults, miller-style preview pane, file thumbnails.
+- **Spotlight + local subfolder search**, editorial themes, stage-then-explore
+  copy/move, confirm dialogs, bulk rename, "Open With…", miller-style preview,
+  file thumbnails.
 
 Deferred for now: file-content preview pane (text peek exists), Linux
 packaging (Linux runs via `npm run dev` for now).
@@ -140,7 +150,9 @@ how features are gated and how to add Linux parity for a given verb.
 
 ### Data locations
 
-- `~/.breezefile/tasks.db` — the task store (existing).
+- Tasks live **online** in the TypeBuild service — there is no local task DB.
+  (The legacy `~/.breezefile/tasks.db` is being removed with the local task
+  source.)
 - `~/.breezefile/index.db` — the file/folder name index (Linux).
 - `~/.config/breezefile/` (or the platform's Electron `userData`) —
   per-extension Open With bindings, terminal preferences, thumbnail cache.
@@ -152,14 +164,15 @@ how features are gated and how to add Linux parity for a given verb.
 - Editorial palette built on Fraunces (display), Inter Tight (UI), and
   JetBrains Mono (kbd).
 
-## Why "Breeze File"?
+## Why "TypeBuild"?
 
-Ranger is incredible but keyboard-only and Linux-native. Finder is
-discoverable but slow for power users. Breeze File aims for both:
-typing-driven verbs for people who lean on the keyboard, plus visible
-chips and confirm dialogs so a non-vim user can still drive it on day one.
-The "breeze" is the easy-mode promise; the file glyph in the icon is the
-literal subject.
+The product is the place you **build** things by expressing work as tasks an
+agent (or you) carries out — much of it by **typing** the action you want rather
+than memorizing a UI. It grew out of *Breeze File*, a keyboard-first file
+manager (ranger's speed without ranger's chord-memorization wall), and that
+file surface survives as an ability the client uses. The pivot: the point is no
+longer managing files — it's getting work done with agents, with files as one of
+the tools.
 
 ## License
 

@@ -1,15 +1,22 @@
 # Workflow Tasks — Design
 
-Status: draft · Owner: Vivek · Last updated: 2026-06-10
+Status: draft · Owner: Vivek · Last updated: 2026-06-24
+
+> **Update 2026-06-24:** the consolidation goal below is now **resolved.**
+> **TypeBuild is the single online task system; beads has been removed** from the
+> repo. The data model in this doc (parent/containment + `depends_on`/ordering +
+> per-step state) maps directly onto the TypeBuild task model
+> (`parent_task_id`, `depends_on`, status). This doc is kept as the design
+> rationale for that model.
 
 ## Goal
 
-Evolve the Breeze task system from a flat "what am I working on" list into a
+Evolve the task system from a flat "what am I working on" list into a
 single system that can also express **assignment, dependencies, and
-agent-driven workflows** — without becoming Jira. The long-term intent is to
-**consolidate onto one system and retire beads**, so Breeze tasks must be able
-to carry the tactical structure (status, deps, ownership) that currently lives
-in beads.
+agent-driven workflows** — without becoming Jira. The intent was to
+**consolidate onto one system and retire beads** — now done: TypeBuild is that
+one system, carrying the tactical structure (status, deps, ownership) that
+previously lived in beads.
 
 Guiding principle: **the simplest possible system that is at the same time
 extremely powerful.** We get power not by adding control-flow machinery to the
@@ -173,5 +180,5 @@ Five ideas, all already tasks. Zero control-flow machinery.
 - [ ] How is `blocked` status derived & kept in sync as blockers close?
 - [ ] Cron ↔ template trigger wiring (where the association is stored).
 - [ ] `instantiate` semantics: deep-copy depth, how run context is injected.
-- [ ] Migration: map current beads-tracked work onto this single model.
+- [x] Migration: beads removed; dev tracking moved into TypeBuild (2026-06-24).
 - [ ] UI: how the graph (containment + ordering) is shown without clutter.

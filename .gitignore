@@ -8,9 +8,6 @@ release
 *.tsbuildinfo
 output
 .claude/scheduled_tasks.lock
-.beads/dolt-access.lock
-.beads/last-touched
-.beads/dolt
 
 # Agent / assistant context — keep local; not part of the published repo.
 CLAUDE.md
@@ -26,8 +23,3 @@ native/sharer/sharer
 # Local secrets (PATs, tokens). Never commit.
 .env
 .env.local
-
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key

@@ -217,14 +217,6 @@ A clean folder reference makes the task discoverable from the right
 place later without you re-explaining the project context.
 `;
 
-const BEADS_SECTION = `
-## When working in a beads-enabled repo
-This folder has a \`.beads/\` directory, so detailed work breakdown likely
-lives in beads issues. Treat breeze tasks as the strategic frame and
-beads issues as the tactical units. Use \`bd ready\` to find next steps;
-closing beads issues advances the breeze task. No explicit cross-link is
-maintained — infer the relationship from titles, descriptions, and folder.`;
-
 async function cmdPrime() {
   const r = await call('GET', '/tasks');
   // Silent exit when app unreachable so SessionStart hook never blocks.
@@ -249,9 +241,6 @@ async function cmdPrime() {
     }
   }
 
-  if (existsSync(join(pwd, '.beads'))) {
-    process.stdout.write(BEADS_SECTION + '\n');
-  }
   return 0;
 }
 

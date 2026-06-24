@@ -1,48 +1,82 @@
-# Breeze File — Value Proposition
+# TypeBuild — Value Proposition
 
 > Living document. Start small; add propositions as we learn what
 > actually matters to users. Every claim here should show up somewhere
 > in the product (copy, onboarding, help) or be cut.
+>
+> **Reframed 2026-06-24.** This product began as *Breeze File*, a
+> keyboard-first file manager. It is now the **TypeBuild client**: the place
+> a person and their team get work done with AI agents. The file-manager
+> value props are preserved at the bottom as the "abilities" layer, since
+> they're still true and still ship — but they are no longer the core promise.
 
 ## The core promise
 
-**Breeze File makes file management easy and fast — with a keyboard-first approach that doesn't make you memorize arbitrary mappings.**
+**TypeBuild is the client where you and your team get things done with AI
+agents — you see every task, run it (yourself or hand it to an agent), and watch
+the automated work happen.**
 
 That is the whole product in one sentence. Everything else is in
 service of it.
 
 ## What that means in practice
 
-### Easy
+### Tasks are the primitive
 
-You shouldn't have to stop and think to do routine file work. The
-common actions (find a file, move it, rename it, send it somewhere)
-should be reachable without hunting through menus, remembering chords,
-or switching tools.
+Work is expressed as **tasks**, not files or chats. A task is a unit of work for
+a human or an agent. The client's job is to make the full set of your tasks
+visible, executable, and observable in one place — what's ready, what's running,
+what an agent is doing right now, and what's blocked.
 
-### Fast
+### Online and shared — across people and machines
 
-Keyboard-driven work is faster than mouse-driven work when the
-interface is designed for it. Breeze File is designed for it.
+Tasks live online, in the TypeBuild service. That means they are **shared**: a
+task can be distributed across a team, or across one person's several machines.
+You pick up where any of your machines left off, and you can see what your
+teammates' agents are working through. There is no separate local task list to
+keep in sync — there is one system.
 
-### Keyboard-first — but not keyboard-obscure
+### Agents do the work; you stay in control
 
-Other keyboard-driven file tools (ranger, vifm, nnn) are fast once
-you've memorized dozens of single-letter chords. That memorization
-cost is a wall most people won't climb.
+The client gives agents the abilities they need to complete a task — operating
+your browser (Playwright-driven), touching files, opening apps — while keeping
+you in the loop. Sensitive form submissions still require explicit human
+confirmation. PII stays out of the agent's context by design (placeholder keys,
+server-side decryption — see the data-field contract). You watch the work, not
+just the result.
 
-Breeze File replaces memorized chords with **typing the action you
-want**. You want to copy? Type `copy`. Move? Type `move`. Share? Type
-`share`. The app fills in the rest. Chords exist as shortcuts for
-actions you've already learned — they are not the primary surface.
+### Auditable, resumable automation
+
+Because tasks carry state and a one-line "why" on every step, automated work is
+**resumable** (an agent crashes or a schedule re-fires; the next agent reads
+state and continues) and **auditable** (every decision is written down and can be
+corrected by editing the task). A non-deterministic executor becomes trustworthy.
+
+## The abilities layer (formerly the whole product)
+
+The keyboard-first file manager that this project started as is now an **ability
+set** the client and its agents use. These propositions are still true and still
+ship:
+
+- **Easy, fast, keyboard-first file work.** Common file actions (find, move,
+  rename, send somewhere) are reachable without hunting through menus or
+  memorizing chords.
+- **Type the action you want.** Want to copy? Type `copy`. Move? Type `move`.
+  The app fills in the rest. Chords exist as shortcuts for actions you've
+  already learned — not the primary surface.
+- **Native drag-out to web apps** (Slack, Gmail, Finder) — the original reason
+  the file manager existed, still the best-in-class affordance for getting a
+  file *out* to where the work is.
+
+These remain in the product; they are the means, not the end.
 
 ## Guardrails for future propositions
 
 As we add value propositions, they should:
 
 - Be **testable** against real user behavior — not aspirational.
-- Point to a **concrete surface** in the product (a verb, a view, a
-  flow).
+- Point to a **concrete surface** in the product (a task view, a verb, a flow,
+  an agent ability).
 - Be **true today**, not "true once we ship feature X."
 - Stay short. If a value prop needs three paragraphs to explain, it
   isn't one yet.
