@@ -1173,7 +1173,7 @@ const VERBS: VerbDef[] = [
     // appear under their own "<host>" section. No terminal, no sync —
     // the host owns and runs its own tasks. Disconnect from the sidebar.
     id: 'remote-attach',
-    label: 'Connect host (breeze tasks from a remote)',
+    label: 'Connect host (TypeBuild tasks from a remote)',
     aliases: ['remote-attach', 'attach', 'remote', 'connect', 'ssh-attach'],
     icon: '⇄',
     describe: (c) =>
@@ -1479,7 +1479,7 @@ const VERBS: VerbDef[] = [
     label: 'Side-by-side (Chrome left / here right)',
     aliases: ['sidebyside', 'side by side', 'split', 'chrome', 'typebuild layout', 'arrange'],
     icon: '◧',
-    describe: () => 'Toggle Chrome-left / Breezefile-right side-by-side layout',
+    describe: () => 'Toggle Chrome-left / TypeBuild-right side-by-side layout',
     isAvailable: () => ({ ok: true }),
     slots: [],
     execute: (_c, _p, api) => {

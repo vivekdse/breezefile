@@ -102,7 +102,7 @@ export function PrivacyHelpDialog({ onClose }: { onClose: () => void }) {
           {allGranted ? 'All set. Your files stay yours.' : 'Folder access'}
         </h2>
         <p className="privacy-help__lede">
-          Breeze File runs locally. macOS asks once per protected folder.
+          TypeBuild runs locally. macOS asks once per protected folder.
           Anywhere else in your home folder opens without a prompt.
         </p>
 

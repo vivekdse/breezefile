@@ -21,7 +21,7 @@ const PATTERNS: { match: RegExp; render: (raw: string) => string }[] = [
   {
     match: /^(EACCES|EPERM)\b/,
     render: () =>
-      "Mac blocked this. Check System Settings → Privacy & Security → Files and Folders, then re-enable Breeze for that folder.",
+      "Mac blocked this. Check System Settings → Privacy & Security → Files and Folders, then re-enable TypeBuild for that folder.",
   },
   // File or directory gone — usually a stale view or a moved/deleted source.
   {

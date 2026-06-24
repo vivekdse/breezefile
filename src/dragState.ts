@@ -62,7 +62,7 @@ export function resolveDropPaths(e: React.DragEvent | DragEvent): string[] {
   if (!files || files.length === 0) return [];
   if (typeof fm.pathForFile !== 'function') {
     throw new Error(
-      'preload bridge missing pathForFile — quit and relaunch Breeze to pick up the new build',
+      'preload bridge missing pathForFile — quit and relaunch TypeBuild to pick up the new build',
     );
   }
   const out: string[] = [];

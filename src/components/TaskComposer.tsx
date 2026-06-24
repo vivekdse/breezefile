@@ -1505,7 +1505,7 @@ export function TaskComposer(props: Props) {
                 />
                 {executor === 'claude' && (
                   <div className="composer__notes-help">
-                    Sent to Claude as the task’s context — Breeze wraps the title, folder, and due date around what you write here.
+                    Sent to Claude as the task’s context — TypeBuild wraps the title, folder, and due date around what you write here.
                   </div>
                 )}
               </div>

@@ -52,7 +52,7 @@
   },
   "build": {
     "appId": "com.vivek.breezefile",
-    "productName": "Breeze File",
+    "productName": "TypeBuild",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -105,13 +105,13 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSDocumentsFolderUsageDescription": "Breeze File needs access to your Documents folder to browse and manage files.",
-        "NSDownloadsFolderUsageDescription": "Breeze File needs access to your Downloads folder to browse and manage files.",
-        "NSDesktopFolderUsageDescription": "Breeze File needs access to your Desktop folder to browse and manage files.",
-        "NSRemovableVolumesUsageDescription": "Breeze File needs access to removable volumes (USB drives, SD cards) to browse and manage files.",
-        "NSNetworkVolumesUsageDescription": "Breeze File needs access to network volumes to browse and manage files.",
-        "NSAppleEventsUsageDescription": "Breeze File uses Apple Events to open files in other applications and reveal them in Finder.",
-        "NSSystemAdministrationUsageDescription": "Breeze File needs access to system folders to browse and manage files."
+        "NSDocumentsFolderUsageDescription": "TypeBuild needs access to your Documents folder to browse and manage files.",
+        "NSDownloadsFolderUsageDescription": "TypeBuild needs access to your Downloads folder to browse and manage files.",
+        "NSDesktopFolderUsageDescription": "TypeBuild needs access to your Desktop folder to browse and manage files.",
+        "NSRemovableVolumesUsageDescription": "TypeBuild needs access to removable volumes (USB drives, SD cards) to browse and manage files.",
+        "NSNetworkVolumesUsageDescription": "TypeBuild needs access to network volumes to browse and manage files.",
+        "NSAppleEventsUsageDescription": "TypeBuild uses Apple Events to open files in other applications and reveal them in Finder.",
+        "NSSystemAdministrationUsageDescription": "TypeBuild needs access to system folders to browse and manage files."
       },
       "target": [
         {

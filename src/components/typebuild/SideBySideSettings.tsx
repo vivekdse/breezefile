@@ -90,7 +90,7 @@ export function SideBySideSettings() {
       {probe === 'no-permission' && (
         <div className="settings__row">
           <span className="settings__path settings__hint">
-            To position Chrome, Breezefile needs Accessibility permission. Until
+            To position Chrome, TypeBuild needs Accessibility permission. Until
             then it snaps only its own window — Chrome stays put.
           </span>
           <button
@@ -107,8 +107,8 @@ export function SideBySideSettings() {
         <div className="settings__row">
           <span className="settings__path settings__hint">
             {caps.id === 'linux'
-              ? 'Moving other apps’ windows isn’t available in this session (Wayland, or wmctrl/xdotool not installed). Side-by-side still snaps Breezefile to the right — snap Chrome to the left yourself (or install wmctrl on X11).'
-              : 'Positioning Chrome isn’t available here. Side-by-side still snaps Breezefile to the right; snap Chrome to the left manually.'}
+              ? 'Moving other apps’ windows isn’t available in this session (Wayland, or wmctrl/xdotool not installed). Side-by-side still snaps TypeBuild to the right — snap Chrome to the left yourself (or install wmctrl on X11).'
+              : 'Positioning Chrome isn’t available here. Side-by-side still snaps TypeBuild to the right; snap Chrome to the left manually.'}
           </span>
         </div>
       )}

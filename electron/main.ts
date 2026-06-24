@@ -46,9 +46,9 @@ dns.setDefaultResultOrder('ipv4first');
 // package.json's `name` is the npm-style slug "file-manager"; Electron
 // reads that for app.getName() in dev (before the bundle is built) and
 // the default `role: 'appMenu'` uses it for the About / Hide / Quit
-// labels. Force the display name so the menu says "Breeze File"
+// labels. Force the display name so the menu says "TypeBuild"
 // everywhere, dev and packaged alike.
-app.setName('Breeze File');
+app.setName('TypeBuild');
 
 // ─── Fail-soft safety net ────────────────────────────────────────────────────
 // A network / TLS / auth failure deep in an async path (a TypeBuild mint or

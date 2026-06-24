@@ -93,8 +93,8 @@ export function ScheduleModal({
       >
         <div className="tasks__modal-title">Schedule on a local cron</div>
         <div className="tasks__modal-body">
-          This source has no scheduler, so Breezefile fires it locally on the
-          cron below. The run is interactive — Breezefile must be open and
+          This source has no scheduler, so TypeBuild fires it locally on the
+          cron below. The run is interactive — TypeBuild must be open and
           signed in when it fires. Note: a session left at the approval gate
           past the 2h claim TTL can lose its claim.
         </div>

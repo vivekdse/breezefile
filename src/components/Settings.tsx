@@ -50,10 +50,10 @@ export function Settings({ onClose, initialSection }: Props) {
         setClaudeResetMsg('Reset failed — see logs. Some entries may remain.');
       } else if (mcp === 'removed' || hooks === 'removed') {
         setClaudeResetMsg(
-          'Removed Breeze MCP + hooks from ~/.claude. They re-register on next launch.',
+          'Removed TypeBuild MCP + hooks from ~/.claude. They re-register on next launch.',
         );
       } else {
-        setClaudeResetMsg('Already clean — nothing of Breeze was registered.');
+        setClaudeResetMsg('Already clean — nothing of TypeBuild was registered.');
       }
     } catch (err) {
       setClaudeResetMsg(formatOpError('reset', err));
@@ -411,7 +411,7 @@ export function Settings({ onClose, initialSection }: Props) {
           >
             <div className="settings__row">
               <span className="settings__action">
-                Breeze auto-registers a Claude Code MCP server and busy/idle
+                TypeBuild auto-registers a Claude Code MCP server and busy/idle
                 hooks in <code>~/.claude</code> on launch. Reset to strip them
                 (and the hook script); they re-register next launch.
               </span>

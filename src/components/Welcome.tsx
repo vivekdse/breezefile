@@ -218,7 +218,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
           <>
             <div className="welcome__eyebrow">Welcome to</div>
             <h1 id="welcome-title" className="welcome__title">
-              Breeze<em>·</em>File
+              TypeBuild
             </h1>
 
             <WelcomeDemo />
@@ -255,7 +255,7 @@ export function Welcome({ onClose }: { onClose: () => void }) {
               Your Mac will ask for some permissions.
             </h2>
             <p className="welcome__notice-body">
-              To protect your privacy, macOS will ask Breeze File for
+              To protect your privacy, macOS will ask TypeBuild for
               permission to read Desktop, Documents, Downloads, and
               iCloud Drive. Click <strong>Allow</strong> on each prompt
               that appears after this. Nothing leaves your machine.
