@@ -9,6 +9,19 @@
   the right pane feel live.
   VALUES SERVED: V1 Calm Triage, V2 Live Situational Awareness, V3 Direct Control,
   V5 Trust & Auditability, V7 Confidentiality (TypeBuild content gated behind reveal).
+
+  PROJECT LAYER (added): A calm project plaque + switcher sits ABOVE the left list —
+  CURRENT PROJECT "API service · ~/git/api" (switcher hints Personal / Web app), with the
+  repo binding (github.com/acme/api · main) and an "Instructions (4)" pill that opens the
+  four canonical project rules one click away (incl. "1 learned from you Tue") plus a
+  "＋ Teach a rule" control. The list is scoped to the project. In the RIGHT pane each run
+  shows "Honors 4 project instructions"; the blocked Nightly deploy cites the rule in its
+  step-trace "why" ("stopped — rule: never merge with red CI"), surfacing the earned
+  block↔rule link; and the inline steer box offers "Save as project instruction" to teach
+  in the moment.
+  ADDED VALUES SERVED: V8 Power Without Machinery (teach the system in plain language, no
+  settings-page machinery) reinforcing V5 Auditability (block cites the rule that caused it)
+  and V3 Direct Control (teach/bind/switch are explicit, never hover-only).
 -->
 <html lang="en">
 <head>
@@ -40,8 +53,50 @@
 
   .split{display:grid; grid-template-columns:360px 1fr; min-height:0}
 
+  /* ---------------- LEFT COLUMN (project plaque + list) ---------------- */
+  .leftcol{display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--line); background:var(--side)}
+
+  /* project plaque — calm strip above the list */
+  .proj{padding:11px 14px 12px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#16181f,#14161c); position:relative}
+  .proj .ptop{display:flex; align-items:center; gap:9px}
+  .proj .pmark{width:22px;height:22px;border-radius:7px;flex:none;display:grid;place-items:center;font-size:12px;font-weight:800;color:#0c0d11;background:linear-gradient(135deg,var(--accent),#a98bff)}
+  .proj .pname{font-weight:700; font-size:14px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .proj .plabel{font-size:10px; letter-spacing:.8px; text-transform:uppercase; color:var(--muted); display:block; margin-bottom:1px}
+  .proj .switch{font:11px inherit; color:var(--muted); background:var(--chip); border:1px solid var(--line); border-radius:7px; padding:3px 8px; cursor:pointer}
+  .proj .switch:hover{color:var(--ink); border-color:#3a3f4d}
+  .proj .pbind{display:flex; align-items:center; gap:7px; margin-top:8px; font-size:11.5px; color:var(--muted); flex-wrap:wrap}
+  .proj .pbind code{background:var(--chip); padding:1px 6px; border-radius:5px; color:#cfd5e0}
+  .proj .pbind .branch{color:var(--accent2)}
+  .proj .pi{display:inline-flex; align-items:center; gap:6px; margin-top:9px; font:11.5px inherit; color:var(--ink); background:var(--chip); border:1px solid var(--line); border-radius:8px; padding:4px 10px; cursor:pointer}
+  .proj .pi:hover{border-color:#3a3f4d}
+  .proj .pi .dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .proj .pi .learn{color:var(--muted)}
+
+  /* switcher dropdown */
+  .pswitch-menu{position:absolute; top:42px; left:14px; right:14px; z-index:30; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:6px; display:none; box-shadow:0 12px 30px rgba(0,0,0,.45)}
+  .pswitch-menu.open{display:block}
+  .pswitch-menu .opt{display:flex; align-items:center; gap:8px; padding:8px 9px; border-radius:8px; cursor:pointer; font-size:13px}
+  .pswitch-menu .opt:hover{background:#1e2229}
+  .pswitch-menu .opt.cur{background:var(--sel)}
+  .pswitch-menu .opt .om{width:18px;height:18px;border-radius:6px;flex:none;display:grid;place-items:center;font-size:10px;font-weight:800;color:#0c0d11}
+  .pswitch-menu .opt .osub{color:var(--muted); font-size:11px; margin-left:auto}
+  .pswitch-menu .newp{color:var(--accent2); border-top:1px solid var(--line); margin-top:4px; padding-top:9px}
+
+  /* instructions popover */
+  .pi-pop{position:absolute; top:42px; left:14px; right:14px; z-index:30; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; display:none; box-shadow:0 14px 36px rgba(0,0,0,.5)}
+  .pi-pop.open{display:block}
+  .pi-pop h5{margin:0 0 3px; font-size:13px}
+  .pi-pop .sub{color:var(--muted); font-size:11.5px; margin:0 0 11px}
+  .pi-pop ol{list-style:none; margin:0 0 12px; padding:0; counter-reset:r}
+  .pi-pop li{display:grid; grid-template-columns:18px 1fr; gap:9px; padding:7px 0; border-bottom:1px dashed var(--line); font-size:12.5px; line-height:1.45; color:#cfd5e0}
+  .pi-pop li:last-of-type{border-bottom:none}
+  .pi-pop li::before{counter-increment:r; content:counter(r); width:18px;height:18px;border-radius:6px; background:var(--chip); color:var(--muted); display:grid; place-items:center; font-size:10px; margin-top:1px}
+  .pi-pop li .new{display:inline-block; font-size:9px; letter-spacing:.4px; text-transform:uppercase; color:var(--accent2); background:rgba(57,211,178,.12); border:1px solid rgba(57,211,178,.3); border-radius:99px; padding:0 6px; margin-left:6px; vertical-align:1px}
+  .pi-pop .teach{font:12px inherit; font-weight:600; width:100%; cursor:pointer; color:var(--accent); background:rgba(124,92,255,.1); border:1px solid rgba(124,92,255,.4); border-radius:9px; padding:8px 12px}
+  .pi-pop .teach:hover{background:rgba(124,92,255,.18)}
+
   /* ---------------- LEFT LIST ---------------- */
-  .list{border-right:1px solid var(--line); background:var(--side); overflow:auto; padding:8px 0}
+  .list{flex:1; overflow:auto; padding:8px 0; min-height:0}
   .grouphead{font-size:11px; letter-spacing:.8px; text-transform:uppercase; color:var(--muted); padding:14px 18px 6px; display:flex; gap:8px; align-items:center}
   .grouphead .n{background:var(--chip); border-radius:99px; padding:0 8px; line-height:18px; font-size:11px}
   .grouphead.alert{color:var(--warn)}
@@ -76,6 +131,17 @@
   .dhead h2{margin:0 0 4px; font-size:21px}
   .dhead .dmeta{color:var(--muted); font-size:12.5px; display:flex; gap:16px; flex-wrap:wrap}
   .dhead .dmeta code{background:var(--chip);padding:1px 6px;border-radius:5px}
+  /* "honors project instructions" chip in detail header */
+  .honors{display:inline-flex; align-items:center; gap:6px; margin-top:10px; font-size:11.5px; color:var(--accent2); background:rgba(124,92,255,.08); border:1px solid rgba(124,92,255,.3); border-radius:99px; padding:3px 10px; cursor:pointer}
+  .honors:hover{border-color:rgba(124,92,255,.55)}
+  .honors .pmark{width:14px;height:14px;border-radius:4px;display:grid;place-items:center;font-size:8px;font-weight:800;color:#0c0d11;background:linear-gradient(135deg,var(--accent),#a98bff)}
+  /* the rule cited in a step-trace "why" */
+  .ts .y .rule{color:var(--bad); font-weight:600}
+  /* save-as-instruction strip near steer */
+  .saverule{display:flex; align-items:center; gap:9px; margin-top:9px; font-size:12px; color:var(--muted)}
+  .saverule button{font:12px inherit; font-weight:600; cursor:pointer; color:var(--accent); background:rgba(124,92,255,.1); border:1px solid rgba(124,92,255,.4); border-radius:8px; padding:5px 11px}
+  .saverule button:hover{background:rgba(124,92,255,.18)}
+  .saverule .teaches{color:var(--accent2)}
 
   /* live stream */
   .dbody{padding:18px 24px; flex:1}
@@ -132,6 +198,46 @@
 
   <div class="split">
     <!-- LEFT -->
+    <div class="leftcol">
+
+      <!-- PROJECT PLAQUE — calm context + switcher + repo binding + instructions -->
+      <div class="proj">
+        <div class="ptop">
+          <span class="pmark">A</span>
+          <div style="flex:1;min-width:0">
+            <span class="plabel">Project</span>
+            <span class="pname">API service</span>
+          </div>
+          <button class="switch" id="switchBtn">Switch ▾</button>
+        </div>
+        <div class="pbind">
+          <span>🔗 bound to</span><code>~/git/api</code>
+          <span>· github.com/acme/api ·</span><span class="branch">main</span>
+        </div>
+        <span class="pi" id="instrBtn"><span class="dot"></span><b>Instructions (4)</b><span class="learn">· 1 learned from you Tue</span></span>
+
+        <!-- switcher dropdown -->
+        <div class="pswitch-menu" id="switchMenu">
+          <div class="opt cur"><span class="om" style="background:linear-gradient(135deg,#7c5cff,#a98bff)">A</span>API service<span class="osub">~/git/api</span></div>
+          <div class="opt"><span class="om" style="background:linear-gradient(135deg,#39d3b2,#6ee7cf)">P</span>Personal<span class="osub">~/notes</span></div>
+          <div class="opt"><span class="om" style="background:linear-gradient(135deg,#ffb020,#ffd58a)">W</span>Web app<span class="osub">~/git/web</span></div>
+          <div class="opt newp">＋ New project…</div>
+        </div>
+
+        <!-- instructions popover -->
+        <div class="pi-pop" id="instrPop">
+          <h5>Project instructions — API service</h5>
+          <p class="sub">Plain-language rules every agent run in this project honors. They persist · 4 instructions · 1 learned from you Tue.</p>
+          <ol>
+            <li>Never merge with red CI — stop and ask me.</li>
+            <li>Squash &amp; merge only. PR titles: <code style="background:var(--chip);padding:0 4px;border-radius:4px">area: summary</code>.</li>
+            <li>Post run results to #eng.<span class="new">learned Tue</span></li>
+            <li>Don't touch <code style="background:var(--chip);padding:0 4px;border-radius:4px">infra/</code> without confirming first.</li>
+          </ol>
+          <button class="teach" id="teachBtn">＋ Teach a rule</button>
+        </div>
+      </div>
+
     <div class="list" id="list">
       <div class="grouphead alert">Needs you <span class="n">2</span></div>
 
@@ -168,7 +274,8 @@
         <div class="l2"><span class="owner"><span class="av bot">⚙</span>local auto · cron Fri 9am · summarized 18 PRs</span></div>
         <div class="quick"><button>Accept</button><button>Redo</button></div>
       </div>
-    </div>
+    </div><!-- /.list -->
+    </div><!-- /.leftcol -->
 
     <!-- RIGHT -->
     <div class="detail" id="detail"><!-- filled by JS --></div>
@@ -186,19 +293,20 @@ const DATA = {
       'vitest run …','✕ auth.spec.ts "rejects expired session token"','expected 401, received 200',
       'paused — deploy gate red, waiting for you'
     ],
+    honors:4,
     trace:[
       ['ok','Pulled latest main','ensure deploy reflects newest commits'],
       ['ok','Installed deps & built bundle','build must pass before tests'],
-      ['fail','Ran tests — 1 failing','deploy gate requires green suite; stopped here'],
+      ['fail','Ran tests — 1 failing','<span class="rule">stopped — rule: never merge with red CI</span> (a project instruction)'],
       ['todo','Deploy to production — held','will not ship while tests are red']
     ],
-    err:'auth.spec.ts failed: token TTL check skipped when clock skew &gt; 0 (session.ts:88). Re-run, or steer the agent to fix or skip.',
+    err:'auth.spec.ts failed: token TTL check skipped when clock skew &gt; 0 (session.ts:88). Blocked by your project rule <b>“Never merge with red CI — stop and ask me.”</b> Re-run, or steer the agent to fix or skip.',
     controls:'running', est:'Re-running the suite ≈ <b>1 build minute</b> and won’t deploy on its own — you review the result first.'
   },
   beads:{
     tag:'wait', tagtxt:'Waiting on you', title:'Migrate beads → tasks',
     meta:['local auto agent','folder <code>~/.breezefile</code>','step 4 of 6'],
-    live:false,
+    live:false, honors:4,
     question:'Delete 12 stale issues? (y/n) — they’ve been closed &gt; 90 days and have no open deps.',
     trace:[
       ['ok','Read 64 beads issues','source of truth for migration'],
@@ -211,7 +319,7 @@ const DATA = {
   triage:{
     tag:'work', tagtxt:'Working', title:'Triage inbox → tasks',
     meta:['TypeBuild · claimed by you','encrypted queue','running 6 min'],
-    live:true, phi:true,
+    live:true, phi:true, honors:4,
     stream:['scanning inbox (37 threads)','clustering by sender + intent','drafting task: “Reply to landlord…”','drafting task: “Review Sam’s PR #214”','drafted 4 tasks — refining titles'],
     trace:[
       ['ok','Decrypted queue in memory','content never written to disk'],
@@ -224,7 +332,7 @@ const DATA = {
   refactor:{
     tag:'work', tagtxt:'Working', title:'Refactor TaskRow',
     meta:['TypeBuild · claimed by Priya','encrypted queue','step 3 of 5'],
-    live:true,
+    live:true, honors:4,
     stream:['Priya’s agent: split TaskRow into Row + Meta','extracting status badge','updating 6 call sites','running component tests…'],
     trace:[
       ['ok','Read TaskRow.tsx','identify split boundaries'],
@@ -237,7 +345,7 @@ const DATA = {
   weekly:{
     tag:'done', tagtxt:'Done · 2h ago', title:'Weekly report',
     meta:['local auto · cron Fri 9am','folder <code>~/git</code>','ran 4 min'],
-    live:false,
+    live:false, honors:4,
     result:['Summarized <b>18 merged PRs</b> across api, web, infra','Flagged <b>2 risky changes</b> (auth, billing) for review','Wrote <code>~/git/reports/2026-06-13.md</code>','Drafted a 6-line Slack digest (not sent)'],
     trace:[
       ['ok','Listed merged PRs (since last Fri)','scope = one week'],
@@ -262,7 +370,8 @@ function render(id){
   const d=DATA[id];
   let controls='';
   if(d.controls==='running') controls=`
-    <div class="steer"><textarea placeholder="Steer the agent — e.g. 'Skip the expired-token test and open a follow-up', or 'Fix the clock-skew check and re-run.'"></textarea></div>
+    <div class="steer"><textarea id="steerBox" placeholder="Steer the agent — e.g. 'Skip the expired-token test and open a follow-up', or 'Fix the clock-skew check and re-run.'"></textarea></div>
+    <div class="saverule">Teaching the agent here? <button id="saveRuleBtn">＋ Save as project instruction</button><span class="teaches">applies to every future run in API service</span></div>
     ${d.est?`<div class="est">Dry run · ${d.est}</div>`:''}
     <div class="controls"><button class="b primary">Send steer</button><button class="b">Re-run</button><button class="b">Pause</button><div class="grow"></div><button class="b danger">Stop agent</button></div>`;
   else if(d.controls==='yesno') controls=`
@@ -287,6 +396,7 @@ function render(id){
       <div class="tagrow"><span class="tag ${d.tag}">${d.tagtxt}</span><span style="color:var(--muted);font-size:12px">${id==='deploy'?'open first':''}</span></div>
       <h2>${d.title}</h2>
       <div class="dmeta">${metaHTML(d.meta)}</div>
+      ${d.honors?`<span class="honors" id="honorsChip" title="Click to view the project instructions in effect"><span class="pmark">A</span>Honors ${d.honors} project instructions</span>`:''}
     </div>
     <div class="dbody">
       ${d.live?`<p class="blocktitle"><span class="live-dot"></span> Live session — last actions</p><div class="stream" id="stream"></div>`:''}
@@ -315,7 +425,43 @@ function render(id){
 
   const rb=document.getElementById('revealBtn');
   if(rb) rb.onclick=()=>document.getElementById('phiBox').classList.add('revealed');
+
+  // "Honors N project instructions" chip → open the instructions popover
+  const hc=document.getElementById('honorsChip');
+  if(hc) hc.onclick=()=>{closeMenus();instrPop.classList.add('open');};
+
+  // "Save as project instruction" — teach in the moment
+  const sr=document.getElementById('saveRuleBtn');
+  if(sr) sr.onclick=()=>{
+    const box=document.getElementById('steerBox');
+    const txt=(box&&box.value.trim())||prompt('Save this as a project instruction for “API service” — every future run will honor it:','');
+    if(txt&&txt.trim()) alert('Saved as a project instruction for “API service”:\n\n“'+txt.trim()+'”\n\nIt now joins the set (5 instructions · learned from you just now) and shapes every agent run in this project.');
+  };
 }
+
+/* ---- project layer: switcher + instructions ---- */
+const switchBtn=document.getElementById('switchBtn');
+const switchMenu=document.getElementById('switchMenu');
+const instrBtn=document.getElementById('instrBtn');
+const instrPop=document.getElementById('instrPop');
+const teachBtn=document.getElementById('teachBtn');
+function closeMenus(){switchMenu.classList.remove('open');instrPop.classList.remove('open');}
+switchBtn.onclick=e=>{e.stopPropagation();const o=switchMenu.classList.contains('open');closeMenus();if(!o)switchMenu.classList.add('open');};
+instrBtn.onclick=e=>{e.stopPropagation();const o=instrPop.classList.contains('open');closeMenus();if(!o)instrPop.classList.add('open');};
+instrPop.onclick=e=>e.stopPropagation();
+switchMenu.onclick=e=>e.stopPropagation();
+[...switchMenu.querySelectorAll('.opt')].forEach(o=>o.onclick=()=>{
+  closeMenus();
+  if(o.classList.contains('cur'))return;
+  if(o.classList.contains('newp')){alert('New project — name it, then bind a folder or git repo so its agents inherit context.');return;}
+  alert('Switching project to “'+o.childNodes[1].textContent.trim()+'”.\n\nThe list and runs would re-scope to that project and load its own instructions.');
+});
+teachBtn.onclick=()=>{
+  const r=prompt('Teach a new rule for “API service” — plain language. Every agent run in this project will honor it:','');
+  if(r&&r.trim()){closeMenus();alert('Added to project instructions for “API service”:\n\n“'+r.trim()+'”\n\nThe set now grows (5 instructions · learned from you just now).');}
+};
+document.addEventListener('click',closeMenus);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenus();});
 
 /* selection + keyboard */
 const rows=[...document.querySelectorAll('.row')];

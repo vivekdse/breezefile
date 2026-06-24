@@ -64,13 +64,21 @@
   Each explores a distinct paradigm against the three jobs: <b>monitor running agents live · triage
   the overview · create agentic tasks from intent.</b> Not pick-a-winner — these are for comparing,
   combining, and converging in Phase 4.</p>
+  <p class="sub" style="margin-top:12px">New in this pass: every variation now carries a first-class
+  <b>Project layer</b> — a calm current-project context + switcher, an optional <b>folder / git-repo
+  binding</b> (how context flows to agents), and persistent <b>project instructions</b>: the
+  <b>teaching layer</b> where the operator sets plain-language rules every agent honors. Each paradigm
+  expresses it natively (mailbox rules, house rules, a canvas node, an audit ledger entry…) — always
+  unobtrusive, always a knowable affordance.</p>
 </header>
 
 <div class="hero">
   Same scenario runs through all nine, so you can compare paradigms on identical data:
   <b>3 agents need you · "Nightly deploy" has been blocked 41 min on a failing <code>auth.spec.ts</code></b>
   · "Migrate beads" is asking a y/n · Priya's "Refactor TaskRow" is on step 3/5 · the team shares the
-  encrypted TypeBuild queue.
+  encrypted TypeBuild queue. All nine sit in one project — <b>"API service"</b>, bound to
+  <code>~/git/api</code> — whose instruction <i>"Never merge with red CI"</i> is exactly why the
+  deploy held: the block cites the rule the operator taught.
 </div>
 
 <div class="wrap">
@@ -288,6 +296,45 @@
   </table>
   </div>
 
+  <h2>The Project layer — how each paradigm expresses it</h2>
+  <div class="scroll" style="margin-top:10px">
+  <table>
+    <thead><tr>
+      <th>Variation</th><th>Project context + switch</th><th>Folder / repo binding</th>
+      <th>Instructions = the teaching layer</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>01 Mission Control</td><td>Context strip under the topbar; switcher dropdown</td>
+        <td>Repo shown on the strip + in the panel</td>
+        <td class="lead">Slide-in panel; tile cites "held by rule: never merge red CI"; ＋ Teach a rule</td></tr>
+      <tr><td>02 Command Bar</td><td>Calm strip above ⌘K; switcher popover</td>
+        <td>Proposal folder reads "from project · API service"</td>
+        <td class="lead">"Honors 4 instructions"; <code>teach:</code> command + "Save as instruction" on edit</td></tr>
+      <tr><td>03 Attention Lanes</td><td>Plaque above the lanes; keyboard switch</td>
+        <td>Repo on plaque; lane "+" pre-fills <code>~/git/api</code></td>
+        <td>Instructions panel (<code>i</code>); blocked card cites the rule</td></tr>
+      <tr><td>04 Agent Inbox</td><td class="lead">Project = mailbox/account; switching re-scopes the inbox</td>
+        <td>Binding on the mailbox; unbound "Personal" offers to bind</td>
+        <td class="lead">Instructions framed as inbox RULES; "Make this a rule" on reply</td></tr>
+      <tr><td>05 Living Timeline</td><td>Context plaque under header; switch ▾</td>
+        <td>Repo on plaque</td>
+        <td class="lead">Block + rule-edits are ledger events; "Pin as a project instruction"</td></tr>
+      <tr><td>06 Ambient Canvas</td><td>Corner plaque = the canvas world; switch swaps canvas</td>
+        <td>Binding on plaque</td>
+        <td class="lead">A "House rules" node on the canvas; blocked edge cites the rule</td></tr>
+      <tr><td>07 Single Focus</td><td>Quiet label in the slim rail; switcher</td>
+        <td>Inherited folder shown subtly</td>
+        <td>On-demand drawer (<code>i</code>); focused item "Held by your rule …"</td></tr>
+      <tr><td>08 Split Monitor</td><td>Plaque above the list; Switch ▾; list scoped to project</td>
+        <td>Repo on plaque</td>
+        <td class="lead">Pane shows "Honors 4 instructions"; "why" cites rule; Save-as-instruction by steer box</td></tr>
+      <tr><td>09 Fleet Roster</td><td class="lead">Project = the team/org; switcher; roster scoped to it</td>
+        <td>Team's home repo on plaque</td>
+        <td class="lead">Instructions = the team's "House rules" charter; ＋ Teach a rule (<code>h</code>)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
   <h2>Tensions each navigates</h2>
   <div class="legend" style="display:block;line-height:1.7">
     <div><b>Live awareness vs. clutter</b> — Mission Control (01), Timeline (05), Split (08) lean
@@ -300,6 +347,11 @@
     both show the inferred plan before committing.</div>
     <div><b>Tasks-centric vs. agents-centric</b> — eight variations organize around <i>work</i>; Fleet
     (09) organizes around <i>workers</i> (human + agent). Worth testing which mental model the team adopts.</div>
+    <div><b>Teaching unobtrusively vs. discoverably</b> — project instructions must shape every agent run
+    without becoming a settings page that dominates. Inbox "rules" (04) and Fleet "house rules" (09) make
+    the teaching layer feel native; Single Focus (07) hides it behind one keystroke. The question: will
+    operators find — and trust — a teaching affordance that stays out of the way? The earned link (a block
+    that cites the rule that caused it) is the set's shared answer: instructions prove themselves in use.</div>
   </div>
 
 </div>

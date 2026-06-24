@@ -66,6 +66,46 @@ Triage / to-dos:
 TypeBuild team queue: tasks owned by you / Priya / Sam; one "unclaimed: Fix flaky CI"; priorities P0-P3.
 Templates/recipes for creation: "Ship a PR", "Nightly deploy", "Triage inbox", "Summarize a repo".
 
+## Project layer — first-class scope (NEW — design into EVERY variation)
+Breezefile now groups tasks under **Projects**. A project is a first-class *scope*, not a tag.
+Because the work is now agentic, a project is where the user **teaches the system** how to work.
+Three things every variation must express, each **unobtrusive but a clearly knowable affordance**:
+
+1. **Current-project context + switcher.** The user is always *in* a project; show which one and let
+   them switch. The view is scoped to it (the tasks shown belong to the current project). Default
+   project for this scenario: **"API service."** Others exist (e.g. "Personal", "Web app") — the
+   switcher hints at them. Keep it calm: a strip/header/plaque, NOT a panel that dominates.
+
+2. **Folder / git-repo binding (optional but useful).** A project *can* be bound to a folder or a git
+   repo — this is how context flows to its agents. "API service" is bound to git repo **`~/git/api`**
+   (github.com/acme/api · branch `main`). Manual projects may bind a plain folder or nothing. Make
+   "optional" legible: an unbound project is valid — offer a gentle "Bind a folder or repo" next step.
+
+3. **Project instructions — THE TEACHING LAYER.** Persistent, plain-language rules the user writes that
+   EVERY agent run in the project honors. This is the user teaching the system. Canonical instructions
+   for "API service" (reuse verbatim for coherence):
+   - "Never merge with red CI — stop and ask me."
+   - "Squash & merge only. PR titles: `area: summary`."
+   - "Post run results to #eng."
+   - "Don't touch `infra/` without confirming first."
+   Convey that instructions (a) **persist**, (b) **shape every agent in the project**, and (c) can be
+   **taught in the moment** — when the user corrects/answers an agent, offer "Save as a project
+   instruction." Show the set grows: e.g. "4 instructions · 1 learned from you Tue".
+
+**Earned connection — USE IT:** "Nightly deploy" is BLOCKED on red `auth.spec.ts` *because of* the
+project instruction "Never merge with red CI." Surface this link — the block cites the rule that caused
+it. The teaching layer should feel powerful and auditable, not like a settings page.
+
+**Treatment bar (in addition to the usability + content bars above):**
+- Unobtrusive: project context is a calm strip/header; instructions live one click/keystroke away — not
+  always expanded, never buried three levels deep in a modal.
+- Clearly teachable: use an explicit, inviting control ("＋ Teach a rule", "Edit instructions", "Bind
+  repo"). Never hover-only — the user must KNOW the affordance exists.
+- Inheritance is visible: tasks inherit the project's folder + instructions; show overrides; a created
+  task pre-fills its folder from the project.
+- Stay native to each variation's visual language (its CSS vars, layout, type). Match — don't paste a
+  foreign component in.
+
 ## Output
 Write each variation as its own file in this folder. Use the EXACT filenames you were told to use.
 Top of each file: an HTML comment listing the variation name, the paradigm, and the values it serves.

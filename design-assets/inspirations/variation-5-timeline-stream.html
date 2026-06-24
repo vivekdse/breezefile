@@ -13,6 +13,16 @@
     V1 Calm Clarity               — single chronological column; filters fold the rest away.
     V6 Team Coordination          — events attributed to you / Priya / Sam.
     V7 Confidentiality            — TypeBuild event bodies blurred until focus/hover.
+  PROJECT LAYER (added):
+    A calm project-context plaque under the header names the CURRENT PROJECT "API service" bound to
+    git repo ~/git/api (github.com/acme/api · main), with a switcher hinting Personal / Web app. The
+    whole timeline is SCOPED to this project. An "Instructions (4)" chip opens the four canonical
+    rules one click away, with an explicit "＋ Teach a rule" control. Leaning into the audit metaphor:
+    the block event reads "🔒 blocked — rule 'Never merge with red CI' triggered" (an auditable event
+    citing the instruction), and a "you taught a rule Tue" ledger event records an instruction change.
+    Correcting an agent in the feed offers "Pin as a project instruction".
+    Serves V5 Trust & Auditability (rules as cited, timestamped ledger events), V4 Intent→Action
+    (teach-in-the-moment), V8 Power Without Machinery (plain-language rules, no settings page).
 -->
 <html lang="en">
 <head>
@@ -48,6 +58,57 @@
   .chip{border:1px solid var(--line);background:var(--panel);color:var(--dim);
     padding:5px 11px;border-radius:999px;font-size:12.5px;cursor:pointer}
   .chip[aria-pressed="true"]{background:var(--accent-d);border-color:var(--accent);color:#eafff5}
+
+  /* project context plaque */
+  .proj{grid-column:1 / -1;background:linear-gradient(90deg,#101a16,#0e1411);
+    border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:12px;
+    padding:10px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:6px 0 0}
+  .proj .pj-lab{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--faint);font-weight:700}
+  .proj .pj-name{font-weight:750;font-size:14px;display:inline-flex;align-items:center;gap:7px}
+  .proj .pj-name .em{font-size:15px}
+  .pj-switch{position:relative}
+  .pj-switch .caret{border:1px solid var(--line);background:var(--panel);color:var(--dim);
+    border-radius:8px;padding:4px 9px;font-size:12px;cursor:pointer;font-family:var(--sans)}
+  .pj-switch .caret:hover{border-color:var(--accent-d);color:var(--ink)}
+  .pj-menu{position:absolute;top:115%;left:0;z-index:30;min-width:200px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:10px;padding:5px;display:none;box-shadow:0 10px 30px #0008}
+  .pj-menu.show{display:block}
+  .pj-menu .item{padding:7px 9px;border-radius:7px;font-size:12.5px;cursor:pointer;color:var(--dim);display:flex;flex-direction:column;gap:1px}
+  .pj-menu .item:hover{background:var(--panel);color:var(--ink)}
+  .pj-menu .item.cur{color:var(--accent)}
+  .pj-menu .item .sub{font-size:11px;color:var(--faint)}
+  .pj-menu .sep{height:1px;background:var(--line);margin:4px 2px}
+  .pj-repo{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);
+    font-family:var(--mono);border:1px solid var(--line);border-radius:7px;padding:3px 8px;background:#0a0d0b}
+  .pj-repo a{color:var(--dim);text-decoration:none}
+  .pj-repo .branch{color:var(--faint)}
+  .pj-instr{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .pj-chip{border:1px solid var(--line);background:var(--panel);color:var(--dim);
+    padding:5px 11px;border-radius:999px;font-size:12.5px;cursor:pointer;font-family:var(--sans)}
+  .pj-chip:hover{border-color:var(--accent-d);color:var(--ink)}
+  .pj-chip[aria-expanded="true"]{background:var(--accent-d);border-color:var(--accent);color:#eafff5}
+  .pj-chip .learned{color:var(--accent);font-weight:700}
+
+  /* instructions drawer */
+  .instr-drawer{grid-column:1 / -1;max-height:0;overflow:hidden;transition:max-height .25s}
+  .instr-drawer.show{max-height:340px}
+  .instr-inner{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-top:8px}
+  .instr-inner .ih{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+  .instr-inner .ih h4{margin:0;font-size:12.5px;font-weight:700}
+  .instr-inner .ih .meta{font-size:11.5px;color:var(--faint)}
+  .instr-inner .ih .meta .learned{color:var(--accent);font-weight:600}
+  .rule{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .rule:last-of-type{border-bottom:0}
+  .rule .rn{color:var(--accent);font-weight:700;flex:0 0 16px;font-variant-numeric:tabular-nums}
+  .rule code{font-family:var(--mono);font-size:11.5px;background:#08110d;border:1px solid var(--line);border-radius:4px;padding:0 4px;color:var(--dim)}
+  .rule .tag{font-size:10px;color:var(--accent);border:1px solid var(--accent-d);border-radius:5px;padding:1px 6px;margin-left:6px;white-space:nowrap}
+  .rule .cited{font-size:10px;color:var(--urgent);border:1px solid #5a2b2b;border-radius:5px;padding:1px 6px;margin-left:6px;white-space:nowrap}
+  .instr-foot{display:flex;gap:9px;align-items:center;margin-top:11px;flex-wrap:wrap}
+  .instr-foot .est{color:var(--faint);font-size:11.5px}
+  .pin-row{margin-top:9px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+    background:#101a16;border:1px dashed var(--accent-d);border-radius:9px;padding:8px 11px}
+  .pin-row .ptxt{font-size:12px;color:var(--dim)}
+  .pin-row .ptxt b{color:var(--ink)}
 
   /* hero */
   .hero{grid-column:1 / -1;background:linear-gradient(90deg,#1a120f,#12100d);
@@ -158,6 +219,51 @@
     </div>
   </header>
 
+  <!-- PROJECT CONTEXT — calm plaque; timeline below is scoped to it -->
+  <div class="proj">
+    <span class="pj-lab">Project</span>
+    <span class="pj-name"><span class="em">🛠</span> API service</span>
+    <span class="pj-switch">
+      <button class="caret" id="pjCaret" aria-expanded="false" onclick="togglePjMenu()">switch ▾</button>
+      <div class="pj-menu" id="pjMenu">
+        <div class="item cur"><span>🛠 API service <span style="float:right">●</span></span><span class="sub">~/git/api · 5 active runs</span></div>
+        <div class="sep"></div>
+        <div class="item" onclick="toast('Switching to Web app… (demo)')"><span>🌐 Web app</span><span class="sub">~/git/web · 2 active runs</span></div>
+        <div class="item" onclick="toast('Switching to Personal… (demo)')"><span>🏠 Personal</span><span class="sub">no repo · manual to-dos</span></div>
+        <div class="sep"></div>
+        <div class="item" onclick="toast('New project flow… (demo)')"><span>＋ New project</span></div>
+      </div>
+    </span>
+    <span class="pj-repo" title="Context flows from this repo to every agent run">
+      🔗 <a href="#" onclick="toast('github.com/acme/api');return false">~/git/api</a>
+      <span class="branch">· github.com/acme/api · main</span>
+    </span>
+    <span class="pj-instr">
+      <button class="pj-chip" id="instrChip" aria-expanded="false" onclick="toggleInstr()">
+        📜 Instructions (4) · <span class="learned">1 learned Tue</span> ▾
+      </button>
+    </span>
+  </div>
+
+  <!-- THE TEACHING LAYER — one click away, never buried -->
+  <div class="instr-drawer" id="instrDrawer">
+    <div class="instr-inner">
+      <div class="ih">
+        <h4>📜 Project instructions — every agent run in <b>API service</b> honors these</h4>
+        <span class="meta">4 instructions · <span class="learned">1 learned from you Tue</span></span>
+      </div>
+      <div class="rule"><span class="rn">1</span><span>Never merge with red CI — stop and ask me.<span class="cited">cited now → blocked Nightly deploy</span></span></div>
+      <div class="rule"><span class="rn">2</span><span>Squash &amp; merge only. PR titles: <code>area: summary</code>.</span></div>
+      <div class="rule"><span class="rn">3</span><span>Post run results to <code>#eng</code>.</span></div>
+      <div class="rule"><span class="rn">4</span><span>Don't touch <code>infra/</code> without confirming first.<span class="tag">learned from you · Tue</span></span></div>
+      <div class="instr-foot">
+        <button class="btn pri" onclick="toast('New rule — type it in plain language… (demo)')">＋ Teach a rule</button>
+        <button class="btn" onclick="toast('Editing instructions… (demo)')">Edit instructions</button>
+        <span class="est">Rules persist &amp; shape every agent in this project · tasks inherit folder ~/git/api</span>
+      </div>
+    </div>
+  </div>
+
   <div class="hero">
     <span class="em">🛑</span>
     <p><b>Nightly deploy</b> has been blocked <b id="hAge">41 min</b> — its last action was a failing
@@ -213,12 +319,13 @@ const PINNED=[
   {
     id:'deploy', agent:'Nightly deploy', who:null, tb:false, state:'block',
     pill:['p-block','blocked','41m'], step:'Step 4/6 · promote gate', barCls:'block',
-    last:'Test suite failed — <code>auth.spec.ts</code> "rejects expired token"',
+    last:'🔒 blocked — rule <b>“Never merge with red CI”</b> triggered · <code>auth.spec.ts</code> "rejects expired token" is red',
     trace:[
       ['✓','09:01','Ran build','passed in 38s'],
       ['✓','09:01','Ran lint','0 errors'],
       ['✗','09:02','Ran test suite','auth.spec.ts: got 200, expected 401'],
-      ['◦','—','Promote to staging','blocked on red CI'],
+      ['🔒','09:02','Honored project rule #1','“Never merge with red CI — stop and ask me.”'],
+      ['◦','—','Promote to staging','blocked on red CI · awaiting you'],
     ],
     needs:true,
     acts:`<button class="btn pri" onclick="toast('Skipping auth.spec.ts, re-running gate…')">Skip test & continue</button>
@@ -277,6 +384,16 @@ let HISTORY=[
   {id:'h-fix', node:'ok', agent:'Fix flaky CI', who:'sam', tb:true, ts:'08:40',
    act:'<span class="conf">Sam closed — retry logic added to flaky network test</span>', pill:['p-ok','done',''], needs:false,
    why:'Was the #2 source of red CI last week; Sam cleared the unclaimed P2.'},
+  {id:'h-answer', node:'ok', agent:'Migrate beads → tasks', who:'you', tb:false, ts:'08:12',
+   act:'you answered — <b>"folder ~/git/api/issues, not the repo root"</b>', pill:['p-ok','you',''], needs:false,
+   why:'corrected where the agent was writing migrated issues so future runs land them right.',
+   trace:[['↳','08:12','You corrected the agent','wrote to root; should be issues/']],
+   acts:`<button class="btn pri" onclick="pinRule()">📌 Pin as a project instruction</button>
+         <span class="est">teach it once → every agent in API service follows it</span>`},
+  // LEDGER: an instruction change is itself an auditable timeline event
+  {id:'h-taught', node:'ok', agent:'Project · instructions', who:'you', tb:false, ts:'Tue 16:20',
+   act:'you taught a rule — <b>"Don\'t touch <code>infra/</code> without confirming first."</b>', pill:['p-ok','rule +1',''], needs:false,
+   why:'now instruction #4 of 4 · applies to every agent run in API service from here on.'},
 ];
 
 let HERO_AGE=41*60;
@@ -312,7 +429,7 @@ function showPinned(){
 }
 
 function traceLi(t){
-  const c=t[0]==='✓'?'var(--accent)':t[0]==='✗'?'var(--urgent)':t[0]==='?'?'var(--warn)':t[0]==='⟳'?'var(--working)':'var(--faint)';
+  const c=t[0]==='✓'?'var(--accent)':t[0]==='✗'?'var(--urgent)':t[0]==='?'?'var(--warn)':t[0]==='⟳'?'var(--working)':t[0]==='🔒'?'var(--urgent)':t[0]==='↳'?'var(--accent)':'var(--faint)';
   return `<li><span class="s" style="color:${c}">${t[0]}</span><span class="t"><span class="ts" style="position:static;margin:0;color:var(--faint)">${t[1]}</span> <b>${t[2]}</b> <span class="w">— ${t[3]}</span></span></li>`;
 }
 
@@ -354,6 +471,32 @@ function refresh(){ showPinned(); showHistory(); }
 function drop(id){ openId=id; refresh(); toast('Dropped into '+(PINNED.find(p=>p.id===id)?.agent||HISTORY.find(h=>h.id===id)?.agent||id));
   const node=document.querySelector('.live-run, .card.open'); }
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2200);}
+
+/* ---------- project layer ---------- */
+function togglePjMenu(){
+  const m=$('#pjMenu'),c=$('#pjCaret'),open=!m.classList.contains('show');
+  m.classList.toggle('show',open); c.setAttribute('aria-expanded',open);
+}
+function toggleInstr(){
+  const d=$('#instrDrawer'),c=$('#instrChip'),open=!d.classList.contains('show');
+  d.classList.toggle('show',open); c.setAttribute('aria-expanded',open);
+  if(open) d.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function pinRule(){
+  // teaching-in-the-moment: record the new rule as an auditable ledger event + open instructions
+  HISTORY.unshift({id:'live-rule'+Date.now(),node:'ok',agent:'Project · instructions',who:'you',tb:false,
+    ts:nowStamp(),act:'you taught a rule — <b>"Write migrated issues to ~/git/api/issues."</b>',
+    pill:['p-ok','rule +1',''],needs:false,_new:true,
+    why:'pinned from your correction · now applies to every agent run in API service.'});
+  if(HISTORY.length>11) HISTORY.pop();
+  $('#instrDrawer').classList.add('show'); $('#instrChip').setAttribute('aria-expanded',true);
+  $('#instrChip').innerHTML='📜 Instructions (5) · <span class="learned">2 learned</span> ▾';
+  refresh(); toast('📌 Pinned as a project instruction — every agent will honor it');
+}
+// close switcher menu on outside click
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.pj-switch')) $('#pjMenu').classList.remove('show');
+});
 
 /* filters */
 document.querySelectorAll('.chip[data-f]').forEach(c=>c.onclick=()=>{

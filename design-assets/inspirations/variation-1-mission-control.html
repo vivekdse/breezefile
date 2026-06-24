@@ -6,6 +6,17 @@
             bulk stop/nudge. Calm to-do triage in a quieter side rail.
   Values served: V2 Live Situational Awareness (primary), V3 Direct Control, V1 Calm Clarity,
                  V5 Trust & Auditability, V6 Team Coordination, V7 Confidentiality (PHI reveal).
+
+  Project layer (added): a calm command/context strip under the topbar holds the CURRENT PROJECT
+  plaque "API service" with its repo binding (~/git/api · github.com/acme/api · branch main), a
+  project SWITCHER (hints at Personal, Web app), and an "Instructions (4)" button that slides in a
+  panel of the 4 canonical project instructions + a "＋ Teach a rule" composer. Instructions are the
+  teaching layer: they persist, shape every agent run, and show "4 instructions · 1 learned from you
+  Tue". The blocked "Nightly deploy" tile cites the rule that blocked it — "blocked by rule: Never
+  merge with red CI" — linking into the instructions panel and highlighting that rule. Serves the
+  brief's project spec: (1) current-project context + switcher, (2) folder/repo binding made visible,
+  (3) project instructions / earned blocked-by-rule connection. Additive; all existing tiles, hero,
+  rail, selection, PHI reveal, and live tickers unchanged.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -154,6 +165,83 @@
   .rail .add { width: 100%; margin-top: 12px; text-align: left; }
   .rail .qcap { margin-top: 18px; }
 
+  /* project context strip */
+  .projbar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 12px;
+    background: linear-gradient(90deg, rgba(76,194,255,.07), transparent 70%);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 12px;
+    padding: 10px 12px 10px 14px;
+    position: relative;
+  }
+  .projbar .plaque { display: flex; align-items: center; gap: 11px; }
+  .projbar .pj-ico { width: 30px; height: 30px; border-radius: 8px; flex:0 0 auto; display:grid; place-items:center; background: rgba(76,194,255,.14); color: var(--accent); font-size: 15px; }
+  .projbar .pj-name { font-weight: 700; font-size: 14.5px; letter-spacing: .2px; }
+  .projbar .pj-name .lbl { font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--dim); font-weight: 700; display:block; margin-bottom: 1px; }
+  .projbar .caret { color: var(--muted); font-size: 10px; margin-left: 2px; }
+  .projbar .switcher { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; display: flex; align-items: center; gap: 11px; padding: 4px 8px 4px 4px; border-radius: 9px; }
+  .projbar .switcher:hover { background: var(--panel); }
+  .projbar .bind { display:inline-flex; align-items:center; gap:7px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; }
+  .projbar .bind .gh { color: var(--dim); }
+  .projbar .bind .branch { color: var(--accent); }
+  .projbar .pj-spacer { flex: 1; }
+  .projbar .scoped { font-size: 11.5px; color: var(--dim); }
+  .ix-btn { display:inline-flex; align-items:center; gap:8px; border-radius: 9px; border: 1px solid #2c3e57; background: var(--panel-2); color: var(--text); padding: 8px 12px; font: inherit; font-size: 12.5px; cursor: pointer; }
+  .ix-btn:hover { border-color: var(--accent); }
+  .ix-btn .cnt { font-family: var(--mono); font-size: 11px; color: var(--accent); background: rgba(76,194,255,.12); border-radius: 6px; padding: 1px 6px; }
+
+  /* switcher dropdown */
+  .pj-menu { position: absolute; top: calc(100% + 6px); left: 8px; z-index: 40; min-width: 240px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: 0 16px 40px rgba(0,0,0,.5); display: none; }
+  .pj-menu.open { display: block; }
+  .pj-menu .opt { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; cursor: pointer; }
+  .pj-menu .opt:hover { background: var(--panel-2); }
+  .pj-menu .opt.cur { background: var(--panel-2); }
+  .pj-menu .opt .od { width: 8px; height: 8px; border-radius: 50%; flex:0 0 auto; }
+  .pj-menu .opt .on2 { font-weight: 600; font-size: 13.5px; }
+  .pj-menu .opt .om { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-left: auto; }
+  .pj-menu .opt .tick { color: var(--accent); margin-left: auto; }
+  .pj-menu .div { height: 1px; background: var(--line); margin: 5px 6px; }
+  .pj-menu .new { color: var(--muted); font-size: 12.5px; }
+
+  /* instructions slide-in panel */
+  .ix-scrim { position: fixed; inset: 0; background: rgba(4,8,14,.55); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 50; }
+  .ix-scrim.open { opacity: 1; pointer-events: auto; }
+  .ix-panel { position: fixed; top: 0; right: 0; height: 100%; width: 420px; max-width: 92vw; background: var(--bg-2); border-left: 1px solid var(--line); box-shadow: -20px 0 60px rgba(0,0,0,.5); transform: translateX(100%); transition: transform .24s ease; z-index: 51; display: flex; flex-direction: column; }
+  .ix-panel.open { transform: translateX(0); }
+  .ix-panel header { padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+  .ix-panel header .crumb { font-size: 11px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--dim); display:flex; align-items:center; gap:8px; }
+  .ix-panel header .crumb .x { margin-left: auto; cursor: pointer; color: var(--muted); font-size: 16px; line-height: 1; background:none; border:0; }
+  .ix-panel header h2 { font-size: 17px; margin: 8px 0 4px; letter-spacing: 0; text-transform: none; color: var(--text); }
+  .ix-panel header .blurb { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .ix-panel .body { padding: 14px 16px; overflow-y: auto; flex: 1; }
+  .ix-panel .countline { font-size: 11.5px; color: var(--dim); margin: 2px 4px 12px; display:flex; align-items:center; gap:8px; }
+  .ix-panel .countline .learned { color: var(--working); }
+  .rule { display: flex; gap: 11px; align-items: flex-start; padding: 12px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); margin-bottom: 9px; transition: border-color .15s, box-shadow .15s; }
+  .rule .rno { width: 20px; height: 20px; border-radius: 6px; flex:0 0 auto; display:grid; place-items:center; font-family: var(--mono); font-size: 11px; color: var(--accent); background: rgba(76,194,255,.1); margin-top: 1px; }
+  .rule .rtxt { font-size: 13.5px; line-height: 1.45; }
+  .rule .rmeta { font-size: 11px; color: var(--dim); margin-top: 5px; display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+  .rule .rmeta .badge { color: var(--working); border: 1px solid #214a3a; border-radius: 5px; padding: 1px 6px; font-size: 10px; }
+  .rule .rmeta .enf { color: var(--blocked); border: 1px solid #5a2730; border-radius: 5px; padding: 1px 6px; font-size: 10px; }
+  .rule .edit { margin-left: auto; background:none; border:0; color: var(--dim); cursor: pointer; font-size: 11px; }
+  .rule .edit:hover { color: var(--text); }
+  .rule.flash { border-color: var(--blocked); box-shadow: 0 0 0 1px var(--blocked) inset, 0 0 26px rgba(255,93,108,.25); }
+  .teach { margin-top: 6px; border: 1px dashed #2c3e57; border-radius: 11px; padding: 12px; background: rgba(76,194,255,.03); }
+  .teach .th { font-size: 12.5px; color: var(--muted); margin-bottom: 8px; display:flex; align-items:center; gap:8px; }
+  .teach textarea { width: 100%; resize: vertical; min-height: 54px; background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; font: inherit; font-size: 13px; }
+  .teach textarea:focus { outline: none; border-color: var(--accent); }
+  .teach .trow { display:flex; gap:8px; align-items:center; margin-top: 9px; }
+  .teach .hint { font-size: 11px; color: var(--dim); }
+  .ix-panel .bind-row { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); font-size: 12.5px; color: var(--muted); display:flex; align-items:center; gap: 10px; }
+  .ix-panel .bind-row .gh2 { font-family: var(--mono); color: var(--text); }
+
+  /* blocked-by-rule citation in deploy tile */
+  .ruleflag { margin-top: 9px; display: flex; align-items: center; gap: 8px; font-size: 11.5px; background: rgba(255,93,108,.08); border: 1px solid #3a2530; border-radius: 8px; padding: 7px 9px; color: var(--muted); }
+  .ruleflag .lk { color: var(--blocked); }
+  .ruleflag button { background:none; border:0; padding:0; font: inherit; font-size: 11.5px; cursor: pointer; color: var(--blocked); text-decoration: underline; text-underline-offset: 2px; }
+  .ruleflag button:hover { color: #ff8a95; }
+
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(54,211,153,.55); } 70% { box-shadow: 0 0 0 8px rgba(54,211,153,0); } 100% { box-shadow: 0 0 0 0 rgba(54,211,153,0); } }
   .footnote { grid-column: 1 / -1; color: var(--dim); font-size: 11px; text-align: center; margin-top: 6px; }
 </style>
@@ -171,6 +259,31 @@
       <button>Team</button>
     </div>
     <button class="btn primary">+ New task</button>
+  </div>
+
+  <!-- PROJECT CONTEXT STRIP -->
+  <div class="projbar">
+    <div class="plaque">
+      <button class="switcher" id="pjSwitch" aria-haspopup="true" aria-expanded="false">
+        <span class="pj-ico">◆</span>
+        <span class="pj-name"><span class="lbl">Project</span>API service <span class="caret">▾</span></span>
+      </button>
+      <span class="bind" title="Bound git repo — context flows to this project's agents">
+        ⎇ <span class="gh">github.com/acme/api</span> · ~/git/api · <span class="branch">main</span>
+      </span>
+    </div>
+    <div class="pj-spacer"></div>
+    <span class="scoped">Showing this project's agents &amp; to-dos</span>
+    <button class="ix-btn" id="ixOpen">📋 Instructions <span class="cnt">4</span></button>
+
+    <!-- switcher dropdown -->
+    <div class="pj-menu" id="pjMenu" role="menu">
+      <div class="opt cur" role="menuitem"><span class="od" style="background:var(--accent)"></span><span class="on2">API service</span><span class="tick">✓</span></div>
+      <div class="opt" role="menuitem"><span class="od" style="background:#c792ea"></span><span class="on2">Web app</span><span class="om">~/git/web</span></div>
+      <div class="opt" role="menuitem"><span class="od" style="background:var(--waiting)"></span><span class="on2">Personal</span><span class="om">no repo</span></div>
+      <div class="div"></div>
+      <div class="opt new" role="menuitem"><span class="od" style="background:var(--line)"></span>＋ New project…</div>
+    </div>
   </div>
 
   <!-- HERO INSIGHT -->
@@ -215,6 +328,10 @@
           <span class="blip" style="background:var(--blocked)"></span>
           test failed: <span style="color:#ff8a95">auth.spec.ts</span>
           <span class="t" id="t-deploy">41m ago</span>
+        </div>
+        <div class="ruleflag">
+          🔒 <span>Held by project rule:</span>
+          <button onclick="event.stopPropagation(); openInstructions('never-red-ci')">Never merge with red CI</button>
         </div>
         <div class="trace">
           <div class="step ok"><span class="ix">✓</span><span class="lbl">Pull &amp; install deps</span><span class="why">— up to date</span></div>
@@ -382,6 +499,71 @@
   <div class="footnote">Live data refreshes every second · last sync just now · 5 agents tracked</div>
 </div>
 
+<!-- INSTRUCTIONS SLIDE-IN PANEL -->
+<div class="ix-scrim" id="ixScrim"></div>
+<aside class="ix-panel" id="ixPanel" aria-label="Project instructions">
+  <header>
+    <div class="crumb">◆ API service · Instructions
+      <button class="x" id="ixClose" aria-label="Close">✕</button>
+    </div>
+    <h2>Project instructions</h2>
+    <div class="blurb">Plain-language rules every agent in <b style="color:var(--text)">API service</b> honors — automatically, on every run. This is how you teach the system.</div>
+  </header>
+  <div class="body">
+    <div class="countline"><b style="color:var(--muted)">4 instructions</b> · <span class="learned">1 learned from you Tue</span></div>
+
+    <div class="rule" data-rule="never-red-ci" id="rule-never-red-ci">
+      <span class="rno">1</span>
+      <div style="flex:1">
+        <div class="rtxt">Never merge with red CI — stop and ask me.</div>
+        <div class="rmeta"><span class="enf">enforcing now</span> blocking “Nightly deploy” · <span style="color:var(--muted)">auth.spec.ts failing</span></div>
+      </div>
+      <button class="edit">Edit</button>
+    </div>
+
+    <div class="rule" data-rule="squash">
+      <span class="rno">2</span>
+      <div style="flex:1">
+        <div class="rtxt">Squash &amp; merge only. PR titles: <span style="font-family:var(--mono);color:var(--accent)">area: summary</span>.</div>
+        <div class="rmeta">applies to every PR agent</div>
+      </div>
+      <button class="edit">Edit</button>
+    </div>
+
+    <div class="rule" data-rule="post-eng">
+      <span class="rno">3</span>
+      <div style="flex:1">
+        <div class="rtxt">Post run results to <span style="font-family:var(--mono);color:var(--accent)">#eng</span>.</div>
+        <div class="rmeta">Weekly report posted here 2h ago</div>
+      </div>
+      <button class="edit">Edit</button>
+    </div>
+
+    <div class="rule" data-rule="infra">
+      <span class="rno">4</span>
+      <div style="flex:1">
+        <div class="rtxt">Don't touch <span style="font-family:var(--mono);color:var(--accent)">infra/</span> without confirming first.</div>
+        <div class="rmeta"><span class="badge">learned from you · Tue</span> after you corrected an agent</div>
+      </div>
+      <button class="edit">Edit</button>
+    </div>
+
+    <div class="teach" id="teachBox">
+      <div class="th">＋ Teach a rule</div>
+      <textarea id="teachText" placeholder="e.g. Always run prettier before committing."></textarea>
+      <div class="trow">
+        <button class="btn primary" id="teachSave">Save instruction</button>
+        <span class="hint">Persists for the project · shapes every future agent run.</span>
+      </div>
+    </div>
+
+    <div class="bind-row">
+      ⎇ Bound to <span class="gh2">github.com/acme/api</span> · branch <span style="color:var(--accent);font-family:var(--mono)">main</span>
+      <button class="mini" style="margin-left:auto">Change binding</button>
+    </div>
+  </div>
+</aside>
+
 <script>
   // live clock
   function tick() {
@@ -430,9 +612,80 @@
       const n = grid.querySelectorAll('.tile.sel').length;
       sc.textContent = n;
       bulk.classList.toggle('hidden', n === 0);
-    } else if (!e.target.classList.contains('mini')) {
+    } else if (!e.target.classList.contains('mini') && !e.target.closest('.ruleflag')) {
       tile.classList.toggle('revealed'); // PHI on-focus reveal
     }
+  });
+
+  // --- Project switcher dropdown ---
+  const pjSwitch = document.getElementById('pjSwitch');
+  const pjMenu = document.getElementById('pjMenu');
+  pjSwitch.addEventListener('click', e => {
+    e.stopPropagation();
+    const open = pjMenu.classList.toggle('open');
+    pjSwitch.setAttribute('aria-expanded', open);
+  });
+  pjMenu.addEventListener('click', e => {
+    const opt = e.target.closest('.opt'); if (!opt) return;
+    if (opt.classList.contains('new')) { pjMenu.classList.remove('open'); return; }
+    // switch current project (visual hint only — data stays scoped to API service here)
+    pjMenu.querySelectorAll('.opt').forEach(o => { o.classList.remove('cur'); const t=o.querySelector('.tick'); if(t) t.remove(); });
+    opt.classList.add('cur');
+    const tick = document.createElement('span'); tick.className = 'tick'; tick.textContent = '✓';
+    const om = opt.querySelector('.om'); opt.insertBefore(tick, om || null);
+    pjMenu.classList.remove('open');
+  });
+  document.addEventListener('click', () => pjMenu.classList.remove('open'));
+
+  // --- Instructions slide-in panel ---
+  const ixPanel = document.getElementById('ixPanel');
+  const ixScrim = document.getElementById('ixScrim');
+  function openInstructions(focusRule) {
+    ixPanel.classList.add('open');
+    ixScrim.classList.add('open');
+    if (focusRule) {
+      const r = document.getElementById('rule-' + focusRule);
+      if (r) {
+        r.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        r.classList.remove('flash'); void r.offsetWidth; r.classList.add('flash');
+        setTimeout(() => r.classList.remove('flash'), 2400);
+      }
+    }
+  }
+  function closeInstructions() { ixPanel.classList.remove('open'); ixScrim.classList.remove('open'); }
+  document.getElementById('ixOpen').addEventListener('click', () => openInstructions());
+  document.getElementById('ixClose').addEventListener('click', closeInstructions);
+  ixScrim.addEventListener('click', closeInstructions);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeInstructions(); });
+
+  // --- Teach a rule (adds a persisted instruction, live) ---
+  document.getElementById('teachSave').addEventListener('click', () => {
+    const ta = document.getElementById('teachText');
+    const txt = ta.value.trim(); if (!txt) { ta.focus(); return; }
+    const teachBox = document.getElementById('teachBox');
+    const n = teachBox.parentElement.querySelectorAll('.rule').length + 1;
+    const rule = document.createElement('div');
+    rule.className = 'rule';
+    rule.innerHTML = '<span class="rno">' + n + '</span><div style="flex:1"><div class="rtxt"></div>'
+      + '<div class="rmeta"><span class="badge">learned from you · just now</span></div></div>'
+      + '<button class="edit">Edit</button>';
+    rule.querySelector('.rtxt').textContent = txt;
+    teachBox.parentElement.insertBefore(rule, teachBox);
+    ta.value = '';
+    // bump the visible counts
+    document.querySelector('#ixOpen .cnt').textContent = n;
+    const cl = document.querySelector('.ix-panel .countline');
+    cl.innerHTML = '<b style="color:var(--muted)">' + n + ' instructions</b> · <span class="learned">2 learned from you</span>';
+    rule.classList.add('flash'); setTimeout(() => rule.classList.remove('flash'), 2400);
+  });
+
+  // Edit buttons (stub — demonstrates affordance is real & visible)
+  document.addEventListener('click', e => {
+    const ed = e.target.closest('.rule .edit'); if (!ed) return;
+    const txt = ed.parentElement.querySelector('.rtxt');
+    const cur = txt.textContent;
+    const next = prompt('Edit project instruction:', cur);
+    if (next !== null && next.trim()) txt.textContent = next.trim();
   });
 </script>
 </body>

@@ -7,6 +7,18 @@
   is hidden until you finish or skip. Keyboard: enter=act, n=next, s=skip.
   VALUES SERVED: V1 Calm Clarity (extreme), V3 Direct Control, V5 Trust & Auditability
   (step trace + failing test inline), V2 Live Situational Awareness (slim rail).
+
+  PROJECT LAYER (added, native to single-focus): the slim rail now carries a calm
+  CURRENT-PROJECT plaque — "API service · ~/git/api" — with a quiet switcher hinting
+  Personal / Web app, keeping the view scoped without a panel. The focused blocked-
+  deploy item prominently cites the rule that caused the block ("Held by your rule:
+  Never merge with red CI") with a quiet, on-demand link to view/edit the project's
+  four instructions (a slide-in drawer — revealed only when asked, so the single
+  screen stays uncluttered) plus a "＋ Teach a rule" affordance. Repo binding
+  (github.com/acme/api · main) shown subtly in the drawer. When the user steers/
+  answers the agent, we offer "Save as a project instruction" — teaching in the moment.
+  ADDED VALUES: V8 Power Without Machinery (rules, not config screens),
+  V5 Trust & Auditability (the block names its cause).
 -->
 <html lang="en">
 <head>
@@ -43,6 +55,104 @@
   @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
   .railcount{font-size:13px; color:var(--muted); white-space:nowrap}
   .railcount b{color:var(--ink)}
+
+  /* current-project plaque (calm, not a panel) */
+  .project{position:relative}
+  .projbtn{
+    display:flex; align-items:center; gap:9px; background:transparent; border:1px solid var(--line);
+    border-radius:10px; padding:6px 11px; cursor:pointer; color:var(--ink); font:inherit;
+    transition:.15s;
+  }
+  .projbtn:hover{border-color:#2c3850; background:rgba(91,140,255,.06)}
+  .projbtn .pdot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .projbtn .pname{font-size:13px; font-weight:600}
+  .projbtn .ppath{font-size:12px; color:var(--muted)}
+  .projbtn .pcaret{color:var(--muted); font-size:10px; margin-left:1px}
+  .switch{
+    position:absolute; top:calc(100% + 8px); left:0; min-width:230px; z-index:30;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    box-shadow:var(--shadow); padding:6px; display:none;
+  }
+  .switch.open{display:block}
+  .switch .shdr{font-size:10px; letter-spacing:.9px; text-transform:uppercase; color:var(--muted); padding:7px 10px 5px}
+  .switch .sitem{
+    display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+    background:transparent; border:none; border-radius:8px; padding:9px 10px; cursor:pointer;
+    color:var(--ink); font:inherit;
+  }
+  .switch .sitem:hover{background:var(--chip)}
+  .switch .sitem.active{background:rgba(91,140,255,.10)}
+  .switch .sitem .sd{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+  .switch .sitem.active .sd{background:var(--accent)}
+  .switch .sitem .sub{display:block; font-size:11px; color:var(--muted)}
+  .switch .sitem.active .check{margin-left:auto; color:var(--accent)}
+
+  /* rule citation chip inside hero */
+  .rulecite{
+    margin-top:14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    background:rgba(255,93,108,.08); border:1px solid rgba(255,93,108,.30);
+    border-radius:12px; padding:10px 14px; font-size:13.5px;
+  }
+  .rulecite .lock{color:var(--bad); font-weight:700}
+  .rulecite .txt{color:#ffd0d6}
+  .rulecite .txt b{color:#fff}
+  .rulecite .viewrules{
+    margin-left:auto; background:transparent; border:1px solid var(--line); color:var(--muted);
+    border-radius:8px; padding:5px 10px; font:inherit; font-size:12px; cursor:pointer; white-space:nowrap;
+  }
+  .rulecite .viewrules:hover{color:var(--ink); border-color:#2c3850}
+
+  /* "save as instruction" nudge under steer/send */
+  .teachnudge{
+    display:none; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap;
+    background:rgba(91,140,255,.08); border:1px dashed rgba(91,140,255,.35);
+    border-radius:10px; padding:10px 14px; font-size:13px; color:#cdd9ff;
+  }
+  .teachnudge.show{display:flex}
+  .teachnudge .ti{font-weight:700;color:var(--accent)}
+  .teachnudge button{padding:6px 12px; font-size:12px; border-radius:8px}
+
+  /* instructions drawer (on-demand) */
+  .scrim{position:fixed; inset:0; background:rgba(6,9,14,.55); backdrop-filter:blur(2px); opacity:0; pointer-events:none; transition:.2s; z-index:40}
+  .scrim.open{opacity:1; pointer-events:auto}
+  .drawer{
+    position:fixed; top:0; right:0; height:100%; width:min(440px,100%); z-index:50;
+    background:var(--panel); border-left:1px solid var(--line); box-shadow:var(--shadow);
+    transform:translateX(100%); transition:transform .22s cubic-bezier(.4,0,.2,1);
+    display:flex; flex-direction:column;
+  }
+  .drawer.open{transform:translateX(0)}
+  .drawer .dhead{padding:22px 24px 16px; border-bottom:1px solid var(--line)}
+  .drawer .dhead .dtitle{font-size:18px; font-weight:700; display:flex; align-items:center; gap:10px}
+  .drawer .dhead .dsub{font-size:13px; color:var(--muted); margin-top:6px}
+  .drawer .dhead .dsub b{color:var(--ink)}
+  .drawer .closex{position:absolute; top:18px; right:18px; background:transparent; border:none; color:var(--muted); font-size:20px; cursor:pointer; padding:4px 8px; border-radius:8px}
+  .drawer .closex:hover{color:var(--ink); background:var(--chip)}
+  .drawer .dbody{padding:18px 24px; overflow:auto; flex:1}
+  .bind{
+    display:flex; align-items:center; gap:10px; background:var(--chip); border:1px solid var(--line);
+    border-radius:10px; padding:11px 14px; margin-bottom:20px; font-size:13px;
+  }
+  .bind .bicon{color:var(--accent)}
+  .bind code{background:#0b0e14; padding:2px 7px; border-radius:6px; color:#cdd6e3; font:12px ui-monospace,monospace}
+  .bind .brepo{display:block; color:var(--muted); font-size:12px; margin-top:3px}
+  .bind .bedit{margin-left:auto; background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:7px; padding:5px 9px; font:inherit; font-size:11px; cursor:pointer}
+  .bind .bedit:hover{color:var(--ink)}
+  .rules{list-style:none; margin:0 0 8px; padding:0}
+  .rules li{
+    display:grid; grid-template-columns:18px 1fr; gap:11px; padding:13px 0; border-bottom:1px dashed var(--line);
+  }
+  .rules li:last-child{border-bottom:none}
+  .rules .ri{color:var(--accent); margin-top:1px}
+  .rules .rule{font-size:14px; line-height:1.45}
+  .rules .rtag{display:inline-block; margin-top:5px; font-size:11px; color:var(--ok); background:rgba(62,207,142,.12); border:1px solid rgba(62,207,142,.3); border-radius:99px; padding:2px 8px}
+  .rules .cited{outline:1px solid rgba(255,93,108,.4); outline-offset:8px; border-radius:4px}
+  .rules .ctag{display:inline-block; margin-top:5px; margin-left:6px; font-size:11px; color:#ffd0d6; background:rgba(255,93,108,.12); border:1px solid rgba(255,93,108,.3); border-radius:99px; padding:2px 8px}
+  .drawer .dfoot{padding:16px 24px; border-top:1px solid var(--line); display:flex; gap:10px; align-items:center}
+  .teachform{display:none; margin-top:14px}
+  .teachform.open{display:block}
+  .teachform input{width:100%; background:#0b0e14; border:1px solid var(--line); border-radius:10px; color:var(--ink); padding:11px 13px; font:inherit}
+  .teachform .tfrow{display:flex; gap:9px; margin-top:9px}
 
   /* stage */
   .stage{flex:1; display:grid; place-items:center; padding:40px 24px}
@@ -137,6 +247,30 @@
 <body>
   <div class="rail">
     <div class="brand"><b>Breezefile</b> · Focus</div>
+    <div class="project">
+      <button class="projbtn" id="projBtn" aria-haspopup="true" aria-expanded="false">
+        <span class="pdot"></span>
+        <span class="pname">API service</span>
+        <span class="ppath">· ~/git/api</span>
+        <span class="pcaret">▾</span>
+      </button>
+      <div class="switch" id="switchMenu" role="menu">
+        <div class="shdr">Switch project</div>
+        <button class="sitem active" role="menuitem">
+          <span class="sd"></span>
+          <span>API service<span class="sub">~/git/api · 4 instructions</span></span>
+          <span class="check">✓</span>
+        </button>
+        <button class="sitem" role="menuitem">
+          <span class="sd"></span>
+          <span>Personal<span class="sub">~/notes · no repo bound</span></span>
+        </button>
+        <button class="sitem" role="menuitem">
+          <span class="sd"></span>
+          <span>Web app<span class="sub">~/git/web · 2 instructions</span></span>
+        </button>
+      </div>
+    </div>
     <div class="pips" id="pips"></div>
     <div class="railcount"><b id="railIdx">1</b> of <b id="railTot">3</b> things need you</div>
   </div>
@@ -151,9 +285,14 @@
           The agent has paused and is waiting for you to act or steer it.</p>
         <div class="meta">
           <span>local auto agent</span>
-          <span>folder <code>~/git/api</code></span>
+          <span>folder <code>~/git/api</code> <span style="color:#5b6675">· inherited from project</span></span>
           <span>attempt 3 of 3</span>
           <span>last action 2 min ago</span>
+        </div>
+        <div class="rulecite">
+          <span class="lock">⛔</span>
+          <span class="txt">Held by your rule: <b>“Never merge with red CI — stop and ask me.”</b></span>
+          <button class="viewrules" id="viewRules">View project rules</button>
         </div>
       </div>
 
@@ -194,6 +333,11 @@
             <button class="primary" id="btnSend">Send instruction</button>
             <button class="ghost" id="btnCancelSteer">Cancel</button>
           </div>
+          <div class="teachnudge" id="teachNudge">
+            <span class="ti">＋ Teach it</span>
+            <span>Want this to apply every run? Save it as a project instruction for <b>API service</b>.</span>
+            <button class="ghost" id="btnSaveRule" style="margin-left:auto">Save as a project instruction</button>
+          </div>
         </div>
       </div>
     </section>
@@ -218,8 +362,53 @@
   </main>
 
   <div class="footnote">
-    <span class="kbd">↵</span> act · <span class="kbd">n</span> next · <span class="kbd">s</span> skip · everything else stays out of your way
+    <span class="kbd">↵</span> act · <span class="kbd">n</span> next · <span class="kbd">s</span> skip · <span class="kbd">i</span> project rules · everything else stays out of your way
   </div>
+
+  <!-- ===================== PROJECT INSTRUCTIONS DRAWER (on-demand) ===================== -->
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Project instructions">
+    <div class="dhead">
+      <button class="closex" id="drawerClose" aria-label="Close">✕</button>
+      <div class="dtitle"><span class="pdot"></span> API service · rules</div>
+      <div class="dsub"><b>4 instructions · 1 learned from you Tue</b> — every agent run in this project honors these.</div>
+    </div>
+    <div class="dbody">
+      <div class="bind">
+        <span class="bicon">🔗</span>
+        <span>
+          Bound to <code>~/git/api</code>
+          <span class="brepo">github.com/acme/api · branch <code>main</code> · context flows to every agent</span>
+        </span>
+        <button class="bedit">Bind / edit</button>
+      </div>
+
+      <ul class="rules">
+        <li><span class="ri">⛔</span><div>
+          <div class="rule cited">Never merge with red CI — stop and ask me.</div>
+          <span class="ctag">cited now · holding Nightly deploy</span>
+        </div></li>
+        <li><span class="ri">▸</span><div class="rule">Squash &amp; merge only. PR titles: <code style="font:12px ui-monospace,monospace;background:#0b0e14;padding:1px 6px;border-radius:5px">area: summary</code>.</div></li>
+        <li><span class="ri">▸</span><div class="rule">Post run results to <b>#eng</b>.</div></li>
+        <li><span class="ri">▸</span><div>
+          <div class="rule">Don't touch <code style="font:12px ui-monospace,monospace;background:#0b0e14;padding:1px 6px;border-radius:5px">infra/</code> without confirming first.</div>
+          <span class="rtag">learned from you · Tue</span>
+        </div></li>
+      </ul>
+
+      <div class="teachform" id="teachForm">
+        <input id="newRule" placeholder="e.g. “Always run the linter before opening a PR.”" />
+        <div class="tfrow">
+          <button class="primary" id="btnAddRule">Add instruction</button>
+          <button class="ghost" id="btnCancelRule">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div class="dfoot">
+      <button class="primary" id="btnTeachRule">＋ Teach a rule</button>
+      <span style="font-size:12px;color:var(--muted)">Rules persist and apply to every future run.</span>
+    </div>
+  </aside>
 
 <script>
   // Three things need you; we focus #1 (deploy). n/s advance through the queue,
@@ -265,15 +454,73 @@
   };
   document.getElementById('btnSkip').onclick=advance;
   document.getElementById('btnStop').onclick=()=>{ runState.classList.add('show'); runState.innerHTML='<span style="color:var(--bad)">■</span> Agent stopped. Nothing deployed.'; setTimeout(advance,1600); };
-  document.getElementById('btnSteer').onclick=()=>steerBox.classList.toggle('open');
-  document.getElementById('btnCancelSteer').onclick=()=>steerBox.classList.remove('open');
-  document.getElementById('btnSend').onclick=()=>{ steerBox.classList.remove('open'); runState.classList.add('show'); runState.innerHTML='<span class="spin"></span> Agent re-planning with your instruction…'; setTimeout(advance,2400); };
+  const teachNudge=document.getElementById('teachNudge');
+  document.getElementById('btnSteer').onclick=()=>{ steerBox.classList.toggle('open'); teachNudge.classList.remove('show'); };
+  document.getElementById('btnCancelSteer').onclick=()=>{ steerBox.classList.remove('open'); teachNudge.classList.remove('show'); };
+  document.getElementById('btnSend').onclick=()=>{
+    runState.classList.add('show'); runState.innerHTML='<span class="spin"></span> Agent re-planning with your instruction…';
+    // You corrected the agent — offer to make it permanent (teaching in the moment).
+    teachNudge.classList.add('show');
+    setTimeout(()=>{ steerBox.classList.remove('open'); teachNudge.classList.remove('show'); advance(); },3200);
+  };
+
+  // ---- Project layer: switcher, instructions drawer, teach-a-rule ----
+  const projBtn=document.getElementById('projBtn');
+  const switchMenu=document.getElementById('switchMenu');
+  const scrim=document.getElementById('scrim');
+  const drawer=document.getElementById('drawer');
+  const teachForm=document.getElementById('teachForm');
+
+  function toggleSwitch(open){
+    const on = open===undefined ? !switchMenu.classList.contains('open') : open;
+    switchMenu.classList.toggle('open',on);
+    projBtn.setAttribute('aria-expanded',on);
+  }
+  projBtn.onclick=(e)=>{ e.stopPropagation(); toggleSwitch(); };
+  switchMenu.querySelectorAll('.sitem').forEach(item=>{
+    item.onclick=()=>{
+      if(item.classList.contains('active')){ toggleSwitch(false); return; }
+      const name=item.querySelector('span').childNodes[0].textContent.trim();
+      alert('Switch to “'+name+'”\n\nThe focus queue would re-scope to this project — its tasks, its bound folder, and its instructions.');
+      toggleSwitch(false);
+    };
+  });
+  document.addEventListener('click',()=>toggleSwitch(false));
+
+  function openDrawer(){ scrim.classList.add('open'); drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false'); }
+  function closeDrawer(){ scrim.classList.remove('open'); drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); teachForm.classList.remove('open'); }
+  document.getElementById('viewRules').onclick=openDrawer;
+  document.getElementById('drawerClose').onclick=closeDrawer;
+  scrim.onclick=closeDrawer;
+
+  document.getElementById('btnTeachRule').onclick=()=>{ teachForm.classList.add('open'); document.getElementById('newRule').focus(); };
+  document.getElementById('btnCancelRule').onclick=()=>teachForm.classList.remove('open');
+  document.getElementById('btnAddRule').onclick=()=>{
+    const v=document.getElementById('newRule').value.trim();
+    if(!v){ document.getElementById('newRule').focus(); return; }
+    const ul=drawer.querySelector('.rules');
+    const li=document.createElement('li');
+    li.innerHTML='<span class="ri">▸</span><div><div class="rule">'+v.replace(/</g,'&lt;')+'</div><span class="rtag">learned from you · just now</span></div>';
+    ul.appendChild(li);
+    drawer.querySelector('.dsub b').textContent=(ul.children.length)+' instructions · 2 learned from you';
+    document.getElementById('newRule').value=''; teachForm.classList.remove('open');
+  };
+
+  // "Save as a project instruction" from the in-the-moment correction → opens drawer + teach form
+  document.getElementById('btnSaveRule').onclick=()=>{
+    openDrawer(); teachForm.classList.add('open');
+    document.getElementById('newRule').value='Skip the expired-token test for now and open a follow-up issue.';
+    document.getElementById('newRule').focus();
+  };
 
   document.getElementById('btnReset').onclick=()=>{ idx=0; cardZero.classList.add('hidden'); cardFocus.classList.remove('hidden'); runState.classList.remove('show'); runState.innerHTML='<span class="spin"></span> Re-running…'; renderPips(); };
   document.getElementById('btnNew').onclick=()=>alert('Create from intent: “Ship a PR”, “Nightly deploy”, “Triage inbox”, “Summarize a repo” — or type a sentence.');
 
   document.addEventListener('keydown',e=>{
-    if(e.target.tagName==='TEXTAREA') return;
+    if(e.key==='Escape'){ if(drawer.classList.contains('open')) closeDrawer(); toggleSwitch(false); return; }
+    if(e.target.tagName==='TEXTAREA'||e.target.tagName==='INPUT') return;
+    if(e.key==='i'){ drawer.classList.contains('open')?closeDrawer():openDrawer(); return; }
+    if(drawer.classList.contains('open')) return; // rules drawer takes over the screen
     if(e.key==='Enter'){ if(!cardFocus.classList.contains('hidden')) document.getElementById('btnRetry').click(); }
     if(e.key==='n') advance();
     if(e.key==='s'){ if(!cardFocus.classList.contains('hidden')) advance(); }

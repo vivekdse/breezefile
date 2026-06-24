@@ -7,6 +7,15 @@
             with a locked title that reveals on focus/click. One empty lane done well.
   Values served: V1 Calm Clarity (primary), V2 Live Situational Awareness, V6 Team Coordination,
                  V7 Confidentiality (PHI reveal), V3 Direct Control.
+
+  Project layer (added): a calm project plaque sits ABOVE the lanes — current project "API service"
+  with a switcher (hints Personal / Web app), its git-repo binding (~/git/api · github.com/acme/api
+  · main), and an "Instructions (4)" affordance that opens the four canonical teaching rules one
+  click away (not always expanded) plus a "＋ Teach a rule" control. The lanes are scoped to this
+  project; the "Needs you" deploy card cites the rule that blocked it ("↳ rule: never merge red CI",
+  a link into the instructions). Lane "+ add" pre-fills the project folder ~/git/api.
+  Values served by the project layer: V5 Trust & Auditability (block cites the rule), V4 Intent→Action
+  (teach a rule in plain language), V1 Calm Clarity (unobtrusive plaque, not a panel), V3 Direct Control.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -117,6 +126,63 @@
 
   .laneadd { width: 100%; text-align: left; color: var(--dim); border: 1px dashed var(--line); background: transparent; border-radius: 10px; padding: 9px 12px; cursor: pointer; font: inherit; font-size: 13px; }
   .laneadd:hover { color: var(--ink); border-color: #d4d8df; }
+
+  /* ---- Project plaque (calm strip above the lanes) ---- */
+  .project {
+    margin-top: 14px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 11px 14px;
+  }
+  .project .pj-mark { width: 28px; height: 28px; border-radius: 8px; background: var(--work-bg); color: var(--work); display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: 0 0 auto; }
+  .project .pj-id { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .project .pj-name { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 7px; }
+  .project .pj-name .caret { color: var(--dim); font-size: 11px; }
+  .project .pj-bind { font-size: 12px; color: var(--muted); font-family: var(--mono); display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .project .pj-bind .repo { color: var(--work); }
+  .project .pj-bind .br { color: var(--dim); }
+  .pj-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 0; }
+  .project .pj-grow { margin-left: auto; }
+  .pj-btn { font: inherit; font-size: 12px; border-radius: 8px; padding: 7px 11px; cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+  .pj-btn:hover { border-color: #d4d8df; }
+  .pj-btn .badge { font-family: var(--mono); font-size: 10px; background: var(--work-bg); color: var(--work); border-radius: 999px; padding: 0 6px; }
+  .pj-btn.teach { color: var(--work); border-color: #d3e1f7; }
+
+  /* project switcher popover */
+  .pj-switch-wrap { position: relative; }
+  .pj-pop { display: none; position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; min-width: 210px;
+    background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgba(26,29,33,.12); padding: 6px; }
+  .pj-pop.open { display: block; }
+  .pj-opt { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--ink); }
+  .pj-opt:hover { background: var(--bg); }
+  .pj-opt .om { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: 0 0 auto; }
+  .pj-opt .osub { font-size: 11px; color: var(--dim); font-family: var(--mono); }
+  .pj-opt.cur { background: var(--work-bg); }
+  .pj-opt.cur .check { margin-left: auto; color: var(--work); }
+  .pj-pop .pj-new { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; color: var(--muted); }
+
+  /* instructions panel (one click away, not always expanded) */
+  .instr { display: none; margin: 0 28px; }
+  .instr.open { display: block; }
+  .instr-inner { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 0; }
+  .instr-head { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
+  .instr-head .h { font-weight: 700; font-size: 13px; }
+  .instr-head .meta { font-size: 11.5px; color: var(--dim); }
+  .instr-head .close { margin-left: auto; cursor: pointer; color: var(--dim); font-size: 13px; border: none; background: none; font: inherit; }
+  .instr-sub { font-size: 12px; color: var(--muted); margin: 2px 0 10px; }
+  .instr-list { display: grid; gap: 7px; }
+  .instr-rule { display: flex; align-items: baseline; gap: 9px; font-size: 13px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fbfbfc; }
+  .instr-rule .rn { font-family: var(--mono); font-size: 10px; color: var(--dim); flex: 0 0 auto; }
+  .instr-rule.learned { border-color: #d3e1f7; background: var(--work-bg); }
+  .instr-rule .learn-flag { font-size: 10px; color: var(--work); font-weight: 700; font-family: var(--mono); margin-left: auto; flex: 0 0 auto; }
+  .instr-rule.cited { box-shadow: 0 0 0 3px rgba(217,83,79,.14); border-color: var(--needs); }
+  .instr-add { display: flex; gap: 8px; margin-top: 11px; }
+  .instr-add input { flex: 1; font: inherit; font-size: 13px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); }
+  .instr-add input:focus { outline: none; border-color: var(--work); box-shadow: 0 0 0 3px rgba(44,110,203,.12); }
+
+  /* rule citation chip on the deploy card */
+  .rule-cite { display: inline-flex; align-items: center; gap: 5px; margin-top: 7px; font-size: 11.5px; color: var(--needs); cursor: pointer; border: 1px solid #f1d6d4; background: var(--needs-bg); border-radius: 7px; padding: 3px 8px; font-weight: 600; }
+  .rule-cite:hover { background: #f9e3e1; }
 </style>
 </head>
 <body>
@@ -127,7 +193,67 @@
     <span style="font-family:var(--mono);font-size:14px">auth.spec.ts</span> — clear it before it
     stalls tonight's release. 2 agents are moving on their own.
   </div>
-  <div class="kbdhint">Navigate <kbd>j</kbd> <kbd>k</kbd> · open <kbd>enter</kbd> · across lanes <kbd>h</kbd> <kbd>l</kbd> · new task <kbd>n</kbd></div>
+  <div class="kbdhint">Navigate <kbd>j</kbd> <kbd>k</kbd> · open <kbd>enter</kbd> · across lanes <kbd>h</kbd> <kbd>l</kbd> · new task <kbd>n</kbd> · project rules <kbd>i</kbd></div>
+
+  <!-- Project plaque: current scope + switcher + repo binding + instructions -->
+  <div class="project">
+    <div class="pj-mark">API</div>
+    <div class="pj-switch-wrap">
+      <div class="pj-id" id="pjToggle" role="button" tabindex="0" aria-haspopup="true" style="cursor:pointer">
+        <div class="pj-name">API service <span class="caret">▾</span></div>
+        <div class="pj-bind"><span class="repo">~/git/api</span></div>
+      </div>
+      <div class="pj-pop" id="pjPop" role="menu">
+        <div class="pj-opt cur" role="menuitem">
+          <span class="om" style="background:var(--work-bg);color:var(--work)">API</span>
+          <span><div>API service</div><div class="osub">~/git/api · main</div></span>
+          <span class="check">✓</span>
+        </div>
+        <div class="pj-opt" role="menuitem">
+          <span class="om" style="background:#f0ece1;color:var(--sam)">Pe</span>
+          <span><div>Personal</div><div class="osub">no folder bound</div></span>
+        </div>
+        <div class="pj-opt" role="menuitem">
+          <span class="om" style="background:#efe7fb;color:var(--priya)">We</span>
+          <span><div>Web app</div><div class="osub">~/git/web</div></span>
+        </div>
+        <div class="pj-opt pj-new" role="menuitem">＋ New project…</div>
+      </div>
+    </div>
+
+    <div class="pj-sep"></div>
+    <div class="pj-bind">
+      <span class="repo">github.com/acme/api</span>
+      <span class="br">· branch main</span>
+      <button class="pj-btn" style="padding:3px 9px" id="pjRebind">Rebind repo</button>
+    </div>
+
+    <div class="pj-grow"></div>
+    <button class="pj-btn" id="instrBtn" aria-expanded="false">Instructions <span class="badge">4</span></button>
+    <button class="pj-btn teach" id="teachBtn">＋ Teach a rule</button>
+  </div>
+</div>
+
+<!-- Project instructions — the teaching layer (one click away, not always expanded) -->
+<div class="instr" id="instrPanel">
+  <div class="instr-inner">
+    <div class="instr-head">
+      <span class="h">API service — project instructions</span>
+      <span class="meta">4 instructions · 1 learned from you Tue · honored by every agent in this project</span>
+      <button class="close" id="instrClose">✕</button>
+    </div>
+    <div class="instr-sub">Persistent, plain-language rules. Every agent run in <b>API service</b> follows them. Tasks inherit them automatically.</div>
+    <div class="instr-list">
+      <div class="instr-rule cited" id="ruleCI"><span class="rn">R1</span><span>Never merge with red CI — stop and ask me.</span></div>
+      <div class="instr-rule"><span class="rn">R2</span><span>Squash &amp; merge only. PR titles: <span style="font-family:var(--mono)">area: summary</span>.</span></div>
+      <div class="instr-rule"><span class="rn">R3</span><span>Post run results to #eng.</span></div>
+      <div class="instr-rule learned"><span class="rn">R4</span><span>Don't touch <span style="font-family:var(--mono)">infra/</span> without confirming first.</span><span class="learn-flag">learned from you · Tue</span></div>
+    </div>
+    <div class="instr-add">
+      <input id="teachInput" type="text" placeholder="Teach a new rule in plain language, e.g. “Always run lint before pushing.”" />
+      <button class="pj-btn teach" id="teachSave">Save rule</button>
+    </div>
+  </div>
 </div>
 
 <div class="board">
@@ -139,6 +265,7 @@
     <div class="card" tabindex="0">
       <div class="top-row"><span class="title">Nightly deploy</span><span class="ava you">Y</span></div>
       <div class="why"><span class="strong">Blocked 41 min</span> — test <span style="font-family:var(--mono)">auth.spec.ts</span> returns 401, expected 200.</div>
+      <div><span class="rule-cite" id="ruleCiteChip" role="button" tabindex="0">↳ rule: never merge red CI</span></div>
       <div class="tagline"><span class="tag lo">local · cron</span> · ~/git/api</div>
       <div class="detail">
         <div class="trace">
@@ -181,7 +308,7 @@
       <div class="detail"><div class="acts"><button class="b primary">Mark done</button><button class="b">Open PR</button></div></div>
     </div>
 
-    <button class="laneadd">+ Add a to-do or agent task…</button>
+    <button class="laneadd">+ Add a to-do or agent task… <span style="font-family:var(--mono);color:var(--work)">in ~/git/api</span></button>
   </section>
 
   <!-- LANE 2: AGENTS WORKING -->
@@ -221,7 +348,7 @@
       </div>
     </div>
 
-    <button class="laneadd">+ Start an agent task…</button>
+    <button class="laneadd">+ Start an agent task… <span style="font-family:var(--mono);color:var(--work)">in ~/git/api</span></button>
   </section>
 
   <!-- LANE 3: DONE / FYI  (includes an empty-state demo when filtered, plus real done items) -->
@@ -266,6 +393,69 @@
     else if (k === 'l') { li = Math.min(li + 1, lanes.length - 1); ci = Math.min(ci, lanes[li].length - 1); focusCard(); e.preventDefault(); }
     else if (k === 'h') { li = Math.max(li - 1, 0); ci = Math.min(ci, lanes[li].length - 1); focusCard(); e.preventDefault(); }
     else if (k === 'enter') { const c = lanes[li][ci]; if (c) c.classList.toggle('open'); e.preventDefault(); }
+    else if (k === 'i') { toggleInstr(); e.preventDefault(); } // open project instructions
+  });
+
+  // ---- Project layer interactions ----
+  const instrPanel = document.getElementById('instrPanel');
+  const instrBtn = document.getElementById('instrBtn');
+  function toggleInstr(force) {
+    const open = force === undefined ? !instrPanel.classList.contains('open') : force;
+    instrPanel.classList.toggle('open', open);
+    instrBtn.setAttribute('aria-expanded', String(open));
+    if (open) instrPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  instrBtn.addEventListener('click', () => toggleInstr());
+  document.getElementById('instrClose').addEventListener('click', () => toggleInstr(false));
+
+  // "Teach a rule" — opens the panel and focuses the input
+  function startTeach() { toggleInstr(true); const inp = document.getElementById('teachInput'); inp.focus(); }
+  document.getElementById('teachBtn').addEventListener('click', startTeach);
+  document.getElementById('teachSave').addEventListener('click', addRule);
+  document.getElementById('teachInput').addEventListener('keydown', e => { if (e.key === 'Enter') addRule(); });
+  function addRule() {
+    const inp = document.getElementById('teachInput');
+    const text = inp.value.trim();
+    if (!text) { inp.focus(); return; }
+    const list = instrPanel.querySelector('.instr-list');
+    const n = list.children.length + 1;
+    const row = document.createElement('div');
+    row.className = 'instr-rule learned';
+    row.innerHTML = '<span class="rn">R' + n + '</span><span></span><span class="learn-flag">learned from you · just now</span>';
+    row.children[1].textContent = text;
+    list.appendChild(row);
+    inp.value = '';
+    instrBtn.querySelector('.badge').textContent = String(n);
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // Project switcher popover
+  const pjPop = document.getElementById('pjPop');
+  const pjToggle = document.getElementById('pjToggle');
+  function togglePop(force) { pjPop.classList.toggle('open', force === undefined ? !pjPop.classList.contains('open') : force); }
+  pjToggle.addEventListener('click', e => { e.stopPropagation(); togglePop(); });
+  pjToggle.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePop(); } });
+  document.addEventListener('click', e => { if (!e.target.closest('.pj-switch-wrap')) togglePop(false); });
+
+  document.getElementById('pjRebind').addEventListener('click', e => {
+    e.stopPropagation();
+    alert('Bind a folder or git repo to API service.\nCurrently bound: ~/git/api · github.com/acme/api · branch main.\n(An unbound project is valid — agents just get less context.)');
+  });
+
+  // Rule citation on the blocked deploy card -> open instructions, highlight the cited rule
+  function citeRule(e) {
+    if (e) e.stopPropagation();
+    toggleInstr(true);
+    const r = document.getElementById('ruleCI');
+    r.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    r.classList.remove('cited'); void r.offsetWidth; r.classList.add('cited'); // re-trigger emphasis
+  }
+  document.getElementById('ruleCiteChip').addEventListener('click', citeRule);
+  document.getElementById('ruleCiteChip').addEventListener('keydown', e => { if (e.key === 'Enter') citeRule(e); });
+
+  // Lane "+ add" pre-fills the current project's folder
+  document.querySelectorAll('.laneadd').forEach(btn => {
+    btn.addEventListener('click', () => alert('New task in project “API service”.\nFolder pre-filled from project: ~/git/api\nInherits 4 project instructions (e.g. “Never merge with red CI”).'));
   });
 
   // click toggles open (reveals detail + PHI) — not hover-gated

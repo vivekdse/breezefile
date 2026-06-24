@@ -12,6 +12,22 @@
     V5 Trust & Auditability— "what changed" structured diff with per-step trace + why lines.
     V6 Team Coordination   — owner avatars (you / Priya / Sam) on TypeBuild items.
     V7 Confidentiality     — TypeBuild bodies blurred until focused (hover/focus reveal).
+
+  PROJECT LAYER (added):
+    The project is treated as a MAILBOX / ACCOUNT, native to the email metaphor.
+    1. Current-project + switcher — the mailbox plaque shows "API service · ~/git/api"
+       with a one-click account switcher hinting "Personal" and "Web app". Switching the
+       mailbox switches the inbox scope (the count/strip reflect the active project).
+    2. Folder / repo binding — the mailbox shows its git binding (~/git/api ·
+       github.com/acme/api · branch main); an unbound account offers "Bind a folder or repo".
+    3. Instructions = inbox RULES — "4 rules apply" opens a panel of the four canonical
+       project instructions ("4 instructions · 1 learned from you Tue") with "Edit",
+       "＋ Teach a rule", and per-rule edit. The blocked "Nightly deploy" cites
+       "held by rule: Never merge with red CI" (earned connection). Steering an agent
+       inline offers "＋ Save as a rule for this project" — teaching in the moment.
+    VALUES SERVED by the project layer: V5 Trust & Auditability (the block cites the exact
+    rule that caused it), V8 Power Without Machinery (plain-language rules, no settings page),
+    V1 Calm Clarity (rules live one click away behind a calm plaque, never always-expanded).
 -->
 <html lang="en">
 <head>
@@ -40,6 +56,81 @@
   .brand .dot{color:var(--accent)}
   .count{font-variant-numeric:tabular-nums;color:var(--dim);font-size:13px}
   .count b{color:var(--ink)}
+
+  /* Mailbox plaque (project = account) */
+  .mailbox{position:relative;display:flex;align-items:center;gap:11px;margin:8px 0 4px;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:9px 12px}
+  .mbicon{font-size:18px;width:30px;height:30px;flex:0 0 30px;display:grid;place-items:center;
+    background:var(--panel2);border:1px solid var(--line);border-radius:9px}
+  .mbbody{flex:1;min-width:0}
+  .mbtop{display:flex;align-items:center;gap:8px}
+  .mbname{font-weight:650;font-size:13.5px}
+  .mbtag{font-size:10px;color:var(--faint);border:1px solid var(--line);border-radius:5px;
+    padding:1px 5px;letter-spacing:.3px}
+  .mbbind{color:var(--dim);font-size:12px;margin-top:2px;font-family:var(--mono)}
+  .mbbind a{color:var(--accent);text-decoration:none}
+  .mbbind a:hover{text-decoration:underline}
+  .mbactions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+  .switch{border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+    padding:6px 11px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;
+    font-family:var(--sans);display:inline-flex;align-items:center;gap:6px}
+  .switch:hover{border-color:var(--accent)}
+  .switch .car{color:var(--dim);font-size:10px}
+  .rulesbtn{border:1px solid var(--line);background:var(--panel2);color:var(--accent);
+    padding:6px 11px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;
+    font-family:var(--sans);display:inline-flex;align-items:center;gap:6px}
+  .rulesbtn:hover{border-color:var(--accent)}
+  .rulesbtn .ct{color:var(--ink);font-variant-numeric:tabular-nums}
+
+  /* Account switcher dropdown */
+  .accts{position:absolute;top:calc(100% + 6px);right:12px;z-index:30;min-width:260px;
+    background:var(--panel2);border:1px solid var(--line);border-radius:11px;
+    box-shadow:0 18px 50px -18px #000;padding:6px;display:none}
+  .accts.show{display:block}
+  .acct{display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;cursor:pointer}
+  .acct:hover{background:var(--panel)}
+  .acct.on{background:var(--panel)}
+  .acct .ai{font-size:16px;width:24px;text-align:center}
+  .acct .an{font-weight:600;font-size:13px}
+  .acct .ad{color:var(--faint);font-size:11.5px;font-family:var(--mono)}
+  .acct .ac{margin-left:auto;color:var(--accent);font-size:12px}
+  .acct .badge{margin-left:auto;font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .accts .div{height:1px;background:var(--line);margin:5px 6px}
+  .accts .add{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;
+    cursor:pointer;color:var(--accent);font-size:12.5px;font-weight:600}
+  .accts .add:hover{background:var(--panel)}
+
+  /* Rules panel (project instructions) */
+  .rules{background:var(--panel);border:1px solid var(--accent);border-radius:var(--radius);
+    margin:0 0 14px;overflow:hidden;max-height:0;opacity:0;transition:max-height .22s ease,opacity .18s,margin .22s;
+    margin-top:-4px}
+  .rules.open{max-height:560px;opacity:1;margin:6px 0 16px;padding:0}
+  .rules-hd{display:flex;align-items:center;gap:10px;padding:12px 15px;border-bottom:1px solid var(--line)}
+  .rules-hd .t{font-weight:650;font-size:13.5px}
+  .rules-hd .meta{color:var(--dim);font-size:12px;margin-left:2px}
+  .rules-hd .sp{margin-left:auto}
+  .rule{display:flex;gap:11px;padding:11px 15px;border-bottom:1px solid var(--line);align-items:flex-start}
+  .rule:last-child{border-bottom:none}
+  .rule .rn{flex:0 0 22px;width:22px;height:22px;border-radius:50%;background:var(--panel2);
+    border:1px solid var(--line);display:grid;place-items:center;font-size:11px;color:var(--dim);
+    font-variant-numeric:tabular-nums}
+  .rule .rt{flex:1;min-width:0;font-size:13px}
+  .rule .rt .learned{display:inline-block;margin-left:7px;font-size:10.5px;color:var(--ok);
+    border:1px solid #1f5a39;border-radius:5px;padding:1px 6px;letter-spacing:.2px}
+  .rule .rt .cites{display:inline-block;margin-left:7px;font-size:10.5px;color:var(--urgent);
+    border:1px solid #5a2a30;border-radius:5px;padding:1px 6px;letter-spacing:.2px}
+  .rule .redit{opacity:.55;cursor:pointer;font-size:12px;flex:0 0 auto}
+  .rule:hover .redit{opacity:1}
+  .rule.flash{background:#11331f33;animation:rflash 1.4s ease}
+  @keyframes rflash{0%{background:#11331f}100%{background:transparent}}
+
+  /* held-by-rule citation on blocked item */
+  .heldby{display:inline-flex;align-items:center;gap:5px;margin-top:5px;font-size:11.5px;
+    color:var(--urgent);background:#3a182022;border:1px solid #5a2a30;border-radius:7px;
+    padding:2px 8px;cursor:pointer;white-space:nowrap}
+  .heldby:hover{background:#3a182055}
+  .heldby b{color:#ffb0b0;font-weight:600}
 
   /* Hero insight */
   .hero{background:linear-gradient(180deg,#221218,#191116);border:1px solid #4a2730;
@@ -168,6 +259,64 @@
     <div class="count"><b id="needcount">3</b> need you · <b id="totcount">6</b> in inbox</div>
   </div>
 
+  <!-- Mailbox = project/account. Switching the mailbox switches the inbox scope. -->
+  <div class="mailbox">
+    <div class="mbicon">📬</div>
+    <div class="mbbody">
+      <div class="mbtop">
+        <span class="mbname" id="mbName">API service</span>
+        <span class="mbtag">PROJECT MAILBOX</span>
+      </div>
+      <div class="mbbind" id="mbBind">
+        🔗 <a href="#" onclick="toast('Open ~/git/api');return false">~/git/api</a>
+        · github.com/acme/api · branch <b>main</b>
+      </div>
+    </div>
+    <div class="mbactions">
+      <button class="rulesbtn" id="rulesToggle" onclick="toggleRules()" aria-expanded="false">
+        ⚖ Rules <span class="ct">(4)</span>
+      </button>
+      <button class="switch" onclick="toggleAccts(event)">
+        Switch <span class="car">▾</span>
+      </button>
+    </div>
+
+    <!-- Account switcher -->
+    <div class="accts" id="accts">
+      <div class="acct on" onclick="switchAcct('API service')">
+        <span class="ai">📬</span>
+        <div><div class="an">API service</div><div class="ad">~/git/api · main</div></div>
+        <span class="ac">✓ current</span>
+      </div>
+      <div class="acct" onclick="switchAcct('Web app')">
+        <span class="ai">🌐</span>
+        <div><div class="an">Web app</div><div class="ad">~/git/web · main</div></div>
+        <span class="badge">2</span>
+      </div>
+      <div class="acct" onclick="switchAcct('Personal')">
+        <span class="ai">🏠</span>
+        <div><div class="an">Personal</div><div class="ad">no repo bound</div></div>
+        <span class="badge">5</span>
+      </div>
+      <div class="div"></div>
+      <div class="add" onclick="toast('＋ New project mailbox — name it, then bind a folder or repo')">
+        ＋ New project mailbox
+      </div>
+    </div>
+  </div>
+
+  <!-- Project instructions, framed as inbox RULES. One click from the plaque, never always-on. -->
+  <div class="rules" id="rules">
+    <div class="rules-hd">
+      <span class="t">⚖ Rules for this mailbox</span>
+      <span class="meta">4 instructions · <span style="color:var(--ok)">1 learned from you Tue</span> · every agent here honors them</span>
+      <span class="sp"></span>
+      <button class="btn sm" onclick="toast('Edit all rules — plain text, one per line')">Edit</button>
+      <button class="btn pri sm" onclick="teachRule()">＋ Teach a rule</button>
+    </div>
+    <div id="rulesList"></div>
+  </div>
+
   <div class="hero" id="hero">
     <div class="icon">🛑</div>
     <div>
@@ -201,6 +350,7 @@
   <span><kbd>e</kbd> archive</span>
   <span><kbd>a</kbd> accept</span>
   <span><kbd>c</kbd> create task</span>
+  <span><kbd>g</kbd> rules</span>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -213,13 +363,14 @@ const ITEMS = [
     pill:['p-block','blocked','41 min'], live:true, ageBase:41*60,
     sub:'Failing test <code>auth.spec.ts</code> · folder <code>~/git/api</code>',
     why:'Step 4/6 — deploy gate refuses to promote while CI is red.',
+    heldBy:'Never merge with red CI', heldByRule:0,
     needs:true, type:'agent',
     trace:[
       ['✓','Pulled <b>main</b> @ a91f2c','clean working tree'],
       ['✓','Ran <b>build</b>','passed in 38s'],
       ['✓','Ran <b>lint</b>','0 errors'],
       ['✗','Ran <b>test suite</b>','<code>auth.spec.ts</code> "rejects expired token" failing — got 200, expected 401'],
-      ['◦','Promote to staging','blocked on test'],
+      ['◦','Promote to staging','blocked by rule: "Never merge with red CI"'],
       ['◦','Notify #releases','pending'],
     ],
     quick:['Skip auth.spec.ts and continue','Re-run the suite','Show me the failing diff','Stop the run'],
@@ -299,6 +450,86 @@ const ITEMS = [
   },
 ];
 
+/* ---- project layer: the active mailbox + its rules (project instructions) ---- */
+let project = 'API service';
+/* canonical "API service" instructions, verbatim from the brief; framed here as inbox RULES.
+   learned: surfaced as "1 learned from you Tue". cites: linked to the blocked deploy. */
+const RULES = [
+  {text:'Never merge with red CI — stop and ask me.', cites:true},
+  {text:'Squash & merge only. PR titles: <code>area: summary</code>.'},
+  {text:'Post run results to #eng.'},
+  {text:"Don't touch <code>infra/</code> without confirming first.", learned:'learned from you Tue'},
+];
+
+function renderRules(){
+  const list=document.getElementById('rulesList');
+  list.innerHTML = RULES.map((r,i)=>`
+    <div class="rule" data-rule="${i}">
+      <span class="rn">${i+1}</span>
+      <span class="rt">${r.text}
+        ${r.learned?`<span class="learned">✦ ${r.learned}</span>`:''}
+        ${r.cites?'<span class="cites">⚖ blocking Nightly deploy now</span>':''}
+      </span>
+      <span class="redit" title="Edit this rule" onclick="toast('Edit rule ${i+1}')">✎</span>
+    </div>`).join('');
+  document.querySelector('#rules .meta').innerHTML =
+    `${RULES.length} instructions · <span style="color:var(--ok)">1 learned from you Tue</span> · every agent here honors them`;
+  document.querySelector('#rulesToggle .ct').textContent = '('+RULES.length+')';
+}
+
+function toggleRules(force){
+  const p=document.getElementById('rules');
+  const open = force!==undefined ? force : !p.classList.contains('open');
+  p.classList.toggle('open', open);
+  document.getElementById('rulesToggle').setAttribute('aria-expanded', open);
+}
+function showRule(i){
+  toggleRules(true);
+  setTimeout(()=>{
+    const el=document.querySelector(`.rule[data-rule="${i}"]`);
+    if(el){ el.classList.add('flash'); el.scrollIntoView({block:'center',behavior:'smooth'});
+      setTimeout(()=>el.classList.remove('flash'),1500); }
+  },230);
+  toast('This block cites rule '+(i+1)+' — auditable teaching layer');
+}
+function teachRule(){
+  const t=prompt('Teach a rule for "'+project+'" — plain language, every agent here will follow it:');
+  if(t&&t.trim()){ RULES.push({text:t.trim(), learned:'learned from you just now'}); renderRules(); toggleRules(true);
+    toast('✦ Taught — now '+RULES.length+' rules apply to '+project); }
+}
+function saveAsRule(id){
+  const i=document.getElementById('reply-'+id); const v=i&&i.value.trim();
+  if(!v){ toast('Type a steer first, then save it as a rule'); if(i)i.focus(); return; }
+  RULES.push({text:v, learned:'learned from you just now'}); renderRules(); toggleRules(true);
+  toast('✦ Saved as a rule for '+project+' — every future agent will follow it');
+  if(i) i.value='';
+}
+
+/* account switcher */
+function toggleAccts(e){ if(e)e.stopPropagation(); document.getElementById('accts').classList.toggle('show'); }
+document.addEventListener('click',()=>document.getElementById('accts').classList.remove('show'));
+const ACCTS={
+  'API service':{icon:'📬', bind:'🔗 <a href="#" onclick="toast(\'Open ~/git/api\');return false">~/git/api</a> · github.com/acme/api · branch <b>main</b>'},
+  'Web app':{icon:'🌐', bind:'🔗 <a href="#" onclick="toast(\'Open ~/git/web\');return false">~/git/web</a> · github.com/acme/web · branch <b>main</b>'},
+  'Personal':{icon:'🏠', bind:'No repo bound — <a href="#" onclick="toast(\'Bind a folder or repo to Personal\');return false">Bind a folder or repo</a>'},
+};
+function switchAcct(name){
+  project=name; const a=ACCTS[name];
+  document.getElementById('mbName').textContent=name;
+  document.querySelector('.mbicon').textContent=a.icon;
+  document.getElementById('mbBind').innerHTML=a.bind;
+  document.querySelectorAll('#accts .acct').forEach(el=>{
+    const on=el.querySelector('.an').textContent===name;
+    el.classList.toggle('on',on);
+    const oldMark=el.querySelector('.ac'); if(oldMark) oldMark.remove();
+    const badge=el.querySelector('.badge'); if(badge) badge.style.display = on?'none':'';
+    if(on){ const m=document.createElement('span'); m.className='ac'; m.textContent='✓ current'; el.appendChild(m); }
+  });
+  document.getElementById('accts').classList.remove('show');
+  toggleRules(false);
+  toast('Switched mailbox → '+name+' — inbox now scoped to this project');
+}
+
 let sel = 0, filter='all', tick=0;
 const stream = document.getElementById('stream');
 
@@ -349,6 +580,7 @@ function render(){
             ${it.owner?avatar(it.owner):''} ${tbBadge}
           </div>
           <div class="sub">${it.sub} ${it.why?`<span class="why">— ${it.why}</span>`:''}</div>
+          ${it.heldBy?`<div class="heldby" onclick="event.stopPropagation();showRule(${it.heldByRule})" title="This block was caused by a project rule — click to see it">⚖ held by rule: <b>${it.heldBy}</b></div>`:''}
         </div>
         <div class="meta">${pillAge}</div>
       </div>
@@ -381,6 +613,7 @@ function expandHTML(it){
     h+=`<div class="reply">
           <input id="reply-${it.id}" placeholder="Steer ${it.title} — type and ↵ (e.g. ${it.quick?it.quick[0].toLowerCase():'…'})">
           <button class="btn pri" onclick="sendReply('${it.id}')">Send</button>
+          <button class="btn ghost sm" title="Persist this steer so every agent in API service follows it" onclick="saveAsRule('${it.id}')">＋ Save as a rule</button>
         </div>`;
     if(it.quick){
       h+='<div class="quick">';
@@ -482,6 +715,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='e'){ toast('Archived '+cur.title); removeItem(cur.id); }
   else if(e.key==='a' && cur.type==='result'){ accept(cur.id); }
   else if(e.key==='c'){ newTask(); }
+  else if(e.key==='g'){ e.preventDefault(); toggleRules(); }
 });
 
 /* live tick — ages count up, triage step advances */
@@ -495,6 +729,7 @@ setInterval(()=>{
   render();
 },1000);
 
+renderRules();
 render();
 </script>
 </body>

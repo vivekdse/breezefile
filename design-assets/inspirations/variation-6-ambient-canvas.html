@@ -15,6 +15,17 @@
     V5 Trust & Auditability      — node detail carries the step trace + per-step why.
     V6 Team Coordination         — node owner badges (you / Priya / Sam).
     V7 Confidentiality           — TypeBuild node labels blurred until the node is focused.
+
+  PROJECT LAYER (added): The canvas is now scoped to a PROJECT — the project IS the world/frame.
+    A calm corner plaque names the current project "API service · ~/git/api" with a switcher
+    (Personal, Web app) that swaps the canvas. The repo binding (github.com/acme/api · main) lives
+    on the plaque. A "house rules" node anchored on the canvas reveals the four canonical project
+    instructions on click, plus a "＋ Teach a rule" control. The red blocked edge (Test→Promote)
+    now cites the rule that caused it: "blocked by rule: never merge with red CI."
+    Values served by the project layer:
+      V5 Trust & Auditability  — the block names the project rule that produced it (rule → effect).
+      V4 Intent→Action         — teach a plain-language rule in one click; it shapes every agent run.
+      V8 Power Without Machinery— project = thin scope + persistent rules, not a settings page.
 -->
 <html lang="en">
 <head>
@@ -146,6 +157,59 @@
   .toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(15px);z-index:60;
     background:#0e1426;border:1px solid var(--accent);border-radius:10px;padding:9px 16px;font-size:13px;opacity:0;transition:.2s;pointer-events:none}
   .toast.show{opacity:1;transform:translateX(-50%)}
+
+  /* ---- project plaque (calm corner, top-left of canvas world) ---- */
+  .plaque{position:fixed;left:18px;top:62px;z-index:26;width:248px;
+    background:#0a0f1ee8;border:1px solid var(--line);border-radius:12px;padding:11px 13px;
+    box-shadow:0 14px 40px -22px #000}
+  .plaque .lbl{font-size:9.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--faint);margin-bottom:6px}
+  .plaque .proj{display:flex;align-items:center;gap:8px;cursor:pointer;border-radius:8px;
+    padding:4px 6px;margin:-4px -6px;transition:background .15s}
+  .plaque .proj:hover{background:#0e1426}
+  .plaque .pdot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:0 0 9px;
+    box-shadow:0 0 10px -1px var(--accent)}
+  .plaque .pname{font-size:14px;font-weight:700}
+  .plaque .pchev{margin-left:auto;color:var(--faint);font-size:11px}
+  .plaque .bind{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);
+    margin-top:8px;padding-top:8px;border-top:1px solid #131c30}
+  .plaque .bind code{font-family:var(--mono);color:var(--accent);font-size:11px}
+  .plaque .bind .rurl{color:var(--faint);font-size:10.5px}
+  .plaque .branch{font-family:var(--mono);font-size:10px;color:var(--dim);background:#0e1426;
+    border:1px solid var(--line);border-radius:5px;padding:0 5px;margin-left:auto}
+  /* switcher dropdown */
+  .pswitch{display:none;margin-top:9px;padding-top:9px;border-top:1px solid #131c30}
+  .pswitch.open{display:block}
+  .pswitch .opt{display:flex;align-items:center;gap:8px;padding:6px 6px;border-radius:8px;
+    cursor:pointer;font-size:12.5px;margin:0 -6px}
+  .pswitch .opt:hover{background:#0e1426}
+  .pswitch .opt .od{width:7px;height:7px;border-radius:50%;flex:0 0 7px}
+  .pswitch .opt .om{color:var(--faint);font-size:10.5px;margin-left:auto;font-family:var(--mono)}
+  .pswitch .opt.cur{color:var(--accent)}
+
+  /* ---- house-rules node skin (project instructions, on the canvas) ---- */
+  .nd.rules{border-color:var(--violet);border-style:solid;background:#150f24ee;
+    box-shadow:0 0 0 1px #c08bff44,0 10px 30px -16px #000}
+  .node.sel .nd.rules{box-shadow:0 0 0 2px var(--violet),0 0 30px -2px #c08bff88}
+  .nd.rules .nm{color:#e3d4ff}
+
+  /* ---- rules detail panel content ---- */
+  .ruleslist{list-style:none;padding:0;margin:0 0 14px;font-size:13px}
+  .ruleslist li{display:flex;gap:9px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #131c30}
+  .ruleslist li:last-child{border:0}
+  .ruleslist .rq{color:var(--violet);font-weight:800;flex:0 0 14px}
+  .ruleslist .rt{color:var(--ink);line-height:1.35}
+  .ruleslist .learned{font-size:10.5px;color:var(--ok);background:#0f2b1f;border-radius:6px;
+    padding:1px 7px;margin-left:8px;white-space:nowrap}
+  .rulecite{background:#150f24;border:1px solid #3a2a5e;border-left:3px solid var(--violet);
+    border-radius:9px;padding:10px 12px;font-size:12.5px;color:#d9c8ff;margin:10px 0 0}
+  .rulecite b{color:#fff}
+  .teach{display:flex;gap:8px;margin:14px 0 0}
+  .teach input{flex:1;background:#070a12;border:1px solid var(--line);border-radius:9px;
+    color:var(--ink);padding:9px 11px;font-size:13px}
+  .teach input:focus{outline:none;border-color:var(--violet)}
+  .btn.teachbtn{background:var(--violet);border-color:var(--violet);color:#100a1e}
+  /* edge label gets a project-rule citation chip vibe */
+  .edge-rule{fill:var(--urgent);font-size:10px;font-weight:600;font-family:var(--sans);opacity:.92}
 </style>
 </head>
 <body>
@@ -162,6 +226,28 @@
     <span><i class="sw" style="background:var(--warn)"></i>waiting on you</span>
     <span><i class="sw" style="background:var(--ok)"></i>done</span>
     <span><i class="sw" style="background:#33405f"></i>to-do</span>
+  </div>
+</div>
+
+<!-- project plaque: the canvas is scoped to a PROJECT; this names the world -->
+<div class="plaque">
+  <div class="lbl">Project · this canvas</div>
+  <div class="proj" onclick="toggleSwitch()" title="Switch project — swaps the canvas">
+    <span class="pdot"></span>
+    <span class="pname">API service</span>
+    <span class="pchev" id="pchev">▾ switch</span>
+  </div>
+  <div class="bind" title="This project is bound to a git repo; context flows to its agents">
+    🔗 <code>~/git/api</code>
+    <span class="branch">main</span>
+  </div>
+  <div class="bind" style="border-top:0;padding-top:2px;margin-top:2px">
+    <span class="rurl">github.com/acme/api</span>
+  </div>
+  <div class="pswitch" id="pswitch">
+    <div class="opt cur"><span class="od" style="background:var(--accent)"></span>API service <span class="om">~/git/api</span></div>
+    <div class="opt" onclick="switchProject('Personal')"><span class="od" style="background:var(--ok)"></span>Personal <span class="om">~/notes</span></div>
+    <div class="opt" onclick="switchProject('Web app')"><span class="od" style="background:var(--work)"></span>Web app <span class="om">~/git/web</span></div>
   </div>
 </div>
 
@@ -239,13 +325,31 @@ const NODES={
     desc:'local auto · cron Fri 9am',
     why:'Finished clean — summarized 18 PRs. Accept it or ask for a redo.',type:'result',
     trace:[['✓','Collect PRs','18 / 3 repos'],['✓','Group','5 themes'],['✓','Write','142 lines']]},
+
+  /* house rules — the project's teaching layer, anchored on the canvas */
+  rules:{x:300,y:560,ic:'📜',nm:'House rules',state:'rules',cls:'rules',owner:null,tb:false,
+    sub:'4 instructions',pill:['p-todo','project rules'],type:'rules',
+    desc:'Project instructions · API service',
+    why:'Plain-language rules every agent in this project honors. They persist and shape every run. The Nightly deploy block traces back to one of these.'},
 };
 
 const EDGES=[
   ['deploy','build','contain'],['deploy','lint','contain'],['deploy','test','contain'],['deploy','promote','contain'],
   ['build','test','order'],['lint','promote','order'],
-  ['test','promote','block'],   // the red blocker edge
+  ['test','promote','block'],   // the red blocker edge — cites a project rule (see drawEdges)
 ];
+
+/* project teaching layer — persists, shapes every agent run in "API service" */
+const PROJECT={
+  name:'API service', repo:'~/git/api', url:'github.com/acme/api', branch:'main',
+  rules:[
+    {t:'Never merge with red CI — stop and ask me.', learned:false},
+    {t:'Squash & merge only. PR titles: <code>area: summary</code>.', learned:false},
+    {t:'Post run results to #eng.', learned:false},
+    {t:"Don't touch <code>infra/</code> without confirming first.", learned:true},
+  ],
+  summary:'4 instructions · 1 learned from you Tue',
+};
 
 let zlevel=0, sel=null, age=41*60;
 const Z=[{s:1,l:'constellation'},{s:1.45,l:'mid'},{s:2.0,l:'node detail'}];
@@ -289,8 +393,13 @@ function drawEdges(){
     const na=NODES[a], nb=NODES[b];
     // curve
     const mx=(na.x+nb.x)/2, my=(na.y+nb.y)/2;
-    s+=`<path class="edge ${t}" d="M ${na.x} ${na.y} Q ${mx} ${my} ${nb.x} ${nb.y}"/>`;
-    if(t==='block'){ s+=`<text class="edge-label" x="${mx+8}" y="${my-6}">⛔ blocked-by</text>`; }
+    const title=t==='block'?'<title>Promote is blocked by Test.\nblocked by project rule: “Never merge with red CI — stop and ask me.”</title>':'';
+    const pe=t==='block'?' style="pointer-events:stroke;cursor:help"':'';
+    s+=`<path class="edge ${t}"${pe} d="M ${na.x} ${na.y} Q ${mx} ${my} ${nb.x} ${nb.y}">${title}</path>`;
+    if(t==='block'){
+      s+=`<text class="edge-label" x="${mx+8}" y="${my-8}">⛔ blocked-by</text>`;
+      s+=`<text class="edge-rule" x="${mx+8}" y="${my+8}">rule: never merge with red CI</text>`;
+    }
   }
   edgesEl.innerHTML=s;
 }
@@ -319,8 +428,32 @@ function focusNode(id){
   openDetail(id);
 }
 
+function renderRules(){
+  return '<ul class="ruleslist">'+PROJECT.rules.map(r=>
+    `<li><span class="rq">＂</span><span class="rt">${r.t}${r.learned?'<span class="learned">learned from you · Tue</span>':''}</span></li>`
+  ).join('')+'</ul>';
+}
+
 function openDetail(id){
   const n=NODES[id];
+
+  /* house-rules node: the project teaching layer */
+  if(n.type==='rules'){
+    document.getElementById('detailBody').innerHTML=`
+      <span class="pill p-todo">project rules</span>
+      <h2>📜 House rules <span style="font-size:11px;color:var(--faint)">· ${PROJECT.name}</span></h2>
+      <div class="dmeta">Plain-language rules <b>every agent</b> in this project honors. They <b>persist</b> and shape every run.<br>${PROJECT.summary}</div>
+      <div id="rulesList">${renderRules()}</div>
+      <div class="rulecite">⛔ The <b>Nightly deploy</b> block traces to rule #1 — <b>“Never merge with red CI.”</b> The agent stopped and is asking you, exactly as taught.</div>
+      <div class="teach">
+        <input id="newRule" placeholder="Teach a rule — e.g. 'Tag releases vX.Y.Z'" onkeydown="if(event.key==='Enter')teachRule()">
+        <button class="btn teachbtn" onclick="teachRule()">＋ Teach</button>
+      </div>
+      <span class="est">Saved rules apply to every future agent run in ${PROJECT.name}. One click — no settings page.</span>`;
+    document.getElementById('detail').classList.add('open');
+    return;
+  }
+
   const stateColor={block:'var(--urgent)',work:'var(--work)',wait:'var(--warn)',done:'var(--ok)',todo:'var(--violet)'}[n.state];
   let acts='';
   if(n.type==='agent'||n.type==='step'||n.type==='workflow'){
@@ -329,7 +462,8 @@ function openDetail(id){
             <div class="acts"><button class="btn pri" onclick="toast('Deleting 12 issues…');closeDetail()">Yes, delete ↵</button>
             <button class="btn" onclick="toast('Kept — continuing');closeDetail()">No, keep</button>
             <button class="btn danger" onclick="toast('■ Stop sent')">■ Stop</button></div>
-            <span class="est">⚠ Irreversible · deletes 12 issues · no undo. Run a dry-run first?</span>`;
+            <span class="est">⚠ Irreversible · deletes 12 issues · no undo. Run a dry-run first?</span>
+            <button class="btn teachbtn" style="margin-top:10px" onclick="saveAnswerAsRule()">＋ Save this answer as a project instruction</button>`;
     } else if(n.blocker){
       acts=`<div class="reply"><input placeholder="Steer the run — e.g. 'skip auth.spec.ts'"><button class="btn" onclick="toast('Steered')">Send</button></div>
             <div class="acts"><button class="btn pri" onclick="toast('Skipping test, promoting to staging…');closeDetail()">Skip test & continue</button>
@@ -354,17 +488,52 @@ function openDetail(id){
     return `<li><span class="s" style="color:${c}">${t[0]}</span><span class="t"><b>${t[1]}</b><span class="w">${t[2]}</span></span></li>`;
   }).join('')+'</ul>'):'';
   const label=n.tb?'🔒 '+n.nm+' <span style="font-size:11px;color:var(--faint)">(TypeBuild · content revealed on focus)</span>':n.nm;
+  const ruleCite=(n.blocker||n.parent)?`<div class="rulecite">⛔ Blocked by project rule — <b>“Never merge with red CI — stop and ask me.”</b> <span style="color:var(--faint)">${PROJECT.name} · <a href="#" style="color:var(--violet)" onclick="focusNode('rules');return false">view house rules</a></span></div>`:'';
   document.getElementById('detailBody').innerHTML=`
     <span class="pill ${n.pill[0]}">${(n.state==='work'||n.state==='block'||n.state==='wait')?'<span class="blink"></span>':''}${n.pill[1]}</span>
     <h2>${n.ic} ${label}</h2>
     <div class="dmeta">${n.desc}${n.parent?' · workflow with 4 steps':''}</div>
     <div class="whybox">${n.why}</div>
+    ${ruleCite}
     ${traceLi}
     ${acts}`;
   document.getElementById('detail').classList.add('open');
 }
 function closeDetail(){document.getElementById('detail').classList.remove('open');sel=null;zlevel=0;render();applyZoom();}
 function toast(t){const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2200);}
+
+/* ---- project switcher: swaps the canvas world ---- */
+function toggleSwitch(){
+  const sw=document.getElementById('pswitch');
+  const open=sw.classList.toggle('open');
+  document.getElementById('pchev').textContent=open?'▴ close':'▾ switch';
+}
+function switchProject(name){
+  toggleSwitch();
+  toast('Switched to '+name+' — swapping canvas…');
+}
+
+/* ---- learn from an in-the-moment answer: save it as a persistent rule ---- */
+function saveAnswerAsRule(){
+  PROJECT.rules.push({t:'Always confirm before deleting stale issues older than 90 days.',learned:true});
+  PROJECT.summary=PROJECT.rules.length+' instructions · '+PROJECT.rules.filter(r=>r.learned).length+' learned from you';
+  NODES.rules.sub=PROJECT.rules.length+' instructions';
+  render();
+  toast('✓ Saved as project instruction — future runs will ask first');
+}
+
+/* ---- teach a rule in the moment: persists, shapes every future run ---- */
+function teachRule(){
+  const inp=document.getElementById('newRule');
+  const v=(inp&&inp.value||'').trim();
+  if(!v){inp&&inp.focus();return;}
+  PROJECT.rules.push({t:v.replace(/</g,'&lt;'),learned:true});
+  PROJECT.summary=PROJECT.rules.length+' instructions · '+PROJECT.rules.filter(r=>r.learned).length+' learned from you';
+  NODES.rules.sub=PROJECT.rules.length+' instructions';
+  render();
+  if(sel==='rules')openDetail('rules');         // re-render panel with the new rule
+  toast('✓ Taught — applies to every agent in '+PROJECT.name);
+}
 
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape')closeDetail();

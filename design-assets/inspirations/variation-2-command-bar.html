@@ -7,6 +7,16 @@
             ("show blocked", "stop nightly deploy"). Below: a calm minimal list that responds.
   Values served: V4 Intent→Action (primary), V8 Power Without Machinery, V1 Calm Clarity,
                  V5 Trust & Auditability (dry-run estimate + step trace).
+
+  Project layer (added): a calm context line above the bar — "Project: API service · ~/git/api ·
+  4 instructions ▸" — with a switcher (Personal, Web app) and a click-to-reveal instructions view
+  showing the four canonical rules, "1 learned from you Tue", and an explicit "＋ Teach a rule".
+  The proposal infers Folder FROM the project ("from project · API service") and shows it "Honors
+  4 project instructions" (squash-merge instruction → merge-strategy field). Steering the proposal
+  offers "Save as a project instruction" (teach-in-the-moment); the bar also accepts "teach: <rule>".
+  The blocked "Nightly deploy" item cites "rule: never merge red CI".
+  Values served by this layer: V1 Calm Clarity (unobtrusive strip), V4 Intent→Action (teach in flow),
+  V5 Trust & Auditability (block cites the rule), V8 Power Without Machinery (plain-language teaching).
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -54,6 +64,65 @@
 
   .hint { text-align: center; color: var(--dim); font-size: 12px; margin: 10px 0 2px; }
   .hint b { color: var(--muted); font-weight: 600; }
+
+  /* PROJECT CONTEXT STRIP — calm plaque above the bar */
+  .proj { display: flex; align-items: center; gap: 10px; margin: 0 4px 12px; font-size: 13px; color: var(--muted); }
+  .proj .scope { display: inline-flex; align-items: center; gap: 9px; background: var(--card); border: 1px solid var(--line); border-radius: 11px; padding: 7px 12px; cursor: pointer; transition: border-color .12s, background .12s; }
+  .proj .scope:hover { border-color: var(--accent); }
+  .proj .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+  .proj .pname { color: var(--ink); font-weight: 650; }
+  .proj .psep { color: var(--line); }
+  .proj .ppath { font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+  .proj .caret { color: var(--dim); font-size: 11px; }
+  .proj .insts { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 6px 4px; }
+  .proj .insts:hover { text-decoration: underline; }
+  .proj .insts .tw { transition: transform .15s; display: inline-block; }
+  .proj .insts.open .tw { transform: rotate(90deg); }
+
+  /* switcher popover */
+  .switch { position: relative; }
+  .switchmenu { display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px; min-width: 220px; box-shadow: 0 14px 34px -18px rgba(0,0,0,.4); }
+  .switchmenu.show { display: block; animation: rise .16s ease; }
+  .switchmenu .so { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 9px; cursor: pointer; font-size: 13px; color: var(--ink); }
+  .switchmenu .so:hover { background: var(--accent-soft); }
+  .switchmenu .so .sd { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+  .switchmenu .so .ssub { color: var(--dim); font-size: 11px; margin-left: auto; font-family: var(--mono); }
+  .switchmenu .so.cur { background: var(--accent-soft); }
+  .switchmenu .so.cur .check { color: var(--accent); margin-left: auto; font-size: 12px; }
+  .switchmenu .sdiv { height: 1px; background: var(--line); margin: 5px 4px; }
+  .switchmenu .so.add { color: var(--accent); }
+
+  /* INSTRUCTIONS — the teaching layer, one click away */
+  .instpanel { display: none; margin: -4px 4px 14px; background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 13px; padding: 14px 16px 12px; }
+  .instpanel.show { display: block; animation: rise .2s ease; }
+  .instpanel .ih { display: flex; align-items: baseline; gap: 8px; margin-bottom: 11px; }
+  .instpanel .ih .it { font-size: 13px; font-weight: 650; color: var(--ink); }
+  .instpanel .ih .isub { font-size: 11.5px; color: var(--dim); }
+  .instpanel .ih .isub b { color: var(--accent); font-weight: 600; }
+  .instpanel .ih .ibind { margin-left: auto; font-size: 12px; color: var(--accent); cursor: pointer; }
+  .instpanel .ih .ibind:hover { text-decoration: underline; }
+  .instrule { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink); }
+  .instrule:first-of-type { border-top: 0; }
+  .instrule .rq { color: var(--accent); font-size: 14px; line-height: 1.2; flex: 0 0 auto; }
+  .instrule .rt { flex: 1; line-height: 1.45; }
+  .instrule .rmeta { font-size: 11px; color: var(--dim); margin-left: 6px; }
+  .instrule.learned .rmeta { color: var(--accent); }
+  .instrule .redit { font-size: 11.5px; color: var(--dim); cursor: pointer; flex: 0 0 auto; align-self: center; }
+  .instrule .redit:hover { color: var(--accent); }
+  .instadd { display: flex; gap: 8px; margin-top: 12px; }
+  .instadd input { flex: 1; font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; background: var(--bg); color: var(--ink); outline: 0; }
+  .instadd input:focus { border-color: var(--accent); }
+  .instadd .teachbtn { font: inherit; font-size: 13px; font-weight: 600; border: 0; border-radius: 9px; padding: 8px 14px; background: var(--accent); color: #fff; cursor: pointer; }
+
+  /* proposal: honors-instructions banner + save-as-instruction */
+  .honors { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--accent-soft); border-top: 1px solid var(--line); font-size: 12.5px; color: var(--accent); }
+  .honors .hk { font-size: 13px; }
+  .honors .hrel { color: var(--muted); }
+  .savebar { display: none; align-items: center; gap: 10px; padding: 11px 16px; background: #fdf8ee; border-top: 1px solid #f0e4c8; font-size: 12.5px; color: var(--amber); }
+  .savebar.show { display: flex; }
+  .savebar .sx { flex: 1; }
+  .savebar .savebtn { font: inherit; font-size: 12.5px; font-weight: 600; border: 1px solid #e8d9bb; border-radius: 8px; padding: 6px 12px; background: #fff; color: var(--amber); cursor: pointer; }
+  .savebar .savebtn.done { background: var(--accent); color: #fff; border-color: transparent; }
 
   /* dropdown under bar */
   .panel { margin-top: 14px; }
@@ -146,13 +215,51 @@
     </div>
   </div>
 
+  <!-- PROJECT CONTEXT STRIP -->
+  <div class="proj">
+    <div class="switch">
+      <div class="scope" id="scopeBtn" title="Switch project">
+        <span class="dot"></span>
+        <span>Project: <span class="pname">API service</span></span>
+        <span class="psep">·</span>
+        <span class="ppath">~/git/api</span>
+        <span class="caret">▾</span>
+      </div>
+      <div class="switchmenu" id="switchMenu">
+        <div class="so cur"><span class="sd" style="background:var(--accent)"></span>API service<span class="check">✓ current</span></div>
+        <div class="so"><span class="sd" style="background:var(--priya)"></span>Web app<span class="ssub">~/git/web</span></div>
+        <div class="so"><span class="sd" style="background:var(--sam)"></span>Personal<span class="ssub">no repo</span></div>
+        <div class="sdiv"></div>
+        <div class="so add">＋ New project…</div>
+      </div>
+    </div>
+    <span class="insts" id="instToggle"><span class="tw">▸</span>&nbsp;4 instructions</span>
+  </div>
+
+  <!-- INSTRUCTIONS — teaching layer, revealed on click -->
+  <div class="instpanel" id="instPanel">
+    <div class="ih">
+      <span class="it">Project instructions</span>
+      <span class="isub">Every agent run in <b>API service</b> honors these · 4 instructions · 1 learned from you Tue</span>
+      <span class="ibind" id="bindBtn">⛓ Bound to github.com/acme/api · branch main · rebind</span>
+    </div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Never merge with red CI — stop and ask me.</span><span class="redit">edit</span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Squash &amp; merge only. PR titles: <span class="mono" style="font-family:var(--mono);font-size:11.5px">area: summary</span>.</span><span class="redit">edit</span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Post run results to #eng.</span><span class="redit">edit</span></div>
+    <div class="instrule learned"><span class="rq">“</span><span class="rt">Don't touch <span class="mono" style="font-family:var(--mono);font-size:11.5px">infra/</span> without confirming first.<span class="rmeta">★ learned from you · Tue</span></span><span class="redit">edit</span></div>
+    <div class="instadd">
+      <input id="newRule" placeholder="＋ Teach a rule — plain language, e.g. “Always rebase before opening a PR”" />
+      <button class="teachbtn" id="teachBtn">Teach</button>
+    </div>
+  </div>
+
   <!-- COMMAND BAR -->
   <div class="bar">
     <span class="prompt">›</span>
     <input id="cmd" autocomplete="off" placeholder="Describe work, or type a command…  (e.g. ship the auth PR after tests pass)" />
     <kbd>⌘K</kbd>
   </div>
-  <div class="hint">Try: <b>ship the auth PR after tests pass</b> · <b>show blocked</b> · <b>stop nightly deploy</b> · <b>summarize ~/git/api</b></div>
+  <div class="hint">Try: <b>ship the auth PR after tests pass</b> · <b>show blocked</b> · <b>stop nightly deploy</b> · <b>teach: never deploy on Fridays</b></div>
 
   <!-- DEFAULT PANEL: templates + recents (shown until user types intent) -->
   <div class="panel" id="defaultPanel">
@@ -175,15 +282,24 @@
     <div class="ph">
       <div class="ptag">Proposed agent task — review before it runs</div>
       <div class="pt" id="pTitle">Ship the auth PR after tests pass</div>
-      <div class="pq">I inferred the rest from your intent and repo history. <i>I only need one thing from you.</i></div>
+      <div class="pq">I inferred the rest from your intent and the <i>API service</i> project. <i>I only need one thing from you.</i></div>
     </div>
     <div class="fields">
       <div class="field"><div class="k">Agent</div><div class="v">Claude Code · local auto <span class="inferred">inferred</span></div></div>
-      <div class="field"><div class="k">Folder</div><div class="v">~/git/api <span class="inferred">inferred</span></div></div>
+      <div class="field"><div class="k">Folder</div><div class="v">~/git/api <span class="inferred">from project · API service</span></div></div>
       <div class="field"><div class="k">Trigger</div><div class="v">When CI tests pass on PR #214 <span class="inferred">inferred</span></div></div>
       <div class="field ask"><div class="k">⚠ Merge strategy — I can't infer this</div><div class="v">
-        <select><option>Squash &amp; merge</option><option>Rebase</option><option>Create merge commit</option></select>
+        <select id="mergeSel"><option>Squash &amp; merge</option><option>Rebase</option><option>Create merge commit</option></select>
       </div></div>
+    </div>
+    <div class="honors" id="honorsBanner">
+      <span class="hk">✓</span>
+      <span>Honors <b>4 project instructions</b></span>
+      <span class="hrel">— “Squash &amp; merge only” pre-selects the merge strategy · “Post run results to #eng” is step 4</span>
+    </div>
+    <div class="savebar" id="saveBar">
+      <span class="sx">You changed the merge strategy. Make this stick for every future run?</span>
+      <button class="savebtn" id="saveInstrBtn">＋ Save as a project instruction</button>
     </div>
     <div class="ptrace">
       <div class="tlbl">Planned steps</div>
@@ -215,7 +331,7 @@
 
     <div class="item" data-state="blocked" data-name="nightly deploy">
       <span class="st blocked"></span>
-      <div><div class="nm">Nightly deploy</div><div class="info"><span class="mono">~/git/api</span> · failing: auth.spec.ts</div></div>
+      <div><div class="nm">Nightly deploy</div><div class="info"><span class="mono">~/git/api</span> · failing: auth.spec.ts · <span style="color:var(--red)">rule: never merge red CI</span></div></div>
       <div class="right">
         <span class="badge blocked">blocked 41m</span>
         <span class="tag lo">local</span><span class="ava you">Y</span>
@@ -270,6 +386,48 @@
   // verbs that command the list vs intents that propose a task
   const COMMANDS = ['show', 'stop', 'hide', 'filter', 'clear', 'pause', 'resume'];
 
+  // ---- PROJECT LAYER ----
+  const instPanel = document.getElementById('instPanel');
+  const instToggle = document.getElementById('instToggle');
+  const switchMenu = document.getElementById('switchMenu');
+  const scopeBtn = document.getElementById('scopeBtn');
+
+  function openInstructions(open) {
+    instPanel.classList.toggle('show', open);
+    instToggle.classList.toggle('open', open);
+  }
+  instToggle.addEventListener('click', () => openInstructions(!instPanel.classList.contains('show')));
+
+  scopeBtn.addEventListener('click', (e) => { e.stopPropagation(); switchMenu.classList.toggle('show'); });
+  document.addEventListener('click', () => switchMenu.classList.remove('show'));
+
+  // teach a rule from the instructions panel
+  function addRule(text, learned) {
+    text = (text || '').trim();
+    if (!text) return;
+    const row = document.createElement('div');
+    row.className = 'instrule' + (learned ? ' learned' : '');
+    const meta = learned ? '<span class="rmeta">★ learned from you · just now</span>' : '';
+    row.innerHTML = '<span class="rq">“</span><span class="rt">' +
+      text.replace(/</g, '&lt;') + meta + '</span><span class="redit">edit</span>';
+    instPanel.querySelector('.instadd').before(row);
+    openInstructions(true);
+  }
+  const newRule = document.getElementById('newRule');
+  document.getElementById('teachBtn').addEventListener('click', () => { addRule(newRule.value, true); newRule.value = ''; });
+  newRule.addEventListener('keydown', (e) => { if (e.key === 'Enter') { addRule(newRule.value, true); newRule.value = ''; } });
+
+  // teach-in-the-moment: changing the merge strategy offers to make it stick
+  const mergeSel = document.getElementById('mergeSel');
+  const saveBar = document.getElementById('saveBar');
+  const saveInstrBtn = document.getElementById('saveInstrBtn');
+  if (mergeSel) mergeSel.addEventListener('change', () => saveBar.classList.add('show'));
+  if (saveInstrBtn) saveInstrBtn.addEventListener('click', () => {
+    addRule(mergeSel.value + ' only for API service.', true);
+    saveInstrBtn.textContent = '✓ Saved to project instructions';
+    saveInstrBtn.classList.add('done');
+  });
+
   function isCommand(t) {
     const first = t.trim().split(/\s+/)[0].toLowerCase();
     return COMMANDS.includes(first);
@@ -309,6 +467,14 @@
       clearFilter();
       return;
     }
+    if (/^teach:\s*/i.test(t)) {
+      // typed teaching: "teach: <rule>" — proposes adding it to the project
+      proposal.classList.remove('show');
+      defaultPanel.style.display = 'none';
+      filtNote.textContent = '＋ Press Enter to teach API service: “' + t.replace(/^teach:\s*/i, '') + '”';
+      filtNote.classList.add('show');
+      return;
+    }
     if (isCommand(t)) {
       proposal.classList.remove('show');
       defaultPanel.style.display = 'none';
@@ -323,6 +489,18 @@
       proposal.classList.remove('show');
       defaultPanel.style.display = '';
       clearFilter();
+    }
+  });
+
+  cmd.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && /^teach:\s*/i.test(cmd.value)) {
+      const rule = cmd.value.replace(/^teach:\s*/i, '').trim();
+      if (rule) {
+        addRule(rule.charAt(0).toUpperCase() + rule.slice(1) + (/[.!?]$/.test(rule) ? '' : '.'), true);
+        cmd.value = '';
+        clearFilter();
+        defaultPanel.style.display = '';
+      }
     }
   });
 

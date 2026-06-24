@@ -9,6 +9,16 @@
   agent" picks from the roster. Hero insight: who's idle vs overloaded vs stuck.
   VALUES SERVED: V6 Team Coordination, V2 Live Situational Awareness, V4 Intent→Action,
   V8 Power Without Machinery (thin data, agent supplies control flow).
+
+  PROJECT LAYER (added): the PROJECT is treated as the TEAM/ORG the roster belongs to.
+  A calm project plaque/switcher in the header shows the current project "API service ·
+  ~/git/api" (switcher hints at Personal, Web app) with its git-repo binding. Project
+  instructions are framed as the team's "House rules / charter" — a one-click
+  "House rules (4)" affordance listing the four canonical rules + an explicit
+  "＋ Teach a rule" control. The blocked Deploy bot cites the rule that stopped it
+  ("never merge with red CI"), making the teaching layer auditable. The whole roster is
+  scoped to the current project's team. Serves: V5 Trust & Auditability, V6 Team
+  Coordination, V8 Power Without Machinery — plus the existing values above.
 -->
 <html lang="en">
 <head>
@@ -35,6 +45,52 @@
   .hero{flex:1;min-width:280px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 18px;box-shadow:var(--shadow);font-size:14.5px}
   .hero b{color:var(--block)} .hero .w{color:var(--work)} .hero .i{color:var(--accent);cursor:pointer;font-weight:600}
   .newbtn{background:var(--accent);color:#fff;border:none;border-radius:11px;padding:12px 18px;font:inherit;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(58,85,255,.3);white-space:nowrap}
+
+  /* project plaque — the team/org the roster belongs to */
+  .projbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;width:100%;margin-bottom:16px}
+  .plaque{display:flex;align-items:center;gap:11px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px 8px 12px;box-shadow:var(--shadow);position:relative}
+  .plaque .crest{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#3a55ff,#5b3aff);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;flex:none}
+  .plaque .pinfo{min-width:0}
+  .plaque .plbl{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .plaque .pname{font-weight:800;font-size:14.5px;display:flex;align-items:center;gap:7px}
+  .plaque .repo{font-size:11.5px;color:var(--muted);font-weight:500}
+  .plaque .repo code{background:var(--accentsoft);color:var(--accent);padding:0 5px;border-radius:5px;font-size:11px}
+  .switch{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:8px;width:26px;height:26px;cursor:pointer;font-size:11px;display:grid;place-items:center;flex:none}
+  .switch:hover{border-color:var(--accent);color:var(--accent)}
+  .rulesbtn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:11px;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer;box-shadow:var(--shadow)}
+  .rulesbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .rulesbtn .rdot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .rulesbtn .rn{background:var(--accentsoft);color:var(--accent);font-weight:800;font-size:11.5px;padding:1px 7px;border-radius:99px}
+
+  /* project switcher popover */
+  .switchmenu{position:absolute;top:46px;left:0;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:6px;min-width:230px;z-index:15;display:none}
+  .switchmenu.open{display:block}
+  .switchmenu .sm-lbl{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);font-weight:700;padding:6px 9px 3px}
+  .smrow{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:9px;cursor:pointer;font-size:13px}
+  .smrow:hover{background:var(--accentsoft)}
+  .smrow .smc{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-weight:800;font-size:11px;color:#fff;flex:none}
+  .smrow .smn{font-weight:600}.smrow .sms{font-size:11px;color:var(--muted)}
+  .smrow.cur{background:var(--accentsoft)}
+  .smrow.cur .smn{color:var(--accent)}
+  .smrow.newproj{color:var(--accent);font-weight:700;border-top:1px solid var(--line);margin-top:4px;padding-top:11px}
+
+  /* house rules drawer content */
+  .charter{background:var(--accentsoft);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+  .charter .chl{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:8px}
+  .rule{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);font-size:13.5px}
+  .rule:first-of-type{border-top:none}
+  .rule .rk{width:22px;height:22px;border-radius:7px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;font-size:12px;flex:none;margin-top:1px}
+  .rule .rtxt{flex:1}
+  .rule .rmeta{font-size:11px;color:var(--muted);margin-top:2px}
+  .rule.cited{outline:2px solid var(--block);outline-offset:2px;border-radius:8px}
+  .rule .citetag{display:inline-block;font-size:10px;font-weight:700;color:var(--block);background:rgba(232,72,63,.12);padding:1px 7px;border-radius:99px;margin-top:4px}
+  .learned{font-size:10px;font-weight:700;color:var(--work);background:rgba(31,158,107,.13);padding:1px 7px;border-radius:99px}
+  .teachrow{display:flex;gap:8px;margin-top:12px}
+  .teachrow input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--ink);font:inherit}
+  .teachbtn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:9px;padding:9px 14px;font:inherit;font-weight:700;cursor:pointer;white-space:nowrap}
+  .bindrow{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted);border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin-bottom:14px}
+  .bindrow code{background:var(--accentsoft);color:var(--accent);padding:1px 6px;border-radius:5px;font-size:11.5px}
+  .bindrow .bound{color:var(--work);font-weight:700}
 
   /* fleet summary strip */
   .strip{display:flex;gap:10px;margin:6px 0 22px;flex-wrap:wrap}
@@ -119,8 +175,29 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="projbar">
+    <div class="plaque" id="plaque">
+      <div class="crest">API</div>
+      <div class="pinfo">
+        <div class="plbl">Project · this roster</div>
+        <div class="pname">API service</div>
+        <div class="repo">bound to <code>~/git/api</code> · github.com/acme/api · main</div>
+      </div>
+      <button class="switch" id="switchBtn" title="Switch project">▾</button>
+      <div class="switchmenu" id="switchMenu">
+        <div class="sm-lbl">Switch project</div>
+        <div class="smrow cur"><div class="smc" style="background:linear-gradient(135deg,#3a55ff,#5b3aff)">API</div><div><div class="smn">API service</div><div class="sms">bound to ~/git/api · 7 in roster</div></div></div>
+        <div class="smrow"><div class="smc" style="background:#1f9e6b">P</div><div><div class="smn">Personal</div><div class="sms">no repo · manual to-dos</div></div></div>
+        <div class="smrow"><div class="smc" style="background:#e69300">W</div><div><div class="smn">Web app</div><div class="sms">bound to ~/git/web</div></div></div>
+        <div class="smrow newproj">＋ New project…</div>
+      </div>
+    </div>
+    <button class="rulesbtn" id="rulesBtn"><span class="rdot"></span>House rules <span class="rn">4</span></button>
+    <span style="font-size:11.5px;color:var(--muted)">4 instructions · 1 learned from you Tue — every agent here follows them</span>
+  </div>
+
   <header>
-    <div class="brand">Breezefile<span class="sub">Fleet · your team of humans &amp; agents</span></div>
+    <div class="brand">Breezefile<span class="sub">Fleet · API service team — humans &amp; agents</span></div>
     <div class="hero">
       <b>1 agent is stuck</b> (Nightly deploy, 41 min on a failing test) and
       <span class="w">2 are working</span>. <b style="color:var(--idle)">“Summarize” bot is idle</b> while Priya is overloaded —
@@ -147,6 +224,7 @@
         <span class="badge b-block"><span class="bdot"></span>Blocked 41m</span>
       </div>
       <div class="nowdoing"><span class="lbl">Right now</span><span class="task">Nightly deploy — held on <code>auth.spec.ts</code></span><div style="color:var(--muted);font-size:12px;margin-top:3px">attempt 3/3 · folder ~/git/api · paused, waiting for you</div></div>
+      <div style="font-size:11.5px;color:var(--block);background:rgba(232,72,63,.1);border-radius:8px;padding:6px 9px;margin-bottom:6px;cursor:pointer" id="ruleChip">⛔ Stopped by house rule: <b>never merge with red CI</b> — see charter →</div>
       <div class="record"><span>This week: <b>9 runs</b></span><span class="fail">failed: <b>1</b></span><span>uptime <b>98%</b></span></div>
       <div class="miniq">Click to act: re-run · steer · skip · stop</div>
     </div>
@@ -279,12 +357,12 @@
 const DRAWERS = {
   deploybot:{title:'Deploy bot',sub:'local auto · ~/git/api · BLOCKED 41 min',state:'block',
     q:[['P0','Nightly deploy — held on auth.spec.ts (attempt 3/3)','block']],
-    detail:'<p style="font-size:13px;color:var(--muted);margin:0 0 6px">Why it stopped</p><div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px">auth.spec.ts: expected <b>401</b>, received <b>200</b> — token TTL check skipped when clock skew &gt; 0 (session.ts:88). Deploy gate is red.</div>',
+    detail:'<p style="font-size:13px;color:var(--muted);margin:0 0 6px">Why it stopped</p><div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px">auth.spec.ts: expected <b>401</b>, received <b>200</b> — token TTL check skipped when clock skew &gt; 0 (session.ts:88). Deploy gate is red.</div><div style="margin-top:8px;background:rgba(232,72,63,.1);border:1px solid rgba(232,72,63,.25);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--block)">⛔ Held by <b>API service</b> house rule: <b>“Never merge with red CI — stop and ask me.”</b> The agent obeyed your charter. <span id="seeRule" style="text-decoration:underline;cursor:pointer">View house rules</span></div>',
     btns:[['primary','Re-run test'],['','Steer agent'],['','Skip & open issue'],['','Stop']],
     est:'Re-running ≈ <b>1 build minute</b>; won’t deploy on its own — you review first.'},
   beadsbot:{title:'Migrate bot',sub:'local auto · waiting on you · step 4/6',state:'wait',
     q:[['P1','Migrate beads → tasks','wait']],
-    detail:'<div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px"><b>Delete 12 stale issues?</b> Closed &gt; 90 days, no open deps. Deletion is reversible for 30 days.</div>',
+    detail:'<div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px"><b>Delete 12 stale issues?</b> Closed &gt; 90 days, no open deps. Deletion is reversible for 30 days.</div><label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-top:10px;cursor:pointer"><input type="checkbox" checked> ＋ Save your answer as a house rule: <b style="color:var(--ink)">“Auto-delete issues closed &gt; 90 days with no deps.”</b></label>',
     btns:[['primary','Yes — delete 12'],['','No — keep'],['','Preview the 12']],
     est:'Reversible for 30 days via trash. Preview before confirming.'},
   you:{title:'You',sub:'human · owns 3 tasks, 2 due today',state:'work',
@@ -328,12 +406,61 @@ function openDrawer(id){
     ${d.est?`<div class="est">Dry run · ${d.est}</div>`:''}`;
   scrim.classList.add('open'); drawer.classList.add('open');
   const rb=document.getElementById('revBtn'); if(rb) rb.onclick=()=>{document.getElementById('revC').style.display='block';rb.style.display='none';};
+  const sr=document.getElementById('seeRule'); if(sr) sr.onclick=()=>showRules(true);
 }
 function closeDrawer(){scrim.classList.remove('open');drawer.classList.remove('open');}
+
+/* HOUSE RULES — the project's charter every agent here follows */
+const RULES=[
+  {t:'Never merge with red CI — stop and ask me.',k:'⛔',cited:true},
+  {t:'Squash &amp; merge only. PR titles: <code>area: summary</code>.',k:'⌥'},
+  {t:'Post run results to <b>#eng</b>.',k:'#'},
+  {t:'Don’t touch <code>infra/</code> without confirming first.',k:'🔒',learned:true},
+];
+function showRules(highlight){
+  const rows=RULES.map(r=>`
+    <div class="rule${r.cited&&highlight?' cited':''}">
+      <div class="rk">${r.k}</div>
+      <div class="rtxt">${r.t}
+        ${r.learned?'<span class="learned">learned from you · Tue</span>':''}
+        ${r.cited&&highlight?'<div class="citetag">⛔ this rule is currently blocking Deploy bot</div>':''}
+        <div class="rmeta">applies to all 7 in the roster · persists across runs</div>
+      </div>
+    </div>`).join('');
+  body.innerHTML=`
+    <h2>House rules</h2>
+    <div class="dsub">API service · the team charter — every agent in this roster obeys these</div>
+    <div class="bindrow"><span>Bound to</span><span class="bound">~/git/api</span><span>· github.com/acme/api · branch main</span><button style="margin-left:auto;font:inherit;font-weight:600;border:1px solid var(--line);background:transparent;color:var(--accent);border-radius:8px;padding:5px 10px;cursor:pointer">Change binding</button></div>
+    <div class="charter">
+      <div class="chl">4 instructions · 1 learned from you Tue</div>
+      ${rows}
+      <div class="teachrow">
+        <input id="teachInput" type="text" placeholder="＋ Teach a rule — e.g. “Always run lint before pushing”" />
+        <button class="teachbtn" id="teachBtn">Teach</button>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--muted);margin:0">Rules persist and shape every agent run in this project. When you correct an agent in the moment, you can <b>Save as a house rule</b> right from its drawer.</p>`;
+  scrim.classList.add('open'); drawer.classList.add('open');
+  const ti=document.getElementById('teachInput'), tb=document.getElementById('teachBtn');
+  const teach=()=>{const v=ti.value.trim();if(!v)return;RULES.push({t:v,k:'＋',learned:true});
+    document.querySelector('.rulesbtn .rn').textContent=RULES.length;showRules(false);};
+  if(tb)tb.onclick=teach;
+  if(ti)ti.onkeydown=e=>{if(e.key==='Enter')teach();};
+}
 document.querySelectorAll('.agent').forEach(a=>a.onclick=()=>openDrawer(a.dataset.id));
 document.getElementById('closeDrawer').onclick=closeDrawer;
 scrim.onclick=closeDrawer;
 document.getElementById('rebalance').onclick=(e)=>{e.stopPropagation();openDrawer('priya');};
+
+/* project: house rules + switcher + rule chip */
+document.getElementById('rulesBtn').onclick=()=>showRules(false);
+document.getElementById('ruleChip').onclick=(e)=>{e.stopPropagation();showRules(true);};
+const switchBtn=document.getElementById('switchBtn'), switchMenu=document.getElementById('switchMenu');
+switchBtn.onclick=(e)=>{e.stopPropagation();switchMenu.classList.toggle('open');};
+document.addEventListener('click',e=>{if(!document.getElementById('plaque').contains(e.target))switchMenu.classList.remove('open');});
+document.querySelectorAll('.smrow').forEach(r=>r.onclick=()=>{switchMenu.classList.remove('open');
+  if(r.classList.contains('cur')||r.classList.contains('newproj'))return;
+  alert('Switching project scopes this roster + its house rules to the new project. (Prototype: staying on API service.)');});
 
 /* modal */
 const modal=document.getElementById('modal');
@@ -351,7 +478,7 @@ document.querySelectorAll('.acard').forEach(c=>c.onclick=()=>{c.style.borderColo
 const states=['drafted 4 tasks — refining titles','deduping 2 similar threads','tagging by folder','grouping 4 → 3 tasks','ready for your review'];
 let s=0;setInterval(()=>{s=(s+1)%states.length;const el=document.getElementById('triageNow');if(el)el.textContent=states[s];},2600);
 
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrawer();modal.classList.remove('open');}if(e.key==='n'&&!modal.classList.contains('open')){openModal('');e.preventDefault();}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDrawer();modal.classList.remove('open');switchMenu.classList.remove('open');}if(e.key==='n'&&!modal.classList.contains('open')){openModal('');e.preventDefault();}if(e.key==='h'&&!modal.classList.contains('open')){showRules(false);e.preventDefault();}});
 </script>
 </body>
 </html>
