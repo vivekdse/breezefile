@@ -377,14 +377,14 @@ const ITEMS = [
     cancel:true
   },
   {
-    id:'beads', kind:'wait', rail:'r-warn', ic:'🤔',
-    title:'Migrate beads → tasks', tb:false, agent:'local auto',
+    id:'crm', kind:'wait', rail:'r-warn', ic:'🤔',
+    title:'Migrate CRM data', tb:false, agent:'local auto',
     pill:['p-wait','waiting on you','12 min'], live:true, ageBase:12*60,
     sub:'Asking: <b>“Delete 12 stale issues older than 90 days? (y/n)”</b>',
     why:'It found 12 issues with no activity since March; deleting is irreversible.',
     needs:true, type:'agent', question:true,
     trace:[
-      ['✓','Scanned beads db','312 issues, 12 stale (>90d)'],
+      ['✓','Scanned CRM export','312 issues, 12 stale (>90d)'],
       ['✓','Mapped open issues → tasks','280 mapped, 20 skipped (no folder)'],
       ['?','Awaiting your call on 12 stale issues','irreversible — needs y/n'],
     ],

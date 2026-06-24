@@ -56,7 +56,7 @@ keep a fast keyboard path).
 Running agents:
 - "Nightly deploy" — local auto, BLOCKED 41 min on failing test `auth.spec.ts`, folder ~/git/api
 - "Triage inbox → tasks" — TypeBuild, WORKING, claimed by you, last action "drafted 4 tasks"
-- "Migrate beads → tasks" — local auto, WAITING ON YOU: "Delete 12 stale issues? (y/n)"
+- "Migrate CRM data" — local auto, WAITING ON YOU: "Delete 12 stale issues? (y/n)"
 - "Refactor TaskRow" — TypeBuild, WORKING, claimed by Priya, step 3/5
 - "Weekly report" — local auto cron Fri 9am, DONE 2h ago, "summarized 18 PRs"
 Triage / to-dos:

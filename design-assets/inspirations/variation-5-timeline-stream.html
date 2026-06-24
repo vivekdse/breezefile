@@ -268,7 +268,7 @@
     <span class="em">🛑</span>
     <p><b>Nightly deploy</b> has been blocked <b id="hAge">41 min</b> — its last action was a failing
        <code>auth.spec.ts</code> at <b>09:02</b> and nothing has moved since. That's your oldest
-       stalled run. <b>Migrate beads</b> is also waiting on a y/n.</p>
+       stalled run. <b>Migrate CRM data</b> is also waiting on a y/n.</p>
     <button class="btn pri cta" onclick="drop('deploy')">Drop into run ↵</button>
   </div>
 
@@ -364,10 +364,10 @@ const PINNED=[
 
 /* ---------- history events (newest first) ---------- */
 let HISTORY=[
-  {id:'beads', node:'wait', agent:'Migrate beads → tasks', who:null, tb:false, ts:'09:48',
+  {id:'crm', node:'wait', agent:'Migrate CRM data', who:null, tb:false, ts:'09:48',
    act:'asks <b>"Delete 12 stale issues (&gt;90d)? (y/n)"</b>', pill:['p-wait','waiting','12m'], needs:true,
    why:'12 issues have no activity since March; deletion is irreversible so it stopped.',
-   trace:[['✓','09:46','Scanned beads db','312 issues, 12 stale'],['✓','09:47','Mapped open issues','280 → tasks'],['?','09:48','Awaiting your y/n','irreversible']],
+   trace:[['✓','09:46','Scanned CRM export','312 issues, 12 stale'],['✓','09:47','Mapped open issues','280 → tasks'],['?','09:48','Awaiting your y/n','irreversible']],
    acts:`<button class="btn pri" onclick="toast('Deleting 12 issues…')">Yes, delete</button>
          <button class="btn" onclick="toast('Kept — continuing')">No, keep</button>
          <span class="est">⚠ irreversible · no undo</span>`},

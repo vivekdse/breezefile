@@ -165,7 +165,7 @@ Status already exists. On top of the field additions above:
   to instantiate
 - agents permitted to **create tasks at runtime** inside a run's subgraph
 - a **`breeze ready`** query: tasks with no open `blocked-by` blockers — the
-  highest-value thing dependencies unlock (mirrors `bd ready`)
+  highest-value thing dependencies unlock (mirrors TypeBuild's `claim_next_task`)
 
 ## Minimal model, restated
 

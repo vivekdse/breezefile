@@ -253,7 +253,7 @@
    Paper-family editorial palettes — ported from design-assets/inspirations/themes.html.
    These are additive tokens (--bg, --panel, --ink, --accent, --hi, etc.) that
    coexist with the --bg-0/--fg-1 system above. Components will migrate to the
-   editorial tokens as the mockup-adoption beads land.
+   editorial tokens as the mockup-adoption tasks land.
 
    Invariants (enforced by every palette below):
      - --bg (canvas / center) is noticeably darker than --panel (chrome).

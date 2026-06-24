@@ -247,8 +247,8 @@
         <div class="quick"><button>Re-run</button><button>Steer</button><button>Stop</button></div>
       </div>
 
-      <div class="row" data-id="beads" tabindex="0">
-        <div class="l1"><span class="stbox s-wait"></span><span class="title">Migrate beads → tasks</span><span class="when">now</span></div>
+      <div class="row" data-id="crm" tabindex="0">
+        <div class="l1"><span class="stbox s-wait"></span><span class="title">Migrate CRM data</span><span class="when">now</span></div>
         <div class="l2"><span class="owner"><span class="av bot">⚙</span>local auto · asks: “Delete 12 stale issues? (y/n)”</span></div>
         <div class="quick"><button>Yes</button><button>No</button><button>Open</button></div>
       </div>
@@ -303,13 +303,13 @@ const DATA = {
     err:'auth.spec.ts failed: token TTL check skipped when clock skew &gt; 0 (session.ts:88). Blocked by your project rule <b>“Never merge with red CI — stop and ask me.”</b> Re-run, or steer the agent to fix or skip.',
     controls:'running', est:'Re-running the suite ≈ <b>1 build minute</b> and won’t deploy on its own — you review the result first.'
   },
-  beads:{
-    tag:'wait', tagtxt:'Waiting on you', title:'Migrate beads → tasks',
+  crm:{
+    tag:'wait', tagtxt:'Waiting on you', title:'Migrate CRM data',
     meta:['local auto agent','folder <code>~/.breezefile</code>','step 4 of 6'],
     live:false, honors:4,
     question:'Delete 12 stale issues? (y/n) — they’ve been closed &gt; 90 days and have no open deps.',
     trace:[
-      ['ok','Read 64 beads issues','source of truth for migration'],
+      ['ok','Read 64 CRM records','source of truth for migration'],
       ['ok','Mapped 52 to tasks','1:1 where status maps cleanly'],
       ['run','Reviewing 12 stale issues','paused — needs your call before deleting'],
       ['todo','Write tasks.json','only after you confirm deletions']

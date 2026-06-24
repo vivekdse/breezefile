@@ -325,8 +325,8 @@
   }
 }
 
-/* Placeholder for slots owned by other beads (fm-4zi, fm-fda). Neutral
-   styling only — real styling lives in the slot-owner beads. */
+/* Placeholder for slots owned by other tasks (fm-4zi, fm-fda). Neutral
+   styling only — real styling lives in the slot-owner tasks. */
 .shell__placeholder {
   height: 100%;
   width: 100%;

@@ -230,13 +230,13 @@
     </div>
 
     <!-- WAITING bot -->
-    <div class="agent wait" data-id="beadsbot">
+    <div class="agent wait" data-id="crmbot">
       <div class="ahead">
         <div class="avatar a-bot2">⚙</div>
         <div class="who"><div class="name">Migrate bot <span class="kind">local auto</span></div></div>
         <span class="badge b-wait"><span class="bdot"></span>Waiting on you</span>
       </div>
-      <div class="nowdoing"><span class="lbl">Asking</span><span class="task">“Delete 12 stale issues? (y/n)”</span><div style="color:var(--muted);font-size:12px;margin-top:3px">Migrate beads → tasks · step 4/6</div></div>
+      <div class="nowdoing"><span class="lbl">Asking</span><span class="task">“Delete 12 stale issues? (y/n)”</span><div style="color:var(--muted);font-size:12px;margin-top:3px">Migrate CRM data · step 4/6</div></div>
       <div class="record"><span>This week: <b>3 runs</b></span><span>failed: <b>0</b></span><span>avg <b>4 min</b></span></div>
       <div class="miniq">Click to answer y/n or preview the 12 issues</div>
     </div>
@@ -360,8 +360,8 @@ const DRAWERS = {
     detail:'<p style="font-size:13px;color:var(--muted);margin:0 0 6px">Why it stopped</p><div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px">auth.spec.ts: expected <b>401</b>, received <b>200</b> — token TTL check skipped when clock skew &gt; 0 (session.ts:88). Deploy gate is red.</div><div style="margin-top:8px;background:rgba(232,72,63,.1);border:1px solid rgba(232,72,63,.25);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--block)">⛔ Held by <b>API service</b> house rule: <b>“Never merge with red CI — stop and ask me.”</b> The agent obeyed your charter. <span id="seeRule" style="text-decoration:underline;cursor:pointer">View house rules</span></div>',
     btns:[['primary','Re-run test'],['','Steer agent'],['','Skip & open issue'],['','Stop']],
     est:'Re-running ≈ <b>1 build minute</b>; won’t deploy on its own — you review first.'},
-  beadsbot:{title:'Migrate bot',sub:'local auto · waiting on you · step 4/6',state:'wait',
-    q:[['P1','Migrate beads → tasks','wait']],
+  crmbot:{title:'Migrate bot',sub:'local auto · waiting on you · step 4/6',state:'wait',
+    q:[['P1','Migrate CRM data','wait']],
     detail:'<div style="background:var(--accentsoft);border-radius:10px;padding:12px;font-size:13px"><b>Delete 12 stale issues?</b> Closed &gt; 90 days, no open deps. Deletion is reversible for 30 days.</div><label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-top:10px;cursor:pointer"><input type="checkbox" checked> ＋ Save your answer as a house rule: <b style="color:var(--ink)">“Auto-delete issues closed &gt; 90 days with no deps.”</b></label>',
     btns:[['primary','Yes — delete 12'],['','No — keep'],['','Preview the 12']],
     est:'Reversible for 30 days via trash. Preview before confirming.'},
