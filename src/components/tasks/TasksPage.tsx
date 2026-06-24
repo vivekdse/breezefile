@@ -54,7 +54,7 @@ import { ScheduleModal } from './ScheduleModal';
 import { addDays, isoFromDate } from './helpers';
 import '../TasksPage.css';
 
-type SourceFilter = 'all' | 'local' | 'typebuild';
+type SourceFilter = 'all' | 'typebuild';
 
 function nextWeekday(targetDow: number): string {
   const d = new Date();
@@ -75,7 +75,8 @@ function TasksPageInner() {
 
   const overlayFor = (t: Task): RemoteSchedule | undefined =>
     t.source ? overlayByKey[`${t.source}:${t.id}`] : undefined;
-  const capsFor = (t: Task) => sourcesById[t.source ?? 'local']?.capabilities;
+  const capsFor = (t: Task) =>
+    t.source ? sourcesById[t.source]?.capabilities : undefined;
 
   // ── filter state ──────────────────────────────────────────────────────────
   const [searchInput, setSearchInput] = useState('');
@@ -135,10 +136,8 @@ function TasksPageInner() {
   // Apply the source dropdown before partitioning.
   const sourceFiltered = useMemo(() => {
     if (sourceFilter === 'all') return rawTasks;
-    if (sourceFilter === 'typebuild')
-      return rawTasks.filter((t) => t.source === 'typebuild');
-    // local
-    return rawTasks.filter((t) => !t.source || t.source === 'local');
+    // typebuild
+    return rawTasks.filter((t) => t.source === 'typebuild');
   }, [rawTasks, sourceFilter]);
 
   const runningTaskIds = useMemo(() => new Set(sessions.keys()), [sessions]);
@@ -915,7 +914,6 @@ function TasksPageInner() {
               aria-label="Filter by source"
             >
               <option value="all">All sources</option>
-              <option value="local">Breeze</option>
               <option value="typebuild">TypeBuild</option>
             </select>
             <span className="tasks__filter-spacer" />

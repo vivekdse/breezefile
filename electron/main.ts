@@ -10,8 +10,7 @@ import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
 import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
 import { restoreSources } from './sources';
-import { registerBreezeMcp } from './mcp-register';
-import { registerBreezeHooks, ensureBreezeCli } from './hooks-register';
+import { registerBreezeHooks } from './hooks-register';
 import { installBrowserSubagent } from './browser/subagent';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
 import { registerTypebuildDetectIpc } from './typebuild/detect';
@@ -307,18 +306,6 @@ app.whenReady().then(() => {
   // lapsed while suspended is caught the instant the machine resumes. The
   // renderer turns 'expired' into a one-click relaunch via the IPC below.
   startExpiryClock();
-  // fm-fc0 — best-effort: register breeze-mcp into ~/.claude/settings.json
-  // on every launch. Idempotent — does nothing if already present and
-  // up-to-date. Failures (file unreadable, no MCP binary) are logged
-  // and ignored; never block app startup.
-  try {
-    const result = registerBreezeMcp();
-    if (result === 'written') {
-      console.log('[mcp-register] added breeze entry to ~/.claude/settings.json');
-    }
-  } catch (e) {
-    console.warn('[mcp-register] failed:', (e as Error).message);
-  }
   // fm-z7v — register UserPromptSubmit/Stop hooks so Claude Code reports
   // working/idle state per pty. Idempotent; failures are logged and
   // ignored.
@@ -329,18 +316,6 @@ app.whenReady().then(() => {
     }
   } catch (e) {
     console.warn('[hooks-register] failed:', (e as Error).message);
-  }
-  // Put `breeze` on PATH automatically (symlink ~/.local/bin/breeze →
-  // bundled/dev shim). Idempotent; covers both `npm run dev` and the
-  // packaged .app so users never need ./cli/install.sh. Best-effort —
-  // failures are logged and never block startup.
-  try {
-    const result = ensureBreezeCli();
-    if (result === 'written') {
-      console.log('[breeze-cli] linked ~/.local/bin/breeze');
-    }
-  } catch (e) {
-    console.warn('[breeze-cli] failed:', (e as Error).message);
   }
   // Browser-automation RUNTIME: install the helper CLIs (+ a bundled
   // playwright-core) into ~/.breezefile/automation/ on launch, so the agent's

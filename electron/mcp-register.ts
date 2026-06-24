@@ -1,11 +1,8 @@
-// fm-fc0 — register breeze-mcp into the user-level Claude config so any
-// AI session (task-bound or not) can call Breeze tools natively.
-//
-// User-level only — we never touch per-project .claude/ directories
-// because that would scatter Breeze references across the user's repos.
-// One global registration is enough; the MCP server itself reads
-// ~/.breezefile/api.json on every call so it stays in sync with whichever
-// Breeze process is currently running.
+// fm-at5 — strip a stale breeze-mcp registration from the user-level Claude
+// config. The breeze-mcp server has been removed; this remains so users who
+// registered it on an earlier build can cleanly remove the leftover
+// `mcpServers.breeze` entry from ~/.claude.json (via the
+// `claude:unregister-mcp` IPC / Settings reset).
 
 import path from 'node:path';
 import os from 'node:os';
@@ -16,7 +13,6 @@ import {
   existsSync,
   copyFileSync,
 } from 'node:fs';
-import { app } from 'electron';
 
 type ClaudeMcpEntry = {
   type?: 'stdio';
@@ -40,22 +36,6 @@ function settingsPath(): string {
 
 function backupPath(): string {
   return settingsPath() + '.bak';
-}
-
-/** Resolve the bundled breeze-mcp.mjs path. In dev this lives next to
- *  the app source; in a packaged build electron-builder copies the mcp/
- *  directory into resources. We search both locations and return the
- *  first that exists. */
-function resolveMcpPath(): string | null {
-  const candidates = [
-    path.join(app.getAppPath(), 'mcp', 'breeze-mcp.mjs'),
-    path.join(process.resourcesPath ?? '', 'app', 'mcp', 'breeze-mcp.mjs'),
-    path.join(process.resourcesPath ?? '', 'mcp', 'breeze-mcp.mjs'),
-  ];
-  for (const c of candidates) {
-    if (c && existsSync(c)) return c;
-  }
-  return null;
 }
 
 function readSettings(): ClaudeSettings | null {
@@ -87,58 +67,9 @@ function writeSettings(s: ClaudeSettings, originalExisted: boolean) {
   writeFileSync(p, JSON.stringify(s, null, 2) + '\n', 'utf8');
 }
 
-function entriesEqual(a: ClaudeMcpEntry, b: ClaudeMcpEntry): boolean {
-  if (a.command !== b.command) return false;
-  if (JSON.stringify(a.args ?? []) !== JSON.stringify(b.args ?? [])) return false;
-  // env intentionally not compared — token rotates per launch and the
-  // MCP server reads from api.json by default; we don't pin a token here.
-  return true;
-}
-
-/** Idempotent: register breeze under mcpServers.breeze if missing or stale.
- *  Returns one of:
- *   'written'   — new entry added or stale entry replaced
- *   'unchanged' — entry already correct
- *   'no-mcp'    — couldn't locate breeze-mcp.mjs (silent skip)
- *   'error'     — read/parse/write failure
- */
-export function registerBreezeMcp(): 'written' | 'unchanged' | 'no-mcp' | 'error' {
-  const mcpPath = resolveMcpPath();
-  if (!mcpPath) return 'no-mcp';
-
-  const desired: ClaudeMcpEntry = {
-    type: 'stdio',
-    command: 'node',
-    args: [mcpPath],
-    env: {},
-  };
-
-  const existed = existsSync(settingsPath());
-  const settings = readSettings();
-  if (settings === null) return 'error';
-
-  const current = settings.mcpServers?.breeze;
-  if (current && entriesEqual(current, desired)) return 'unchanged';
-
-  const next: ClaudeSettings = {
-    ...settings,
-    mcpServers: {
-      ...(settings.mcpServers ?? {}),
-      breeze: desired,
-    },
-  };
-
-  try {
-    writeSettings(next, existed);
-    return 'written';
-  } catch (e) {
-    console.warn('[mcp-register] write failed:', (e as Error).message);
-    return 'error';
-  }
-}
-
-/** Remove the breeze entry — used when the user disables auto-registration
- *  or task management. Leaves other mcpServers entries intact. */
+/** Remove the breeze entry — used to strip a stale registration left by an
+ *  earlier build. Leaves other mcpServers entries intact and drops an empty
+ *  mcpServers object. */
 export function unregisterBreezeMcp(): 'removed' | 'absent' | 'error' {
   const existed = existsSync(settingsPath());
   if (!existed) return 'absent';

@@ -247,33 +247,22 @@ export function useOverlaySchedules(): Record<string, RemoteSchedule> {
 
 // fm-b5at.1 — registered TaskSources + their capabilities. Re-pulls on
 // sources:changed so a source connecting/disconnecting (TypeBuild) keeps
-// the capability map fresh. The local source is always present.
-const LOCAL_SOURCE: TaskSourceInfo = {
-  id: 'local',
-  label: 'Local',
-  capabilities: {
-    canSchedule: true,
-    canClaim: false,
-    canEdit: true,
-    canDelete: true,
-    // fm-r8vj (S5 plumbing) — local tasks are creatable.
-    canCreate: true,
-    phiSensitive: false,
-    hasFolder: true,
-  },
-};
-
+// the capability map fresh. Starts empty; the backend list is the source of
+// truth (no phantom 'Local' source).
 export function useTaskSources(): {
   sources: TaskSourceInfo[];
   byId: Record<string, TaskSourceInfo>;
 } {
-  const [sources, setSources] = useState<TaskSourceInfo[]>([LOCAL_SOURCE]);
+  const [sources, setSources] = useState<TaskSourceInfo[]>([]);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
         const list = await fm.tasksSources();
-        if (!cancelled && list.length) setSources(list);
+        // Assign unconditionally so an empty backend list clears the UI —
+        // a source disconnecting (TypeBuild sign-out) must not leave stale
+        // entries behind.
+        if (!cancelled) setSources(list);
       } catch {
         /* keep the last-known set */
       }
@@ -546,8 +535,6 @@ export function buildContextPrompt(task: Task, userTemplate?: string): string {
       lines.push(`  Notes: ${notes}`);
     }
   }
-  lines.push('');
-  lines.push('You can update the task with `breeze task <subcmd>`.');
   return lines.join('\n');
 }
 

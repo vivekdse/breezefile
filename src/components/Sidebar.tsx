@@ -929,7 +929,7 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
   // route through task.source so TypeBuild rows don't silently no-op against
   // the local store.
   const { byId } = useTaskSources();
-  const caps = byId[task.source ?? 'local']?.capabilities;
+  const caps = task.source ? byId[task.source]?.capabilities : undefined;
   const canEdit = caps ? caps.canEdit : true;
   const canDelete = caps ? caps.canDelete : true;
   const tbReady = useTypebuildReadiness();

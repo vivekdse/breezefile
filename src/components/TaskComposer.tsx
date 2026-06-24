@@ -305,24 +305,36 @@ export function TaskComposer(props: Props) {
   );
 
   const [target, setTarget] = useState<string>(
-    props.mode === 'edit' ? props.task.source ?? 'local' : 'local',
+    props.mode === 'edit'
+      ? props.task.source ?? TYPEBUILD_SOURCE
+      : TYPEBUILD_SOURCE,
   );
   // Once the user explicitly picks a target we stop auto-defaulting it (so a
-  // deliberate "save to local" while signed in isn't yanked back to TypeBuild).
+  // deliberate pick while signed in isn't yanked back to TypeBuild).
   const [targetTouched, setTargetTouched] = useState(props.mode === 'edit');
-  // Auto-default: TypeBuild when signed in, else local. Re-runs as auth
-  // resolves (the hook starts false then flips true on the async state read).
+  // Auto-default to TypeBuild (the only built-in create target now) when
+  // signed in; otherwise fall back to the first available creatable target,
+  // if any. Re-runs as auth resolves (the hook starts false then flips true
+  // on the async state read).
   useEffect(() => {
     if (props.mode === 'edit' || targetTouched) return;
-    setTarget(tbSignedIn ? TYPEBUILD_SOURCE : 'local');
-  }, [tbSignedIn, targetTouched, props.mode]);
+    setTarget(
+      tbSignedIn
+        ? TYPEBUILD_SOURCE
+        : localCreatables[0]?.id ?? TYPEBUILD_SOURCE,
+    );
+  }, [tbSignedIn, targetTouched, props.mode, localCreatables]);
   // A target that's no longer offered (e.g. TypeBuild after a sign-out) falls
-  // back to local so the composer stays usable.
+  // back to the first available target so the composer stays coherent.
   useEffect(() => {
     if (props.mode === 'edit' || targets.length === 0) return;
-    if (!targets.some((s) => s.id === target)) setTarget('local');
+    if (!targets.some((s) => s.id === target)) setTarget(targets[0].id);
   }, [targets, target, props.mode]);
   const isTypebuild = target === TYPEBUILD_SOURCE;
+  // No valid save target (signed out + no other creatable source). The create
+  // action is disabled with a "Sign in to TypeBuild" hint rather than firing a
+  // create that has nowhere to land.
+  const noTarget = props.mode === 'create' && targets.length === 0;
 
   const QUESTIONS = useMemo(() => composerQuestions(target), [target]);
 
@@ -801,6 +813,10 @@ export function TaskComposer(props: Props) {
 
   async function save(overrideWhenId?: string) {
     if (busy) return;
+    if (noTarget) {
+      setError('Sign in to TypeBuild to create a task.');
+      return;
+    }
     if (!title.trim()) {
       setError('Add a title.');
       setActiveIdx(0);
@@ -937,19 +953,16 @@ export function TaskComposer(props: Props) {
 
       let savedId: string;
       if (props.mode === 'create') {
-        // fm-m2s4 (S5) — route the create through the chosen source. 'local'
-        // (and undefined) keep the existing local path; 'typebuild' sends the
-        // create to the server (it encrypts title/notes — by design).
-        const t = await createTask(
-          payload as TaskCreate,
-          target === 'local' ? undefined : target,
-        );
+        // fm-m2s4 (S5) — route the create through the chosen source. The
+        // target is a registered source id (e.g. 'typebuild', which encrypts
+        // title/notes — by design); send it directly.
+        const t = await createTask(payload as TaskCreate, target);
         savedId = t.id;
       } else {
         const t = await updateTask(
           props.task.id,
           payload as TaskUpdate,
-          target === 'local' ? undefined : target,
+          target,
         );
         savedId = t.id;
       }
@@ -1869,9 +1882,16 @@ export function TaskComposer(props: Props) {
                   (phase === 'commit' ? ' composer__create-btn--ready' : '')
                 }
                 onClick={() => void save()}
-                disabled={busy || !title.trim()}
+                disabled={busy || !title.trim() || noTarget}
+                title={noTarget ? 'Sign in to TypeBuild to create a task' : undefined}
               >
-                {busy ? 'Saving…' : props.mode === 'edit' ? 'Save changes' : 'Create task'}
+                {busy
+                  ? 'Saving…'
+                  : noTarget
+                    ? 'Sign in to TypeBuild'
+                    : props.mode === 'edit'
+                      ? 'Save changes'
+                      : 'Create task'}
                 <span className="composer__btn-kbd">
                   {phase === 'commit' ? 'C' : submitKbd}
                 </span>

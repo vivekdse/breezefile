@@ -2603,10 +2603,10 @@ end tell`;
   // main thread (better-sqlite3 is synchronous and fast); writes broadcast
   // a 'tasks:changed' event to every window so the UI re-pulls.
   // ── Multi-source (breezed P4) ──────────────────────────────────────
-  // Every task is tagged with `source` ('local' | <host>) so the UI can
-  // group by machine. Mutations route to the owning source. Remote
+  // Every task is tagged with `source` (<registered-source> | <host>) so the
+  // UI can group by machine. Mutations route to the owning source. Remote
   // failures are logged, never thrown — a dead tunnel must not blank the
-  // local list.
+  // list.
   const taskQuery = (f?: TaskFilter): string => {
     if (!f) return '';
     const q = new URLSearchParams();
@@ -2636,6 +2636,11 @@ end tell`;
   // parallel: a `source` that names a connected ssh host is NOT a
   // registered TaskSource, so it falls through to remoteRequest unchanged.
   const isRegisteredSource = (id?: string): boolean => !!getTaskSource(id);
+
+  // With no built-in local source, an unspecified source has nowhere to go
+  // unless the caller is signed in to a remote source (TypeBuild). Surface a
+  // clear, actionable error instead of crashing on `undefined!`.
+  const NO_SOURCE = 'No task source available — sign in to TypeBuild';
 
   // fm-at5 — let the user cleanly back out of the auto-registered Claude
   // Code integration (MCP server + settings.json hooks + hook script).
@@ -2693,13 +2698,14 @@ end tell`;
   ipcMain.handle('tasks:get', (_e, id: string, source?: string) => {
     const src = getTaskSource(source);
     if (src) return src.getTask(id);
-    return remoteRequest(source!, 'GET', `/tasks/${encodeURIComponent(id)}`);
+    if (!source) throw new Error(NO_SOURCE);
+    return remoteRequest(source, 'GET', `/tasks/${encodeURIComponent(id)}`);
   });
   // Auto-by-folder routing: if the caller didn't pin a source and the
   // task's folder lives under a *connected* host's sshfs mount, the
   // task belongs to that machine — create it on its daemon with the
   // folder rewritten to the real remote path. Otherwise route through the
-  // named (or default 'local') registered source.
+  // named registered source (e.g. TypeBuild).
   ipcMain.handle('tasks:create', async (_e, input: TaskCreate, source?: string) => {
     if (source && !isRegisteredSource(source)) {
       return remoteRequest(source, 'POST', '/tasks', input);
@@ -2713,20 +2719,24 @@ end tell`;
         });
       }
     }
-    return getTaskSource(source)!.createTask(input);
+    const src = getTaskSource(source);
+    if (!src) throw new Error(NO_SOURCE);
+    return src.createTask(input);
   });
   ipcMain.handle(
     'tasks:update',
     (_e, id: string, patch: TaskUpdate, source?: string) => {
       const src = getTaskSource(source);
       if (src) return src.updateTask(id, patch);
-      return remoteRequest(source!, 'PATCH', `/tasks/${encodeURIComponent(id)}`, patch);
+      if (!source) throw new Error(NO_SOURCE);
+      return remoteRequest(source, 'PATCH', `/tasks/${encodeURIComponent(id)}`, patch);
     },
   );
   ipcMain.handle('tasks:delete', (_e, id: string, source?: string) => {
     const src = getTaskSource(source);
     if (src) return src.deleteTask(id);
-    return remoteRequest(source!, 'DELETE', `/tasks/${encodeURIComponent(id)}`);
+    if (!source) throw new Error(NO_SOURCE);
+    return remoteRequest(source, 'DELETE', `/tasks/${encodeURIComponent(id)}`);
   });
   // fm-b5at.1 — registered sources + their capabilities (renderer gates
   // edit/delete/schedule affordances on these).
@@ -2808,8 +2818,9 @@ end tell`;
     // executes on that machine's daemon — fall through to remoteRequest.
     const src = getTaskSource(source);
     if (src) return src.runNow(taskId, { manualInvocation: true });
+    if (!source) throw new Error(NO_SOURCE);
     return remoteRequest(
-      source!,
+      source,
       'POST',
       `/tasks/${encodeURIComponent(taskId)}/run`,
       {},

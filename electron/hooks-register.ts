@@ -19,7 +19,6 @@
 
 import path from 'node:path';
 import os from 'node:os';
-import { app } from 'electron';
 import {
   readFileSync,
   writeFileSync,
@@ -27,9 +26,6 @@ import {
   existsSync,
   copyFileSync,
   chmodSync,
-  lstatSync,
-  readlinkSync,
-  symlinkSync,
   unlinkSync,
 } from 'node:fs';
 
@@ -141,89 +137,12 @@ const BUSY_CMD = `sh "${SCRIPT}" busy`;
 const IDLE_CMD = `sh "${SCRIPT}" idle`;
 const WAITING_CMD = `sh "${SCRIPT}" waiting`;
 
-// Absolute path to the bundled `breeze` launcher. Used for SessionStart
-// and PreCompact hooks that emit cross-folder task context to Claude
-// Code via `breeze prime`. Matches the resolution pattern in ipc.ts's
-// sharerPath(): packaged → process.resourcesPath; dev → repo bin/.
-function breezeBinPath(): string {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'breeze')
-    : path.join(app.getAppPath(), 'bin', 'breeze');
-}
-
-// Put `breeze` on the user's PATH automatically, on every launch, so
-// `breeze` works from any shell without a manual ./cli/install.sh step
-// — for both `npm run dev` (source) and the packaged .app (cask).
-// Idempotent: symlink ~/.local/bin/breeze → breezeBinPath() (the POSIX
-// shim, which itself resolves a Node runtime). This is the in-app
-// equivalent of cli/install.sh and the single source of truth for how
-// the launcher reaches the user's PATH.
-//
-// ~/.local/bin is the right target on both macOS and Linux: it's the
-// XDG-ish per-user bin dir, needs no sudo, and is on PATH in typical
-// shell setups. We never write to /usr/local/bin (would need sudo and
-// is system-global). Best-effort: any failure is returned, not thrown,
-// so it can never block startup.
-function localBinDir(): string {
-  return path.join(os.homedir(), '.local', 'bin');
-}
-
-export function ensureBreezeCli():
-  | 'written'
-  | 'unchanged'
-  | 'missing-source'
-  | 'error' {
-  try {
-    const src = breezeBinPath();
-    if (!existsSync(src)) return 'missing-source';
-
-    const dir = localBinDir();
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const link = path.join(dir, 'breeze');
-
-    // Already a symlink pointing exactly where we want → nothing to do.
-    let existing: { isLink: boolean; target?: string } = { isLink: false };
-    try {
-      if (lstatSync(link).isSymbolicLink()) {
-        existing = { isLink: true, target: readlinkSync(link) };
-      } else if (existsSync(link)) {
-        // A real file (or non-symlink) is squatting the name. Don't
-        // clobber something the user may have put there deliberately.
-        return 'error';
-      }
-    } catch {
-      /* link doesn't exist yet — fall through to create it */
-    }
-    if (existing.isLink && existing.target === src) return 'unchanged';
-    if (existing.isLink) unlinkSync(link); // stale/wrong target → replace
-
-    symlinkSync(src, link);
-
-    // Surface (log only) when the dir we just linked into isn't on PATH,
-    // mirroring cli/install.sh's note — the symlink is useless otherwise.
-    const onPath = (process.env.PATH ?? '')
-      .split(path.delimiter)
-      .includes(dir);
-    if (!onPath) {
-      console.warn(
-        `[breeze-cli] linked ${link} but ${dir} is not on PATH; ` +
-          `add it to your shell rc to use the \`breeze\` command.`,
-      );
-    }
-    return 'written';
-  } catch (e) {
-    console.warn('[breeze-cli] ensureBreezeCli failed:', (e as Error).message);
-    return 'error';
-  }
-}
-
-// We own any hook entry whose command runs claude-hook.sh OR
-// `breeze prime` — re-register replaces them rather than appending so
-// idempotency holds even when we evolve the command shape (e.g. the
-// breeze launcher path changes between dev and packaged builds).
+// We own any hook entry whose command runs claude-hook.sh — re-register
+// replaces them rather than appending so idempotency holds even when we
+// evolve the command shape.
 function isBreezeHook(h: HookEntry): boolean {
   if (typeof h.command !== 'string') return false;
-  return h.command.includes('claude-hook.sh') || /\bbreeze\b.*\bprime\b/.test(h.command);
+  return h.command.includes('claude-hook.sh');
 }
 
 function withoutBreezeMatchers(blocks: HookMatcher[] | undefined): HookMatcher[] {
@@ -264,8 +183,6 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' | 'skip
     'Stop',
     'StopFailure',
     'Notification',
-    'SessionStart',
-    'PreCompact',
   ]) {
     if (!nextHooks[event]) nextHooks[event] = [];
   }
@@ -287,20 +204,6 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' | 'skip
   // the system notification regardless of where they're looking.
   nextHooks.Notification.push({
     hooks: [{ type: 'command', command: WAITING_CMD }],
-  });
-
-  // SessionStart + PreCompact run `breeze prime` so Claude gets active
-  // task context at session boot and again after compaction. Path is
-  // absolute (not bare `breeze`) so the hook works even when the user's
-  // shell PATH doesn't include the brew/dev install location.
-  const PRIME_CMD = `"${breezeBinPath()}" prime`;
-  nextHooks.SessionStart.push({
-    matcher: '',
-    hooks: [{ type: 'command', command: PRIME_CMD }],
-  });
-  nextHooks.PreCompact.push({
-    matcher: '',
-    hooks: [{ type: 'command', command: PRIME_CMD }],
   });
 
   if (JSON.stringify(oldHooks) === JSON.stringify(nextHooks)) {

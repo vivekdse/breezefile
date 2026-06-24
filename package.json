@@ -73,14 +73,6 @@
           "to": "sharer"
         },
         {
-          "from": "bin/breeze",
-          "to": "breeze"
-        },
-        {
-          "from": "bin/breeze.mjs",
-          "to": "breeze.mjs"
-        },
-        {
           "from": "bin/breeze-tools",
           "to": "automation/bin/breeze-tools"
         },
@@ -134,14 +126,6 @@
       "icon": "build/icon.ico",
       "artifactName": "Breezefile-${version}-${arch}.${ext}",
       "extraResources": [
-        {
-          "from": "bin/breeze.cmd",
-          "to": "breeze.cmd"
-        },
-        {
-          "from": "bin/breeze.mjs",
-          "to": "breeze.mjs"
-        },
         {
           "from": "bin/breeze-tools.cmd",
           "to": "automation/bin/breeze-tools.cmd"

@@ -292,21 +292,21 @@ class ClaudeAgent implements AgentRunner {
 // Standing instruction prepended to every auto-run prompt. Auto-mode is
 // non-interactive: a denied tool call has no human to escalate to and
 // would otherwise either get silently worked around or cause the agent
-// to thrash. Instead, instruct the agent to file a manual Breeze task
-// naming the exact tool/pattern needed and stop. The user sees that
-// task in their list, reviews it, and adds the pattern to
-// .claude/settings.json. `Bash(breeze *)` must be pre-allowed in
-// project settings so this escape valve isn't itself blocked.
+// to thrash. Instead, instruct the agent to stop and report exactly which
+// tool/pattern it needed so the user can review the run output, add the
+// pattern to .claude/settings.json, and re-run.
 function buildPreamble(taskId: string, runId: string): string {
   return [
     'You are running unattended in Breeze auto-task mode (no human in the loop).',
     '',
     'If a tool call is denied by permissions, do NOT retry, work around it,',
     'or attempt an alternative tool to accomplish the same effect. Instead:',
-    '  1. File a manual Breeze task so the user can see and act on it:',
-    `       breeze add "Permission needed: <tool/pattern>" \\`,
-    `         --notes "Task ${taskId} run ${runId} needed <tool> to <reason>. Add the pattern to .claude/settings.json allow list, then re-run."`,
-    '  2. Stop and exit. The user will grant the permission and re-run.',
+    '  1. Stop immediately and report, as your final message, the exact',
+    `     tool/pattern you needed and why (e.g. "Task ${taskId} run ${runId}`,
+    '     needed <tool> to <reason>. Add the pattern to the',
+    '     .claude/settings.json allow list, then re-run.").',
+    '  2. Exit. The user will read the run output, grant the permission,',
+    '     and re-run.',
     '',
     '--- task prompt below ---',
     '',

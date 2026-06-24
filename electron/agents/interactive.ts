@@ -62,7 +62,7 @@ export type InteractiveRunOptions = {
    *  caller react — e.g. TypeBuild refreshes the source + offers Release. */
   onExit?: (info: { exitCode: number; signal: number | null }) => void;
   /** Owning source id, threaded into the broadcast so the renderer can gate
-   *  PHI-aware tab behavior. Defaults to 'local'. */
+   *  PHI-aware tab behavior. Omitted when not passed. */
   source?: string;
 };
 
@@ -83,8 +83,8 @@ export type InteractiveRunPayload = {
   /** Tab/terminal label. Generic + content-free for PHI-sensitive sources. */
   title: string;
   cwd: string;
-  /** Owning source id ('local' by default). The renderer uses this to gate
-   *  PHI-aware tab behavior (e.g. the TypeBuild OAuth hint). */
+  /** Owning source id (omitted when not passed). The renderer uses this to
+   *  gate PHI-aware tab behavior (e.g. the TypeBuild OAuth hint). */
   source?: string;
 };
 
@@ -209,7 +209,7 @@ export async function runTaskInteractive(
     // otherwise we use the (local, non-PHI) task title.
     title: opts.label?.trim() || task.title,
     cwd,
-    source: opts.source ?? 'local',
+    ...(opts.source ? { source: opts.source } : {}),
   };
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);

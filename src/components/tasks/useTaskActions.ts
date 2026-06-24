@@ -88,7 +88,7 @@ export function useTaskActions(): TaskActions {
 
   const capsFor = useCallback(
     (t: Task): TaskSourceCapabilities | undefined =>
-      byId[t.source ?? 'local']?.capabilities,
+      t.source ? byId[t.source]?.capabilities : undefined,
     [byId],
   );
 
