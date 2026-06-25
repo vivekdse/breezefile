@@ -357,10 +357,6 @@ const fm = {
   sourcesDisconnect: (host: string) =>
     ipcRenderer.invoke('sources:disconnect', host),
   // fm-at5 — Claude Code integration reset
-  claudeUnregisterMcp: () =>
-    ipcRenderer.invoke('claude:unregister-mcp') as Promise<
-      'removed' | 'absent' | 'error'
-    >,
   claudeUnregisterHooks: () =>
     ipcRenderer.invoke('claude:unregister-hooks') as Promise<
       'removed' | 'absent' | 'error'
