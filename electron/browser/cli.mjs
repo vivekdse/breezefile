@@ -69,6 +69,10 @@ function fail(msg) {
 // docs/pii-data-injection-design.md. We never print the resolved value.
 async function resolveDataRef(ref) {
   const taskId = (process.env.BREEZE_TYPEBUILD_TASK_ID || '').trim();
+  // NOTE: a "me.*" ref resolves against the per-user vault and is task-independent
+  // (main routes it to the entity resolver, ignoring taskId). We still require a
+  // TypeBuild session for it today to keep one gate; relaxing this so non-task
+  // sessions can fill `me.*` credentials is a follow-up.
   if (!taskId) {
     fail('fill-ref/type-ref require $BREEZE_TYPEBUILD_TASK_ID (TypeBuild sessions only)');
   }

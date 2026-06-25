@@ -92,29 +92,48 @@ therefore requires trusted agents exactly as class 1 does.
   an agent fill, **one value per call, uncached** — same memory-only/transient
   discipline as PHI.
 
-#### Class-2 endpoints (`/chromeext/me/data`)
+#### Class-2 resolve — the entity resolver (what shipped)
 
-The per-user vault is a TypeBuild server dependency
-(task `task_manager_api-8y0`); the Breeze client side is
-`task-57862d425ef1` (resolver `task-data.ts`, vault CRUD `user-vault.ts`,
-the `:secrets` management UI).
+The per-user vault shipped as TypeBuild task `task_manager_api-8y0`; the Breeze
+client side is `task-57862d425ef1` (resolver `task-data.ts`, vault CRUD
+`user-vault.ts`, the `:secrets` management UI). **The class-2 fill/reveal path
+resolves through the entity resolver, NOT `GET /chromeext/me/data?ref=`** (that
+assumed endpoint never shipped). The `me.*` namespace is unchanged.
 
-| Method | Endpoint | Returns | Use |
-|--------|----------|---------|-----|
-| `GET` | `/chromeext/me/data` | `{ keys: string[] }` | list (NAMES only, no values) |
-| `GET` | `/chromeext/me/data?ref=<key>` | `{ value: string }` | one value — reveal / fill |
-| `PUT` | `/chromeext/me/data` `{ ref, value }` | `{ ok: true }` | create / replace |
-| `DELETE` | `/chromeext/me/data?ref=<key>` | `{ ok: true }` | delete |
+```
+GET /chromeext/entities/resolve?field=<name>&entity=<id|me>&format=<fmt>
+```
 
-All scoped to the signed-in user by the Firebase token, same as the class-1
-`/chromeext/<id>/data` endpoint.
+- `entity` **defaults to `me`** — omitted for the `me.*` case; `field` required.
+  Firebase-authed, scope-checked, value crosses only this hop, never logged.
+- **`me.*` → request:** strip `me.`, the remainder is `field` (`me.npi` →
+  `?field=npi`). The server canonicalizes aliases (`npi`, `tax_id`/`ein`,
+  `login_id`, `practice_name`) and hard-refuses secret fields, so the client
+  passes the bare field name.
+- **Response shapes (exact):**
+  - `{ "resolved": true,  "field": "<canonical>", "value": "<string>" }`
+  - `{ "resolved": false, "reason": "not_found",  "available": ["<names>"] }`
+  - `{ "resolved": false, "reason": "ambiguous",  "candidates": ["<names>"] }`
+  - `{ "resolved": false, "reason": "ambiguous_secret" }` (NO names)
+- **Client handling** (`resolveUserField`): `resolved:true` → the string `value`
+  (empty → "no data", same as class 1, never logged); `not_found` → error that
+  may list non-secret `available` names; `ambiguous` → error that may list
+  `candidates`; `ambiguous_secret` → generic refusal disclosing **nothing**. No
+  value is ever logged (the false branches carry none).
+- **Supporting (names only, not needed for fill):** `GET /chromeext/entities`
+  (list), `GET /chromeext/entities/me` (self field names), `GET /chromeext/entities/{id}`.
+
+The vault **CRUD** (`user-vault.ts` list/PUT/DELETE for the `:secrets` panel)
+still targets `/chromeext/me/data`; migrating it onto the entity API is a
+follow-up. All paths are scoped to the signed-in user by the Firebase token.
 
 **Open question — multi-value disambiguation.** A user may have more than one of
-the same kind of identifier (e.g. an NPI per practice location). The current
-convention encodes the discriminator into the key (`me.npi.<location>`), leaving
-it to the task/skill author to reference the right key. Whether the client
-should help disambiguate (a picker, or location inferred from task context) is
-unresolved.
+the same kind of identifier (e.g. an NPI per practice location). The shipped
+model uses **separate entities** (`entity=<id>`), not a flattened
+`me.npi.<location>` key. The client always resolves `me.*` against the `me`
+self-entity today; when multiple match, the resolver returns `ambiguous`.
+**Client-side multi-entity / location selection (a picker, or location inferred
+from task context) is a follow-up.**
 
 ## Architecture
 

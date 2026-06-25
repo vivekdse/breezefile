@@ -30,12 +30,37 @@
 // ref's prefix to the right server source.
 //
 // Server contract (TypeBuild dependency — not built in this repo):
-//   GET /chromeext/<id>/data?ref=<key>   → { value: string }   (class 1, per task)
-//   GET /chromeext/me/data?ref=<key>     → { value: string }   (class 2, per user)
-//     200 with the single decrypted value for <key>.
-//     404 when the task/user isn't visible / has no data / the key is unknown.
-// Requesting one ref at a time keeps a single value (not the whole bag)
-// crossing the wire into main on each fill.
+//
+//   CLASS 1 (per-task PHI):
+//     GET /chromeext/<id>/data?ref=<key>   → { value: string }
+//       200 with the single decrypted value for <key>; 404 when the task isn't
+//       visible / has no data / the key is unknown.
+//
+//   CLASS 2 (per-user credential vault) — the ENTITY RESOLVER:
+//     GET /chromeext/entities/resolve?field=<name>&entity=<id|me>&format=<fmt>
+//       `entity` defaults to `me` (the user's self-entity) — we omit it for the
+//       `me.*` case; `field` is required. The server maps field aliases via a
+//       canonical registry (npi, tax_id/ein, login_id, practice_name, …) and
+//       hard-refuses secret fields, so we pass the BARE field name and let the
+//       server canonicalize. Firebase-authed, scope-checked, value crosses only
+//       this hop and is never logged. Response shapes (exact):
+//         { "resolved": true,  "field": "<canonical>", "value": "<string>" }
+//         { "resolved": false, "reason": "not_found",  "available": [<names>] }
+//         { "resolved": false, "reason": "ambiguous",  "candidates": [<names>] }
+//         { "resolved": false, "reason": "ambiguous_secret" }   (NO names)
+//     (Supporting, not needed here: GET /chromeext/entities (list, names only),
+//      GET /chromeext/entities/me (self field names), GET /chromeext/entities/{id}.)
+//
+// Requesting one ref/field at a time keeps a single value (not the whole bag /
+// entity) crossing the wire into main on each fill.
+//
+// me.* → resolve mapping (the ref-to-request decision): strip the "me." prefix;
+// the remainder is the `field` (entity defaults to `me`). e.g. "me.npi" →
+// ?field=npi. Multi-segment refs (the old "me.npi.<location>" idea) are NOT
+// flat dotted keys in the shipped model — disambiguation is by separate ENTITIES
+// (entity=<id>). For now we pass the whole remainder through as the field name
+// verbatim and let the server's resolver/canonicalizer decide; client-side
+// location routing (multi-entity selection) is a deliberate follow-up punt.
 
 import { getIdToken } from './auth';
 
@@ -90,9 +115,12 @@ export async function resolveTaskDataRef(taskId: string, ref: string): Promise<s
   if (!ref) throw new Error('ref required');
 
   if (isUserDataRef(ref)) {
-    // Class 2 — the user's own vault. Scoped to the signed-in user by the
-    // Firebase token; no task involved, so taskId is intentionally unused.
-    return fetchDataValue(`${API_BASE}/chromeext/me/data?ref=${encodeURIComponent(ref)}`, ref);
+    // Class 2 — the user's own vault, via the entity resolver. Scoped to the
+    // signed-in user by the Firebase token; no task involved, so taskId is
+    // intentionally unused. This path has its OWN parse (a richer resolved/
+    // not-resolved response than class 1's plain {value}), so it does not reuse
+    // fetchDataValue.
+    return resolveUserField(ref);
   }
 
   // Class 1 — patient PHI on this task.
@@ -131,4 +159,92 @@ async function fetchDataValue(reqUrl: string, ref: string): Promise<string> {
     throw Object.assign(new Error(`no data for ref "${ref}" (empty)`), { status: 404 });
   }
   return body.value;
+}
+
+// The entity-resolver's not-resolved payload. Only NON-secret field names ever
+// appear here (available/candidates); ambiguous_secret discloses nothing.
+type ResolveResponse =
+  | { resolved: true; field?: string; value?: unknown }
+  | { resolved: false; reason?: string; available?: unknown; candidates?: unknown };
+
+/** Names-careful join: keep error text terse and bounded, and never echo a
+ *  value (these branches have no value anyway). Returns '' when there are none. */
+function joinNames(names: unknown): string {
+  if (!Array.isArray(names)) return '';
+  const safe = names.filter((n): n is string => typeof n === 'string');
+  if (safe.length === 0) return '';
+  const shown = safe.slice(0, 12);
+  const suffix = safe.length > shown.length ? ', …' : '';
+  return shown.join(', ') + suffix;
+}
+
+/** Resolve a class-2 "me.*" ref against the per-user entity resolver. Strips the
+ *  "me." prefix to the `field`; entity defaults to `me` (omitted). The server
+ *  canonicalizes aliases and refuses secret fields, so we pass the bare field.
+ *
+ *  On `resolved:true` returns the string value (NEVER logged — same memory-only
+ *  discipline as class 1). On `resolved:false` throws a value-free, name-careful
+ *  error the fill path surfaces to the agent:
+ *    not_found        → "field not found" (may list the user's non-secret fields)
+ *    ambiguous        → "ambiguous — disambiguate" (may list candidate fields)
+ *    ambiguous_secret → generic "ambiguous / refused" — discloses NOTHING.
+ *  Never caches; one value per call. */
+async function resolveUserField(ref: string): Promise<string> {
+  // Strip the reserved "me." prefix → the field. Multi-segment remainders pass
+  // through verbatim (see header: location routing is a server/follow-up concern).
+  const field = ref.slice(USER_REF_PREFIX.length);
+  if (!field) throw new Error(`ref "${ref}" has no field after "me."`);
+
+  // entity defaults to `me`, so we omit it. format is left to the server default.
+  const reqUrl = `${API_BASE}/chromeext/entities/resolve?field=${encodeURIComponent(field)}`;
+  const res = await typebuildFetch(reqUrl);
+  if (!res.ok) {
+    throw Object.assign(new Error(`resolve failed for ref "${ref}" (${res.status})`), {
+      status: 502,
+    });
+  }
+  const body = (await res.json().catch(() => ({}))) as ResolveResponse;
+
+  if (body.resolved === true) {
+    if (typeof body.value !== 'string') {
+      throw Object.assign(new Error(`ref "${ref}" resolved without a string value`), {
+        status: 502,
+      });
+    }
+    // Treat empty as "no data" — a blank fill that reports success is worse than
+    // a clear error (mirrors class 1).
+    if (body.value === '') {
+      throw Object.assign(new Error(`no data for ref "${ref}" (empty)`), { status: 404 });
+    }
+    return body.value;
+  }
+
+  // resolved:false — value-free, name-careful errors by reason. We name only
+  // NON-secret field names (available/candidates) the server chose to disclose.
+  const reason = body.resolved === false ? body.reason : undefined;
+  if (reason === 'ambiguous_secret') {
+    // Discloses NOTHING — no field names, no value.
+    throw Object.assign(
+      new Error(`ref "${ref}" is ambiguous and refused (no details disclosed)`),
+      { status: 409 },
+    );
+  }
+  if (reason === 'ambiguous') {
+    const candidates = body.resolved === false ? joinNames(body.candidates) : '';
+    throw Object.assign(
+      new Error(
+        `ref "${ref}" is ambiguous — disambiguate` +
+          (candidates ? ` (candidates: ${candidates})` : ''),
+      ),
+      { status: 409 },
+    );
+  }
+  // not_found (and any unknown reason) — terse, may list the user's fields.
+  const available = body.resolved === false ? joinNames(body.available) : '';
+  throw Object.assign(
+    new Error(
+      `no field for ref "${ref}"` + (available ? ` (available: ${available})` : ''),
+    ),
+    { status: 404 },
+  );
 }

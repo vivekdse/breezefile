@@ -7,7 +7,11 @@
 // Electron app or a CDP browser. We therefore do NOT drive a real browser.
 // Instead we stand up a tiny in-process stub HTTP server that imitates BOTH:
 //   (a) Breeze's control API:  GET /app/task-data?taskId=&ref= -> {ok,ref,value}
-//   (b) the TypeBuild REST:    GET /chromeext/<id>/data?ref=   -> {value} / 404
+//   (b) the TypeBuild REST, two class paths:
+//        class 1: GET /chromeext/<id>/data?ref=            -> {value} / 404
+//        class 2: GET /chromeext/entities/resolve?field=   -> {resolved,...}
+//                 (the user-credential entity resolver — what actually shipped;
+//                  the old /chromeext/me/data?ref= reveal endpoint was NEVER built)
 //
 // What we CAN and CANNOT reach from CI (the load-bearing scoping decision):
 //   - electron/typebuild/task-data.ts hardcodes API_BASE + getIdToken() and
@@ -60,32 +64,57 @@ const DATA_BAG = {
 // no test may leak it onto an agent-facing surface either.
 const NPI_CANARY = 'NPI-1669500302-CANARY';
 const USER_REF = 'me.npi';
+// The entity resolver is keyed by the BARE field name (the canonical registry is
+// mocked as identity). The client maps `me.npi` -> ?field=npi, so this bag is
+// keyed by `npi`, not `me.npi`.
 const USER_BAG = {
-  [USER_REF]: NPI_CANARY,
+  npi: NPI_CANARY,
 };
 
-// Mirror electron/typebuild/task-data.ts isUserDataRef: "me." refs are class-2.
+// Mirror electron/typebuild/task-data.ts isUserDataRef + the me.* -> field strip.
 const isUserRef = (ref) => ref.startsWith('me.');
+const refToField = (ref) => ref.slice('me.'.length);
 
 function startStub() {
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.setHeader('content-type', 'application/json');
 
-    // (b) TypeBuild REST: GET /chromeext/<id>/data?ref=<key> -> {value} / 404.
-    // The <id> segment is a task id for class-1 refs, or the literal "me" for
-    // the per-user vault (class-2). The bag is chosen by the path, not the ref.
+    // (b1) TypeBuild REST class 1: GET /chromeext/<id>/data?ref=<key> -> {value}
+    // / 404. The <id> segment is the task id for class-1 (patient PHI) refs.
     const rest = u.pathname.match(/^\/chromeext\/([^/]+)\/data$/);
     if (rest && req.method === 'GET') {
       const ref = u.searchParams.get('ref') ?? '';
-      const bag = rest[1] === 'me' ? USER_BAG : DATA_BAG;
-      const value = bag[ref];
+      const value = DATA_BAG[ref];
       if (typeof value !== 'string') {
         res.statusCode = 404;
         return res.end(JSON.stringify({ error: 'no data' }));
       }
       res.statusCode = 200;
       return res.end(JSON.stringify({ value }));
+    }
+
+    // (b2) TypeBuild REST class 2: the user-credential ENTITY RESOLVER.
+    // GET /chromeext/entities/resolve?field=<name>[&entity=<id|me>] -> the
+    // resolved/not-resolved envelope. entity defaults to `me`. The vault bag is
+    // keyed by the bare field name (the canonical registry is mocked as identity
+    // here). This is what the shipped server exposes; the client maps a `me.npi`
+    // ref to ?field=npi.
+    if (u.pathname === '/chromeext/entities/resolve' && req.method === 'GET') {
+      const field = u.searchParams.get('field') ?? '';
+      if (!field) {
+        res.statusCode = 400;
+        return res.end(JSON.stringify({ error: 'field required' }));
+      }
+      const value = USER_BAG[field];
+      res.statusCode = 200;
+      if (typeof value === 'string') {
+        return res.end(JSON.stringify({ resolved: true, field, value }));
+      }
+      // not_found carries non-secret field NAMES only — never a value.
+      return res.end(
+        JSON.stringify({ resolved: false, reason: 'not_found', available: Object.keys(USER_BAG) }),
+      );
     }
 
     // (a) Breeze control API: GET /app/task-data?taskId=&ref= -> {ok,ref,value}.
@@ -100,7 +129,7 @@ function startStub() {
         res.statusCode = 400;
         return res.end(JSON.stringify({ error: 'ref required (and taskId for non-me.* refs)' }));
       }
-      const value = isUserRef(ref) ? USER_BAG[ref] : DATA_BAG[ref];
+      const value = isUserRef(ref) ? USER_BAG[refToField(ref)] : DATA_BAG[ref];
       if (typeof value !== 'string') {
         res.statusCode = 404;
         return res.end(JSON.stringify({ error: `no data for ref "${ref}"` }));
@@ -235,12 +264,32 @@ test('control API: an unknown "me." ref is a 404 and invents no value', async ()
   }
 });
 
-test('typebuild REST: the per-user vault lives at /chromeext/me/data', async () => {
+test('typebuild REST: the per-user vault resolves via /chromeext/entities/resolve', async () => {
   const { server, port } = await startStub();
   try {
-    const r = await get(port, `/chromeext/me/data?ref=${encodeURIComponent(USER_REF)}`);
+    // The client maps `me.npi` -> ?field=npi (entity defaults to `me`, omitted).
+    const r = await get(
+      port,
+      `/chromeext/entities/resolve?field=${encodeURIComponent(refToField(USER_REF))}`,
+    );
     assert.equal(r.status, 200);
-    assert.equal(r.json.value, NPI_CANARY, 'vault GET must return the one value');
+    assert.equal(r.json.resolved, true, 'a known field must resolve');
+    assert.equal(r.json.value, NPI_CANARY, 'resolve must return the one value');
+  } finally {
+    server.close();
+  }
+});
+
+test('typebuild REST: an unknown field is resolved:false/not_found with NAMES only', async () => {
+  const { server, port } = await startStub();
+  try {
+    const r = await get(port, `/chromeext/entities/resolve?field=nope`);
+    assert.equal(r.status, 200, 'the resolver answers 200 with a resolved:false envelope');
+    assert.equal(r.json.resolved, false);
+    assert.equal(r.json.reason, 'not_found');
+    assert.ok(Array.isArray(r.json.available), 'not_found lists available field NAMES');
+    // Names only — never a value.
+    assert.ok(!r.body.includes(NPI_CANARY), 'not_found envelope leaked the vault canary');
   } finally {
     server.close();
   }

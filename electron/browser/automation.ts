@@ -61,7 +61,7 @@ export function playwrightPromptAddendum(): string {
     'Give the subagent, in its prompt: the goal; the start URL; exactly what to',
     'extract or produce; any data-placeholder KEYS the task lists (the KEYS only —',
     'never their values); and the task id from $BREEZE_TYPEBUILD_TASK_ID if set.',
-    'Note: `me.*` placeholders (e.g. `me.npi`, `me.taxId`) resolve to the USER\'s',
+    'Note: `me.*` placeholders (e.g. `me.npi`, `me.tax_id`) resolve to the USER\'s',
     'OWN saved credentials — NPI, practice Tax ID, portal login IDs — via the same',
     'fill-ref path, distinct from the per-task patient PHI; the subagent uses them',
     'when a form needs the provider\'s own identifier rather than customer data.',

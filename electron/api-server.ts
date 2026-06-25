@@ -229,8 +229,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const taskId = url.searchParams.get('taskId') ?? '';
       const ref = url.searchParams.get('ref') ?? '';
       const { resolveTaskDataRef, isUserDataRef } = await import('./typebuild/task-data');
-      // A "me." ref resolves against the per-user vault and needs no task; any
-      // other ref is patient PHI on a specific task, so taskId is mandatory.
+      // A "me." ref resolves against the per-user vault (via the entity resolver,
+      // GET /chromeext/entities/resolve) and needs no task — taskId is ignored
+      // for it; any other ref is patient PHI on a specific task, so taskId is
+      // mandatory.
       if (!ref || (!isUserDataRef(ref) && !taskId)) {
         throw Object.assign(new Error('ref required (and taskId for non-me.* refs)'), {
           status: 400,

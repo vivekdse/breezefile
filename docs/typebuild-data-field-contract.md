@@ -194,7 +194,7 @@ available — and must never include the values.**
   `task` body over MCP, that body must contain only placeholder keys. PII lives
   solely in `data`.
 
-## 4a. The user's own credential vault — `/chromeext/me/data` (class 2)
+## 4a. The user's own credential vault — entity resolver (class 2)
 
 §1–§4 cover **class-1** data: PHI that is **per task**. A second class shares the
 same placeholder-fill mechanism but a different scope and lifetime, and needs its
@@ -218,25 +218,77 @@ resolver routes a `me.*` ref to the vault instead of the task bag. **The
 threat-model is UNCHANGED** — cooperative boundary, trusted agents only.
 
 The Breeze client side is built (`task-data.ts` resolver, `user-vault.ts` CRUD,
-the `:secrets` panel — client task `task-57862d425ef1`); the **vault endpoints
-below are the outstanding server dependency, task `task_manager_api-8y0`.**
+the `:secrets` panel — client task `task-57862d425ef1`); the **server side that
+shipped is task `task_manager_api-8y0`.**
 
-### Endpoints (all scoped to the signed-in user by the Firebase ID token)
+> **Reconciliation (what actually shipped).** The class-2 *resolve* path (an agent
+> fill or an explicit reveal) does **not** use `GET /chromeext/me/data?ref=`. It
+> uses the **entity resolver**. The client (`task-data.ts` `resolveUserField`)
+> targets it; the `me.*` namespace is unchanged (the agent still fills
+> `me.npi`). The vault **CRUD** rows (list/PUT/DELETE) below remain pointed at
+> `/chromeext/me/data` in `user-vault.ts` and are a separate management-path
+> reconciliation (the resolver supports list-by-name via
+> `GET /chromeext/entities/me`) — tracked as a follow-up.
+
+### The resolve endpoint (class-2 fill / reveal) — what shipped
+
+```
+GET /chromeext/entities/resolve?field=<name>&entity=<id|me>&format=<fmt>
+```
+
+- `entity` **defaults to `me`** (the user's self-entity) — the client OMITS it for
+  the `me.*` case. `field` is **required**. Firebase-authed, scope-checked, the
+  value crosses only this hop and is **never logged**.
+- **`me.*` → request mapping:** strip the `me.` prefix; the remainder is the
+  `field`. e.g. `me.npi` → `?field=npi`. The server maps field aliases via a
+  **canonical registry** (`npi`, `tax_id`/`ein`, `login_id`, `practice_name`, …)
+  and **hard-refuses secret fields**, so the client passes the **bare field name**
+  and lets the server canonicalize.
+- **Multi-segment refs** (the old `me.npi.<location>` idea) are **not** flat dotted
+  keys in the shipped model — disambiguation is by **separate entities**
+  (`entity=<id>`). The client passes the whole post-`me.` remainder through as the
+  field verbatim; **client-side location routing is a deliberate follow-up punt.**
+- **Response shapes (exact):**
+  - `{ "resolved": true,  "field": "<canonical>", "value": "<rendered string>" }`
+  - `{ "resolved": false, "reason": "not_found",        "available": ["<names>"] }`
+  - `{ "resolved": false, "reason": "ambiguous",        "candidates": ["<names>"] }`
+  - `{ "resolved": false, "reason": "ambiguous_secret" }` — **no names disclosed**
+- **Client handling** (`resolveUserField`, value-free + name-careful):
+  `resolved:true` → return `value` (empty string treated as "no data", same as
+  class 1); `not_found` → 404, may list `available` (non-secret) field names;
+  `ambiguous` → 409, may list `candidates`; `ambiguous_secret` → 409, discloses
+  **nothing**. The value is never logged on any branch (the false branches carry
+  none).
+
+### Supporting entity endpoints (names only — not needed for fill)
+
+| Method | Endpoint | Returns |
+|--------|----------|---------|
+| `GET` | `/chromeext/entities` | list of entities, **names only** |
+| `GET` | `/chromeext/entities/me` | the self-entity's field **names** (no values) |
+| `GET` | `/chromeext/entities/{id}` | a named entity's field names |
+
+### Vault CRUD (management `:secrets` path — still `/chromeext/me/data`)
+
+> These drive the `:secrets` panel (`user-vault.ts`) and are **not** part of this
+> resolve reconciliation; the GET-one-value reveal already routes through the
+> shared resolver above. Migrating list/PUT/DELETE onto the entity API is a
+> follow-up.
 
 | Method | Endpoint | Body / Returns | Use |
 |--------|----------|----------------|-----|
 | `GET` | `/chromeext/me/data` | → `{ "keys": string[] }` | list **NAMES only**, never values (drives the masked `:secrets` list) |
-| `GET` | `/chromeext/me/data?ref=<key>` | → `{ "value": "<decrypted>" }` | **one** value — explicit reveal, or an agent fill |
 | `PUT` | `/chromeext/me/data` | `{ "ref": "me.npi", "value": "<your-npi>" }` → `{ "ok": true }` | create / replace one key (full-value replace) |
 | `DELETE` | `/chromeext/me/data?ref=<key>` | → `{ "ok": true }` | delete one key (idempotent — `404` is treated as success) |
 
 - **Keys** are `me.*` dotted identifiers (`^me\.[A-Za-z0-9._-]+$`), opaque and
-  non-PHI, e.g. `me.npi`, `me.taxId`, `me.availity.login`. The management UI
+  non-PHI, e.g. `me.npi`, `me.tax_id`, `me.login_id`. The management UI
   accepts a short key (`npi`) and namespaces it to `me.npi`.
-- **`GET ?ref=` behaves exactly like the class-1 decrypt endpoint** (§3): one
-  value per call, never the whole bag; `200` carries a string `value`; an
-  empty-string value is treated as "no data"; `404` is the "nothing to reveal/
-  fill" signal. Breeze reuses the same resolver and 404/empty handling for both.
+- **Reveal/fill behaves like the class-1 decrypt endpoint** (§3): one value per
+  call, never the whole bag; an empty-string value is treated as "no data". The
+  shipped *resolve* response is richer (`resolved:false` reasons) but the success
+  case is the same single string value, and Breeze reuses the same empty→"no data"
+  handling for both.
 - **Encryption:** vault values are **encrypted at rest, per user**, with the same
   key custody as task `data` (server-side at rest; no client-held key).
 - **The client persists NO class-2 plaintext at rest.** Listing returns names
@@ -247,10 +299,13 @@ below are the outstanding server dependency, task `task_manager_api-8y0`.**
   principal, and the time; never the value.
 
 **Open question — multi-value disambiguation.** A user may hold more than one of
-the same identifier kind (e.g. an NPI per practice location). The convention is
-to encode the discriminator in the key (`me.npi.<location>`), leaving selection
-to the task/skill author. Whether the server or client should help disambiguate
-(scoping by location, a picker) is unresolved — see the design doc.
+the same identifier kind (e.g. an NPI per practice location). The shipped model
+does **not** flatten this into the key (`me.npi.<location>`) — it uses **separate
+entities**, selected with `entity=<id>` on the resolver. The client does not yet
+have a way to pick a non-`me` entity for a `me.*` fill (it always resolves against
+`me`); when more than one matches, the resolver returns `ambiguous` with the
+candidate field names. **Client-side multi-entity / location selection is a
+follow-up** (a picker, or location inferred from task context).
 
 ## 5. Audit / compliance
 
