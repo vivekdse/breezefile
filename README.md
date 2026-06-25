@@ -18,8 +18,9 @@ on as one of the abilities the client and its agents use.
   No separate local task list to keep in sync.
 - **Run tasks, or hand them to an agent** — execute a task yourself, or let an
   AI agent do it. Agents operate your browser (Playwright-driven), touch files,
-  and open apps to complete the work, with sensitive submissions gated on
-  explicit human confirmation.
+  and open apps to complete the work. Confirmation is task-dependent: browser
+  tasks run interactively where a human can confirm sensitive steps, while
+  headless-safe tasks run unattended.
 - **Watch automation happen** — see what's ready, what's running, what an agent
   is doing right now, and what's blocked. Automated work is resumable and
   auditable: every step records state and a one-line "why".

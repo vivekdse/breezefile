@@ -14,7 +14,10 @@ removed; do **not** reach for a local task store or a `breeze task …` command.
 
 Task bodies are **PHI**: keep them in the conversation only — never write them to
 files, notes, or logs. Skills/notes/notifications are shared and must stay
-PHI-free. Final form submissions always need explicit human confirmation.
+PHI-free. Whether a task needs human confirmation (e.g. before a sensitive form
+submission) is **task-dependent** — a property of the task and its flags, not a
+blanket rule: browser-flagged tasks (`chrome` / `playwright`) run interactively
+where a human is present to confirm, while headless-safe tasks run unattended.
 
 > Note: **the user's TypeBuild tasks and this repo's development tracking are
 > both in TypeBuild but are different things** — don't conflate user work with

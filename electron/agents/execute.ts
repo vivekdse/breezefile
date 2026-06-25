@@ -5,6 +5,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import * as tasks from '../tasks';
 import type { Task, TaskRun } from '../tasks';
@@ -36,6 +37,15 @@ export type ExecuteOptions = {
    *  expect to fire many times). The scheduler path leaves this unset
    *  so that genuine run-once-on-save tasks still complete cleanly. */
   manualInvocation?: boolean;
+  /** fm-typebuild-repoint — RUN-ROW SUPPRESSION for remote (TypeBuild) tasks.
+   *  task_runs.task_id FKs the local `tasks` table, but a remote TypeBuild id
+   *  has NO local row, so recording a run would violate the FK. When false, we
+   *  run the agent directly and record NO run row (and skip the local
+   *  status follow-through, which has no local row to update). Mirrors the
+   *  interactive launcher's `recordRun` knob. The decrypted body rides in the
+   *  in-memory Task (auto_prompt/notes) and never touches disk. Defaults to
+   *  true (local scheduler / run-now path unchanged). */
+  recordRun?: boolean;
 };
 
 export type ExecuteOutcome = {
@@ -104,17 +114,42 @@ export async function executeTaskRun(
   const agent = getAgent(agentId);
   if (!agent) throw new AgentNotAvailableError(agentId);
 
+  // fm-typebuild-repoint — remote (TypeBuild) tasks have no local `tasks` row,
+  // so a task_runs row keyed by their id would violate the FK. recordRun=false
+  // runs the agent directly with NO run-row writes and NO local status
+  // follow-through. The decrypted body rides in the in-memory Task only.
+  const recordRun = opts.recordRun !== false;
+
   // Refuse to start a second concurrent run for the same task. Reusing
   // an existing row (scheduler retry path) is exempt — that's the same
-  // run continuing, not a new one.
-  if (!opts.existingRunId) {
+  // run continuing, not a new one. Skipped when not recording (no rows to
+  // dedupe against; the daemon's own concurrency cap guards it).
+  if (recordRun && !opts.existingRunId) {
     const inflight = tasks.getInflightRun(task.id);
     if (inflight) throw new TaskAlreadyRunningError(task.id, inflight.id);
   }
 
   const now = Date.now();
+  // The run handle — a real persisted row when recording, otherwise a
+  // synthetic in-memory stand-in (no disk) so the return shape is uniform.
   let run: TaskRun;
-  if (opts.existingRunId) {
+  if (!recordRun) {
+    run = {
+      id: crypto.randomUUID(),
+      task_id: task.id,
+      agent: agentId,
+      status: 'running',
+      attempt: opts.attempt ?? 1,
+      scheduled_for: now,
+      started_at: now,
+      finished_at: null,
+      conversation_id: null,
+      exit_code: null,
+      error_class: null,
+      error_message: null,
+      output_path: null,
+    };
+  } else if (opts.existingRunId) {
     const existing = tasks.getRun(opts.existingRunId);
     if (!existing) throw new Error(`run not found: ${opts.existingRunId}`);
     run = existing;
@@ -131,11 +166,15 @@ export async function executeTaskRun(
   const outputDir = path.join(RUNS_ROOT, run.id);
   mkdirSync(outputDir, { recursive: true });
 
-  run = tasks.updateRun(run.id, {
-    status: 'running',
-    started_at: Date.now(),
-    output_path: outputDir,
-  });
+  if (recordRun) {
+    run = tasks.updateRun(run.id, {
+      status: 'running',
+      started_at: Date.now(),
+      output_path: outputDir,
+    });
+  } else {
+    run = { ...run, output_path: outputDir };
+  }
 
   // Register a cancellation handle if the caller didn't pre-supply one
   // — that's how the renderer's cancel button reaches into a running
@@ -188,18 +227,34 @@ export async function executeTaskRun(
   // run history doesn't paint a deliberate stop in red.
   const wasCancelled =
     !result.ok && (signal.aborted || result.errorMessage === 'cancelled');
-  run = tasks.updateRun(run.id, {
-    status: result.ok
-      ? 'succeeded'
-      : wasCancelled
-        ? 'cancelled'
-        : 'failed',
-    finished_at: Date.now(),
-    conversation_id: result.conversationId,
-    exit_code: result.exitCode,
-    error_class: result.errorClass ?? null,
-    error_message: result.errorMessage ?? null,
-  });
+  const finalStatus = result.ok
+    ? 'succeeded'
+    : wasCancelled
+      ? 'cancelled'
+      : 'failed';
+  if (recordRun) {
+    run = tasks.updateRun(run.id, {
+      status: finalStatus,
+      finished_at: Date.now(),
+      conversation_id: result.conversationId,
+      exit_code: result.exitCode,
+      error_class: result.errorClass ?? null,
+      error_message: result.errorMessage ?? null,
+    });
+  } else {
+    // No row to write — fold the outcome into the in-memory handle so the
+    // returned ExecuteOutcome.run is accurate for the caller (the daemon
+    // reports success/failure to TypeBuild from `result`, not this row).
+    run = {
+      ...run,
+      status: finalStatus,
+      finished_at: Date.now(),
+      conversation_id: result.conversationId,
+      exit_code: result.exitCode,
+      error_class: result.errorClass ?? null,
+      error_message: result.errorMessage ?? null,
+    };
+  }
 
   // fm-h8g7 — run-success notification, mirror of the scheduler's failure
   // path. Fire on a SUCCESSFUL run so the user learns a long unattended run
@@ -237,8 +292,11 @@ export async function executeTaskRun(
   //                                    re-run; on-demand explicitly so)
   //   recurring auto                → leave alone (should recur forever)
   //   any auto + failure            → leave alone (lets retry / re-run)
+  //   remote (recordRun=false)      → leave alone (no local row to update;
+  //                                    the daemon reports the outcome to the
+  //                                    remote source instead)
   // Re-fetch in case the user edited the task mid-run.
-  if (result.ok && !opts.manualInvocation) {
+  if (recordRun && result.ok && !opts.manualInvocation) {
     const fresh = tasks.getTask(task.id);
     if (fresh && !fresh.cron && fresh.status !== 'done') {
       tasks.updateTask(task.id, { status: 'done' });

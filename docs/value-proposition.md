@@ -40,10 +40,12 @@ keep in sync — there is one system.
 
 The client gives agents the abilities they need to complete a task — operating
 your browser (Playwright-driven), touching files, opening apps — while keeping
-you in the loop. Sensitive form submissions still require explicit human
-confirmation. PII stays out of the agent's context by design (placeholder keys,
-server-side decryption — see the data-field contract). You watch the work, not
-just the result.
+you in the loop. Confirmation is task-dependent, not a blanket rule: a task's
+flags decide whether it runs interactively (browser tasks, where a human is
+present to confirm sensitive steps like a form submission) or unattended
+(headless-safe tasks). PII stays out of the agent's context by design
+(placeholder keys, server-side decryption — see the data-field contract). You
+watch the work, not just the result.
 
 ### Auditable, resumable automation
 

@@ -25,7 +25,6 @@
 import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { BrowserWindow } from 'electron';
 import { breezeHost } from '../core/host';
 import { classifyTransitions } from './typebuild-transitions.mjs';
 import { getAuthState, getIdToken } from '../typebuild/auth';
@@ -43,6 +42,31 @@ import type { Task, TaskCreate, TaskFilter, TaskStatus, TaskUpdate } from '../ta
 
 const API_BASE = 'https://general.typebuild.com';
 const POLL_INTERVAL_MS = 30_000;
+
+// Lazy Electron `BrowserWindow` accessor. The GUI methods (runNow,
+// relaunchSession, onSessionExit, poll) broadcast to windows; the daemon never
+// calls them (it only uses claimNext + the REST verbs). Requiring electron
+// lazily keeps this module Electron-free AT LOAD so breezed can construct the
+// source and call claimNext() without pulling a hard `electron` dependency into
+// its bundle. Returns [] when electron isn't present (headless).
+function browserWindows(): Array<{
+  isDestroyed(): boolean;
+  webContents: { send(channel: string, payload: unknown): void };
+}> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const electron = require('electron') as {
+      BrowserWindow?: { getAllWindows(): unknown[] };
+    };
+    const all = electron.BrowserWindow?.getAllWindows() ?? [];
+    return all as Array<{
+      isDestroyed(): boolean;
+      webContents: { send(channel: string, payload: unknown): void };
+    }>;
+  } catch {
+    return [];
+  }
+}
 
 // Env var the minted MCP token is injected under (PTY env only — never argv:
 // /proc/<pid>/cmdline is world-readable). The inline --mcp-config below
@@ -445,6 +469,45 @@ export class TypeBuildTaskSource implements TaskSource {
     return this.mapDetail(detail, id);
   }
 
+  // ─── claim-next (headless breezed loop — fm-typebuild-repoint) ────────────
+  // POST /chromeext/tasks/claim-next — atomically claim the next runnable task
+  // for this machine (the REST analog of the MCP `claim_next_task` verb). The
+  // daemon's poll-claim-execute loop calls this; the GUI app does not.
+  //
+  // Server (verified live):
+  //   200 → { ok, id, title, task, status, start_url, skill_ids, attempts,
+  //           max_attempts, notes, flags, skills } — `task` is the DECRYPTED
+  //           body (PHI). We map it through mapDetail so the body lands in
+  //           `notes` (memory only) exactly like getTask.
+  //   409 { ok:false, reason:'no_open_tasks' } → empty queue; return null.
+  //   anything else → throw (the loop logs a PHI-free line and backs off).
+  //
+  // PHI: the decrypted body rides home in the returned SourcedTask.notes and
+  // lives in daemon memory only. We never log it and never seed it into the
+  // poll cache's persisted/broadcast path here (the daemon doesn't poll).
+  async claimNext(): Promise<SourcedTask | null> {
+    const res = await this.request('POST', '/chromeext/tasks/claim-next');
+    if (res.status === 409) {
+      // Empty queue (reason:'no_open_tasks') — the normal "nothing to do"
+      // answer, not an error. Drain the body so the socket frees cleanly.
+      await res.json().catch(() => ({}));
+      return null;
+    }
+    if (!res.ok) {
+      throw new Error(`typebuild: claim-next failed (${res.status})`);
+    }
+    const detail = (await res.json().catch(() => ({}))) as DetailRow & {
+      ok?: boolean;
+    };
+    if (detail.ok === false) {
+      // Defensive: server signalled no-task with a 200 body.
+      return null;
+    }
+    const id = detail.id ?? '';
+    if (!id) throw new Error('typebuild: claim-next returned no id');
+    return this.mapDetail(detail, id);
+  }
+
   // Map a decrypted detail row into a SourcedTask. The body (`task`) goes into
   // `notes` — that's what the existing detail UI renders. Memory only.
   private mapDetail(detail: DetailRow, fallbackId: string): SourcedTask {
@@ -691,7 +754,7 @@ export class TypeBuildTaskSource implements TaskSource {
       // release it, then rethrow so the renderer maps the typed mint error.
       // PHI-free: the broadcast carries only the opaque task id.
       if (!alreadyMine) {
-        for (const w of BrowserWindow.getAllWindows()) {
+        for (const w of browserWindows()) {
           if (!w.isDestroyed()) {
             w.webContents.send('typebuild:releasePrompt', { taskId: id });
           }
@@ -742,7 +805,7 @@ export class TypeBuildTaskSource implements TaskSource {
 
     // Tell the renderer to repoint the tab that hosted oldPtyId onto the new
     // ptyId — avoids closing/reopening a tab under the user. PHI-free payload.
-    for (const w of BrowserWindow.getAllWindows()) {
+    for (const w of browserWindows()) {
       if (!w.isDestroyed()) {
         w.webContents.send('typebuild:sessionRelaunched', {
           oldPtyId,
@@ -981,7 +1044,7 @@ export class TypeBuildTaskSource implements TaskSource {
     const me = getAuthState().email;
     const row = this.cache.get(id);
     if (me && row?.claimedBy && row.claimedBy === me) {
-      for (const w of BrowserWindow.getAllWindows()) {
+      for (const w of browserWindows()) {
         if (!w.isDestroyed()) {
           w.webContents.send('typebuild:releasePrompt', { taskId: id });
         }
@@ -1278,7 +1341,7 @@ export class TypeBuildTaskSource implements TaskSource {
   private async poll(): Promise<void> {
     // Pause when there's no window to update — saves a token round-trip and
     // server load while the app is closed-but-running (macOS dock).
-    if (BrowserWindow.getAllWindows().every((w) => w.isDestroyed())) return;
+    if (browserWindows().every((w) => w.isDestroyed())) return;
     try {
       const res = await this.request('GET', `/chromeext/tasks?titles=1&all=1`);
       if (!res.ok) return;

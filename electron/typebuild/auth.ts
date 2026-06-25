@@ -20,10 +20,17 @@
 //
 // SECURITY: passwords and ID tokens are never written to disk or logged; only
 // the refresh token touches disk, and only through safeStorage.
-
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { app, safeStorage } from 'electron';
+//
+// HEADLESS (breezed) — fm-typebuild-repoint: the token lifecycle (sign-in,
+// refresh, single-flight, skew, getIdToken, getAuthState) is Electron-free. The
+// only Electron dependency is REFRESH-TOKEN PERSISTENCE, which is hidden behind
+// an injectable `CredentialStore`. The default store lazily imports Electron's
+// `safeStorage`/`app` (so merely importing this module headlessly never pulls a
+// hard `electron` dependency at load time — the import happens on first
+// persistence call, which the daemon never makes). The daemon installs a
+// memory-only store via `initHeadlessAuth()` / `signInHeadless()`: credentials
+// come from env (TYPEBUILD_EMAIL / TYPEBUILD_PASSWORD), the refresh token stays
+// in memory only, and a restart re-signs-in from env.
 
 // Public web API key + auth domain for the Firebase project the TypeBuild
 // server (general.typebuild.com) verifies against. These are the values the
@@ -58,8 +65,100 @@ let refreshInFlight: Promise<string> | null = null;
 
 const listeners = new Set<(s: AuthState) => void>();
 
-function authFilePath(): string {
-  return path.join(app.getPath('userData'), 'typebuild-auth.bin');
+// ─── Credential store (injectable persistence seam) ───────────────────────
+// The ONLY part of this module that needs Electron. The default impl persists
+// the refresh token encrypted via safeStorage to userData (GUI behavior,
+// unchanged). The headless impl is memory-only (no disk). Both are pure
+// async string load/save/clear — the token lifecycle above doesn't care which.
+
+export interface CredentialStore {
+  /** Persist the refresh token (encrypted where the impl supports it). */
+  save(refreshToken: string): Promise<void>;
+  /** Load a previously-persisted refresh token, or null if none. */
+  load(): Promise<string | null>;
+  /** Drop any persisted refresh token. */
+  clear(): Promise<void>;
+}
+
+// The Electron safeStorage-backed store. Electron is imported LAZILY (inside
+// the methods) so that merely importing auth.ts under a headless runtime
+// (breezed) never resolves `electron` at module load — only the GUI app, which
+// actually calls these, pulls it in. Mirrors the original behavior exactly:
+// refuse to write plaintext when no OS keychain is available; tolerate a
+// missing/undecryptable file as "no stored session".
+const electronSafeStorageStore: CredentialStore = {
+  async save(refreshToken: string): Promise<void> {
+    try {
+      const { app, safeStorage } = await import('electron');
+      const { promises: fs } = await import('node:fs');
+      const path = await import('node:path');
+      if (!safeStorage.isEncryptionAvailable()) {
+        // No OS keychain backing — refuse to write plaintext. The session still
+        // works in-memory for this run; it just won't survive a restart.
+        console.warn(
+          '[typebuild-auth] safeStorage unavailable; refresh token not persisted',
+        );
+        return;
+      }
+      const blob = safeStorage.encryptString(refreshToken);
+      const file = path.join(app.getPath('userData'), 'typebuild-auth.bin');
+      await fs.writeFile(file, blob, { mode: 0o600 });
+    } catch (err) {
+      console.warn(
+        '[typebuild-auth] failed to persist refresh token:',
+        (err as Error).message,
+      );
+    }
+  },
+  async load(): Promise<string | null> {
+    try {
+      const { app, safeStorage } = await import('electron');
+      const { promises: fs } = await import('node:fs');
+      const path = await import('node:path');
+      if (!safeStorage.isEncryptionAvailable()) return null;
+      const file = path.join(app.getPath('userData'), 'typebuild-auth.bin');
+      const blob = await fs.readFile(file);
+      const token = safeStorage.decryptString(blob);
+      return token || null;
+    } catch {
+      return null;
+    }
+  },
+  async clear(): Promise<void> {
+    try {
+      const { app } = await import('electron');
+      const { promises: fs } = await import('node:fs');
+      const path = await import('node:path');
+      const file = path.join(app.getPath('userData'), 'typebuild-auth.bin');
+      await fs.rm(file, { force: true });
+    } catch (err) {
+      console.warn(
+        '[typebuild-auth] failed to clear refresh token:',
+        (err as Error).message,
+      );
+    }
+  },
+};
+
+// Memory-only store for headless breezed: the refresh token is held in module
+// memory by the session itself, so persistence is a no-op. A daemon restart
+// re-signs-in from the env credentials (signInHeadless), so there is nothing to
+// load and nothing to write to a server box's disk in the clear.
+const memoryOnlyStore: CredentialStore = {
+  async save(): Promise<void> {},
+  async load(): Promise<string | null> {
+    return null;
+  },
+  async clear(): Promise<void> {},
+};
+
+// The active store. Defaults to the Electron-backed one so GUI behavior is
+// identical; the daemon swaps in the memory-only store at startup.
+let credentialStore: CredentialStore = electronSafeStorageStore;
+
+/** Override the persistence backend (test seam + headless daemon). */
+export function setCredentialStore(store: CredentialStore): void {
+  credentialStore = store;
 }
 
 function currentState(): AuthState {
@@ -80,49 +179,20 @@ function notify(): void {
   }
 }
 
-// ─── Persistence (refresh token only, encrypted) ──────────────────────────
+// ─── Persistence (refresh token only) ─────────────────────────────────────
+// Thin delegators over the active CredentialStore so the token lifecycle below
+// is unchanged and store-agnostic.
 
 async function persistRefreshToken(refreshToken: string): Promise<void> {
-  try {
-    if (!safeStorage.isEncryptionAvailable()) {
-      // No OS keychain backing — refuse to write plaintext. The session still
-      // works in-memory for this run; it just won't survive a restart.
-      console.warn(
-        '[typebuild-auth] safeStorage unavailable; refresh token not persisted',
-      );
-      return;
-    }
-    const blob = safeStorage.encryptString(refreshToken);
-    await fs.writeFile(authFilePath(), blob, { mode: 0o600 });
-  } catch (err) {
-    console.warn(
-      '[typebuild-auth] failed to persist refresh token:',
-      (err as Error).message,
-    );
-  }
+  await credentialStore.save(refreshToken);
 }
 
 async function loadRefreshToken(): Promise<string | null> {
-  try {
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    const blob = await fs.readFile(authFilePath());
-    const token = safeStorage.decryptString(blob);
-    return token || null;
-  } catch {
-    // Missing file or undecryptable blob — treat as no stored session.
-    return null;
-  }
+  return credentialStore.load();
 }
 
 async function clearRefreshToken(): Promise<void> {
-  try {
-    await fs.rm(authFilePath(), { force: true });
-  } catch (err) {
-    console.warn(
-      '[typebuild-auth] failed to clear refresh token:',
-      (err as Error).message,
-    );
-  }
+  await credentialStore.clear();
 }
 
 // ─── REST helpers ──────────────────────────────────────────────────────────
@@ -318,6 +388,39 @@ export async function restoreSession(): Promise<void> {
       (err as Error).message,
     );
   }
+}
+
+// ─── Headless (breezed) entry points ──────────────────────────────────────
+
+/**
+ * Establish a TypeBuild session WITHOUT Electron: installs the memory-only
+ * credential store and signs in with email/password. After this resolves,
+ * getIdToken() works exactly as in the GUI (in-memory refresh, single-flight,
+ * skew). The refresh token is held in module memory only — never disk. A daemon
+ * restart calls this again from the env credentials. Throws the Firebase error
+ * code on failure (e.g. INVALID_LOGIN_CREDENTIALS), same as signIn().
+ */
+export async function signInHeadless(
+  email: string,
+  password: string,
+): Promise<AuthState> {
+  setCredentialStore(memoryOnlyStore);
+  return signIn(email, password);
+}
+
+/**
+ * Headless startup helper for the daemon: read TYPEBUILD_EMAIL /
+ * TYPEBUILD_PASSWORD from the environment and sign in. Returns the resulting
+ * AuthState on success, or null when the env credentials are absent (the daemon
+ * then runs without the TypeBuild loop rather than crashing). Re-throws on a
+ * genuine sign-in failure with creds present, so a misconfigured password is
+ * loud rather than silently disabling the loop.
+ */
+export async function initHeadlessAuth(): Promise<AuthState | null> {
+  const email = process.env.TYPEBUILD_EMAIL?.trim();
+  const password = process.env.TYPEBUILD_PASSWORD;
+  if (!email || !password) return null;
+  return signInHeadless(email, password);
 }
 
 /** Decode the email claim from a Firebase ID token (JWT) without verifying. */

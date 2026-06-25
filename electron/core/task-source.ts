@@ -107,6 +107,14 @@ export interface TaskSource {
     action: string,
     payload?: unknown,
   ): Promise<unknown>;
+
+  /** Claim and return the next runnable task for this machine, or null when
+   *  the queue is empty — the equivalent of the MCP `claim_next_task` verb.
+   *  Used by the headless breezed daemon's poll-claim-execute loop. Optional:
+   *  only sources with a server-side claim-next endpoint (TypeBuild) implement
+   *  it; local-style stores omit it. The returned task carries its decrypted
+   *  body in memory (PHI) when the source is phiSensitive. */
+  claimNext?(): Promise<SourcedTask | null>;
 }
 
 /** Serializable descriptor returned by the tasks:sources IPC so the
