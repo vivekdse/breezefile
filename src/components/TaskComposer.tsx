@@ -32,6 +32,7 @@ import {
   todayISO,
   updateTask,
   useTaskSources,
+  useTasks,
   useTypebuildAuth,
 } from '../tasks';
 import { humanizeError } from '../errorMessages';
@@ -405,6 +406,27 @@ export function TaskComposer(props: Props) {
   // True after the folder→project resolve has run for this folder, so the
   // attached chip can distinguish "auto-attached" from a manual pick.
   const [projectAutoAttached, setProjectAutoAttached] = useState(false);
+  // task-7ef6be165783 — count ACTIVE (non-done, non-cancelled) tasks per
+  // project so the picker can surface the busiest projects first. Same data
+  // path the rest of the app uses (cached by useTasks); no extra round-trip.
+  // Only meaningful for the TypeBuild target — the local source has no
+  // projects — so the subscription is gated on that to stay cheap.
+  const { tasks: activeTaskRows } = useTasks(
+    isTypebuild ? { activeOnly: true } : {},
+  );
+  const activeCountByProject = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!isTypebuild) return counts;
+    for (const t of activeTaskRows) {
+      // "Active" = not terminal. Mirror attention.mjs's isTerminal notion
+      // (done | cancelled); activeOnly already excludes them server-side,
+      // this guards any status the filter leaves in (and the local source,
+      // which ignores the filter).
+      if (!t.projectId || t.status === 'done' || t.status === 'cancelled') continue;
+      counts.set(t.projectId, (counts.get(t.projectId) ?? 0) + 1);
+    }
+    return counts;
+  }, [activeTaskRows, isTypebuild]);
   // Notes doubles as the agent prompt for Claude tasks (one field, not two).
   // If a legacy task only has auto_prompt set, surface it in notes so the
   // user can see and edit it; we'll save it back as notes (auto_prompt
@@ -534,17 +556,26 @@ export function TaskComposer(props: Props) {
   // task-ab1d7955e23f — project options: "None" (index 0) + one entry per
   // project. value '' = no project. Hint surfaces the project description so
   // the picker is glanceable.
-  const PROJECT_OPTIONS = useMemo(
-    () => [
+  const PROJECT_OPTIONS = useMemo(() => {
+    // task-7ef6be165783 — order projects by MOST ACTIVE tasks (desc), then
+    // alphabetically (case-insensitive) for a deterministic tie-break. A
+    // project with zero active tasks still appears — it just sorts last
+    // within its name group. "None" stays pinned at index 0.
+    const ordered = [...projects].sort((a, b) => {
+      const ca = activeCountByProject.get(a.id) ?? 0;
+      const cb = activeCountByProject.get(b.id) ?? 0;
+      if (cb !== ca) return cb - ca;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+    return [
       { value: '', label: 'None', hint: 'no project' },
-      ...projects.map((p) => ({
+      ...ordered.map((p) => ({
         value: p.id,
         label: p.name,
         hint: p.description ?? undefined,
       })),
-    ],
-    [projects],
-  );
+    ];
+  }, [projects, activeCountByProject]);
   const [projectHighlight, setProjectHighlight] = useState(0);
   // Keep the highlight aligned with the chosen project as the list loads /
   // the selection changes (e.g. after a folder auto-attach resolves).
