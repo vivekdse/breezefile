@@ -1,4 +1,4 @@
-import type { Entry, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Entry, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 
 export type Capabilities = {
   id: 'mac' | 'linux' | 'windows';
@@ -341,6 +341,31 @@ type Fm = {
     listUsers: () => Promise<TaskUser[]>;
     // fm-k6wz (S7) — per-task audit history (NON-PHI actor/action/detail/time).
     audit: (taskId: string, limit?: number) => Promise<TaskAuditEvent[]>;
+    // Credential vault — the user's OWN identifiers (NPI, Tax ID, login IDs),
+    // NOT patient PHI. Values are encrypted on TypeBuild, scoped to the user,
+    // and never persisted to this machine's disk. `list` returns key names
+    // only; `reveal` decrypts a single value on explicit user action.
+    vault: {
+      list: () => Promise<string[]>;
+      reveal: (ref: string) => Promise<string>;
+      set: (key: string, value: string) => Promise<string>;
+      remove: (ref: string) => Promise<void>;
+    };
+    // task-ab1d7955e23f — TypeBuild Projects: named task containers with
+    // optional instructions + owned folders. NON-PHI. `resolve` is the
+    // auto-attach lookup (folder → owning project or null).
+    projects: {
+      list: () => Promise<Project[]>;
+      get: (id: string, effective?: boolean) => Promise<Project | null>;
+      resolve: (folder: string) => Promise<Project | null>;
+      create: (input: {
+        name: string;
+        description?: string;
+        instructions?: string;
+        parentProjectId?: string;
+        folders?: string[];
+      }) => Promise<Project>;
+    };
   };
   // fm-b5at.6 — TypeBuild side-by-side layout. Chrome left / our window
   // right while a session runs. Self-contained namespaced block; the OS work

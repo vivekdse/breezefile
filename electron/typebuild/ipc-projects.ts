@@ -1,0 +1,62 @@
+// TypeBuild Projects IPC (task-ab1d7955e23f). Bridges the TypeBuild source's
+// project REST methods to the renderer. Projects are named containers with
+// optional instructions + a set of owned folders.
+//
+//   typebuild:projects:list     ()                  -> Project[]
+//   typebuild:projects:get      (id, effective?)    -> Project | null
+//   typebuild:projects:resolve  (folder)            -> Project | null
+//   typebuild:projects:create   (input)             -> Project
+//
+// NON-PHI: project name/description/instructions/folders are not patient data.
+// The source still never logs request/response bodies. Registered from
+// electron/main.ts (sibling to registerTypebuildVaultIpc). Idempotent.
+//
+// The source instance is resolved through the same registry accessor the
+// tasks:* handlers use (getTaskSource('typebuild')); when signed out the source
+// is unregistered, so we surface a clean error rather than a null deref.
+
+import { ipcMain } from 'electron';
+import { getTaskSource } from '../sources/registry';
+import type { Project, TypeBuildTaskSource } from '../sources/typebuild';
+
+let registered = false;
+
+function source(): TypeBuildTaskSource {
+  const src = getTaskSource('typebuild') as TypeBuildTaskSource | undefined;
+  if (!src) {
+    throw new Error('typebuild: not signed in (projects unavailable)');
+  }
+  return src;
+}
+
+export function registerTypebuildProjectsIpc(): void {
+  if (registered) return;
+  registered = true;
+
+  ipcMain.handle('typebuild:projects:list', (): Promise<Project[]> =>
+    source().listProjects(),
+  );
+  ipcMain.handle(
+    'typebuild:projects:get',
+    (_e, id: string, effective?: boolean): Promise<Project | null> =>
+      source().getProject(id, { effective: !!effective }),
+  );
+  ipcMain.handle(
+    'typebuild:projects:resolve',
+    (_e, folder: string): Promise<Project | null> =>
+      source().resolveProjectFolder(folder),
+  );
+  ipcMain.handle(
+    'typebuild:projects:create',
+    (
+      _e,
+      input: {
+        name: string;
+        description?: string;
+        instructions?: string;
+        parentProjectId?: string;
+        folders?: string[];
+      },
+    ): Promise<Project> => source().createProject(input),
+  );
+}

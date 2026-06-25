@@ -40,6 +40,7 @@ import {
 import { handleTagControl, isTagControl, type TagControlReq } from './tagControl';
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
+import { SecretsPanel } from './components/SecretsPanel';
 import { TerminalSplit } from './components/TerminalSplit';
 import { TypebuildSessionBanner } from './components/TypebuildSessionBanner';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
@@ -135,6 +136,8 @@ function Shell() {
   // Slide-based help (HelpTour). Opened by the :help verb or the Help
   // link in the Statusbar. Distinct from Tutorial (interactive practice).
   const [helpOpen, setHelpOpen] = useState<{ slide?: HelpSlideId } | null>(null);
+  // :secrets — the user's credential vault (NPI, Tax ID, login IDs). Server-backed.
+  const [secretsOpen, setSecretsOpen] = useState(false);
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskComposerRequest | null>(null);
@@ -1118,6 +1121,9 @@ function Shell() {
     function onWelcome() {
       setWelcomeOpen(true);
     }
+    function onSecrets() {
+      setSecretsOpen(true);
+    }
     function onOpenTask(e: Event) {
       const detail = (e as CustomEvent).detail as TaskComposerRequest | undefined;
       if (detail) setTaskDialog(detail);
@@ -1182,6 +1188,7 @@ function Shell() {
     window.addEventListener('fm:newTag', onNewTag);
     window.addEventListener('fm:tagPicker', onTagPicker);
     window.addEventListener('fm:openHelp', onHelp);
+    window.addEventListener('fm:openSecrets', onSecrets);
     window.addEventListener('fm:openWelcome', onWelcome);
     window.addEventListener('fm:openTask', onOpenTask);
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
@@ -1203,6 +1210,7 @@ function Shell() {
       window.removeEventListener('fm:newTag', onNewTag);
       window.removeEventListener('fm:tagPicker', onTagPicker);
       window.removeEventListener('fm:openHelp', onHelp);
+      window.removeEventListener('fm:openSecrets', onSecrets);
       window.removeEventListener('fm:openWelcome', onWelcome);
       window.removeEventListener('fm:openTask', onOpenTask);
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
@@ -1543,6 +1551,7 @@ function Shell() {
           onClose={() => setHelpOpen(null)}
         />
       )}
+      {secretsOpen && <SecretsPanel onClose={() => setSecretsOpen(false)} />}
       {runHistoryFor && (
         <RunHistoryDialog
           taskId={runHistoryFor}

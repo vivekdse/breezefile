@@ -13,6 +13,8 @@ import { restoreSources } from './sources';
 import { registerBreezeHooks } from './hooks-register';
 import { installBrowserSubagent } from './browser/subagent';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
+import { registerTypebuildVaultIpc } from './typebuild/ipc-vault';
+import { registerTypebuildProjectsIpc } from './typebuild/ipc-projects';
 import { registerTypebuildDetectIpc } from './typebuild/detect';
 import {
   getAuthState,
@@ -288,6 +290,12 @@ app.whenReady().then(() => {
   // handlers + the auth-state broadcaster, and restores any persisted
   // (encrypted) session from a prior launch. Best-effort; never blocks.
   registerTypebuildAuthIpc();
+  // User credential vault IPC (:secrets panel) — class-2 data (NPI, Tax ID,
+  // login IDs). Server-backed; no plaintext at rest in the client.
+  registerTypebuildVaultIpc();
+  // task-ab1d7955e23f — TypeBuild Projects IPC (list/get/resolve/create).
+  // Named task containers; NON-PHI. Server-backed via the TypeBuild source.
+  registerTypebuildProjectsIpc();
   // fm-b5at.3 — TypeBuild onboarding prerequisite detection IPC
   // (claude/chrome presence + the Claude Code install command). Used by the
   // onboarding checklist in Settings.

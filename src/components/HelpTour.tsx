@@ -357,6 +357,7 @@ const SLIDES: Slide[] = [
       { name: 'open-terminal', chord: 'cli', what: 'open an external terminal app (iTerm, Warp, …) at this folder' },
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
       { name: 'maximize / fullscreen', chord: 'Ctrl+Shift+M / F11', what: 'toggle window maximize or fullscreen from inside TypeBuild — bypasses WM shortcuts (e.g. Alt+Space) that may collide with TypeBuild\'s own bindings on Linux' },
+      { name: ':secrets', what: 'manage your saved credentials (NPI, Tax ID, login IDs) that the agent fills into forms — aliases vault/credentials · masked list, reveal-on-click, create, delete · server-backed, no plaintext stored on this machine' },
       { name: 'settings', chord: '?', what: 'view & rebind keys · per-launcher settings · notification channels · Reset to defaults' },
       { name: 'permissions', what: 'see which protected folders TypeBuild can read; grant any still missing' },
       { name: 'upgrade', what: ':upgrade runs brew upgrade --cask breezefile and relaunches · the help dialog also surfaces an "Update available" banner when a newer release is out' },

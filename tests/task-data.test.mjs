@@ -56,16 +56,30 @@ const DATA_BAG = {
   'patient.first': 'Alex',
 };
 
+// Class-2 vault (the user's OWN identifiers). A canary stands in for the NPI so
+// no test may leak it onto an agent-facing surface either.
+const NPI_CANARY = 'NPI-1669500302-CANARY';
+const USER_REF = 'me.npi';
+const USER_BAG = {
+  [USER_REF]: NPI_CANARY,
+};
+
+// Mirror electron/typebuild/task-data.ts isUserDataRef: "me." refs are class-2.
+const isUserRef = (ref) => ref.startsWith('me.');
+
 function startStub() {
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     res.setHeader('content-type', 'application/json');
 
     // (b) TypeBuild REST: GET /chromeext/<id>/data?ref=<key> -> {value} / 404.
+    // The <id> segment is a task id for class-1 refs, or the literal "me" for
+    // the per-user vault (class-2). The bag is chosen by the path, not the ref.
     const rest = u.pathname.match(/^\/chromeext\/([^/]+)\/data$/);
     if (rest && req.method === 'GET') {
       const ref = u.searchParams.get('ref') ?? '';
-      const value = DATA_BAG[ref];
+      const bag = rest[1] === 'me' ? USER_BAG : DATA_BAG;
+      const value = bag[ref];
       if (typeof value !== 'string') {
         res.statusCode = 404;
         return res.end(JSON.stringify({ error: 'no data' }));
@@ -80,11 +94,13 @@ function startStub() {
     if (u.pathname === '/app/task-data' && req.method === 'GET') {
       const taskId = u.searchParams.get('taskId') ?? '';
       const ref = u.searchParams.get('ref') ?? '';
-      if (!taskId || !ref) {
+      // A "me." ref resolves against the per-user vault and needs NO taskId; any
+      // other ref is patient PHI on a specific task, so taskId is mandatory.
+      if (!ref || (!isUserRef(ref) && !taskId)) {
         res.statusCode = 400;
-        return res.end(JSON.stringify({ error: 'taskId and ref required' }));
+        return res.end(JSON.stringify({ error: 'ref required (and taskId for non-me.* refs)' }));
       }
-      const value = DATA_BAG[ref];
+      const value = isUserRef(ref) ? USER_BAG[ref] : DATA_BAG[ref];
       if (typeof value !== 'string') {
         res.statusCode = 404;
         return res.end(JSON.stringify({ error: `no data for ref "${ref}"` }));
@@ -173,6 +189,74 @@ test('control API: unknown ref is a non-200 and does not invent a value', async 
     assert.equal(r.json?.value, undefined, 'a non-200 must never carry a value');
     // The error envelope carries only the opaque ref key, never a value.
     assert.ok(!r.body.includes(SECRET_VALUE), 'error body leaked an unrelated secret value');
+  } finally {
+    server.close();
+  }
+});
+
+// ── Class-2 (user credential vault, "me.*" refs) routing contract ───────────
+// The control API routes "me." refs to the per-user vault and must NOT require
+// a taskId for them; non-me refs still must. (electron/api-server.ts +
+// electron/typebuild/task-data.ts isUserDataRef.)
+
+test('control API: a "me." ref resolves WITHOUT a taskId (class-2 vault)', async () => {
+  const { server, port } = await startStub();
+  try {
+    const r = await get(port, `/app/task-data?ref=${encodeURIComponent(USER_REF)}`);
+    assert.equal(r.status, 200, 'me.* ref must resolve with no taskId');
+    assert.equal(r.json.ok, true);
+    assert.equal(r.json.ref, USER_REF, 'envelope must echo the opaque me.* ref');
+    assert.equal(r.json.value, NPI_CANARY, 'me.* ref must carry the vault value to the helper');
+  } finally {
+    server.close();
+  }
+});
+
+test('control API: a non-me ref STILL requires a taskId (400 without one)', async () => {
+  const { server, port } = await startStub();
+  try {
+    const r = await get(port, `/app/task-data?ref=${encodeURIComponent(REF)}`);
+    assert.equal(r.status, 400, 'patient.* ref without a taskId must be a 400');
+    assert.equal(r.json?.ok, undefined, '400 must not be a success envelope');
+  } finally {
+    server.close();
+  }
+});
+
+test('control API: an unknown "me." ref is a 404 and invents no value', async () => {
+  const { server, port } = await startStub();
+  try {
+    const r = await get(port, `/app/task-data?ref=me.unknown`);
+    assert.equal(r.status, 404, 'unknown me.* ref must map to non-200');
+    assert.equal(r.json?.value, undefined, 'a non-200 must never carry a value');
+    assert.ok(!r.body.includes(NPI_CANARY), 'error body leaked the vault canary');
+  } finally {
+    server.close();
+  }
+});
+
+test('typebuild REST: the per-user vault lives at /chromeext/me/data', async () => {
+  const { server, port } = await startStub();
+  try {
+    const r = await get(port, `/chromeext/me/data?ref=${encodeURIComponent(USER_REF)}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.json.value, NPI_CANARY, 'vault GET must return the one value');
+  } finally {
+    server.close();
+  }
+});
+
+test('SECURITY: a class-2 (me.*) value never co-mingles with the task bag', async () => {
+  const { server, port } = await startStub();
+  try {
+    // Asking the task path for the user's ref must NOT find it (separate bag),
+    // so a me.* value can't be obtained by guessing it onto an arbitrary task.
+    const r = await get(
+      port,
+      `/chromeext/${encodeURIComponent(TASK_ID)}/data?ref=${encodeURIComponent(USER_REF)}`,
+    );
+    assert.equal(r.status, 404, 'me.* refs must not resolve from a task bag');
+    assert.ok(!r.body.includes(NPI_CANARY), 'task path leaked the vault canary');
   } finally {
     server.close();
   }

@@ -228,10 +228,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (p === '/app/task-data' && m === 'GET') {
       const taskId = url.searchParams.get('taskId') ?? '';
       const ref = url.searchParams.get('ref') ?? '';
-      if (!taskId || !ref) {
-        throw Object.assign(new Error('taskId and ref required'), { status: 400 });
+      const { resolveTaskDataRef, isUserDataRef } = await import('./typebuild/task-data');
+      // A "me." ref resolves against the per-user vault and needs no task; any
+      // other ref is patient PHI on a specific task, so taskId is mandatory.
+      if (!ref || (!isUserDataRef(ref) && !taskId)) {
+        throw Object.assign(new Error('ref required (and taskId for non-me.* refs)'), {
+          status: 400,
+        });
       }
-      const { resolveTaskDataRef } = await import('./typebuild/task-data');
       const value = await resolveTaskDataRef(taskId, ref);
       return sendJson(res, 200, { ok: true, ref, value });
     }

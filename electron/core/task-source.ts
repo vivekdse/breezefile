@@ -64,6 +64,9 @@ export type SourcedTask = Omit<Task, 'folder'> & {
   // (memory-only, opaque non-PHI ids).
   deferUntil?: string | null;
   parentTaskId?: string | null;
+  // task-ab1d7955e23f — owning project container (opaque, non-PHI). Optional;
+  // present when a task was created into / belongs to a TypeBuild Project.
+  projectId?: string | null;
   dependsOn?: string[];
   depsSatisfied?: boolean;
   blockedBy?: string[];

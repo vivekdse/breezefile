@@ -53,6 +53,69 @@ on tasks that carry PII.** Any future move to untrusted/third-party agents would
 require a different design (hard boundary: main-process resolve+fill, plus
 locking down eval/read-back/screenshot on PII fields).
 
+## Three data classes (class 2 added)
+
+A value a form needs is exactly one of three classes. The agent surface is
+identical for classes 1 and 2 — it fills a placeholder KEY and never sees the
+value; only Breeze main's resolver (`electron/typebuild/task-data.ts`) routes
+the ref to the right server source by its prefix.
+
+1. **Patient/customer PHI** — about the customer the task is for (SSN, DOB,
+   member id…). Encrypted **per task** on that task's `data` bag, resolved by
+   `(taskId, ref)` with arbitrary keys (e.g. `patient.ssn`). Lives in the active
+   session only. This is the original class above.
+2. **The user's OWN credentials/identifiers** — their NPI, the practice Tax ID,
+   portal login IDs (NOT passwords). **Per-user, reusable across all of that
+   user's tasks**, NOT patient PHI, NOT shared cross-user. Addressed by a
+   reserved **`me.` ref prefix** (e.g. `me.npi`, `me.taxId`, `me.availity.login`,
+   or location-scoped `me.npi.<location>`) and resolved against a **per-user
+   credential vault**, independent of any task. *(This class is the new
+   addition.)*
+3. **Shared NON-PHI how-to** — navigation prose in skills/memory (which button,
+   what the field is named). Shared cross-user. **Never a value.**
+
+**Threat model for class 2 is UNCHANGED** — same cooperative boundary as class 1.
+The agent fills a `me.*` KEY via `fill-ref`/`type-ref` and never receives the
+value, but it could still screenshot or read back the filled field; class 2
+therefore requires trusted agents exactly as class 1 does.
+
+### The `me.` reserved namespace and the per-user vault
+
+- A ref starting with `me.` (`USER_REF_PREFIX` in `task-data.ts`) means "the
+  signed-in user's own credential vault", not the task `data` bag. Scoping is by
+  the Firebase token; **no `taskId` is involved** for a class-2 fill.
+- Keys are a safe dotted-identifier shape (`^me\.[A-Za-z0-9._-]+$`); the
+  management UI accepts a short key (`npi`) and namespaces it to `me.npi`.
+- **The client persists NO class-2 plaintext at rest.** The **server is the
+  source of truth** (encrypted at rest, per-user, Firebase-authed). Listing
+  returns key NAMES only; a value crosses the wire only on an explicit reveal or
+  an agent fill, **one value per call, uncached** — same memory-only/transient
+  discipline as PHI.
+
+#### Class-2 endpoints (`/chromeext/me/data`)
+
+The per-user vault is a TypeBuild server dependency
+(task `task_manager_api-8y0`); the Breeze client side is
+`task-57862d425ef1` (resolver `task-data.ts`, vault CRUD `user-vault.ts`,
+the `:secrets` management UI).
+
+| Method | Endpoint | Returns | Use |
+|--------|----------|---------|-----|
+| `GET` | `/chromeext/me/data` | `{ keys: string[] }` | list (NAMES only, no values) |
+| `GET` | `/chromeext/me/data?ref=<key>` | `{ value: string }` | one value — reveal / fill |
+| `PUT` | `/chromeext/me/data` `{ ref, value }` | `{ ok: true }` | create / replace |
+| `DELETE` | `/chromeext/me/data?ref=<key>` | `{ ok: true }` | delete |
+
+All scoped to the signed-in user by the Firebase token, same as the class-1
+`/chromeext/<id>/data` endpoint.
+
+**Open question — multi-value disambiguation.** A user may have more than one of
+the same kind of identifier (e.g. an NPI per practice location). The current
+convention encodes the discriminator into the key (`me.npi.<location>`), leaving
+it to the task/skill author to reference the right key. Whether the client
+should help disambiguate (a picker, or location inferred from task context) is
+unresolved.
+
 ## Architecture
 
 ```

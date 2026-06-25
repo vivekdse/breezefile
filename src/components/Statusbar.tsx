@@ -63,6 +63,14 @@ export function Statusbar() {
       <button
         type="button"
         className="statusbar__help"
+        onClick={() => window.dispatchEvent(new CustomEvent('fm:openSecrets'))}
+        title="Manage your saved credentials (NPI, Tax ID, login IDs)"
+      >
+        Secrets
+      </button>
+      <button
+        type="button"
+        className="statusbar__help"
         onClick={() => window.dispatchEvent(new CustomEvent('fm:openHelp'))}
         title="Open the help tour (slides)"
       >

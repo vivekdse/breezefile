@@ -280,6 +280,26 @@ export type TaskCreate = {
   // builds the row from its own field set and drops unknown keys).
   deferUntil?: string | null;
   priority?: number;
+  // task-ab1d7955e23f — optional TypeBuild project container (opaque id,
+  // non-PHI). The local source ignores it; TypeBuild maps it to `project_id`.
+  projectId?: string;
+};
+
+// task-ab1d7955e23f — a TypeBuild Project as the renderer sees it (camelCase,
+// mirrors electron/sources/typebuild.ts `Project`). NON-PHI: name/description/
+// instructions/folders are containers + guidance, not patient data.
+export type Project = {
+  id: string;
+  name: string;
+  description: string | null;
+  instructions: string | null;
+  parentProjectId: string | null;
+  folders: string[];
+  createdBy: string | null;
+  groupId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  effectiveInstructions?: string;
 };
 
 export type TaskUpdate = Partial<{

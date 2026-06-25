@@ -72,6 +72,10 @@ export type TaskCreate = {
   // type-checks across the source seam.
   deferUntil?: string | null;
   priority?: number;
+  // task-ab1d7955e23f — optional TypeBuild project container (opaque id,
+  // non-PHI). The local store ignores it; the TypeBuild source maps it to the
+  // server's `project_id` on create.
+  projectId?: string;
 };
 
 export type TaskUpdate = Partial<{

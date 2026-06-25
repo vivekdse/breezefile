@@ -157,6 +157,7 @@ type Verb =
   | 'run'
   | 'filter'
   | 'help'
+  | 'secrets'
   | 'maximize'
   | 'fullscreen'
   | 'welcome'
@@ -1949,6 +1950,19 @@ const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openHelp'));
+    },
+  },
+  {
+    id: 'secrets',
+    label: 'Secrets',
+    aliases: ['secrets', 'secret', 'vault', 'credentials', 'credential', 'npi', 'identifiers', 'me'],
+    icon: '🔑',
+    describe: () => 'Manage your saved credentials (NPI, Tax ID, login IDs) the agent fills into forms',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openSecrets'));
     },
   },
   {

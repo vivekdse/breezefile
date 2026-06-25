@@ -1,5 +1,22 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
+// task-ab1d7955e23f — TypeBuild Project as it crosses the bridge (camelCase;
+// mirrors src/types.ts `Project`). Inlined here because preload carries no
+// shared-type imports. NON-PHI.
+type Project = {
+  id: string;
+  name: string;
+  description: string | null;
+  instructions: string | null;
+  parentProjectId: string | null;
+  folders: string[];
+  createdBy: string | null;
+  groupId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  effectiveInstructions?: string;
+};
+
 const fm = {
   platform: process.platform,
   versions: process.versions,
@@ -609,6 +626,45 @@ const fm = {
       }>,
     installCommand: () =>
       ipcRenderer.invoke('typebuild:detect:installCommand') as Promise<string>,
+    // User credential vault (:secrets panel) — class-2 data (the user's OWN
+    // identifiers: NPI, Tax ID, login IDs). Server-backed; values cross only on
+    // explicit reveal/save. `list` returns KEY names only.
+    vault: {
+      list: () => ipcRenderer.invoke('typebuild:vault:list') as Promise<string[]>,
+      reveal: (ref: string) =>
+        ipcRenderer.invoke('typebuild:vault:reveal', ref) as Promise<string>,
+      set: (key: string, value: string) =>
+        ipcRenderer.invoke('typebuild:vault:set', key, value) as Promise<string>,
+      remove: (ref: string) =>
+        ipcRenderer.invoke('typebuild:vault:delete', ref) as Promise<void>,
+    },
+    // task-ab1d7955e23f — TypeBuild Projects: named task containers with
+    // optional instructions + owned folders. NON-PHI; server-backed via the
+    // TypeBuild source. `resolve` is the auto-attach lookup (folder → owner or
+    // null).
+    projects: {
+      list: () =>
+        ipcRenderer.invoke('typebuild:projects:list') as Promise<Project[]>,
+      get: (id: string, effective?: boolean) =>
+        ipcRenderer.invoke(
+          'typebuild:projects:get',
+          id,
+          effective,
+        ) as Promise<Project | null>,
+      resolve: (folder: string) =>
+        ipcRenderer.invoke(
+          'typebuild:projects:resolve',
+          folder,
+        ) as Promise<Project | null>,
+      create: (input: {
+        name: string;
+        description?: string;
+        instructions?: string;
+        parentProjectId?: string;
+        folders?: string[];
+      }) =>
+        ipcRenderer.invoke('typebuild:projects:create', input) as Promise<Project>,
+    },
     // fm-j7w0 (S4) — user registry for the assignee picker (NON-PHI identities).
     listUsers: () =>
       ipcRenderer.invoke('typebuild:listUsers') as Promise<

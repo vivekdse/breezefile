@@ -183,6 +183,8 @@ type ListRow = {
   due_at?: string | null;
   defer_until?: string | null;
   parent_task_id?: string | null;
+  // task-ab1d7955e23f — owning project container (opaque, non-PHI).
+  project_id?: string | null;
 };
 
 /** Decrypted detail from GET /chromeext/<id>. `task` is the body (PHI). */
@@ -196,6 +198,41 @@ type DetailRow = ListRow & {
   depends_on?: string[] | null;
   deps_satisfied?: boolean | null;
   blocked_by?: string[] | null;
+};
+
+// ─── Projects (task-ab1d7955e23f) ─────────────────────────────────────────
+// A TypeBuild Project: a named container with optional instructions + a set of
+// owned folders. NON-PHI (name/description/instructions/folders are not patient
+// data) — but we still never log request bodies. Snake_case server JSON below;
+// the client-facing `Project` is camelCase (mapped via mapProjectRow).
+type ProjectRow = {
+  id: string;
+  name: string;
+  description?: string | null;
+  instructions?: string | null;
+  parent_project_id?: string | null;
+  folders?: string[] | null;
+  created_by?: string | null;
+  group_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  effective_instructions?: string | null;
+};
+
+/** A TypeBuild Project as the renderer sees it (camelCase). `effectiveInstructions`
+ *  is present only when fetched with `effective=1` (or on create). NON-PHI. */
+export type Project = {
+  id: string;
+  name: string;
+  description: string | null;
+  instructions: string | null;
+  parentProjectId: string | null;
+  folders: string[];
+  createdBy: string | null;
+  groupId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  effectiveInstructions?: string;
 };
 
 // ─── Status mapping ──────────────────────────────────────────────────────
@@ -302,6 +339,8 @@ function mapListRow(row: ListRow): SourcedTask {
     // needs the time to decide "in the future"); parentTaskId is opaque.
     deferUntil: row.defer_until ?? null,
     parentTaskId: row.parent_task_id ?? null,
+    // task-ab1d7955e23f — owning project container (opaque, non-PHI).
+    projectId: row.project_id ?? null,
   };
 }
 
@@ -548,6 +587,8 @@ export class TypeBuildTaskSource implements TaskSource {
     if (input.due_at) payload.due_at = input.due_at;
     if (input.deferUntil) payload.defer_until = input.deferUntil;
     if (typeof input.priority === 'number') payload.priority = input.priority;
+    // task-ab1d7955e23f — optional project container. Opaque id (non-PHI).
+    if (input.projectId) payload.project_id = input.projectId;
 
     const res = await this.request('POST', '/chromeext/tasks', payload);
     if (!res.ok) {
@@ -581,6 +622,7 @@ export class TypeBuildTaskSource implements TaskSource {
       priority: typeof input.priority === 'number' ? input.priority : undefined,
       due_at: input.due_at ?? null,
       defer_until: input.deferUntil ?? null,
+      project_id: input.projectId ?? null,
     });
     // notes (the body) is PHI-in-memory; attach it for the immediate return so
     // the composer can show the just-created task without a re-fetch.
@@ -631,6 +673,130 @@ export class TypeBuildTaskSource implements TaskSource {
       throw new Error(`[typebuild-delete:${reason}]`);
     }
     throw new Error(`typebuild: delete failed (${res.status})`);
+  }
+
+  // ─── projects (task-ab1d7955e23f) ────────────────────────────────────────
+  // Project containers over /chromeext/projects. NON-PHI (names/instructions/
+  // folders are not patient data), but we still never log request/response
+  // bodies. All four verbs map the snake_case server JSON → the camelCase
+  // `Project` through `mapProjectRow`.
+
+  // Map a raw server project row → the camelCase client `Project`.
+  private mapProjectRow(raw: ProjectRow): Project {
+    const project: Project = {
+      id: raw.id,
+      name: raw.name,
+      description: raw.description ?? null,
+      instructions: raw.instructions ?? null,
+      parentProjectId: raw.parent_project_id ?? null,
+      folders: Array.isArray(raw.folders) ? raw.folders : [],
+      createdBy: raw.created_by ?? null,
+      groupId: raw.group_id ?? null,
+      createdAt: raw.created_at ?? null,
+      updatedAt: raw.updated_at ?? null,
+    };
+    if (typeof raw.effective_instructions === 'string') {
+      project.effectiveInstructions = raw.effective_instructions;
+    }
+    return project;
+  }
+
+  // GET /chromeext/projects → { projects: [...] }. Returns [] on a parse miss.
+  async listProjects(): Promise<Project[]> {
+    const res = await this.request('GET', '/chromeext/projects');
+    if (!res.ok) {
+      throw new Error(`typebuild: list projects failed (${res.status})`);
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      projects?: ProjectRow[];
+    };
+    const rows = Array.isArray(data.projects) ? data.projects : [];
+    return rows.map((r) => this.mapProjectRow(r));
+  }
+
+  // GET /chromeext/projects/{id}(?effective=1). 404 (not found / not visible)
+  // → null, mirroring resolve's "no owner" answer.
+  async getProject(
+    id: string,
+    opts?: { effective?: boolean },
+  ): Promise<Project | null> {
+    const qs = opts?.effective ? '?effective=1' : '';
+    const res = await this.request(
+      'GET',
+      `/chromeext/projects/${encodeURIComponent(id)}${qs}`,
+    );
+    if (res.status === 404) {
+      await res.json().catch(() => ({}));
+      return null;
+    }
+    if (!res.ok) {
+      throw new Error(`typebuild: get project failed (${res.status})`);
+    }
+    const raw = (await res.json().catch(() => ({}))) as ProjectRow;
+    if (!raw || !raw.id) return null;
+    return this.mapProjectRow(raw);
+  }
+
+  // GET /chromeext/projects/resolve?folder=<enc> → { project: ...|null }. The
+  // auto-attach lookup: returns null (not an error) when no project owns the
+  // folder.
+  async resolveProjectFolder(folder: string): Promise<Project | null> {
+    const res = await this.request(
+      'GET',
+      `/chromeext/projects/resolve?folder=${encodeURIComponent(folder)}`,
+    );
+    if (!res.ok) {
+      throw new Error(`typebuild: resolve project failed (${res.status})`);
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      project?: ProjectRow | null;
+    };
+    return data.project ? this.mapProjectRow(data.project) : null;
+  }
+
+  // POST /chromeext/projects → 201 { ok, id, project }. On !ok surface the
+  // server reason (400 { reason|error }, 422 PHI-guard rejection) WITHOUT
+  // logging the body.
+  async createProject(input: {
+    name: string;
+    description?: string;
+    instructions?: string;
+    parentProjectId?: string;
+    folders?: string[];
+  }): Promise<Project> {
+    const payload: Record<string, unknown> = { name: input.name };
+    if (input.description !== undefined) payload.description = input.description;
+    if (input.instructions !== undefined) {
+      payload.instructions = input.instructions;
+    }
+    if (input.parentProjectId) {
+      payload.parent_project_id = input.parentProjectId;
+    }
+    if (input.folders !== undefined) payload.folders = input.folders;
+
+    const res = await this.request('POST', '/chromeext/projects', payload);
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      const detail = data.reason ?? data.error ?? '';
+      const phi =
+        res.status === 422 ? ' (rejected by PHI guard)' : '';
+      throw new Error(
+        `typebuild: create project failed (${res.status})${
+          detail ? `: ${detail}` : ''
+        }${phi}`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      project?: ProjectRow;
+      id?: string;
+    };
+    if (!data.project || !data.project.id) {
+      throw new Error('typebuild: create project returned no project');
+    }
+    return this.mapProjectRow(data.project);
   }
 
   // ─── users registry (fm-j7w0/S4) ─────────────────────────────────────────

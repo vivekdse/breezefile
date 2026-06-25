@@ -194,6 +194,64 @@ available — and must never include the values.**
   `task` body over MCP, that body must contain only placeholder keys. PII lives
   solely in `data`.
 
+## 4a. The user's own credential vault — `/chromeext/me/data` (class 2)
+
+§1–§4 cover **class-1** data: PHI that is **per task**. A second class shares the
+same placeholder-fill mechanism but a different scope and lifetime, and needs its
+own endpoints:
+
+- **Class 1 — patient/customer PHI:** per task, on the task `data` bag, resolved
+  by `(taskId, ref)`. Covered above.
+- **Class 2 — the user's OWN credentials/identifiers:** their NPI, the practice
+  Tax ID, portal login IDs (NOT passwords). **Per-user, reusable across all of
+  that user's tasks**, NOT patient PHI, NOT shared cross-user.
+- **Class 3 — shared NON-PHI how-to:** navigation prose in skills/memory; never a
+  value. No `data` involvement.
+
+> **The earlier "all data is per-task" framing is incomplete:** class-2 data is
+> **per-user**, addressed independently of any task by a reserved `me.` ref
+> prefix, and lives in a **per-user vault** the server must hold.
+
+The **agent surface is identical** to class 1: the agent fills a placeholder KEY
+(`me.npi`) via `fill-ref`/`type-ref` and never sees the value. Only Breeze main's
+resolver routes a `me.*` ref to the vault instead of the task bag. **The
+threat-model is UNCHANGED** — cooperative boundary, trusted agents only.
+
+The Breeze client side is built (`task-data.ts` resolver, `user-vault.ts` CRUD,
+the `:secrets` panel — client task `task-57862d425ef1`); the **vault endpoints
+below are the outstanding server dependency, task `task_manager_api-8y0`.**
+
+### Endpoints (all scoped to the signed-in user by the Firebase ID token)
+
+| Method | Endpoint | Body / Returns | Use |
+|--------|----------|----------------|-----|
+| `GET` | `/chromeext/me/data` | → `{ "keys": string[] }` | list **NAMES only**, never values (drives the masked `:secrets` list) |
+| `GET` | `/chromeext/me/data?ref=<key>` | → `{ "value": "<decrypted>" }` | **one** value — explicit reveal, or an agent fill |
+| `PUT` | `/chromeext/me/data` | `{ "ref": "me.npi", "value": "<your-npi>" }` → `{ "ok": true }` | create / replace one key (full-value replace) |
+| `DELETE` | `/chromeext/me/data?ref=<key>` | → `{ "ok": true }` | delete one key (idempotent — `404` is treated as success) |
+
+- **Keys** are `me.*` dotted identifiers (`^me\.[A-Za-z0-9._-]+$`), opaque and
+  non-PHI, e.g. `me.npi`, `me.taxId`, `me.availity.login`. The management UI
+  accepts a short key (`npi`) and namespaces it to `me.npi`.
+- **`GET ?ref=` behaves exactly like the class-1 decrypt endpoint** (§3): one
+  value per call, never the whole bag; `200` carries a string `value`; an
+  empty-string value is treated as "no data"; `404` is the "nothing to reveal/
+  fill" signal. Breeze reuses the same resolver and 404/empty handling for both.
+- **Encryption:** vault values are **encrypted at rest, per user**, with the same
+  key custody as task `data` (server-side at rest; no client-held key).
+- **The client persists NO class-2 plaintext at rest.** Listing returns names
+  only; a value crosses the wire only on an explicit reveal or an agent fill, and
+  is **never cached, persisted, or logged** in Breeze main — same memory-only
+  discipline as PHI. The **server is the source of truth.**
+- **Audit:** the same value-free rules as §5 apply — log/audit the **key**, the
+  principal, and the time; never the value.
+
+**Open question — multi-value disambiguation.** A user may hold more than one of
+the same identifier kind (e.g. an NPI per practice location). The convention is
+to encode the discriminator in the key (`me.npi.<location>`), leaving selection
+to the task/skill author. Whether the server or client should help disambiguate
+(scoping by location, a picker) is unresolved — see the design doc.
+
 ## 5. Audit / compliance
 
 - **Reads are auditable.** Each `GET …/data?ref=<key>` SHOULD produce an audit
