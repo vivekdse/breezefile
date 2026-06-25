@@ -1,0 +1,244 @@
+<!--
+  Settings redesign mockup — task-3237cf5ae6ab
+  Static, single-file, inline styles only. The :root block echoes the REAL token
+  values from src/styles/tokens.css (Alpine dusk default + a few theme-safe text
+  tokens) so this reads in the product's own visual language — it is NOT a new
+  palette. Companion doc: settings-redesign.md.
+
+  Shows: left GROUP RAIL (overview w/ live summary lines) + right CARD pane.
+  The focused field carries the accent ring; the active rail group uses the
+  selection color. A faux ChipPrompt at the bottom shows the SETTINGS-SCOPED
+  verb set (:theme :keybind :reset-claude :export …) that replaces folder/task
+  verbs while activeTab.kind === 'settings'.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TypeBuild — Settings (redesign)</title>
+<style>
+  :root{
+    /* ---- echoed from tokens.css (Alpine dusk, dark-first) ---- */
+    --bg-0:#0a1018; --bg-1:#0f1822; --bg-2:#162231; --bg-3:#1f2d3f; --bg-4:#273a4f;
+    --fg-1:#e8eef5; --fg-2:#a8b5c4; --fg-3:#6b7a8c; --fg-dim:#47546a;
+    --border-1:rgba(180,210,255,.06); --border-2:rgba(180,210,255,.11);
+    --accent:#7fd4c7; --accent-strong:#4ab8a8;
+    --accent-soft:rgba(127,212,199,.14); --accent-glow:rgba(127,212,199,.38);
+    --sel-bg:rgba(127,212,199,.18); --sel-fg:#ffffff; --accent-ink:#0a1018;
+    --ok:#8fe6b8; --warn:#ffd28a; --err:#ff9a9a;
+    --shadow-1:0 1px 2px rgba(0,8,20,.5);
+    --shadow-2:0 12px 32px rgba(0,8,20,.55),0 0 0 1px rgba(127,212,199,.04);
+    /* type / space / radii / motion — token values */
+    --fs-xs:12px; --fs-sm:13px; --fs-md:14px; --fs-lg:16px; --fs-xl:20px;
+    --lh-tight:1.25; --lh-normal:1.55; --tracking-caps:.08em; --tracking-tight:-.01em;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px;
+    --r-sm:4px; --r-md:6px; --r-lg:10px; --r-xl:14px;
+    --motion-toggle:200ms cubic-bezier(.4,0,.2,1);
+    --motion-focus-ring:120ms cubic-bezier(.2,.8,.2,1);
+    --motion-reveal:200ms cubic-bezier(.2,0,0,1.05);
+    --font-sans:'Inter Tight',ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{margin:0;background:var(--bg-1);color:var(--fg-1);font-family:var(--font-sans);font-size:var(--fs-md);-webkit-font-smoothing:antialiased;}
+  kbd{font-family:var(--font-mono);font-size:var(--fs-xs);background:var(--bg-3);border:1px solid var(--border-2);border-radius:var(--r-sm);padding:1px 6px;color:var(--fg-1);}
+
+  .win{max-width:1120px;margin:28px auto;border:1px solid var(--border-2);border-radius:var(--r-xl);overflow:hidden;box-shadow:var(--shadow-2);background:var(--bg-1);}
+  /* chrome titlebar */
+  .titlebar{display:flex;align-items:center;gap:var(--sp-3);height:44px;padding:0 var(--sp-4);background:var(--bg-0);border-bottom:1px solid var(--border-1);}
+  .dots{display:flex;gap:6px;}.dots i{width:11px;height:11px;border-radius:50%;display:block;}
+  .dots i:nth-child(1){background:#ff5f57;}.dots i:nth-child(2){background:#febc2e;}.dots i:nth-child(3){background:#28c840;}
+  .tab{font-size:var(--fs-sm);color:var(--fg-2);padding:4px 10px;border-radius:var(--r-md);}
+  .tab.active{background:var(--bg-2);color:var(--fg-1);box-shadow:inset 0 0 0 1px var(--border-2);}
+  .crumb{margin-left:auto;font-size:var(--fs-xs);color:var(--fg-3);}
+
+  .layout{display:grid;grid-template-columns:264px 1fr;min-height:560px;}
+
+  /* ---- group rail (overview) ---- */
+  .rail{background:var(--bg-2);border-right:1px solid var(--border-1);padding:var(--sp-4);}
+  .rail h1{font-size:var(--fs-lg);letter-spacing:var(--tracking-tight);margin:0 0 var(--sp-4) var(--sp-2);}
+  .grp{display:flex;gap:var(--sp-3);align-items:flex-start;padding:var(--sp-3);border-radius:var(--r-lg);cursor:default;margin-bottom:var(--sp-1);}
+  .grp .ico{font-size:var(--fs-lg);width:22px;text-align:center;color:var(--fg-2);}
+  .grp .lbl{font-size:var(--fs-sm);color:var(--fg-1);font-weight:600;}
+  .grp .sum{font-size:var(--fs-xs);color:var(--fg-3);margin-top:2px;line-height:var(--lh-normal);}
+  .grp.active{background:var(--sel-bg);} .grp.active .lbl,.grp.active .ico{color:var(--sel-fg);}
+
+  /* ---- content pane ---- */
+  .pane{padding:var(--sp-6);overflow:auto;}
+  .pane>.crumb2{font-size:var(--fs-xs);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--fg-3);margin-bottom:var(--sp-4);}
+  .card{background:var(--bg-2);border:1px solid var(--border-1);border-radius:var(--r-lg);box-shadow:var(--shadow-1);padding:var(--sp-5);margin-bottom:var(--sp-4);}
+  .card.focus{box-shadow:var(--shadow-1),inset 3px 0 0 var(--accent-soft);}
+  .card-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:var(--sp-4);}
+  .card-title{font-size:var(--fs-md);letter-spacing:var(--tracking-tight);color:var(--fg-1);}
+  .card-act{font-size:var(--fs-xs);color:var(--accent);}
+
+  .field{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);padding:var(--sp-3) var(--sp-2);border-radius:var(--r-md);}
+  .field+.field{border-top:1px solid var(--border-1);}
+  .f-main .lbl{font-size:var(--fs-md);color:var(--fg-1);}
+  .f-main .hint{font-size:var(--fs-xs);color:var(--fg-3);line-height:var(--lh-normal);margin-top:2px;max-width:46ch;}
+  /* focused field = accent ring */
+  .field.cursor{outline:2px solid var(--accent);outline-offset:0;background:var(--accent-soft);transition:box-shadow var(--motion-focus-ring);}
+
+  /* controls */
+  .toggle{width:40px;height:22px;border-radius:999px;background:var(--bg-4);position:relative;flex:0 0 auto;transition:background var(--motion-toggle);}
+  .toggle.on{background:var(--accent);}
+  .toggle i{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--fg-1);transition:left var(--motion-toggle);}
+  .toggle.on i{left:20px;background:var(--accent-ink);}
+  .picker{font-size:var(--fs-sm);color:var(--fg-1);background:var(--bg-3);border:1px solid var(--border-2);border-radius:var(--r-md);padding:6px 12px;display:inline-flex;gap:8px;align-items:center;}
+  .picker .car{color:var(--fg-3);}
+  .keyb{font-family:var(--font-mono);font-size:var(--fs-xs);background:var(--bg-3);border:1px solid var(--border-2);border-radius:var(--r-sm);padding:3px 9px;color:var(--fg-1);}
+  .btn{font-size:var(--fs-sm);padding:6px 14px;border-radius:var(--r-md);border:1px solid var(--border-2);background:var(--bg-3);color:var(--fg-1);}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;}
+  .btn.danger{color:var(--err);border-color:rgba(255,154,154,.35);background:transparent;}
+
+  /* keybind table card */
+  .ktab{display:grid;grid-template-columns:1fr auto;gap:var(--sp-2) var(--sp-4);}
+  .ktab .ka{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--fg-2);align-self:center;}
+  .ns-cap{font-size:var(--fs-xs);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--fg-3);}
+
+  /* ---- faux ChipPrompt: settings-scoped verb set ---- */
+  .chip{border-top:1px solid var(--border-1);background:var(--bg-0);padding:var(--sp-3) var(--sp-4);}
+  .chip-line{display:flex;align-items:center;gap:var(--sp-2);}
+  .chip-line .col{color:var(--accent);font-family:var(--font-mono);}
+  .chip-line .ph{color:var(--fg-dim);font-size:var(--fs-sm);}
+  .verbs{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-3);}
+  .verb{font-size:var(--fs-xs);background:var(--bg-2);border:1px solid var(--border-1);border-radius:999px;padding:4px 11px;color:var(--fg-2);display:inline-flex;gap:6px;align-items:center;}
+  .verb.hot{background:var(--sel-bg);color:var(--sel-fg);border-color:transparent;}
+  .verb .vi{opacity:.8;}
+  .scope-note{font-size:var(--fs-xs);color:var(--fg-3);margin-top:var(--sp-2);}
+  .scope-note b{color:var(--accent);font-family:var(--font-mono);font-weight:400;}
+</style>
+</head>
+<body>
+  <div class="win">
+    <!-- chrome: a SINGLETON 'settings' tab (like projects/tasks), not a modal -->
+    <div class="titlebar">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <span class="tab">~/work</span>
+      <span class="tab">All tasks</span>
+      <span class="tab active">⚙ Settings</span>
+      <span class="crumb">activeTab.kind === 'settings' &nbsp;→&nbsp; verb set scoped</span>
+    </div>
+
+    <div class="layout">
+      <!-- GROUP RAIL: overview with live summary lines -->
+      <aside class="rail">
+        <h1>Settings</h1>
+        <div class="grp"><span class="ico">◳</span><div><div class="lbl">General</div><div class="sum">Alpine dusk · window helpers</div></div></div>
+        <div class="grp active"><span class="ico">⌨</span><div><div class="lbl">Keybindings</div><div class="sum">37 bound · 3 changed</div></div></div>
+        <div class="grp"><span class="ico">✓</span><div><div class="lbl">Tasks</div><div class="sum">Task mgmt on</div></div></div>
+        <div class="grp"><span class="ico">▤</span><div><div class="lbl">Terminal</div><div class="sum">iTerm · tmux off</div></div></div>
+        <div class="grp"><span class="ico">⚡</span><div><div class="lbl">Agents</div><div class="sum">Default: Claude</div></div></div>
+        <div class="grp"><span class="ico">◖</span><div><div class="lbl">Notifications</div><div class="sum">Attention on · sound off</div></div></div>
+        <div class="grp"><span class="ico">⚙</span><div><div class="lbl">Integrations</div><div class="sum">TypeBuild signed in</div></div></div>
+      </aside>
+
+      <!-- CONTENT PANE: cards for the focused group (Keybindings shown) -->
+      <main class="pane">
+        <div class="crumb2">Keybindings  ·  <kbd>h</kbd> rail  <kbd>j</kbd>/<kbd>k</kbd> field  <kbd>J</kbd>/<kbd>K</kbd> card  <kbd>n</kbd> next changed</div>
+
+        <!-- focused card, with the field cursor on an action -->
+        <section class="card focus">
+          <div class="card-head"><span class="card-title">nav — motion</span><span class="card-act">Reset group</span></div>
+          <div class="ktab">
+            <span class="ka">nav.down</span><span class="keyb">j</span>
+            <span class="ka">nav.up</span><span class="keyb">k</span>
+            <span class="ka">nav.into</span><span class="keyb">l</span>
+            <span class="ka">nav.out</span><span class="keyb">h</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span class="card-title">goto — jumps</span><span class="card-act">Reset group</span></div>
+          <div class="field cursor">
+            <div class="f-main">
+              <div class="lbl">goto.home</div>
+              <div class="hint">Press <kbd>Enter</kbd> to capture a new chord · <kbd>Esc</kbd> aborts. Reuses startEdit→saveEdit.</div>
+            </div>
+            <span class="keyb">~</span>
+          </div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">goto.top</div></div>
+            <span class="keyb">gg</span>
+          </div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">goto.bottom</div></div>
+            <span class="keyb">G</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span class="card-title">Keybindings — all</span><span class="card-act">Reset to defaults</span></div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">Restore every binding</div><div class="hint">dispatch setKeybinds · DEFAULT_KEYBINDS</div></div>
+            <button class="btn danger">Reset to defaults</button>
+          </div>
+        </section>
+
+        <!-- a few normalized non-keybind controls to show the card grammar -->
+        <section class="card">
+          <div class="card-head"><span class="card-title">Terminal &amp; tmux</span></div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">Open Terminal here launches</div><div class="hint">fm.setDefaultTerminal — picker, keyboard navigable</div></div>
+            <span class="picker">iTerm <span class="car">▾</span></span>
+          </div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">Use tmux for embedded terminals</div><div class="hint">Requires tmux on PATH</div></div>
+            <span class="toggle"><i></i></span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span class="card-title">Notifications</span></div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">Notify when a backgrounded tab needs attention</div></div>
+            <span class="toggle on"><i></i></span>
+          </div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">Task notifications</div><div class="hint">Agent runs &amp; remote task changes</div></div>
+            <span class="picker">Failures only <span class="car">▾</span></span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-head"><span class="card-title">Claude integration</span></div>
+          <div class="field">
+            <div class="f-main"><div class="lbl">Reset Claude integration</div><div class="hint">Strip TypeBuild MCP + hooks from ~/.claude — re-register next launch</div></div>
+            <button class="btn danger">Reset</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- FAUX CHIPPROMPT — the settings-scoped verb catalog -->
+    <div class="chip">
+      <div class="chip-line">
+        <span class="col">:</span>
+        <span class="ph">type a settings verb…</span>
+      </div>
+      <div class="verbs">
+        <span class="verb hot"><span class="vi">◐</span> theme</span>
+        <span class="verb"><span class="vi">⌨</span> keybind</span>
+        <span class="verb"><span class="vi">↺</span> reset-keys</span>
+        <span class="verb"><span class="vi">▤</span> default-terminal</span>
+        <span class="verb"><span class="vi">⚡</span> default-agent</span>
+        <span class="verb"><span class="vi">◖</span> notifications</span>
+        <span class="verb"><span class="vi">▦</span> tmux</span>
+        <span class="verb"><span class="vi">⚙</span> typebuild</span>
+        <span class="verb"><span class="vi">✕</span> reset-claude</span>
+        <span class="verb"><span class="vi">⤓</span> export-settings</span>
+        <span class="verb"><span class="vi">⤒</span> import-settings</span>
+        <span class="verb"><span class="vi">→</span> goto-group</span>
+        <span class="verb"><span class="vi">⏎</span> close-settings</span>
+      </div>
+      <div class="scope-note">
+        Gated by <b>tabKinds: ['settings']</b> — the same allowlist filter that scopes the Tasks-tab verbs
+        (ChipPrompt.tsx:3267). Folder/task verbs (Move, Copy, Go&nbsp;to…) are filtered out while this tab is active.
+        Switch tabs → <b>activeTab.kind</b> changes → the memo re-runs → normal verbs return.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

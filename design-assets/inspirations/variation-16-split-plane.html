@@ -1,0 +1,363 @@
+<!--
+  Variation 16 — "Split Plane"  (HOME REDESIGN · the online↔desktop split IS the layout)
+  Paradigm: A HOME divided into two living planes. LEFT = ☁ ONLINE PLANE: the TypeBuild task state
+            that follows you to any machine (the queue, who's working, what's blocked — available
+            from anywhere). RIGHT = ▣ THIS MAC PLANE: the desktop-only abilities firing right here —
+            notifications, the Chrome automation session, file activity. A single full-width
+            NEEDS-YOU banner bridges both planes (the one focal point), and where an online task
+            REACHES INTO the desktop (an agent driving Chrome / touching files), a hairline connector
+            crosses the divide. Keyboard-first: `:` palette, j/k within a plane, h/l to switch planes.
+
+  Goals this leans into:
+   · ONLINE↔DESKTOP SPLIT★ — the split is literally the page. You can read at a glance what's portable
+     (online) vs what's anchored to this machine (desktop), and see the moments work crosses over.
+   · TASK-FIRST HOME — both planes are organized by tasks; the file surface appears only as a desktop-
+     plane activity stream (an ability the agent used), never as the home itself.
+   · FEATURE DISCOVERY — the desktop plane has a compact "abilities on this Mac" dock (notify / Chrome /
+     files) with verbs + live status; an "online, everywhere" footer teaches what travels with you.
+
+  Tokens echoed from src/styles/tokens.css (Alpine dusk): bg-0..4, fg-1..dim, accent #7fd4c7 (working),
+   warn #ffd28a (needs-you), err #ff9a9a (blocked), type-link #c9a8ff, borders, r-*, Inter Tight / JetBrains Mono.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TypeBuild — Split Plane</title>
+<style>
+  :root{
+    --bg-0:#0a1018; --bg-1:#0f1822; --bg-2:#162231; --bg-3:#1f2d3f; --bg-4:#273a4f;
+    --fg-1:#e8eef5; --fg-2:#a8b5c4; --fg-3:#6b7a8c; --fg-dim:#47546a;
+    --line-1:rgba(180,210,255,.06); --line-2:rgba(180,210,255,.11);
+    --accent:#7fd4c7; --accent-strong:#4ab8a8; --accent-soft:rgba(127,212,199,.14); --accent-glow:rgba(127,212,199,.38);
+    --warn:#ffd28a; --warn-soft:rgba(255,210,138,.13);
+    --err:#ff9a9a;  --err-soft:rgba(255,154,154,.12);
+    --link:#c9a8ff; --sel:rgba(127,212,199,.18);
+    --sans:'Inter Tight','Inter',ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono','Menlo',monospace;
+    --r-sm:4px; --r-md:6px; --r-lg:10px; --r-xl:14px;
+    --ease:cubic-bezier(.2,.8,.2,1); --t:.2s;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{ margin:0; background:var(--bg-0); color:var(--fg-1); font-family:var(--sans); font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .shell{ min-height:100vh; padding-bottom:96px; }
+  .page{ max-width:1200px; margin:0 auto; padding:24px 28px 40px; }
+
+  .head{ display:flex; align-items:center; gap:14px; margin-bottom:16px; }
+  .scope{ display:inline-flex; align-items:center; gap:9px; padding:7px 12px 7px 10px; border-radius:var(--r-lg); cursor:pointer; transition:background var(--t) var(--ease); }
+  .scope:hover{ background:var(--bg-2); }
+  .scope .pdot{ width:9px; height:9px; border-radius:50%; background:var(--accent); }
+  .scope b{ font-weight:650; } .scope .repo{ color:var(--fg-3); font-size:12px; font-family:var(--mono); }
+  .scope .caret{ color:var(--fg-dim); font-size:11px; }
+  .machine{ margin-left:auto; font-size:12px; color:var(--fg-3); display:inline-flex; align-items:center; gap:8px; }
+  .machine .mono{ font-family:var(--mono); color:var(--fg-2); }
+
+  /* needs-you banner — bridges both planes, the one focal point */
+  .banner{ background:linear-gradient(90deg, rgba(255,210,138,.09), var(--bg-2) 60%); border:1px solid var(--line-2);
+           border-left:3px solid var(--warn); border-radius:var(--r-xl); padding:15px 20px; display:flex; align-items:center; gap:18px;
+           margin-bottom:18px; box-shadow:0 14px 36px -26px rgba(0,8,20,.7); }
+  .banner .bl{ flex:1; }
+  .banner .bk{ font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--warn); font-weight:700; }
+  .banner h2{ margin:4px 0 3px; font-size:18px; font-weight:650; letter-spacing:-.01em; }
+  .banner p{ margin:0; color:var(--fg-2); font-size:12.5px; }
+  .banner p .mono{ font-family:var(--mono); font-size:11.5px; color:var(--err); }
+  .banner p .rule{ color:var(--warn); }
+  .banner .span2{ font-family:var(--mono); font-size:10px; color:var(--fg-3); }
+  .btn{ font:inherit; font-size:12.5px; border-radius:var(--r-md); padding:7px 13px; cursor:pointer; border:1px solid var(--line-2); background:var(--bg-1); color:var(--fg-1); transition:background var(--t) var(--ease); display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .btn:hover{ background:var(--bg-3); }
+  .btn .kk{ font-family:var(--mono); font-size:10.5px; color:var(--fg-3); border:1px solid var(--line-2); border-radius:var(--r-sm); padding:0 4px; }
+  .btn.primary{ background:var(--accent); color:#06231d; border-color:transparent; font-weight:650; }
+  .btn.primary:hover{ background:var(--accent-strong); }
+
+  /* THE TWO PLANES */
+  .planes{ display:grid; grid-template-columns:1fr 1px 1fr; gap:0; }
+  .divider{ background:linear-gradient(180deg, transparent, var(--line-2) 12%, var(--line-2) 88%, transparent); position:relative; }
+  .divider .lbl{ position:absolute; top:-10px; left:50%; transform:translateX(-50%); background:var(--bg-0); padding:0 8px; font-family:var(--mono); font-size:10px; color:var(--fg-dim); white-space:nowrap; }
+  .plane{ padding:0 22px; }
+  .plane.left{ padding-left:2px; } .plane.right{ padding-right:2px; }
+  .ph{ display:flex; align-items:center; gap:9px; margin-bottom:14px; }
+  .ph .glyph{ font-family:var(--mono); font-size:13px; }
+  .ph.online .glyph{ color:var(--accent); } .ph.desktop .glyph{ color:var(--warn); }
+  .ph .pt{ font-weight:650; font-size:14px; }
+  .ph .sub{ font-size:11.5px; color:var(--fg-3); }
+  .ph .sub b{ color:var(--fg-2); }
+
+  /* online plane: task rows by state */
+  .grp{ font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-3); font-weight:700; margin:16px 0 8px; display:flex; align-items:center; gap:7px; }
+  .grp .dot{ width:7px; height:7px; border-radius:50%; }
+  .grp.work .dot{ background:var(--accent); } .grp.work{ color:var(--accent); }
+  .grp.need .dot{ background:var(--warn); } .grp.need{ color:var(--warn); }
+  .grp .c{ margin-left:auto; color:var(--fg-2); letter-spacing:0; }
+  .row{ display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--bg-1); border:1px solid var(--line-1); border-radius:var(--r-lg); margin-bottom:8px; cursor:pointer; position:relative; transition:border-color var(--t) var(--ease), background var(--t) var(--ease); }
+  .row::before{ content:""; position:absolute; left:0; top:10px; bottom:10px; width:3px; border-radius:3px; background:transparent; transition:background var(--t) var(--ease); }
+  .row:hover{ border-color:var(--line-2); }
+  .row.cursor{ background:var(--bg-2); border-color:var(--line-2); } .row.cursor::before{ background:var(--accent); }
+  .row .ava{ width:20px; height:20px; border-radius:50%; background:var(--bg-4); color:var(--fg-1); display:grid; place-items:center; font-size:9px; font-weight:650; flex:0 0 auto; }
+  .row .ava.bot{ background:var(--bg-3); }
+  .row .m{ flex:1; min-width:0; }
+  .row .m .nm{ font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .m .meta{ font-size:11.5px; color:var(--fg-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .m .meta .mono{ font-family:var(--mono); font-size:11px; }
+  .row .pill{ font-size:10px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; padding:2px 7px; border-radius:var(--r-sm); flex:0 0 auto; }
+  .pill.working{ color:var(--accent); background:var(--accent-soft); }
+  .pill.waiting{ color:var(--warn); background:var(--warn-soft); }
+  .pill.blocked{ color:var(--err); background:var(--err-soft); }
+  .pill.claimed{ color:var(--fg-2); background:var(--bg-3); }
+  .pill.unclaimed{ color:var(--fg-2); background:transparent; border:1px solid var(--line-2); }
+  .row .crosslink{ position:absolute; right:-23px; top:50%; transform:translateY(-50%); font-family:var(--mono); font-size:10px; color:var(--warn); }
+  .row .crosslink::before{ content:"⟶"; }
+  .row .livedot{ width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 2s infinite; flex:0 0 auto; }
+  @keyframes pulse{ 0%{box-shadow:0 0 0 0 var(--accent-glow);} 70%{box-shadow:0 0 0 5px transparent;} 100%{box-shadow:0 0 0 0 transparent;} }
+  .phi{ filter:blur(5px); user-select:none; }
+
+  /* desktop plane: abilities dock + live activity */
+  .dock{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:18px; }
+  .abil{ background:var(--bg-1); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:12px; cursor:pointer; transition:border-color var(--t) var(--ease), transform var(--t) var(--ease); }
+  .abil:hover{ border-color:var(--warn); transform:translateY(-2px); }
+  .abil .ic{ font-size:17px; }
+  .abil .an{ font-weight:650; font-size:12.5px; margin:7px 0 3px; }
+  .abil .av{ font-family:var(--mono); font-size:10px; color:var(--warn); }
+  .abil .st{ margin-top:7px; font-size:10.5px; color:var(--accent); display:inline-flex; align-items:center; gap:5px; }
+  .abil .st .ld{ width:5px; height:5px; border-radius:50%; background:var(--accent); animation:pulse 2s infinite; }
+  .abil .st.warn{ color:var(--warn); } .abil .st.warn .ld{ background:var(--warn); }
+  .abil .st.idle{ color:var(--fg-3); }
+
+  .actlbl{ font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-3); font-weight:700; margin:0 0 10px; display:flex; align-items:center; gap:7px; }
+  .actlbl .ld{ width:6px; height:6px; border-radius:50%; background:var(--warn); animation:pulse 2s infinite; }
+  .act{ position:relative; padding-left:16px; }
+  .act::before{ content:""; position:absolute; left:4px; top:6px; bottom:6px; width:2px; background:linear-gradient(var(--warn-soft), transparent); }
+  .actrow{ position:relative; padding:9px 12px 9px 14px; background:var(--bg-1); border:1px solid var(--line-1); border-radius:var(--r-lg); margin-bottom:8px; cursor:pointer; transition:border-color var(--t) var(--ease); }
+  .actrow:hover{ border-color:var(--line-2); }
+  .actrow::before{ content:""; position:absolute; left:-12px; top:16px; width:8px; height:8px; border-radius:50%; background:var(--warn); }
+  .actrow .at{ font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .actrow .at .src{ margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--warn); }
+  .actrow .aw{ font-size:11.5px; color:var(--fg-3); margin-top:3px; }
+  .actrow .aw .mono{ font-family:var(--mono); font-size:11px; color:var(--fg-2); }
+  .actrow .ld{ width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 2s infinite; }
+
+  .everywhere{ margin-top:18px; font-size:11.5px; color:var(--fg-3); border-top:1px solid var(--line-1); padding-top:12px; }
+  .everywhere b{ color:var(--accent); }
+
+  /* palette + statusbar */
+  .scrim{ position:fixed; inset:0; background:rgba(10,16,24,.55); display:flex; justify-content:center; align-items:flex-start; padding-top:13vh; opacity:0; pointer-events:none; transition:opacity var(--t); z-index:90; }
+  .scrim.show{ opacity:1; pointer-events:auto; }
+  .pal{ width:min(560px,92vw); background:var(--bg-2); border:1px solid var(--line-2); border-radius:var(--r-xl); box-shadow:0 30px 80px -30px rgba(0,8,20,.85); overflow:hidden; transform:translateY(-8px); transition:transform var(--t) var(--ease); }
+  .scrim.show .pal{ transform:none; }
+  .pal .chip{ display:flex; gap:8px; padding:11px 16px; background:var(--accent-soft); font-family:var(--mono); font-size:12px; color:var(--accent); }
+  .pal .chip .verb{ font-weight:700; } .pal .chip .slot{ color:var(--fg-3); }
+  .pal .inp{ display:flex; align-items:center; gap:9px; padding:13px 16px; border-bottom:1px solid var(--line-1); }
+  .pal .inp .gt{ font-family:var(--mono); color:var(--accent); }
+  .pal .inp input{ flex:1; background:transparent; border:0; outline:0; color:var(--fg-1); font:inherit; font-size:15px; }
+  .pal .list{ max-height:320px; overflow:auto; padding:6px; }
+  .pal .opt{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:var(--r-md); cursor:pointer; font-size:13px; }
+  .pal .opt.sel{ background:var(--sel); }
+  .pal .opt .vb{ font-family:var(--mono); font-size:12px; color:var(--accent); width:74px; }
+  .pal .opt .ds{ color:var(--fg-2); }
+  .statusbar{ position:fixed; left:0; right:0; bottom:0; height:42px; background:var(--bg-1); border-top:1px solid var(--line-1); display:flex; align-items:center; gap:14px; padding:0 18px; z-index:85; font-size:12px; }
+  .statusbar .mode{ font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.6px; padding:3px 9px; border-radius:var(--r-md); color:var(--accent); background:var(--accent-soft); }
+  .statusbar .mode.cmd{ color:#06231d; background:var(--accent); }
+  .statusbar .summary{ color:var(--fg-2); } .statusbar .summary .w{ color:var(--accent); } .statusbar .summary .n{ color:var(--warn); } .statusbar .summary .b{ color:var(--err); }
+  .statusbar .plane-ind{ font-family:var(--mono); font-size:10.5px; color:var(--fg-3); }
+  .statusbar .plane-ind b{ color:var(--accent); }
+  .statusbar .hints{ margin-left:auto; display:flex; gap:7px; }
+  .statusbar kbd{ font-family:var(--mono); font-size:11px; color:var(--fg-2); background:var(--bg-0); border:1px solid var(--line-2); border-radius:var(--r-md); padding:2px 6px; }
+  .statusbar kbd b{ color:var(--fg-1); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="page">
+
+    <div class="head">
+      <div class="scope" onclick="pal('go')"><span class="pdot"></span><b>API service</b><span class="repo">~/git/api · main</span><span class="caret">▾</span></div>
+      <div class="machine">on <span class="mono">Vivek’s MacBook Pro</span> · 1 of 2 active machines</div>
+    </div>
+
+    <!-- needs-you banner bridging both planes -->
+    <div class="banner">
+      <div class="bl">
+        <div class="bk">● needs you · spans both planes</div>
+        <h2>Nightly deploy blocked 41 min on <span style="font-family:var(--mono)">auth.spec.ts</span></h2>
+        <p>An <span style="color:var(--accent)">☁ online</span> agent paused at 4/6 and reached into
+          <span style="color:var(--warn)">▣ this Mac</span> to read the failing test
+          <span class="mono">auth.spec.ts › refresh token</span> · <span class="rule">rule "Never merge with red CI"</span>.</p>
+      </div>
+      <button class="btn primary" onclick="alert('Enter thread')">Enter thread <span class="kk">⏎</span></button>
+      <button class="btn" onclick="alert('Stop')">Stop <span class="kk">s</span></button>
+    </div>
+
+    <!-- TWO PLANES -->
+    <div class="planes">
+
+      <!-- ONLINE PLANE -->
+      <div class="plane left" id="planeOnline">
+        <div class="ph online"><span class="glyph">☁</span><span class="pt">Online</span>
+          <span class="sub">— the TypeBuild queue · follows you to <b>any machine</b></span></div>
+
+        <div class="grp need"><span class="dot"></span>Needs you <span class="c">3</span></div>
+        <div class="row cursor" onclick="alert('Answer y/n')">
+          <span class="ava bot">⚙</span>
+          <div class="m"><div class="nm">Migrate CRM data</div><div class="meta"><span class="mono">"Delete 12 stale issues? (y/n)"</span></div></div>
+          <span class="pill waiting">waiting</span>
+          <span class="crosslink" title="reaches into this Mac (Chrome)"></span>
+        </div>
+        <div class="row" onclick="alert('Open task')">
+          <span class="ava">V</span>
+          <div class="m"><div class="nm">Reply to landlord about lease ★</div><div class="meta">manual · due today · you</div></div>
+          <span class="pill waiting">today</span>
+        </div>
+        <div class="row" onclick="alert('Open task')">
+          <span class="ava">S</span>
+          <div class="m"><div class="nm phi">Review Sam’s PR #214</div><div class="meta phi">Sam handed to you · encrypted</div></div>
+          <span class="pill waiting">your turn</span>
+        </div>
+
+        <div class="grp work"><span class="dot"></span>Working <span class="c">2</span></div>
+        <div class="row" onclick="alert('Open live session')">
+          <span class="livedot"></span>
+          <div class="m"><div class="nm">Triage inbox → tasks</div><div class="meta">you · step 5/6 · drafted 4 tasks</div></div>
+          <span class="pill working">working</span>
+          <span class="crosslink" title="writing files on this Mac"></span>
+        </div>
+        <div class="row" onclick="alert('Open live session')">
+          <span class="ava">P</span>
+          <div class="m"><div class="nm">Refactor TaskRow</div><div class="meta">Priya · step 3/5</div></div>
+          <span class="pill working">working</span>
+        </div>
+
+        <div class="grp" style="color:var(--fg-3)"><span class="dot" style="background:var(--fg-dim)"></span>Unclaimed <span class="c">1</span></div>
+        <div class="row" onclick="pal('claim','Fix flaky CI')">
+          <span class="ava bot" style="background:transparent;border:1px dashed var(--line-2)"></span>
+          <div class="m"><div class="nm">Fix flaky CI</div><div class="meta">P0 · no one claimed it yet</div></div>
+          <span class="pill unclaimed">claim ⏎</span>
+        </div>
+      </div>
+
+      <div class="divider"><span class="lbl">online ↔ this Mac</span></div>
+
+      <!-- DESKTOP PLANE -->
+      <div class="plane right" id="planeDesktop">
+        <div class="ph desktop"><span class="glyph">▣</span><span class="pt">This Mac</span>
+          <span class="sub">— abilities that run <b>here</b> · don’t travel with the queue</span></div>
+
+        <!-- abilities dock (feature discovery) -->
+        <div class="dock">
+          <div class="abil" onclick="alert('Notifications settings')">
+            <div class="ic">🔔</div><div class="an">Notifications</div><div class="av">:notify</div>
+            <div class="st warn"><span class="ld"></span>1 pending</div>
+          </div>
+          <div class="abil" onclick="alert('Chrome automation')">
+            <div class="ic">🌐</div><div class="an">Chrome</div><div class="av">:browse</div>
+            <div class="st"><span class="ld"></span>1 driving</div>
+          </div>
+          <div class="abil" onclick="alert('File surface')">
+            <div class="ic">🗂</div><div class="an">Files</div><div class="av">:files</div>
+            <div class="st idle">ready</div>
+          </div>
+        </div>
+
+        <!-- live desktop activity -->
+        <div class="actlbl"><span class="ld"></span>Live on this machine</div>
+        <div class="act" id="act">
+          <div class="actrow" onclick="alert('Answer in Chrome')">
+            <div class="at"><span class="ld" style="background:var(--warn)"></span>Chrome agent paused for you
+              <span class="src">🌐 browser</span></div>
+            <div class="aw">"Migrate CRM data" filled the form, now asks <span class="mono">"Delete 12 stale issues?"</span> — 🔔 notification fired</div>
+          </div>
+          <div class="actrow" onclick="alert('Open file')">
+            <div class="at"><span class="ld"></span>Read a file <span class="src">🗂 files</span></div>
+            <div class="aw">Nightly deploy opened <span class="mono">~/git/api/auth.spec.ts</span> to summarize the block</div>
+          </div>
+          <div class="actrow" onclick="alert('Open file')">
+            <div class="at"><span class="ld"></span>Wrote a file <span class="src">🗂 files</span></div>
+            <div class="aw">Triage agent saved <span class="mono">~/git/api/notes/triage.md</span></div>
+          </div>
+        </div>
+
+        <div class="everywhere">
+          <b>☁ Follows you everywhere:</b> the task queue, statuses, who’s working, project rules.
+          Open TypeBuild on your other Mac and this plane re-binds to that machine’s notifications, browser &amp; files.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- COMMAND PALETTE -->
+<div class="scrim" id="scrim" onclick="if(event.target===this)closePal()">
+  <div class="pal" role="dialog" aria-label="Command palette">
+    <div class="chip"><span class="verb" id="pVerb">go</span><span class="slot" id="pSlot">· slot</span></div>
+    <div class="inp"><span class="gt">:</span><input id="pInput" autocomplete="off" placeholder="type an action, task, or ability…" /></div>
+    <div class="list" id="pList"></div>
+  </div>
+</div>
+
+<!-- STATUS BAR -->
+<div class="statusbar">
+  <span class="mode" id="modeBadge">NORMAL</span>
+  <span class="plane-ind" id="planeInd">plane: <b>☁ online</b> · <span style="color:var(--warn)">h/l</span> switch</span>
+  <span class="summary"><span class="w">2 working</span> · <span class="n">3 need you</span> · <span class="b">1 blocked</span></span>
+  <span class="hints">
+    <kbd><b>j</b>/<b>k</b> move</kbd>
+    <kbd><b>h</b>/<b>l</b> plane</kbd>
+    <kbd><b>⏎</b> open</kbd>
+    <kbd><b>:</b> actions</kbd>
+    <kbd><b>?</b> help</kbd>
+  </span>
+</div>
+
+<script>
+  const VERBS=[
+    ['create','propose an agentic task from a sentence'],
+    ['claim','take an unclaimed TypeBuild task'],
+    ['go','jump to a project, task, or ability'],
+    ['teach','save a project instruction'],
+    ['notify','desktop notifications (this Mac)'],
+    ['browse','Chrome automation (this Mac)'],
+    ['files','file surface (this Mac)'],
+    ['stop','stop a running agent'],
+    ['help','open the help tour'],
+  ];
+  const scrim=document.getElementById('scrim'),pInput=document.getElementById('pInput'),pList=document.getElementById('pList'),
+        pVerb=document.getElementById('pVerb'),pSlot=document.getElementById('pSlot'),modeBadge=document.getElementById('modeBadge'),planeInd=document.getElementById('planeInd');
+  let sel=0,filtered=VERBS;
+  function render(){ pList.innerHTML=filtered.map((v,i)=>`<div class="opt ${i===sel?'sel':''}" data-i="${i}"><span class="vb">:${v[0]}</span><span class="ds">${v[1]}</span></div>`).join('');
+    const c=filtered[sel]; if(c){pVerb.textContent=c[0];pSlot.textContent='· …';} }
+  function pal(verb,slot){ scrim.classList.add('show'); modeBadge.textContent='COMMAND'; modeBadge.classList.add('cmd'); pInput.value=slot?(verb+' '+slot):(verb||''); flt(); pInput.focus();
+    if(verb){const i=VERBS.findIndex(v=>v[0]===verb); if(i>=0){sel=0;filtered=[VERBS[i]];render();}} }
+  function closePal(){ scrim.classList.remove('show'); modeBadge.textContent='NORMAL'; modeBadge.classList.remove('cmd'); }
+  function flt(){ const q=pInput.value.toLowerCase().replace(/^:/,'').split(' ')[0]; filtered=VERBS.filter(v=>v[0].includes(q)||v[1].includes(q)); sel=0; render(); }
+  pInput.addEventListener('input',flt);
+  pList.addEventListener('click',e=>{const o=e.target.closest('.opt'); if(o){closePal();alert('verb → :'+filtered[+o.dataset.i][0]);}});
+
+  // two-plane keyboard nav: j/k within plane, h/l to switch planes
+  let plane='online';
+  const sets={ online:[...document.querySelectorAll('#planeOnline .row')], desktop:[...document.querySelectorAll('#planeDesktop .abil, #planeDesktop .actrow')] };
+  let cur={online:0,desktop:0};
+  function paint(){ [...document.querySelectorAll('.cursor')].forEach(e=>e.classList.remove('cursor'));
+    const el=sets[plane][cur[plane]]; if(el){el.classList.add('cursor'); el.scrollIntoView({block:'nearest'});}
+    planeInd.innerHTML = plane==='online' ? 'plane: <b>☁ online</b> · <span style="color:var(--warn)">h/l</span> switch'
+      : 'plane: <b style="color:var(--warn)">▣ this Mac</b> · <span style="color:var(--warn)">h/l</span> switch'; }
+  function mv(d){ cur[plane]=Math.max(0,Math.min(sets[plane].length-1,cur[plane]+d)); paint(); }
+  function setPlane(p){ plane=p; paint(); }
+  paint();
+  document.addEventListener('keydown',e=>{
+    if(scrim.classList.contains('show')){
+      if(e.key==='Escape')closePal();
+      if(e.key==='ArrowDown'){sel=Math.min(filtered.length-1,sel+1);render();e.preventDefault();}
+      if(e.key==='ArrowUp'){sel=Math.max(0,sel-1);render();e.preventDefault();}
+      if(e.key==='Enter'){closePal(); if(filtered[sel])alert('verb → :'+filtered[sel][0]);} return;
+    }
+    if(e.key===':'){e.preventDefault();pal('');}
+    else if(e.key==='j')mv(1); else if(e.key==='k')mv(-1);
+    else if(e.key==='l'||e.key==='ArrowRight')setPlane('desktop');
+    else if(e.key==='h'||e.key==='ArrowLeft')setPlane('online');
+    else if(e.key==='?'){e.preventDefault();alert('Help tour (:help)');}
+    else if(e.key==='Enter')sets[plane][cur[plane]]?.click();
+  });
+</script>
+</body>
+</html>

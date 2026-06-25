@@ -1,0 +1,365 @@
+<!--
+  Variation 14 — "Agent Pulse"  (HOME REDESIGN · live agent activity feed)
+  Paradigm: A HOME that opens on the LIVE PULSE of agents working for you. A pinned "needs-you"
+            ribbon sits over a time-ordered feed that REORDERS LIVE off real TypeBuild statuses
+            (open · claimed · working · waiting · blocked · done). A JS tick appends real events.
+            Down the LEFT edge runs a two-lane "where it runs" spine that makes the ONLINE↔DESKTOP
+            split the literal backbone of the page. Keyboard-first: `:` palette, j/k, status bar.
+
+  Goals this leans into:
+   · ONLINE↔DESKTOP SPLIT★ — the left spine has two rails: ☁ ONLINE (TypeBuild state, visible from
+     any machine) and ▣ THIS MAC (notifications fire, browser drives, files touched). Every feed
+     event docks onto one rail, so you SEE which half of the system did the work.
+   · TASK-FIRST HOME — the feed IS tasks-in-motion; the file surface only appears as a ▣-rail event
+     ("opened ~/git/api/auth.spec.ts") — an ability used, not the page.
+   · FEATURE DISCOVERY — a slim "abilities online vs on this Mac" legend teaches the 5 powers by
+     showing them actually firing in the stream, each tagged with its verb.
+
+  Tokens echoed from src/styles/tokens.css (Alpine dusk): bg-0..4, fg-1..dim, accent #7fd4c7 (working),
+   warn #ffd28a (needs-you), err #ff9a9a (blocked), borders, r-*, Inter Tight / JetBrains Mono, 4px grid.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TypeBuild — Agent Pulse</title>
+<style>
+  :root{
+    --bg-0:#0a1018; --bg-1:#0f1822; --bg-2:#162231; --bg-3:#1f2d3f; --bg-4:#273a4f;
+    --fg-1:#e8eef5; --fg-2:#a8b5c4; --fg-3:#6b7a8c; --fg-dim:#47546a;
+    --line-1:rgba(180,210,255,.06); --line-2:rgba(180,210,255,.11);
+    --accent:#7fd4c7; --accent-strong:#4ab8a8; --accent-soft:rgba(127,212,199,.14); --accent-glow:rgba(127,212,199,.38);
+    --warn:#ffd28a; --warn-soft:rgba(255,210,138,.13);
+    --err:#ff9a9a;  --err-soft:rgba(255,154,154,.12);
+    --link:#c9a8ff; --sel:rgba(127,212,199,.18);
+    --sans:'Inter Tight','Inter',ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono','Menlo',monospace;
+    --r-sm:4px; --r-md:6px; --r-lg:10px; --r-xl:14px;
+    --ease:cubic-bezier(.2,.8,.2,1); --t:.2s;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{ margin:0; background:var(--bg-0); color:var(--fg-1); font-family:var(--sans);
+        font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .shell{ min-height:100vh; padding-bottom:96px; }
+  .page{ max-width:1080px; margin:0 auto; padding:26px 28px 40px; }
+
+  /* header strip */
+  .head{ display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .scope{ display:inline-flex; align-items:center; gap:9px; padding:7px 12px 7px 10px; border-radius:var(--r-lg); cursor:pointer; transition:background var(--t) var(--ease); }
+  .scope:hover{ background:var(--bg-2); }
+  .scope .pdot{ width:9px; height:9px; border-radius:50%; background:var(--accent); }
+  .scope b{ font-weight:650; } .scope .repo{ color:var(--fg-3); font-size:12px; font-family:var(--mono); }
+  .scope .caret{ color:var(--fg-dim); font-size:11px; }
+  .legend{ margin-left:auto; display:flex; gap:16px; font-size:11.5px; color:var(--fg-2); }
+  .legend .lg{ display:inline-flex; align-items:center; gap:6px; }
+  .legend .cl b{ color:var(--accent); font-family:var(--mono); } .legend .ds b{ color:var(--warn); font-family:var(--mono); }
+
+  /* needs-you ribbon — the one bright focal point */
+  .ribbon{ background:linear-gradient(90deg, rgba(255,210,138,.08), var(--bg-2));
+           border:1px solid var(--line-2); border-left:3px solid var(--warn);
+           border-radius:var(--r-xl); padding:16px 20px; display:flex; align-items:center; gap:18px;
+           box-shadow:0 14px 36px -24px rgba(0,8,20,.7); }
+  .ribbon .rl{ flex:1; }
+  .ribbon .rk{ font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--warn); font-weight:700; }
+  .ribbon h2{ margin:5px 0 3px; font-size:18px; font-weight:650; letter-spacing:-.01em; }
+  .ribbon p{ margin:0; color:var(--fg-2); font-size:13px; }
+  .ribbon p .mono{ font-family:var(--mono); font-size:12px; color:var(--err); }
+  .ribbon p .rule{ color:var(--warn); }
+  .ribbon .ract{ display:flex; gap:9px; }
+  .btn{ font:inherit; font-size:13px; border-radius:var(--r-lg); padding:8px 14px; cursor:pointer;
+        border:1px solid var(--line-2); background:var(--bg-1); color:var(--fg-1);
+        transition:background var(--t) var(--ease); display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
+  .btn:hover{ background:var(--bg-3); }
+  .btn .k{ font-family:var(--mono); font-size:11px; color:var(--fg-3); border:1px solid var(--line-2); border-radius:var(--r-sm); padding:0 5px; }
+  .btn.primary{ background:var(--accent); color:#06231d; border-color:transparent; font-weight:650; }
+  .btn.primary:hover{ background:var(--accent-strong); }
+
+  /* count chips */
+  .counts{ display:flex; gap:10px; margin:22px 0 10px; }
+  .chipcount{ flex:1; background:var(--bg-1); border:1px solid var(--line-1); border-radius:var(--r-lg); padding:11px 14px; cursor:pointer; transition:border-color var(--t) var(--ease); }
+  .chipcount:hover{ border-color:var(--line-2); }
+  .chipcount .n{ font-size:22px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .chipcount .l{ font-size:11px; color:var(--fg-3); text-transform:uppercase; letter-spacing:.05em; margin-top:2px; }
+  .chipcount.work .n{ color:var(--accent); } .chipcount.need .n{ color:var(--warn); }
+  .chipcount.blk .n{ color:var(--err); } .chipcount.done .n{ color:var(--fg-2); }
+
+  /* ---- THE FEED with the online/desktop spine ---- */
+  .feedwrap{ margin-top:14px; display:grid; grid-template-columns:128px 1fr; }
+  .spine{ position:relative; }
+  .spine .railhead{ font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--fg-3); font-weight:700;
+                    display:flex; flex-direction:column; gap:2px; padding-right:14px; text-align:right; }
+  .spine .railhead .cl{ color:var(--accent); font-family:var(--mono); }
+  .spine .railhead .ds{ color:var(--warn); font-family:var(--mono); margin-top:6px; }
+  /* two vertical rails */
+  .spine::before, .spine::after{ content:""; position:absolute; top:64px; bottom:0; width:2px; }
+  .spine::before{ right:78px; background:linear-gradient(var(--accent-soft), transparent); }
+  .spine::after{ right:30px; background:linear-gradient(var(--warn-soft), transparent); }
+
+  .feed{ position:relative; }
+  .ev{ position:relative; padding:13px 16px 13px 18px; margin-bottom:9px; background:var(--bg-1);
+       border:1px solid var(--line-1); border-radius:var(--r-lg); cursor:pointer;
+       transition:border-color var(--t) var(--ease), background var(--t) var(--ease); }
+  .ev::before{ content:""; position:absolute; left:0; top:12px; bottom:12px; width:3px; border-radius:3px; background:transparent; transition:background var(--t) var(--ease); }
+  .ev:hover{ border-color:var(--line-2); }
+  .ev.cursor{ background:var(--bg-2); border-color:var(--line-2); }
+  .ev.cursor::before{ background:var(--accent); }
+  /* connector dot to a rail */
+  .ev .dock{ position:absolute; left:-50px; top:18px; width:9px; height:9px; border-radius:50%; }
+  .ev[data-rail="cl"] .dock{ left:-50px; background:var(--accent); }       /* near accent rail */
+  .ev[data-rail="ds"] .dock{ left:-98px; background:var(--warn); }          /* near warn rail */
+  .ev .top{ display:flex; align-items:center; gap:9px; }
+  .ev .pill{ font-size:10px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; padding:2px 7px; border-radius:var(--r-sm); }
+  .pill.working{ color:var(--accent); background:var(--accent-soft); }
+  .pill.claimed{ color:var(--fg-2); background:var(--bg-3); }
+  .pill.waiting{ color:var(--warn); background:var(--warn-soft); }
+  .pill.blocked{ color:var(--err); background:var(--err-soft); }
+  .pill.done{ color:var(--fg-2); background:var(--bg-3); }
+  .pill.open{ color:var(--fg-2); background:var(--bg-3); }
+  .ev .who{ font-size:11px; color:var(--fg-3); display:inline-flex; align-items:center; gap:6px; }
+  .ev .who .ava{ width:18px; height:18px; border-radius:50%; background:var(--bg-4); color:var(--fg-1); display:grid; place-items:center; font-size:9px; font-weight:650; }
+  .ev .where{ margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--fg-3); }
+  .ev .where.cl{ color:var(--accent); } .ev .where.ds{ color:var(--warn); }
+  .ev .time{ font-family:var(--mono); font-size:10.5px; color:var(--fg-dim); }
+  .ev .t{ font-weight:600; margin:7px 0 2px; }
+  .ev .why{ font-size:12.5px; color:var(--fg-2); }
+  .ev .why .mono{ font-family:var(--mono); font-size:11.5px; }
+  .ev .why .rule{ color:var(--warn); }
+  .ev.live{ animation:slidein .4s var(--ease); }
+  @keyframes slidein{ from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:none;} }
+  .ev .livedot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 0 var(--accent-glow); animation:pulse 2s infinite; }
+  @keyframes pulse{ 0%{box-shadow:0 0 0 0 var(--accent-glow);} 70%{box-shadow:0 0 0 6px transparent;} 100%{box-shadow:0 0 0 0 transparent;} }
+  .phi{ filter:blur(5px); user-select:none; }
+
+  .daydiv{ font-size:11px; color:var(--fg-3); text-transform:uppercase; letter-spacing:.06em; margin:18px 0 10px 18px; }
+
+  /* command palette + statusbar (shared shell language) */
+  .scrim{ position:fixed; inset:0; background:rgba(10,16,24,.55); display:flex; justify-content:center; align-items:flex-start; padding-top:13vh; opacity:0; pointer-events:none; transition:opacity var(--t); z-index:90; }
+  .scrim.show{ opacity:1; pointer-events:auto; }
+  .pal{ width:min(560px,92vw); background:var(--bg-2); border:1px solid var(--line-2); border-radius:var(--r-xl); box-shadow:0 30px 80px -30px rgba(0,8,20,.85); overflow:hidden; transform:translateY(-8px); transition:transform var(--t) var(--ease); }
+  .scrim.show .pal{ transform:none; }
+  .pal .chip{ display:flex; gap:8px; padding:11px 16px; background:var(--accent-soft); font-family:var(--mono); font-size:12px; color:var(--accent); }
+  .pal .chip .verb{ font-weight:700; } .pal .chip .slot{ color:var(--fg-3); }
+  .pal .inp{ display:flex; align-items:center; gap:9px; padding:13px 16px; border-bottom:1px solid var(--line-1); }
+  .pal .inp .gt{ font-family:var(--mono); color:var(--accent); }
+  .pal .inp input{ flex:1; background:transparent; border:0; outline:0; color:var(--fg-1); font:inherit; font-size:15px; }
+  .pal .list{ max-height:320px; overflow:auto; padding:6px; }
+  .pal .opt{ display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:var(--r-md); cursor:pointer; font-size:13px; }
+  .pal .opt.sel{ background:var(--sel); }
+  .pal .opt .vb{ font-family:var(--mono); font-size:12px; color:var(--accent); width:74px; }
+  .pal .opt .ds{ color:var(--fg-2); }
+  .statusbar{ position:fixed; left:0; right:0; bottom:0; height:42px; background:var(--bg-1); border-top:1px solid var(--line-1); display:flex; align-items:center; gap:14px; padding:0 18px; z-index:85; font-size:12px; }
+  .statusbar .mode{ font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.6px; padding:3px 9px; border-radius:var(--r-md); color:var(--accent); background:var(--accent-soft); }
+  .statusbar .mode.cmd{ color:#06231d; background:var(--accent); }
+  .statusbar .summary{ color:var(--fg-2); } .statusbar .summary .w{ color:var(--accent); } .statusbar .summary .n{ color:var(--warn); } .statusbar .summary .b{ color:var(--err); }
+  .statusbar .hints{ margin-left:auto; display:flex; gap:7px; }
+  .statusbar kbd{ font-family:var(--mono); font-size:11px; color:var(--fg-2); background:var(--bg-0); border:1px solid var(--line-2); border-radius:var(--r-md); padding:2px 6px; }
+  .statusbar kbd b{ color:var(--fg-1); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="page">
+
+    <div class="head">
+      <div class="scope" onclick="pal('go','project')">
+        <span class="pdot"></span><b>API service</b>
+        <span class="repo">~/git/api · main</span><span class="caret">▾</span>
+      </div>
+      <div class="legend">
+        <span class="lg cl"><b>☁</b> online — visible on every machine</span>
+        <span class="lg ds"><b>▣</b> this Mac — notifications · browser · files</span>
+      </div>
+    </div>
+
+    <!-- needs-you ribbon -->
+    <div class="ribbon">
+      <div class="rl">
+        <div class="rk">● needs you · most urgent</div>
+        <h2>Nightly deploy blocked 41 min on <span style="font-family:var(--mono)">auth.spec.ts</span></h2>
+        <p>Agent paused at 4/6 — <span class="rule">your rule "Never merge with red CI"</span> fired on
+          <span class="mono">auth.spec.ts › refresh token</span>.</p>
+      </div>
+      <div class="ract">
+        <button class="btn primary" onclick="alert('Enter agent thread')">Enter thread <span class="k">⏎</span></button>
+        <button class="btn" onclick="alert('Stop run')">Stop <span class="k">s</span></button>
+      </div>
+    </div>
+
+    <!-- count chips -->
+    <div class="counts">
+      <div class="chipcount need" onclick="pal('go','needs you')"><div class="n">3</div><div class="l">need you</div></div>
+      <div class="chipcount work" onclick="pal('go','working')"><div class="n">2</div><div class="l">working now</div></div>
+      <div class="chipcount blk" onclick="pal('go','blocked')"><div class="n">1</div><div class="l">blocked</div></div>
+      <div class="chipcount done" onclick="pal('go','done')"><div class="n">7</div><div class="l">done today</div></div>
+    </div>
+
+    <!-- THE FEED with two-rail spine -->
+    <div class="feedwrap">
+      <div class="spine">
+        <div class="railhead">
+          <span>where it ran</span>
+          <span class="cl">☁ online</span>
+          <span class="ds">▣ this Mac</span>
+        </div>
+      </div>
+
+      <div class="feed" id="feed">
+
+        <div class="daydiv">Live — now</div>
+
+        <div class="ev cursor" data-rail="cl" onclick="alert('Open live session')">
+          <span class="dock"></span>
+          <div class="top"><span class="pill working">working</span>
+            <span class="who"><span class="ava">V</span> you</span>
+            <span class="where cl">☁ TypeBuild</span><span class="time">now</span></div>
+          <div class="t">Triage inbox → tasks <span class="livedot"></span></div>
+          <div class="why">step 5/6 · <span class="mono">drafted 4 tasks, linking to PR #214</span></div>
+        </div>
+
+        <div class="ev" data-rail="ds" onclick="alert('Open live browser session')">
+          <span class="dock"></span>
+          <div class="top"><span class="pill waiting">waiting</span>
+            <span class="who"><span class="ava">⚙</span> Migrate CRM</span>
+            <span class="where ds">▣ Chrome</span><span class="time">1m ago</span></div>
+          <div class="t">Browser agent is asking you a question</div>
+          <div class="why"><span class="mono">"Delete 12 stale issues? (y/n)"</span> — fired a desktop notification 🔔</div>
+        </div>
+
+        <div class="ev" data-rail="cl" onclick="alert('Open task')">
+          <span class="dock"></span>
+          <div class="top"><span class="pill working">working</span>
+            <span class="who"><span class="ava">P</span> Priya</span>
+            <span class="where cl">☁ TypeBuild</span><span class="time">2m ago</span></div>
+          <div class="t">Refactor TaskRow · step 3/5</div>
+          <div class="why">writing tests for <span class="mono">TaskRow.test.tsx</span></div>
+        </div>
+
+        <div class="ev" data-rail="ds" onclick="alert('Open file surface')">
+          <span class="dock"></span>
+          <div class="top"><span class="pill working">working</span>
+            <span class="who"><span class="ava">⚙</span> Nightly deploy</span>
+            <span class="where ds">▣ files</span><span class="time">4m ago</span></div>
+          <div class="t">Opened <span style="font-family:var(--mono);font-size:12px">~/git/api/auth.spec.ts</span></div>
+          <div class="why">reading the failing test to summarize the block — file ability used by the agent</div>
+        </div>
+
+        <div class="ev" data-rail="cl" onclick="alert('Open task')">
+          <span class="dock"></span>
+          <div class="top"><span class="pill blocked">blocked</span>
+            <span class="who"><span class="ava">⚙</span> Nightly deploy</span>
+            <span class="where cl">☁ TypeBuild</span><span class="time">41m ago</span></div>
+          <div class="t">Held — would not merge with red CI</div>
+          <div class="why"><span class="rule">cited rule: "Never merge with red CI — stop and ask me."</span></div>
+        </div>
+
+        <div class="daydiv">Earlier today</div>
+
+        <div class="ev" data-rail="cl" onclick="alert('Open task')">
+          <span class="dock"></span>
+          <div class="top"><span class="pill claimed">claimed</span>
+            <span class="who"><span class="ava">S</span> Sam</span>
+            <span class="where cl">☁ TypeBuild</span><span class="time">1h ago</span></div>
+          <div class="t phi">Fix flaky CI — Sam claimed the unclaimed P0</div>
+          <div class="why phi">encrypted task · focus to reveal</div>
+        </div>
+
+        <div class="ev" data-rail="ds" onclick="alert('Open schedule')">
+          <span class="dock"></span>
+          <div class="top"><span class="pill done">done</span>
+            <span class="who"><span class="ava">↻</span> cron · Fri 9am</span>
+            <span class="where ds">▣ local auto</span><span class="time">2h ago</span></div>
+          <div class="t">Weekly report — summarized 18 PRs</div>
+          <div class="why">posted results to <span class="mono">#eng</span> (project rule)</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- COMMAND PALETTE -->
+<div class="scrim" id="scrim" onclick="if(event.target===this)closePal()">
+  <div class="pal" role="dialog" aria-label="Command palette">
+    <div class="chip"><span class="verb" id="pVerb">go</span><span class="slot" id="pSlot">· slot</span></div>
+    <div class="inp"><span class="gt">:</span><input id="pInput" autocomplete="off" placeholder="type an action, task, or ability…" /></div>
+    <div class="list" id="pList"></div>
+  </div>
+</div>
+
+<!-- STATUS BAR -->
+<div class="statusbar">
+  <span class="mode" id="modeBadge">NORMAL</span>
+  <span class="summary"><span class="w">2 working</span> · <span class="n">3 need you</span> · <span class="b">1 blocked</span> · 7 done</span>
+  <span class="hints">
+    <kbd><b>j</b>/<b>k</b> move</kbd>
+    <kbd><b>⏎</b> open</kbd>
+    <kbd><b>f</b> filter</kbd>
+    <kbd><b>:</b> actions</kbd>
+    <kbd><b>?</b> help</kbd>
+  </span>
+</div>
+
+<script>
+  const VERBS=[
+    ['create','propose an agentic task from a sentence'],
+    ['claim','take an unclaimed TypeBuild task'],
+    ['go','jump to a state, task, or ability'],
+    ['teach','save a project instruction every agent honors'],
+    ['notify','desktop notifications (this Mac)'],
+    ['browse','run a Chrome-automation task (this Mac)'],
+    ['files','open the file surface (this Mac)'],
+    ['stop','stop a running agent'],
+    ['help','open the help tour'],
+  ];
+  const scrim=document.getElementById('scrim'),pInput=document.getElementById('pInput'),pList=document.getElementById('pList'),
+        pVerb=document.getElementById('pVerb'),pSlot=document.getElementById('pSlot'),modeBadge=document.getElementById('modeBadge');
+  let sel=0,filtered=VERBS;
+  function render(){ pList.innerHTML=filtered.map((v,i)=>`<div class="opt ${i===sel?'sel':''}" data-i="${i}"><span class="vb">:${v[0]}</span><span class="ds">${v[1]}</span></div>`).join('');
+    const c=filtered[sel]; if(c){pVerb.textContent=c[0];pSlot.textContent='· '+(c[0]==='go'?'where':'…');} }
+  function pal(verb){ scrim.classList.add('show'); modeBadge.textContent='COMMAND'; modeBadge.classList.add('cmd'); pInput.value=verb||''; flt(); pInput.focus();
+    if(verb){const i=VERBS.findIndex(v=>v[0]===verb); if(i>=0){sel=0;filtered=[VERBS[i]];render();}} }
+  function closePal(){ scrim.classList.remove('show'); modeBadge.textContent='NORMAL'; modeBadge.classList.remove('cmd'); }
+  function flt(){ const q=pInput.value.toLowerCase().replace(/^:/,''); filtered=VERBS.filter(v=>v[0].includes(q)||v[1].includes(q)); sel=0; render(); }
+  pInput.addEventListener('input',flt);
+  pList.addEventListener('click',e=>{const o=e.target.closest('.opt'); if(o){closePal();alert('verb → :'+filtered[+o.dataset.i][0]);}});
+
+  // live tick: append a new working event every few seconds
+  const feed=document.getElementById('feed');
+  const ticks=[
+    ['cl','working','V','you','☁ TypeBuild','linked task to PR #214'],
+    ['cl','working','P','Priya','☁ TypeBuild','ran TaskRow.test.tsx — 12 passing'],
+    ['ds','working','⚙','Triage','▣ files','wrote ~/git/api/notes/triage.md'],
+  ]; let ti=0;
+  setInterval(()=>{ const t=ticks[ti%ticks.length]; ti++;
+    const el=document.createElement('div'); el.className='ev live'; el.dataset.rail=t[0];
+    el.innerHTML=`<span class="dock"></span><div class="top"><span class="pill ${t[1]}">${t[1]}</span>
+      <span class="who"><span class="ava">${t[2]}</span> ${t[3]}</span>
+      <span class="where ${t[0]}">${t[4]}</span><span class="time">now</span></div>
+      <div class="t">${t[5]} <span class="livedot"></span></div>`;
+    el.onclick=()=>alert('Open live session');
+    feed.querySelector('.daydiv').after(el);
+    const evs=feed.querySelectorAll('.ev'); if(evs.length>9) evs[evs.length-1].remove();
+  },4200);
+
+  // keyboard
+  let cards=()=>[...document.querySelectorAll('.ev')]; let cur=0;
+  function mv(d){ const c=cards(); c[cur]?.classList.remove('cursor'); cur=Math.max(0,Math.min(c.length-1,cur+d)); c[cur].classList.add('cursor'); c[cur].scrollIntoView({block:'nearest'}); }
+  document.addEventListener('keydown',e=>{
+    if(scrim.classList.contains('show')){
+      if(e.key==='Escape')closePal();
+      if(e.key==='ArrowDown'){sel=Math.min(filtered.length-1,sel+1);render();e.preventDefault();}
+      if(e.key==='ArrowUp'){sel=Math.max(0,sel-1);render();e.preventDefault();}
+      if(e.key==='Enter'){closePal(); if(filtered[sel])alert('verb → :'+filtered[sel][0]);} return;
+    }
+    if(e.key===':'){e.preventDefault();pal('');}
+    else if(e.key==='j')mv(1); else if(e.key==='k')mv(-1);
+    else if(e.key==='f')pal('go');
+    else if(e.key==='?'){e.preventDefault();alert('Help tour (:help)');}
+    else if(e.key==='Enter')cards()[cur]?.click();
+  });
+</script>
+</body>
+</html>
