@@ -207,7 +207,6 @@ type Fm = {
   sourcesAutoAttach: (cwd: string) => Promise<string | null>;
   sourcesDisconnect: (host: string) => Promise<void>;
   // fm-at5 — reset the auto-registered Claude Code integration
-  claudeUnregisterMcp: () => Promise<'removed' | 'absent' | 'error'>;
   claudeUnregisterHooks: () => Promise<'removed' | 'absent' | 'error'>;
   onSourcesChanged: (cb: () => void) => () => void;
   tasksCountByFolder: (folder: string) => Promise<number>;

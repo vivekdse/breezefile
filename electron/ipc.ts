@@ -2643,13 +2643,8 @@ end tell`;
   const NO_SOURCE = 'No task source available — sign in to TypeBuild';
 
   // fm-at5 — let the user cleanly back out of the auto-registered Claude
-  // Code integration (MCP server + settings.json hooks + hook script).
-  // Re-registration runs on next app launch, so this is a reset, not a
-  // permanent opt-out.
-  ipcMain.handle('claude:unregister-mcp', async () => {
-    const { unregisterBreezeMcp } = await import('./mcp-register');
-    return unregisterBreezeMcp();
-  });
+  // Code integration (settings.json hooks + hook script). Re-registration
+  // runs on next app launch, so this is a reset, not a permanent opt-out.
   ipcMain.handle('claude:unregister-hooks', async () => {
     const { unregisterBreezeHooks } = await import('./hooks-register');
     return unregisterBreezeHooks();

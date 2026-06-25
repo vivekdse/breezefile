@@ -42,15 +42,12 @@ export function Settings({ onClose, initialSection }: Props) {
     setClaudeResetting(true);
     setClaudeResetMsg(null);
     try {
-      const [mcp, hooks] = await Promise.all([
-        fm.claudeUnregisterMcp(),
-        fm.claudeUnregisterHooks(),
-      ]);
-      if (mcp === 'error' || hooks === 'error') {
+      const hooks = await fm.claudeUnregisterHooks();
+      if (hooks === 'error') {
         setClaudeResetMsg('Reset failed — see logs. Some entries may remain.');
-      } else if (mcp === 'removed' || hooks === 'removed') {
+      } else if (hooks === 'removed') {
         setClaudeResetMsg(
-          'Removed TypeBuild MCP + hooks from ~/.claude. They re-register on next launch.',
+          'Removed TypeBuild hooks from ~/.claude. They re-register on next launch.',
         );
       } else {
         setClaudeResetMsg('Already clean — nothing of TypeBuild was registered.');
