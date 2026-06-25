@@ -28,19 +28,31 @@ export function Statusbar() {
   );
 
   const mode = state.mode.toUpperCase();
-  const summary =
-    markedCount > 0
+  // task-83048f692491 — the Projects tab has no folder listing; describe its
+  // own motion model instead of reporting "0 items" for a placeholder trail.
+  const isProjects = activeTab.kind === 'projects';
+  const summary = isProjects
+    ? 'Projects · drill into any one'
+    : markedCount > 0
       ? `${markedCount} of ${entries.length} selected · ${formatSize(selectedSize)}`
       : `${entries.length} items · ${formatSize(totalSize)}`;
 
   // Keyboard hints — only the two affordances that are still real after the
   // shift to the verb-first model: Space marks the cursor item, `:` opens
   // the verb palette empty. Everything else is reachable by typing any
-  // letter (which opens the palette pre-filtered).
-  const hints: Array<{ keys: string[]; label: string }> = [
-    { keys: ['space'], label: 'mark' },
-    { keys: [':'], label: 'actions' },
-  ];
+  // letter (which opens the palette pre-filtered). The Projects tab is a
+  // zoom surface, so its hints are motion: j/k move, l/Enter in, h/Esc back.
+  const hints: Array<{ keys: string[]; label: string }> = isProjects
+    ? [
+        { keys: ['j', 'k'], label: 'move' },
+        { keys: ['l'], label: 'open' },
+        { keys: ['h'], label: 'back' },
+        { keys: [':'], label: 'actions' },
+      ]
+    : [
+        { keys: ['space'], label: 'mark' },
+        { keys: [':'], label: 'actions' },
+      ];
 
   return (
     <div className="statusbar">

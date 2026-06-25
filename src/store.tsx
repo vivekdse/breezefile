@@ -231,6 +231,7 @@ type Action =
   | { type: 'newTab'; tab: Tab }
   | { type: 'openTaskTab'; taskId: string; folder: string; focus?: boolean }
   | { type: 'openTasksTab'; focus?: boolean }
+  | { type: 'openProjectsTab'; focus?: boolean }
   | { type: 'openEditTab'; path: string; focus?: boolean }
   | { type: 'setTabDirty'; index: number; dirty: boolean }
   | { type: 'openOrFocusFolderTab'; path: string; focus?: boolean }
@@ -318,7 +319,7 @@ type Action =
 function makeTab(
   path: string,
   opts?: {
-    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser';
+    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects';
     taskId?: string | null;
     editPath?: string | null;
     browserUrl?: string;
@@ -437,6 +438,23 @@ function reducer(s: State, a: Action): State {
       const seedCwd =
         s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
       const tab = makeTab(seedCwd, { kind: 'tasks' });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'openProjectsTab': {
+      // task-83048f692491 — singleton Projects-home (Project Atlas) tab.
+      // Same lifecycle as openTasksTab: focus existing if present, else spawn
+      // one rooted at the active tab's cwd (the trail is unused for render).
+      const existing = s.tabs.findIndex((t) => t.kind === 'projects');
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const seedCwd =
+        s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
+      const tab = makeTab(seedCwd, { kind: 'projects' });
       return {
         ...s,
         tabs: [...s.tabs, tab],

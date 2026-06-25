@@ -28,6 +28,7 @@ import {
   createTask,
   runTaskNow,
   shiftISO,
+  taskSourceAction,
   todayISO,
   updateTask,
   useTaskSources,
@@ -39,7 +40,7 @@ import {
   buildCronFromForm,
   defaultRecurrenceForm,
 } from '../recurrence';
-import type { Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
+import type { Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
@@ -51,6 +52,7 @@ type Props = TaskComposerRequest & { onClose: () => void };
 type QuestionId =
   | 'title'
   | 'folder'
+  | 'project'
   | 'who'
   | 'when'
   | 'status'
@@ -72,8 +74,13 @@ const QUESTIONS_LOCAL: QuestionId[] = [
   'start', 'when',
   'status', 'pin',
 ];
+// task-ab1d7955e23f — `project` sits right after the title for the TypeBuild
+// target: a task's project is teaching context (it carries the project's
+// folders + instructions), so it reads as part of "what is this", before who
+// runs it. Folder-anchored creates auto-attach the owning project here; the
+// user can still override or pick "None".
 const QUESTIONS_TYPEBUILD: QuestionId[] = [
-  'title', 'who', 'notes',
+  'title', 'project', 'who', 'notes',
   'start', 'when', 'priority',
   'status', 'pin',
 ];
@@ -385,6 +392,19 @@ export function TaskComposer(props: Props) {
   const [priority, setPriority] = useState<string>(
     initial?.priority != null ? String(initial.priority) : '',
   );
+  // task-ab1d7955e23f — TypeBuild project association. `projects` is the
+  // signed-in user's project list (non-PHI: names/folders/instructions are
+  // teaching context, safe to display). `projectId` is the chosen container
+  // ('' = None). Edits start pinned to the task's own project.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<string>(initial?.projectId ?? '');
+  // Once the user explicitly picks a project we stop auto-attaching from the
+  // folder (mirrors targetTouched/executorTouched). Edits start "touched" so
+  // the saved value isn't overwritten by a folder resolve.
+  const [projectTouched, setProjectTouched] = useState(props.mode === 'edit');
+  // True after the folder→project resolve has run for this folder, so the
+  // attached chip can distinguish "auto-attached" from a manual pick.
+  const [projectAutoAttached, setProjectAutoAttached] = useState(false);
   // Notes doubles as the agent prompt for Claude tasks (one field, not two).
   // If a legacy task only has auto_prompt set, surface it in notes so the
   // user can see and edit it; we'll save it back as notes (auto_prompt
@@ -509,6 +529,85 @@ export function TaskComposer(props: Props) {
       })),
     ],
     [],
+  );
+
+  // task-ab1d7955e23f — project options: "None" (index 0) + one entry per
+  // project. value '' = no project. Hint surfaces the project description so
+  // the picker is glanceable.
+  const PROJECT_OPTIONS = useMemo(
+    () => [
+      { value: '', label: 'None', hint: 'no project' },
+      ...projects.map((p) => ({
+        value: p.id,
+        label: p.name,
+        hint: p.description ?? undefined,
+      })),
+    ],
+    [projects],
+  );
+  const [projectHighlight, setProjectHighlight] = useState(0);
+  // Keep the highlight aligned with the chosen project as the list loads /
+  // the selection changes (e.g. after a folder auto-attach resolves).
+  useEffect(() => {
+    const i = PROJECT_OPTIONS.findIndex((o) => o.value === projectId);
+    if (i >= 0) setProjectHighlight(i);
+  }, [PROJECT_OPTIONS, projectId]);
+
+  // Load the signed-in user's projects once TypeBuild is the target and the
+  // user is signed in. Non-PHI, so it's safe to hold in renderer state.
+  useEffect(() => {
+    if (!isTypebuild || !tbSignedIn) return;
+    let alive = true;
+    fm.typebuild.projects
+      .list()
+      .then((list) => {
+        if (alive) setProjects(list);
+      })
+      .catch(() => {
+        /* projects stay empty → only the "None" option is offered */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isTypebuild, tbSignedIn]);
+
+  // Folder auto-attach: when the composer opens from a folder (create mode),
+  // resolve that folder to its owning project and default-select it. Skipped
+  // once the user has touched the picker (so a deliberate choice isn't yanked
+  // back) and in edit mode (the saved project wins).
+  useEffect(() => {
+    if (props.mode !== 'create' || projectTouched || !isTypebuild || !tbSignedIn) return;
+    const f = props.defaultFolder;
+    if (!f) return;
+    let alive = true;
+    fm.typebuild.projects
+      .resolve(f)
+      .then((proj) => {
+        if (!alive || !proj) return;
+        // Guard against a late user pick racing the resolve.
+        if (projectTouched) return;
+        setProjectId(proj.id);
+        setProjectAutoAttached(true);
+        // Ensure the resolved project is present in the list even if the
+        // list call hasn't landed yet, so the chip + option render.
+        setProjects((prev) =>
+          prev.some((p) => p.id === proj.id) ? prev : [...prev, proj],
+        );
+      })
+      .catch(() => {
+        /* no owning project → stays "None" */
+      });
+    return () => {
+      alive = false;
+    };
+    // defaultFolder is stable for the composer's lifetime; intentionally not
+    // re-resolving on every keystroke.
+  }, [props.mode, projectTouched, isTypebuild, tbSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The currently-attached project object (for the chip / summary).
+  const attachedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
   );
 
   // If executor changes and the current When pick is hidden, reset.
@@ -668,6 +767,18 @@ export function TaskComposer(props: Props) {
     goNext();
   }
 
+  // task-ab1d7955e23f — TypeBuild project pick. Index 0 is "None".
+  function chooseProject(i: number) {
+    const o = PROJECT_OPTIONS[i];
+    if (!o) return;
+    setProjectId(o.value);
+    setProjectHighlight(i);
+    setProjectTouched(true);
+    // A manual pick is no longer an auto-attach (clears the "auto" chip note).
+    setProjectAutoAttached(false);
+    goNext();
+  }
+
   function choosePin(i: number) {
     const o = PIN_OPTIONS[i];
     if (!o) return;
@@ -698,6 +809,14 @@ export function TaskComposer(props: Props) {
         setWhoHighlight(0);
         goNext();
       } else setFolderHighlight((i) => i + 1);
+      return;
+    }
+    if (active === 'project') {
+      // task-ab1d7955e23f — Project → Who.
+      if (projectHighlight >= PROJECT_OPTIONS.length - 1) {
+        setWhoHighlight(0);
+        goNext();
+      } else setProjectHighlight((i) => i + 1);
       return;
     }
     if (active === 'who') {
@@ -758,9 +877,18 @@ export function TaskComposer(props: Props) {
       else setFolderHighlight((i) => i - 1);
       return;
     }
+    if (active === 'project') {
+      // task-ab1d7955e23f — Project ↑ → back to Title.
+      if (projectHighlight === 0) goBack();
+      else setProjectHighlight((i) => i - 1);
+      return;
+    }
     if (active === 'who') {
       if (whoHighlight === 0) {
-        setFolderHighlight(visibleFolderPresets.length - 1);
+        // task-ab1d7955e23f — the question before Who is Project (TypeBuild)
+        // or Folder (local).
+        if (isTypebuild) setProjectHighlight(PROJECT_OPTIONS.length - 1);
+        else setFolderHighlight(visibleFolderPresets.length - 1);
         goBack();
       } else setWhoHighlight((i) => i - 1);
       return;
@@ -934,6 +1062,11 @@ export function TaskComposer(props: Props) {
       // detail-panel PATCH, not the composer). So for the TypeBuild target we
       // attach them only on create; an edit just keeps the shared base + empty
       // folder.
+      // task-ab1d7955e23f — the chosen project rides the create as `projectId`
+      // (TaskCreate models it; the TypeBuild source maps it to `project_id`).
+      // Only meaningful for the TypeBuild target; the local source ignores it.
+      // '' (the "None" option) means "no project" → omit the key so a create
+      // that doesn't care leaves the server default untouched.
       const payload =
         isTypebuild && props.mode === 'create'
           ? {
@@ -942,6 +1075,7 @@ export function TaskComposer(props: Props) {
               // The chosen start date becomes defer_until for TypeBuild.
               deferUntil: resolvedStart,
               ...(parsedPriority !== undefined ? { priority: parsedPriority } : {}),
+              ...(projectId ? { projectId } : {}),
             }
           : isTypebuild
             ? { ...basePayload, folder: '' }
@@ -958,6 +1092,18 @@ export function TaskComposer(props: Props) {
         // title/notes — by design); send it directly.
         const t = await createTask(payload as TaskCreate, target);
         savedId = t.id;
+      } else if (isTypebuild) {
+        // task-ab1d7955e23f — TypeBuild edits don't go through updateTask
+        // (canEdit is false / the source throws); management-field edits ride
+        // the S4 detail-panel PATCH. A project change is a management field, so
+        // route it through the same 'patch' source action ('' clears it). Other
+        // composer fields for TypeBuild edits are owned by the detail panel.
+        if (projectId !== (initial?.projectId ?? '')) {
+          await taskSourceAction(target, props.task.id, 'patch', {
+            project_id: projectId,
+          });
+        }
+        savedId = props.task.id;
       } else {
         const t = await updateTask(
           props.task.id,
@@ -1053,6 +1199,23 @@ export function TaskComposer(props: Props) {
       if (!Number.isNaN(n) && n >= 1 && n <= visibleFolderPresets.length) {
         e.preventDefault();
         chooseFolderPreset(n - 1);
+        return;
+      }
+      return;
+    }
+    if (active === 'project') {
+      // task-ab1d7955e23f — arrow + Enter only. Project lists can run past 9
+      // entries, so digit shortcuts would be ambiguous; ↑/↓ moved the
+      // highlight above. Digits 1–9 still pick the first few as a convenience.
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        chooseProject(projectHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= Math.min(9, PROJECT_OPTIONS.length)) {
+        e.preventDefault();
+        chooseProject(n - 1);
         return;
       }
       return;
@@ -1194,6 +1357,10 @@ export function TaskComposer(props: Props) {
   function prioritySummary(): string {
     return priority === '' ? 'Unset' : `Priority ${priority}`;
   }
+  function projectSummary(): string {
+    if (!projectId) return 'None';
+    return attachedProject?.name ?? 'Project';
+  }
   function pinSummary(): string {
     return pinned ? 'Pinned' : 'Not pinned';
   }
@@ -1207,6 +1374,7 @@ export function TaskComposer(props: Props) {
   function answerFor(q: QuestionId): string {
     if (q === 'title') return title.trim();
     if (q === 'folder') return folderSummary();
+    if (q === 'project') return projectSummary();
     if (q === 'who') return whoSummary();
     if (q === 'when') return whenSummary();
     if (q === 'status') return statusSummary();
@@ -1223,6 +1391,7 @@ export function TaskComposer(props: Props) {
   function labelFor(q: QuestionId): string | null {
     if (q === 'title') return null;
     if (q === 'folder') return 'folder';
+    if (q === 'project') return 'project';
     if (q === 'who') return 'who';
     // fm-m2s4 (S5) — the start step is the defer date in TypeBuild mode.
     if (q === 'start') return isTypebuild ? 'defer' : 'start';
@@ -1237,6 +1406,7 @@ export function TaskComposer(props: Props) {
   function promptFor(q: QuestionId): string {
     if (q === 'title') return "What's this task?";
     if (q === 'folder') return 'Which folder?';
+    if (q === 'project') return 'Which project?';
     if (q === 'who') return 'Who runs this?';
     if (q === 'when') return executor === 'claude' ? 'When should it run?' : 'When is it due?';
     if (q === 'status') return "What's the status?";
@@ -1434,6 +1604,67 @@ export function TaskComposer(props: Props) {
               renderInert('folder')
             )}
           </section>
+          )}
+
+          {/* Project — task-ab1d7955e23f. TypeBuild only. "None" + one option
+              per project. Opening from a folder auto-attaches that folder's
+              owning project (surfaced as a chip so it's visible, not magic);
+              the user can override or pick None. Arrow + Enter to pick. */}
+          {isTypebuild && (
+            <section
+              className={sectionClasses('project')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('project'))}
+            >
+              {isActiveSection('project') ? (
+                <div className="composer__q-active-body">
+                  <div className="composer__q-prompt">{promptFor('project')}</div>
+                  {attachedProject && (
+                    <div className="composer__attached" role="status">
+                      <span className="composer__attached-chip">
+                        {attachedProject.name}
+                      </span>
+                      <span className="composer__attached-note">
+                        {projectAutoAttached
+                          ? `auto-attached from ${prettyFolder(props.mode === 'create' ? props.defaultFolder : '')}`
+                          : 'attached'}
+                      </span>
+                    </div>
+                  )}
+                  <ul className="composer__options" role="listbox">
+                    {PROJECT_OPTIONS.map((o, i) => (
+                      <li key={o.value || 'none'}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === projectHighlight}
+                          className={
+                            'composer__option' +
+                            (i === projectHighlight ? ' composer__option--active' : '')
+                          }
+                          onMouseEnter={() => setProjectHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            chooseProject(i);
+                          }}
+                        >
+                          {i < 9 ? (
+                            <kbd className="composer__option-key">{i + 1}</kbd>
+                          ) : (
+                            <span className="composer__option-key" aria-hidden="true" />
+                          )}
+                          <span className="composer__option-label">{o.label}</span>
+                          {o.hint && (
+                            <span className="composer__option-hint">{o.hint}</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                renderInert('project')
+              )}
+            </section>
           )}
 
           {/* Q3 — Who */}

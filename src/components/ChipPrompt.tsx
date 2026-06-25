@@ -163,6 +163,9 @@ type Verb =
   | 'welcome'
   | 'task'
   | 'tasks'
+  | 'projects'
+  | 'new-project'
+  | 'project-task'
   | 'sidebyside'
   | 'settings'
   | 'note'
@@ -1471,6 +1474,62 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    // task-83048f692491 — Projects home (Project Atlas). The calm projects
+    // grid → drill into a project's task tree, fully keyboard-operable. Lives
+    // in its own singleton tab alongside All tasks.
+    id: 'projects',
+    label: 'Projects',
+    aliases: ['projects', 'project', 'atlas', 'project home', 'project atlas'],
+    icon: '◳',
+    describe: () => 'Open Projects — grid of every project, drill into its task tree',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openProjects'));
+    },
+  },
+  {
+    // task-83048f692491 — create a project (or sub-project) inline. Opens the
+    // Projects home with the create form expanded.
+    id: 'new-project',
+    label: 'New project',
+    aliases: ['new project', 'add project', 'create project', 'mkproject', 'new sub-project'],
+    icon: '＋',
+    describe: () => 'Create a project / sub-project (name, parent, description, folder)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openProjects'));
+      // open into the create form once the page has mounted
+      requestAnimationFrame(() =>
+        window.dispatchEvent(new CustomEvent('fm:projects:new')),
+      );
+    },
+  },
+  {
+    // task-ba895e08c5d7 — project-scoped intent→proposal create. Distinct from
+    // `task` (generic guided composer): this leads with recipes, takes a
+    // free-form intent, and shows a proposed-task card that opens into the
+    // inherited project folder + cascading instructions + description. Confirm
+    // creates the task with projectId set. Pre-resolves the owning project from
+    // the active folder when there is one.
+    id: 'project-task',
+    label: 'New project task',
+    aliases: ['project task', 'propose', 'proposal', 'recipe', 'project todo', 'scoped task'],
+    icon: '◇',
+    describe: () => 'Propose a task scoped to a project (recipes + inherited instructions)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(
+        new CustomEvent('fm:openProjectTask', { detail: { folder: c.cwd } }),
+      );
+    },
+  },
+  {
     // fm-b5at.6 — toggle the TypeBuild side-by-side layout: Chrome left,
     // Breezefile right (restores previous bounds on toggle-off). App-level
     // verb (no file/tab scope). Own-window arrangement always works; Chrome
@@ -2361,6 +2420,25 @@ function buildTaskVerbs(): VerbDef[] {
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:open');
+        api.closeOverlay();
+      },
+    },
+    {
+      // task-5e9d866a377f — the task detail DRAWER verb. Distinct from
+      // open-task (which opens a TAB): this opens the right-docked sheet
+      // (Trace · Config · Session). The drawer auto-selects Trace when a
+      // run exists, Config otherwise; the handler also honors an optional
+      // initialTab if one is supplied.
+      id: 'open-detail' as Verb,
+      label: 'Open task detail',
+      aliases: ['inspect', 'detail', 'trace', 'session'],
+      icon: '◷',
+      describe: () => 'Open the task detail drawer (Trace · Config · Session)',
+      isAvailable: () => ({ ok: true }),
+      tabKinds: ['tasks'],
+      slots: [],
+      execute: (_c, _p, api) => {
+        fire('fm:tasks:open-detail');
         api.closeOverlay();
       },
     },

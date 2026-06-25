@@ -24,9 +24,11 @@ import { PrivacyHelpDialog } from './components/PrivacyHelpDialog';
 import { OpenWithDialog } from './components/OpenWithDialog';
 import { TaskComposer, type TaskComposerRequest } from './components/TaskComposer';
 import { RunHistoryDialog } from './components/RunHistoryDialog';
+import { TaskDetailDrawer } from './components/tasks/TaskDetailDrawer';
 import { RunTaskModal } from './components/RunTaskModal';
 import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
+import { ProjectsPage } from './components/projects/ProjectsPage';
 import { TaskShell } from './components/TaskShell';
 import { EditSplit } from './components/EditShell';
 import { BrowserPane, reapBrowserViews } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
@@ -41,6 +43,10 @@ import { handleTagControl, isTagControl, type TagControlReq } from './tagControl
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { SecretsPanel } from './components/SecretsPanel';
+import {
+  ProjectTaskProposal,
+  type ProjectTaskProposalRequest,
+} from './components/ProjectTaskProposal';
 import { TerminalSplit } from './components/TerminalSplit';
 import { TypebuildSessionBanner } from './components/TypebuildSessionBanner';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
@@ -56,7 +62,7 @@ import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } fr
 import { isTextEntryTarget } from './textFocus';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
-import type { CustomTagCriterion, Entry } from './types';
+import type { CustomTagCriterion, Entry, Task } from './types';
 import { TAG_PALETTE, assignTagKey, newTagId } from './tags';
 import './App.css';
 
@@ -138,11 +144,22 @@ function Shell() {
   const [helpOpen, setHelpOpen] = useState<{ slide?: HelpSlideId } | null>(null);
   // :secrets — the user's credential vault (NPI, Tax ID, login IDs). Server-backed.
   const [secretsOpen, setSecretsOpen] = useState(false);
+  // :project-task — project-scoped intent→proposal create flow (recipes +
+  // inherited folder/instructions/description). Opened via fm:openProjectTask.
+  const [projectTask, setProjectTask] =
+    useState<ProjectTaskProposalRequest | null>(null);
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskComposerRequest | null>(null);
   // fm-zf3m — run history dialog (sidebar context-menu "View run history").
   const [runHistoryFor, setRunHistoryFor] = useState<string | null>(null);
+  // task-5e9d866a377f — task detail DRAWER (Trace · Config · Session, Stop,
+  // Enter thread). Opened via fm:openTaskDetail with the task object + an
+  // optional initial tab; any task row can dispatch it.
+  const [taskDetail, setTaskDetail] = useState<{
+    task: Task;
+    initialTab?: 'trace' | 'config' | 'session';
+  } | null>(null);
   // fm-femh — Run-task modal: pick a task to run in the active folder tab.
   const [runTaskCwd, setRunTaskCwd] = useState<string | null>(null);
   // Inline-chat launch options: when the user opens a chat we first show a
@@ -1124,6 +1141,12 @@ function Shell() {
     function onSecrets() {
       setSecretsOpen(true);
     }
+    function onOpenProjectTask(e: Event) {
+      const detail = (e as CustomEvent).detail as
+        | ProjectTaskProposalRequest
+        | undefined;
+      setProjectTask(detail ?? {});
+    }
     function onOpenTask(e: Event) {
       const detail = (e as CustomEvent).detail as TaskComposerRequest | undefined;
       if (detail) setTaskDialog(detail);
@@ -1131,6 +1154,12 @@ function Shell() {
     function onOpenRunHistory(e: Event) {
       const detail = (e as CustomEvent).detail as { taskId?: string } | undefined;
       if (detail?.taskId) setRunHistoryFor(detail.taskId);
+    }
+    function onOpenTaskDetail(e: Event) {
+      const detail = (e as CustomEvent).detail as
+        | { task?: Task; initialTab?: 'trace' | 'config' | 'session' }
+        | undefined;
+      if (detail?.task) setTaskDetail({ task: detail.task, initialTab: detail.initialTab });
     }
     function onOpenRunTask(e: Event) {
       const detail = (e as CustomEvent).detail as { cwd?: string } | undefined;
@@ -1155,6 +1184,21 @@ function Shell() {
       if (folder !== undefined) {
         window.dispatchEvent(
           new CustomEvent('fm:tasks:folder-filter', { detail: { folder } }),
+        );
+      }
+    }
+    function onOpenProjects(e: Event) {
+      // task-83048f692491 — open (or focus) the singleton Projects-home tab.
+      // Optional `projectId` deep-link drills straight into a project; stash it
+      // on window so a freshly-mounted ProjectsPage applies it, and re-broadcast
+      // so an already-mounted page reacts immediately.
+      const projectId = (e as CustomEvent).detail?.projectId as string | undefined;
+      const w = window as unknown as { __fmProjectsDeepLink?: string };
+      if (projectId !== undefined) w.__fmProjectsDeepLink = projectId;
+      dispatch({ type: 'openProjectsTab' });
+      if (projectId !== undefined) {
+        window.dispatchEvent(
+          new CustomEvent('fm:projects:focus', { detail: { projectId } }),
         );
       }
     }
@@ -1189,11 +1233,14 @@ function Shell() {
     window.addEventListener('fm:tagPicker', onTagPicker);
     window.addEventListener('fm:openHelp', onHelp);
     window.addEventListener('fm:openSecrets', onSecrets);
+    window.addEventListener('fm:openProjectTask', onOpenProjectTask);
     window.addEventListener('fm:openWelcome', onWelcome);
     window.addEventListener('fm:openTask', onOpenTask);
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
+    window.addEventListener('fm:openProjects', onOpenProjects);
     window.addEventListener('fm:openSettings', onOpenSettings);
     window.addEventListener('fm:openRunHistory', onOpenRunHistory);
+    window.addEventListener('fm:openTaskDetail', onOpenTaskDetail);
     window.addEventListener('fm:openRunTask', onOpenRunTask);
     window.addEventListener('fm:reloadDir', onReloadDir);
     window.addEventListener('fm:setStatus', onSetStatus);
@@ -1211,11 +1258,14 @@ function Shell() {
       window.removeEventListener('fm:tagPicker', onTagPicker);
       window.removeEventListener('fm:openHelp', onHelp);
       window.removeEventListener('fm:openSecrets', onSecrets);
+      window.removeEventListener('fm:openProjectTask', onOpenProjectTask);
       window.removeEventListener('fm:openWelcome', onWelcome);
       window.removeEventListener('fm:openTask', onOpenTask);
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
+      window.removeEventListener('fm:openProjects', onOpenProjects);
       window.removeEventListener('fm:openSettings', onOpenSettings);
       window.removeEventListener('fm:openRunHistory', onOpenRunHistory);
+      window.removeEventListener('fm:openTaskDetail', onOpenTaskDetail);
       window.removeEventListener('fm:openRunTask', onOpenRunTask);
       window.removeEventListener('fm:reloadDir', onReloadDir);
       window.removeEventListener('fm:setStatus', onSetStatus);
@@ -1267,6 +1317,7 @@ function Shell() {
   // takes over via TerminalSplit, identical to folder tabs.
   const isTaskTab = tab.kind === 'task';
   const isTasksTab = tab.kind === 'tasks';
+  const isProjectsTab = tab.kind === 'projects';
   const isEditTab = tab.kind === 'edit';
   const isBrowserTab = tab.kind === 'browser'; // SPIKE (spike/playwright-cdp)
 
@@ -1291,7 +1342,7 @@ function Shell() {
           and let the task header own the top edge of the main pane. */}
       <div className="shell__chrome">
         <Tabbar />
-        {!isTaskTab && !isTasksTab && !isEditTab && !isBrowserTab && (
+        {!isTaskTab && !isTasksTab && !isProjectsTab && !isEditTab && !isBrowserTab && (
           <Pathbar
             path={tab.trail[tab.trail.length - 1]}
             onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
@@ -1306,7 +1357,7 @@ function Shell() {
           all-tasks page (isTasksTab): that page is its own inbox (list +
           detail), so the global Sidebar was redundant clutter; skipping the
           render also avoids mounting its location/source-polling effects. */}
-      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && !isTasksTab && <Sidebar />}
+      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && !isTasksTab && !isProjectsTab && <Sidebar />}
       {/* main slot — folder tabs render the recessed file plate; task
           tabs render TaskShell (header / actions / folder context).
           TerminalSplit wraps both so embedded terminals work in either
@@ -1347,6 +1398,8 @@ function Shell() {
             <TaskShell tabIndex={state.activeTab} />
           ) : isTasksTab ? (
             <TasksPage />
+          ) : isProjectsTab ? (
+            <ProjectsPage />
           ) : isEditTab ? (
             // Edit tabs render in the persistent EditSplit layer below so
             // they survive tab switches; nothing to draw here.
@@ -1371,7 +1424,7 @@ function Shell() {
           user can browse, toggle, and combine tags without leaving the file
           list. Hidden in terminal mode (fm-jtu) and in task mode (no
           file selected = nothing to preview). */}
-      {!tab.terminal && !isTaskTab && !isTasksTab && !isEditTab && !isBrowserTab && (
+      {!tab.terminal && !isTaskTab && !isTasksTab && !isProjectsTab && !isEditTab && !isBrowserTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
       {/* chat slot — fm-dly3 agent chat panel, docked right. Renders for the
@@ -1552,10 +1605,23 @@ function Shell() {
         />
       )}
       {secretsOpen && <SecretsPanel onClose={() => setSecretsOpen(false)} />}
+      {projectTask && (
+        <ProjectTaskProposal
+          {...projectTask}
+          onClose={() => setProjectTask(null)}
+        />
+      )}
       {runHistoryFor && (
         <RunHistoryDialog
           taskId={runHistoryFor}
           onClose={() => setRunHistoryFor(null)}
+        />
+      )}
+      {taskDetail && (
+        <TaskDetailDrawer
+          task={taskDetail.task}
+          initialTab={taskDetail.initialTab}
+          onClose={() => setTaskDetail(null)}
         />
       )}
       {runTaskCwd && (

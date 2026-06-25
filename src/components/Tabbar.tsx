@@ -134,7 +134,8 @@ export function Tabbar() {
     // fm-yi85 — tasks-overview tab lives in the task zone too. The visual
     // grouping reads as "files on the left, task surfaces on the right",
     // and the All-tasks tab is the natural pivot point between those.
-    if (tab.kind === 'task' || tab.kind === 'tasks') taskTabs.push({ tab, index });
+    if (tab.kind === 'task' || tab.kind === 'tasks' || tab.kind === 'projects')
+      taskTabs.push({ tab, index });
     else folderTabs.push({ tab, index });
   });
 
@@ -154,6 +155,7 @@ export function Tabbar() {
     const folderName = basename(cwd) || '/';
     const isTask = t.kind === 'task';
     const isTasksOverview = t.kind === 'tasks';
+    const isProjects = t.kind === 'projects';
     const isEdit = t.kind === 'edit';
     const isBrowser = t.kind === 'browser'; // SPIKE (spike/playwright-cdp)
     // Defensive: a task tab without a resolvable id/title falls back to
@@ -161,7 +163,9 @@ export function Tabbar() {
     // fm-yi85 — tasks-overview tab gets a fixed "All tasks" label.
     // fm-vu55 — edit tabs label by the file's basename.
     const editName = isEdit && t.editPath ? basename(t.editPath) : '';
-    const label = isTasksOverview
+    const label = isProjects
+      ? 'Projects'
+      : isTasksOverview
       ? 'All tasks'
       : isBrowser
         ? 'Browser'
@@ -197,7 +201,9 @@ export function Tabbar() {
             ? ' · terminal alert'
             : '';
     const shortcutHint = pos <= 9 ? ` (${modKey}${pos})` : '';
-    const baseTitle = isTasksOverview
+    const baseTitle = isProjects
+      ? 'Projects' + shortcutHint
+      : isTasksOverview
       ? 'All tasks' + shortcutHint
       : (isTask ? `${label} — ${cwd}` : cwd) + shortcutHint;
     return (

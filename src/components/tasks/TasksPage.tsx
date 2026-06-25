@@ -17,7 +17,7 @@
 //   ↑/↓ or j/k   move cursor
 //   Space        toggle selection on cursor row
 //   Shift+↑/↓    extend selection
-//   Enter        open edit (manual) / focus detail (agent)
+//   Enter        open edit (manual) / open detail drawer (agent)
 //   /            focus search
 //   [ / ]        shift due ∓1 day (caps.canEdit rows only)
 //   w            shift due +7 days (caps.canEdit rows only)
@@ -229,6 +229,14 @@ function TasksPageInner() {
   function openRuns(task: Task) {
     window.dispatchEvent(
       new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),
+    );
+  }
+  // task-5e9d866a377f — open the full task detail DRAWER (Trace · Config ·
+  // Session, Stop, Enter thread). Pass the task object so the drawer renders
+  // without a refetch (the decrypted body is still lazy-loaded inside).
+  function openDetail(task: Task, initialTab?: 'trace' | 'config' | 'session') {
+    window.dispatchEvent(
+      new CustomEvent('fm:openTaskDetail', { detail: { task, initialTab } }),
     );
   }
   function rowOpenInTab(task: Task) {
@@ -489,10 +497,11 @@ function TasksPageInner() {
     setCursorId(task.id);
   }
   function rowActivate(task: Task) {
-    // Enter / double-click. Manual → edit; agent → focus detail (cursor).
+    // Enter / double-click. Manual → edit dialog; agent (read-only) → open the
+    // full detail DRAWER (Trace · Config · Session, Stop, Enter thread).
     const caps = capsFor(task);
     if (caps ? caps.canEdit : true) openEdit(task);
-    else setCursorId(task.id);
+    else openDetail(task);
   }
   function moveCursor(delta: number, extend: boolean) {
     if (flatOrder.length === 0) return;
@@ -632,6 +641,26 @@ function TasksPageInner() {
       },
       'fm:tasks:goto-folder': () => {
         for (const t of targetTasks()) rowGotoFolder(t);
+      },
+      // task-5e9d866a377f — open the detail DRAWER for the targeted task
+      // (single target; the drawer is a per-task view, not a bulk op). Resolve
+      // the cursor row directly so this doesn't depend on the later-declared
+      // detailTask memo.
+      'fm:tasks:open-detail': (detail?: unknown) => {
+        const ids = new Set(targetIds());
+        const t =
+          (ids.size === 1
+            ? flatOrder.find((x) => ids.has(x.id))
+            : cursorId
+              ? flatOrder.find((x) => x.id === cursorId)
+              : null) ?? null;
+        if (!t) {
+          dispatch({ type: 'setStatus', msg: 'no task targeted' });
+          return;
+        }
+        const initialTab = (detail as { initialTab?: 'trace' | 'config' | 'session' } | undefined)
+          ?.initialTab;
+        openDetail(t, initialTab);
       },
       'fm:tasks:open': () => {
         const tasks = targetTasks();
@@ -1112,6 +1141,7 @@ function TasksPageInner() {
               onDelete={() => detailTask && confirmDelete([detailTask])}
               onSourceAction={(act) => detailTask && void actions.sourceAction(detailTask, act)}
               onOpenRuns={() => detailTask && openRuns(detailTask)}
+              onOpenDetail={(tab) => detailTask && openDetail(detailTask, tab)}
             />
           </div>
       </>

@@ -1,0 +1,320 @@
+/* ProjectTaskProposal — the project-scoped "intent → proposal" create flow.
+ *
+ * Opened via the `:project-task` verb. Three calm steps inside one modal,
+ * mirroring the Project Atlas direction (calm by default, one bright thing):
+ *   1. pick    — choose the project this task belongs to (skipped when scoped)
+ *   2. compose — RECIPES first, then a free-form intent line
+ *   3. propose — a proposed-task card; opening shows inherited folder +
+ *                cascading instructions (provenance) + effective description
+ *
+ * Reuses the shared `.overlay` box convention (see SecretsPanel.css) and the
+ * token palette in src/styles/tokens.css — never hardcoded colors. The "needs
+ * you / attention" hue is --warn; --accent is reserved for the primary path.
+ */
+
+.ptp-panel {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-5) var(--sp-6) var(--sp-5);
+  width: min(640px, 94vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  color: var(--fg-1);
+  animation: ptp-in var(--motion-enter) both;
+}
+
+@keyframes ptp-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+.ptp-panel__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px; /* pill — no --r-pill token exists yet */
+  color: var(--fg-3);
+  font-size: var(--fs-lg);
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.ptp-panel__close:hover { background: var(--border-1); color: var(--fg-1); }
+
+/* ── header ─────────────────────────────────────────────────────────── */
+.ptp-panel__eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  font-weight: 600;
+}
+.ptp-panel__crumb {
+  font-family: var(--font-sans);
+  font-size: var(--fs-2xs);
+  color: var(--accent);
+  font-weight: 600;
+}
+.ptp-panel__title {
+  margin: 4px 0 6px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--fs-xl);
+  letter-spacing: -0.01em;
+  line-height: 1.12;
+  color: var(--fg-1);
+}
+.ptp-panel__lede {
+  margin: 0 0 16px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+
+.ptp-panel__error {
+  margin: 8px 0 12px;
+  font-size: var(--fs-sm);
+  color: var(--err);
+}
+.ptp-panel__status {
+  margin: 12px 0;
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+/* ── step 1: project picker ─────────────────────────────────────────── */
+.ptp-projects { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ptp-project {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--fg-1);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color var(--motion-hover), background var(--motion-hover);
+}
+.ptp-project:hover { border-color: var(--border-2); background: var(--bg-3); }
+.ptp-project.is-cursor {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ptp-project__key {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--accent);
+  background: var(--accent-soft);
+  width: 20px; height: 20px;
+  border-radius: var(--r-sm);
+  display: grid; place-items: center;
+  flex: 0 0 auto;
+}
+.ptp-project__key--inline { margin-right: var(--sp-2); }
+.ptp-project__body { min-width: 0; flex: 1; }
+.ptp-project__name { font-weight: 600; font-size: var(--fs-sm); }
+.ptp-project__crumb { font-size: var(--fs-2xs); color: var(--fg-3); }
+.ptp-project__desc {
+  font-size: var(--fs-xs); color: var(--fg-2);
+  margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ptp-project__meta {
+  font-size: var(--fs-2xs); color: var(--fg-3);
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── step 2: recipes + intent ───────────────────────────────────────── */
+.ptp-section-lbl {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fg-3);
+  font-weight: 600;
+  margin: 4px 0 8px;
+}
+.ptp-recipes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+@media (max-width: 520px) { .ptp-recipes { grid-template-columns: 1fr; } }
+.ptp-recipe {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  text-align: left;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  border-radius: var(--r-md);
+  padding: 10px var(--sp-3);
+  color: var(--fg-1);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color var(--motion-hover), background var(--motion-hover);
+}
+.ptp-recipe:hover { border-color: var(--border-2); background: var(--bg-3); }
+.ptp-recipe.is-cursor {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ptp-recipe__ic { font-size: var(--fs-md); flex: 0 0 auto; line-height: 1.3; }
+.ptp-recipe__name { font-weight: 600; font-size: var(--fs-sm); }
+.ptp-recipe__sub { font-size: var(--fs-2xs); color: var(--fg-3); margin-top: 1px; }
+
+.ptp-intent { margin-top: 4px; }
+.ptp-intent__input {
+  width: 100%;
+  font: inherit;
+  font-size: var(--fs-md);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-3);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  outline: 0;
+}
+.ptp-intent__input:focus { border-color: var(--accent); }
+.ptp-intent__hint { font-size: var(--fs-2xs); color: var(--fg-3); margin-top: 6px; }
+
+/* ── step 3: proposal ───────────────────────────────────────────────── */
+.ptp-proposal__tag {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.ptp-proposal__card {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  padding: var(--sp-4) var(--sp-4);
+  margin-bottom: 16px;
+}
+.ptp-proposal__title {
+  font-weight: 600;
+  font-size: var(--fs-lg);
+  line-height: 1.3;
+  margin-bottom: 4px;
+}
+.ptp-proposal__why { font-size: var(--fs-xs); color: var(--fg-2); line-height: 1.45; }
+
+/* a calm fact grid: who / folder / when, each marked inferred */
+.ptp-facts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3) var(--sp-5); margin-bottom: 16px; }
+.ptp-fact .k {
+  font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+.ptp-fact .v { font-size: var(--fs-sm); margin-top: 3px; }
+.ptp-fact .v .mono { font-family: var(--font-mono); font-size: var(--fs-xs); }
+.ptp-fact .inferred {
+  font-size: var(--fs-2xs); color: var(--fg-3);
+  border: 1px solid var(--border-1); border-radius: var(--r-sm);
+  padding: 1px 5px; margin-left: var(--sp-2);
+}
+
+/* disclosure — inherited context (folder / instructions / description) */
+.ptp-disc { border-top: 1px solid var(--border-1); }
+.ptp-disc__dt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 2px; cursor: pointer; user-select: none;
+  font-size: var(--fs-sm); color: var(--fg-1);
+}
+.ptp-disc__tw {
+  color: var(--fg-3); font-size: var(--fs-2xs);
+  transition: transform var(--motion-hover);
+}
+.ptp-disc.is-open .ptp-disc__tw { transform: rotate(90deg); }
+.ptp-disc__hint { margin-left: auto; color: var(--fg-3); font-size: var(--fs-xs); }
+.ptp-disc__dc { display: none; padding: 0 2px 14px; }
+.ptp-disc.is-open .ptp-disc__dc { display: block; }
+
+/* cascade group (Project / Category / Task), borderless inner atoms */
+.ptp-scope { margin-bottom: 16px; }
+.ptp-scope__gh { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ptp-scope__pill {
+  font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 600; border-radius: var(--r-md); padding: 2px 7px;
+  color: var(--fg-2); background: var(--bg-3);
+}
+.ptp-scope--task .ptp-scope__pill { color: var(--warn); background: var(--accent-soft); }
+.ptp-scope__nm { font-size: var(--fs-xs); font-weight: 600; }
+.ptp-scope__nm .mono { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--fg-2); font-weight: 400; }
+.ptp-scope__gc { margin-left: auto; font-size: var(--fs-2xs); color: var(--fg-3); }
+.ptp-scope__card {
+  background: var(--bg-1);
+  border-radius: var(--r-md);
+  padding: 2px var(--sp-3);
+}
+.ptp-scope--task .ptp-scope__card { box-shadow: inset 3px 0 0 var(--warn); }
+.ptp-rule {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: var(--sp-2) 0; font-size: var(--fs-sm); line-height: 1.4;
+}
+.ptp-rule + .ptp-rule { border-top: 1px solid var(--border-1); }
+.ptp-rule__q { color: var(--accent); flex: 0 0 auto; line-height: 1.1; }
+.ptp-rule__t { flex: 1; }
+
+.ptp-casc-summary { font-size: var(--fs-xs); color: var(--fg-3); margin: 2px 2px 0; line-height: 1.5; }
+.ptp-desc {
+  font-size: var(--fs-sm); color: var(--fg-2); line-height: 1.5;
+  white-space: pre-wrap;
+}
+.ptp-desc__seg + .ptp-desc__seg { margin-top: 8px; }
+.ptp-desc__from { font-size: var(--fs-2xs); color: var(--fg-3); display: block; margin-bottom: 2px; }
+.ptp-empty { font-size: var(--fs-xs); color: var(--fg-3); padding: 4px 0 10px; }
+.ptp-empty--inline { padding: 0; }
+
+.ptp-folder { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-1); }
+.ptp-folder--many { display: grid; gap: 4px; margin-top: 4px; }
+
+/* ── footer / actions ───────────────────────────────────────────────── */
+.ptp-footer {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--border-1);
+}
+.ptp-footer__spacer { flex: 1; }
+.ptp-btn {
+  font: inherit; font-size: var(--fs-sm);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-4); cursor: pointer;
+  border: 1px solid var(--border-2);
+  background: var(--bg-1); color: var(--fg-1);
+  transition: filter var(--motion-hover), border-color var(--motion-hover);
+}
+.ptp-btn:hover { filter: brightness(1.06); border-color: var(--accent); }
+.ptp-btn--primary {
+  background: var(--accent); color: var(--text-on-accent);
+  border-color: transparent; font-weight: 600;
+}
+.ptp-btn--primary:disabled { opacity: 0.5; cursor: default; filter: none; }
+.ptp-btn__kbd {
+  font-family: var(--font-mono); font-size: var(--fs-2xs);
+  margin-left: 8px; opacity: 0.7;
+}
+
+.ptp-flash {
+  font-size: var(--fs-sm); color: var(--accent); font-weight: 600;
+  padding: var(--sp-2) 2px;
+}

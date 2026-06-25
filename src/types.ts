@@ -32,7 +32,10 @@ export type TagFilter = { mode: TagFilterMode; ids: string[] };
 // carries the actual file path and `dirty` tracks unsaved changes.
 // SPIKE (spike/playwright-cdp): 'browser' is an embedded web view tab backed
 // by a main-process WebContentsView (see BrowserPane / electron browser:*).
-export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser';
+// task-83048f692491 — 'projects' is the singleton Projects-home tab (Project
+// Atlas): the calm projects grid → drill-into a project's task tree. Like
+// 'tasks' it ignores `trail` for rendering and gates its own scoped verbs.
+export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects';
 
 export type Tab = {
   id: string;
@@ -209,6 +212,9 @@ export type Task = {
   dependsOn?: string[];
   depsSatisfied?: boolean;
   blockedBy?: string[];
+  // task-ab1d7955e23f — owning TypeBuild project container (opaque id,
+  // non-PHI). Carried from the server `project_id`; absent on local rows.
+  projectId?: string | null;
 };
 
 // fm-b5at.1 — per-source capability flags. The UI gates row affordances

@@ -56,6 +56,7 @@ export function TaskDetailPanel({
   onDelete,
   onSourceAction,
   onOpenRuns,
+  onOpenDetail,
 }: {
   task: Task | null;
   caps?: TaskSourceCapabilities;
@@ -72,6 +73,8 @@ export function TaskDetailPanel({
   onDelete: () => void;
   onSourceAction: (action: 'release' | 'reopen' | 'complete' | 'cancel') => void;
   onOpenRuns: () => void;
+  // task-5e9d866a377f — open the full detail DRAWER (Trace · Config · Session).
+  onOpenDetail: (tab?: 'trace' | 'config' | 'session') => void;
 }) {
   if (selectedCount > 1) {
     return (
@@ -114,6 +117,7 @@ export function TaskDetailPanel({
         onGotoFolder={onGotoFolder}
         onSourceAction={onSourceAction}
         onDelete={onDelete}
+        onOpenDetail={onOpenDetail}
       />
     );
   }
@@ -132,6 +136,7 @@ export function TaskDetailPanel({
       onTogglePin={onTogglePin}
       onDelete={onDelete}
       onOpenRuns={onOpenRuns}
+      onOpenDetail={onOpenDetail}
     />
   );
 }
@@ -183,6 +188,7 @@ function ManualDetail({
   onTogglePin,
   onDelete,
   onOpenRuns,
+  onOpenDetail,
 }: {
   task: Task;
   caps?: TaskSourceCapabilities;
@@ -196,6 +202,7 @@ function ManualDetail({
   onTogglePin: () => void;
   onDelete: () => void;
   onOpenRuns: () => void;
+  onOpenDetail: (tab?: 'trace' | 'config' | 'session') => void;
 }) {
   const today = todayISO();
   const overdue =
@@ -313,6 +320,14 @@ function ManualDetail({
       )}
 
       <div className="tasks__detail-actions">
+        <button
+          type="button"
+          className="tasks__btn"
+          onClick={() => onOpenDetail()}
+          title="Open the full detail drawer (Trace · Config · Session)"
+        >
+          Open ↗
+        </button>
         {canEdit && (
           <button type="button" className="tasks__btn" onClick={onEdit}>
             Edit
@@ -380,6 +395,7 @@ function AgentDetail({
   onGotoFolder,
   onSourceAction,
   onDelete,
+  onOpenDetail,
 }: {
   task: Task;
   caps?: TaskSourceCapabilities;
@@ -390,6 +406,7 @@ function AgentDetail({
   onGotoFolder: () => void;
   onSourceAction: (action: 'release' | 'reopen' | 'complete' | 'cancel') => void;
   onDelete: () => void;
+  onOpenDetail: (tab?: 'trace' | 'config' | 'session') => void;
 }) {
   const { dispatch } = useStore();
   const say = useCallback(
@@ -557,6 +574,14 @@ function AgentDetail({
       </div>
 
       <div className="tasks__detail-actions">
+        <button
+          type="button"
+          className="tasks__btn"
+          onClick={() => onOpenDetail()}
+          title="Open the full detail drawer (Trace · Config · Session)"
+        >
+          Open ↗
+        </button>
         <button type="button" className="tasks__btn" onClick={onOpenInTab}>
           Open tab
         </button>

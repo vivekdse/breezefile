@@ -21,11 +21,13 @@
     var(--emoji);
 
   /* Bumped one step up throughout for better legibility on big monitors. */
+  --fs-2xs: 11px;        /* micro-caption (badges, segment captions, mono ids) */
   --fs-xs: 12px;
   --fs-sm: 13px;
   --fs-md: 14px;
   --fs-lg: 16px;
   --fs-xl: 20px;
+  --fs-display: 40px;    /* empty-state / hero glyph */
   --lh-tight: 1.25;
   --lh-normal: 1.55;
   --tracking-tight: -0.01em;
@@ -174,6 +176,13 @@
   --ok: #8fe6b8;             /* new growth */
   --warn: #ffd28a;           /* signal fire */
   --err: #ff9a9a;            /* alpenglow flare */
+
+  /* Soft tints — semantic counterparts to --accent-soft, derived from the
+     live status token so they stay on-hue in every theme (the paper family
+     inherits --warn/--err from here; light/themes that override them
+     recompute the tint against their own value). */
+  --warn-soft: color-mix(in srgb, var(--warn) 16%, transparent);
+  --err-soft: color-mix(in srgb, var(--err) 16%, transparent);
 
   /* Shadows — deep alpine night, with a faint teal rim for premium depth */
   --shadow-1: 0 1px 2px rgba(0, 8, 20, 0.5);

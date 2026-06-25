@@ -275,6 +275,27 @@
 }
 .composer__quickpick-label { font-weight: 500; }
 
+/* task-ab1d7955e23f — folder auto-attach: the project that got attached
+   shows as a visible chip above the project options (calm, not magic). */
+.composer__attached {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-1) 0 var(--sp-3);
+  font-size: var(--fs-xs);
+}
+.composer__attached-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.composer__attached-note { color: var(--muted); }
+
 .composer__path-input {
   width: 100%;
   background: transparent;

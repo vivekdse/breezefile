@@ -1033,13 +1033,29 @@ export class TypeBuildTaskSource implements TaskSource {
     // session runs here and loads the seeded settings via --settings below.
     const { cwd: tasksCwd, settingsPath } = ensureTasksWorkspace();
 
+    // task-ab1d7955e23f (item 4) — project-derived launch context. When the
+    // task belongs to a TypeBuild project, run it IN the project's folder and
+    // inject the project's cascading instructions into the session. Resolved
+    // with effective=1 so we get the merged (parent → child) instructions.
+    // Defensive: a null/folderless project, a missing folder, or any resolve
+    // error falls back to the generic tasks workspace and an instruction-free
+    // prompt — the session still launches. Project name/instructions/folders
+    // are NON-PHI teaching context; the task title/body are never touched here.
+    const projectCtx = await this.resolveLaunchContext(id);
+    const runCwd = projectCtx.cwd ?? tasksCwd;
+
     // Pre-claimed Start (fm-v0rc): we already hold the claim over REST, so the
     // session must NOT re-claim (the in-session claim is conditional on
     // status=open and would 409 now). Tell the agent the task is already mine
     // and to run /work without claiming. ONLY the opaque task id — no PHI.
-    const prompt = opts.preclaimed
+    const basePrompt = opts.preclaimed
       ? `Task ${id} is already claimed by me. Run /mcp__typebuild__work for task ${id} — do not claim it again.`
       : `Run /mcp__typebuild__work and claim task ${id}`;
+    // Prepend the project's effective instructions (NON-PHI) as context so the
+    // agent operates with the project's cascading guidance from the first turn.
+    const prompt = projectCtx.instructions
+      ? `${projectCtx.instructions}\n\n---\n\n${basePrompt}`
+      : basePrompt;
 
     let ptyId = 0;
     const res = await runTaskInteractive(synthetic, {
@@ -1049,7 +1065,9 @@ export class TypeBuildTaskSource implements TaskSource {
       // On resume, suppress the positional prompt so --continue resumes the
       // existing conversation rather than seeding a new /work claim.
       omitPrompt: opts.resume,
-      cwd: tasksCwd,
+      // Project folder when the task belongs to a project (resolveLaunchContext),
+      // else the generic app-owned tasks workspace.
+      cwd: runCwd,
       // No local run row: FK to tasks(id) would fail for a remote id.
       recordRun: false,
       // PHI: generic, content-free tab label.
@@ -1168,6 +1186,48 @@ export class TypeBuildTaskSource implements TaskSource {
   // Build a minimal local-shape Task to feed runTaskInteractive. It NEVER
   // carries the decrypted title/body (PHI) — the prompt and label are built
   // from the opaque id only, so a benign placeholder title is safe and unused.
+  // task-ab1d7955e23f (item 4) — derive a project-scoped launch context for a
+  // task: the run cwd (the project's first existing folder) and the project's
+  // cascading instructions (effective, NON-PHI) to inject into the session.
+  //
+  // Capabilities-driven + defensive: returns an empty context (caller falls
+  // back to the generic tasks workspace + instruction-free prompt) when the
+  // source doesn't expose projects, the task has no projectId, the project is
+  // not visible / has no folders, the chosen folder doesn't exist locally, or
+  // any resolve call throws. We NEVER read the task title/body here — only the
+  // opaque task id and the non-PHI project (name/instructions/folders).
+  private async resolveLaunchContext(
+    id: string,
+  ): Promise<{ cwd?: string; instructions?: string }> {
+    // Projects are a capability of THIS source (getProject is always present
+    // here); gate defensively in case the method is ever made optional.
+    if (typeof this.getProject !== 'function') return {};
+    // projectId rides the cached list row (mapListRow). No extra fetch needed
+    // to learn whether the task belongs to a project.
+    const projectId = this.cache.get(id)?.projectId ?? null;
+    if (!projectId) return {};
+    try {
+      const project = await this.getProject(projectId, { effective: true });
+      if (!project) return {};
+      // First folder that exists locally becomes the run cwd. A folder that is
+      // configured on the project but absent on THIS machine is skipped so we
+      // don't spawn into a non-existent dir.
+      const cwd = project.folders.find(
+        (f) => typeof f === 'string' && f.trim() && existsSync(f),
+      );
+      const instructions =
+        typeof project.effectiveInstructions === 'string' &&
+        project.effectiveInstructions.trim()
+          ? project.effectiveInstructions.trim()
+          : undefined;
+      return { cwd, instructions };
+    } catch {
+      // Resolve failed (network / not visible / parse) — fall back silently.
+      // PHI-free: nothing about the task or project is logged.
+      return {};
+    }
+  }
+
   private syntheticTask(id: string, flags: string[]): Task {
     const now = Date.now();
     return {
@@ -1298,6 +1358,14 @@ export class TypeBuildTaskSource implements TaskSource {
       const s = typeof v === 'string' ? v : '';
       body.defer_until = s;
       cachePatch.deferUntil = s === '' ? null : s;
+    }
+    // task-ab1d7955e23f — owning project container. '' clears the association
+    // (the composer's "None" option), an opaque id attaches it. Non-PHI.
+    if ('project_id' in input) {
+      const v = input.project_id;
+      const s = typeof v === 'string' ? v : '';
+      body.project_id = s;
+      cachePatch.projectId = s === '' ? null : s;
     }
 
     // Nothing recognized — a no-op rather than a wasted round-trip.

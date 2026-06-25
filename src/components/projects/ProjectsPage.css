@@ -1,0 +1,573 @@
+/*
+ * task-83048f692491 — Projects home (Project Atlas). A calm spatial-zoom
+ * surface that lives inline in the existing shell (kind='projects' tab):
+ *   L1 GRID    every project as a card — the ONE bright thing is "needs you"
+ *   L1 SCOPED  a project with children shows the SAME grid, scoped + breadcrumb
+ *   L2 DETAIL  drill into a project → its parent→child task tree with roll-up
+ *              sentences + visible dependencies
+ *
+ * Translated from variation-10-project-atlas.html into the app's real tokens
+ * (src/styles/tokens.css). Calm by default: ~3 attention colors —
+ *   working  → --accent   needs-you → --warn   blocked → --err
+ * everything resolved/passive → --fg-3 / --fg-dim. One status signal per row.
+ */
+
+.projects {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: var(--canvas, var(--panel));
+  color: var(--text-on-panel);
+  font-family: var(--font-sans);
+}
+
+.projects__page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: var(--sp-6) var(--sp-5) var(--sp-8);
+}
+
+/* ── breadcrumb / zoom indicator ─────────────────────────────────────────── */
+.projects__crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  margin-bottom: var(--sp-3);
+}
+.projects__crumb-clk {
+  cursor: pointer;
+  color: var(--muted-on-panel);
+  background: none;
+  border: 0;
+  font: inherit;
+  padding: 0;
+}
+.projects__crumb-clk:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.projects__crumb-here {
+  color: var(--text-on-panel);
+  font-weight: 650;
+}
+.projects__crumb-sep {
+  color: var(--fg-dim);
+}
+.projects__zoom {
+  margin-left: auto;
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+.projects__zoom i {
+  width: var(--sp-2);
+  height: var(--sp-2);
+  border-radius: 50%;
+  background: var(--border-2);
+}
+.projects__zoom i.on {
+  background: var(--accent);
+}
+
+/* ── L1 head + hero ──────────────────────────────────────────────────────── */
+.projects__head {
+  margin: var(--sp-2) 0 var(--sp-4);
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+.projects__head-text {
+  min-width: 0;
+}
+.projects__title {
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  margin: 0 0 var(--sp-1);
+  letter-spacing: var(--tracking-tight);
+}
+.projects__sub {
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm);
+}
+.projects__head-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.projects__btn {
+  font: inherit;
+  font-size: var(--fs-sm);
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+  border: 1px solid var(--rule-on-panel);
+  background: var(--panel-2, var(--panel));
+  color: var(--text-on-panel);
+  white-space: nowrap;
+}
+.projects__btn:hover {
+  border-color: var(--accent);
+}
+.projects__btn--primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: transparent;
+  font-weight: 650;
+}
+
+.projects__hero {
+  margin: var(--sp-3) 0 var(--sp-6);
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--rule-on-panel);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r-xl);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+}
+.projects__hero--clear {
+  border-left-color: var(--accent);
+  color: var(--muted-on-panel);
+}
+.projects__hero b {
+  color: var(--warn);
+}
+.projects__hero-open {
+  color: var(--accent);
+  font-weight: 650;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  font: inherit;
+  padding: 0;
+}
+.projects__hero-open:hover {
+  text-decoration: underline;
+}
+
+/* ── L1 grid ─────────────────────────────────────────────────────────────── */
+.projects__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-5);
+}
+@media (max-width: 720px) {
+  .projects__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pcard {
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-xl);
+  padding: var(--sp-5);
+  cursor: pointer;
+  outline: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color var(--motion-hover), box-shadow var(--motion-hover);
+}
+.pcard:hover {
+  border-color: var(--border-2);
+}
+.pcard.cursor {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.pcard__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.pcard__name {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pcard__need {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--r-md);
+  padding: var(--sp-1) var(--sp-2);
+  white-space: nowrap;
+}
+.pcard__need .num {
+  font-variant-numeric: tabular-nums;
+}
+
+.pcard__desc {
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+  line-height: var(--lh-normal);
+  /* clamp to keep cards aligned */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pcard__desc--empty {
+  color: var(--fg-dim);
+}
+.pcard__ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-2xs);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+.pcard__subs {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+.pcard__add {
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  font: inherit;
+  padding: 0;
+}
+.pcard__add:hover {
+  text-decoration: underline;
+}
+
+.pcard__bind {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+.pcard__bind .mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* one proportion bar — the only encoding of the status mix */
+.segbar {
+  display: flex;
+  height: var(--sp-2);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-3, var(--border-1));
+  margin-top: auto;
+}
+.segbar i {
+  display: block;
+  height: 100%;
+}
+.seg-working {
+  background: var(--accent);
+}
+.seg-need {
+  background: var(--warn);
+}
+.seg-blocked {
+  background: var(--err);
+}
+.seg-done {
+  background: var(--fg-dim);
+}
+.segcap {
+  font-size: var(--fs-2xs);
+  color: var(--fg-3);
+  display: flex;
+  gap: var(--sp-3);
+}
+.segcap .num {
+  color: var(--muted-on-panel);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── empty state ─────────────────────────────────────────────────────────── */
+.projects__empty {
+  text-align: center;
+  padding: 12vh var(--sp-5);
+  color: var(--muted-on-panel);
+}
+.projects__empty-glyph {
+  font-size: var(--fs-display);
+  opacity: 0.5;
+  margin-bottom: var(--sp-3);
+}
+.projects__empty-title {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  color: var(--text-on-panel);
+  margin-bottom: var(--sp-2);
+}
+.projects__empty-body {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  max-width: 38ch;
+  margin: 0 auto var(--sp-4);
+}
+
+/* ── L2 detail ───────────────────────────────────────────────────────────── */
+.projects__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  background: none;
+  border: 0;
+  font-family: inherit;
+  padding: 0;
+  margin-bottom: var(--sp-3);
+}
+.projects__back:hover {
+  text-decoration: underline;
+}
+
+.projects__l2head {
+  margin: 0 0 var(--sp-4);
+}
+.projects__l2top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.projects__l2name {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  margin: 0;
+}
+.projects__l2bind {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.projects__l2bind .mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+.projects__desc {
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+  line-height: var(--lh-normal);
+  margin-top: var(--sp-2);
+}
+.projects__ins {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  margin-top: var(--sp-3);
+}
+
+/* the task tree */
+.ptree {
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-xl);
+  padding: var(--sp-2);
+}
+.ptree__empty {
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm);
+}
+
+.trow {
+  display: grid;
+  grid-template-columns: 22px 10px 1fr auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition: background var(--motion-hover);
+}
+.trow:hover {
+  background: var(--bg-3, var(--accent-soft));
+}
+.trow.cursor {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.trow__twist {
+  font-size: var(--fs-2xs);
+  color: var(--fg-3);
+  width: 22px;
+  text-align: center;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.trow.leaf .trow__twist {
+  visibility: hidden;
+}
+.trow__dot {
+  width: var(--sp-2);
+  height: var(--sp-2);
+  border-radius: 50%;
+  justify-self: center;
+  background: var(--fg-dim);
+}
+.trow__dot.working {
+  background: var(--accent);
+}
+.trow__dot.need {
+  background: var(--warn);
+}
+.trow__dot.blocked {
+  background: var(--err);
+}
+.trow__body {
+  min-width: 0;
+}
+.trow.child .trow__body {
+  padding-left: var(--sp-5);
+}
+.trow__nm {
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trow__roll {
+  font-weight: 400;
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+  margin-left: var(--sp-2);
+}
+.trow__meta {
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xs);
+  margin-top: var(--sp-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.trow__dep {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--err);
+  font-size: var(--fs-xs);
+}
+.trow__right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-self: end;
+}
+
+.pbadge {
+  font-size: var(--fs-2xs);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-md);
+  white-space: nowrap;
+  font-weight: 650;
+}
+.pbadge.need {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.pbadge.blocked {
+  color: var(--err);
+  background: var(--err-soft);
+}
+.pbadge.working {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ── inline create form ──────────────────────────────────────────────────── */
+.pcreate {
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--accent);
+  border-radius: var(--r-xl);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.pcreate__title {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pcreate__field label {
+  display: block;
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--fg-3);
+  margin-bottom: var(--sp-1);
+}
+.pcreate input,
+.pcreate textarea,
+.pcreate select {
+  width: 100%;
+  font: inherit;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-lg);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--canvas, var(--bg-1));
+  color: var(--text-on-panel);
+  outline: 0;
+}
+.pcreate input:focus,
+.pcreate textarea:focus,
+.pcreate select:focus {
+  border-color: var(--accent);
+}
+.pcreate textarea {
+  resize: vertical;
+  min-height: 56px;
+  line-height: var(--lh-normal);
+}
+.pcreate__hint {
+  font-size: var(--fs-2xs);
+  color: var(--fg-3);
+  margin-top: var(--sp-1);
+}
+.pcreate__row {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+  align-items: center;
+}
+.pcreate__err {
+  color: var(--err);
+  font-size: var(--fs-xs);
+  margin-right: auto;
+}
