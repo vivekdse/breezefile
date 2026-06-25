@@ -212,6 +212,16 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* task-6255239581b2 — per-card attention summary ("3 open · 1 blocked · …").
+   Sits just under the name/pill; warm to echo the "needs you" amber. */
+.pcard__attn {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+  margin-top: calc(-1 * var(--sp-1));
+}
+
 .pcard__desc {
   font-size: var(--fs-sm);
   color: var(--muted-on-panel);
@@ -299,6 +309,62 @@
 .segcap .num {
   color: var(--muted-on-panel);
   font-variant-numeric: tabular-nums;
+}
+
+/* ── task-6255239581b2 — the fold + secondary/idle sections ──────────────────
+   The needs-attention grid leads; everything below needs nothing right now.
+   The fold is a quiet labelled rule; secondary + idle grids reuse the grid
+   layout. Idle cards render dimmed/quiet so revealing them stays calm. */
+.projects__fold {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: var(--sp-6) 0 var(--sp-4);
+  color: var(--fg-dim);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide, 0.06em);
+}
+.projects__fold::before,
+.projects__fold::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule-on-panel);
+}
+.projects__grid--rest {
+  margin-top: 0;
+}
+
+/* "Show all projects (N hidden)" toggle. */
+.projects__showall {
+  display: flex;
+  justify-content: center;
+  margin: var(--sp-6) 0 var(--sp-2);
+}
+.projects__showall-btn {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.projects__showall-btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--text-on-panel);
+}
+
+/* Idle/quiet projects, revealed by the toggle — dimmed so they read as quiet. */
+.projects__grid--idle {
+  margin-top: var(--sp-3);
+}
+.pcard--quiet {
+  opacity: 0.55;
+  background: var(--panel);
+  border-style: dashed;
+}
+.pcard--quiet:hover {
+  opacity: 0.85;
+}
+.pcard--quiet.cursor {
+  opacity: 1;
 }
 
 /* ── empty state ─────────────────────────────────────────────────────────── */

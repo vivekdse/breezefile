@@ -16,3 +16,9 @@ export {
   resolveEffectiveInstructions,
   formatSummary,
 } from './resolver.mjs';
+// task-6255239581b2 — attention reframe (what needs my attention vs recency).
+export {
+  computeProjectAttention,
+  attentionSummary,
+  todayKey,
+} from './attention.mjs';

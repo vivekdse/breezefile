@@ -24,3 +24,10 @@ export {
   resolveEffectiveInstructions,
   formatSummary,
 } from './resolver.d.mts';
+// task-6255239581b2 — attention reframe.
+export type { ProjectAttention } from './attention.d.mts';
+export {
+  computeProjectAttention,
+  attentionSummary,
+  todayKey,
+} from './attention.d.mts';

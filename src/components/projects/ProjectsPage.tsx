@@ -35,11 +35,17 @@ import {
   ancestorChain,
   breadcrumbPath,
   rollUpTaskStats,
+  computeProjectAttention,
+  attentionSummary,
   resolveEffectiveDescription,
   resolveEffectiveInstructions,
 } from '../../projects/index.mjs';
-import type { ProjectNode, TaskStats } from '../../projects/index.mjs';
+import type { ProjectNode, TaskStats, ProjectAttention } from '../../projects/index.mjs';
 import { resolveBlockedBy } from '../tasks/sections.mjs';
+import {
+  loadProjectsViewPrefs,
+  saveProjectsViewPrefs,
+} from '../../projectsViewPrefs';
 import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
@@ -126,6 +132,31 @@ function ProjectsPageInner() {
     [roots, allTasks],
   );
 
+  // task-6255239581b2 — "what needs my attention" reframe. We capture the
+  // page's mount time once and feed it as the activity floor: the TypeBuild
+  // list endpoint stamps now() onto every non-terminal task's created/updated
+  // (it carries no real timestamps — see mapListRow), so any timestamp at/after
+  // mount is a placeholder and must NOT count as "recent activity" (else idle
+  // never fires). Anything below the floor is a real, older stamp.
+  const mountMsRef = useRef<number>(Date.now());
+  const attention = useMemo(
+    () =>
+      computeProjectAttention(roots, allTasks, {
+        activityFloorMs: mountMsRef.current,
+      }),
+    [roots, allTasks],
+  );
+
+  // "Show all projects" toggle — reveals hidden idle/quiet projects. Persisted
+  // in localStorage (projectsViewPrefs), matching the repo's self-contained
+  // UI-pref pattern (sideBySidePrefs / the fm.* flags).
+  const [showAll, setShowAll] = useState<boolean>(
+    () => loadProjectsViewPrefs().showAll,
+  );
+  useEffect(() => {
+    saveProjectsViewPrefs({ showAll });
+  }, [showAll]);
+
   // ── zoom state ─────────────────────────────────────────────────────────────
   // level 1 = grid; level 2 = a single project's task tree.
   const [level, setLevel] = useState<1 | 2>(1);
@@ -141,11 +172,58 @@ function ProjectsPageInner() {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
 
-  // The project nodes shown in the current L1 grid.
-  const gridNodes: ProjectNode[] = useMemo(() => {
+  // The project nodes in scope for the current L1 grid (unranked).
+  const scopeNodes: ProjectNode[] = useMemo(() => {
     if (scopeId == null) return roots;
     return nodeById.get(scopeId)?.children ?? [];
   }, [roots, scopeId, nodeById]);
+
+  // task-6255239581b2 — partition + rank the scoped nodes by attention.
+  //   attentionNodes  needs-you (score desc, then recency, then name) — above
+  //   recentNodes     no attention but recent/unknown activity — below the fold
+  //   idleNodes       no attention AND stale → hidden unless `showAll`
+  // Recency is a tiebreaker, not the headline. Within "recent" we still order
+  // by last activity desc so the freshest non-urgent project sits highest.
+  const partitioned = useMemo(() => {
+    const att = (id: string): ProjectAttention | undefined => attention.get(id);
+    const lastAct = (id: string) => att(id)?.lastActivityMs ?? 0;
+    const nameOf = (n: ProjectNode) => (n.project.name ?? '').toLowerCase();
+    const byAttention = (a: ProjectNode, b: ProjectNode) => {
+      const sa = att(a.project.id)?.score ?? 0;
+      const sb = att(b.project.id)?.score ?? 0;
+      if (sa !== sb) return sb - sa;
+      const ra = lastAct(a.project.id);
+      const rb = lastAct(b.project.id);
+      if (ra !== rb) return rb - ra;
+      return nameOf(a).localeCompare(nameOf(b));
+    };
+    const byRecency = (a: ProjectNode, b: ProjectNode) => {
+      const ra = lastAct(a.project.id);
+      const rb = lastAct(b.project.id);
+      if (ra !== rb) return rb - ra;
+      return nameOf(a).localeCompare(nameOf(b));
+    };
+    const attentionNodes: ProjectNode[] = [];
+    const recentNodes: ProjectNode[] = [];
+    const idleNodes: ProjectNode[] = [];
+    for (const n of scopeNodes) {
+      const a = att(n.project.id);
+      if ((a?.total ?? 0) > 0) attentionNodes.push(n);
+      else if (a?.idle) idleNodes.push(n);
+      else recentNodes.push(n);
+    }
+    attentionNodes.sort(byAttention);
+    recentNodes.sort(byRecency);
+    idleNodes.sort(byRecency);
+    return { attentionNodes, recentNodes, idleNodes };
+  }, [scopeNodes, attention]);
+
+  // The full ordered visible sequence (drives keyboard cursor indices). Hidden
+  // idle nodes are appended only when `showAll` is on.
+  const gridNodes: ProjectNode[] = useMemo(() => {
+    const base = [...partitioned.attentionNodes, ...partitioned.recentNodes];
+    return showAll ? [...base, ...partitioned.idleNodes] : base;
+  }, [partitioned, showAll]);
 
   // Clamp the grid cursor when the visible set changes.
   useEffect(() => {
@@ -388,11 +466,13 @@ function ProjectsPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, level, scopeId, gridNodes, gridCursor, treeRows, treeCursor, showCreate]);
 
-  // keep the cursor row in view
+  // keep the cursor card in view. The grid now renders across multiple section
+  // <div>s (needs-attention / below-the-fold / idle), so query the whole page
+  // by the card's absolute data-grid-i rather than a single grid container.
   useEffect(() => {
     if (level !== 1) return;
-    gridRef.current
-      ?.querySelector(`[data-grid-i="${gridCursor}"]`)
+    document
+      .querySelector(`.projects__page [data-grid-i="${gridCursor}"]`)
       ?.scrollIntoView({ block: 'nearest' });
   }, [gridCursor, level]);
   useEffect(() => {
@@ -403,27 +483,29 @@ function ProjectsPageInner() {
   }, [treeCursor, level]);
 
   // ── L1 hero ──────────────────────────────────────────────────────────────────
+  // task-6255239581b2 — hero counts come from the attention partition (stable
+  // regardless of the show-all toggle; idle projects contribute nothing).
   const heroNeed = useMemo(
-    () => gridNodes.reduce((a, n) => a + (rollUp.get(n.project.id)?.rolled.needsYou ?? 0), 0),
-    [gridNodes, rollUp],
+    () =>
+      partitioned.attentionNodes.reduce(
+        (a, n) => a + (attention.get(n.project.id)?.total ?? 0),
+        0,
+      ),
+    [partitioned, attention],
   );
   const heroBlocked = useMemo(
-    () => gridNodes.reduce((a, n) => a + (rollUp.get(n.project.id)?.rolled.blocked ?? 0), 0),
-    [gridNodes, rollUp],
+    () =>
+      partitioned.attentionNodes.reduce(
+        (a, n) => a + (attention.get(n.project.id)?.blocked ?? 0),
+        0,
+      ),
+    [partitioned, attention],
   );
-  // the project most needing attention (drives the hero "open it first")
-  const heroTarget = useMemo(() => {
-    let best: ProjectNode | null = null;
-    let bestNeed = 0;
-    for (const n of gridNodes) {
-      const need = rollUp.get(n.project.id)?.rolled.needsYou ?? 0;
-      if (need > bestNeed) {
-        bestNeed = need;
-        best = n;
-      }
-    }
-    return best;
-  }, [gridNodes, rollUp]);
+  // the project most needing attention = first in the ranked attention list.
+  const heroTarget = useMemo(
+    () => partitioned.attentionNodes[0] ?? null,
+    [partitioned],
+  );
 
   const scopeProject = scopeId != null ? nodeById.get(scopeId)?.project ?? null : null;
 
@@ -466,8 +548,14 @@ function ProjectsPageInner() {
         {level === 1 ? (
           <ProjectsGrid
             gridRef={gridRef}
-            nodes={gridNodes}
+            attentionNodes={partitioned.attentionNodes}
+            recentNodes={partitioned.recentNodes}
+            idleNodes={partitioned.idleNodes}
+            gridNodes={gridNodes}
             rollUp={rollUp}
+            attention={attention}
+            showAll={showAll}
+            onToggleShowAll={() => setShowAll((v) => !v)}
             scopeProject={scopeProject}
             totalProjects={projects.length}
             gridCursor={gridCursor}
@@ -517,8 +605,14 @@ function ProjectsPageInner() {
 // ── L1: the projects grid ──────────────────────────────────────────────────────
 function ProjectsGrid({
   gridRef,
-  nodes,
+  attentionNodes,
+  recentNodes,
+  idleNodes,
+  gridNodes,
   rollUp,
+  attention,
+  showAll,
+  onToggleShowAll,
   scopeProject,
   totalProjects,
   gridCursor,
@@ -538,8 +632,15 @@ function ProjectsGrid({
   scopeId,
 }: {
   gridRef: React.RefObject<HTMLDivElement | null>;
-  nodes: ProjectNode[];
+  attentionNodes: ProjectNode[];
+  recentNodes: ProjectNode[];
+  idleNodes: ProjectNode[];
+  /** Full ordered visible sequence — defines the keyboard cursor index. */
+  gridNodes: ProjectNode[];
   rollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
+  attention: Map<string, ProjectAttention>;
+  showAll: boolean;
+  onToggleShowAll: () => void;
   scopeProject: Project | null;
   totalProjects: number;
   gridCursor: number;
@@ -558,7 +659,90 @@ function ProjectsGrid({
   allProjects: Project[];
   scopeId: string | null;
 }) {
-  const empty = loaded && !loadErr && nodes.length === 0;
+  const totalScoped = attentionNodes.length + recentNodes.length + idleNodes.length;
+  const empty = loaded && !loadErr && totalScoped === 0;
+  const hiddenCount = idleNodes.length;
+
+  // Cursor index into the flat `gridNodes` sequence for a given node. We render
+  // in sections, so each card resolves its own absolute index for keyboard sync.
+  const indexOf = (id: string) => gridNodes.findIndex((n) => n.project.id === id);
+
+  const renderCard = (node: ProjectNode, quiet: boolean) => {
+    const p = node.project;
+    const rolled = rollUp.get(p.id)?.rolled;
+    const stats: TaskStats = rolled ?? {
+      total: 0,
+      open: 0,
+      inProgress: 0,
+      done: 0,
+      cancelled: 0,
+      blocked: 0,
+      needsYou: 0,
+    };
+    const att = attention.get(p.id);
+    const need = att?.total ?? 0;
+    const summary = att ? attentionSummary(att) : '';
+    const bind = p.folders.length > 0 ? p.folders.join(' · ') : 'no folder bound';
+    const i = indexOf(p.id);
+    return (
+      <button
+        type="button"
+        key={p.id}
+        data-grid-i={i}
+        role="listitem"
+        className={[
+          'pcard',
+          quiet ? 'pcard--quiet' : '',
+          i === gridCursor ? 'cursor' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        onClick={() => {
+          if (i >= 0) onSetCursor(i);
+          onEnter(node);
+        }}
+      >
+        <div className="pcard__top">
+          <span className="pcard__name">{p.name}</span>
+          {need > 0 && (
+            <span className="pcard__need">
+              ⚑ <span className="num">{need}</span> need you
+            </span>
+          )}
+        </div>
+        {summary && <div className="pcard__attn">{summary}</div>}
+        {p.description ? (
+          <div className="pcard__desc">
+            {p.description}{' '}
+            <span className="pcard__ctx">{CTX_MARK}</span>
+          </div>
+        ) : (
+          <div className="pcard__desc pcard__desc--empty">
+            No description yet — agents have no shared context for this project.
+          </div>
+        )}
+        {node.children.length > 0 && (
+          <div className="pcard__subs">
+            ▸ {node.children.length} sub-project{node.children.length === 1 ? '' : 's'}
+          </div>
+        )}
+        <div className="pcard__bind">
+          <span aria-hidden="true">⛓</span>
+          <span className="mono">{bind}</span>
+        </div>
+        <SegBar stats={stats} />
+        <div className="segcap">
+          <span>
+            <span className="num">{stats.inProgress}</span> working
+          </span>
+          <span>
+            <span className="num">{stats.done}</span> done
+          </span>
+        </div>
+      </button>
+    );
+  };
+
   return (
     <>
       <div className="projects__head">
@@ -568,8 +752,8 @@ function ProjectsGrid({
           </h1>
           <div className="projects__sub">
             {scopeProject
-              ? `${nodes.length} sub-project${nodes.length === 1 ? '' : 's'} · same view, scoped`
-              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · zoom into any one to see its task tree`}
+              ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · same view, scoped · ranked by what needs you`
+              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · ranked by what needs you`}
           </div>
         </div>
         <div className="projects__head-actions">
@@ -595,7 +779,7 @@ function ProjectsGrid({
         </div>
       )}
 
-      {!empty && !loadErr && nodes.length > 0 && (
+      {!empty && !loadErr && totalScoped > 0 && (
         heroNeed === 0 && heroBlocked === 0 ? (
           <div className="projects__hero projects__hero--clear" role="status">
             Nothing needs you{scopeProject ? ' in these sub-projects' : ''} — agents are running.
@@ -637,73 +821,51 @@ function ProjectsGrid({
         </div>
       )}
 
-      <div className="projects__grid" ref={gridRef} role="list">
-        {nodes.map((node, i) => {
-          const p = node.project;
-          const rolled = rollUp.get(p.id)?.rolled;
-          const need = rolled?.needsYou ?? 0;
-          const stats: TaskStats = rolled ?? {
-            total: 0,
-            open: 0,
-            inProgress: 0,
-            done: 0,
-            cancelled: 0,
-            blocked: 0,
-            needsYou: 0,
-          };
-          const bind = p.folders.length > 0 ? p.folders.join(' · ') : 'no folder bound';
-          return (
-            <button
-              type="button"
-              key={p.id}
-              data-grid-i={i}
-              role="listitem"
-              className={['pcard', i === gridCursor ? 'cursor' : ''].filter(Boolean).join(' ')}
-              onClick={() => {
-                onSetCursor(i);
-                onEnter(node);
-              }}
-            >
-              <div className="pcard__top">
-                <span className="pcard__name">{p.name}</span>
-                {need > 0 && (
-                  <span className="pcard__need">
-                    ⚑ <span className="num">{need}</span> need you
-                  </span>
-                )}
-              </div>
-              {p.description ? (
-                <div className="pcard__desc">
-                  {p.description}{' '}
-                  <span className="pcard__ctx">{CTX_MARK}</span>
-                </div>
-              ) : (
-                <div className="pcard__desc pcard__desc--empty">
-                  No description yet — agents have no shared context for this project.
-                </div>
-              )}
-              {node.children.length > 0 && (
-                <div className="pcard__subs">
-                  ▸ {node.children.length} sub-project{node.children.length === 1 ? '' : 's'}
-                </div>
-              )}
-              <div className="pcard__bind">
-                <span aria-hidden="true">⛓</span>
-                <span className="mono">{bind}</span>
-              </div>
-              <SegBar stats={stats} />
-              <div className="segcap">
-                <span>
-                  <span className="num">{stats.inProgress}</span> working
-                </span>
-                <span>
-                  <span className="num">{stats.done}</span> done
-                </span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      {/* Needs-attention — leads the page. */}
+      {attentionNodes.length > 0 && (
+        <div className="projects__grid" ref={gridRef} role="list">
+          {attentionNodes.map((node) => renderCard(node, false))}
+        </div>
+      )}
+
+      {/* The fold: everything below needs nothing from you right now. */}
+      {recentNodes.length > 0 && (
+        <>
+          {attentionNodes.length > 0 && (
+            <div className="projects__fold" aria-hidden="true">
+              <span>nothing needs you below</span>
+            </div>
+          )}
+          <div
+            className="projects__grid projects__grid--rest"
+            ref={attentionNodes.length === 0 ? gridRef : undefined}
+            role="list"
+          >
+            {recentNodes.map((node) => renderCard(node, false))}
+          </div>
+        </>
+      )}
+
+      {/* Idle/quiet projects — hidden by default, revealed (dimmed) on toggle. */}
+      {hiddenCount > 0 && !empty && (
+        <div className="projects__showall">
+          <button
+            type="button"
+            className="projects__btn projects__showall-btn"
+            aria-pressed={showAll}
+            onClick={onToggleShowAll}
+          >
+            {showAll
+              ? `Hide idle projects (${hiddenCount})`
+              : `Show all projects (${hiddenCount} hidden)`}
+          </button>
+        </div>
+      )}
+      {showAll && idleNodes.length > 0 && (
+        <div className="projects__grid projects__grid--idle" role="list">
+          {idleNodes.map((node) => renderCard(node, true))}
+        </div>
+      )}
     </>
   );
 }
