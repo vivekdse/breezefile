@@ -1749,7 +1749,11 @@ const VERBS: VerbDef[] = [
     id: 'create',
     availableInTaskMode: false,
     label: 'Create',
-    aliases: ['create', 'new', 'mkdir', 'touch'],
+    aliases: [
+      'create', 'new', 'mkdir', 'touch',
+      'new file', 'new folder', 'create file', 'create folder',
+      'add file', 'add folder', 'make file', 'make folder',
+    ],
     icon: '+',
     describe: () => 'Create new…',
     isAvailable: () => ({ ok: true }),
@@ -1757,8 +1761,8 @@ const VERBS: VerbDef[] = [
       {
         label: 'Type',
         getOptions: () => [
-          { id: 'folder', label: 'Folder', detail: 'new directory', available: true },
-          { id: 'file', label: 'File', detail: 'empty file', available: true },
+          { id: 'folder', label: 'Folder', detail: 'new directory', available: true, aliases: ['new folder', 'mkdir', 'directory', 'dir'] },
+          { id: 'file', label: 'File', detail: 'empty file', available: true, aliases: ['new file', 'touch', 'document', 'doc'] },
         ],
       },
     ],

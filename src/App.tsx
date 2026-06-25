@@ -101,7 +101,7 @@ function readChatWidth(): number {
 }
 
 function Shell() {
-  const { state, activeTab, refreshActive, dispatch, setTab, focusEntryByName, navigateTo, loadDir } = useStore();
+  const { state, activeTab, refreshActive, dispatch, setTab, focusEntryByName, navigateTo, loadDir, openPath } = useStore();
   const [renaming, setRenaming] = useState<{ entry: Entry; mode: RenameMode } | null>(null);
   const [mkdirOpen, setMkdirOpen] = useState(false);
   const [touchOpen, setTouchOpen] = useState(false);
@@ -1428,9 +1428,11 @@ function Shell() {
           onClose={() => setMkdirOpen(false)}
           onCommit={async (name) => {
             if (!name) { setMkdirOpen(false); return; }
-            await fm.mkdir(pathJoin(tab.trail[tab.trail.length - 1], name));
-            await refreshActive();
-            focusEntryByName(name);
+            const dir = pathJoin(tab.trail[tab.trail.length - 1], name);
+            await fm.mkdir(dir);
+            // Drop the user straight into the folder they just made, rather
+            // than leaving them in the parent with the new entry merely selected.
+            await openPath(dir);
             dispatch({ type: 'setStatus', msg: `created ${name}/` });
             setMkdirOpen(false);
           }}
@@ -1445,9 +1447,17 @@ function Shell() {
             if (!name) { setTouchOpen(false); return; }
             const to = pathJoin(tab.trail[tab.trail.length - 1], name);
             await fm.touch(to);
-            await refreshActive();
-            focusEntryByName(name);
-            requestAnimationFrame(() => celebratePaths([to]));
+            const ext = name.split('.').pop()?.toLowerCase() ?? '';
+            if (ext === 'md' || ext === 'mdx') {
+              // Markdown opens straight into the in-app editor — same routing
+              // as goRight/:note — so you can start writing immediately.
+              dispatch({ type: 'openEditTab', path: to, focus: true });
+              dispatch({ type: 'pushRecentFile', path: to });
+            } else {
+              await refreshActive();
+              focusEntryByName(name);
+              requestAnimationFrame(() => celebratePaths([to]));
+            }
             dispatch({ type: 'setStatus', msg: `created ${name}` });
             setTouchOpen(false);
           }}
