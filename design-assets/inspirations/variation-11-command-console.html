@@ -1,0 +1,1295 @@
+<!--
+  Variation 11 — "Command Console" (calm pass)
+  Paradigm: The truest expression of the keyboard-first, VERB-based system. ONE calm scoped list of
+            "who needs me right now," driven by the `:` command palette (SENTENCE CHIP `VERB · slot · slot`),
+            a status bar with MODE, a transient ModeLine, and full vim navigation. The task detail is a
+            DRAWER that slides in on demand (Esc/h to dismiss) and LEADS WITH TRACE — Config & Activity
+            sit behind tabs. Calm by default, powerful on demand.
+
+  Simplification pass — Maeda's 10 Laws (THE ONE: subtract the obvious, add the meaningful):
+   · 3 attention colors + neutral. Teal=working, amber=needs-you/waiting, red=blocked. Done/claimed/
+     unclaimed = grey. Blue + per-person hues retired; avatars are grey circles w/ initials.
+   · One status encoding per row (dot for in-flight; word-badge only for P0 / blocked / needs-you).
+   · Needs-you is the visual hero; Working / Claimed / Done are collapsed count-only headers.
+   · Proposed tasks fold behind one calm line. One teach entry point (:teach + the strip toggle).
+   · 2 weights, ~6 type sizes, 8px spacing scale; borders only on top-level cards; one ~.18s easing;
+     pulse reserved for the single live working task. 3px left-edge accent bar (no 2px cursor ring).
+   · DRAWER segmented into Trace · Config · Activity (default Trace). Earned-link folded into the
+     running trace step. Cascade collapsed to one line. Project timeline lives under Activity.
+
+  New requirements:
+   · RECURRING TASKS as ↻ definition rows — cadence sub-title, next-run as right-edge meta; today's
+     run expands as a child. Drawer Config Schedule shows cron + last/next + "run #14 … view schedule →".
+   · SUB-PROJECTS + DESCRIPTION — strip becomes a breadcrumb whose ▾ opens the switcher with sub-
+     projects indented; a single muted description line under the strip is the project's agent-facing
+     context (editable inline; effective = parent + child).
+
+  Reactions still served: 1 project overview/switcher · 2 parent→child + roll-ups + blocked-by ·
+   3 cascading instructions w/ provenance + teach-in-the-moment · 4 every task opens (config/trace/
+   stop/result) · 5 live session in the drawer · 6 enter-thread/steer · 7 proposed cards → proposal ·
+   8 living timeline · 9 calm, aligned · 10 keyboard-first verb-native.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breezefile — Command Console</title>
+<style>
+  :root{
+    --bg:#faf9f7; --ink:#1d1c1a; --muted:#6c6760; --dim:#9a948b; --line:#e7e3dc;
+    --card:#ffffff; --card2:#f4f2ee;
+    --accent:#2f6f5e; --accent-soft:#e8f1ee;       /* teal = working / primary */
+    --amber:#b5731a; --amber-soft:#faf0dc;          /* needs you / waiting */
+    --red:#b3402f;   --red-soft:#f7e6e2;            /* blocked */
+    --avatar:#8d877c;                               /* one neutral avatar grey */
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    --ease:cubic-bezier(.4,0,.2,1);
+    --t:.18s; --tp:.24s;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:14px; -webkit-font-smoothing:antialiased; }
+
+  /* ===== shell ===== */
+  .shell{ min-height:100vh; padding-bottom:88px; }
+  .page{ max-width:840px; margin:0 auto; padding:40px 24px 48px; }
+
+  /* ===== project context strip (breadcrumb) ===== */
+  .ctx{ display:flex; align-items:center; gap:12px; position:relative; }
+  .scope{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; border-radius:8px; padding:6px 10px 6px 4px; transition:background var(--t) var(--ease); }
+  .scope:hover{ background:var(--card2); }
+  .scope .dot{ width:8px; height:8px; border-radius:50%; background:var(--accent); flex:0 0 auto; }
+  .scope .crumb{ color:var(--muted); }
+  .scope .crumb b{ color:var(--ink); font-weight:650; }
+  .scope .sep{ color:var(--dim); margin:0 2px; }
+  .scope .caret{ color:var(--dim); font-size:11px; }
+  .insts{ margin-left:auto; display:inline-flex; align-items:center; gap:6px; color:var(--muted); cursor:pointer; font-size:13px; padding:6px 10px; border-radius:8px; transition:background var(--t) var(--ease); }
+  .insts:hover{ background:var(--card2); color:var(--accent); }
+
+  /* project description — single calm agent-facing line */
+  .desc{ margin:8px 4px 0; font-size:13px; line-height:1.6; color:var(--muted); }
+  .desc .dtext{ cursor:text; border-radius:6px; padding:1px 3px; transition:background var(--t) var(--ease); }
+  .desc .dtext:hover{ background:var(--card2); }
+  .desc .dctx{ display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--dim); white-space:nowrap; margin-left:6px; }
+  .desc .dctx .gl{ font-size:11px; }
+
+  /* switcher popover */
+  .switchmenu{ display:none; position:absolute; top:calc(100% + 8px); left:0; z-index:40; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:8px; min-width:340px; box-shadow:0 20px 50px -30px rgba(0,0,0,.5); }
+  .switchmenu.show{ display:block; animation:rise var(--t) var(--ease); }
+  .switchmenu .sm-h{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); padding:6px 10px 8px; }
+  .so{ display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; cursor:pointer; transition:background var(--t) var(--ease); }
+  .so:hover{ background:var(--card2); }
+  .so.cur{ background:var(--accent-soft); }
+  .so .sd{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:var(--dim); }
+  .so .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .so .nm .bd{ color:var(--dim); font-size:12px; margin-left:6px; }
+  .so .cnt{ font-variant-numeric:tabular-nums; font-size:13px; color:var(--muted); flex:0 0 auto; }
+  .so .cnt .nz{ color:var(--dim); }
+  .so.sub{ padding-left:30px; }
+  .so.sub .sd{ background:transparent; border:1.5px solid var(--dim); width:6px; height:6px; }
+  .sdiv{ height:1px; background:var(--line); margin:6px 8px; }
+  .so.add{ color:var(--accent); }
+
+  /* ===== hero: single priority line ===== */
+  .hero{ margin:24px 4px 8px; font-size:17px; line-height:1.5; font-weight:650; }
+  .hero .need{ color:var(--amber); } .hero .blk{ color:var(--red); }
+  .hero .mono{ font-family:var(--mono); font-size:14px; font-weight:400; }
+  .hero .min{ font-weight:650; }
+  .hero a{ color:var(--accent); cursor:pointer; }
+  .hero .reg{ font-weight:400; color:var(--muted); }
+
+  /* ===== instructions reveal ===== */
+  .instpanel{ display:none; margin:16px 4px 0; padding:16px 4px; }
+  .instpanel.show{ display:block; animation:rise var(--tp) var(--ease); }
+  .instpanel .ih{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin-bottom:12px; }
+  .instpanel .ih b{ color:var(--muted); font-weight:650; }
+  .instrule{ display:flex; gap:8px; align-items:baseline; padding:8px 0; font-size:13px; line-height:1.5; border-top:1px solid var(--line); }
+  .instrule:first-of-type{ border-top:0; }
+  .instrule .rq{ color:var(--dim); flex:0 0 auto; }
+  .instrule .rt{ flex:1; }
+  .instrule .scopetag{ font-family:var(--mono); font-size:11px; color:var(--dim); margin-left:6px; white-space:nowrap; }
+  .instrule .rmeta{ color:var(--amber); font-size:12px; margin-left:6px; }
+  .instadd{ display:flex; gap:8px; margin-top:12px; }
+  .instadd input{ flex:1; font:inherit; font-size:13px; border:1px solid var(--line); border-radius:10px; padding:9px 12px; background:var(--card); color:var(--ink); outline:0; transition:border-color var(--t) var(--ease); }
+  .instadd input:focus{ border-color:var(--accent); }
+  .instadd .teachbtn{ font:inherit; font-size:13px; font-weight:650; border:0; border-radius:10px; padding:9px 16px; background:var(--accent); color:#fff; cursor:pointer; }
+
+  /* ===== proposed — folded behind one line ===== */
+  .propline{ margin:24px 4px 0; font-size:13px; color:var(--muted); cursor:pointer; display:inline-flex; align-items:center; gap:6px; border-radius:8px; padding:4px 6px; transition:background var(--t) var(--ease); }
+  .propline:hover{ background:var(--card2); color:var(--accent); }
+  .propcards{ display:none; grid-template-columns:1fr 1fr; gap:12px; margin:12px 4px 0; }
+  .propcards.show{ display:grid; animation:rise var(--tp) var(--ease); }
+  .propcard{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; cursor:pointer; transition:border-color var(--t) var(--ease); }
+  .propcard:hover{ border-color:var(--accent); }
+  .propcard .pc-tag{ font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--accent); font-weight:650; }
+  .propcard .pc-t{ font-weight:650; margin:6px 0; line-height:1.4; }
+  .propcard .pc-sub{ font-size:12px; color:var(--muted); line-height:1.5; }
+  .propcard .pc-sub .mono{ font-family:var(--mono); font-size:11.5px; }
+
+  /* detailed proposal */
+  .proposal{ display:none; margin:12px 4px 0; background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 20px 50px -30px rgba(0,0,0,.4); }
+  .proposal.show{ display:block; animation:rise var(--tp) var(--ease); }
+  .proposal .ph{ padding:16px 20px 4px; }
+  .proposal .ptag{ font-size:11px; color:var(--accent); font-weight:650; text-transform:uppercase; letter-spacing:.8px; }
+  .proposal .pt{ font-size:17px; font-weight:650; margin:8px 0 4px; line-height:1.35; }
+  .proposal .pq{ font-size:13px; color:var(--muted); line-height:1.5; }
+  .proposal .pq i{ color:var(--accent); font-style:normal; }
+  .fields{ display:grid; grid-template-columns:1fr 1fr; gap:16px 24px; padding:20px; }
+  .field .k{ font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.6px; }
+  .field .v{ font-size:14px; margin-top:4px; }
+  .field .v .inferred{ color:var(--accent); font-size:11px; font-weight:650; margin-left:6px; }
+  .field.ask .k{ color:var(--amber); }
+  .field.ask .v{ color:var(--amber); margin-top:6px; }
+  .field.ask select{ font:inherit; font-size:14px; border:1px solid var(--amber); border-radius:8px; padding:5px 9px; background:var(--card); color:var(--ink); }
+  .honors{ display:flex; gap:8px; padding:12px 20px; background:var(--accent-soft); font-size:13px; color:var(--accent); line-height:1.5; }
+  .honors b{ font-weight:650; } .honors .hrel{ color:var(--muted); }
+  .ptrace{ padding:16px 20px; }
+  .ptrace .tlbl{ font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin-bottom:10px; }
+  .pstep{ display:flex; gap:10px; align-items:center; font-size:13px; padding:4px 0; color:var(--muted); }
+  .pstep .n{ font-family:var(--mono); font-size:11px; color:var(--accent); width:18px; height:18px; border-radius:50%; display:grid; place-items:center; flex:0 0 auto; background:var(--accent-soft); }
+  .pstep .why{ color:var(--dim); font-size:12px; }
+  .estimate{ display:flex; align-items:center; gap:24px; padding:16px 20px; background:var(--card2); }
+  .estimate .e b{ font-size:15px; color:var(--accent); display:block; } .estimate .e span{ font-size:11px; color:var(--muted); }
+  .estimate .spacer{ flex:1; } .estimate .dry{ font-size:12px; color:var(--muted); }
+  .pactions{ display:flex; gap:10px; padding:16px 20px; }
+  .pactions .spacer{ flex:1; }
+  .btn{ font:inherit; font-size:14px; border-radius:10px; padding:9px 16px; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--ink); transition:background var(--t) var(--ease); }
+  .btn:hover{ background:var(--card2); }
+  .btn.primary{ background:var(--accent); color:#fff; border-color:transparent; font-weight:650; }
+  .btn.primary:hover{ background:#285f50; }
+  .btn.danger{ color:var(--red); border-color:#e7c9c2; }
+
+  /* ===== main list ===== */
+  .grp{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin:32px 4px 12px; display:flex; align-items:center; gap:8px; }
+  .grp.fold{ cursor:pointer; border-radius:8px; padding:6px 6px; transition:background var(--t) var(--ease); }
+  .grp.fold:hover{ background:var(--card2); }
+  .grp .gtog{ font-size:10px; color:var(--dim); transition:transform var(--t) var(--ease); display:inline-block; width:10px; }
+  .grp.open .gtog{ transform:rotate(90deg); }
+  .grp .gcount{ color:var(--muted); margin-left:auto; letter-spacing:0; text-transform:none; font-size:12px; }
+
+  /* alignment grid — every row shares these columns */
+  .row{
+    display:grid;
+    grid-template-columns: 16px 16px 1fr auto auto;
+    align-items:center; gap:12px;
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:14px 16px; margin-bottom:8px; cursor:pointer; position:relative;
+    transition:border-color var(--t) var(--ease);
+  }
+  .row::before{ content:""; position:absolute; left:0; top:10px; bottom:10px; width:3px; border-radius:3px; background:transparent; transition:background var(--t) var(--ease); }
+  .row:hover{ border-color:#d8d2c8; }
+  .row.cursor::before{ background:var(--accent); }
+  .row.child{ margin-left:24px; background:var(--card2); border-color:transparent; }
+  .row.marked{ background:var(--amber-soft); }
+
+  .col-tog{ display:grid; place-items:center; }
+  .col-tog .tog{ color:var(--dim); font-size:11px; width:14px; text-align:center; transition:transform var(--t) var(--ease); }
+  .row.parent .col-tog .tog{ cursor:pointer; }
+  .row.open .col-tog .tog{ transform:rotate(90deg); }
+
+  .col-st{ display:grid; place-items:center; }
+  .st{ width:9px; height:9px; border-radius:50%; background:var(--dim); }
+  .st.working{ background:var(--accent); }
+  .st.waiting{ background:var(--amber); }
+  .st.blocked{ background:var(--red); }
+  .st.claimed,.st.done{ background:var(--dim); }
+  .st.unclaimed{ background:transparent; border:1.5px solid var(--dim); width:8px; height:8px; }
+  .st.live{ box-shadow:0 0 0 0 rgba(47,111,94,.5); animation:pulse 2s infinite; }
+
+  .col-main{ min-width:0; }
+  .col-main .nm{ font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row.child .col-main .nm{ font-weight:400; }
+  .col-main .sub{ color:var(--muted); font-size:12px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .col-main .sub .mono{ font-family:var(--mono); font-size:11.5px; }
+  .col-main .sub .cad{ color:var(--dim); }
+  .col-main .rollup{ color:var(--muted); font-size:12px; margin-top:3px; }
+  .col-main .rollup .w{ color:var(--accent); } .col-main .rollup .n{ color:var(--amber); } .col-main .rollup .b{ color:var(--red); }
+  .col-main .dep{ display:inline-flex; align-items:center; gap:6px; margin-top:7px; font-size:12px; color:var(--red); }
+  .col-main .dep .lock{ font-size:11px; }
+
+  .col-ava{ display:grid; place-items:center; }
+  .ava{ width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-size:10px; font-weight:650; color:#fff; background:var(--avatar); }
+  .ava.bot{ font-size:9px; }
+  .ava.none{ background:transparent; border:1.5px dashed var(--dim); }
+
+  .col-right{ display:grid; justify-items:end; gap:2px; }
+  .col-right .next{ font-size:11px; color:var(--dim); font-family:var(--mono); white-space:nowrap; }
+  .badge{ font-size:11px; padding:2px 9px; border-radius:7px; white-space:nowrap; font-weight:650; }
+  .badge.waiting{ color:var(--amber); background:var(--amber-soft); }
+  .badge.blocked{ color:var(--red); background:var(--red-soft); }
+  .badge.p0{ color:#fff; background:var(--red); }
+
+  .children{ overflow:hidden; }
+  .children.collapsed{ display:none; }
+  .grpbody.collapsed{ display:none; }
+
+  /* ===== DRAWER ===== */
+  .scrim{ position:fixed; inset:0; background:rgba(29,28,26,.28); opacity:0; pointer-events:none; transition:opacity var(--tp); z-index:50; }
+  .scrim.show{ opacity:1; pointer-events:auto; }
+  .drawer{ position:fixed; top:0; right:0; height:100%; width:min(540px,94vw); background:var(--bg); border-left:1px solid var(--line); box-shadow:-24px 0 60px -30px rgba(0,0,0,.5); transform:translateX(100%); transition:transform var(--tp) var(--ease); z-index:60; display:flex; flex-direction:column; }
+  .drawer.show{ transform:none; }
+  .dr-head{ padding:20px 24px 0; }
+  .dr-crumb{ font-size:12px; color:var(--dim); display:flex; align-items:center; gap:7px; }
+  .dr-crumb .x{ margin-left:auto; cursor:pointer; color:var(--muted); font-size:13px; display:inline-flex; align-items:center; gap:5px; }
+  .dr-crumb .x kbd{ font-family:var(--mono); font-size:11px; border:1px solid var(--line); border-radius:4px; padding:0 4px; }
+  .dr-title{ font-size:22px; font-weight:650; margin:12px 0 8px; display:flex; align-items:center; gap:10px; line-height:1.25; }
+  .dr-title .st{ width:10px; height:10px; flex:0 0 auto; }
+  .dr-meta{ font-size:12px; color:var(--muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .dr-meta .mono{ font-family:var(--mono); font-size:11.5px; }
+  /* drawer primary action + earned reason lead */
+  .dr-lead{ margin:16px 0 4px; }
+  .dr-reason{ font-size:13px; line-height:1.5; padding:12px 14px; border-radius:12px; margin-bottom:12px; }
+  .dr-reason.waiting{ background:var(--amber-soft); color:#7a4f12; }
+  .dr-reason.blocked{ background:var(--red-soft); color:#7a2a1f; }
+  .dr-reason a{ color:inherit; text-decoration:underline; cursor:pointer; }
+  .dr-primary{ display:flex; gap:10px; flex-wrap:wrap; }
+  /* tabs */
+  .tabs{ display:flex; gap:4px; margin:20px 0 0; border-bottom:1px solid var(--line); }
+  .tab{ font:inherit; font-size:13px; font-weight:650; color:var(--muted); background:none; border:0; border-bottom:2px solid transparent; padding:10px 12px; cursor:pointer; margin-bottom:-1px; transition:color var(--t) var(--ease); }
+  .tab:hover{ color:var(--ink); }
+  .tab.active{ color:var(--accent); border-bottom-color:var(--accent); }
+  .dr-body{ overflow-y:auto; padding:0 24px 24px; flex:1; }
+  .pane{ display:none; }
+  .pane.active{ display:block; animation:rise var(--t) var(--ease); }
+  .dr-sec{ margin-top:20px; }
+  .dr-sec > .h{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin-bottom:12px; }
+
+  /* config (borderless rows) */
+  .cfg .crow{ display:flex; gap:12px; padding:8px 0; border-top:1px solid var(--line); font-size:13px; line-height:1.5; }
+  .cfg .crow:first-child{ border-top:0; }
+  .cfg .crow .ck{ color:var(--dim); width:92px; flex:0 0 auto; }
+  .cfg .crow .cv{ flex:1; }
+  .cfg .crow .cv .mono{ font-family:var(--mono); font-size:11.5px; }
+  .cfg .crow .cv a{ color:var(--accent); cursor:pointer; }
+  .cfg .crow .cv .ok{ color:var(--accent); }
+
+  /* trace (borderless) */
+  .trace .tstep{ display:grid; grid-template-columns:18px 1fr; gap:10px; align-items:start; padding:10px 0; border-top:1px solid var(--line); font-size:13px; }
+  .trace .tstep:first-child{ border-top:0; }
+  .trace .ti{ text-align:center; line-height:1.4; color:var(--dim); }
+  .trace .ti.done,.trace .ti.run{ color:var(--accent); }
+  .trace .tt{ line-height:1.5; }
+  .trace .tt.running{ font-weight:650; }
+  .trace .twhy{ color:var(--dim); font-size:12px; margin-top:2px; }
+  .trace .gate{ display:block; margin-top:6px; font-size:12px; padding:8px 10px; border-radius:8px; line-height:1.45; }
+  .trace .gate.waiting{ background:var(--amber-soft); color:#7a4f12; }
+  .trace .gate.blocked{ background:var(--red-soft); color:#7a2a1f; }
+  .trace .gate a{ color:inherit; text-decoration:underline; cursor:pointer; }
+
+  /* cascade collapsed by default */
+  .casc-line{ font-size:13px; color:var(--muted); line-height:1.5; }
+  .casc-line a{ color:var(--accent); cursor:pointer; }
+  .casc{ display:none; margin-top:12px; }
+  .casc.show{ display:block; animation:rise var(--t) var(--ease); }
+  .casc .sg-h{ font-size:11px; color:var(--muted); display:flex; align-items:center; gap:8px; margin:14px 0 6px; }
+  .casc .sg-h .tagm{ font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .casc .crule{ display:flex; gap:8px; padding:6px 0 6px 10px; font-size:13px; line-height:1.5; border-left:2px solid var(--line); margin-left:2px; }
+  .casc .crule.gate{ border-left-color:var(--amber); }
+  .casc .crule .rq{ color:var(--dim); }
+  .casc .crule .lm{ color:var(--amber); font-size:12px; }
+  .casc .crule .ov{ font-family:var(--mono); font-size:11px; color:var(--dim); margin-left:4px; }
+  .casc .efftot{ margin-top:14px; font-size:13px; color:var(--ink); }
+  .casc .efftot b{ color:var(--accent); }
+
+  /* live session terminal */
+  .term{ background:#1d1c1a; color:#e8e3da; border-radius:12px; padding:14px 16px; font-family:var(--mono); font-size:12px; line-height:1.7; white-space:pre-wrap; }
+  .term .pr,.term .ok{ color:#7fb8a6; } .term .run{ color:#e3b562; } .term .dim{ color:#8d877c; }
+  .term .reveal{ color:#e3b562; cursor:pointer; text-decoration:underline; }
+
+  /* timeline */
+  .tl .ev{ display:grid; grid-template-columns:46px 64px 1fr; gap:10px; align-items:baseline; padding:8px 0; border-top:1px solid var(--line); font-size:12px; }
+  .tl .ev:first-child{ border-top:0; }
+  .tl .ev .ts{ font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .tl .ev .stag{ font-family:var(--mono); font-size:11px; font-weight:650; letter-spacing:.3px; color:var(--dim); }
+  .tl .ev .stag.working{ color:var(--accent); } .tl .ev .stag.waiting{ color:var(--amber); } .tl .ev .stag.blocked{ color:var(--red); }
+  .tl .ev .et{ color:var(--ink); line-height:1.45; }
+  .tl .ev .et .mono{ font-family:var(--mono); font-size:11px; }
+
+  .result{ font-size:13px; line-height:1.55; }
+  .result .rh{ font-weight:650; color:var(--accent); margin-bottom:6px; }
+
+  /* steer box */
+  .steer{ border-top:1px solid var(--line); background:var(--card); padding:14px 20px; }
+  .steer .si{ display:flex; gap:9px; align-items:center; }
+  .steer textarea{ flex:1; font:inherit; font-size:13px; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:var(--bg); color:var(--ink); resize:none; outline:0; height:40px; line-height:1.4; transition:border-color var(--t) var(--ease); }
+  .steer textarea:focus{ border-color:var(--accent); }
+  .steer .sendbtn{ font:inherit; font-size:13px; font-weight:650; border:0; border-radius:10px; padding:10px 16px; background:var(--accent); color:#fff; cursor:pointer; flex:0 0 auto; }
+  .saveinstr{ display:none; align-items:center; gap:10px; margin-top:12px; padding:10px 12px; background:var(--amber-soft); border-radius:10px; font-size:12px; color:#7a4f12; }
+  .saveinstr.show{ display:flex; }
+  .saveinstr .sx{ flex:1; }
+  .saveinstr select{ font:inherit; font-size:12px; border:1px solid var(--amber); border-radius:7px; padding:4px 7px; background:var(--card); color:var(--ink); }
+  .saveinstr .savebtn{ font:inherit; font-size:12px; font-weight:650; border:1px solid var(--amber); border-radius:8px; padding:6px 11px; background:var(--card); color:#7a4f12; cursor:pointer; }
+  .saveinstr .savebtn.done{ background:var(--accent); color:#fff; border-color:transparent; }
+
+  /* ===== command palette ===== */
+  .palette-scrim{ position:fixed; inset:0; background:rgba(29,28,26,.18); opacity:0; pointer-events:none; transition:opacity var(--t); z-index:80; display:flex; justify-content:center; align-items:flex-start; padding-top:14vh; }
+  .palette-scrim.show{ opacity:1; pointer-events:auto; }
+  .palette{ width:min(540px,92vw); background:var(--card); border:1px solid var(--line); border-radius:16px; box-shadow:0 30px 70px -30px rgba(0,0,0,.55); overflow:hidden; transform:translateY(-8px); transition:transform var(--t) var(--ease); }
+  .palette-scrim.show .palette{ transform:none; }
+  .pal-chip{ display:flex; align-items:center; gap:8px; padding:11px 16px; background:var(--accent-soft); font-family:var(--mono); font-size:12px; color:var(--accent); }
+  .pal-chip .verb{ font-weight:650; } .pal-chip .slot{ color:var(--muted); } .pal-chip .slot.empty{ color:var(--dim); }
+  .pal-input{ display:flex; align-items:center; gap:10px; padding:14px 16px; }
+  .pal-input .gt{ color:var(--accent); font-size:17px; }
+  .pal-input input{ flex:1; border:0; outline:0; font:inherit; font-size:16px; background:transparent; color:var(--ink); }
+  .pal-input input::placeholder{ color:var(--dim); }
+  .pal-list{ max-height:320px; overflow-y:auto; padding:6px; border-top:1px solid var(--line); }
+  .pal-opt{ display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:10px; cursor:pointer; font-size:14px; }
+  .pal-opt.sel{ background:var(--accent-soft); }
+  .pal-opt .num{ font-family:var(--mono); font-size:11px; color:var(--accent); background:var(--card); border:1px solid var(--line); border-radius:6px; width:18px; height:18px; display:grid; place-items:center; flex:0 0 auto; }
+  .pal-opt .ov{ font-weight:650; }
+  .pal-opt .od{ color:var(--dim); font-size:12px; margin-left:auto; }
+
+  /* ===== mode line + status bar ===== */
+  .modeline{ position:fixed; left:0; right:0; bottom:40px; display:flex; justify-content:center; pointer-events:none; z-index:70; }
+  .modeline .ml{ background:var(--ink); color:#f4f2ee; font-size:12px; padding:8px 14px; border-radius:10px; box-shadow:0 10px 26px -14px rgba(0,0,0,.6); opacity:0; transform:translateY(6px); transition:opacity var(--t), transform var(--t); }
+  .modeline .ml.show{ opacity:1; transform:none; }
+  .modeline .ml .v{ color:#8fc6b4; font-family:var(--mono); }
+
+  .statusbar{ position:fixed; left:0; right:0; bottom:0; height:40px; background:var(--card); border-top:1px solid var(--line); display:flex; align-items:center; gap:14px; padding:0 16px; z-index:75; font-size:12px; }
+  .statusbar .mode{ font-family:var(--mono); font-size:11px; font-weight:650; letter-spacing:.6px; padding:3px 9px; border-radius:7px; }
+  .statusbar .mode.NORMAL{ color:var(--accent); background:var(--accent-soft); }
+  .statusbar .mode.COMMAND{ color:#fff; background:var(--accent); }
+  .statusbar .summary{ color:var(--muted); }
+  .statusbar .summary .w{ color:var(--accent); } .statusbar .summary .n{ color:var(--amber); } .statusbar .summary .b{ color:var(--red); }
+  .statusbar .hints{ margin-left:auto; display:flex; gap:7px; align-items:center; }
+  .statusbar kbd{ font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:2px 6px; }
+  .statusbar kbd b{ color:var(--ink); }
+
+  @keyframes pulse{ 70%{ box-shadow:0 0 0 6px rgba(47,111,94,0); } 100%{ box-shadow:0 0 0 0 rgba(47,111,94,0); } }
+  @keyframes rise{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<div class="page">
+
+  <!-- ===== PROJECT CONTEXT STRIP (breadcrumb) ===== -->
+  <div class="ctx">
+    <div class="scope" id="scopeBtn" title="Switch project  ( : switch project )">
+      <span class="dot"></span>
+      <span class="crumb"><b>Insurance Authorization</b></span>
+      <span class="caret">▾</span>
+    </div>
+    <span class="insts" id="instToggle">▸&nbsp;9 instructions</span>
+
+    <!-- switcher popover: projects with sub-projects indented, one number each -->
+    <div class="switchmenu" id="switchMenu">
+      <div class="sm-h">Project · open tasks</div>
+      <div class="so cur"><span class="sd" style="background:var(--accent)"></span><span class="nm">Insurance Authorization</span><span class="cnt">17</span></div>
+      <div class="so sub"><span class="sd"></span><span class="nm">Aetna HMO</span><span class="cnt">8</span></div>
+      <div class="so sub"><span class="sd"></span><span class="nm">UnitedHealthcare</span><span class="cnt">5</span></div>
+      <div class="so sub"><span class="sd"></span><span class="nm">Medicare Advantage</span><span class="cnt">4</span></div>
+      <div class="sdiv"></div>
+      <div class="so"><span class="sd"></span><span class="nm">Eligibility Verification <span class="bd">↻ daily 6am</span></span><span class="cnt">9</span></div>
+      <div class="so"><span class="sd"></span><span class="nm">Claims &amp; Denials</span><span class="cnt">10</span></div>
+      <div class="so"><span class="sd"></span><span class="nm">Patient Intake</span><span class="cnt">3</span></div>
+      <div class="so"><span class="sd"></span><span class="nm">API service <span class="bd">~/git/api</span></span><span class="cnt">4</span></div>
+      <div class="so"><span class="sd"></span><span class="nm">Personal</span><span class="cnt"><span class="nz">1</span></span></div>
+      <div class="sdiv"></div>
+      <div class="so add">＋ New project…</div>
+    </div>
+  </div>
+
+  <!-- PROJECT DESCRIPTION — single calm agent-facing line -->
+  <div class="desc">
+    <span class="dtext" id="descText" title="Click to edit">Prior authorizations for our top payers. Confirm coverage, attach the latest EHR clinical notes, post outcomes to #auth-team, and stop to ask before anything irreversible.</span>
+    <span class="dctx" title="This description is given to every agent as context"><span class="gl">◇</span> given to every agent as context</span>
+  </div>
+
+  <!-- HERO — single priority line -->
+  <div class="hero">
+    <span class="blk">2 blocked</span>, <span class="need">3 need you</span>.
+    <span class="reg"><span class="mono">A-2250</span> has been blocked <span class="min" style="color:var(--red)">38 min</span> on missing secondary coverage —</span>
+    <a id="heroOpen">open it first ›</a>
+  </div>
+
+  <!-- ===== PROJECT INSTRUCTIONS (revealed) ===== -->
+  <div class="instpanel" id="instPanel">
+    <div class="ih">Project instructions · every task in <b>Insurance Authorization</b> inherits these · 9 across scopes · 1 learned from you Tue</div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Never submit an auth without confirming secondary coverage.<span class="scopetag">project</span></span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Attach the latest clinical notes from the EHR.<span class="scopetag">project</span></span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Post outcomes to #auth-team.<span class="scopetag">project</span></span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">If the payer portal is down, queue and retry — don't fail the task.<span class="scopetag">project</span></span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">HMO requires a PCP referral on file — confirm before submitting.<span class="scopetag">payer:HMO</span><span class="rmeta">★ learned from you · Tue</span></span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Use the HMO fax cover sheet, not the PPO one.<span class="scopetag">payer:HMO</span></span></div>
+    <div class="instrule"><span class="rq">“</span><span class="rt">Request 7-day expedited review when the case is marked urgent.<span class="scopetag">kind:prior-auth</span></span></div>
+    <div class="instadd">
+      <input id="newRule" placeholder="＋ Teach a rule — plain language, e.g. “Always queue overnight if the portal is slow”" />
+      <button class="teachbtn" id="teachBtn">Teach</button>
+    </div>
+  </div>
+
+  <!-- ===== PROPOSED — folded behind one line ===== -->
+  <div class="propline" id="propLine">＋ 2 proposed for you ›</div>
+  <div class="propcards" id="propCards">
+    <div class="propcard" id="propA">
+      <div class="pc-tag">Proposed · ready</div>
+      <div class="pc-t">Submit the Aetna HMO batch once PCP referrals are confirmed</div>
+      <div class="pc-sub">agent <b>Auth bot</b> · folder from project · honors 8 instructions · ~5–8 min · ~$0.11</div>
+    </div>
+    <div class="propcard" id="propB">
+      <div class="pc-tag">Proposed · recurring</div>
+      <div class="pc-t">↻ Sweep eligibility for tomorrow's schedule</div>
+      <div class="pc-sub">agent <b>Eligibility checker</b> · <span class="mono">↻ daily 6:00am</span> · honors 5 instructions</div>
+    </div>
+  </div>
+
+  <!-- detailed proposal -->
+  <div class="proposal" id="proposal">
+    <div class="ph">
+      <div class="ptag">Proposed agent task — review before it runs</div>
+      <div class="pt">Submit the Aetna HMO batch once PCP referrals are confirmed</div>
+      <div class="pq">I inferred the rest from the <i>Insurance Authorization</i> project and the HMO batch. <i>I only need one thing from you.</i></div>
+    </div>
+    <div class="fields">
+      <div class="field"><div class="k">Agent</div><div class="v">Auth bot · local auto <span class="inferred">inferred</span></div></div>
+      <div class="field"><div class="k">Folder</div><div class="v">Aetna portal queue <span class="inferred">from project</span></div></div>
+      <div class="field"><div class="k">Trigger</div><div class="v">When A-2242 PCP referral is confirmed <span class="inferred">inferred</span></div></div>
+      <div class="field ask"><div class="k">⚠ Expedite? — I can't infer this</div><div class="v">
+        <select id="expSel"><option>Standard review</option><option>7-day expedited (urgent)</option></select>
+      </div></div>
+    </div>
+    <div class="honors">
+      <span>✓</span><span>Honors <b>8 instructions</b> <span class="hrel">— “confirm secondary coverage” gates step 2 · “PCP referral on file” gates step 1 · outcomes post to #auth-team</span></span>
+    </div>
+    <div class="ptrace">
+      <div class="tlbl">Planned steps</div>
+      <div class="pstep"><span class="n">1</span><span>Confirm PCP referral for each HMO auth</span><span class="why">— why: HMO category rule</span></div>
+      <div class="pstep"><span class="n">2</span><span>Confirm secondary coverage</span><span class="why">— why: project rule (never submit without it)</span></div>
+      <div class="pstep"><span class="n">3</span><span>Submit via Aetna portal</span><span class="why">— why: ship the batch</span></div>
+      <div class="pstep"><span class="n">4</span><span>Post outcomes to #auth-team</span><span class="why">— why: project rule (team visibility)</span></div>
+    </div>
+    <div class="estimate">
+      <div class="e"><b>~5–8 min</b><span>est. runtime</span></div>
+      <div class="e"><b>~$0.11</b><span>est. token cost</span></div>
+      <div class="spacer"></div>
+      <div class="dry">▶ Dry-run first (no submit) recommended</div>
+    </div>
+    <div class="pactions">
+      <button class="btn" id="propDry">Dry-run</button>
+      <button class="btn primary" id="propCreate">Create &amp; run</button>
+      <div class="spacer"></div>
+      <button class="btn" id="propCancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ===== MAIN LIST ===== -->
+  <div id="listRoot"></div>
+
+</div><!-- /page -->
+</div><!-- /shell -->
+
+<!-- ===== DRAWER ===== -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Task detail">
+  <div class="dr-head">
+    <div class="dr-crumb">
+      <span>Insurance Authorization</span><span>›</span><span id="drCrumbParent">Aetna HMO batch</span>
+      <span class="x" id="drClose">close <kbd>esc</kbd></span>
+    </div>
+    <div class="dr-title"><span class="st" id="drDot"></span><span id="drTitle">Task</span></div>
+    <div class="dr-meta" id="drMeta"></div>
+    <!-- earned-reason + primary action lead -->
+    <div class="dr-lead" id="drLead"></div>
+    <!-- tabs -->
+    <div class="tabs" id="drTabs">
+      <button class="tab active" data-tab="trace">Trace</button>
+      <button class="tab" data-tab="config">Config</button>
+      <button class="tab" data-tab="activity">Activity</button>
+    </div>
+  </div>
+  <div class="dr-body">
+    <div class="pane active" id="paneTrace"></div>
+    <div class="pane" id="paneConfig"></div>
+    <div class="pane" id="paneActivity"></div>
+  </div>
+  <!-- steer / reply box -->
+  <div class="steer">
+    <div class="si">
+      <textarea id="steerInput" placeholder="Steer the agent — e.g. “submit anyway, referral arrives tomorrow”"></textarea>
+      <button class="sendbtn" id="steerSend">Send</button>
+    </div>
+    <div class="saveinstr" id="saveInstr">
+      <span class="sx">Save this correction as an instruction?</span>
+      <select id="saveScope">
+        <option value="task">this task only</option>
+        <option value="hmo">payer:HMO category</option>
+        <option value="project">whole project</option>
+      </select>
+      <button class="savebtn" id="saveInstrBtn">＋ Save</button>
+    </div>
+  </div>
+</aside>
+
+<!-- ===== COMMAND PALETTE ===== -->
+<div class="palette-scrim" id="palScrim">
+  <div class="palette" role="dialog" aria-label="Command palette">
+    <div class="pal-chip">
+      <span class="verb" id="palVerb">open</span>
+      <span class="slot" id="palSlot1">·</span>
+      <span class="slot empty" id="palSlot2">· slot</span>
+    </div>
+    <div class="pal-input">
+      <span class="gt">:</span>
+      <input id="palInput" autocomplete="off" placeholder="type an action, file, or task…" />
+    </div>
+    <div class="pal-list" id="palList"></div>
+  </div>
+</div>
+
+<!-- ===== MODE LINE + STATUS BAR ===== -->
+<div class="modeline"><div class="ml" id="modeLine" role="status"></div></div>
+<div class="statusbar">
+  <span class="mode NORMAL" id="modeBadge">NORMAL</span>
+  <span class="summary"><span class="w">12 working</span> · <span class="n">3 need you</span> · <span class="b">2 blocked</span> · 7 done</span>
+  <span class="hints">
+    <kbd><b>j</b>/<b>k</b> move</kbd>
+    <kbd><b>enter</b> open</kbd>
+    <kbd><b>space</b> mark</kbd>
+    <kbd><b>:</b> actions</kbd>
+    <kbd><b>?</b> help</kbd>
+  </span>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   DATA — verbatim names/numbers from shared spec
+   ========================================================================= */
+const TASKS = [
+  /* group: needs you */
+  { id:"A-2250", group:"need", parent:"UHC batch", title:"Auth #A-2250 · blocked 38 min", state:"blocked",
+    badge:"blocked 38m", who:"bot", sub:'UHC · agent waiting on missing secondary coverage',
+    dep:{ rule:'Never submit without secondary coverage check', text:'blocked-by “Secondary coverage on file”' },
+    config:{ agent:"Auth bot · local auto", sched:"part of UHC batch (↻ Mon 7:00am)", binding:"UnitedHealthcare portal · EHR", node:"step 2/5 · confirm secondary coverage" },
+    trace:[
+      ["done","Pull patient + payer context","needed to fill the auth form"],
+      ["run","Confirm secondary coverage","project rule — none on file → BLOCKED, waiting on you",
+        {kind:"blocked", rule:'“Never submit without secondary coverage check.”'}],
+      ["todo","Confirm UHC requirements","payer rule"],
+      ["todo","Submit via UHC portal","ship the auth"],
+      ["todo","Post outcome to #auth-team","project rule"],
+    ],
+    session:[
+      ["pr","$ authbot run --task A-2250"],
+      ["ok","→ Loaded patient context (MRN ••••• — <span class=\"reveal\" data-mrn>reveal</span> to view)"],
+      ["ok","→ Payer: UnitedHealthcare · Plan: Choice Plus"],
+      ["run","⏸ step 2/5 · secondary coverage NOT on file — cannot proceed"],
+      ["dim","   project rule blocks submit; waiting for you to resolve"],
+    ] },
+
+  { id:"A-2242", group:"need", parent:"Aetna HMO batch", title:"Auth #A-2242 · HMO · PCP referral", state:"waiting",
+    badge:"waiting on you", who:"bot", sub:'“No PCP referral on file — submit anyway? (y/n)”',
+    config:{ agent:"Auth bot · local auto", sched:"part of Aetna HMO batch (↻ Mon 7:00am)", binding:"Aetna portal · EHR", node:"step 1/4 · confirm PCP referral" },
+    trace:[
+      ["done","Pull patient + payer context","needed to fill the auth form"],
+      ["run","Confirm PCP referral (HMO)","HMO category rule — none on file → asking you (y/n)",
+        {kind:"waiting", rule:'“HMO requires a PCP referral on file.”'}],
+      ["todo","Confirm secondary coverage","project rule"],
+      ["todo","Submit via Aetna portal","ship the auth"],
+    ],
+    session:[
+      ["pr","$ authbot run --task A-2242"],
+      ["ok","→ Loaded patient context (MRN ••••• — <span class=\"reveal\" data-mrn>reveal</span> to view)"],
+      ["ok","→ Payer: Aetna HMO · Plan: Open Access"],
+      ["run","⏸ HMO requires PCP referral — none on file"],
+      ["dim","   awaiting your y/n: submit anyway?"],
+    ],
+    showCascade:true },
+
+  /* group: working — recurring definition parent (↻) */
+  { id:"AETNA", group:"work", isParent:true, recurring:true, cadence:"↻ Mon 7:00am", next:"next Mon 7:00am",
+    title:"↻ Prior auth — Aetna HMO batch", state:"working", live:true,
+    who:"bot",
+    rollup:'↻ weekly · last run created 6 subtasks · <span class="w">1 working</span> · <span class="n">1 needs you</span> · 4 done',
+    config:{ agent:"Auth bot · local auto", schedRec:{cron:"↻ Mon 7:00am (weekly · cron)", last:"today 08:05 ✓", next:"Mon 7:00am", run:"this run created 6 subtasks"}, binding:"Aetna payer portal · EHR", node:"batch — fans out 1 subtask per patient" },
+    children:["A-2241","A-2242","A-2243","A-2244","A-2245","A-2246"],
+    session:[
+      ["pr","$ authbot batch --payer aetna-hmo --schedule mon-0700"],
+      ["ok","→ Created 6 subtasks from today's worklist"],
+      ["ok","→ A-2241 submitted · conf #AET-88102"],
+      ["run","⏵ A-2243 drafting clinical justification (412 words)"],
+      ["dim","   A-2242 waiting on you · 4 done"],
+    ] },
+
+  { id:"A-2243", group:"work", parent:"Aetna HMO batch", title:"Auth #A-2243 · clinical justification", state:"working",
+    who:"bot", sub:'drafting clinical justification · <span class="mono">412 words</span> · step 4/6',
+    config:{ agent:"Auth bot · local auto", sched:"part of Aetna HMO batch (↻ Mon 7:00am)", binding:"Aetna portal · EHR", node:"step 4/6 · draft clinical justification" },
+    trace:[
+      ["done","Pull patient + payer context","needed to fill the auth form"],
+      ["done","Confirm secondary coverage","project rule — none found, noted"],
+      ["done","Confirm PCP referral (HMO)","HMO category rule — on file"],
+      ["run","Draft clinical justification","payer requires medical necessity (IN PROGRESS, step 4/6)"],
+      ["todo","Submit via Aetna portal","ship the auth"],
+      ["todo","Post outcome to #auth-team","project rule (team visibility)"],
+    ],
+    session:[
+      ["pr","$ authbot run --task A-2243"],
+      ["ok","→ Loaded patient context (MRN ••••• — <span class=\"reveal\" data-mrn>reveal</span> to view)"],
+      ["ok","→ Payer: Aetna HMO · Plan: Open Access"],
+      ["ok","→ Confirmed secondary coverage: none on file"],
+      ["ok","→ Confirmed PCP referral: on file ✓"],
+      ["run","⏵ step 4/6 · drafting clinical justification from 3 encounters…"],
+      ["dim","   ✎ 412 words drafted"],
+    ] },
+
+  { id:"REAUTH", group:"work", title:"Re-auth expiring this week", state:"working",
+    who:"priya", sub:'claimed by Priya · step 3/5',
+    config:{ agent:"Eligibility checker", sched:"weekly sweep", binding:"EHR · expiring auths report", node:"step 3/5 · renewing expiring auths" },
+    trace:[
+      ["done","List auths expiring within 7 days","find what needs renewal"],
+      ["done","Pull renewal requirements per payer","payer rules differ"],
+      ["run","Renew each auth","step 3/5 — Priya steering"],
+      ["todo","Verify confirmations","ensure each renewed"],
+      ["todo","Post outcomes to #auth-team","project rule"],
+    ],
+    session:[
+      ["pr","$ eligbot reauth --window 7d"],
+      ["ok","→ 9 auths expiring this week"],
+      ["run","⏵ step 3/5 · renewing (Priya steering)"],
+    ] },
+
+  /* group: working — UHC parent (blocked) */
+  { id:"UHC", group:"work", isParent:true, recurring:true, cadence:"↻ Mon 7:00am", next:"next Mon 7:00am",
+    title:"↻ Prior auth — UnitedHealthcare batch", state:"blocked",
+    who:"bot",
+    rollup:'↻ weekly · 5 children · <span class="b">1 blocked</span> · 4 working',
+    config:{ agent:"Auth bot · local auto", schedRec:{cron:"↻ Mon 7:00am (weekly · cron)", last:"today 08:05 ✓", next:"Mon 7:00am", run:"this run created 5 subtasks"}, binding:"UnitedHealthcare portal · EHR", node:"batch — fans out 1 subtask per patient" },
+    children:["A-2250"],
+    dep:{ rule:'Confirm PCP referral (A-2242)', text:'“Submit Aetna HMO batch” is blocked-by “Confirm PCP referral (A-2242)”' },
+    session:[
+      ["pr","$ authbot batch --payer uhc --schedule mon-0700"],
+      ["ok","→ Created 5 subtasks"],
+      ["run","⏵ 4 working"],
+      ["dim","   A-2250 blocked · secondary coverage missing"],
+    ] },
+
+  /* group: claimed / unclaimed */
+  { id:"APPEAL", group:"other", title:"Appeal denial — CT scan (Medicare)", state:"claimed",
+    who:"sam", sub:'claimed by Sam',
+    config:{ agent:"Denial responder", sched:"on demand", binding:"clearinghouse · EHR", node:"not started — claimed, awaiting Sam" },
+    trace:[
+      ["todo","Pull denial reason + clinical record","build the appeal packet"],
+      ["todo","Draft appeal letter","payer:Medicare rules"],
+      ["todo","Attach supporting notes","project rule"],
+      ["todo","Submit appeal","ship it"],
+    ],
+    session:[
+      ["pr","$ # claimed by Sam — not yet started"],
+      ["dim","   waiting for Sam to enter the thread"],
+    ] },
+
+  { id:"STAT", group:"need", title:"Stat auth — ER admit, Cigna", state:"unclaimed",
+    badge:"P0", who:"none", sub:'unclaimed · ready for any agent',
+    config:{ agent:"— unclaimed —", sched:"immediate (P0) · one-off", binding:"Cigna portal · EHR", node:"not started — ready for any agent" },
+    trace:[
+      ["todo","Claim + pull ER context","stat — time-sensitive"],
+      ["todo","Confirm coverage","project rule"],
+      ["todo","Submit expedited auth","kind:prior-auth — 7-day expedited (urgent)"],
+    ],
+    session:[
+      ["pr","$ # unclaimed — P0 stat auth"],
+      ["dim","   any agent can claim with :claim"],
+    ] },
+
+  /* completed */
+  { id:"A-2241", group:"done", parent:"Aetna HMO batch", title:"Auth #A-2241 · J. Rivera · MRI lumbar", state:"done",
+    who:"bot", sub:'submitted · conf <span class="mono">#AET-88102</span>',
+    config:{ agent:"Auth bot · local auto", sched:"part of Aetna HMO batch (↻ Mon 7:00am)", binding:"Aetna portal · EHR", node:"complete — 6/6 steps" },
+    result:'Submitted to Aetna · confirmation #AET-88102 · approved same-day · clinical notes attached · posted to #auth-team.',
+    trace:[
+      ["done","Pull patient + payer context","needed to fill the auth form"],
+      ["done","Confirm secondary coverage","project rule — verified"],
+      ["done","Confirm PCP referral (HMO)","HMO rule — on file"],
+      ["done","Draft clinical justification","medical necessity"],
+      ["done","Submit via Aetna portal","conf #AET-88102"],
+      ["done","Post outcome to #auth-team","team visibility"],
+    ],
+    session:[
+      ["pr","$ authbot run --task A-2241"],
+      ["ok","→ Loaded patient context (MRN ••••• — <span class=\"reveal\" data-mrn>reveal</span> to view)"],
+      ["ok","→ Submitted via Aetna portal"],
+      ["ok","✓ Confirmation #AET-88102 · approved"],
+    ] },
+];
+const BY_ID = Object.fromEntries(TASKS.map(t=>[t.id,t]));
+
+const CHILD_DONE = {
+  "A-2244": { id:"A-2244", title:"Auth #A-2244", state:"done", who:"bot", sub:"submitted ✓",
+    config:{ agent:"Auth bot · local auto", sched:"part of Aetna HMO batch", binding:"Aetna portal · EHR", node:"complete" },
+    result:"Submitted · approved.", trace:[["done","Submit via Aetna portal","done"]], session:[["pr","$ authbot run --task A-2244"],["ok","✓ submitted"]] },
+  "A-2245": { id:"A-2245", title:"Auth #A-2245", state:"done", who:"bot", sub:"submitted ✓",
+    config:{ agent:"Auth bot · local auto", sched:"part of Aetna HMO batch", binding:"Aetna portal · EHR", node:"complete" },
+    result:"Submitted · approved.", trace:[["done","Submit via Aetna portal","done"]], session:[["pr","$ authbot run --task A-2245"],["ok","✓ submitted"]] },
+  "A-2246": { id:"A-2246", title:"Auth #A-2246", state:"done", who:"bot", sub:"submitted ✓",
+    config:{ agent:"Auth bot · local auto", sched:"part of Aetna HMO batch", binding:"Aetna portal · EHR", node:"complete" },
+    result:"Submitted · approved.", trace:[["done","Submit via Aetna portal","done"]], session:[["pr","$ authbot run --task A-2246"],["ok","✓ submitted"]] },
+};
+Object.assign(BY_ID, CHILD_DONE);
+
+const TIMELINE = [
+  ["09:42","working","Auth bot — drafted clinical justification (412 words) · <span class='mono'>A-2243</span>"],
+  ["09:41","claimed","Auth bot claimed <span class='mono'>A-2243</span>"],
+  ["09:38","blocked","<span class='mono'>A-2250</span> — secondary coverage missing · cites “Never submit without secondary coverage”"],
+  ["09:31","waiting","<span class='mono'>A-2242</span> — needs PCP referral (HMO rule) · y/n to you"],
+  ["09:24","rule","HMO scope applied to <span class='mono'>A-2242</span> → required PCP referral check"],
+  ["09:20","claimed","Priya claimed “Re-auth expiring this week”"],
+  ["09:02","done","<span class='mono'>A-2241</span> submitted to Aetna · conf <span class='mono'>#AET-88102</span>"],
+  ["08:05","started","cron “↻ Prior auth — Aetna HMO batch” (Mon 7:00am) created 6 subtasks"],
+];
+
+const CASCADE = [
+  { scope:"PROJECT · Insurance Authorization", cls:"project", rules:[
+    ["Never submit an auth without confirming secondary coverage.",false,false,false],
+    ["Attach the latest clinical notes from the EHR.",false,false,false],
+    ["Post outcomes to #auth-team.",false,false,false],
+    ["If the payer portal is down, queue and retry — don't fail the task.",false,false,false],
+  ]},
+  { scope:"CATEGORY · payer:HMO", cls:"payer:HMO", rules:[
+    ["HMO requires a PCP referral on file — confirm before submitting.",true,false,true],
+    ["Use the HMO fax cover sheet, not the PPO one.",false,false,false],
+  ]},
+  { scope:"CATEGORY · kind:prior-auth", cls:"kind:prior-auth", rules:[
+    ["Request 7-day expedited review when the case is marked urgent.",false,false,false],
+  ]},
+  { scope:"TASK · Auth #A-2242", cls:"task", rules:[
+    ["This patient: contact via portal message, not phone.",false,true,false],
+  ]},
+];
+
+/* =========================================================================
+   RENDER LIST — Needs-you expanded; Working / Other / Done count-only foldable
+   ========================================================================= */
+const listRoot = document.getElementById("listRoot");
+const GROUPS = [
+  ["need","Needs you",true],
+  ["work","Working",false],
+  ["other","Claimed",false],
+  ["done","Done today",false],
+];
+let rowEls = [];
+
+function avaHTML(who){
+  if(who==="you") return '<span class="ava">Y</span>';
+  if(who==="priya") return '<span class="ava">P</span>';
+  if(who==="sam") return '<span class="ava">S</span>';
+  if(who==="bot") return '<span class="ava bot">AB</span>';
+  return '<span class="ava none"></span>';
+}
+
+function rowHTML(t, isChild){
+  const tog = t.isParent ? '<span class="tog">▸</span>' : (isChild ? '<span class="tog">·</span>' : '<span class="tog"></span>');
+  const liveDot = (t.live && t.state==="working") ? " live" : "";
+  let mainInner = `<div class="nm">${t.title}</div>`;
+  if(t.rollup) mainInner += `<div class="rollup">${t.rollup}</div>`;
+  else if(t.sub) mainInner += `<div class="sub">${t.sub}</div>`;
+  if(t.dep) mainInner += `<div class="dep"><span class="lock">⛓</span>${t.dep.text}</div>`;
+
+  // right column: ONE encoding. badge only for actionable; recurring defs show next-run meta.
+  let right = "";
+  if(t.id==="STAT") right = `<span class="badge p0">P0</span>`;
+  else if(t.state==="blocked") right = `<span class="badge blocked">${t.badge||"blocked"}</span>`;
+  else if(t.state==="waiting") right = `<span class="badge waiting">${t.badge||"waiting on you"}</span>`;
+  if(t.recurring && t.next) right += `<span class="next">${t.next}</span>`;
+
+  return `
+    <div class="col-tog">${tog}</div>
+    <div class="col-st"><span class="st ${t.state}${liveDot}"></span></div>
+    <div class="col-main">${mainInner}</div>
+    <div class="col-ava">${avaHTML(t.who)}</div>
+    <div class="col-right">${right}</div>`;
+}
+
+function buildList(){
+  listRoot.innerHTML = "";
+  rowEls = [];
+  GROUPS.forEach(([gk,gl,openByDefault])=>{
+    const inGroup = TASKS.filter(t=>t.group===gk);
+    if(!inGroup.length) return;
+
+    const header = document.createElement("div");
+    header.className = "grp fold" + (openByDefault?" open":"");
+    header.dataset.group = gk;
+    const counts = inGroup.length + (gk==="work" ? " · "+TASKS.filter(t=>t.group==="work").reduce((n)=>n,0) : "");
+    header.innerHTML = `<span class="gtog">▸</span>${gl}<span class="gcount">${inGroup.length} ${inGroup.length===1?"task":"tasks"}</span>`;
+    listRoot.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "grpbody" + (openByDefault?"":" collapsed");
+    body.dataset.groupbody = gk;
+    listRoot.appendChild(body);
+
+    header.addEventListener("click",()=>{
+      const collapsed = body.classList.toggle("collapsed");
+      header.classList.toggle("open",!collapsed);
+    });
+
+    inGroup.forEach(t=>{
+      const r = document.createElement("div");
+      r.className = "row" + (t.isParent ? " parent" : "");
+      r.dataset.id = t.id;
+      r.innerHTML = rowHTML(t,false);
+      body.appendChild(r);
+      rowEls.push(r);
+      if(t.isParent && t.children){
+        const wrap = document.createElement("div");
+        wrap.className="children collapsed";
+        wrap.dataset.parent=t.id;
+        t.children.forEach(cid=>{
+          const c = BY_ID[cid];
+          const cr = document.createElement("div");
+          cr.className="row child";
+          cr.dataset.id=cid;
+          cr.innerHTML = rowHTML(c,true);
+          wrap.appendChild(cr);
+          rowEls.push(cr);
+        });
+        body.appendChild(wrap);
+      }
+    });
+  });
+  bindRows();
+}
+
+function bindRows(){
+  document.querySelectorAll(".row").forEach(r=>{
+    r.addEventListener("click",(e)=>{
+      const t = BY_ID[r.dataset.id];
+      if(t.isParent && e.target.classList.contains("tog")){ toggleParent(r,t); return; }
+      openDrawer(r.dataset.id);
+    });
+  });
+}
+
+function toggleParent(rowEl,t){
+  rowEl.classList.toggle("open");
+  const wrap = listRoot.querySelector('.children[data-parent="'+t.id+'"]');
+  if(wrap){
+    const collapsing = !wrap.classList.contains("collapsed");
+    wrap.classList.toggle("collapsed");
+    flash(`${collapsing?"collapsed":"expanded"} <span class="v">${t.title}</span>`);
+  }
+}
+
+/* =========================================================================
+   DRAWER — Trace · Config · Activity (default Trace)
+   ========================================================================= */
+const scrim = document.getElementById("scrim");
+const drawer = document.getElementById("drawer");
+const paneTrace = document.getElementById("paneTrace");
+const paneConfig = document.getElementById("paneConfig");
+const paneActivity = document.getElementById("paneActivity");
+let drawerOpen = false;
+
+function traceHTML(t){
+  if(!t.trace) return '<div class="dr-sec"><div class="h">Trace</div><div class="casc-line">No steps yet — this task hasn’t started.</div></div>';
+  const icon = s => s==="done" ? '<span class="ti done">✓</span>' : s==="run" ? '<span class="ti run">⏵</span>' : '<span class="ti todo">◦</span>';
+  const rows = t.trace.map(step=>{
+    const [s,txt,why,gate] = step;
+    let gateHTML = "";
+    if(gate){ // earned-link folded INTO the running step
+      gateHTML = `<span class="gate ${gate.kind}">${gate.kind==="blocked"?"⛔ Blocked":"⏸ Waiting"} on rule ${gate.rule} <a data-jump>see the rule’s scope ›</a></span>`;
+    }
+    return `<div class="tstep">${icon(s)}<div><div class="tt ${s==="run"?"running":""}">${txt}</div><div class="twhy">why: ${why}</div>${gateHTML}</div></div>`;
+  }).join("");
+  return `<div class="dr-sec"><div class="h">Trace</div><div class="trace">${rows}</div></div>`;
+}
+
+function cascadeBlockHTML(){
+  let h = '<div class="casc" id="cascFull">';
+  CASCADE.forEach(g=>{
+    h += `<div class="scope-grp"><div class="sg-h"><span class="tagm">${g.cls}</span>${g.scope} · ${g.rules.length}</div>`;
+    g.rules.forEach(([txt,learned,over,gate])=>{
+      h += `<div class="crule ${gate?"gate":""}"><span class="rq">“</span><span>${txt}${learned?'<span class="lm"> ★ learned from you · Tue</span>':''}${over?'<span class="ov">override</span>':''}</span></div>`;
+    });
+    h += `</div>`;
+  });
+  h += `<div class="efftot"><b>Effective instructions: 8</b> &nbsp;(4 project · 2 HMO · 1 prior-auth · 1 task) &nbsp;·&nbsp; resolved Project → payer:HMO → kind:prior-auth → Task</div></div>`;
+  return h;
+}
+
+function instructionsSectionHTML(t){
+  // collapsed-to-one-line cascade; inline only the gating rule
+  const gating = (t.trace||[]).map(s=>s[3]).find(Boolean);
+  let inline = "";
+  if(gating) inline = `<div class="casc-line" style="margin-bottom:8px;color:var(--${gating.kind==='blocked'?'red':'amber'})">Gating now: ${gating.rule}</div>`;
+  if(t.showCascade){
+    return `<div class="dr-sec"><div class="h">Effective instructions</div>
+      ${inline}
+      <div class="casc-line">Honors <b>8 instructions</b> (4 project · 2 HMO · 1 prior-auth · 1 task) — <a data-casctoggle>view ›</a></div>
+      ${cascadeBlockHTML()}</div>`;
+  }
+  return `<div class="dr-sec"><div class="h">Effective instructions</div>
+    ${inline}
+    <div class="casc-line">Inherits the project + category cascade — <a data-cascade>view the 8-rule HMO cascade ›</a></div></div>`;
+}
+
+function configPaneHTML(t){
+  const c = t.config;
+  let schedRow;
+  if(c.schedRec){
+    const r = c.schedRec;
+    schedRow = `<div class="crow"><span class="ck">Schedule</span><span class="cv">${r.cron} · last run ${r.last} · next ${r.next}<br>
+      <span style="color:var(--muted)">${r.run} · this is run #14 of <i>${t.title.replace('↻ ','')}</i> · <a data-schedule>view schedule →</a></span></span></div>`;
+  } else {
+    schedRow = `<div class="crow"><span class="ck">Schedule</span><span class="cv">${c.sched}</span></div>`;
+  }
+  return `<div class="dr-sec"><div class="h">Config</div><div class="cfg">
+    <div class="crow"><span class="ck">Agent</span><span class="cv">${c.agent}</span></div>
+    ${schedRow}
+    <div class="crow"><span class="ck">Binding</span><span class="cv">${c.binding}</span></div>
+    <div class="crow"><span class="ck">Step / node</span><span class="cv">${c.node}</span></div>
+  </div></div>`
+  + instructionsSectionHTML(t);
+}
+
+function sessionHTML(t){
+  if(!t.session) return "";
+  const lines = t.session.map(([cls,txt])=>`<span class="${cls}">${txt}</span>`).join("\n");
+  const lbl = t.state==='done' ? "Live session (replay)" : "Live session";
+  return `<div class="dr-sec"><div class="h">${lbl}</div><div class="term">${lines}</div></div>`;
+}
+
+function activityPaneHTML(t){
+  let h = sessionHTML(t);
+  h += `<div class="dr-sec"><div class="h">Project timeline · live</div><div class="tl">`+
+    TIMELINE.map(([ts,st,txt])=>`<div class="ev"><span class="ts">${ts}</span><span class="stag ${st}">${st.toUpperCase()}</span><span class="et">${txt}</span></div>`).join("")+
+    `</div></div>`;
+  return h;
+}
+
+function leadHTML(t){
+  // earned reason chip (for waiting/blocked) + ONE primary action set
+  let reason = "";
+  if(t.state==="waiting") reason = `<div class="dr-reason waiting">⏸ Waiting on the HMO rule <i>“HMO requires a PCP referral on file.”</i> Answer below or resolve the referral. <a data-jump>see the rule ›</a></div>`;
+  else if(t.state==="blocked") reason = `<div class="dr-reason blocked">⛔ Blocked by the project rule <i>“Never submit without secondary coverage check.”</i> No secondary coverage on file. <a data-jump>see the rule ›</a></div>`;
+
+  let btns = "";
+  if(t.state==="waiting") btns += `<button class="btn primary" data-act="yes">Submit anyway (y)</button>`;
+  if(t.state==="unclaimed") btns += `<button class="btn primary" data-act="claim">Claim</button>`;
+  if(t.state==="working"||t.state==="blocked"||t.state==="waiting") btns += `<button class="btn danger" data-act="stop">■ Stop</button>`;
+  if(t.state==="done"){ btns += `<button class="btn primary" data-act="accept">Accept</button><button class="btn" data-act="redo">Redo</button>`; }
+  btns += `<button class="btn" data-act="thread">Enter thread →</button>`;
+  return reason + `<div class="dr-primary">${btns}</div>`;
+}
+
+let curTab = "trace";
+function openDrawer(id){
+  const t = BY_ID[id];
+  if(!t) return;
+  document.getElementById("drTitle").textContent = t.title;
+  document.getElementById("drDot").className = "st "+t.state+((t.live&&t.state==="working")?" live":"");
+  document.getElementById("drCrumbParent").textContent = t.parent || (t.isParent?"batch":"task");
+
+  const stateLabel = { working:"Working", waiting:"Waiting on you", blocked:"Blocked", claimed:"Claimed", unclaimed:"Unclaimed · P0", done:"Done" }[t.state];
+  document.getElementById("drMeta").innerHTML =
+    `<span>${stateLabel}</span><span>·</span><span>${t.config.agent}</span>` +
+    (t.recurring?`<span>· ${t.cadence}</span>`:"");
+
+  document.getElementById("drLead").innerHTML = leadHTML(t);
+
+  // earned-link is folded into trace; result lives at top of trace for done
+  let traceBody = "";
+  if(t.state==="done" && t.result){
+    traceBody += `<div class="dr-sec"><div class="h">What changed</div><div class="result"><div class="rh">✓ Result</div>${t.result}</div></div>`;
+  }
+  traceBody += traceHTML(t);
+  paneTrace.innerHTML = traceBody;
+  paneConfig.innerHTML = configPaneHTML(t);
+  paneActivity.innerHTML = activityPaneHTML(t);
+
+  setTab("trace");
+  bindDrawerActions();
+
+  scrim.classList.add("show");
+  drawer.classList.add("show");
+  drawerOpen = true;
+  document.getElementById("saveInstr").classList.remove("show");
+}
+
+function setTab(tab){
+  curTab = tab;
+  document.querySelectorAll("#drTabs .tab").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+  paneTrace.classList.toggle("active",tab==="trace");
+  paneConfig.classList.toggle("active",tab==="config");
+  paneActivity.classList.toggle("active",tab==="activity");
+  drawer.querySelector(".dr-body").scrollTop = 0;
+}
+document.querySelectorAll("#drTabs .tab").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
+
+function bindDrawerActions(){
+  drawer.querySelectorAll("[data-mrn]").forEach(el=>el.addEventListener("click",()=>{
+    el.textContent = "MRN 4471-882"; el.style.cursor="default"; el.classList.remove("reveal");
+    el.style.color="#e8e3da"; el.style.textDecoration="none";
+    flash('revealed PHI — <span class="v">memory only</span>');
+  }));
+  drawer.querySelectorAll("[data-jump]").forEach(j=>j.addEventListener("click",()=>{ closeDrawer(); openInstructions(true); flash('jumped to the rule\'s scope'); }));
+  const casc = drawer.querySelector("[data-cascade]");
+  if(casc) casc.addEventListener("click",()=>{ openDrawer("A-2242"); setTab("config"); });
+  const ct = drawer.querySelector("[data-casctoggle]");
+  if(ct) ct.addEventListener("click",()=>{ const f=document.getElementById("cascFull"); if(f){ f.classList.toggle("show"); ct.textContent = f.classList.contains("show")?"hide ‹":"view ›"; } });
+  const sch = drawer.querySelector("[data-schedule]");
+  if(sch) sch.addEventListener("click",()=>flash('opened schedule — <span class="v">↻ Mon 7:00am · pause available</span>'));
+  drawer.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",()=>{
+    const a = b.dataset.act;
+    const id = document.getElementById("drTitle").textContent;
+    if(a==="stop") flash('■ stopped Auth bot on <span class="v">'+id.replace('↻ ','').split("·")[0].trim()+'</span>');
+    if(a==="thread") flash('entered thread → <span class="v">agent session</span>');
+    if(a==="claim") flash('claimed <span class="v">'+id.split("·")[0].trim()+'</span>');
+    if(a==="yes") flash('submitted anyway — <span class="v">noted referral pending</span>');
+    if(a==="accept") flash('accepted result');
+    if(a==="redo") flash('queued a redo');
+  }));
+}
+
+function closeDrawer(){
+  scrim.classList.remove("show");
+  drawer.classList.remove("show");
+  drawerOpen=false;
+}
+document.getElementById("drClose").addEventListener("click",closeDrawer);
+scrim.addEventListener("click",closeDrawer);
+
+/* steer box → save-as-instruction with scope picker */
+const steerInput = document.getElementById("steerInput");
+const saveInstr = document.getElementById("saveInstr");
+document.getElementById("steerSend").addEventListener("click",()=>{
+  if(steerInput.value.trim()){ flash('sent to agent → <span class="v">steering</span>'); saveInstr.classList.add("show"); steerInput.value=""; }
+});
+steerInput.addEventListener("keydown",(e)=>{
+  if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); document.getElementById("steerSend").click(); }
+  e.stopPropagation();
+});
+const saveScope = document.getElementById("saveScope");
+const saveInstrBtn = document.getElementById("saveInstrBtn");
+saveInstrBtn.addEventListener("click",()=>{
+  const scopeLabel = { task:"this task", hmo:"payer:HMO category", project:"the project" }[saveScope.value];
+  saveInstrBtn.textContent="✓ Saved"; saveInstrBtn.classList.add("done");
+  flash('taught <span class="v">'+scopeLabel+'</span> — cascades to matching tasks');
+  setTimeout(()=>{ saveInstr.classList.remove("show"); saveInstrBtn.textContent="＋ Save"; saveInstrBtn.classList.remove("done"); },1600);
+});
+
+/* =========================================================================
+   PROJECT SWITCHER + DESCRIPTION + INSTRUCTIONS
+   ========================================================================= */
+const switchMenu = document.getElementById("switchMenu");
+document.getElementById("scopeBtn").addEventListener("click",(e)=>{ e.stopPropagation(); switchMenu.classList.toggle("show"); });
+document.addEventListener("click",()=>switchMenu.classList.remove("show"));
+
+const DESCRIPTIONS = {
+  "Insurance Authorization":"Prior authorizations for our top payers. Confirm coverage, attach the latest EHR clinical notes, post outcomes to #auth-team, and stop to ask before anything irreversible.",
+  "Aetna HMO":"Aetna HMO prior auths. HMO plans need a PCP referral on file — confirm before submitting; use the HMO fax cover sheet, not the PPO one.\n↳ Inherited from Insurance Authorization + this sub-project.",
+  "UnitedHealthcare":"UnitedHealthcare prior auths.\n↳ Inherited from Insurance Authorization + this sub-project.",
+  "Medicare Advantage":"Medicare Advantage prior auths.\n↳ Inherited from Insurance Authorization + this sub-project.",
+  "Eligibility Verification":"Daily eligibility and benefits checks for tomorrow's schedule. Flag inactive coverage and missing secondary plans before the patient arrives.",
+  "Claims & Denials":"Work denied and rejected claims. Triage by payer, draft appeals with medical-necessity language, and resubmit inside the timely-filing window.",
+  "Patient Intake":"Front-desk intake review. Verify demographics and insurance cards before the first appointment.",
+  "API service":"The acme/api backend. Never merge with red CI, squash & merge only, post results to #eng.",
+  "Personal":null,
+};
+const descText = document.getElementById("descText");
+const descCtx = document.querySelector(".desc .dctx");
+const scopeCrumb = document.querySelector(".scope .crumb");
+
+switchMenu.querySelectorAll(".so").forEach(so=>so.addEventListener("click",(e)=>{
+  e.stopPropagation();
+  if(so.classList.contains("add")){ flash('new project — <span class="v">pick a binding</span>'); switchMenu.classList.remove("show"); return; }
+  const nameEl = so.querySelector(".nm");
+  const name = nameEl.childNodes[0].textContent.trim();
+  const isSub = so.classList.contains("sub");
+  // breadcrumb: parent › child for sub-projects
+  if(isSub) scopeCrumb.innerHTML = `Insurance Authorization <span class="sep">›</span> <b>${name}</b>`;
+  else scopeCrumb.innerHTML = `<b>${name}</b>`;
+  // swap description (effective = parent + child for sub-projects)
+  const d = DESCRIPTIONS[name];
+  if(d===null || d===undefined){ descText.textContent = "＋ Add a description"; descText.style.color="var(--accent)"; descCtx.style.display="none"; }
+  else { descText.textContent = d; descText.style.color=""; descText.style.whiteSpace="pre-line"; descCtx.style.display=""; }
+  flash('switched to <span class="v">'+name+'</span>');
+  switchMenu.classList.remove("show");
+}));
+
+/* editable description (inline, no modal) */
+descText.addEventListener("click",()=>{
+  if(descText.isContentEditable) return;
+  descText.contentEditable = "true";
+  descText.style.background = "var(--card2)";
+  descText.focus();
+});
+descText.addEventListener("blur",()=>{
+  if(descText.isContentEditable){ descText.contentEditable="false"; descText.style.background=""; flash('updated description — <span class="v">agents will use it as context</span>'); }
+});
+descText.addEventListener("keydown",(e)=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); descText.blur(); } e.stopPropagation(); });
+
+const instPanel = document.getElementById("instPanel");
+const instToggle = document.getElementById("instToggle");
+function openInstructions(open){
+  instPanel.classList.toggle("show",open);
+  instToggle.textContent = (open?"▾":"▸")+" 9 instructions";
+  if(open) instPanel.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+instToggle.addEventListener("click",()=>openInstructions(!instPanel.classList.contains("show")));
+
+function addRule(text){
+  text=(text||"").trim(); if(!text) return;
+  const row=document.createElement("div");
+  row.className="instrule";
+  row.innerHTML='<span class="rq">“</span><span class="rt">'+text.replace(/</g,"&lt;")+
+    '<span class="scopetag">project</span><span class="rmeta">★ learned from you · just now</span></span>';
+  instPanel.querySelector(".instadd").before(row);
+  openInstructions(true);
+  flash('taught <span class="v">the project</span> — cascades to all tasks');
+}
+const newRule=document.getElementById("newRule");
+document.getElementById("teachBtn").addEventListener("click",()=>{ addRule(newRule.value); newRule.value=""; });
+newRule.addEventListener("keydown",(e)=>{ if(e.key==="Enter"){ addRule(newRule.value); newRule.value=""; } e.stopPropagation(); });
+
+/* =========================================================================
+   PROPOSED TASKS (folded behind one line)
+   ========================================================================= */
+const propCards = document.getElementById("propCards");
+const propLine = document.getElementById("propLine");
+propLine.addEventListener("click",()=>{
+  const showing = propCards.classList.toggle("show");
+  propLine.textContent = (showing?"－":"＋")+" 2 proposed for you "+(showing?"▾":"›");
+});
+const proposal = document.getElementById("proposal");
+function showProposal(show){ proposal.classList.toggle("show",show); if(show) proposal.scrollIntoView({behavior:"smooth",block:"nearest"}); }
+document.getElementById("propA").addEventListener("click",()=>showProposal(true));
+document.getElementById("propB").addEventListener("click",()=>{ showProposal(true); flash('opened proposal — <span class="v">↻ Eligibility sweep</span>'); });
+document.getElementById("propCancel").addEventListener("click",()=>showProposal(false));
+document.getElementById("propDry").addEventListener("click",()=>flash('▶ dry-run started — <span class="v">no submit</span>'));
+document.getElementById("propCreate").addEventListener("click",()=>{ showProposal(false); flash('created &amp; ran — <span class="v">Auth bot</span>'); });
+
+/* =========================================================================
+   COMMAND PALETTE
+   ========================================================================= */
+const palScrim=document.getElementById("palScrim");
+const palInput=document.getElementById("palInput");
+const palList=document.getElementById("palList");
+const palVerb=document.getElementById("palVerb");
+const palSlot1=document.getElementById("palSlot1");
+const palSlot2=document.getElementById("palSlot2");
+let palOpen=false, palSel=0;
+
+const VERBS=[
+  { v:"open", d:"a task in the drawer", slot1:"task", run:()=>{ if(cursorRow()) openDrawer(cursorRow().dataset.id); } },
+  { v:"run", d:"an agent task now", slot1:"task", run:()=>flash('run — <span class="v">queued</span>') },
+  { v:"stop", d:"a running agent", slot1:"task", run:()=>flash('■ stopped <span class="v">Auth bot on A-2250</span>') },
+  { v:"claim", d:"an unclaimed task", slot1:"task", run:()=>flash('claimed <span class="v">Stat auth — ER admit</span>') },
+  { v:"done", d:"mark a task done", slot1:"task", run:()=>flash('marked <span class="v">done</span>') },
+  { v:"teach", d:"a rule into a scope", slot1:"scope", slot2:"rule", run:()=>{ closePalette(); openInstructions(true); setTimeout(()=>newRule.focus(),120); } },
+  { v:"goto", d:"jump to a task", slot1:"task", run:()=>flash('goto — <span class="v">A-2243</span>') },
+  { v:"switch", d:"project", slot1:"project", run:()=>{ closePalette(); document.getElementById("scopeBtn").click(); } },
+  { v:"filter", d:"the list by status", slot1:"status", run:()=>flash('filtered — <span class="v">blocked</span>') },
+  { v:"new", d:"task from a recipe", slot1:"recipe", run:()=>flash('new task — <span class="v">pick a recipe</span>') },
+];
+
+function renderPal(q){
+  q=(q||"").toLowerCase();
+  const matches=VERBS.filter(x=>x.v.includes(q)||x.d.includes(q));
+  palList.innerHTML="";
+  if(palSel>=matches.length) palSel=0;
+  matches.forEach((x,i)=>{
+    const o=document.createElement("div");
+    o.className="pal-opt"+(i===palSel?" sel":"");
+    o.innerHTML=`<span class="num">${i+1}</span><span class="ov">${x.v}</span><span style="color:var(--muted)">${x.d}</span><span class="od">verb</span>`;
+    o.addEventListener("click",()=>{ runVerb(x); });
+    o.addEventListener("mouseenter",()=>{ palSel=i; syncSel(); updateChip(matches[palSel]); });
+    palList.appendChild(o);
+  });
+  updateChip(matches[palSel]);
+  return matches;
+}
+function syncSel(){ [...palList.children].forEach((c,i)=>c.classList.toggle("sel",i===palSel)); }
+function updateChip(x){
+  if(!x){ palVerb.textContent="—"; palSlot1.textContent="·"; palSlot2.textContent=""; return; }
+  palVerb.textContent=x.v;
+  palSlot1.innerHTML='· <span class="slot empty">'+(x.slot1||"slot")+'</span>';
+  palSlot2.innerHTML = x.slot2 ? '· <span class="slot empty">'+x.slot2+'</span>' : '';
+}
+function openPalette(prefill){
+  palScrim.classList.add("show"); palOpen=true; palSel=0;
+  palInput.value=prefill||"";
+  renderPal(palInput.value);
+  setMode("COMMAND");
+  setTimeout(()=>palInput.focus(),20);
+}
+function closePalette(){ palScrim.classList.remove("show"); palOpen=false; setMode("NORMAL"); }
+function runVerb(x){ closePalette(); if(x&&x.run) x.run(); }
+palInput.addEventListener("input",()=>renderPal(palInput.value));
+palInput.addEventListener("keydown",(e)=>{
+  const matches=VERBS.filter(x=>x.v.includes(palInput.value.toLowerCase())||x.d.includes(palInput.value.toLowerCase()));
+  if(e.key==="Escape"){ closePalette(); }
+  else if(e.key==="ArrowDown"){ e.preventDefault(); palSel=(palSel+1)%matches.length; syncSel(); updateChip(matches[palSel]); }
+  else if(e.key==="ArrowUp"){ e.preventDefault(); palSel=(palSel-1+matches.length)%matches.length; syncSel(); updateChip(matches[palSel]); }
+  else if(e.key==="Enter"){ e.preventDefault(); runVerb(matches[palSel]); }
+  else if(/^[1-9]$/.test(e.key)){ const idx=+e.key-1; if(matches[idx]){ e.preventDefault(); runVerb(matches[idx]); } }
+});
+palScrim.addEventListener("click",(e)=>{ if(e.target===palScrim) closePalette(); });
+
+/* =========================================================================
+   MODE LINE + STATUS BAR
+   ========================================================================= */
+const modeLine=document.getElementById("modeLine");
+const modeBadge=document.getElementById("modeBadge");
+let flashTimer=null;
+function flash(html){
+  modeLine.innerHTML=html;
+  modeLine.classList.add("show");
+  clearTimeout(flashTimer);
+  flashTimer=setTimeout(()=>modeLine.classList.remove("show"),2500);
+}
+function setMode(m){ modeBadge.textContent=m; modeBadge.className="mode "+m; }
+
+/* =========================================================================
+   VIM NAV (j/k cursor, enter/l open, h/esc close, space mark)
+   ========================================================================= */
+let cursor=-1;
+function visibleRows(){ return rowEls.filter(r=>r.offsetParent!==null); }
+function cursorRow(){ const vis=visibleRows(); return (cursor>=0&&cursor<vis.length)?vis[cursor]:null; }
+function setCursor(i){
+  const vis=visibleRows();
+  rowEls.forEach(r=>r.classList.remove("cursor"));
+  if(!vis.length){ cursor=-1; return; }
+  cursor=Math.max(0,Math.min(i,vis.length-1));
+  const r=vis[cursor];
+  r.classList.add("cursor");
+  r.scrollIntoView({block:"nearest"});
+}
+
+document.addEventListener("keydown",(e)=>{
+  if(palOpen) return;
+  const typing = ["INPUT","TEXTAREA","SELECT"].includes(document.activeElement.tagName) || document.activeElement.isContentEditable;
+  if(typing) return;
+
+  if(e.key===":"||e.key==="/"){ e.preventDefault(); openPalette(); return; }
+  if(e.key==="?"){ e.preventDefault(); flash('help — <span class="v">j/k move · enter open · : actions · space mark · h/esc close</span>'); return; }
+
+  if(drawerOpen){
+    if(e.key==="Escape"||e.key==="h"){ e.preventDefault(); closeDrawer(); }
+    else if(e.key==="1"){ setTab("trace"); } else if(e.key==="2"){ setTab("config"); } else if(e.key==="3"){ setTab("activity"); }
+    return;
+  }
+
+  if(e.key==="j"||e.key==="ArrowDown"){ e.preventDefault(); setCursor(cursor<0?0:cursor+1); }
+  else if(e.key==="k"||e.key==="ArrowUp"){ e.preventDefault(); setCursor(cursor<0?0:cursor-1); }
+  else if(e.key==="Enter"||e.key==="l"){ e.preventDefault(); const r=cursorRow(); if(r) openDrawer(r.dataset.id); }
+  else if(e.key===" "){ e.preventDefault(); const r=cursorRow(); if(r){ r.classList.toggle("marked"); flash((r.classList.contains("marked")?"marked":"unmarked")+' <span class="v">'+BY_ID[r.dataset.id].title.replace('↻ ','').split("·")[0].trim()+'</span>'); } }
+  else if(e.key==="Escape"){ switchMenu.classList.remove("show"); }
+});
+
+/* hero link */
+document.getElementById("heroOpen").addEventListener("click",()=>openDrawer("A-2250"));
+
+/* =========================================================================
+   BOOT
+   ========================================================================= */
+buildList();
+setCursor(0);
+flash('NORMAL · <span class="v">12 working · 3 need you · 2 blocked</span> — press : for actions');
+</script>
+</body>
+</html>

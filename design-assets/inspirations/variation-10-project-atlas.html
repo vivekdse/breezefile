@@ -1,0 +1,1173 @@
+<!--
+  Variation 10 — "Project Atlas"  (simplification pass)
+  Paradigm: a calm SPATIAL ZOOM model. One page, three zoom levels transitioned in JS (no reloads),
+            each carrying context forward:
+              L1 PROJECTS GRID — see every project; THE ONE thing per card is "does this need me?".
+                 A project whose children are projects (not tasks) drills into the SAME grid, scoped.
+              L2 PROJECT DETAIL — a parent→child task TREE with roll-up SENTENCES + dependencies,
+                 a description line, recurring definitions (↻) with dated runs, and a calm slide-in
+                 "Instruction scopes" panel rendering the cascade (Project→Category→Task).
+              L3 TASK DRAWER — leads with the earned-link reason + the ONE primary action + the live
+                 trace; Config, the full 8-rule cascade, and the live session are one disclosure away.
+
+  SIMPLIFICATION PASS (Maeda's 10 Laws): THE ONE on every screen is "what needs me right now."
+    · Palette cut to 3 attention colors + neutrals (teal=working, amber=needs-you/waiting, red=blocked;
+      everything resolved/passive = neutral grey). Blue and per-person colors retired; avatars are
+      neutral initials.
+    · L1 cards lost the redundant legend + 4-column stat row; ONE proportion segbar remains and ONLY
+      the "need you" count surfaces, as an amber pill when > 0.
+    · L2 rows show status ONCE (dot OR badge; badge reserved for actionable rows). The bordered
+      roll-up chip became ONE muted sentence; the duplicate agg strip was removed.
+    · Type collapsed to 6 sizes / 2 weights (+700 logo). Spacing on an 8px scale. Inner atoms are
+      borderless; 1px line only on outer containers; soft shadows for depth. One easing + 2 durations;
+      pulse reserved for the single live working task; tabular-nums on the surviving need-you number.
+  NEW REQUIREMENTS:
+    · Recurring tasks modelled as definition→runs on the existing tree (↻ cadence · next-run; runs are
+      dated children; drawer Schedule shows cadence + last/next + "run #N of <def> → view schedule").
+    · Sub-projects + a human description line at every level, marked "given to agents as context",
+      editable inline; sub-project description inherits parent + own, shown like the cascade.
+
+  Reactions accommodated: R1 overview+drill, R2 parent–child roll-ups + dependencies, R3 cascading
+    instructions, R4 openable tasks, R5 live session (on demand), R6 enter the thread, R8 living
+    statuses, R9 calm + alignment, R10 keyboard-first / verb-native.
+  Values: V1 Calm Clarity, V2 Hierarchy & Aggregation, V3 Cascading Instructions, V5 Trust & Auditability.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Breezefile — Project Atlas</title>
+<style>
+  :root{
+    --bg:#faf9f7; --ink:#1d1c1a; --muted:#6c6760; --dim:#9a948b; --line:#e7e3dc;
+    --card:#ffffff; --card2:#f4f2ee;
+    --accent:#2f6f5e; --accent-soft:#e8f1ee;       /* teal-green = working / primary */
+    --amber:#b5731a; --amber-soft:#faf0dc;          /* needs you / waiting-on-you */
+    --red:#b3402f;   --red-soft:#f7e6e2;            /* blocked */
+    --blue:#3a6ea5;  --blue-soft:#e6eef6;           /* (retired from resting UI; kept for palette parity) */
+    --you:#2f6f5e; --priya:#7a4fa3; --sam:#b5731a;  /* (retired from resting UI; kept for palette parity) */
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    /* one quiet heartbeat: one easing + two durations */
+    --ease:cubic-bezier(.22,.61,.36,1); --t-chrome:.16s; --t-panel:.24s;
+    --shadow-soft:0 1px 2px rgba(29,28,26,.05);
+    --shadow-panel:-20px 0 50px -30px rgba(0,0,0,.5);
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:14px; -webkit-font-smoothing:antialiased; }
+  .app{ min-height:100%; padding-bottom:96px; }
+  .page{ max-width:980px; margin:0 auto; padding:32px 24px 40px; }
+
+  /* type scale: 22 / 17 / 14 / 13 / 12 / 11 ; weights 400 + 650 (+700 logo). tabular nums where counts live. */
+  .num{ font-variant-numeric:tabular-nums; }
+
+  /* ---------- top crumb / zoom indicator (thin identity line) ---------- */
+  .crumb{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .crumb .logo{ font-weight:700; color:var(--accent); letter-spacing:.2px; }
+  .crumb .sep{ color:var(--line); }
+  .crumb .here{ color:var(--ink); font-weight:650; }
+  .crumb .clk{ cursor:pointer; }
+  .crumb .clk:hover{ color:var(--accent); text-decoration:underline; }
+  .crumb .zoom{ margin-left:auto; display:inline-flex; gap:4px; }
+  .crumb .zoom .z{ width:7px; height:7px; border-radius:50%; background:var(--line); }
+  .crumb .zoom .z.on{ background:var(--accent); }
+  .back{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; color:var(--accent); font-size:12px; }
+  .back:hover{ text-decoration:underline; }
+
+  /* description line — one calm muted line, agent-context marked, editable inline */
+  .desc{ font-size:13px; color:var(--muted); line-height:1.5; }
+  .desc .ctx{ display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--dim); margin-left:6px; white-space:nowrap; }
+  .desc .ctx .g{ font-size:11px; }
+  .desc[contenteditable="true"]{ outline:none; background:var(--card); border-radius:8px; box-shadow:inset 0 0 0 1.5px var(--accent); padding:6px 8px; }
+  .desc .edit{ color:var(--accent); cursor:pointer; margin-left:6px; font-size:11px; }
+  .desc .edit:hover{ text-decoration:underline; }
+
+  /* ============================================================ LEVEL 1 */
+  .l1head{ margin:8px 0 16px; }
+  .l1head h1{ font-size:22px; font-weight:650; margin:0 0 4px; letter-spacing:-.2px; }
+  .l1head .sub{ color:var(--muted); font-size:13px; }
+
+  /* the single calm hero line — the only place counts appear besides the status bar */
+  .hero{ margin:12px 0 24px; background:var(--card); border:1px solid var(--line); border-left:3px solid var(--amber);
+         border-radius:14px; padding:14px 16px; font-size:14px; line-height:1.5; box-shadow:var(--shadow-soft); }
+  .hero.clear{ border-left-color:var(--accent); color:var(--muted); }
+  .hero b{ color:var(--amber); }
+  .hero .open{ color:var(--accent); font-weight:650; cursor:pointer; }
+  .hero .open:hover{ text-decoration:underline; }
+
+  .grid{ display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media (max-width:720px){ .grid{ grid-template-columns:1fr; } }
+
+  .pcard{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px;
+          cursor:pointer; transition:border-color var(--t-chrome) var(--ease), box-shadow var(--t-chrome) var(--ease); outline:none;
+          box-shadow:var(--shadow-soft); display:flex; flex-direction:column; gap:12px; }
+  .pcard:hover{ border-color:#d8d2c8; }
+  .pcard.cursor{ border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .pcard.unbound{ background:#fdfcfa; }
+
+  .pcard .ptop{ display:flex; align-items:baseline; gap:8px; }
+  .pcard .pname{ font-size:17px; font-weight:650; }
+  .pcard .need-pill{ margin-left:auto; display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:650;
+                     color:var(--amber); background:var(--amber-soft); border-radius:8px; padding:3px 9px; white-space:nowrap; }
+  .pcard .need-pill .n{ font-variant-numeric:tabular-nums; }
+  .pcard .pdesc{ font-size:13px; color:var(--muted); line-height:1.45; }
+  .pcard .pdesc .ctx{ font-size:11px; color:var(--dim); }
+  .pcard .subs{ font-size:12px; color:var(--dim); }
+  .pcard .bind{ display:flex; align-items:center; gap:6px; color:var(--dim); font-size:12px; }
+  .pcard .bind .ic{ font-size:12px; }
+  .pcard .bind .mono{ font-family:var(--mono); font-size:11px; }
+  .pcard .bind .recur{ color:var(--accent); }
+
+  /* one proportion bar — the only encoding of the mix */
+  .segbar{ display:flex; height:6px; border-radius:4px; overflow:hidden; background:var(--card2); margin-top:auto; }
+  .segbar i{ display:block; height:100%; }
+  .seg-working{ background:var(--accent); } .seg-need{ background:var(--amber); }
+  .seg-blocked{ background:var(--red); } .seg-done{ background:var(--dim); }
+  .segcap{ font-size:11px; color:var(--dim); display:flex; gap:12px; }
+  .segcap .num{ color:var(--muted); }
+
+  .bindcta{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--accent);
+            border:1px dashed #cdd9d4; background:var(--accent-soft); border-radius:9px; padding:6px 10px; cursor:pointer; align-self:flex-start; }
+  .bindcta:hover{ background:#dfeee9; }
+
+  /* ============================================================ LEVEL 2 */
+  .view{ display:none; }
+  .view.active{ display:block; animation:fade var(--t-panel) var(--ease); }
+  @keyframes fade{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+
+  .l2head{ margin:8px 0 16px; }
+  .l2head .top{ display:flex; align-items:center; gap:10px; }
+  .l2head h2{ font-size:17px; font-weight:650; margin:0; }
+  .l2head .switcher{ position:relative; }
+  .l2head .swbtn{ display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card);
+                  border-radius:9px; padding:5px 10px; font-size:12px; cursor:pointer; color:var(--muted); }
+  .l2head .swbtn:hover{ border-color:var(--accent); }
+  .l2head .swmenu{ display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:30; background:var(--card);
+                   border:1px solid var(--line); border-radius:12px; padding:6px; min-width:260px; box-shadow:0 16px 38px -18px rgba(0,0,0,.4); }
+  .l2head .swmenu.show{ display:block; animation:fade var(--t-chrome) var(--ease); }
+  .l2head .swmenu .so{ display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:9px; cursor:pointer; font-size:13px; }
+  .l2head .swmenu .so:hover{ background:var(--card2); }
+  .l2head .swmenu .so.sub{ padding-left:26px; }
+  .l2head .swmenu .so .sd{ width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:var(--dim); }
+  .l2head .swmenu .so .sx{ margin-left:auto; font-size:11px; color:var(--dim); font-family:var(--mono); }
+  .l2head .swmenu .so.cur{ background:var(--accent-soft); color:var(--accent); font-weight:650; }
+  .l2head .swmenu .so.cur .sd{ background:var(--accent); }
+  .l2head .bind{ margin-left:auto; color:var(--dim); font-size:12px; display:flex; align-items:center; gap:6px; }
+  .l2head .bind .mono{ font-family:var(--mono); font-size:11px; }
+  .l2head .descrow{ display:flex; align-items:flex-start; gap:8px; margin-top:8px; }
+  .l2head .insBtn{ display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--accent); cursor:pointer; margin-top:10px; }
+  .l2head .insBtn:hover{ text-decoration:underline; }
+
+  /* the tree — 1px line only on the outer container */
+  .tree{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:8px; box-shadow:var(--shadow-soft); }
+  .trow{ display:grid; grid-template-columns:24px 12px 1fr auto; align-items:center; gap:12px;
+         padding:12px; border-radius:10px; cursor:pointer; transition:background var(--t-chrome) var(--ease); }
+  .trow:hover{ background:var(--card2); }
+  .trow.cursor{ background:var(--accent-soft); box-shadow:inset 0 0 0 1.5px var(--accent); }
+  .trow .twist{ font-size:12px; color:var(--dim); width:24px; text-align:center; }
+  .trow.leaf .twist{ visibility:hidden; }
+  .trow .dot{ width:8px; height:8px; border-radius:50%; justify-self:center; background:var(--dim); }
+  .trow .dot.working{ background:var(--accent); } .trow .dot.need{ background:var(--amber); } .trow .dot.blocked{ background:var(--red); }
+  .trow .body .nm{ font-weight:650; }
+  .trow .body .nm .recur{ color:var(--accent); font-weight:400; margin-right:4px; }
+  .trow .body .nm .rollsent{ font-weight:400; color:var(--dim); font-size:13px; margin-left:8px; }
+  .trow .body .meta{ color:var(--muted); font-size:12px; margin-top:3px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .trow .body .meta .mono{ font-family:var(--mono); font-size:11px; }
+  .trow .body .meta .cadence{ color:var(--accent); }
+  .trow .body .meta .passive{ color:var(--dim); }
+  .trow .right{ display:flex; align-items:center; gap:9px; justify-self:end; }
+
+  /* badge reserved for ACTIONABLE rows only */
+  .badge{ font-size:11px; padding:3px 8px; border-radius:8px; white-space:nowrap; font-weight:650; }
+  .badge.waiting{ color:var(--amber); background:var(--amber-soft); }
+  .badge.blocked{ color:var(--red); background:var(--red-soft); }
+  .badge.p0{ color:var(--red); background:var(--red-soft); font-family:var(--mono); }
+  .badge.unclaimed{ color:var(--muted); background:transparent; border:1px solid var(--line); font-weight:400; }
+
+  /* neutral grey avatar — identity is the initial, not the hue */
+  .ava{ width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:10px; font-weight:650;
+        color:var(--muted); background:var(--card2); border:1px solid var(--line); flex:0 0 auto; }
+
+  .children{ display:none; }
+  .children.open{ display:block; }
+  .trow.child{ grid-template-columns:24px 12px 1fr auto; }
+  .trow.child .body{ padding-left:24px; }
+  .blocklink{ display:inline-flex; align-items:center; gap:5px; color:var(--red); font-size:12px; cursor:pointer; }
+  .blocklink:hover{ text-decoration:underline; }
+  .deplink{ display:inline-flex; align-items:center; gap:5px; color:var(--muted); font-size:12px; cursor:pointer; }
+  .deplink:hover{ color:var(--accent); text-decoration:underline; }
+
+  /* ============================================================ INSTRUCTION SCOPES PANEL (slide-in) */
+  .scrim{ display:none; position:fixed; inset:0; background:rgba(29,28,26,.28); z-index:40; }
+  .scrim.show{ display:block; animation:fade var(--t-chrome) var(--ease); }
+  .scopes{ position:fixed; top:0; right:0; bottom:0; width:430px; max-width:92vw; background:var(--bg);
+           border-left:1px solid var(--line); z-index:50; transform:translateX(100%); transition:transform var(--t-panel) var(--ease);
+           overflow:auto; box-shadow:var(--shadow-panel); }
+  .scopes.show{ transform:none; }
+  .scopes .sh{ position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:16px; z-index:2; }
+  .scopes .sh .t{ font-size:17px; font-weight:650; display:flex; align-items:center; gap:8px; }
+  .scopes .sh .x{ margin-left:auto; cursor:pointer; color:var(--muted); font-size:18px; line-height:1; }
+  .scopes .sh .sub{ font-size:12px; color:var(--muted); margin-top:4px; line-height:1.45; }
+  .scopes .sh .sub b{ color:var(--accent); font-weight:650; }
+  .scopes .body{ padding:16px; }
+
+  /* borderless inner atoms; group separated by whitespace */
+  .scopegrp{ margin-bottom:24px; }
+  .scopegrp .gh{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .scopegrp .gh .pill{ font-size:11px; text-transform:uppercase; letter-spacing:.6px; font-weight:650; border-radius:6px; padding:2px 7px;
+                       color:var(--muted); background:var(--card2); }
+  .scopegrp.grp-task .gh .pill{ color:var(--amber); background:var(--amber-soft); }
+  .scopegrp .gh .gn{ font-size:13px; font-weight:650; }
+  .scopegrp .gh .gn .mono{ font-family:var(--mono); font-size:11px; color:var(--muted); font-weight:400; }
+  .scopegrp .gh .gc{ margin-left:auto; font-size:11px; color:var(--dim); }
+  .scopecard{ background:var(--card); border-radius:12px; padding:2px 14px; box-shadow:var(--shadow-soft); }
+  .scopegrp.grp-task .scopecard{ box-shadow:inset 3px 0 0 var(--amber), var(--shadow-soft); }
+  .rule{ display:flex; gap:9px; align-items:flex-start; padding:10px 0; font-size:13px; line-height:1.45; }
+  .rule + .rule{ border-top:1px solid var(--line); }
+  .rule .q{ color:var(--accent); font-size:14px; flex:0 0 auto; line-height:1.2; }
+  .rule .rt{ flex:1; }
+  .rule .rmeta{ display:block; font-size:11px; color:var(--dim); margin-top:3px; }
+  .rule.learned .rmeta{ color:var(--accent); }
+  .rule .ovr{ font-size:11px; color:var(--amber); background:var(--amber-soft); border-radius:5px; padding:1px 6px; margin-left:6px; }
+
+  .scopefoot{ font-size:12px; color:var(--dim); margin:4px 2px 0; line-height:1.5; }
+  .teachadd{ margin-top:24px; background:var(--card); border-radius:12px; padding:14px; box-shadow:var(--shadow-soft); }
+  .teachadd .lbl{ font-size:12px; font-weight:650; margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+  .teachadd input{ width:100%; font:inherit; font-size:13px; border:1px solid var(--line); border-radius:9px; padding:9px 11px; background:var(--bg); color:var(--ink); outline:0; }
+  .teachadd input:focus{ border-color:var(--accent); }
+  .teachadd .scopepick{ display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  .teachadd .sp{ font-size:12px; border:1px solid var(--line); border-radius:8px; padding:5px 10px; cursor:pointer; color:var(--muted); background:var(--bg); }
+  .teachadd .sp.sel{ border-color:var(--accent); color:var(--accent); background:var(--accent-soft); font-weight:650; }
+  .teachadd .go{ margin-top:12px; width:100%; font:inherit; font-size:13px; font-weight:650; border:0; border-radius:9px; padding:9px; background:var(--accent); color:#fff; cursor:pointer; }
+
+  /* ============================================================ LEVEL 3 TASK DRAWER */
+  .drawer{ position:fixed; top:0; right:0; bottom:0; width:560px; max-width:96vw; background:var(--bg);
+           border-left:1px solid var(--line); z-index:60; transform:translateX(100%); transition:transform var(--t-panel) var(--ease);
+           overflow:auto; box-shadow:var(--shadow-panel); }
+  .drawer.show{ transform:none; }
+  .drawer .dh{ position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:16px 20px; z-index:2; }
+  .drawer .dh .topr{ display:flex; align-items:center; gap:9px; }
+  .drawer .dh .id{ font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .drawer .dh .x{ margin-left:auto; cursor:pointer; color:var(--muted); font-size:20px; line-height:1; }
+  .drawer .dh h3{ font-size:17px; font-weight:650; margin:8px 0 2px; }
+  .drawer .dh .who{ font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  .drawer .dh .who .sdot{ width:8px; height:8px; border-radius:50%; background:var(--dim); }
+  .drawer .dh .who .sdot.working{ background:var(--accent); } .drawer .dh .who .sdot.need{ background:var(--amber); } .drawer .dh .who .sdot.blocked{ background:var(--red); }
+  .drawer .db{ padding:20px; }
+
+  /* THE ONE: lead with earned reason + primary action + trace */
+  .earned{ background:var(--amber-soft); border-radius:12px; padding:14px 16px; font-size:14px; line-height:1.5; margin-bottom:16px;
+           box-shadow:inset 3px 0 0 var(--amber); }
+  .earned.blk{ background:var(--red-soft); box-shadow:inset 3px 0 0 var(--red); }
+  .earned .ti{ font-weight:650; color:var(--amber); }
+  .earned.blk .ti{ color:var(--red); }
+  .earned .rule{ border:0; padding:0; margin-top:6px; font-style:italic; color:var(--muted); }
+
+  .dactions{ display:flex; gap:10px; align-items:center; margin-bottom:24px; flex-wrap:wrap; }
+  .btn{ font:inherit; font-size:13px; border-radius:10px; padding:10px 16px; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  .btn:hover{ filter:brightness(.98); }
+  .btn.primary{ background:var(--accent); color:#fff; border-color:transparent; font-weight:650; }
+  .btn.stop{ color:var(--red); border-color:#eccfc8; background:var(--red-soft); }
+
+  .sect{ margin-bottom:24px; }
+  .sect .sl{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin-bottom:12px; }
+
+  .trace .tstep{ display:grid; grid-template-columns:22px 1fr; gap:12px; align-items:start; padding:8px 0; }
+  .trace .tstep .mk{ width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-size:12px; flex:0 0 auto; }
+  .trace .tstep .mk.ok{ background:var(--card2); color:var(--dim); }
+  .trace .tstep .mk.run{ background:var(--accent); color:#fff; }
+  .trace .tstep .mk.run.live{ animation:pulse 2s infinite; }
+  .trace .tstep .mk.todo{ background:var(--card2); color:var(--dim); }
+  .trace .tstep .tx{ font-size:13px; }
+  .trace .tstep .tx .why{ display:block; color:var(--dim); font-size:12px; margin-top:2px; }
+  .trace .tstep.run .tx{ font-weight:650; }
+  .trace .tstep.run .gating{ display:block; color:var(--amber); font-size:12px; margin-top:4px; font-style:italic; }
+  .trace .tstep.run.blk .gating{ color:var(--red); }
+
+  /* disclosures — borderless content, soft line separator */
+  .disc{ border-top:1px solid var(--line); }
+  .disc .dt{ display:flex; align-items:center; gap:8px; padding:14px 2px; cursor:pointer; font-size:13px; color:var(--ink); user-select:none; }
+  .disc .dt .tw{ color:var(--dim); font-size:11px; transition:transform var(--t-chrome) var(--ease); }
+  .disc.open .dt .tw{ transform:rotate(90deg); }
+  .disc .dt .hint{ margin-left:auto; color:var(--dim); font-size:12px; }
+  .disc .dc{ display:none; padding:0 2px 16px; }
+  .disc.open .dc{ display:block; animation:fade var(--t-chrome) var(--ease); }
+
+  .config{ display:grid; grid-template-columns:1fr 1fr; gap:16px 24px; }
+  .config .f .k{ font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim); }
+  .config .f .v{ font-size:13px; margin-top:4px; }
+  .config .f .v .mono{ font-family:var(--mono); font-size:12px; }
+  .config .f.full{ grid-column:1 / -1; }
+  .config .f .runlink{ color:var(--accent); cursor:pointer; }
+  .config .f .runlink:hover{ text-decoration:underline; }
+
+  .casc1{ font-size:13px; color:var(--ink); line-height:1.5; }
+  .casc1 .parts{ color:var(--muted); }
+  .casc1 .view{ display:inline; color:var(--accent); cursor:pointer; }
+  .casc1 .view:hover{ text-decoration:underline; }
+
+  .session{ background:#1d2422; color:#cfe3dc; border-radius:11px; padding:14px 16px; font-family:var(--mono); font-size:12px; line-height:1.7; overflow:auto; }
+  .session .pl{ color:#7fae9f; }
+  .session .ok{ color:#86c9a8; }
+  .session .run{ color:#e7c489; }
+  .session .reveal{ color:#e7c489; cursor:pointer; text-decoration:underline; }
+  .session .draft{ color:#9fb8b0; }
+
+  .result{ background:var(--accent-soft); border-radius:11px; padding:14px 16px; font-size:13px; line-height:1.5; box-shadow:inset 3px 0 0 var(--accent); }
+  .result .rt{ font-weight:650; color:var(--accent); margin-bottom:4px; }
+  .result .mono{ font-family:var(--mono); font-size:12px; }
+
+  /* ============================================================ STATUS BAR + MODE LINE + PALETTE */
+  .modeline{ position:fixed; left:0; right:0; bottom:34px; display:flex; justify-content:center; pointer-events:none; z-index:70; }
+  .modeline .m{ background:var(--ink); color:#f6f4f0; font-size:12px; padding:7px 14px; border-radius:9px;
+                opacity:0; transform:translateY(4px); transition:opacity var(--t-chrome), transform var(--t-chrome); box-shadow:0 10px 30px -12px rgba(0,0,0,.5); }
+  .modeline .m.show{ opacity:1; transform:none; }
+
+  .statusbar{ position:fixed; left:0; right:0; bottom:0; height:34px; background:var(--card); border-top:1px solid var(--line);
+              display:flex; align-items:center; gap:12px; padding:0 14px; font-size:12px; color:var(--muted); z-index:65; }
+  .statusbar .mode{ font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.5px; color:#fff; background:var(--accent); border-radius:6px; padding:3px 8px; }
+  .statusbar .mode.cmd{ background:var(--amber); }
+  .statusbar .summary b{ color:var(--ink); }
+  .statusbar .hints{ margin-left:auto; display:flex; gap:7px; }
+  kbd{ font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--bg); border:1px solid var(--line); border-radius:5px; padding:2px 6px; }
+
+  .paloverlay{ display:none; position:fixed; inset:0; background:rgba(29,28,26,.32); z-index:80; align-items:flex-start; justify-content:center; }
+  .paloverlay.show{ display:flex; animation:fade var(--t-chrome) var(--ease); }
+  .palette{ margin-top:14vh; width:560px; max-width:92vw; background:var(--card); border:1px solid var(--line); border-radius:16px;
+            box-shadow:0 30px 70px -30px rgba(0,0,0,.55); overflow:hidden; }
+  .palette .chip{ display:flex; align-items:center; gap:8px; padding:13px 16px 10px; border-bottom:1px solid var(--line); background:var(--accent-soft); }
+  .palette .chip .verb{ font-weight:700; color:var(--accent); font-size:13px; }
+  .palette .chip .slot{ font-size:13px; color:var(--muted); border:1px dashed #c6d6d0; border-radius:7px; padding:2px 8px; }
+  .palette .chip .dotsep{ color:var(--dim); }
+  .palette input{ width:100%; border:0; outline:0; font:inherit; font-size:17px; padding:14px 16px; background:transparent; color:var(--ink); }
+  .palette input::placeholder{ color:var(--dim); }
+  .palette .opts{ max-height:320px; overflow:auto; padding:4px 0 8px; }
+  .palette .opt{ display:flex; align-items:center; gap:12px; padding:9px 16px; cursor:pointer; }
+  .palette .opt:hover, .palette .opt.sel{ background:var(--card2); }
+  .palette .opt .n{ font-family:var(--mono); font-size:11px; color:var(--accent); background:var(--accent-soft); width:18px; height:18px; border-radius:5px; display:grid; place-items:center; flex:0 0 auto; }
+  .palette .opt .ov{ font-weight:650; }
+  .palette .opt .od{ color:var(--dim); font-size:12px; margin-left:auto; }
+
+  @keyframes pulse{ 0%{ box-shadow:0 0 0 0 rgba(47,111,94,.45); } 70%{ box-shadow:0 0 0 7px rgba(47,111,94,0); } 100%{ box-shadow:0 0 0 0 rgba(47,111,94,0); } }
+  .pulsedot{ animation:pulse 2s infinite; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="page">
+
+    <div class="crumb">
+      <span class="logo">Breezefile</span>
+      <span class="sep">·</span>
+      <span id="crumbTrail">Atlas — all projects</span>
+      <span class="zoom" id="zoomDots"><span class="z on"></span><span class="z"></span><span class="z"></span></span>
+    </div>
+
+    <!-- ============================ LEVEL 1: PROJECTS GRID ============================ -->
+    <div class="view active" id="view1">
+      <div class="l1head">
+        <h1 id="l1title">Your projects</h1>
+        <div class="sub" id="l1sub">6 projects · zoom into any one to see its task tree and instruction scopes</div>
+      </div>
+
+      <div class="hero" id="hero" role="status"><!-- hero line injected --></div>
+
+      <div class="grid" id="grid"><!-- cards injected --></div>
+    </div>
+
+    <!-- ============================ LEVEL 2: PROJECT DETAIL (TREE) ============================ -->
+    <div class="view" id="view2">
+      <div class="back" id="back2">‹ h — back to all projects</div>
+      <div class="l2head">
+        <div class="top">
+          <h2 id="p2name">Insurance Authorization</h2>
+          <div class="switcher">
+            <div class="swbtn" id="swBtn">switch project <span style="font-size:10px">▾</span></div>
+            <div class="swmenu" id="swMenu"><!-- injected --></div>
+          </div>
+          <div class="bind"><span>⛓</span><span class="mono" id="p2bind">Aetna/UHC payer portals + EHR</span></div>
+        </div>
+        <div class="descrow">
+          <div class="desc" id="p2desc"><!-- description injected --></div>
+        </div>
+        <div class="insBtn" id="openScopes">⚖ Instruction scopes · 9</div>
+      </div>
+
+      <div class="tree" id="tree"><!-- tree injected --></div>
+    </div>
+
+  </div><!-- /page -->
+</div><!-- /app -->
+
+<!-- ============================ INSTRUCTION SCOPES PANEL ============================ -->
+<div class="scrim" id="scrim"></div>
+<aside class="scopes" id="scopesPanel" aria-label="Instruction scopes">
+  <div class="sh">
+    <div class="t">⚖ Instruction scopes <span class="x" id="scopesX">×</span></div>
+    <div class="sub">Insurance Authorization · a task inherits the <b>union</b> of every scope it belongs to,
+      most-general → most-specific. More-specific scopes can override.</div>
+  </div>
+  <div class="body">
+
+    <div class="scopegrp grp-project">
+      <div class="gh"><span class="pill">Project</span><span class="gn">Insurance Authorization</span><span class="gc">4 rules</span></div>
+      <div class="scopecard">
+        <div class="rule"><span class="q">“</span><span class="rt">Never submit an auth without confirming secondary coverage.</span></div>
+        <div class="rule"><span class="q">“</span><span class="rt">Attach the latest clinical notes from the EHR.</span></div>
+        <div class="rule"><span class="q">“</span><span class="rt">Post outcomes to #auth-team.</span></div>
+        <div class="rule"><span class="q">“</span><span class="rt">If the payer portal is down, queue and retry — don't fail the task.</span></div>
+      </div>
+    </div>
+
+    <div class="scopegrp grp-category">
+      <div class="gh"><span class="pill">Category</span><span class="gn">payer:<span class="mono">HMO</span></span><span class="gc">2 rules</span></div>
+      <div class="scopecard">
+        <div class="rule learned"><span class="q">“</span><span class="rt">HMO requires a PCP referral on file — confirm before submitting.<span class="rmeta">★ learned from you · Tue</span></span></div>
+        <div class="rule"><span class="q">“</span><span class="rt">Use the HMO fax cover sheet, not the PPO one.</span></div>
+      </div>
+    </div>
+
+    <div class="scopegrp grp-category">
+      <div class="gh"><span class="pill">Category</span><span class="gn">kind:<span class="mono">prior-auth</span></span><span class="gc">1 rule</span></div>
+      <div class="scopecard">
+        <div class="rule"><span class="q">“</span><span class="rt">Request 7-day expedited review when the case is marked urgent.</span></div>
+      </div>
+    </div>
+
+    <div class="scopegrp grp-task">
+      <div class="gh"><span class="pill">Task</span><span class="gn">Auth #A-2242</span><span class="gc">1 rule · override</span></div>
+      <div class="scopecard">
+        <div class="rule"><span class="q">“</span><span class="rt">This patient: contact via portal message, not phone.<span class="ovr">overrides project default</span></span></div>
+      </div>
+    </div>
+
+    <div class="scopefoot">
+      Other categories in this project: payer:PPO · payer:Medicare · kind:appeal · drug:specialty
+    </div>
+
+    <div class="teachadd">
+      <div class="lbl">＋ Teach a rule</div>
+      <input id="teachInput" placeholder="Plain language, e.g. “Always request expedited review for ER cases”" />
+      <div class="scopepick" id="scopePick">
+        <span class="sp" data-scope="this task">this task</span>
+        <span class="sp sel" data-scope="HMO category">HMO category</span>
+        <span class="sp" data-scope="the project">the project</span>
+      </div>
+      <button class="go" id="teachGo">Teach rule →</button>
+    </div>
+
+  </div>
+</aside>
+
+<!-- ============================ LEVEL 3: TASK DRAWER ============================ -->
+<aside class="drawer" id="drawer" aria-label="Task detail"><!-- injected --></aside>
+
+<!-- ============================ MODE LINE + STATUS BAR ============================ -->
+<div class="modeline"><div class="m" id="modeline" role="status"></div></div>
+
+<div class="statusbar">
+  <span class="mode" id="modeBadge">NORMAL</span>
+  <span class="summary"><b class="num">12</b> working · <b class="num">3</b> need you · <b class="num">2</b> blocked</span>
+  <span class="hints">
+    <kbd>j/k move</kbd><kbd>l / enter open</kbd><kbd>h / esc back</kbd><kbd>: actions</kbd><kbd>? help</kbd>
+  </span>
+</div>
+
+<!-- ============================ COMMAND PALETTE ============================ -->
+<div class="paloverlay" id="palOverlay">
+  <div class="palette">
+    <div class="chip">
+      <span class="verb" id="palVerb">open</span>
+      <span class="dotsep">·</span>
+      <span class="slot">target</span>
+      <span class="dotsep">·</span>
+      <span class="slot">scope</span>
+    </div>
+    <input id="palInput" placeholder="type an action, file, or task…" autocomplete="off" />
+    <div class="opts" id="palOpts"></div>
+  </div>
+</div>
+
+<script>
+/* ----------------------------------------------------------- DATA ----------------------------------------------------------- */
+const PROJECTS = [
+  { id:'ins', name:'Insurance Authorization', bind:'Aetna/UHC payer portals + EHR', bindIcon:'⛓',
+    desc:'Prior authorizations for our top payers. Confirm coverage, attach the latest EHR clinical notes, post outcomes to #auth-team, and stop to ask before anything irreversible.',
+    insts:9, working:12, need:3, blocked:2, done:7, current:true, subprojects:['aetna','uhc','medi'] },
+  { id:'elig', name:'Eligibility Verification', bind:'EHR · ↻ daily 6am sweep', bindIcon:'⏱', recur:true,
+    desc:'Daily eligibility and benefits checks for tomorrow’s schedule. Flag inactive coverage and missing secondary plans before the patient arrives.',
+    insts:5, working:8, need:1, blocked:0, done:15 },
+  { id:'claims', name:'Claims & Denials', bind:'clearinghouse + EHR', bindIcon:'⛓',
+    desc:'Work denied and rejected claims. Triage by payer, draft appeals with medical-necessity language, and resubmit inside the timely-filing window.',
+    insts:6, working:5, need:4, blocked:1, done:11 },
+  { id:'intake', name:'Patient Intake', bind:'front-desk folder (manual-heavy)', bindIcon:'📁',
+    desc:'Front-desk intake review. Verify demographics and insurance cards before the first appointment.',
+    insts:2, working:3, need:0, blocked:0, done:6 },
+  { id:'api', name:'API service', dev:true, bind:'~/git/api · branch main', bindIcon:'⌥', mono:true,
+    desc:'The acme/api backend. Never merge with red CI, squash & merge only, post results to #eng.',
+    insts:4, working:2, need:1, blocked:1, done:4 },
+  { id:'personal', name:'Personal', bind:'no binding', bindIcon:'○', unbound:true,
+    desc:null,
+    insts:0, working:1, need:0, blocked:0, done:2 },
+];
+
+/* sub-projects of Insurance Authorization — a project whose children are projects, not tasks.
+   description inherits parent + own (shown like the instruction cascade). */
+const SUBPROJECTS = {
+  aetna: { id:'aetna', name:'Aetna HMO', bind:'Aetna HMO portal + EHR', bindIcon:'⛓',
+    desc:'Aetna HMO prior auths. HMO plans need a PCP referral on file — confirm before submitting; use the HMO fax cover sheet, not the PPO one.',
+    inherit:'ins', insts:6, working:7, need:2, blocked:0, done:4 },
+  uhc:   { id:'uhc', name:'UnitedHealthcare', bind:'UHC portal + EHR', bindIcon:'⛓',
+    desc:'UnitedHealthcare prior auths. Always confirm secondary coverage before submitting; queue and retry if the UHC portal is down.',
+    inherit:'ins', insts:5, working:3, need:0, blocked:2, done:2 },
+  medi:  { id:'medi', name:'Medicare Advantage', bind:'CMS + EHR', bindIcon:'⛓',
+    desc:'Medicare Advantage prior auths and appeals. Cite Medicare medical-necessity criteria; mind expedited-review timelines.',
+    inherit:'ins', insts:4, working:2, need:1, blocked:0, done:1 },
+};
+
+const PEOPLE = { you:'Y', priya:'P', sam:'S' };
+
+const TREE = [
+  /* recurring DEFINITION → dated run children. recur:true gives it the ↻ texture, not a status color. */
+  { kind:'parent', id:'aetna', name:'Prior auth — Aetna HMO batch', status:'working', recur:true,
+    cadence:'↻ Mon 7:00am · next Mon 7:00am',
+    sub:'last run today · created 6 subtasks', rollsent:'4 of 6 done · 1 needs you',
+    dep:{ text:'Submit Aetna HMO batch blocked-by Confirm PCP referral (A-2242)', kind:'block' },
+    children:[
+      { id:'A-2241', name:'Auth #A-2241 · J. Rivera · MRI lumbar', status:'done', meta:'conf #AET-88102' },
+      { id:'A-2242', name:'Auth #A-2242 · HMO · PCP referral', status:'waiting', meta:'“No PCP referral on file — submit anyway? (y/n)”', open:true },
+      { id:'A-2243', name:'Auth #A-2243 · drafting clinical justification', status:'working', meta:'step 4/6', open:true },
+      { id:'A-2244', name:'Auth #A-2244', status:'done', meta:'submitted' },
+      { id:'A-2245', name:'Auth #A-2245', status:'done', meta:'submitted' },
+      { id:'A-2246', name:'Auth #A-2246', status:'done', meta:'submitted' },
+    ]},
+  { kind:'parent', id:'uhc', name:'Prior auth — UnitedHealthcare batch', status:'blocked',
+    sub:'agent Auth bot', rollsent:'2 of 5 done · 1 blocked',
+    children:[
+      { id:'A-2250', name:'Auth #A-2250 · secondary coverage', status:'blocked',
+        meta:'blocked 38 min — agent waiting on missing secondary coverage',
+        dep:{ text:'blocked-by Secondary coverage on file', kind:'block' } },
+      { id:'A-2251', name:'Auth #A-2251', status:'working', meta:'step 2/6' },
+      { id:'A-2252', name:'Auth #A-2252', status:'working', meta:'step 1/6' },
+      { id:'A-2253', name:'Auth #A-2253', status:'done', meta:'submitted' },
+      { id:'A-2254', name:'Auth #A-2254', status:'done', meta:'submitted' },
+    ]},
+  { kind:'leaf', id:'reauth', name:'Re-auth expiring this week', status:'working',
+    meta:'step 3/5', who:'priya', whoLabel:'claimed by Priya' },
+  { kind:'leaf', id:'appeal', name:'Appeal denial — CT scan (Medicare)', status:'claimed',
+    meta:'claimed', who:'sam', whoLabel:'claimed by Sam' },
+  { kind:'leaf', id:'stat', name:'Stat auth — ER admit, Cigna', status:'unclaimed',
+    meta:'ready for any agent', badge:'unclaimed', p0:true },
+];
+
+/* task detail records keyed by id */
+const TASKS = {
+  'A-2242': {
+    title:'Auth #A-2242 · HMO · PCP referral', who:'HMO · waiting on you', status:'waiting',
+    config:{ agent:'Auth bot · local auto',
+             schedule:'↻ part of “Aetna HMO batch” · Mon 7:00am · last run today (created 6) · next Mon 7:00am',
+             runlink:'This is a run of Aetna HMO batch · view schedule →',
+             binding:'Aetna HMO portal + EHR', nodes:'6 steps · paused at confirm' },
+    earned:{ kind:'wait', why:'Waiting because of the HMO category rule',
+             rule:'“HMO requires a PCP referral on file — confirm before submitting.”' },
+    eff:{ total:8, parts:['4 project','2 HMO','1 prior-auth','1 task'] },
+    trace:[
+      { s:'ok',   t:'Pull patient + payer context', why:'needed to fill the auth form' },
+      { s:'ok',   t:'Confirm secondary coverage', why:'project rule — none found, noted' },
+      { s:'run',  t:'Confirm PCP referral (HMO)', why:'HMO category rule — none on file → asking you',
+                  gating:'Gated by: “HMO requires a PCP referral on file — confirm before submitting.”' },
+      { s:'todo', t:'Submit via Aetna portal', why:'blocked until you answer y/n' },
+    ],
+    waiting:true, live:true,
+    session:`<span class="pl">$ authbot run --task A-2242</span>
+→ Loaded patient context (<span class="reveal" data-mrn>MRN ••••• — reveal to view</span>)
+→ Payer: Aetna HMO · Plan: Open Access
+<span class="ok">→ Confirmed secondary coverage: none on file</span>
+<span class="run">⚠ PCP referral: NOT on file — pausing, asking you (y/n)</span>`,
+  },
+  'A-2243': {
+    title:'Auth #A-2243 · drafting clinical justification', who:'working · step 4/6', status:'working',
+    config:{ agent:'Auth bot · local auto',
+             schedule:'↻ part of “Aetna HMO batch” · Mon 7:00am · last run today (created 6) · next Mon 7:00am',
+             runlink:'This is a run of Aetna HMO batch · view schedule →',
+             binding:'Aetna HMO portal + EHR', nodes:'6 steps · running' },
+    earned:null,
+    eff:{ total:8, parts:['4 project','2 HMO','1 prior-auth','1 task'] },
+    trace:[
+      { s:'ok',   t:'Pull patient + payer context', why:'needed to fill the auth form' },
+      { s:'ok',   t:'Confirm secondary coverage', why:'project rule — none found, noted' },
+      { s:'ok',   t:'Confirm PCP referral (HMO)', why:'HMO category rule — on file' },
+      { s:'run',  t:'Draft clinical justification', why:'payer requires medical necessity (step 4/6)' },
+      { s:'todo', t:'Submit via Aetna portal', why:'ship the auth' },
+      { s:'todo', t:'Post outcome to #auth-team', why:'project rule (team visibility)' },
+    ],
+    working:true, live:true,
+    session:`<span class="pl">$ authbot run --task A-2243</span>
+→ Loaded patient context (<span class="reveal" data-mrn>MRN ••••• — reveal to view</span>)
+→ Payer: Aetna HMO · Plan: Open Access
+<span class="ok">→ Confirmed secondary coverage: none on file</span>
+<span class="ok">→ Confirmed PCP referral: on file ✓</span>
+<span class="run">⏵ step 4/6 · drafting clinical justification from 3 encounters…</span>
+<span class="draft">   ✎ 412 words drafted</span>`,
+  },
+  'A-2241': {
+    title:'Auth #A-2241 · J. Rivera · MRI lumbar', who:'done · conf #AET-88102', status:'done',
+    config:{ agent:'Auth bot · local auto',
+             schedule:'↻ run of “Aetna HMO batch” · Mon 7:00am · this run today',
+             runlink:'This is a run of Aetna HMO batch · view schedule →',
+             binding:'Aetna HMO portal + EHR', nodes:'6 steps · complete' },
+    earned:null,
+    eff:{ total:8, parts:['4 project','2 HMO','1 prior-auth','1 task'] },
+    trace:[
+      { s:'ok', t:'Pull patient + payer context', why:'needed to fill the auth form' },
+      { s:'ok', t:'Confirm secondary coverage', why:'project rule — secondary on file' },
+      { s:'ok', t:'Confirm PCP referral (HMO)', why:'HMO category rule — on file' },
+      { s:'ok', t:'Draft clinical justification', why:'payer requires medical necessity' },
+      { s:'ok', t:'Submit via Aetna portal', why:'shipped the auth' },
+      { s:'ok', t:'Post outcome to #auth-team', why:'project rule (team visibility)' },
+    ],
+    done:true, live:false,
+    result:'Auth approved and submitted to Aetna. Confirmation <span class="mono">#AET-88102</span> · posted to #auth-team · 1 PDF attached to EHR.',
+    session:`<span class="pl">$ authbot run --task A-2241</span>
+→ Loaded patient context (<span class="reveal" data-mrn>MRN ••••• — reveal to view</span>)
+<span class="ok">→ All checks passed · justification drafted (388 words)</span>
+<span class="ok">→ Submitted via Aetna portal → conf #AET-88102 ✓</span>
+<span class="ok">→ Posted outcome to #auth-team</span>`,
+  },
+  'A-2250': {
+    title:'Auth #A-2250 · secondary coverage', who:'blocked 38 min', status:'blocked',
+    config:{ agent:'Auth bot · local auto', schedule:'part of “UnitedHealthcare batch”',
+             binding:'UHC portal + EHR', nodes:'6 steps · halted at step 2' },
+    earned:{ kind:'block', why:'Blocked because of the project rule',
+             rule:'“Never submit an auth without confirming secondary coverage.”' },
+    eff:{ total:7, parts:['4 project','2 UHC','1 prior-auth'] },
+    trace:[
+      { s:'ok',   t:'Pull patient + payer context', why:'needed to fill the auth form' },
+      { s:'run',  t:'Confirm secondary coverage', why:'project rule — none on file → halted (not allowed to proceed)', blk:true,
+                  gating:'Gated by: “Never submit an auth without confirming secondary coverage.”' },
+      { s:'todo', t:'Confirm referral / submit', why:'blocked until secondary coverage is on file' },
+    ],
+    blocked:true, live:true,
+    session:`<span class="pl">$ authbot run --task A-2250</span>
+→ Loaded patient context (<span class="reveal" data-mrn>MRN ••••• — reveal to view</span>)
+→ Payer: UnitedHealthcare
+<span class="run">✗ Secondary coverage: none on file</span>
+<span class="run">■ Halted by project rule — “Never submit without secondary coverage”</span>`,
+  },
+};
+
+/* ----------------------------------------------------------- STATE ----------------------------------------------------------- */
+let level = 1;
+let scope = 'root';   // 'root' = all projects, or a project id (e.g. 'ins') when showing its sub-projects
+let gridList = [];     // the projects currently shown at L1
+let gridCursor = 0;
+let treeCursor = 0;
+let teachScope = 'HMO category';
+
+/* ----------------------------------------------------------- HELPERS ----------------------------------------------------------- */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+let mlTimer = null;
+function flash(msg){
+  const m = $('#modeline');
+  m.textContent = msg; m.classList.add('show');
+  clearTimeout(mlTimer);
+  mlTimer = setTimeout(()=>m.classList.remove('show'), 2500);
+}
+function ctxMarker(){ return '<span class="ctx">◇ given to agents as context</span>'; }
+
+/* ----------------------------------------------------------- LEVEL 1 RENDER ----------------------------------------------------------- */
+function renderHero(){
+  const h = $('#hero');
+  if(scope==='root'){
+    h.className = 'hero';
+    h.innerHTML = `<b>3 projects need you.</b> Insurance Authorization has <b>2 blocked auths</b> and 3 waiting —
+      <span class="open" id="heroOpen">open it first →</span>`;
+    $('#heroOpen').addEventListener('click', ()=>{ enterProject('ins'); });
+  } else {
+    const needSum = gridList.reduce((a,p)=>a+p.need,0);
+    const blkSum = gridList.reduce((a,p)=>a+p.blocked,0);
+    if(needSum===0 && blkSum===0){
+      h.className = 'hero clear';
+      h.innerHTML = `Nothing needs you in these sub-projects — agents are running.`;
+    } else {
+      h.className = 'hero';
+      h.innerHTML = `<b>${needSum} sub-project task${needSum===1?'':'s'} need you${blkSum?`, ${blkSum} blocked`:''}.</b> Pick the one with the amber pill.`;
+    }
+  }
+}
+
+function renderGrid(){
+  // choose the project list for this scope
+  if(scope==='root'){ gridList = PROJECTS.slice(); }
+  else { gridList = (PROJECTS.find(p=>p.id===scope)?.subprojects||[]).map(id=>SUBPROJECTS[id]); }
+
+  // header + crumb
+  if(scope==='root'){
+    $('#l1title').textContent = 'Your projects';
+    $('#l1sub').textContent = `${PROJECTS.length} projects · zoom into any one to see its task tree and instruction scopes`;
+    $('#crumbTrail').textContent = 'Atlas — all projects';
+  } else {
+    const par = PROJECTS.find(p=>p.id===scope);
+    $('#l1title').textContent = par.name;
+    $('#l1sub').textContent = `${gridList.length} sub-projects · same view, scoped to ${par.name}`;
+    $('#crumbTrail').innerHTML = `Atlas › <span class="clk" id="crToRoot">${esc(par.name)}</span> <span class="here">sub-projects</span>`;
+    const cr = $('#crToRoot'); if(cr) cr.addEventListener('click', ()=>{ scope='root'; gridCursor=0; renderGrid(); });
+  }
+  renderHero();
+
+  const g = $('#grid');
+  g.innerHTML = gridList.map((p,i)=>{
+    const total = p.working+p.need+p.blocked+p.done || 1;
+    const seg = (cls,n)=> n>0 ? `<i class="${cls}" style="flex:${n}"></i>` : '';
+    const needPill = p.need>0 ? `<span class="need-pill">⚑ <span class="n">${p.need}</span> need you</span>` : '';
+    const bindClass = p.mono ? 'mono' : '';
+    const recurCls = p.recur ? ' recur' : '';
+    const cta = p.unbound ? `<div class="bindcta" data-bind="${p.id}">＋ Bind a folder</div>` : '';
+    const subline = (p.subprojects&&p.subprojects.length) ? `<div class="subs">▸ ${p.subprojects.length} sub-projects</div>` : '';
+    const descLine = p.desc
+      ? `<div class="pdesc">${esc(p.desc)} ${ctxMarker()}</div>`
+      : (p.unbound ? `<div class="pdesc" style="color:var(--dim)">No description yet. <span class="open" data-adddesc="${p.id}">＋ Add a description →</span></div>` : '');
+    return `
+      <div class="pcard${p.unbound?' unbound':''}" data-i="${i}" tabindex="0" role="button">
+        <div class="ptop"><span class="pname">${esc(p.name)}</span>${needPill}</div>
+        ${descLine}
+        ${subline}
+        <div class="bind"><span class="ic">${p.bindIcon}</span><span class="${bindClass}${recurCls}">${esc(p.bind)}</span></div>
+        <div class="segbar">
+          ${seg('seg-working',p.working)}${seg('seg-need',p.need)}${seg('seg-blocked',p.blocked)}${seg('seg-done',p.done)}
+        </div>
+        <div class="segcap"><span><span class="num">${p.working}</span> working</span><span><span class="num">${p.done}</span> done</span></div>
+        ${cta}
+      </div>`;
+  }).join('');
+
+  $$('#grid .pcard').forEach(card=>{
+    card.addEventListener('click', e=>{
+      if(e.target.closest('[data-bind]') || e.target.closest('[data-adddesc]')) return;
+      gridCursor = +card.dataset.i; setGridCursor(); enterCard(gridList[gridCursor]);
+    });
+  });
+  $$('#grid [data-bind]').forEach(b=>b.addEventListener('click', e=>{
+    e.stopPropagation(); flash('⛓ bind — pick a folder to bind to “Personal”'); }));
+  $$('#grid [data-adddesc]').forEach(b=>b.addEventListener('click', e=>{
+    e.stopPropagation(); flash('✎ add description — type what this project is for (also given to agents as context)'); }));
+  if(gridCursor>=gridList.length) gridCursor=0;
+  setGridCursor();
+}
+function setGridCursor(){ $$('#grid .pcard').forEach((c,i)=>c.classList.toggle('cursor', i===gridCursor)); }
+
+/* clicking a card: a project with sub-projects re-scopes the grid; otherwise drills into its tree */
+function enterCard(p){
+  if(p.subprojects && p.subprojects.length){
+    scope = p.id; gridCursor = 0; renderGrid();
+    flash('zoom → ' + p.name + ' — showing its sub-projects (same grid, scoped)');
+  } else {
+    enterProject(p.id, p.name);
+  }
+}
+
+/* ----------------------------------------------------------- ZOOM TRANSITIONS ----------------------------------------------------------- */
+function setLevel(n){
+  level = n;
+  $('#view1').classList.toggle('active', n===1);
+  $('#view2').classList.toggle('active', n===2);
+  $$('#zoomDots .z').forEach((z,i)=>z.classList.toggle('on', i < n));
+  if(n===1){ renderGrid(); }
+}
+
+function enterProject(id, label){
+  // for set coherence the full worked tree is Insurance Authorization; others flash a note
+  const proj = PROJECTS.find(p=>p.id===id) || SUBPROJECTS[id];
+  if(id!=='ins' && id!=='aetna'){
+    flash('zoom → ' + (label||proj.name) + ' — opening project (Insurance Authorization shown as the worked example)');
+  }
+  // breadcrumb: include sub-project step if we drilled from a scoped grid
+  if(scope!=='root' && SUBPROJECTS[id]){
+    const par = PROJECTS.find(p=>p.id===scope);
+    $('#crumbTrail').innerHTML = `Atlas › ${esc(par.name)} › <span class="here">${esc(SUBPROJECTS[id].name)}</span>`;
+    $('#p2name').textContent = 'Insurance Authorization › ' + SUBPROJECTS[id].name;
+    $('#p2bind').textContent = SUBPROJECTS[id].bind;
+    setDesc(SUBPROJECTS[id]);
+  } else {
+    $('#crumbTrail').innerHTML = 'Atlas › <span class="here">Insurance Authorization</span>';
+    $('#p2name').textContent = 'Insurance Authorization';
+    $('#p2bind').textContent = 'Aetna/UHC payer portals + EHR';
+    setDesc(PROJECTS.find(p=>p.id==='ins'));
+  }
+  renderTree();
+  setLevel(2);
+}
+
+/* description line at L2 — inherited cascade for sub-projects, editable inline */
+function setDesc(proj){
+  const el = $('#p2desc');
+  if(SUBPROJECTS[proj.id]){
+    const par = PROJECTS.find(p=>p.id===proj.inherit);
+    el.innerHTML = `<span class="dtext">${esc(proj.desc)}</span> ${ctxMarker()}
+      <span class="edit" data-editdesc>✎ edit</span>
+      <div style="font-size:11px;color:var(--dim);margin-top:4px">Inherited from ${esc(par.name)} + this sub-project (general → specific, like the instruction cascade).</div>`;
+  } else {
+    el.innerHTML = `<span class="dtext">${esc(proj.desc)}</span> ${ctxMarker()} <span class="edit" data-editdesc>✎ edit</span>`;
+  }
+  const ed = el.querySelector('[data-editdesc]');
+  if(ed) ed.addEventListener('click', ()=>{
+    const t = el.querySelector('.dtext');
+    el.setAttribute('contenteditable','true'); el.focus();
+    flash('✎ editing description — Esc to save (also given to agents as context)');
+    el.addEventListener('blur', ()=>{ el.removeAttribute('contenteditable'); flash('✓ description saved · context updated for agents'); }, { once:true });
+  });
+}
+
+/* ----------------------------------------------------------- LEVEL 2 RENDER (TREE) ----------------------------------------------------------- */
+const expanded = { aetna:true, uhc:false };
+
+function dotClass(s){ return s==='waiting'?'need':(s==='claimed'||s==='unclaimed'||s==='done')?'':s; }
+
+/* badge only for ACTIONABLE rows; passive rows carry a quiet dot + plain text */
+function badgeFor(node){
+  if(node.p0) return '<span class="badge p0">P0 · unclaimed</span>';
+  if(node.badge==='unclaimed') return '<span class="badge unclaimed">unclaimed</span>';
+  if(node.status==='blocked') return '<span class="badge blocked">blocked</span>';
+  if(node.status==='waiting') return '<span class="badge waiting">waiting on you</span>';
+  return '';
+}
+function avaFor(node){ return node.who ? `<span class="ava" title="${esc(node.whoLabel||'')}">${PEOPLE[node.who]}</span>` : ''; }
+
+let visibleRows = [];
+function renderTree(){
+  const t = $('#tree');
+  visibleRows = [];
+  let html = '';
+  // one pulse on screen: the single live working item (A-2243)
+  TREE.forEach(node=>{
+    if(node.kind==='parent'){
+      const open = expanded[node.id];
+      const dep = node.dep ? `<span class="blocklink" data-blockdep="${node.id}">⛔ ${esc(node.dep.text)}</span>` : '';
+      const recur = node.recur ? `<span class="recur">↻</span>` : '';
+      const cadence = node.recur ? `<span class="cadence">${esc(node.cadence)}</span>` : '';
+      const subm = node.sub ? `<span class="passive">${esc(node.sub)}</span>` : '';
+      html += `
+        <div class="trow parent" data-row="${node.id}" data-kind="parent">
+          <span class="twist">${open?'▾':'▸'}</span>
+          <span class="dot ${dotClass(node.status)}"></span>
+          <div class="body">
+            <div class="nm">${recur}${esc(node.name)}<span class="rollsent">${esc(node.rollsent)}</span></div>
+            <div class="meta">${cadence} ${subm} ${dep}</div>
+          </div>
+          <div class="right">${badgeFor(node)}</div>
+        </div>`;
+      visibleRows.push({ id:node.id, type:'parent' });
+      html += `<div class="children${open?' open':''}" data-children="${node.id}">`;
+      node.children.forEach(ch=>{
+        const openable = TASKS[ch.id] ? `data-task="${ch.id}"` : '';
+        const dep2 = ch.dep ? `<span class="blocklink" data-blockdep2="${ch.id}">⛔ ${esc(ch.dep.text)}</span>` : '';
+        const ent = (ch.status==='waiting'||ch.status==='working') && TASKS[ch.id]
+          ? `<span class="deplink" data-thread="${ch.id}">enter thread →</span>` : '';
+        const liveCls = (ch.id==='A-2243') ? ' pulsedot' : '';
+        const metaCls = (ch.status==='done') ? ' class="passive"' : '';
+        html += `
+          <div class="trow child leaf" data-row="${ch.id}" data-kind="child" ${openable}>
+            <span class="twist"></span>
+            <span class="dot ${dotClass(ch.status)}${liveCls}"></span>
+            <div class="body">
+              <div class="nm">${esc(ch.name)}</div>
+              <div class="meta"><span${metaCls}>${esc(ch.meta||'')}</span> ${dep2} ${ent}</div>
+            </div>
+            <div class="right">${badgeFor(ch)}</div>
+          </div>`;
+        if(open) visibleRows.push({ id:ch.id, type:'child', task: !!TASKS[ch.id] });
+      });
+      html += `</div>`;
+    } else {
+      const openable = TASKS[node.id] ? `data-task="${node.id}"` : '';
+      const metaCls = (node.status==='done'||node.status==='claimed') ? ' class="passive"' : '';
+      html += `
+        <div class="trow leaf" data-row="${node.id}" data-kind="leaf" ${openable}>
+          <span class="twist"></span>
+          <span class="dot ${dotClass(node.status)}"></span>
+          <div class="body">
+            <div class="nm">${esc(node.name)}</div>
+            <div class="meta"><span${metaCls}>${esc(node.whoLabel||node.meta||'')}</span></div>
+          </div>
+          <div class="right">${avaFor(node)}${badgeFor(node)}</div>
+        </div>`;
+      visibleRows.push({ id:node.id, type:'leaf', task: !!TASKS[node.id] });
+    }
+  });
+  t.innerHTML = html;
+  wireTree();
+  if(treeCursor >= visibleRows.length) treeCursor = 0;
+  setTreeCursor();
+}
+
+function wireTree(){
+  $$('#tree .trow').forEach(row=>{
+    row.addEventListener('click', e=>{
+      if(e.target.closest('[data-blockdep]') || e.target.closest('[data-blockdep2]')){
+        const link = e.target.closest('[data-blockdep],[data-blockdep2]');
+        const tid = link.getAttribute('data-blockdep') || link.getAttribute('data-blockdep2');
+        flash('⛔ dependency — this task is blocked-by a prerequisite' + (TASKS[tid]?'; opening it':''));
+        if(link.hasAttribute('data-blockdep2') && TASKS[tid]) openTask(tid);
+        return;
+      }
+      if(e.target.closest('[data-thread]')){ openTask(e.target.closest('[data-thread]').dataset.thread); flash('› entering thread'); return; }
+      const id = row.dataset.row;
+      const vi = visibleRows.findIndex(r=>r.id===id);
+      if(vi>=0){ treeCursor = vi; setTreeCursor(); }
+      if(row.dataset.kind==='parent'){ expanded[id] = !expanded[id]; renderTree(); }
+      else if(row.dataset.task){ openTask(row.dataset.task); }
+      else { flash('open — ' + row.querySelector('.nm').textContent + ' (no detail in this mock)'); }
+    });
+  });
+}
+function setTreeCursor(){
+  $$('#tree .trow').forEach(r=>r.classList.remove('cursor'));
+  const cur = visibleRows[treeCursor];
+  if(!cur) return;
+  const el = $(`#tree .trow[data-row="${cur.id}"]`);
+  if(el){ el.classList.add('cursor'); el.scrollIntoView({block:'nearest'}); }
+}
+
+/* ----------------------------------------------------------- LEVEL 3: TASK DRAWER ----------------------------------------------------------- */
+function openTask(id){
+  const tk = TASKS[id];
+  if(!tk){ flash('open — no detail for ' + id); return; }
+  const d = $('#drawer');
+
+  // earned link leads (folded conceptually into the gating step too)
+  const earnedHtml = tk.earned ? `
+    <div class="earned ${tk.earned.kind==='block'?'blk':''}">
+      <div class="ti">⛓ ${esc(tk.earned.why)}</div>
+      <div class="rule">${esc(tk.earned.rule)}</div>
+    </div>` : '';
+
+  const traceHtml = tk.trace.map(s=>{
+    const live = (id==='A-2243' || tk.live) && s.s==='run' ? ' live' : '';
+    const mk = s.s==='ok'?'<span class="mk ok">✓</span>': s.s==='run'?`<span class="mk run${live}">⏵</span>`:'<span class="mk todo">◦</span>';
+    const gating = (s.s==='run' && s.gating) ? `<span class="gating">${esc(s.gating)}</span>` : '';
+    return `<div class="tstep ${s.s==='run'?'run':''}${s.blk?' blk':''}">${mk}<div class="tx">${esc(s.t)}<span class="why">why: ${esc(s.why)}</span>${gating}</div></div>`;
+  }).join('');
+
+  // primary action by status
+  let primary = '', secondary = '';
+  if(tk.working){ primary = `<button class="btn primary" data-thread2="${id}">Enter thread →</button>`;
+                  secondary = `<button class="btn stop" data-stop="${id}">■ Stop</button>`; }
+  else if(tk.waiting){ primary = `<button class="btn primary" data-answer="${id}">Answer y/n →</button>`;
+                  secondary = `<button class="btn" data-thread2="${id}">Enter thread →</button><button class="btn stop" data-stop="${id}">■ Stop</button>`; }
+  else if(tk.blocked){ primary = `<button class="btn primary" data-thread2="${id}">Enter thread →</button>`;
+                  secondary = `<button class="btn stop" data-stop="${id}">■ Cancel</button>`; }
+  else if(tk.done){ primary = `<button class="btn" data-thread2="${id}">Open session →</button>`; }
+
+  const cascade1 = `
+    <div class="casc1">Honors <b>${tk.eff.total}</b> instructions <span class="parts">(${tk.eff.parts.join(' · ')})</span>
+      — <span class="view" data-openscopes>view ›</span></div>`;
+
+  const resultHtml = tk.done && tk.result ? `
+    <div class="sect"><div class="sl">What changed</div>
+      <div class="result"><div class="rt">✓ Done</div>${tk.result}</div></div>` : '';
+
+  const runlink = tk.config.runlink ? `<div class="f full"><div class="k">Recurrence</div><div class="v"><span class="runlink" data-sched>${esc(tk.config.runlink)}</span></div></div>` : '';
+
+  // live session expanded for in-progress/blocked; collapsed for done
+  const sessionOpen = tk.live ? ' open' : '';
+
+  d.innerHTML = `
+    <div class="dh">
+      <div class="topr"><span class="id">${esc(id)}</span><span class="x" id="drawerX">×</span></div>
+      <h3>${esc(tk.title)}</h3>
+      <div class="who"><span class="sdot ${tk.waiting?'need':tk.status}"></span>${esc(tk.who)}</div>
+    </div>
+    <div class="db">
+      ${earnedHtml}
+      <div class="dactions">${primary}${secondary}</div>
+
+      <div class="sect"><div class="sl">Live trace · per-step why</div><div class="trace">${traceHtml}</div></div>
+
+      <div class="sect"><div class="sl">Instructions in effect</div>${cascade1}</div>
+
+      ${resultHtml}
+
+      <div class="disc" id="discConfig">
+        <div class="dt" data-disc="discConfig"><span class="tw">▸</span> Show config<span class="hint">agent · schedule · binding · steps</span></div>
+        <div class="dc">
+          <div class="config">
+            <div class="f"><div class="k">Agent</div><div class="v">${esc(tk.config.agent)}</div></div>
+            <div class="f"><div class="k">Binding</div><div class="v">${esc(tk.config.binding)}</div></div>
+            <div class="f full"><div class="k">Schedule</div><div class="v">${esc(tk.config.schedule)}</div></div>
+            ${runlink}
+            <div class="f"><div class="k">Steps / nodes</div><div class="v">${esc(tk.config.nodes)}</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="disc${sessionOpen}" id="discSession">
+        <div class="dt" data-disc="discSession"><span class="tw">▸</span> Show live session<span class="hint">${tk.live?'running now':'transcript'}</span></div>
+        <div class="dc"><div class="session">${tk.session}</div></div>
+      </div>
+    </div>`;
+
+  d.classList.add('show');
+  $('#scrim').classList.add('show');
+
+  // wire drawer
+  $('#drawerX').addEventListener('click', closeDrawer);
+  $$('#drawer [data-stop]').forEach(b=>b.addEventListener('click', ()=>{ flash('■ stopped — ' + b.dataset.stop); }));
+  $$('#drawer [data-thread2]').forEach(b=>b.addEventListener('click', ()=>flash('› entered thread — ' + b.dataset.thread2)));
+  $$('#drawer [data-answer]').forEach(b=>b.addEventListener('click', ()=>flash('✓ answered — ' + b.dataset.answer + ' will proceed')));
+  const sm = $('#drawer [data-openscopes]'); if(sm) sm.addEventListener('click', ()=>{ closeDrawer(); openScopes(); });
+  const sched = $('#drawer [data-sched]'); if(sched) sched.addEventListener('click', ()=>flash('↻ schedule — Aetna HMO batch · Mon 7:00am · last run today · next Mon 7:00am · pause schedule'));
+  $$('#drawer .disc .dt').forEach(dt=>dt.addEventListener('click', ()=>{ $('#'+dt.dataset.disc).classList.toggle('open'); }));
+  $$('#drawer .reveal[data-mrn]').forEach(r=>r.addEventListener('click', function(){
+    this.textContent = 'MRN 4471-0098 (memory-only · hidden on close)';
+    this.style.color = '#cfe3dc'; this.style.cursor='default'; this.style.textDecoration='none';
+  }));
+
+  $('#crumbTrail').innerHTML = 'Atlas › <span class="here">Insurance Authorization</span> › ' + esc(id);
+  $$('#zoomDots .z').forEach((z,i)=>z.classList.toggle('on', i < 3));
+}
+function closeDrawer(){
+  $('#drawer').classList.remove('show');
+  if(!$('#scopesPanel').classList.contains('show')) $('#scrim').classList.remove('show');
+  if(level===2){ $('#crumbTrail').innerHTML = 'Atlas › <span class="here">Insurance Authorization</span>'; $$('#zoomDots .z').forEach((z,i)=>z.classList.toggle('on', i<2)); }
+}
+
+/* ----------------------------------------------------------- SCOPES PANEL ----------------------------------------------------------- */
+function openScopes(){ $('#scopesPanel').classList.add('show'); $('#scrim').classList.add('show'); }
+function closeScopes(){ $('#scopesPanel').classList.remove('show'); if(!$('#drawer').classList.contains('show')) $('#scrim').classList.remove('show'); }
+$('#openScopes').addEventListener('click', openScopes);
+$('#scopesX').addEventListener('click', closeScopes);
+$('#scrim').addEventListener('click', ()=>{ closeScopes(); closeDrawer(); });
+
+$$('#scopePick .sp').forEach(sp=>sp.addEventListener('click', ()=>{
+  $$('#scopePick .sp').forEach(s=>s.classList.remove('sel'));
+  sp.classList.add('sel'); teachScope = sp.dataset.scope;
+}));
+$('#teachGo').addEventListener('click', ()=>{
+  const v = $('#teachInput').value.trim();
+  if(!v){ flash('teach — type a rule first'); return; }
+  flash('✓ taught “' + v.slice(0,40) + (v.length>40?'…':'') + '” → ' + teachScope);
+  $('#teachInput').value='';
+});
+
+/* ----------------------------------------------------------- SWITCHER (sub-projects indented) ----------------------------------------------------------- */
+function buildSwitcher(){
+  const m = $('#swMenu');
+  let html = '';
+  PROJECTS.forEach(p=>{
+    const cls = p.current ? ' cur' : '';
+    html += `<div class="so${cls}" data-sw="${p.id}"><span class="sd"></span>${esc(p.name)}<span class="sx">${p.working}w · ${p.need}n</span></div>`;
+    if(p.subprojects){
+      p.subprojects.forEach(sid=>{
+        const s = SUBPROJECTS[sid];
+        html += `<div class="so sub" data-sw="${s.id}"><span class="sd"></span>${esc(s.name)}<span class="sx">${s.working}w · ${s.need}n</span></div>`;
+      });
+    }
+  });
+  m.innerHTML = html;
+  $$('#swMenu .so').forEach(o=>o.addEventListener('click', ()=>{
+    $('#swMenu').classList.remove('show');
+    const id = o.dataset.sw;
+    if(SUBPROJECTS[id]){ scope='ins'; enterProject(id); return; }
+    const p = PROJECTS.find(x=>x.id===id);
+    if(p.current) return;
+    flash('switch → ' + p.name + ' (Insurance Authorization shown as the worked example)');
+  }));
+}
+$('#swBtn').addEventListener('click', e=>{ e.stopPropagation(); $('#swMenu').classList.toggle('show'); });
+document.addEventListener('click', e=>{ if(!e.target.closest('.switcher')) $('#swMenu').classList.remove('show'); });
+
+/* ----------------------------------------------------------- BACK ----------------------------------------------------------- */
+$('#back2').addEventListener('click', ()=>setLevel(1));
+
+/* ----------------------------------------------------------- COMMAND PALETTE ----------------------------------------------------------- */
+const VERBS = [
+  ['open',          'a project, task, or session'],
+  ['run',           'a recipe or scheduled task'],
+  ['stop',          'a running agent'],
+  ['claim',         'an unclaimed task'],
+  ['done',          'mark a task complete'],
+  ['teach',         'save a rule to a scope'],
+  ['goto',          'jump to a task by id'],
+  ['switch project','change the active project'],
+  ['filter',        'by status (working / blocked …)'],
+  ['new task',      'from a recipe'],
+];
+let palSel = 0;
+function openPalette(){
+  $('#palOverlay').classList.add('show');
+  $('#modeBadge').textContent = 'COMMAND'; $('#modeBadge').classList.add('cmd');
+  const inp = $('#palInput'); inp.value=''; renderPalOpts('');
+  setTimeout(()=>inp.focus(), 10);
+}
+function closePalette(){
+  $('#palOverlay').classList.remove('show');
+  $('#modeBadge').textContent = 'NORMAL'; $('#modeBadge').classList.remove('cmd');
+}
+function renderPalOpts(q){
+  q = q.toLowerCase();
+  const matches = VERBS.filter(v=>v[0].includes(q)).slice(0,9);
+  palSel = 0;
+  $('#palVerb').textContent = matches[0] ? matches[0][0] : 'verb';
+  $('#palOpts').innerHTML = matches.map((v,i)=>
+    `<div class="opt${i===0?' sel':''}" data-i="${i}"><span class="n">${i+1}</span><span class="ov">${v[0]}</span><span class="od">${v[1]}</span></div>`).join('');
+  $$('#palOpts .opt').forEach(o=>o.addEventListener('click', ()=>pickVerb(matches[+o.dataset.i][0])));
+  window._palMatches = matches;
+}
+function pickVerb(verb){ closePalette(); flash('› ' + verb + ' — (stub) verb staged'); }
+$('#palInput').addEventListener('input', e=>renderPalOpts(e.target.value));
+$('#palInput').addEventListener('keydown', e=>{
+  const m = window._palMatches||[];
+  if(e.key==='ArrowDown'){ e.preventDefault(); palSel=Math.min(palSel+1,m.length-1); markSel(); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); palSel=Math.max(palSel-1,0); markSel(); }
+  else if(e.key==='Enter'){ if(m[palSel]) pickVerb(m[palSel][0]); }
+  else if(/^[1-9]$/.test(e.key)){ const idx=+e.key-1; if(m[idx]){ e.preventDefault(); pickVerb(m[idx][0]); } }
+});
+function markSel(){ $$('#palOpts .opt').forEach((o,i)=>{ o.classList.toggle('sel', i===palSel); if(i===palSel) $('#palVerb').textContent=(window._palMatches[i]||['verb'])[0]; }); }
+
+/* ----------------------------------------------------------- GLOBAL KEYS ----------------------------------------------------------- */
+document.addEventListener('keydown', e=>{
+  if($('#palOverlay').classList.contains('show')){
+    if(e.key==='Escape') closePalette();
+    return;
+  }
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
+  if(typing){ if(e.key==='Escape') document.activeElement.blur(); return; }
+
+  if(e.key===':' || e.key==='/'){ e.preventDefault(); openPalette(); return; }
+  if(e.key==='?'){ e.preventDefault(); flash('? help — j/k move · l/enter open · h/esc back · : actions · drill into any project, then any task'); return; }
+
+  if(e.key==='Escape' || e.key==='h'){
+    if($('#drawer').classList.contains('show')){ closeDrawer(); return; }
+    if($('#scopesPanel').classList.contains('show')){ closeScopes(); return; }
+    if(level===2){ setLevel(1); return; }
+    if(level===1 && scope!=='root'){ scope='root'; gridCursor=0; renderGrid(); return; }
+  }
+
+  if(level===1){
+    if(e.key==='j'){ e.preventDefault(); gridCursor=Math.min(gridCursor+1,gridList.length-1); setGridCursor(); }
+    else if(e.key==='k'){ e.preventDefault(); gridCursor=Math.max(gridCursor-1,0); setGridCursor(); }
+    else if(e.key==='l'||e.key==='Enter'){ e.preventDefault(); enterCard(gridList[gridCursor]); }
+  } else if(level===2){
+    if(e.key==='j'){ e.preventDefault(); treeCursor=Math.min(treeCursor+1,visibleRows.length-1); setTreeCursor(); }
+    else if(e.key==='k'){ e.preventDefault(); treeCursor=Math.max(treeCursor-1,0); setTreeCursor(); }
+    else if(e.key==='l'||e.key==='Enter'){
+      e.preventDefault();
+      const cur = visibleRows[treeCursor]; if(!cur) return;
+      if(cur.type==='parent'){ expanded[cur.id]=!expanded[cur.id]; renderTree(); }
+      else if(cur.task){ openTask(cur.id); }
+      else flash('open — no detail in this mock');
+    } else if(e.key==='t'){ openScopes(); }
+  }
+});
+
+/* ----------------------------------------------------------- INIT ----------------------------------------------------------- */
+buildSwitcher();
+setLevel(1);
+</script>
+</body>
+</html>

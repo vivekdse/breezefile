@@ -1,0 +1,1080 @@
+<!--
+  Variation 12 — "Living Timeline" (simplified pass)
+  Paradigm: a calm, time-ordered LIVE feed built from REAL TypeBuild statuses
+            (unclaimed → claimed → working → waiting-on-you → blocked → done). The feed quietly
+            updates: in-progress steps relabel (step 4/6 → 5/6 → DONE), aggregate counts update in
+            place, and new events fade + rise in (no flash, no scale bump). A cron firing shows ONE
+            parent row that expands to its run instances — never N prepended rows. Clicking any event
+            (or Enter on the cursor) opens that task as a centered OVERLAY SHEET with a 3-tier
+            hierarchy (lead + one action → trace → deferred config/instructions/session).
+
+  SIMPLIFICATION PASS — Maeda's 10 Laws (THE ONE = "what needs me right now"):
+    · 3 attention colors + neutral. Retired blue (claimed) and per-person hues from the resting UI;
+      avatars are one neutral identity dot. Done/claimed/started/rule = grey log rows, no pill.
+    · ONE calm hero line with counts inlined (deleted the separate summary header + hero paragraph).
+    · NEEDS-YOU promoted above everything as the visual hero; ONE primary action per card.
+    · Feed grouped into calm buckets ("Now" / "Earlier today"); removed the absolute rail, per-row
+      timestamps (→ hover), and the per-row "why" subline (the why lives in the sheet's trace).
+    · ONE control surface: 2 chips (Needs me / All) + pause; agent/status filtering moved to :filter.
+    · ONE quiet heartbeat — only the single newest working node pulses. Inserts fade + 4px rise.
+    · 6-step type scale, 2 weights, 8px spacing scale, borders on outer containers only.
+
+  NEW REQUIREMENTS:
+    · RECURRING TASKS — recurrence is a texture (↻ prefix + dim cadence), not a color. The 6am
+      "Eligibility sweep" and the Mon 7am "Aetna HMO batch" are recurring; "Stat auth — ER admit"
+      is one-off. Sheet Schedule shows cadence + last/next run + "run #14 · view schedule →"; the
+      definition has a lightweight schedule detail (recent runs + pause). Only a failing/paused
+      schedule earns amber + a needs-you slot.
+    · SUB-PROJECTS + DESCRIPTION — the strip stays a single scope chip with a breadcrumb when inside
+      a child; sub-projects are indented in the switcher popover. The agent-facing DESCRIPTION lives
+      in ONE calm place (the switcher's project header), tagged "given to every agent as context",
+      with parent+child inheritance shown like the instruction cascade.
+
+  Reactions accommodated: #8 (primary) living timeline · #1 projects + switcher · #2 aggregates +
+    dependency · #3 cascading instructions w/ provenance · #4 every task opens to detail · #5 live
+    session in a sheet · #6 Enter thread · #9 strict grid alignment · #10 keyboard-first / verb-native.
+  Values: Calm Clarity, Live Awareness, Trust & Auditability, Power Without Machinery.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TypeBuild — Living Timeline</title>
+<style>
+  :root{
+    --bg:#faf9f7; --ink:#1d1c1a; --muted:#6c6760; --dim:#9a948b; --line:#e7e3dc;
+    --card:#ffffff; --card2:#f4f2ee;
+    --accent:#2f6f5e; --accent-soft:#e8f1ee;       /* teal = working / primary */
+    --amber:#b5731a; --amber-soft:#faf0dc;          /* needs you / waiting-on-you */
+    --red:#b3402f;   --red-soft:#f7e6e2;            /* blocked */
+    --you:#2f6f5e; --priya:#7a4fa3; --sam:#b5731a;  /* people (kept for var-set coherence; unused in resting UI) */
+    --ident:#cdc6bb;                                 /* neutral identity dot */
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    --ease:cubic-bezier(.2,.7,.2,1);
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:14px; -webkit-font-smoothing:antialiased; padding-bottom:52px; }
+  .page{ max-width:760px; margin:0 auto; padding:32px 24px 64px; }
+  kbd{ font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:6px; padding:2px 6px; }
+
+  /* ---------- CONTEXT STRIP (thin identity line) ---------- */
+  .context{ display:flex; align-items:center; gap:12px; margin-bottom:24px; }
+  .switch{ position:relative; }
+  .scope{ display:inline-flex; align-items:center; gap:9px; background:transparent; border:0; font:inherit; color:var(--ink); padding:6px 8px; margin-left:-8px; border-radius:10px; cursor:pointer; transition:background .16s var(--ease); }
+  .scope:hover{ background:var(--card); }
+  .scope .dot{ width:9px; height:9px; border-radius:50%; background:var(--accent); flex:0 0 auto; }
+  .scope .crumb{ color:var(--dim); }
+  .scope .pname{ font-weight:650; }
+  .scope .caret{ color:var(--dim); font-size:11px; }
+  .context .insts{ display:inline-flex; align-items:center; gap:6px; color:var(--muted); cursor:pointer; font-size:12px; padding:6px 4px; border:0; background:transparent; font:inherit; }
+  .context .insts:hover{ color:var(--accent); }
+  .context .feedstate{ margin-left:auto; }
+  .pausebtn{ font:inherit; font-size:12px; display:inline-flex; align-items:center; gap:7px; border:1px solid var(--line); background:var(--card); color:var(--muted); border-radius:10px; padding:6px 12px; cursor:pointer; transition:border-color .16s var(--ease), color .16s var(--ease); }
+  .pausebtn:hover{ border-color:var(--accent); color:var(--accent); }
+  .pausebtn .hb{ width:7px; height:7px; border-radius:50%; background:var(--accent); }
+  .pausebtn.paused .hb{ background:var(--dim); }
+
+  /* switcher popover */
+  .switchmenu{ display:none; position:absolute; top:calc(100% + 8px); left:-8px; z-index:40; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:8px; min-width:380px; box-shadow:0 20px 50px -30px rgba(0,0,0,.55); }
+  .switchmenu.show{ display:block; animation:rise .24s var(--ease); }
+  .projhdr{ padding:8px 10px 12px; }
+  .projhdr .pt{ font-weight:650; font-size:14px; }
+  .projhdr .pdesc{ font-size:12px; color:var(--muted); line-height:1.5; margin-top:6px; }
+  .projhdr .ptag{ display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--dim); margin-top:8px; }
+  .projhdr .pinh{ font-size:11px; color:var(--dim); margin-top:6px; font-style:italic; }
+  .sdiv{ height:1px; background:var(--line); margin:6px 6px 8px; }
+  .so{ display:grid; grid-template-columns:9px 1fr auto; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; cursor:pointer; }
+  .so:hover{ background:var(--card2); }
+  .so.cur{ background:var(--accent-soft); }
+  .so.child{ padding-left:30px; }
+  .so .sd{ width:8px; height:8px; border-radius:50%; background:var(--ident); }
+  .so.cur .sd{ background:var(--accent); }
+  .so .sname{ font-weight:600; font-size:13px; }
+  .so .sbind{ color:var(--dim); font-size:11px; }
+  .so .scounts{ font-size:11px; color:var(--dim); white-space:nowrap; }
+  .so .scounts .ny{ color:var(--amber); } .so .scounts .bl{ color:var(--red); }
+  .so.add{ color:var(--accent); font-weight:600; }
+
+  /* ---------- ONE HERO LINE ---------- */
+  .hero{ font-size:17px; line-height:1.55; color:var(--ink); margin:0 0 28px; font-weight:400; }
+  .hero b{ color:var(--amber); font-weight:650; } .hero .bl{ color:var(--red); font-weight:650; }
+  .hero .counts{ color:var(--dim); font-size:14px; }
+
+  /* ---------- instructions panel (one click away) ---------- */
+  .instpanel{ display:none; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:28px; }
+  .instpanel.show{ display:block; animation:rise .24s var(--ease); }
+  .instpanel .ih{ font-weight:650; }
+  .instpanel .isub{ font-size:12px; color:var(--dim); margin:4px 0 14px; } .instpanel .isub b{ color:var(--accent); }
+  .instscope{ font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--dim); margin:14px 0 6px; }
+  .instrule{ display:flex; gap:8px; align-items:flex-start; padding:5px 0; font-size:13px; line-height:1.5; }
+  .instrule .rq{ color:var(--dim); flex:0 0 auto; }
+  .instrule .rmeta{ color:var(--accent); font-size:11px; margin-left:6px; }
+  .instadd{ display:flex; gap:8px; margin-top:16px; }
+  .instadd input{ flex:1; font:inherit; font-size:13px; border:1px solid var(--line); border-radius:10px; padding:9px 12px; background:var(--bg); color:var(--ink); outline:0; }
+  .instadd input:focus{ border-color:var(--accent); }
+  .teachbtn{ font:inherit; font-size:13px; font-weight:650; border:0; border-radius:10px; padding:9px 16px; background:var(--accent); color:#fff; cursor:pointer; }
+
+  /* ---------- NEEDS YOU — the visual hero ---------- */
+  .needs{ margin-bottom:32px; }
+  .needhdr{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--amber); font-weight:650; margin:0 0 12px; display:flex; align-items:center; gap:6px; }
+  .needcards{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .needcard{ background:var(--card); border:1px solid var(--line); border-left:3px solid var(--amber); border-radius:13px; padding:16px; cursor:pointer; transition:box-shadow .16s var(--ease); display:flex; flex-direction:column; gap:10px; }
+  .needcard:hover{ box-shadow:0 1px 2px rgba(0,0,0,.05), 0 12px 28px -22px rgba(0,0,0,.4); }
+  .needcard.blocked{ border-left-color:var(--red); }
+  .needcard .nid{ font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .needcard .ntitle{ font-weight:650; font-size:14px; line-height:1.4; }
+  .needcard .nwhy{ font-size:12px; color:var(--muted); line-height:1.5; }
+  .needcard .nact{ margin-top:auto; }
+  .nbtn{ font:inherit; font-size:12px; font-weight:650; border-radius:9px; padding:8px 14px; cursor:pointer; border:0; background:var(--accent); color:#fff; }
+  .needcard.blocked .nbtn{ background:var(--red); }
+  .needempty{ background:var(--card); border:1px solid var(--line); border-radius:13px; padding:18px 16px; color:var(--muted); font-size:13px; display:flex; align-items:center; gap:9px; }
+  .needempty .hb{ width:7px; height:7px; border-radius:50%; background:var(--accent); }
+
+  /* ---------- 2-chip filter + heading ---------- */
+  .feedbar{ display:flex; align-items:center; gap:8px; margin:0 0 16px; }
+  .feedbar .fh{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin-right:auto; }
+  .fchip{ font:inherit; font-size:12px; border:1px solid var(--line); background:var(--card); color:var(--muted); border-radius:18px; padding:5px 13px; cursor:pointer; transition:all .16s var(--ease); }
+  .fchip:hover{ border-color:var(--accent); color:var(--accent); }
+  .fchip.on{ background:var(--ink); color:var(--bg); border-color:transparent; }
+
+  /* ---------- THE LIVING TIMELINE (calm buckets) ---------- */
+  .bucket{ font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--dim); margin:24px 0 8px; }
+  .bucket:first-of-type{ margin-top:0; }
+
+  .ev{ display:grid; grid-template-columns:14px 1fr auto; align-items:baseline; gap:12px;
+       padding:9px 12px; margin:0 -12px; border-radius:11px; cursor:pointer; outline:none; transition:background .16s var(--ease); }
+  .ev:hover{ background:var(--card); }
+  .ev.cursor{ background:var(--card); box-shadow:inset 0 0 0 2px var(--accent); }
+  .ev.hidden{ display:none; }
+  .ev.entering{ animation:enter .24s var(--ease); }
+  @keyframes enter{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+
+  /* node dot — the ONE status encoding for passive rows */
+  .ev .nd{ width:9px; height:9px; border-radius:50%; background:var(--ident); align-self:center; }
+  .ev.s-working .nd{ background:var(--accent); }
+  .ev.s-waiting .nd{ background:var(--amber); }
+  .ev.s-blocked .nd{ background:var(--red); }
+  .ev.live .nd{ box-shadow:0 0 0 0 rgba(47,111,94,.5); animation:pulse 2.2s infinite; }
+
+  .ev .etext{ min-width:0; font-size:14px; line-height:1.45; color:var(--ink); }
+  .ev.muted .etext{ color:var(--muted); }
+  .ev .etext .tid{ font-family:var(--mono); font-size:12px; color:var(--dim); }
+  .ev .etext .tag{ font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.5px; border-radius:6px; padding:2px 7px; margin-left:6px; white-space:nowrap; }
+  .ev .etext .tag.waiting{ background:var(--amber-soft); color:var(--amber); }
+  .ev .etext .tag.blocked{ background:var(--red-soft); color:var(--red); }
+  .ev .etext .recur{ color:var(--dim); }
+  .ev .emeta{ font-family:var(--mono); font-size:11px; color:var(--dim); opacity:0; white-space:nowrap; align-self:center; }
+  .ev:hover .emeta, .ev.cursor .emeta{ opacity:1; }
+
+  /* recurring parent that expands to instances */
+  .ev .twirl{ display:inline-block; color:var(--dim); font-size:11px; transition:transform .16s var(--ease); }
+  .ev.open .twirl{ transform:rotate(90deg); }
+  .instances{ display:none; margin:2px 0 6px 26px; padding-left:14px; border-left:1px solid var(--line); }
+  .instances.show{ display:block; animation:rise .24s var(--ease); }
+  .instances .ir{ font-size:13px; color:var(--muted); padding:5px 0; cursor:pointer; }
+  .instances .ir:hover{ color:var(--accent); }
+  .instances .ir .tid{ font-family:var(--mono); font-size:11.5px; color:var(--dim); }
+
+  .feedend{ color:var(--dim); font-size:12px; padding:18px 0 4px; }
+
+  /* ---------- COMMAND PALETTE ---------- */
+  .overlay{ display:none; position:fixed; inset:0; background:rgba(29,28,26,.32); z-index:80; backdrop-filter:blur(1.5px); }
+  .overlay.show{ display:block; animation:fade .16s var(--ease); }
+  @keyframes fade{ from{ opacity:0; } to{ opacity:1; } }
+  .palette{ position:fixed; top:96px; left:50%; transform:translateX(-50%); width:min(560px,92vw); background:var(--card); border:1px solid var(--line); border-radius:16px; box-shadow:0 20px 50px -30px rgba(0,0,0,.55); overflow:hidden; z-index:81; animation:rise .24s var(--ease); }
+  .palette .chiprow{ padding:14px 16px 0; }
+  .sentence{ display:inline-flex; align-items:center; gap:7px; font-family:var(--mono); font-size:12px; color:var(--accent); background:var(--accent-soft); border-radius:8px; padding:5px 10px; }
+  .sentence .slot{ color:var(--dim); }
+  .palette input{ width:100%; border:0; outline:0; font:inherit; font-size:17px; padding:13px 16px; background:transparent; color:var(--ink); }
+  .palette input::placeholder{ color:var(--dim); }
+  .palette .verbs{ border-top:1px solid var(--line); max-height:340px; overflow:auto; padding:6px; }
+  .verb{ display:grid; grid-template-columns:20px 1fr auto; align-items:center; gap:11px; padding:10px 12px; border-radius:10px; cursor:pointer; }
+  .verb.sel{ background:var(--accent-soft); }
+  .verb .vn{ font-family:var(--mono); font-size:11px; color:var(--accent); }
+  .verb .vname{ font-weight:600; } .verb .vname .vd{ color:var(--dim); font-weight:400; font-size:12px; margin-left:8px; }
+  .verb .vk{ font-size:11px; color:var(--dim); }
+
+  /* ---------- TASK SHEET (3-tier) ---------- */
+  .sheet{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:min(640px,94vw); max-height:88vh; overflow:auto; background:var(--card); border:1px solid var(--line); border-radius:18px; box-shadow:0 20px 50px -30px rgba(0,0,0,.6); z-index:81; animation:sheetin .24s var(--ease); }
+  @keyframes sheetin{ from{ opacity:0; transform:translate(-50%,-47%); } to{ opacity:1; transform:translate(-50%,-50%); } }
+
+  /* TIER 1 — lead */
+  .sheet .sh{ padding:22px 24px 20px; }
+  .sheet .sh .htop{ display:flex; align-items:center; gap:10px; }
+  .sheet .sh .hid{ font-family:var(--mono); font-size:12px; color:var(--dim); }
+  .sheet .sh .htag{ font-size:11px; font-weight:650; text-transform:uppercase; letter-spacing:.5px; border-radius:6px; padding:3px 8px; }
+  .sheet .sh .htag.working{ background:var(--accent-soft); color:var(--accent); }
+  .sheet .sh .htag.waiting{ background:var(--amber-soft); color:var(--amber); }
+  .sheet .sh .htag.blocked{ background:var(--red-soft); color:var(--red); }
+  .sheet .sh .htag.done{ background:var(--card2); color:var(--muted); }
+  .sheet .sh .htag.unclaimed{ background:var(--card2); color:var(--muted); }
+  .sheet .sh .hclose{ font:inherit; margin-left:auto; border:1px solid var(--line); background:var(--card); color:var(--dim); border-radius:8px; padding:4px 9px; cursor:pointer; }
+  .sheet .sh .hclose:hover{ border-color:var(--accent); color:var(--accent); }
+  .sheet .sh .htitle{ font-size:22px; font-weight:650; line-height:1.25; margin:12px 0 4px; }
+  .sheet .sh .hsub{ font-size:12px; color:var(--muted); }
+  .leadreason{ display:flex; gap:10px; align-items:flex-start; background:var(--amber-soft); border-radius:11px; padding:12px 14px; font-size:13px; line-height:1.5; margin-top:16px; }
+  .leadreason.blocked{ background:var(--red-soft); }
+  .leadreason .dep{ display:block; font-size:11px; color:var(--muted); margin-top:5px; }
+  .leadact{ display:flex; gap:10px; margin-top:16px; align-items:center; }
+  .btn{ font:inherit; font-size:14px; border-radius:11px; padding:10px 18px; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  .btn:hover{ filter:brightness(.98); }
+  .btn.primary{ background:var(--accent); color:#fff; border-color:transparent; font-weight:650; }
+  .btn.amber{ background:var(--amber); color:#fff; border-color:transparent; font-weight:650; }
+  .btn.fix{ background:var(--red); color:#fff; border-color:transparent; font-weight:650; }
+  .btn.stop{ color:var(--red); border-color:var(--red-soft); }
+  .btn.stop:hover{ background:var(--red-soft); }
+  .leadact .spacer{ flex:1; }
+
+  .sbody{ padding:4px 24px 24px; }
+  /* TIER 2 — trace */
+  .sec{ padding:18px 0 0; }
+  .slbl{ font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); margin-bottom:12px; }
+  .trace .tstep{ display:grid; grid-template-columns:20px 1fr; gap:11px; padding:6px 0; align-items:start; }
+  .trace .tstep .ti{ width:18px; height:18px; border-radius:50%; display:grid; place-items:center; font-size:11px; flex:0 0 auto; }
+  .trace .tstep.ok .ti{ background:var(--accent-soft); color:var(--accent); }
+  .trace .tstep.run .ti{ background:var(--accent); color:#fff; }
+  .trace .tstep.wait .ti{ background:var(--amber); color:#fff; }
+  .trace .tstep.block .ti{ background:var(--red); color:#fff; }
+  .trace .tstep.todo .ti{ background:var(--card2); color:var(--dim); }
+  .trace .tstep .tt{ font-size:14px; }
+  .trace .tstep.run .tt, .trace .tstep.wait .tt, .trace .tstep.block .tt{ font-weight:650; }
+  .trace .tstep .twhy{ font-size:12px; color:var(--dim); margin-top:2px; }
+  .trace .tstep .run-tag{ font-size:11px; color:var(--accent); margin-left:7px; font-weight:650; }
+
+  /* TIER 3 — disclosures */
+  .disc{ border-top:1px solid var(--line); margin-top:18px; }
+  .disc summary{ list-style:none; cursor:pointer; padding:14px 0 0; font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .disc summary::-webkit-details-marker{ display:none; }
+  .disc summary .tw{ color:var(--dim); font-size:11px; transition:transform .16s var(--ease); }
+  .disc[open] summary .tw{ transform:rotate(90deg); }
+  .disc summary:hover{ color:var(--accent); }
+  .disc summary b{ color:var(--ink); font-weight:650; }
+  .disc .dbody{ padding:12px 0 4px; }
+
+  .cfg{ display:grid; grid-template-columns:1fr 1fr; gap:14px 20px; }
+  .cfg .c .k{ font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; }
+  .cfg .c .v{ font-size:13px; margin-top:3px; font-weight:650; }
+  .cfg .c .v .sched{ font-weight:400; color:var(--muted); font-size:12px; display:block; margin-top:3px; }
+  .schedlink{ color:var(--accent); cursor:pointer; font-size:12px; margin-top:10px; display:inline-block; }
+  .schedlink:hover{ text-decoration:underline; }
+
+  .eff1{ font-size:13px; color:var(--muted); line-height:1.5; }
+  .eff1 b{ color:var(--ink); font-weight:650; }
+  .effrule{ display:grid; grid-template-columns:auto 1fr; gap:9px; padding:6px 0; font-size:13px; line-height:1.45; }
+  .effrule .escope{ font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.4px; border-radius:5px; padding:2px 6px; white-space:nowrap; align-self:start; margin-top:2px; background:var(--card2); color:var(--muted); }
+  .effrule .escope.cur{ background:var(--amber-soft); color:var(--amber); }
+  .effrule .learn{ color:var(--accent); font-size:11px; margin-left:6px; }
+  .gating{ background:var(--amber-soft); border-radius:10px; padding:11px 13px; font-size:13px; line-height:1.5; margin-bottom:12px; }
+  .gating b{ font-weight:650; }
+
+  .session{ background:#16302a; border-radius:12px; padding:14px 16px; font-family:var(--mono); font-size:12px; line-height:1.7; color:#cfe6df; overflow:auto; }
+  .session .ln{ white-space:pre-wrap; }
+  .session .arrow{ color:#7fc8b4; } .session .ok{ color:#9ad7b0; } .session .run{ color:#e9c27a; }
+  .reveal{ color:#e9c27a; cursor:pointer; border-bottom:1px dashed #5c7a72; }
+  .reveal:hover{ color:#ffd98a; }
+
+  /* ---------- mode line + status bar ---------- */
+  .modeline{ position:fixed; left:50%; bottom:46px; transform:translateX(-50%) translateY(8px); background:var(--ink); color:#f4f2ee; font-size:12px; padding:8px 15px; border-radius:9px; box-shadow:0 12px 30px -14px rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .24s var(--ease), transform .24s var(--ease); z-index:90; }
+  .modeline.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .statusbar{ position:fixed; left:0; right:0; bottom:0; height:38px; display:flex; align-items:center; gap:12px; padding:0 16px; background:var(--card); border-top:1px solid var(--line); font-size:12px; color:var(--muted); z-index:70; }
+  .statusbar .mode{ font-family:var(--mono); font-weight:650; font-size:11px; letter-spacing:.6px; color:#fff; background:var(--accent); border-radius:6px; padding:3px 9px; }
+  .statusbar .ssum b{ color:var(--ink); } .statusbar .ssum .ny{ color:var(--amber); } .statusbar .ssum .bl{ color:var(--red); }
+  .statusbar .skbd{ margin-left:auto; display:flex; gap:8px; align-items:center; }
+
+  @keyframes pulse{ 70%{ box-shadow:0 0 0 6px rgba(47,111,94,0); } 100%{ box-shadow:0 0 0 0 rgba(47,111,94,0); } }
+  @keyframes rise{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
+  @media (max-width:640px){
+    .needcards{ grid-template-columns:1fr; }
+    .switchmenu{ min-width:300px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== CONTEXT STRIP — thin identity line ===== -->
+  <div class="context">
+    <div class="switch">
+      <button class="scope" id="scopeBtn" title="Switch project (:switch)">
+        <span class="dot"></span>
+        <span class="pname" id="crumb">Insurance Authorization</span>
+        <span class="caret">▾</span>
+      </button>
+      <div class="switchmenu" id="switchMenu">
+        <div class="projhdr">
+          <div class="pt">Insurance Authorization</div>
+          <div class="pdesc">Prior authorizations for our top payers. Confirm coverage, attach the latest EHR clinical notes, post outcomes to #auth-team, and stop to ask before anything irreversible.</div>
+          <div class="ptag">◇ given to every agent as context · click to edit</div>
+        </div>
+        <div class="sdiv"></div>
+        <div class="so cur" data-proj="Insurance Authorization"><span class="sd"></span><span><span class="sname">Insurance Authorization</span> <span class="sbind">· Aetna/UHC portals + EHR</span></span><span class="scounts"><b>12</b> · <span class="ny">3</span> · <span class="bl">2</span> · 7</span></div>
+        <div class="so child" data-proj="Insurance Authorization › Aetna HMO" data-sub="1"><span class="sd"></span><span><span class="sname">Aetna HMO</span> <span class="sbind">· HMO prior auths</span></span><span class="scounts"><b>4</b> · <span class="ny">1</span> · 0 · 3</span></div>
+        <div class="so child" data-proj="Insurance Authorization › UnitedHealthcare"><span class="sd"></span><span><span class="sname">UnitedHealthcare</span> <span class="sbind">· UHC batch</span></span><span class="scounts"><b>5</b> · 0 · <span class="bl">1</span> · 2</span></div>
+        <div class="so child" data-proj="Insurance Authorization › Medicare Advantage"><span class="sd"></span><span><span class="sname">Medicare Advantage</span> <span class="sbind">· MA plans</span></span><span class="scounts"><b>3</b> · 0 · 0 · 2</span></div>
+        <div class="sdiv"></div>
+        <div class="so" data-proj="Eligibility Verification"><span class="sd"></span><span><span class="sname">Eligibility Verification</span> <span class="sbind">· ↻ daily 6am sweep</span></span><span class="scounts"><b>8</b> · <span class="ny">1</span> · 0 · 15</span></div>
+        <div class="so" data-proj="Claims &amp; Denials"><span class="sd"></span><span><span class="sname">Claims &amp; Denials</span> <span class="sbind">· clearinghouse + EHR</span></span><span class="scounts"><b>5</b> · <span class="ny">4</span> · <span class="bl">1</span> · 11</span></div>
+        <div class="so" data-proj="Patient Intake"><span class="sd"></span><span><span class="sname">Patient Intake</span> <span class="sbind">· front-desk folder</span></span><span class="scounts"><b>3</b> · 0 · 0 · 6</span></div>
+        <div class="so" data-proj="API service"><span class="sd"></span><span><span class="sname">API service</span> <span class="sbind">· git ~/git/api · main</span></span><span class="scounts"><b>2</b> · <span class="ny">1</span> · <span class="bl">1</span> · 4</span></div>
+        <div class="so" data-proj="Personal"><span class="sd"></span><span><span class="sname">Personal</span> <span class="sbind">· no binding</span></span><span class="scounts"><b>1</b> · 0 · 0 · 2</span></div>
+        <div class="sdiv"></div>
+        <div class="so add"><span></span><span>＋ New project…</span><span></span></div>
+      </div>
+    </div>
+    <button class="insts" id="instToggle">9 instructions ›</button>
+    <div class="feedstate">
+      <button class="pausebtn" id="pauseBtn"><span class="hb"></span> <span id="pauseLbl">Live · pause</span></button>
+    </div>
+  </div>
+
+  <!-- ===== ONE HERO LINE (counts inlined) ===== -->
+  <p class="hero">
+    <b>2 need you</b>, <span class="bl">1 blocked</span>.
+    <span class="counts">12 running · 7 done today.</span>
+  </p>
+
+  <!-- instructions panel (revealed on click / :teach) -->
+  <div class="instpanel" id="instPanel">
+    <div class="ih">Effective instructions for Insurance Authorization</div>
+    <div class="isub">Resolved general → specific · a task inherits the union of every scope · <b>1 learned from you Tue</b></div>
+    <div class="instscope">Project · Insurance Authorization (4)</div>
+    <div class="instrule"><span class="rq">“</span><span>Never submit an auth without confirming secondary coverage.</span></div>
+    <div class="instrule"><span class="rq">“</span><span>Attach the latest clinical notes from the EHR.</span></div>
+    <div class="instrule"><span class="rq">“</span><span>Post outcomes to #auth-team.</span></div>
+    <div class="instrule"><span class="rq">“</span><span>If the payer portal is down, queue and retry — don’t fail the task.</span></div>
+    <div class="instscope">Category · payer:HMO (2)</div>
+    <div class="instrule"><span class="rq">“</span><span>HMO requires a PCP referral on file — confirm before submitting.<span class="rmeta">★ learned from you · Tue</span></span></div>
+    <div class="instrule"><span class="rq">“</span><span>Use the HMO fax cover sheet, not the PPO one.</span></div>
+    <div class="instscope">Category · kind:prior-auth (1)</div>
+    <div class="instrule"><span class="rq">“</span><span>Request 7-day expedited review when the case is marked urgent.</span></div>
+    <div class="instadd">
+      <input id="newRule" placeholder="＋ Teach a rule — e.g. “Always cc the referring provider”" />
+      <button class="teachbtn" id="teachBtn">Teach</button>
+    </div>
+  </div>
+
+  <!-- ===== NEEDS YOU — the visual hero ===== -->
+  <div class="needs">
+    <div class="needhdr">▲ Needs you</div>
+    <div class="needcards" id="needCards">
+      <div class="needcard" data-open="A-2242">
+        <div class="nid">A-2242 · Aetna HMO</div>
+        <div class="ntitle">No PCP referral on file — submit anyway?</div>
+        <div class="nwhy">Paused on the HMO PCP-referral rule. Blocks the Aetna HMO batch submit.</div>
+        <div class="nact"><button class="nbtn" data-act="Submit anyway">Submit anyway</button></div>
+      </div>
+      <div class="needcard blocked" data-open="A-2250">
+        <div class="nid">A-2250 · UnitedHealthcare</div>
+        <div class="ntitle">Blocked 38 min — secondary coverage missing</div>
+        <div class="nwhy">Held by the project rule “never submit without secondary coverage.”</div>
+        <div class="nact"><button class="nbtn" data-act="Add coverage">Add coverage</button></div>
+      </div>
+      <div class="needcard" data-open="A-2255">
+        <div class="nid">A-2255 · Cigna · P0</div>
+        <div class="ntitle">Stat auth — ER admit · unclaimed</div>
+        <div class="nwhy">Urgent and unclaimed. Claim to start it on Auth bot now.</div>
+        <div class="nact"><button class="nbtn" data-act="Claim &amp; run">Claim &amp; run</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== filter (2 chips) + heading ===== -->
+  <div class="feedbar">
+    <span class="fh">Living timeline</span>
+    <button class="fchip" data-filter="needs">Needs me</button>
+    <button class="fchip on" data-filter="all">All</button>
+  </div>
+
+  <!-- ===== THE LIVING TIMELINE ===== -->
+  <div id="feed"><!-- buckets + events injected by JS --></div>
+  <div class="feedend">↑ feed updates live · the day started at 08:05 with the Mon 7am cron run</div>
+
+</div>
+
+<!-- ===== COMMAND PALETTE ===== -->
+<div class="overlay" id="paletteOverlay"></div>
+<div class="palette" id="palette" style="display:none">
+  <div class="chiprow">
+    <span class="sentence" id="sentence"><span>open</span> · <span class="slot">task</span> · <span class="slot">—</span></span>
+  </div>
+  <input id="paletteInput" autocomplete="off" placeholder="type an action, file, or task…" />
+  <div class="verbs" id="verbs"></div>
+</div>
+
+<!-- ===== TASK SHEET (filled by JS) ===== -->
+<div class="overlay" id="sheetOverlay"></div>
+<div class="sheet" id="sheet" style="display:none"></div>
+
+<!-- ===== mode line + status bar ===== -->
+<div class="modeline" id="modeLine" role="status" aria-live="polite"></div>
+<div class="statusbar">
+  <span class="mode" id="modeBadge">NORMAL</span>
+  <span class="ssum" id="statusSum"><b>12</b> working · <span class="ny">2</span> need you · <span class="bl">1</span> blocked · 7 done today</span>
+  <span class="skbd">
+    <kbd>j</kbd>/<kbd>k</kbd> move <kbd>enter</kbd> open <kbd>:</kbd> actions <kbd>?</kbd> help
+  </span>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- task detail data ----------
+  const TASKS = {
+    "A-2243": {
+      status:"working", tag:"working", id:"A-2243",
+      title:"Draft clinical justification", sub:"Prior auth — Aetna HMO batch · J. Rivera",
+      cfg:[["Agent","Auth bot · local auto"],
+           ["Schedule","↻ Mon 7:00am (cron)","last run today · created 6 subtasks · next Mon 7:00am"],
+           ["Binding","Aetna HMO portal + EHR"],["Step","4 of 6 · in progress"]],
+      schedLink:"Part of ↻ Aetna HMO batch · view schedule →",
+      reason:null,
+      trace:[
+        ["ok","Pull patient + payer context","needed to fill the auth form"],
+        ["ok","Confirm secondary coverage","project rule — none found, noted"],
+        ["ok","Confirm PCP referral (HMO)","HMO category rule — on file"],
+        ["run","Draft clinical justification","payer requires medical necessity","step 4/6"],
+        ["todo","Submit via Aetna portal","ship the auth"],
+        ["todo","Post outcome to #auth-team","project rule (team visibility)"]
+      ],
+      gating:null,
+      session:[
+        ['<span class="arrow">$</span> authbot run --task A-2243'],
+        ['<span class="arrow">→</span> Loaded patient context (MRN <span class="reveal" data-mrn>••••• — reveal to view</span>)'],
+        ['<span class="arrow">→</span> Payer: Aetna HMO · Plan: Open Access'],
+        ['<span class="arrow">→</span> Confirmed secondary coverage: none on file'],
+        ['<span class="arrow">→</span> Confirmed PCP referral: on file <span class="ok">✓</span>'],
+        ['<span class="run">⏵</span> step 4/6 · drafting clinical justification from 3 encounters…'],
+        ['   <span class="ok">✎ 412 words drafted</span>']
+      ],
+      thread:true, canStop:true
+    },
+    "A-2242": {
+      status:"waiting", tag:"waiting on you", id:"A-2242",
+      title:"PCP referral — submit anyway?", sub:"Prior auth — Aetna HMO batch · HMO",
+      cfg:[["Agent","Auth bot · local auto"],
+           ["Schedule","↻ Mon 7:00am (cron)","last run today · next Mon 7:00am"],
+           ["Binding","Aetna HMO portal + EHR"],["Status","waiting on you · y/n"]],
+      schedLink:"Part of ↻ Aetna HMO batch · view schedule →",
+      reason:{kind:"wait", rule:"HMO requires a PCP referral on file.",
+            dep:"Blocks → “Submit Aetna HMO batch,” which is blocked-by this answer."},
+      trace:[
+        ["ok","Pull patient + payer context","needed to fill the auth form"],
+        ["ok","Confirm secondary coverage","project rule — confirmed"],
+        ["wait","Confirm PCP referral (HMO)","HMO rule — none on file, asking you","needs you"],
+        ["todo","Draft clinical justification","payer requires medical necessity"],
+        ["todo","Submit via Aetna portal","ship the auth"],
+        ["todo","Post outcome to #auth-team","project rule (team visibility)"]
+      ],
+      gating:'<b>payer:HMO</b> — “HMO requires a PCP referral on file — confirm before submitting.” <span style="color:var(--accent)">★ learned from you · Tue</span>',
+      session:[
+        ['<span class="arrow">$</span> authbot run --task A-2242'],
+        ['<span class="arrow">→</span> Loaded patient context (MRN <span class="reveal" data-mrn>••••• — reveal to view</span>)'],
+        ['<span class="arrow">→</span> Payer: Aetna HMO · Plan: Open Access'],
+        ['<span class="arrow">→</span> Checked EHR for PCP referral: <span class="run">none on file</span>'],
+        ['<span class="run">⏸</span> HMO rule requires a referral — paused, asking you: submit anyway? (y/n)']
+      ],
+      thread:true, canStop:true
+    },
+    "A-2250": {
+      status:"blocked", tag:"blocked", id:"A-2250",
+      title:"Secondary coverage missing", sub:"Prior auth — UnitedHealthcare batch",
+      cfg:[["Agent","Auth bot · local auto"],
+           ["Schedule","↻ Mon 7:00am (cron)","last run today · next Mon 7:00am"],
+           ["Binding","UHC portal + EHR"],["Status","blocked 38 min"]],
+      schedLink:"Part of ↻ UnitedHealthcare batch · view schedule →",
+      reason:{kind:"block", rule:"Never submit without a secondary-coverage check.",
+            dep:"Blocked-by → “Secondary coverage on file” (not yet satisfied)."},
+      trace:[
+        ["ok","Pull patient + payer context","needed to fill the auth form"],
+        ["block","Confirm secondary coverage","project rule — none found, BLOCKED","blocked"],
+        ["todo","Confirm PCP referral","category rule"],
+        ["todo","Draft clinical justification","payer requires medical necessity"],
+        ["todo","Submit via UHC portal","ship the auth"],
+        ["todo","Post outcome to #auth-team","project rule (team visibility)"]
+      ],
+      gating:'<b>project</b> — “Never submit an auth without confirming secondary coverage.”',
+      session:[
+        ['<span class="arrow">$</span> authbot run --task A-2250'],
+        ['<span class="arrow">→</span> Loaded patient context (MRN <span class="reveal" data-mrn>••••• — reveal to view</span>)'],
+        ['<span class="arrow">→</span> Payer: UnitedHealthcare · checking coverage…'],
+        ['<span class="run">⛔ blocked</span> · no secondary coverage on file'],
+        ['   <span class="run">project rule: never submit without secondary coverage — held for you</span>']
+      ],
+      thread:true, canStop:true
+    },
+    "A-2241": {
+      status:"done", tag:"done", id:"A-2241",
+      title:"MRI lumbar — submitted", sub:"Prior auth — Aetna HMO batch · J. Rivera",
+      cfg:[["Agent","Auth bot · local auto"],
+           ["Schedule","↻ Mon 7:00am (cron)","last run today · next Mon 7:00am"],
+           ["Binding","Aetna HMO portal + EHR"],["Result","conf #AET-88102"]],
+      schedLink:"Part of ↻ Aetna HMO batch · view schedule →",
+      reason:null,
+      trace:[
+        ["ok","Pull patient + payer context","needed to fill the auth form"],
+        ["ok","Confirm secondary coverage","project rule — confirmed"],
+        ["ok","Confirm PCP referral (HMO)","HMO rule — on file"],
+        ["ok","Draft clinical justification","payer requires medical necessity"],
+        ["ok","Submit via Aetna portal","shipped — conf #AET-88102"],
+        ["ok","Post outcome to #auth-team","project rule (team visibility)"]
+      ],
+      gating:null,
+      session:[
+        ['<span class="arrow">$</span> authbot run --task A-2241'],
+        ['<span class="arrow">→</span> Loaded patient context (MRN <span class="reveal" data-mrn>••••• — reveal to view</span>)'],
+        ['<span class="arrow">→</span> Payer: Aetna HMO · all checks passed <span class="ok">✓</span>'],
+        ['<span class="arrow">→</span> Submitted via Aetna portal'],
+        ['<span class="ok">✓ done</span> · confirmation #AET-88102 · posted to #auth-team']
+      ],
+      thread:false, canStop:false
+    },
+    "A-2255": {
+      status:"unclaimed", tag:"unclaimed · P0", id:"A-2255",
+      title:"Stat auth — ER admit, Cigna", sub:"Insurance Authorization · P0 · urgent",
+      cfg:[["Agent","— unclaimed"],["Schedule","on demand (one-off)"],
+           ["Binding","Cigna portal + EHR"],["Status","ready for any agent"]],
+      schedLink:null,
+      reason:null,
+      trace:[
+        ["todo","Pull patient + payer context","needed to fill the auth form"],
+        ["todo","Confirm secondary coverage","project rule"],
+        ["todo","Request 7-day expedited review","prior-auth rule — case is urgent"],
+        ["todo","Draft clinical justification","payer requires medical necessity"],
+        ["todo","Submit via Cigna portal","ship the auth"],
+        ["todo","Post outcome to #auth-team","project rule (team visibility)"]
+      ],
+      gating:null,
+      session:[
+        ['<span class="arrow">→</span> Not started — task is unclaimed.'],
+        ['   <span class="run">Press claim to assign Auth bot and begin.</span>']
+      ],
+      thread:false, canStop:false
+    },
+    "REAUTH": {
+      status:"working", tag:"working", id:"Re-auth",
+      title:"Re-auth expiring this week", sub:"Insurance Authorization · claimed by Priya",
+      cfg:[["Agent","Eligibility checker"],["Schedule","on demand (one-off)"],
+           ["Binding","EHR + payer portals"],["Step","3 of 5 · in progress"]],
+      schedLink:null,
+      reason:null,
+      trace:[
+        ["ok","List auths expiring ≤7 days","scope the batch"],
+        ["ok","Pull patient context","needed to refile"],
+        ["run","Re-verify eligibility","payer rule — coverage may have changed","step 3/5"],
+        ["todo","Draft re-auth requests","ship the renewals"],
+        ["todo","Submit + post outcomes","project rule (team visibility)"]
+      ],
+      gating:null,
+      session:[
+        ['<span class="arrow">$</span> eligibility run --task reauth'],
+        ['<span class="arrow">→</span> 5 auths expiring this week'],
+        ['<span class="run">⏵</span> step 3/5 · re-verifying eligibility…']
+      ],
+      thread:true, canStop:true
+    },
+    "SWEEP": {
+      status:"done", tag:"done", id:"E-sweep #14",
+      title:"Eligibility sweep — today's run", sub:"Eligibility Verification · run #14",
+      cfg:[["Agent","Eligibility checker"],
+           ["Schedule","↻ daily 6:00am (cron)","last run 6:02 ✓ · 14 checked · 1 needs you · next 6:00am tomorrow"],
+           ["Binding","EHR"],["Result","14 checked · 1 needs you"]],
+      schedLink:"This is run #14 of ↻ Eligibility sweep · view schedule →",
+      reason:null,
+      trace:[
+        ["ok","List tomorrow's scheduled patients","scope the sweep"],
+        ["ok","Check active coverage per patient","eligibility rule"],
+        ["ok","Flag inactive / missing secondary","flag before arrival"],
+        ["ok","Verify benefits & copays","fill the day sheet"],
+        ["ok","Post summary to #front-desk","team visibility"]
+      ],
+      gating:null,
+      session:[
+        ['<span class="arrow">$</span> eligibility sweep --date tomorrow'],
+        ['<span class="arrow">→</span> 14 patients on tomorrow’s schedule'],
+        ['<span class="arrow">→</span> Coverage active: 13 · <span class="run">needs you: 1</span> (missing secondary)'],
+        ['<span class="ok">✓ done 6:02</span> · posted to #front-desk']
+      ],
+      thread:false, canStop:false
+    }
+  };
+
+  // ---------- seed timeline events (newest first) ----------
+  // bucket: "now" | "earlier". recur: cadence string => renders ↻ parent w/ expandable instances.
+  const SEED = [
+    {bucket:"now", time:"09:42", status:"working", task:"A-2243", live:true, needs:false,
+      html:'<span class="tid">A-2243</span> · Auth bot drafted clinical justification (412 words)'},
+    {bucket:"now", time:"09:41", status:"claimed", task:"A-2243", needs:false, muted:true,
+      html:'Auth bot claimed <span class="tid">A-2243</span>'},
+    {bucket:"now", time:"09:38", status:"blocked", task:"A-2250", needs:true,
+      html:'<span class="tid">A-2250</span> — secondary coverage missing<span class="tag blocked">blocked</span>'},
+    {bucket:"now", time:"09:31", status:"waiting", task:"A-2242", needs:true,
+      html:'<span class="tid">A-2242</span> — needs PCP referral (HMO rule), y/n to you<span class="tag waiting">needs you</span>'},
+    {bucket:"earlier", time:"09:24", status:"rule", task:"A-2242", needs:false, muted:true,
+      html:'HMO rule applied to <span class="tid">A-2242</span> → required a PCP-referral check'},
+    {bucket:"earlier", time:"09:20", status:"claimed", task:"REAUTH", needs:false, muted:true,
+      html:'Priya claimed “Re-auth expiring this week” · step 3 of 5'},
+    {bucket:"earlier", time:"09:02", status:"done", task:"A-2241", needs:false, muted:true,
+      html:'<span class="tid">A-2241</span> submitted to Aetna · conf #AET-88102'},
+    {bucket:"earlier", time:"06:02", status:"done", task:"SWEEP", needs:false, muted:true,
+      recur:"↻ daily 6:00am · run #14", recurMeta:"14 checked · 1 needs you",
+      html:'<span class="recur">↻</span> Eligibility sweep ran · 14 patients checked for tomorrow',
+      instances:[
+        {task:"SWEEP", html:'<span class="tid">run #14</span> · 14 checked · 1 needs you · 6:02 ✓'},
+        {task:"SWEEP", html:'<span class="tid">run #13</span> · 16 checked · 0 needs you · yesterday 6:01 ✓'}
+      ]},
+    {bucket:"earlier", time:"08:05", status:"started", task:"A-2243", needs:false, muted:true,
+      recur:"↻ Mon 7:00am · weekly", recurMeta:"spawned 6 tasks",
+      html:'<span class="recur">↻</span> Aetna HMO batch fired · spawned 6 tasks',
+      instances:[
+        {task:"A-2241", html:'<span class="tid">A-2241</span> · MRI lumbar — done ✓'},
+        {task:"A-2242", html:'<span class="tid">A-2242</span> · PCP referral — needs you'},
+        {task:"A-2243", html:'<span class="tid">A-2243</span> · clinical justification — working'}
+      ]}
+  ];
+
+  const feed = document.getElementById('feed');
+  const BUCKET_LABEL = { now:"Now", earlier:"Earlier today" };
+  // statuses that get a colored node dot; everything else is a quiet grey log row
+  const COLORED = { working:1, waiting:1, blocked:1 };
+
+  function buildRow(ev){
+    const row = document.createElement('div');
+    const dotStatus = COLORED[ev.status] ? ev.status : 'log';
+    row.className = 'ev s-'+dotStatus + (ev.muted?' muted':'') + (ev.live?' live':'');
+    row.tabIndex = -1;
+    row.dataset.status = ev.status;
+    row.dataset.needs = ev.needs ? "1" : "0";
+    row.dataset.task = ev.task || "";
+    const twirl = ev.instances ? '<span class="twirl">▸</span> ' : '';
+    const recurMeta = ev.recur ? '<span class="emeta-inline" style="color:var(--dim);font-size:11px;margin-left:8px">'+ev.recur+(ev.recurMeta?' · '+ev.recurMeta:'')+'</span>' : '';
+    row.innerHTML =
+      '<span class="nd"></span>'+
+      '<div class="etext">'+twirl+ev.html+recurMeta+'</div>'+
+      '<div class="emeta">'+ev.time+'</div>';
+
+    if(ev.instances){
+      const inst = document.createElement('div');
+      inst.className = 'instances';
+      inst.innerHTML = ev.instances.map(i=>'<div class="ir" data-task="'+(i.task||'')+'">'+i.html+'</div>').join('');
+      row.appendChild(inst);
+      row.addEventListener('click', e=>{
+        if(e.target.closest('.ir')){
+          const t = e.target.closest('.ir').dataset.task;
+          if(t && TASKS[t]) openSheet(t);
+          return;
+        }
+        inst.classList.toggle('show'); row.classList.toggle('open');
+      });
+    } else {
+      row.addEventListener('click', ()=>{ if(ev.task && TASKS[ev.task]) openSheet(ev.task); });
+    }
+    return row;
+  }
+
+  function renderSeed(){
+    feed.innerHTML='';
+    let cur = null;
+    SEED.forEach(ev=>{
+      if(ev.bucket !== cur){
+        cur = ev.bucket;
+        const b = document.createElement('div');
+        b.className = 'bucket'; b.dataset.bucket = cur;
+        b.textContent = BUCKET_LABEL[cur];
+        feed.appendChild(b);
+      }
+      feed.appendChild(buildRow(ev));
+    });
+    refreshCursor(0);
+  }
+  renderSeed();
+
+  // ---------- cursor (j/k) ----------
+  let cursor = 0;
+  function rows(){ return [...feed.querySelectorAll('.ev:not(.hidden)')]; }
+  function refreshCursor(idx){
+    const r = rows();
+    if(!r.length) return;
+    cursor = Math.max(0, Math.min(idx, r.length-1));
+    feed.querySelectorAll('.ev').forEach(e=>e.classList.remove('cursor'));
+    r[cursor].classList.add('cursor');
+    r[cursor].scrollIntoView({block:'nearest'});
+  }
+
+  // ---------- aggregate counts (live, no scale bump) ----------
+  const agg = { work:12, need:2, block:1, done:7 };
+  function setAgg(){
+    document.querySelector('.hero b').textContent = agg.need+' need you';
+    document.querySelector('.hero .bl').textContent = agg.block+' blocked';
+    document.querySelector('.hero .counts').textContent = agg.work+' running · '+agg.done+' done today.';
+    document.getElementById('statusSum').innerHTML =
+      '<b>'+agg.work+'</b> working · <span class="ny">'+agg.need+'</span> need you · '+
+      '<span class="bl">'+agg.block+'</span> blocked · '+agg.done+' done today';
+  }
+
+  // ---------- LIVE FEED (calm scripted ticks) ----------
+  let paused = false, scriptIdx = 0, timer = null, nowMin = 9*60+42;
+
+  function nowTime(){ nowMin += 3; const h=Math.floor(nowMin/60), m=nowMin%60; return (h<10?'0':'')+h+':'+(m<10?'0':'')+m; }
+
+  function prepend(ev){
+    ev.bucket = "now";
+    const row = buildRow(ev);
+    row.classList.add('entering');
+    // the new live row gets the single heartbeat; demote the previous one
+    feed.querySelectorAll('.ev.live').forEach(e=>{ e.classList.remove('live'); });
+    const firstBucket = feed.querySelector('.bucket[data-bucket="now"]');
+    feed.insertBefore(row, firstBucket.nextSibling);
+    applyFilter();
+    refreshCursor(0);
+    setTimeout(()=>row.classList.remove('entering'), 300);
+  }
+
+  const SCRIPT = [
+    function(){ // A-2243 advances step 4 -> 5
+      TASKS["A-2243"].trace[3] = ["ok","Draft clinical justification","payer requires medical necessity"];
+      TASKS["A-2243"].trace[4] = ["run","Submit via Aetna portal","ship the auth","step 5/6"];
+      TASKS["A-2243"].cfg[3] = ["Step","5 of 6 · in progress"];
+      prepend({time:nowTime(), status:"working", task:"A-2243", live:true, needs:false,
+        html:'<span class="tid">A-2243</span> · submitting auth via Aetna portal (step 5/6)'});
+      flash('↻ A-2243 advanced · step 5/6 — submitting');
+    },
+    function(){ // Sam claims an appeal (neutral log row)
+      agg.work += 1; setAgg();
+      prepend({time:nowTime(), status:"claimed", task:null, needs:false, muted:true,
+        html:'Sam claimed “Appeal denial — CT scan (Medicare)”'});
+      flash('Sam claimed Appeal denial — CT scan');
+    },
+    function(){ // A-2243 DONE
+      feed.querySelectorAll('.ev').forEach(e=>{
+        if(e.dataset.task==='A-2243' && e.dataset.status==='working'){ e.dataset.removed='1'; e.classList.add('hidden'); }
+      });
+      agg.work = Math.max(0, agg.work-1); agg.done += 1; setAgg();
+      TASKS["A-2243"] = Object.assign({}, TASKS["A-2243"], {
+        status:"done", tag:"done", title:"Clinical justification submitted",
+        cfg:[["Agent","Auth bot · local auto"],
+             ["Schedule","↻ Mon 7:00am (cron)","last run today · next Mon 7:00am"],
+             ["Binding","Aetna HMO portal + EHR"],["Result","conf #AET-88147"]],
+        trace:[
+          ["ok","Pull patient + payer context","needed to fill the auth form"],
+          ["ok","Confirm secondary coverage","project rule — confirmed"],
+          ["ok","Confirm PCP referral (HMO)","HMO rule — on file"],
+          ["ok","Draft clinical justification","payer requires medical necessity"],
+          ["ok","Submit via Aetna portal","shipped — conf #AET-88147"],
+          ["ok","Post outcome to #auth-team","project rule (team visibility)"]
+        ]
+      });
+      prepend({time:nowTime(), status:"done", task:"A-2243", needs:false, muted:true,
+        html:'<span class="tid">A-2243</span> submitted to Aetna · conf #AET-88147'});
+      flash('✓ A-2243 done · conf #AET-88147');
+    }
+  ];
+
+  function startFeed(){
+    if(timer) return;
+    timer = setInterval(()=>{
+      if(paused) return;
+      if(scriptIdx >= SCRIPT.length){ clearInterval(timer); timer=null; return; }
+      SCRIPT[scriptIdx++]();
+    }, 4500);
+  }
+  startFeed();
+
+  const pauseBtn = document.getElementById('pauseBtn');
+  const pauseLbl = document.getElementById('pauseLbl');
+  function setPaused(p){
+    paused = p;
+    pauseBtn.classList.toggle('paused', p);
+    pauseLbl.textContent = p ? 'Paused · resume' : 'Live · pause';
+    flash(p ? 'feed paused' : 'feed resumed');
+  }
+  pauseBtn.addEventListener('click', ()=>setPaused(!paused));
+
+  // ---------- filters (2 chips; agent/status moved to :filter) ----------
+  let activeFilter = 'all';
+  function applyFilter(){
+    feed.querySelectorAll('.ev').forEach(e=>{
+      let show = activeFilter==='needs' ? e.dataset.needs==='1' : true;
+      if(e.dataset.removed==='1') show = false;
+      e.classList.toggle('hidden', !show);
+    });
+    // hide bucket labels whose rows are all hidden
+    feed.querySelectorAll('.bucket').forEach(b=>{
+      let n=b.nextElementSibling, any=false;
+      while(n && !n.classList.contains('bucket')){ if(n.classList.contains('ev') && !n.classList.contains('hidden')) any=true; n=n.nextElementSibling; }
+      b.style.display = any ? '' : 'none';
+    });
+  }
+  document.querySelectorAll('.fchip').forEach(c=>{
+    c.addEventListener('click', ()=>{
+      document.querySelectorAll('.fchip').forEach(x=>x.classList.remove('on'));
+      c.classList.add('on');
+      activeFilter = c.dataset.filter;
+      applyFilter(); refreshCursor(0);
+      flash('filter · '+c.textContent.trim());
+    });
+  });
+
+  // ---------- mode line ----------
+  let mlTimer = null;
+  const modeLine = document.getElementById('modeLine');
+  function flash(msg){
+    modeLine.textContent = msg;
+    modeLine.classList.add('show');
+    clearTimeout(mlTimer);
+    mlTimer = setTimeout(()=>modeLine.classList.remove('show'), 2500);
+  }
+
+  // ---------- TASK SHEET (3-tier) ----------
+  const sheet = document.getElementById('sheet');
+  const sheetOverlay = document.getElementById('sheetOverlay');
+  let sheetOpen = false;
+
+  function openSheet(taskId){
+    const t = TASKS[taskId];
+    if(!t) return;
+    closePalette();
+
+    // TIER 1 — lead reason + the one primary action
+    let reasonHtml = '';
+    if(t.reason){
+      const cls = t.reason.kind==='block' ? 'blocked' : '';
+      const icon = t.reason.kind==='block' ? '⛔' : '⏸';
+      reasonHtml = `<div class="leadreason ${cls}"><span>${icon}</span><div>
+          ${t.reason.kind==='block'?'Blocked':'Waiting'} because of the rule
+          <b>“${t.reason.rule}”</b>.<span class="dep">${t.reason.dep}</span></div></div>`;
+    }
+    let primary='';
+    if(t.status==='waiting') primary = `<button class="btn amber" id="ansBtn">Submit anyway</button><button class="btn" id="noBtn">No</button>`;
+    else if(t.status==='blocked') primary = `<button class="btn fix" id="fixBtn">Add coverage</button><button class="btn" id="ovrBtn">Override</button>`;
+    else if(t.status==='unclaimed') primary = `<button class="btn primary" id="claimBtn">Claim &amp; run</button>`;
+    else if(t.thread) primary = `<button class="btn primary" id="threadBtn">Enter thread →</button>`;
+    const stopBtn = t.canStop ? `<button class="btn stop" id="stopBtn">■ Stop</button>` : '';
+
+    // TIER 2 — trace
+    const trace = t.trace.map(([st,name,why,tag])=>{
+      const icon = st==='ok'?'✓':(st==='run'?'⏵':(st==='wait'?'⏸':(st==='block'?'⛔':'◦')));
+      const runTag = tag?`<span class="run-tag">${tag}</span>`:'';
+      return `<div class="tstep ${st}"><div class="ti">${icon}</div>
+        <div><div class="tt">${name}${runTag}</div><div class="twhy">why: ${why}</div></div></div>`;
+    }).join('');
+
+    // TIER 3 — disclosures
+    const cfg = t.cfg.map(([k,v,sub])=>`<div class="c"><div class="k">${k}</div><div class="v">${v}${sub?`<span class="sched">${sub}</span>`:''}</div></div>`).join('');
+    const schedLink = t.schedLink ? `<span class="schedlink" id="schedLink">${t.schedLink}</span>` : '';
+
+    const gatingHtml = t.gating ? `<div class="gating">Gating now · ${t.gating}</div>` : '';
+    const eff = `
+      <div class="effrule"><span class="escope">project</span><span>Never submit an auth without confirming secondary coverage.</span></div>
+      <div class="effrule"><span class="escope">project</span><span>Attach the latest clinical notes from the EHR.</span></div>
+      <div class="effrule"><span class="escope">project</span><span>Post outcomes to #auth-team.</span></div>
+      <div class="effrule"><span class="escope">project</span><span>If the payer portal is down, queue and retry.</span></div>
+      <div class="effrule"><span class="escope cur">payer:HMO</span><span>HMO requires a PCP referral on file — confirm before submitting.<span class="learn">★ learned · Tue</span></span></div>
+      <div class="effrule"><span class="escope">payer:HMO</span><span>Use the HMO fax cover sheet, not the PPO one.</span></div>
+      <div class="effrule"><span class="escope">prior-auth</span><span>Request 7-day expedited review when the case is marked urgent.</span></div>
+      <div class="effrule"><span class="escope">task</span><span>This patient: contact via portal message, not phone. <span style="color:var(--amber);font-size:11px">override</span></span></div>`;
+
+    const session = `<div class="session">${ t.session.map(s=>`<div class="ln">${s[0]}</div>`).join('') }</div>`;
+    const sessionOpen = (t.status==='working'||t.status==='waiting'||t.status==='blocked') ? ' open' : '';
+
+    sheet.innerHTML = `
+      <div class="sh">
+        <div class="htop">
+          <span class="hid">${t.id}</span>
+          <span class="htag ${t.status}">${t.status==='working'?'working':t.tag}</span>
+          <button class="hclose" id="sheetClose" title="close (Esc / h)">esc ✕</button>
+        </div>
+        <div class="htitle">${t.title}</div>
+        <div class="hsub">${t.sub}</div>
+        ${reasonHtml}
+        <div class="leadact">${primary}<div class="spacer"></div>${stopBtn}</div>
+      </div>
+      <div class="sbody">
+        <div class="sec trace"><div class="slbl">Trace · ${t.trace.length} steps</div>${trace}</div>
+
+        <details class="disc"><summary><span class="tw">▸</span> <b>Config</b> · agent, schedule, binding</summary>
+          <div class="dbody"><div class="cfg">${cfg}</div>${schedLink}</div></details>
+
+        <details class="disc"><summary><span class="tw">▸</span> <b>Instructions</b> · honors 8 (4 project · 2 HMO · 1 prior-auth · 1 task)</summary>
+          <div class="dbody">${gatingHtml}${eff}
+            <button class="teachbtn" id="sheetTeach" style="margin-top:14px">＋ Teach a rule</button></div></details>
+
+        <details class="disc"${sessionOpen}><summary><span class="tw">▸</span> <b>Live session</b> · ${t.status==='done'?'completed run':'in progress'} · memory-only</summary>
+          <div class="dbody">${session}</div></details>
+      </div>`;
+
+    sheetOverlay.classList.add('show');
+    sheet.style.display='block';
+    sheet.scrollTop = 0;
+    sheetOpen = true;
+    document.getElementById('modeBadge').textContent='SHEET';
+
+    document.getElementById('sheetClose').onclick = closeSheet;
+    sheet.querySelectorAll('[data-mrn]').forEach(el=>{
+      el.addEventListener('click', ()=>{ el.textContent='MRN 4471-9023 ✓ (hidden again on close)'; el.style.borderBottom='none'; });
+    });
+    const wire = (id, fn)=>{ const el=document.getElementById(id); if(el) el.onclick=fn; };
+    wire('stopBtn', ()=>{ flash('■ stopped Auth bot · '+t.id); closeSheet(); });
+    wire('threadBtn', ()=>flash('→ entering thread · '+t.id));
+    wire('claimBtn', ()=>{ flash('claimed '+t.id+' · Auth bot running'); closeSheet(); });
+    wire('ansBtn', ()=>{ flash('submitted '+t.id+' · resuming Aetna batch'); closeSheet(); });
+    wire('noBtn', ()=>{ flash('held '+t.id+' · referral requested'); closeSheet(); });
+    wire('fixBtn', ()=>{ flash('coverage added · '+t.id+' resuming'); closeSheet(); });
+    wire('ovrBtn', ()=>flash('override · confirm the secondary-coverage rule first'));
+    wire('schedLink', ()=>flash('schedule · ↻ recent runs · pause toggle (demo)'));
+    wire('sheetTeach', ()=>flash('teach · choose a scope to save the rule'));
+  }
+
+  function closeSheet(){
+    sheetOverlay.classList.remove('show');
+    sheet.style.display='none';
+    sheetOpen = false;
+    document.getElementById('modeBadge').textContent='NORMAL';
+  }
+  sheetOverlay.addEventListener('click', closeSheet);
+
+  // open from needs-you cards
+  document.querySelectorAll('.needcard').forEach(c=>{
+    c.addEventListener('click', e=>{
+      if(e.target.closest('[data-act]')) return;
+      openSheet(c.dataset.open);
+    });
+  });
+  document.querySelectorAll('.needcard [data-act]').forEach(b=>{
+    b.addEventListener('click', e=>{ e.stopPropagation(); flash(b.dataset.act+' · '+b.closest('.needcard').querySelector('.nid').textContent); });
+  });
+
+  // ---------- COMMAND PALETTE ----------
+  const overlay = document.getElementById('paletteOverlay');
+  const palette = document.getElementById('palette');
+  const paletteInput = document.getElementById('paletteInput');
+  const verbsEl = document.getElementById('verbs');
+  const sentenceEl = document.getElementById('sentence');
+  let paletteOpen = false, vsel = 0;
+
+  const VERBS = [
+    ["open","open the task under the cursor","Enter"],
+    ["run","start / resume an agent task",""],
+    ["stop","stop a running agent","■"],
+    ["claim","claim an unclaimed task",""],
+    ["done","mark a task done",""],
+    ["teach","save a rule to a scope",":teach"],
+    ["goto","jump to a task by id",""],
+    ["switch","change the active project",""],
+    ["filter","filter by agent or status",""],
+    ["pause","pause / resume the timeline",""]
+  ];
+
+  function renderVerbs(q){
+    q = (q||'').toLowerCase();
+    const list = VERBS.filter(v=>v[0].includes(q)||v[1].toLowerCase().includes(q));
+    verbsEl.innerHTML = list.map((v,i)=>
+      `<div class="verb ${i===vsel?'sel':''}" data-verb="${v[0]}"><span class="vn">${i+1}</span>
+        <span class="vname">${v[0]}<span class="vd">${v[1]}</span></span><span class="vk">${v[2]}</span></div>`).join('');
+    verbsEl.querySelectorAll('.verb').forEach((el,i)=>{
+      el.addEventListener('click', ()=>runVerb(el.dataset.verb));
+      el.addEventListener('mouseenter', ()=>{ vsel=i; highlightVerb(); });
+    });
+    const first = list[0];
+    sentenceEl.innerHTML = first
+      ? `<span>${first[0]}</span> · <span class="slot">${first[0]==='goto'||first[0]==='open'?'task':'slot'}</span> · <span class="slot">—</span>`
+      : `<span>—</span> · <span class="slot">slot</span> · <span class="slot">—</span>`;
+    return list;
+  }
+  function highlightVerb(){ verbsEl.querySelectorAll('.verb').forEach((el,i)=>el.classList.toggle('sel', i===vsel)); }
+  function openPalette(){
+    paletteOpen=true; vsel=0;
+    overlay.classList.add('show'); palette.style.display='block';
+    paletteInput.value=''; renderVerbs('');
+    paletteInput.focus();
+    document.getElementById('modeBadge').textContent='COMMAND';
+  }
+  function closePalette(){
+    paletteOpen=false; overlay.classList.remove('show'); palette.style.display='none';
+    if(!sheetOpen) document.getElementById('modeBadge').textContent='NORMAL';
+  }
+  function runVerb(v){
+    closePalette();
+    if(v==='open'){ const r=rows()[cursor]; if(r&&r.dataset.task&&TASKS[r.dataset.task]){ openSheet(r.dataset.task); return; } }
+    if(v==='pause'){ setPaused(!paused); return; }
+    if(v==='teach'){ flash('teach · type the rule, then choose a scope'); instPanel.classList.add('show'); document.getElementById('newRule').focus(); return; }
+    if(v==='switch'){ switchMenu.classList.add('show'); flash('switch · choose a project'); return; }
+    if(v==='filter'){ flash('filter · by agent (Auth bot / Priya / you) or status (working / blocked / done)'); return; }
+    flash(v+' · (demo)');
+  }
+  paletteInput.addEventListener('input', ()=>{ vsel=0; renderVerbs(paletteInput.value); });
+  overlay.addEventListener('click', closePalette);
+
+  // ---------- instructions panel ----------
+  const instPanel = document.getElementById('instPanel');
+  document.getElementById('instToggle').addEventListener('click', ()=>instPanel.classList.toggle('show'));
+  function addRule(text){
+    text=(text||'').trim(); if(!text) return;
+    const row=document.createElement('div');
+    row.className='instrule';
+    row.innerHTML='<span class="rq">“</span><span>'+text.replace(/</g,'&lt;')+
+      '<span class="rmeta">★ learned from you · just now</span></span>';
+    instPanel.querySelector('.instadd').before(row);
+    instPanel.classList.add('show');
+    flash('✓ taught · saved to payer:HMO scope');
+  }
+  const newRule=document.getElementById('newRule');
+  document.getElementById('teachBtn').addEventListener('click', ()=>{ addRule(newRule.value); newRule.value=''; });
+  newRule.addEventListener('keydown', e=>{ if(e.key==='Enter'){ addRule(newRule.value); newRule.value=''; }});
+
+  // ---------- project switcher (sub-projects + breadcrumb) ----------
+  const switchMenu=document.getElementById('switchMenu');
+  const crumb=document.getElementById('crumb');
+  document.getElementById('scopeBtn').addEventListener('click', e=>{ e.stopPropagation(); switchMenu.classList.toggle('show'); });
+  document.addEventListener('click', e=>{ if(!e.target.closest('.switch')) switchMenu.classList.remove('show'); });
+  switchMenu.querySelectorAll('.so[data-proj]').forEach(so=>{
+    so.addEventListener('click', ()=>{
+      const p = so.dataset.proj;
+      if(so.dataset.sub){ crumb.innerHTML = 'Insurance Authorization <span class="crumb">›</span> Aetna HMO'; }
+      else { crumb.textContent = p; }
+      flash('switch project · '+p.replace(/›/g,'›'));
+      switchMenu.classList.remove('show');
+    });
+  });
+  document.querySelector('.projhdr .ptag').addEventListener('click', ()=>flash('edit description · saved as agent context (demo)'));
+
+  // ---------- global keyboard ----------
+  document.addEventListener('keydown', e=>{
+    const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+
+    if(paletteOpen){
+      if(e.key==='Escape'){ closePalette(); }
+      else if(e.key==='ArrowDown'){ e.preventDefault(); vsel=Math.min(vsel+1, verbsEl.children.length-1); highlightVerb(); }
+      else if(e.key==='ArrowUp'){ e.preventDefault(); vsel=Math.max(vsel-1,0); highlightVerb(); }
+      else if(e.key==='Enter'){ const sel=verbsEl.querySelector('.verb.sel'); if(sel) runVerb(sel.dataset.verb); }
+      else if(/^[1-9]$/.test(e.key)){ const el=verbsEl.children[+e.key-1]; if(el){ runVerb(el.dataset.verb); } }
+      return;
+    }
+
+    if(typing) return;
+
+    if(e.key===':'||e.key==='/'){ e.preventDefault(); openPalette(); return; }
+
+    if(sheetOpen){
+      if(e.key==='Escape'||e.key==='h'){ closeSheet(); }
+      return;
+    }
+
+    if(e.key==='Escape'){ switchMenu.classList.remove('show'); instPanel.classList.remove('show'); return; }
+    if(e.key==='j'||e.key==='ArrowDown'){ e.preventDefault(); refreshCursor(cursor+1); }
+    else if(e.key==='k'||e.key==='ArrowUp'){ e.preventDefault(); refreshCursor(cursor-1); }
+    else if(e.key==='Enter'||e.key==='l'){ const r=rows()[cursor]; if(r&&r.dataset.task&&TASKS[r.dataset.task]) openSheet(r.dataset.task); }
+    else if(e.key==='p'){ setPaused(!paused); }
+    else if(e.key==='t'){ instPanel.classList.add('show'); newRule.focus(); }
+    else if(e.key==='?'){ flash('keys · j/k move · enter/l open · : actions · t teach · p pause'); }
+  });
+
+  setAgg();
+  flash('living timeline · 2 need you · feed running');
+})();
+</script>
+</body>
+</html>
