@@ -384,6 +384,8 @@ type Fm = {
   };
   // Native-menu → renderer bridge: a native menu item forwards a verb id.
   onMenuVerb: (cb: (verbId: string) => void) => () => void;
+  // fm-ued6 — cold-start profiling: report the first committed frame to main.
+  reportFirstPaint?: () => void;
 };
 
 export type TypebuildAuthState = { signedIn: boolean; email?: string };

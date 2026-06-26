@@ -704,6 +704,10 @@ const fm = {
     ipcRenderer.on('app:menu-verb', handler);
     return () => ipcRenderer.off('app:menu-verb', handler);
   },
+  // fm-ued6 — cold-start profiling: the renderer fires this once after its
+  // first committed frame so the main process can close out the startup
+  // timeline at the "first interactive frame" boundary. NON-PHI, fire-and-forget.
+  reportFirstPaint: () => ipcRenderer.send('app:firstPaint'),
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

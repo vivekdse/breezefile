@@ -26,3 +26,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     {overlayPty != null ? <AgentOverlay ptyId={Number(overlayPty)} /> : <App />}
   </React.StrictMode>,
 );
+
+// fm-ued6 — cold-start profiling: signal the main process once the browser has
+// painted the first frame (double-rAF: the first callback runs before paint, the
+// second after the commit). Only the main app window reports, not the overlay.
+// Fire-and-forget + optional-chained so it's a no-op when the bridge predates
+// this method. NON-PHI.
+if (overlayPty == null) {
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => window.fm?.reportFirstPaint?.()),
+  );
+}

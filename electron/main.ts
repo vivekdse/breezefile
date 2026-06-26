@@ -26,9 +26,15 @@ import {
   unregisterTaskSource,
 } from './sources/registry';
 import { platform } from './platform';
+// fm-ued6 — cold-start timing instrumentation. Flag-gated ([startup] log
+// namespace); off in production unless BREEZE_STARTUP_PROFILE=1. Kept lightweight
+// so it can stay in the tree or be removed by grepping "[startup]".
+import { mark, timeSync, dumpTimeline } from './core/startup-timing';
 // Side-effect import: registers built-in agent runners (Claude) so the
 // scheduler / run-now endpoints can dispatch by id (epic fm-zf3m).
 import './agents';
+
+mark('main:module-loaded');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -227,7 +233,10 @@ function createWindow() {
   win.on('focus', () => win?.webContents.send('app:focus', true));
   win.on('blur', () => win?.webContents.send('app:focus', false));
 
+  mark('createWindow:BrowserWindow-constructed');
+
   win.once('ready-to-show', () => {
+    mark('createWindow:ready-to-show');
     if (!win || win.isDestroyed()) return;
     // showInactive() avoids raising the window above other apps / stealing
     // keyboard focus on every dev reload. A real production launch should
@@ -236,6 +245,7 @@ function createWindow() {
     else win.show();
   });
 
+  mark('createWindow:load-start');
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
     // DevTools is opt-in during dev so it stops popping on every reload.
@@ -249,6 +259,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  mark('whenReady:enter');
   // asset:///<absolute-path> → stream the file from disk. We delegate to
   // Electron's `net.fetch` with a file:// URL so we get proper range-request
   // and streaming semantics for large media, then patch Content-Type.
@@ -271,34 +282,43 @@ app.whenReady().then(() => {
     }
   });
 
-  registerIpc();
+  timeSync('boot:registerIpc', () => registerIpc());
   // Inject the Electron host before any task subsystem runs so
   // tasks.ts/scheduler.ts broadcast to windows + raise notifications
   // exactly as before the P1 core extraction (breezed injects a
   // headless host instead).
   setBreezeHost(ElectronBreezeHost);
-  startApiServer();
+  timeSync('boot:startApiServer', () => startApiServer());
   // fm-zf3m — auto-executor for tasks with auto_mode=1 / cron set.
   // Starts after the API server so the scheduler can rely on agent
   // registration (electron/agents has already been side-effect imported).
-  startScheduler();
+  // NOTE (fm-ued6): startScheduler() synchronously opens the local sqlite
+  // tasks.db (WAL pragma + full migration chain) via reapStaleRuns()/rearm()
+  // on the MAIN THREAD — a blocking cold-start cost tied to the local task
+  // store that the repo pivot is REMOVING (tasks are online now). Flagged as
+  // dead-weight in the profile.
+  timeSync('boot:startScheduler(opens sqlite)', () => startScheduler());
   // Reconnect previously-connected remote breezed daemons (best-effort,
   // never blocks startup).
-  restoreSources();
+  timeSync('boot:restoreSources', () => restoreSources());
   // fm-b5at.2 — TypeBuild Firebase auth IPC. Registers signIn/signOut/state
   // handlers + the auth-state broadcaster, and restores any persisted
   // (encrypted) session from a prior launch. Best-effort; never blocks.
-  registerTypebuildAuthIpc();
+  timeSync('boot:registerTypebuildAuthIpc(restoreSession)', () =>
+    registerTypebuildAuthIpc(),
+  );
   // User credential vault IPC (:secrets panel) — class-2 data (NPI, Tax ID,
   // login IDs). Server-backed; no plaintext at rest in the client.
-  registerTypebuildVaultIpc();
+  timeSync('boot:registerTypebuildVaultIpc', () => registerTypebuildVaultIpc());
   // task-ab1d7955e23f — TypeBuild Projects IPC (list/get/resolve/create).
   // Named task containers; NON-PHI. Server-backed via the TypeBuild source.
-  registerTypebuildProjectsIpc();
+  timeSync('boot:registerTypebuildProjectsIpc', () =>
+    registerTypebuildProjectsIpc(),
+  );
   // fm-b5at.3 — TypeBuild onboarding prerequisite detection IPC
   // (claude/chrome presence + the Claude Code install command). Used by the
   // onboarding checklist in Settings.
-  registerTypebuildDetectIpc();
+  timeSync('boot:registerTypebuildDetectIpc', () => registerTypebuildDetectIpc());
   // fm-b5at.4 — register the TypeBuildTaskSource in the task-source registry
   // exactly while signed in, so TypeBuild tasks appear in the existing
   // TasksPage. Sign-in registers + starts polling; sign-out unregisters +
@@ -306,18 +326,27 @@ app.whenReady().then(() => {
   // transition fires a `sources:changed` broadcast so the renderer's
   // useTaskSources() re-pulls the capability map, plus a `tasks:changed`
   // so the list re-pulls immediately.
-  wireTypebuildTaskSource();
+  // NOTE (fm-ued6): when already signed in, this synchronously constructs the
+  // TypeBuildTaskSource and calls startPolling(), which kicks an IMMEDIATE
+  // poll() — a network round-trip (GET /chromeext/tasks) fired during boot.
+  // The fetch itself is async (doesn't block the main thread), but it competes
+  // for the network/CPU during the sluggish first window.
+  timeSync('boot:wireTypebuildTaskSource(immediate poll)', () =>
+    wireTypebuildTaskSource(),
+  );
   // fm-b5at.10 — TypeBuild MCP session-expiry clock. Watches the live-session
   // registry (sessions.ts) and broadcasts a T-15min warning + an at-expiry
   // prompt per session, re-evaluating on wake-from-sleep so a token that
   // lapsed while suspended is caught the instant the machine resumes. The
   // renderer turns 'expired' into a one-click relaunch via the IPC below.
-  startExpiryClock();
+  timeSync('boot:startExpiryClock', () => startExpiryClock());
   // fm-z7v — register UserPromptSubmit/Stop hooks so Claude Code reports
   // working/idle state per pty. Idempotent; failures are logged and
-  // ignored.
+  // ignored. NOTE (fm-ued6): reads+writes ~/.claude/settings.json synchronously.
   try {
-    const result = registerBreezeHooks();
+    const result = timeSync('boot:registerBreezeHooks(reads ~/.claude)', () =>
+      registerBreezeHooks(),
+    );
     if (result === 'written') {
       console.log('[hooks-register] updated ~/.claude/settings.json');
     }
@@ -466,8 +495,21 @@ app.whenReady().then(() => {
       }
     },
   );
-  buildAppMenu();
-  createWindow();
+  timeSync('boot:buildAppMenu', () => buildAppMenu());
+  mark('boot:sync-work-complete');
+  timeSync('boot:createWindow', () => createWindow());
+  mark('whenReady:exit');
+
+  // fm-ued6 — the renderer posts 'app:firstPaint' from its first useEffect
+  // (App mounted + first frame committed); that's our "first interactive frame"
+  // marker. dumpTimeline() is idempotent, so the fallback timer below only
+  // fires if the renderer never reports (e.g. a crash) — it still prints the
+  // main-process timeline we captured.
+  ipcMain.on('app:firstPaint', () => {
+    mark('renderer:firstPaint');
+    dumpTimeline('renderer-first-paint');
+  });
+  setTimeout(() => dumpTimeline('fallback-timer-8s'), 8000).unref?.();
 });
 
 // fm-b5at.4 — keep the TypeBuildTaskSource registered exactly while signed
