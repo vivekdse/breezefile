@@ -27,6 +27,34 @@ type VaultEntry = {
   secret: boolean;
 };
 
+// task-317c7fe41f90 — DSL-tag store record as it crosses the bridge. Inlined
+// for the same reason as Project/VaultEntry (preload carries no shared-type
+// imports); mirrors `Tag` in src/tagStore.d.mts. NON-PHI.
+type DslTag = {
+  id: string;
+  name: string;
+  color: string;
+  selector: string;
+  mode: 'live' | 'frozen';
+  snapshot?: string[];
+  created_at: string;
+  updated_at: string;
+};
+type DslTagCreate = {
+  name: string;
+  selector: string;
+  color?: string;
+  mode?: 'live' | 'frozen';
+  snapshot?: string[];
+};
+type DslTagUpdate = {
+  name?: string;
+  selector?: string;
+  color?: string;
+  mode?: 'live' | 'frozen';
+  snapshot?: string[] | null;
+};
+
 const fm = {
   platform: process.platform,
   versions: process.versions,
@@ -714,6 +742,22 @@ const fm = {
     const handler = (_e: unknown, payload: { verbId: string }) => cb(payload.verbId);
     ipcRenderer.on('app:menu-verb', handler);
     return () => ipcRenderer.off('app:menu-verb', handler);
+  },
+  // ─── DSL tags (task-317c7fe41f90) ─────────────────────────────────
+  // Selector-based tag store (src/tagStore.mjs) owned by main in
+  // userData/tags.json. Additive — runs alongside the criterion tag system.
+  // A `selector` is a tagDsl query string; `mode` is 'live'|'frozen' (frozen
+  // pins a `snapshot` of paths). NON-PHI (tag names + selectors only).
+  dslTags: {
+    list: () => ipcRenderer.invoke('dsltags:list') as Promise<DslTag[]>,
+    get: (id: string) =>
+      ipcRenderer.invoke('dsltags:get', id) as Promise<DslTag | null>,
+    create: (input: DslTagCreate) =>
+      ipcRenderer.invoke('dsltags:create', input) as Promise<DslTag>,
+    update: (id: string, patch: DslTagUpdate) =>
+      ipcRenderer.invoke('dsltags:update', id, patch) as Promise<DslTag | null>,
+    delete: (id: string) =>
+      ipcRenderer.invoke('dsltags:delete', id) as Promise<boolean>,
   },
   // fm-ued6 — cold-start profiling: the renderer fires this once after its
   // first committed frame so the main process can close out the startup

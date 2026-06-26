@@ -34,6 +34,7 @@ import {
 } from './sources/registry';
 import { unsupported } from './core/task-source';
 import type { TypeBuildTaskSource } from './sources/typebuild';
+import { registerTagStoreIpc } from './tag-store';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2597,6 +2598,12 @@ end tell`;
     await loadLaunchers();
     shell.showItemInFolder(p);
   });
+
+  // ─── DSL tags (task-317c7fe41f90) ──────────────────────────────────
+  // The new selector-based tag store (src/tagStore.mjs) lives in userData/
+  // tags.json. Additive — runs alongside the live criterion tag system. The
+  // dsltags:* handlers live in electron/tag-store.ts.
+  registerTagStoreIpc();
 
   // ─── Tasks (fm-dhc) ────────────────────────────────────────────────
   // SQLite-backed task store at ~/.breezefile/tasks.db. Reads run on the

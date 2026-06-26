@@ -1,4 +1,5 @@
 import type { Entry, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
 export type Capabilities = {
   id: 'mac' | 'linux' | 'windows';
@@ -386,6 +387,17 @@ type Fm = {
   };
   // Native-menu → renderer bridge: a native menu item forwards a verb id.
   onMenuVerb: (cb: (verbId: string) => void) => () => void;
+  // task-317c7fe41f90 — DSL-tag store (src/tagStore.mjs) owned by main in
+  // userData/tags.json. Additive — runs alongside the criterion tag system.
+  // A `selector` is a tagDsl query string; resolveTag (src/dslTagResolve.mjs)
+  // turns a tag name into the membership predicate the evaluator injects.
+  dslTags: {
+    list: () => Promise<DslTag[]>;
+    get: (id: string) => Promise<DslTag | null>;
+    create: (input: DslTagCreate) => Promise<DslTag>;
+    update: (id: string, patch: DslTagUpdate) => Promise<DslTag | null>;
+    delete: (id: string) => Promise<boolean>;
+  };
   // fm-ued6 — cold-start profiling: report the first committed frame to main.
   reportFirstPaint?: () => void;
 };

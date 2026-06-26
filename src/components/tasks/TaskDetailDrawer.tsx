@@ -32,7 +32,6 @@ import {
   cancelTaskRun,
   getTask,
   taskSourceAction,
-  todayISO,
   useTaskRuns,
   useTaskSources,
   useTypebuildReadiness,
@@ -40,9 +39,13 @@ import {
 import { useOpenResumeInTab } from '../../openResumeInTab';
 import { useRunningSessions } from './useRunningSessions';
 import { useTaskActions } from './useTaskActions';
+import { primaryActionFor } from './primaryAction.mjs';
+import type { PrimaryAction } from './primaryAction.mjs';
+import { PrimaryActionButton } from './PrimaryActionButton';
 import { formatOpError, formatSourceReason } from '../../errorMessages';
 import { TaskStatusDot } from '../TaskIndicators';
-import { homeRel, shortDate } from './helpers';
+import { homeRel } from './helpers';
+import '../TasksPage.css';
 import { resolveEffectiveInstructions } from '../../projects/index.mjs';
 import type {
   CategoryScopeSource,
@@ -236,6 +239,59 @@ export function TaskDetailDrawer({
     (isTypebuild && (raw === 'in_progress' || raw === 'working' || raw === 'claimed' || raw === 'waiting')) ||
     !!latestRun?.conversation_id;
 
+  // task-31b382ab2e4c — the row's ONE primary affordance (Start/run, claim,
+  // run-now, open-session, reopen, done-toggle) carried into the drawer header
+  // via the SAME pure descriptor the row renders, so the detail view never
+  // drifts from the row. We mirror TasksPage's primaryFor + invokePrimary.
+  const primary = useMemo(
+    () =>
+      primaryActionFor(task, {
+        caps,
+        tbReady,
+        myEmail,
+        session,
+        lastRunRunning: running,
+      }),
+    [task, caps, tbReady, myEmail, session, running],
+  );
+
+  function invokePrimary(action: PrimaryAction) {
+    switch (action.kind) {
+      case 'done-toggle':
+        void actions.setStatus(task, 'done');
+        break;
+      case 'reopen':
+        if (isTypebuild) void actions.sourceAction(task, 'reopen');
+        else void actions.setStatus(task, 'pending');
+        break;
+      case 'start':
+      case 'run-now':
+        // Start auto-claims (TypeBuild) / runs-now (local auto), then lands the
+        // user in the live session — same as Enter-thread's claim path.
+        void actions.start(task);
+        say(isTypebuild ? 'entering thread…' : 'running…');
+        exit();
+        break;
+      case 'open-session':
+        dispatch({ type: 'selectTab', index: action.tabIndex });
+        exit();
+        break;
+      case 'view-run':
+        openSession();
+        break;
+      case 'none':
+        break;
+    }
+  }
+
+  // Reconcile the two affordances so the header shows ONE coherent primary:
+  // when the primary descriptor already enters the thread (start / open-session),
+  // suppress the duplicate "Enter thread" button. Keep it only for the cases the
+  // primary doesn't cover (e.g. a completed run with a conversation to resume).
+  const primaryEnters = primary.kind === 'start' || primary.kind === 'open-session';
+  const showPrimaryButton = primary.kind !== 'none';
+  const showEnterThread = canEnterThread && !primaryEnters;
+
   async function stop() {
     if (running && latestRun && isLocalAuto) {
       try {
@@ -332,8 +388,6 @@ export function TaskDetailDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, canStop, canEnterThread, session, latestRun, raw]);
 
-  const today = todayISO();
-
   return (
     <div
       className="overlay tdd-overlay"
@@ -362,11 +416,18 @@ export function TaskDetailDrawer({
 
         <h2 className="tdd__title">{task.title}</h2>
 
-        {/* live action row — Stop / Enter thread (calm-by-default, only shown
-            when actionable) */}
-        {(canStop || canEnterThread) && (
+        {/* live action row — the row's ONE primary affordance (Start/run, claim,
+            run-now, …) + Enter thread + Stop (calm-by-default, only shown when
+            actionable). task-31b382ab2e4c: the primary button is rendered from
+            the SAME pure descriptor the row uses; Enter-thread is suppressed when
+            the primary already enters the thread, so the header never shows two
+            competing primaries. */}
+        {(showPrimaryButton || showEnterThread || canStop) && (
           <div className="tdd__actionrow">
-            {canEnterThread && (
+            {showPrimaryButton && (
+              <PrimaryActionButton action={primary} onInvoke={invokePrimary} variant="detail" />
+            )}
+            {showEnterThread && (
               <button type="button" className="tdd__action tdd__action--primary" onClick={enterThread}>
                 ↳ Enter thread <kbd>e</kbd>
               </button>
@@ -421,7 +482,6 @@ export function TaskDetailDrawer({
                   dependency/containment relations, folder. */}
               <DetailsMeta
                 task={task}
-                today={today}
                 claimedBy={claimedBy}
                 claimedByMe={claimedByMe}
               />
@@ -446,16 +506,17 @@ export function TaskDetailDrawer({
         </div>
 
         <footer className="tdd__foot">
-          <button
-            type="button"
-            className="tdd__btn"
-            onClick={() => {
-              dispatch({ type: 'openTaskTab', taskId: task.id, folder: task.folder });
-              exit();
-            }}
-          >
-            Open tab
-          </button>
+          {/* task-de98e1c6cd18 — "Open tab" only while the task is running, and
+              it opens the LIVE terminal/session for that task. */}
+          {running && (
+            <button
+              type="button"
+              className="tdd__btn"
+              onClick={openSession}
+            >
+              Open tab
+            </button>
+          )}
           {caps?.canEdit && (
             <button
               type="button"
@@ -540,27 +601,17 @@ function TraceTab({
 // ── DETAILS META ──────────────────────────────────────────────────────────────
 // task-b30e546672db — the editable fields now live in the embedded composer
 // (the "Task details" tab). This read-only block carries the supplementary
-// context the composer doesn't surface: dependency/containment relations, the
-// folder, and the resolved schedule (parent/depends_on/blocked_by/next_run).
+// context the composer doesn't surface: dependency/containment relations and
+// the folder. (task-de98e1c6cd18 dropped the "When it runs" schedule block.)
 function DetailsMeta({
   task,
-  today,
   claimedBy,
   claimedByMe,
 }: {
   task: Task;
-  today: string;
   claimedBy: string | null;
   claimedByMe: boolean;
 }) {
-  const overdue =
-    !!task.due_at && task.due_at < today && task.status !== 'done' && task.status !== 'cancelled';
-  const hasSchedule =
-    !!task.cron ||
-    (typeof task.next_run_at === 'number' && task.next_run_at > 0) ||
-    !!task.start_at ||
-    !!task.due_at ||
-    !!task.auto_agent;
   const hasDeps =
     !!task.parentTaskId ||
     (!!task.dependsOn && task.dependsOn.length > 0) ||
@@ -568,47 +619,6 @@ function DetailsMeta({
     !!claimedBy;
   return (
     <div className="tdd__config">
-      {/* schedule (read-only mirror of the composer's When/Start picks) */}
-      {hasSchedule && (
-        <section className="tdd__sect">
-          <div className="tdd__sect-h">When it runs</div>
-          <dl className="tdd__meta">
-            {task.cron && (
-              <div>
-                <dt>Recurring</dt>
-                <dd className="tdd__mono">↻ {task.cron}</dd>
-              </div>
-            )}
-            {typeof task.next_run_at === 'number' && task.next_run_at > 0 && (
-              <div>
-                <dt>Next run</dt>
-                <dd className="tdd__mono">{new Date(task.next_run_at).toLocaleString()}</dd>
-              </div>
-            )}
-            {task.start_at && (
-              <div>
-                <dt>Start</dt>
-                <dd>{shortDate(task.start_at, today)}</dd>
-              </div>
-            )}
-            {task.due_at && (
-              <div>
-                <dt>Due</dt>
-                <dd className={overdue ? 'tdd__overdue' : undefined}>
-                  {shortDate(task.due_at, today)}
-                </dd>
-              </div>
-            )}
-            {task.auto_agent && (
-              <div>
-                <dt>Agent</dt>
-                <dd>{task.auto_agent}</dd>
-              </div>
-            )}
-          </dl>
-        </section>
-      )}
-
       {/* dependencies / containment */}
       {hasDeps && (
         <section className="tdd__sect">

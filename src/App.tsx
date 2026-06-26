@@ -8,6 +8,7 @@ import { FolderHeader } from './components/FolderHeader';
 import { FilterChip } from './components/FilterChip';
 import { Preview } from './components/Preview';
 import { TagInspector } from './components/TagInspector';
+import { DslTagOverlay } from './components/DslTagOverlay';
 import { TagPicker } from './components/TagPicker';
 import { Sidebar } from './components/Sidebar';
 import { Statusbar } from './components/Statusbar';
@@ -43,10 +44,6 @@ import { handleTagControl, isTagControl, type TagControlReq } from './tagControl
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { SecretsPanel } from './components/SecretsPanel';
-import {
-  ProjectTaskProposal,
-  type ProjectTaskProposalRequest,
-} from './components/ProjectTaskProposal';
 import { TerminalSplit } from './components/TerminalSplit';
 import { TypebuildSessionBanner } from './components/TypebuildSessionBanner';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
@@ -137,6 +134,8 @@ function Shell() {
   // fm-60k — Create-tag overlay. Opened via the 'newtag' verb or the
   // "+ New tag" button in the TagInspector pane.
   const [newTagOpen, setNewTagOpen] = useState(false);
+  // task-317c7fe41f90 — selector-based DSL tag editor (additive; :dsltag verb).
+  const [dslTagOpen, setDslTagOpen] = useState(false);
   // fm-60k — keyboard tag HUD. Opened via `t` (apply) or `T` (filter).
   const [tagPicker, setTagPicker] = useState<'apply' | 'filter' | null>(null);
   // Slide-based help (HelpTour). Opened by the :help verb or the Help
@@ -144,10 +143,6 @@ function Shell() {
   const [helpOpen, setHelpOpen] = useState<{ slide?: HelpSlideId } | null>(null);
   // :secrets — the user's credential vault (NPI, Tax ID, login IDs). Server-backed.
   const [secretsOpen, setSecretsOpen] = useState(false);
-  // :project-task — project-scoped intent→proposal create flow (recipes +
-  // inherited folder/instructions/description). Opened via fm:openProjectTask.
-  const [projectTask, setProjectTask] =
-    useState<ProjectTaskProposalRequest | null>(null);
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskComposerRequest | null>(null);
@@ -1129,6 +1124,9 @@ function Shell() {
     function onNewTag() {
       setNewTagOpen(true);
     }
+    function onNewDslTag() {
+      setDslTagOpen(true);
+    }
     function onTagPicker(e: Event) {
       const detail = (e as CustomEvent).detail as { mode: 'apply' | 'filter' } | undefined;
       setTagPicker(detail?.mode ?? 'apply');
@@ -1142,12 +1140,6 @@ function Shell() {
     }
     function onSecrets() {
       setSecretsOpen(true);
-    }
-    function onOpenProjectTask(e: Event) {
-      const detail = (e as CustomEvent).detail as
-        | ProjectTaskProposalRequest
-        | undefined;
-      setProjectTask(detail ?? {});
     }
     function onOpenTask(e: Event) {
       const detail = (e as CustomEvent).detail as TaskComposerRequest | undefined;
@@ -1232,10 +1224,10 @@ function Shell() {
     window.addEventListener('fm:confirm', onConfirm);
     window.addEventListener('fm:openWith', onOpenWith);
     window.addEventListener('fm:newTag', onNewTag);
+    window.addEventListener('fm:newDslTag', onNewDslTag);
     window.addEventListener('fm:tagPicker', onTagPicker);
     window.addEventListener('fm:openHelp', onHelp);
     window.addEventListener('fm:openSecrets', onSecrets);
-    window.addEventListener('fm:openProjectTask', onOpenProjectTask);
     window.addEventListener('fm:openWelcome', onWelcome);
     window.addEventListener('fm:openTask', onOpenTask);
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
@@ -1257,10 +1249,10 @@ function Shell() {
       window.removeEventListener('fm:confirm', onConfirm);
       window.removeEventListener('fm:openWith', onOpenWith);
       window.removeEventListener('fm:newTag', onNewTag);
+      window.removeEventListener('fm:newDslTag', onNewDslTag);
       window.removeEventListener('fm:tagPicker', onTagPicker);
       window.removeEventListener('fm:openHelp', onHelp);
       window.removeEventListener('fm:openSecrets', onSecrets);
-      window.removeEventListener('fm:openProjectTask', onOpenProjectTask);
       window.removeEventListener('fm:openWelcome', onWelcome);
       window.removeEventListener('fm:openTask', onOpenTask);
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
@@ -1597,6 +1589,12 @@ function Shell() {
           }}
         />
       )}
+      {dslTagOpen && (
+        <DslTagOverlay
+          onClose={() => setDslTagOpen(false)}
+          onSaved={(msg) => dispatch({ type: 'setStatus', msg })}
+        />
+      )}
       {tagPicker && (
         <TagPicker mode={tagPicker} onClose={() => setTagPicker(null)} />
       )}
@@ -1607,12 +1605,6 @@ function Shell() {
         />
       )}
       {secretsOpen && <SecretsPanel onClose={() => setSecretsOpen(false)} />}
-      {projectTask && (
-        <ProjectTaskProposal
-          {...projectTask}
-          onClose={() => setProjectTask(null)}
-        />
-      )}
       {runHistoryFor && (
         <RunHistoryDialog
           taskId={runHistoryFor}

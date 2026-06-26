@@ -363,6 +363,17 @@ function ProjectsPageInner() {
       );
     });
   }
+  // task-223d400ffc1a — project-scoped create now opens the SHARED TaskComposer
+  // with the project pre-selected (replacing the retired ProjectTaskProposal
+  // flow). The composer's project field handles inherited folders/instructions;
+  // here we just hand it the project to land in.
+  function newProjectTask(projectId: string) {
+    window.dispatchEvent(
+      new CustomEvent('fm:openTask', {
+        detail: { mode: 'create', defaultFolder: '', projectId },
+      }),
+    );
+  }
   function toggleExpand(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -446,7 +457,12 @@ function ProjectsPageInner() {
         }
       } else {
         // level 2 — task tree
-        if (e.key === 'ArrowDown' || e.key === 'j') {
+        if (e.key === 'n' || e.key === 'a') {
+          // task-223d400ffc1a — new task scoped to THIS project (opens the
+          // shared composer with the project pre-selected).
+          e.preventDefault();
+          if (detailId) newProjectTask(detailId);
+        } else if (e.key === 'ArrowDown' || e.key === 'j') {
           e.preventDefault();
           setTreeCursor((c) => Math.min(treeRows.length - 1, c + 1));
         } else if (e.key === 'ArrowUp' || e.key === 'k') {
@@ -464,7 +480,7 @@ function ProjectsPageInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, level, scopeId, gridNodes, gridCursor, treeRows, treeCursor, showCreate]);
+  }, [isActive, level, scopeId, gridNodes, gridCursor, treeRows, treeCursor, showCreate, detailId]);
 
   // keep the cursor card in view. The grid now renders across multiple section
   // <div>s (needs-attention / below-the-fold / idle), so query the whole page
@@ -595,6 +611,7 @@ function ProjectsPageInner() {
             onSetCursor={setTreeCursor}
             onToggleExpand={toggleExpand}
             onOpenTask={openTaskDetail}
+            onNewTask={() => detailId && newProjectTask(detailId)}
           />
         )}
       </div>
@@ -886,6 +903,7 @@ function ProjectDetail({
   onSetCursor,
   onToggleExpand,
   onOpenTask,
+  onNewTask,
 }: {
   treeRef: React.RefObject<HTMLDivElement | null>;
   project: Project | null;
@@ -901,6 +919,7 @@ function ProjectDetail({
   onSetCursor: (i: number) => void;
   onToggleExpand: (id: string) => void;
   onOpenTask: (t: Task) => void;
+  onNewTask: () => void;
 }) {
   if (!project) {
     return (
@@ -925,6 +944,16 @@ function ProjectDetail({
             <span aria-hidden="true">⛓</span>
             <span className="mono">{bind}</span>
           </div>
+          {/* task-223d400ffc1a — per-project create. Opens the shared task
+              composer with this project pre-selected. */}
+          <button
+            type="button"
+            className="projects__newtask"
+            onClick={onNewTask}
+            title="New task in this project (n)"
+          >
+            + New task <kbd>n</kbd>
+          </button>
         </div>
         {effectiveDesc && (
           <div className="projects__desc">

@@ -432,6 +432,29 @@
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
 }
+/* task-223d400ffc1a — per-project "New task" button (opens the shared
+   composer with the project pre-selected). */
+.projects__newtask {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2);
+  padding: var(--sp-1) var(--sp-3);
+  cursor: pointer;
+}
+.projects__newtask:hover {
+  color: var(--fg-1);
+  border-color: var(--border-2);
+}
+.projects__newtask kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--fg-3);
+}
 .projects__desc {
   font-size: var(--fs-sm);
   color: var(--muted-on-panel);

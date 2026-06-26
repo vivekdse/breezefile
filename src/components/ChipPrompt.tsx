@@ -152,6 +152,7 @@ type Verb =
   | 'remote-attach'
   | 'disconnect'
   | 'newtag'
+  | 'dsltag'
   | 'tag'
   | 'untag'
   | 'run'
@@ -165,7 +166,6 @@ type Verb =
   | 'tasks'
   | 'projects'
   | 'new-project'
-  | 'project-task'
   | 'sidebyside'
   | 'settings'
   | 'note'
@@ -1438,6 +1438,23 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    // task-317c7fe41f90 — create a selector-based DSL tag (additive; distinct
+    // from :newtag's criterion tags). Opens the DslTagOverlay where the user
+    // types a tagDsl selector validated live via parse(), then persists it via
+    // the main-owned tag store (window.fm.dslTags.create).
+    id: 'dsltag',
+    label: 'New DSL tag',
+    aliases: ['dsltag', 'dsl tag', 'selector tag', 'new dsl tag', 'mkdsltag'],
+    icon: '⧉',
+    describe: () => 'Create a tag from a selector query (ext = pdf and size > 4MB)',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      window.dispatchEvent(new CustomEvent('fm:newDslTag'));
+      api.closeOverlay();
+    },
+  },
+  {
     // fm-nmt — task create/edit. Quick-add defaults to the current tab's
     // cwd; the dialog itself accepts an explicit folder override.
     id: 'task',
@@ -1505,27 +1522,6 @@ const VERBS: VerbDef[] = [
       // open into the create form once the page has mounted
       requestAnimationFrame(() =>
         window.dispatchEvent(new CustomEvent('fm:projects:new')),
-      );
-    },
-  },
-  {
-    // task-ba895e08c5d7 — project-scoped intent→proposal create. Distinct from
-    // `task` (generic guided composer): this leads with recipes, takes a
-    // free-form intent, and shows a proposed-task card that opens into the
-    // inherited project folder + cascading instructions + description. Confirm
-    // creates the task with projectId set. Pre-resolves the owning project from
-    // the active folder when there is one.
-    id: 'project-task',
-    label: 'New project task',
-    aliases: ['project task', 'propose', 'proposal', 'recipe', 'project todo', 'scoped task'],
-    icon: '◇',
-    describe: () => 'Propose a task scoped to a project (recipes + inherited instructions)',
-    isAvailable: () => ({ ok: true }),
-    slots: [],
-    execute: (c, _p, api) => {
-      api.closeOverlay();
-      window.dispatchEvent(
-        new CustomEvent('fm:openProjectTask', { detail: { folder: c.cwd } }),
       );
     },
   },

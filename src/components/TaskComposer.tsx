@@ -45,7 +45,12 @@ import type { Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate 
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
-  | { mode: 'create'; defaultFolder: string }
+  // task-223d400ffc1a — `projectId` PRE-SELECTS a project when the composer is
+  // opened from a project context (e.g. the Projects page's per-project "new
+  // task"). It pins the TypeBuild target and the project field so the create
+  // lands in that project; the user can still re-pick (or choose None). This is
+  // the seam that retired the separate ProjectTaskProposal flow.
+  | { mode: 'create'; defaultFolder: string; projectId?: string }
   | { mode: 'edit'; task: Task };
 
 // task-b30e546672db — `embedded` renders the composer INSIDE another surface
@@ -412,12 +417,23 @@ export function TaskComposer(props: Props) {
   // signed-in user's project list (non-PHI: names/folders/instructions are
   // teaching context, safe to display). `projectId` is the chosen container
   // ('' = None). Edits start pinned to the task's own project.
+  // task-223d400ffc1a — a create opened FROM a project carries `projectId`,
+  // which pre-selects it. Edits read the task's own project. Otherwise empty
+  // (None) until the folder auto-attach (or the user) fills it.
+  const preselectedProjectId =
+    props.mode === 'create' ? props.projectId ?? '' : '';
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectId, setProjectId] = useState<string>(initial?.projectId ?? '');
+  const [projectId, setProjectId] = useState<string>(
+    initial?.projectId ?? preselectedProjectId,
+  );
   // Once the user explicitly picks a project we stop auto-attaching from the
   // folder (mirrors targetTouched/executorTouched). Edits start "touched" so
-  // the saved value isn't overwritten by a folder resolve.
-  const [projectTouched, setProjectTouched] = useState(props.mode === 'edit');
+  // the saved value isn't overwritten by a folder resolve; a create with a
+  // PRE-SELECTED project also starts "touched" so the folder resolve doesn't
+  // clobber the project we were explicitly opened with.
+  const [projectTouched, setProjectTouched] = useState(
+    props.mode === 'edit' || preselectedProjectId !== '',
+  );
   // True after the folder→project resolve has run for this folder, so the
   // attached chip can distinguish "auto-attached" from a manual pick.
   const [projectAutoAttached, setProjectAutoAttached] = useState(false);

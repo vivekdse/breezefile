@@ -219,7 +219,6 @@
 
 .tdd__muted { color: var(--fg-3); font-size: var(--fs-sm); line-height: 1.5; }
 .tdd__mono { font-family: var(--font-mono); font-size: var(--fs-xs); }
-.tdd__overdue { color: var(--err); }
 .tdd__blocked { color: var(--err); }
 
 /* ── task details (embedded composer + read-only meta) ── */
