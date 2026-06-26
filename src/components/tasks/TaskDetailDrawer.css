@@ -118,6 +118,16 @@
   line-height: 1.3;
 }
 
+/* task-1e312af5fae8 — the global `body { user-select: none }` (base.css) makes
+   the detail content uncopyable. Scope selection back ON for the task's title
+   and the scrolling content body so the user can select/copy task text. */
+.tdd__title,
+.tdd__body {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: auto;
+}
+
 /* ── live action row ── */
 .tdd__actionrow {
   display: flex;
