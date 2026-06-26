@@ -15,10 +15,15 @@
 //   resume       → --continue            (resume the most recent conversation
 //                                          in the cwd — the closest CLI flag to
 //                                          "pick up where I left off")
-//   auto         → --permission-mode acceptEdits
-//                  (permissive: lets unattended edits through; MUST NOT bypass
-//                   any human-gated approval — we never emit
-//                   --dangerously-skip-permissions here)
+//   auto         → --permission-mode auto
+//                  (the classifier-driven mode: auto-approves routine actions
+//                   INCLUDING Bash — the browser driver/tool CLI calls — while
+//                   still pausing on genuinely risky/irreversible ones. Browser
+//                   work is all Bash, so acceptEdits (file-edits only) left every
+//                   CLI call prompting; `auto` is what makes unattended browser
+//                   runs actually unattended. MUST NOT bypass any human-gated
+//                   approval — we never emit --dangerously-skip-permissions here,
+//                   and the final-submit confirmation still stands.)
 //   interactive  → (no arg) selects the embedded-tab run style; consumed by
 //                  the dispatcher, not passed to claude
 //
@@ -31,7 +36,7 @@ const STYLE_FLAGS = new Set(['interactive', 'playwright']);
 const FLAG_ARGS: Record<string, string[]> = {
   chrome: ['--chrome'],
   resume: ['--continue'],
-  auto: ['--permission-mode', 'acceptEdits'],
+  auto: ['--permission-mode', 'auto'],
 };
 
 export type FlagsToArgs = {

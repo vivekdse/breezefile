@@ -45,28 +45,51 @@ export function browserCliAllowRules(): string[] {
 }
 
 /** Appended to a task session's prompt when the `playwright` flag is set. The
- *  full browser playbook lives in the `breeze-browser` subagent
- *  (electron/browser/subagent.ts, installed to ~/.claude/agents/) — here we just
- *  tell the task session to DELEGATE its browser work to it. */
+ *  session drives the live browser DIRECTLY — no sub-agent delegation. The full
+ *  playbook rides here so the session has it in its own context (the same prose
+ *  also lives in ~/.breezefile/browser actions/CLAUDE.md for manual sessions). */
 export function playwrightPromptAddendum(): string {
+  const T = TOOLS_CLI; // tool repository CLI (absolute)
+  const C = BROWSER_CLI; // raw driver CLI (absolute)
   return [
     '',
     '---',
-    'Browser task. A live, side-by-side Breeze browser window is open. Do NOT',
-    'drive it yourself or fetch pages out-of-band — DELEGATE the browser work to',
-    'the `breeze-browser` subagent (Agent tool, subagent_type: "breeze-browser").',
-    'It holds the full playbook (reuse/build tools, site+task memory, fill-ref for',
-    'PII) and operates the real signed-in browser over CDP.',
+    'Browser task. A live, side-by-side Breeze browser window is open over CDP —',
+    'the user\'s REAL, signed-in session. Drive it YOURSELF; do NOT fetch pages',
+    'out-of-band or use claude-in-chrome tools. Everything is installed: do not',
+    'install Playwright, download browsers, or write your own driver. If the',
+    'browser genuinely cannot do the task, say so — never silently route around it.',
     '',
-    'Give the subagent, in its prompt: the goal; the start URL; exactly what to',
-    'extract or produce; any data-placeholder KEYS the task lists (the KEYS only —',
-    'never their values); and the task id from $BREEZE_TYPEBUILD_TASK_ID if set.',
-    'Note: `me.*` placeholders (e.g. `me.npi`, `me.tax_id`) resolve to the USER\'s',
-    'OWN saved credentials — NPI, practice Tax ID, portal login IDs — via the same',
-    'fill-ref path, distinct from the per-task patient PHI; the subagent uses them',
-    'when a form needs the provider\'s own identifier rather than customer data.',
-    'When it returns its result, finish the task as usual (e.g. submit). If the',
-    'subagent reports the browser cannot do something, surface that — do not work',
-    'around it by fetching the page yourself.',
+    'Two Bash helpers only:',
+    `  TOOLS:   node ${T} <cmd>`,
+    `  DRIVER:  node ${C} <verb>`,
+    `Task id is in $BREEZE_TYPEBUILD_TASK_ID when set.`,
+    '',
+    '1. REUSE a tool first:',
+    `  node ${T} available <url>     tools matching a URL (JSON)`,
+    `  node ${T} help <tool-id>      a tool’s params + docs`,
+    `  node ${T} run <tool-id> --p v run it (JSON {status,code,result,...})`,
+    '  Exit codes: 0 ok · 1 fail · 2 bad output · 3 timeout(retry) · 4 auth ·',
+    '  5 page-changed(UPDATE the tool) · 6 partial · 7 precondition · 8 stopped.',
+    '',
+    '2. FALLBACK — drive the page directly (only when no tool fits):',
+    `  node ${C} <verb> [args]`,
+    '  open [url] · goto <url> · snapshot [sel] · screenshot [path] · text [sel]',
+    '  click <sel> · fill <sel> <v> · type <sel> <v> · press <key> · wait <sel>',
+    '  eval <js> · url | title | pages · fill-ref <sel> <ref> · type-ref <sel> <ref>',
+    '  Loop: open/goto → snapshot → act → snapshot/screenshot to confirm.',
+    '',
+    '3. LEARN — when raw driving solves something REUSABLE, package it as a tool',
+    '  (stage in a mktemp dir, then `breeze-tools create <id> --from "$d"`; on',
+    '  exit 5 `update` it). 4. MEMORY — `breeze-tools memory get|add --site|--task`',
+    '  for durable NON-PHI how-to (selectors, fast path), NEVER a value.',
+    '',
+    'SENSITIVE DATA: fill a KEY, never the real value. Customer/patient PHI comes',
+    'from the task’s data placeholders (e.g. `patient.ssn`) — use `fill-ref`/',
+    '`type-ref` with the KEY. The USER’s OWN identifiers (NPI, practice Tax ID,',
+    'portal login id — never a password) use reserved `me.*` placeholders (e.g.',
+    '`me.npi`, `me.tax_id`) via the same fill-ref path; do NOT ask the human for',
+    'them. Never read back or screenshot a filled sensitive field. A real',
+    'submission (send/pay/file) needs explicit human confirmation before you click.',
   ].join('\n');
 }

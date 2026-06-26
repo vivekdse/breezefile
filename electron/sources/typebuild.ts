@@ -1017,11 +1017,17 @@ export class TypeBuildTaskSource implements TaskSource {
     // opens a browser tab, points the agent at the helper CLI, and pre-grants
     // its permission (see ensureTasksWorkspace). We strip any server-sent
     // 'chrome' so the two browser integrations never both load. The Set dedupes.
+    // 'auto' is forced on alongside 'playwright': every browser task launches in
+    // the classifier-driven auto permission mode (flags.ts → --permission-mode
+    // auto) so the agent's Bash driver/tool CLI calls run unattended instead of
+    // prompting on each one. The mode still pauses on risky/irreversible actions
+    // and never bypasses the human-gated final submit.
     const flags = Array.from(
       new Set([
         ...serverFlags.filter((f) => f !== 'chrome'),
         'interactive',
         'playwright',
+        'auto',
         ...(opts.resume ? ['resume'] : []),
       ]),
     );
