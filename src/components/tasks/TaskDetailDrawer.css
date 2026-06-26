@@ -3,42 +3,56 @@
    needs-you=warn, blocked=err), one live signal per row. */
 
 .tdd-overlay {
-  /* dock the sheet to the right edge instead of centering */
-  place-items: stretch end;
+  /* task-eb684731af01 — the detail view fills the viewport instead of docking
+     to a narrow right sheet. Stretch the dialog across the whole overlay. */
+  place-items: stretch stretch;
 }
 
 .tdd {
-  width: min(480px, 92vw);
+  /* full-screen: occupy the entire viewport */
+  width: 100%;
   height: 100%;
   background: var(--bg-2);
-  border-left: 1px solid var(--border-2);
   box-shadow: var(--shadow-2);
   display: flex;
   flex-direction: column;
-  padding: var(--sp-4);
+  /* generous, but cap content width so long text stays readable; the inner
+     blocks are centered in the full-bleed surface */
+  padding: var(--sp-5) clamp(var(--sp-4), 6vw, 96px);
   gap: var(--sp-3);
   overflow: hidden;
-  animation: tddSlideIn var(--motion-slide);
+  animation: tddFadeIn var(--motion-slide);
+}
+/* keep the readable column centered while the surface itself is full-bleed */
+.tdd__head,
+.tdd__title,
+.tdd__actionrow,
+.tdd__tabs,
+.tdd__body,
+.tdd__foot {
+  width: 100%;
+  max-width: 900px;
+  margin-inline: auto;
 }
 .overlay[data-state='leave'] .tdd {
-  animation: tddSlideOut var(--motion-exit) forwards;
+  animation: tddFadeOut var(--motion-exit) forwards;
 }
 
-@keyframes tddSlideIn {
-  from { transform: translateX(24px); opacity: 0; }
-  to   { transform: translateX(0); opacity: 1; }
+@keyframes tddFadeIn {
+  from { transform: scale(0.99); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
 }
-@keyframes tddSlideOut {
-  from { transform: translateX(0); opacity: 1; }
-  to   { transform: translateX(24px); opacity: 0; }
+@keyframes tddFadeOut {
+  from { transform: scale(1); opacity: 1; }
+  to   { transform: scale(0.99); opacity: 0; }
 }
 
-/* 3px left-edge accent bar tinted by the live tone */
-.tdd--working   { border-left: 3px solid var(--accent); }
-.tdd--needs-you { border-left: 3px solid var(--warn); }
-.tdd--blocked   { border-left: 3px solid var(--err); }
+/* top accent bar tinted by the live tone (full-bleed at the surface top) */
+.tdd--working   { border-top: 3px solid var(--accent); }
+.tdd--needs-you { border-top: 3px solid var(--warn); }
+.tdd--blocked   { border-top: 3px solid var(--err); }
 .tdd--done,
-.tdd--neutral   { border-left: 3px solid var(--border-2); }
+.tdd--neutral   { border-top: 3px solid var(--border-2); }
 
 /* ── header ── */
 .tdd__head {
@@ -210,6 +224,20 @@
 
 /* ── config ── */
 .tdd__config { display: flex; flex-direction: column; gap: var(--sp-4); }
+/* full-screen: lay schedule + dependencies side-by-side when there's room */
+@media (min-width: 720px) {
+  .tdd__config {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-5) var(--sp-5);
+    align-items: start;
+  }
+  /* details, folder and the instruction set read better full-width */
+  .tdd__config > .tdd__sect:first-child,
+  .tdd__config > .tdd__sect:last-child {
+    grid-column: 1 / -1;
+  }
+}
 .tdd__sect { display: flex; flex-direction: column; gap: var(--sp-2); }
 .tdd__sect-h {
   font-size: 11px;
@@ -236,8 +264,7 @@
   line-height: 1.55;
   color: var(--fg-1);
   white-space: pre-wrap;
-  max-height: 220px;
-  overflow-y: auto;
+  /* full-screen: let the body breathe and rely on .tdd__body to scroll */
 }
 .tdd__folder { color: var(--fg-2); word-break: break-all; margin: 0; }
 
