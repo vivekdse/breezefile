@@ -13,7 +13,7 @@ import type { Entry, SortKey, YankMode } from './types';
 import { runPaste } from './clipboard';
 import { formatOpError } from './errorMessages';
 import { isTextEntryTarget } from './textFocus';
-import { isEditablePath } from './fileTypes';
+import { isEditablePath } from './fileTypes.ts';
 
 // Canonical key name — Ctrl chords prefixed with C-, like ranger's <C-x>.
 function keyName(e: KeyboardEvent): string {

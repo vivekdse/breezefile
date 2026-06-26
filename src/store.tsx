@@ -23,7 +23,7 @@ import type {
 import { fm } from './bridge';
 import { visibleEntries, filterTabKey } from './actions';
 import { filterEntries } from './filterEntries.mjs';
-import { isEditablePath } from './fileTypes';
+import { isEditablePath } from './fileTypes.ts';
 
 const STORAGE_KEY = 'fm-state-v1';
 

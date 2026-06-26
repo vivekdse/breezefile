@@ -43,7 +43,7 @@ import { makeResolveTag } from '../dslTagResolve.mjs';
 import { aggregateStats, summarizeStats } from '../selectionStats.mjs';
 import { loadSideBySidePrefs, splitFraction } from '../sideBySidePrefs';
 import { formatOpError } from '../errorMessages';
-import { isEditablePath } from '../fileTypes';
+import { isEditablePath } from '../fileTypes.ts';
 import './ChipPrompt.css';
 
 // One-shot lazy probe for the native Share helper binary. Verbs'

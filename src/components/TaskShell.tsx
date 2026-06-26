@@ -29,7 +29,7 @@ import {
   getLauncherPrefs,
   subscribeLauncherPrefs,
   type LauncherPrefs,
-} from '../launcherPrefs';
+} from '../launcherPrefs.ts';
 import type { Launcher } from '../bridge';
 import type { Task } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';

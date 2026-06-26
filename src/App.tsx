@@ -58,7 +58,7 @@ import { fm } from './bridge';
 import { taskSourceAction } from './tasks';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
 import { isTextEntryTarget } from './textFocus';
-import { isEditablePath } from './fileTypes';
+import { isEditablePath } from './fileTypes.ts';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
 import type { CustomTagCriterion, Entry, Task } from './types';

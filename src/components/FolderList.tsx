@@ -17,7 +17,7 @@ import {
 } from '../dragState';
 import type { HelpSlideId } from './HelpTour';
 import { formatOpError } from '../errorMessages';
-import { isEditablePath } from '../fileTypes';
+import { isEditablePath } from '../fileTypes.ts';
 import './FolderList.css';
 
 type EmptyKind = 'loading' | 'truly-empty' | 'all-hidden' | 'filtered-out';

@@ -11,7 +11,7 @@ import {
   resetEditableExts,
   subscribeEditableExts,
   normalizeExt,
-} from '../fileTypes';
+} from '../fileTypes.ts';
 import {
   getLauncherPrefs,
   setLauncherHidden,
@@ -20,7 +20,7 @@ import {
   subscribeLauncherPrefs,
   isLauncherHidden,
   type LauncherPrefs,
-} from '../launcherPrefs';
+} from '../launcherPrefs.ts';
 import './Settings.css';
 
 type Props = { onClose: () => void; initialSection?: SectionId };
