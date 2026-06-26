@@ -729,6 +729,9 @@ export function useKeyboard(
         }
       }
       function goLeft() {
+        // fm-mp1 — a filter-tab's trail leaf is a synthetic key, not a real
+        // path; there's no parent to ascend to, so going "up" is a no-op.
+        if (tab.boundSelector) return;
         // marks are scoped to the cwd (fm-pcs) — wipe on any cwd change.
         // Every trail mutation pushes the prior trail onto history so the
         // Back button / H undoes it, and clears forward per standard

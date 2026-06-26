@@ -21,7 +21,8 @@ import type {
   YankEntry,
 } from './types';
 import { fm } from './bridge';
-import { visibleEntries } from './actions';
+import { visibleEntries, filterTabKey } from './actions';
+import { filterEntries } from './filterEntries.mjs';
 import { isEditablePath } from './fileTypes';
 
 const STORAGE_KEY = 'fm-state-v1';
@@ -240,6 +241,7 @@ type Action =
   | { type: 'updateTab'; index: number; patch: Partial<Tab> }
   | { type: 'replaceTab'; index: number; tab: Tab }
   | { type: 'newTab'; tab: Tab }
+  | { type: 'openFilterTab'; selector: string; scope?: string; focus?: boolean }
   | { type: 'openTaskTab'; taskId: string; folder: string; focus?: boolean }
   | { type: 'openTasksTab'; focus?: boolean }
   | { type: 'openProjectsTab'; focus?: boolean }
@@ -335,16 +337,30 @@ function makeTab(
     taskId?: string | null;
     editPath?: string | null;
     browserUrl?: string;
+    // fm-mp1 — open as a filter-tab (smart folder). `boundSelector` is a tagDsl
+    // query; `scopePath` is the walk root (defaults to the tab's path).
+    boundSelector?: string;
+    scopePath?: string;
   },
 ): Tab {
+  const id = crypto.randomUUID();
+  // fm-mp1 — a filter-tab caches its matched entries under a synthetic per-tab
+  // key (never a real path), so its trail leaf is that key rather than `path`.
+  // Every entriesByPath reader keys off the trail leaf, so they all work
+  // unchanged while the real scope directory's own listing stays untouched.
+  const trail = opts?.boundSelector ? [filterTabKey(id)] : [path];
   return {
-    id: crypto.randomUUID(),
+    id,
     kind: opts?.kind ?? 'folder',
     taskId: opts?.taskId ?? null,
     editPath: opts?.editPath ?? null,
     browserUrl: opts?.browserUrl,
+    boundSelector: opts?.boundSelector,
+    // fm-mp1 — explicit scope only; a filter-tab with no scope walks home
+    // (resolved at load time via fm.homedir()), per the task's default.
+    scopePath: opts?.scopePath,
     dirty: false,
-    trail: [path],
+    trail,
     selected: { 0: 0 },
     marks: {},
     sortKey: 'name',
@@ -423,6 +439,22 @@ function reducer(s: State, a: Action): State {
     }
     case 'newTab':
       return { ...s, tabs: [...s.tabs, a.tab], activeTab: s.tabs.length };
+    case 'openFilterTab': {
+      // fm-mp1 — open a selector as a live filter-tab (smart folder). The tab
+      // is a folder-kind tab with boundSelector set; makeTab parks a synthetic
+      // cache key in its trail leaf. scopePath defaults to home — left
+      // undefined here so loadFilterTab resolves it via fm.homedir().
+      const seed = a.scope || s.tabs[s.activeTab]?.trail.at(-1) || '/';
+      const tab = makeTab(seed, {
+        boundSelector: a.selector,
+        scopePath: a.scope, // undefined → walk home
+      });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
     case 'openTaskTab': {
       // fm-1y1 — open or focus a task tab. If a tab already exists for
       // this taskId, focus it; otherwise create a new task-kind tab
@@ -1035,9 +1067,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // fm-mp1 — (re-)evaluate a filter-tab: recursively walk its scope, filter the
+  // entries by its bound selector (resolving tag:name atoms via the DSL-tag
+  // store), and cache the matches under the tab's synthetic key. Re-runs each
+  // time the tab is opened so the smart folder reflects the live filesystem.
+  async function loadFilterTab(tab: Tab): Promise<Entry[]> {
+    const key = filterTabKey(tab.id);
+    const selector = tab.boundSelector ?? '';
+    const scope = tab.scopePath || (await fm.homedir());
+    try {
+      const entries = await fm.walkScope(scope);
+      const tags = await fm.dslTags.list().catch(() => []);
+      const matched = filterEntries(entries, selector, { tags }) as Entry[];
+      dispatch({ type: 'setEntries', path: key, entries: matched });
+      return matched;
+    } catch (err) {
+      const msg = (err as Error).message ?? String(err);
+      dispatch({ type: 'setStatus', msg: `filter “${selector}”: ${msg}` });
+      dispatch({ type: 'setEntries', path: key, entries: [] });
+      return [];
+    }
+  }
+
   async function refreshActive() {
     const tab = stateRef.current.tabs[stateRef.current.activeTab];
     if (!tab) return;
+    if (tab.boundSelector) {
+      await loadFilterTab(tab);
+      return;
+    }
     await Promise.all(tab.trail.map((p) => loadDir(p)));
   }
 
@@ -1106,7 +1164,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       index: stateRef.current.activeTab,
       // marks are scoped to the cwd (fm-pcs) — wipe on any cwd change so
       // a later 'delete' doesn't pull in files the user can no longer see.
-      patch: { trail: [p], selected: { 0: 0 }, history, forward: [], marks: {} },
+      // fm-mp1 — navigating into a real directory exits smart-folder mode:
+      // clear the bound selector so the tab becomes an ordinary folder browse.
+      patch: {
+        trail: [p],
+        selected: { 0: 0 },
+        history,
+        forward: [],
+        marks: {},
+        boundSelector: undefined,
+        scopePath: undefined,
+      },
     });
     dispatch({ type: 'pushRecent', path: p });
   }
@@ -1210,6 +1278,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // fm-vu55 — edit/tasks/task tabs don't browse the trail; skip the
     // eager dir-load that would refetch a parent folder we don't show.
     if (activeTab.kind === 'edit' || activeTab.kind === 'tasks') return;
+    // fm-mp1 — a filter-tab re-evaluates its selector across its scope instead
+    // of listing directories; its trail leaf is the synthetic cache key.
+    if (activeTab.boundSelector) {
+      void loadFilterTab(activeTab);
+      return;
+    }
     const trail = activeTab.trail;
     const leaf = trail[trail.length - 1];
     for (let i = 0; i < trail.length; i++) {
@@ -1220,7 +1294,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Reference leaf so the linter sees we read it.
     void leaf;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab?.id, activeTab?.trail.join('|')]);
+  }, [activeTab?.id, activeTab?.trail.join('|'), activeTab?.boundSelector, activeTab?.scopePath]);
 
   const value = useMemo<Ctx>(
     () => ({

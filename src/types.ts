@@ -56,6 +56,15 @@ export type Tab = {
   /** SPIKE (spike/playwright-cdp) — when kind === 'browser', the URL the
    *  embedded WebContentsView loads. */
   browserUrl?: string;
+  /** fm-mp1 — filter-tab (a "smart folder"). When set, this folder tab does
+   *  NOT list a directory; instead it lists the entries under `scopePath`
+   *  (recursively, via fm.walkScope) that MATCH this tagDsl selector,
+   *  re-evaluated each time the tab is opened. The tab stays kind 'folder' so
+   *  it reuses the whole file-browser surface (sort, select, yank, verbs); the
+   *  presence of boundSelector is what flips it into smart-folder mode. */
+  boundSelector?: string;
+  /** fm-mp1 — the root a filter-tab walks (default: home). Absolute path. */
+  scopePath?: string;
   trail: string[]; // absolute paths
   selected: Record<number, number>; // per-column selection index
   marks: Record<string, true>; // paths marked for selection (multi-select)

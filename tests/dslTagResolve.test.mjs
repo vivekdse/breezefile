@@ -65,6 +65,24 @@ test('resolveTag: a frozen tag tests snapshot membership by path', async () => {
   assert.equal(evaluate(ast, png, { resolveTag }), false); // path not in snapshot
 });
 
+test('resolveTag: a snapshot from computeSnapshot resolves via the frozen path (fm-xr0)', async () => {
+  // End-to-end link between fm-xr0's two halves: computeSnapshot captures the
+  // matching path set, the store pins it on a frozen tag, and resolveTag tests
+  // membership by path against that snapshot (NOT by re-evaluating the selector).
+  const { computeSnapshot } = await import('../src/filterEntries.mjs');
+  const walked = [pdf, png];
+  const snapshot = computeSnapshot(walked, 'ext = pdf and size > 4MB');
+  assert.deepEqual(snapshot, [pdf.path]);
+
+  const store = await freshStore();
+  await store.create({ name: 'frozen-pdfs', selector: 'ext = pdf', mode: 'frozen', snapshot });
+  const resolveTag = makeResolveTag(await store.list());
+  // Membership is snapshot-driven: pdf is in, png is not — even though png's
+  // own metadata is irrelevant to a frozen tag.
+  assert.equal(evaluate(parse('tag:frozen-pdfs'), pdf, { resolveTag }), true);
+  assert.equal(evaluate(parse('tag:frozen-pdfs'), png, { resolveTag }), false);
+});
+
 test('resolveTag: a reference cycle degrades to no-match (no stack overflow)', async () => {
   // a → b → a. The bridge's in-flight guard breaks the cycle, treating the
   // back-reference as false. We silence the expected console.warn.

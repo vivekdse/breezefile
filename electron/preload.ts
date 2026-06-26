@@ -87,6 +87,14 @@ const fm = {
       }>
     >,
   readdir: (p: string) => ipcRenderer.invoke('fs:readdir', p),
+  // fm-mp1 / fm-xr0 — recursively walk a scope, returning full-metadata Entry
+  // rows for every descendant (capped: default depth ≤ 8, ≤ 5000 entries). Used
+  // by filter-tabs (selector → matching entries) and frozen tags (selector →
+  // snapshot of matching paths).
+  walkScope: (
+    scope: string,
+    opts?: { maxDepth?: number; maxCount?: number; includeHidden?: boolean },
+  ) => ipcRenderer.invoke('fs:walkScope', scope, opts),
   stat: (p: string) => ipcRenderer.invoke('fs:stat', p),
   mkdir: (p: string) => ipcRenderer.invoke('fs:mkdir', p),
   rename: (from: string, to: string) => ipcRenderer.invoke('fs:rename', from, to),

@@ -198,6 +198,105 @@ async function readdirEntries(dirpath: string): Promise<Entry[]> {
   return results.filter((e): e is Entry => e !== null);
 }
 
+// fm-mp1 / fm-xr0 — recursive scope walker shared by filter-tabs and frozen
+// tags. Unlike readdirEntries (one directory, no recursion) this BFS-walks a
+// scope and returns full-metadata Entry rows for EVERY descendant, so the
+// renderer's pure selector evaluator (src/filterEntries.mjs) can match across a
+// whole subtree. There is no full-metadata recursive lister elsewhere — the
+// platform BFS (electron/platform/bfs.ts) returns name-matched PATHS only, with
+// no size/mtime/kind — so this is net-new.
+//
+// CAPS (performance + safety): default depth ≤ 8 levels below the scope root
+// and ≤ 5000 entries returned; both overridable by the caller but clamped to
+// hard ceilings (depth ≤ 16, count ≤ 20000) so a runaway selector can't walk an
+// unbounded tree. Heavy/uninteresting dirs (.git, node_modules, caches, build
+// output) are skipped, matching the platform BFS skip set. Symlinked dirs are
+// NOT descended into (lstat, never follow) so cycles can't blow the walk up.
+const WALK_SKIP = new Set([
+  '.git', 'node_modules', '__pycache__', '.cache', '.venv', 'venv',
+  '.pytest_cache', '.mypy_cache', '.ruff_cache', '.svn', '.hg',
+  '.npm', '.yarn', '.pnpm-store', '.cargo', '.rustup',
+  'dist', 'build', 'target', '.next', '.nuxt', 'out', 'snap',
+]);
+const WALK_MAX_DEPTH = 8;
+const WALK_MAX_COUNT = 5000;
+const WALK_DEPTH_CEILING = 16;
+const WALK_COUNT_CEILING = 20000;
+
+async function walkScope(
+  scope: string,
+  opts?: { maxDepth?: number; maxCount?: number; includeHidden?: boolean },
+): Promise<Entry[]> {
+  const root = expandHome(scope);
+  const maxDepth = Math.min(opts?.maxDepth ?? WALK_MAX_DEPTH, WALK_DEPTH_CEILING);
+  const maxCount = Math.min(opts?.maxCount ?? WALK_MAX_COUNT, WALK_COUNT_CEILING);
+  const includeHidden = opts?.includeHidden ?? false;
+  const out: Entry[] = [];
+
+  // BFS by level so the cap bites breadth-first (nearer entries win when capped)
+  // and a single very deep branch can't starve siblings.
+  let frontier: string[] = [root];
+  for (let level = 0; level <= maxDepth && frontier.length > 0 && out.length < maxCount; level++) {
+    const next: string[] = [];
+    const batches = await Promise.all(
+      frontier.map(async (dir) => {
+        let dirents;
+        try {
+          dirents = await fs.readdir(dir, { withFileTypes: true });
+        } catch {
+          return [] as { entry: Entry; descend: string | null }[];
+        }
+        return Promise.all(
+          dirents.map(async (d): Promise<{ entry: Entry; descend: string | null } | null> => {
+            const name = d.name;
+            if (WALK_SKIP.has(name)) return null;
+            const isHidden = name.startsWith('.');
+            if (isHidden && !includeHidden) {
+              // Hidden file → omit; hidden dir → omit AND don't descend.
+              return null;
+            }
+            const full = path.join(dir, name);
+            let lst;
+            try {
+              lst = await fs.lstat(full);
+            } catch {
+              return null;
+            }
+            const ext =
+              name.includes('.') && !name.startsWith('.')
+                ? name.split('.').pop()!.toLowerCase()
+                : undefined;
+            const kind = classify(name, lst, lst.mode);
+            const entry: Entry = {
+              name,
+              path: full,
+              kind,
+              ext,
+              size: lst.size,
+              mtimeMs: lst.mtimeMs,
+              ctimeMs: lst.ctimeMs,
+              isHidden,
+            };
+            // Descend only into REAL directories (kind 'dir' excludes symlinks,
+            // which classify reports as 'link') so symlink loops can't recurse.
+            return { entry, descend: kind === 'dir' ? full : null };
+          }),
+        );
+      }),
+    );
+    for (const batch of batches) {
+      for (const item of batch) {
+        if (!item) continue;
+        if (out.length < maxCount) out.push(item.entry);
+        if (item.descend) next.push(item.descend);
+      }
+      if (out.length >= maxCount) break;
+    }
+    frontier = next;
+  }
+  return out;
+}
+
 async function copyRecursive(src: string, dst: string) {
   const st = await fs.lstat(src);
   if (st.isDirectory()) {
@@ -788,6 +887,21 @@ export function registerIpc() {
   ipcMain.handle('fs:readdir', async (_e, dirpath: string) => {
     return readdirEntries(dirpath);
   });
+
+  // fm-mp1 / fm-xr0 — recursively walk a scope and return full-metadata Entry
+  // rows for every descendant, so the renderer can evaluate a tagDsl selector
+  // across a whole subtree (filter-tabs) or capture a frozen snapshot of the
+  // matching paths. Capped (see walkScope): default depth ≤ 8, ≤ 5000 entries.
+  ipcMain.handle(
+    'fs:walkScope',
+    async (
+      _e,
+      scope: string,
+      opts?: { maxDepth?: number; maxCount?: number; includeHidden?: boolean },
+    ) => {
+      return walkScope(scope, opts);
+    },
+  );
 
   ipcMain.handle('fs:homedir', () => os.homedir());
 

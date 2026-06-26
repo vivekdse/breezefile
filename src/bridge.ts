@@ -33,6 +33,14 @@ type Fm = {
     }>
   >;
   readdir: (p: string) => Promise<Entry[]>;
+  // fm-mp1 / fm-xr0 — recursively walk a scope, returning full-metadata Entry
+  // rows for every descendant (capped: default depth ≤ 8, ≤ 5000 entries).
+  // Powers filter-tabs (selector → matching entries across the scope) and
+  // frozen-tag snapshots (selector → set of matching paths).
+  walkScope: (
+    scope: string,
+    opts?: { maxDepth?: number; maxCount?: number; includeHidden?: boolean },
+  ) => Promise<Entry[]>;
   stat: (p: string) => Promise<{ size: number; mtimeMs: number; isDir: boolean }>;
   mkdir: (p: string) => Promise<void>;
   rename: (from: string, to: string) => Promise<void>;

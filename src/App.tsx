@@ -139,7 +139,9 @@ function Shell() {
   // "+ New tag" button in the TagInspector pane.
   const [newTagOpen, setNewTagOpen] = useState(false);
   // task-317c7fe41f90 — selector-based DSL tag editor (additive; :dsltag verb).
-  const [dslTagOpen, setDslTagOpen] = useState(false);
+  // fm-xr0 — null = closed; { editId } = editing an existing DSL tag;
+  // { editId: null } / {} = creating a new one.
+  const [dslTagOpen, setDslTagOpen] = useState<{ editId?: string | null } | null>(null);
   // fm-60k — keyboard tag HUD. Opened via `t` (apply) or `T` (filter).
   const [tagPicker, setTagPicker] = useState<'apply' | 'filter' | null>(null);
   // Slide-based help (HelpTour). Opened by the :help verb or the Help
@@ -1131,7 +1133,19 @@ function Shell() {
       setNewTagOpen(true);
     }
     function onNewDslTag() {
-      setDslTagOpen(true);
+      setDslTagOpen({});
+    }
+    // fm-xr0 — open the DSL-tag editor on an existing tag (frozen toggle etc.).
+    function onEditDslTag(e: Event) {
+      const id = (e as CustomEvent).detail?.id as string | undefined;
+      if (id) setDslTagOpen({ editId: id });
+    }
+    // fm-mp1 — open a tagDsl selector as a live filter-tab (smart folder).
+    function onOpenFilterTab(e: Event) {
+      const selector = (e as CustomEvent).detail?.selector as string | undefined;
+      const scope = (e as CustomEvent).detail?.scope as string | undefined;
+      if (!selector || !selector.trim()) return;
+      dispatch({ type: 'openFilterTab', selector: selector.trim(), scope });
     }
     function onTagPicker(e: Event) {
       const detail = (e as CustomEvent).detail as { mode: 'apply' | 'filter' } | undefined;
@@ -1232,6 +1246,8 @@ function Shell() {
     window.addEventListener('fm:openWith', onOpenWith);
     window.addEventListener('fm:newTag', onNewTag);
     window.addEventListener('fm:newDslTag', onNewDslTag);
+    window.addEventListener('fm:editDslTag', onEditDslTag);
+    window.addEventListener('fm:openFilterTab', onOpenFilterTab);
     window.addEventListener('fm:tagPicker', onTagPicker);
     window.addEventListener('fm:openHelp', onHelp);
     window.addEventListener('fm:openSecrets', onSecrets);
@@ -1258,6 +1274,8 @@ function Shell() {
       window.removeEventListener('fm:openWith', onOpenWith);
       window.removeEventListener('fm:newTag', onNewTag);
       window.removeEventListener('fm:newDslTag', onNewDslTag);
+      window.removeEventListener('fm:editDslTag', onEditDslTag);
+      window.removeEventListener('fm:openFilterTab', onOpenFilterTab);
       window.removeEventListener('fm:tagPicker', onTagPicker);
       window.removeEventListener('fm:openHelp', onHelp);
       window.removeEventListener('fm:openSecrets', onSecrets);
@@ -1322,6 +1340,7 @@ function Shell() {
   const isProjectsTab = tab.kind === 'projects';
   const isEditTab = tab.kind === 'edit';
   const isBrowserTab = tab.kind === 'browser'; // SPIKE (spike/playwright-cdp)
+  const isFilterTab = !!tab.boundSelector; // fm-mp1 — smart folder (folder kind)
 
   return (
     <OverlayCtx.Provider value={overlayApi}><div
@@ -1345,10 +1364,22 @@ function Shell() {
       <div className="shell__chrome">
         <Tabbar />
         {!isTaskTab && !isTasksTab && !isProjectsTab && !isEditTab && !isBrowserTab && (
-          <Pathbar
-            path={tab.trail[tab.trail.length - 1]}
-            onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
-          />
+          isFilterTab ? (
+            // fm-mp1 — a filter-tab has no real cwd to navigate; show the bound
+            // selector + scope instead of the synthetic trail key.
+            <div className="pathbar pathbar--filter" title={tab.boundSelector}>
+              <span className="pathbar__filter-icon">⧉</span>
+              <span className="pathbar__filter-selector">{tab.boundSelector}</span>
+              <span className="pathbar__filter-scope">
+                in {tab.scopePath ? basename(tab.scopePath) || tab.scopePath : 'home'}
+              </span>
+            </div>
+          ) : (
+            <Pathbar
+              path={tab.trail[tab.trail.length - 1]}
+              onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
+            />
+          )
         )}
       </div>
       {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot.
@@ -1599,7 +1630,8 @@ function Shell() {
       )}
       {dslTagOpen && (
         <DslTagOverlay
-          onClose={() => setDslTagOpen(false)}
+          editId={dslTagOpen.editId ?? null}
+          onClose={() => setDslTagOpen(null)}
           onSaved={(msg) => dispatch({ type: 'setStatus', msg })}
         />
       )}

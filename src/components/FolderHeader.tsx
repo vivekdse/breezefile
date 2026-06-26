@@ -30,9 +30,17 @@ export function FolderHeader() {
   if (!view) return null;
   const { cwd, entries } = view;
 
-  const name = basename(cwd) || '/';
-  const parentName = cwd === '/' ? '' : basename(dirname(cwd)) || '/';
-  const [head, tail] = splitTrailingToken(name);
+  // fm-mp1 — a filter-tab (smart folder) has no real cwd; headline the bound
+  // selector and skip the parent kicker / cwd title (the synthetic key is not a
+  // path). The summary + ornament still describe the matched set.
+  const isFilter = !!activeTab?.boundSelector;
+  const name = isFilter ? (activeTab!.boundSelector || 'Filter') : basename(cwd) || '/';
+  const parentName = isFilter
+    ? 'Smart folder'
+    : cwd === '/'
+      ? ''
+      : basename(dirname(cwd)) || '/';
+  const [head, tail] = isFilter ? [name, ''] : splitTrailingToken(name);
   const mtimeLabel = latestMtimeLabel(entries);
   const countLine = summarize(entries);
 

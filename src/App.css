@@ -507,6 +507,70 @@
   color: #fff9ea;
   font-weight: 600;
 }
+/* fm-xr0 — live/frozen mode toggle + action buttons in the DSL-tag overlay. */
+.overlay__mode {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  color: var(--fg-1);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  padding: 5px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+}
+.overlay__mode:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.overlay__mode--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff9ea;
+  font-weight: 600;
+}
+.overlay__mode--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff9ea;
+  font-weight: 600;
+}
+.overlay__mode--primary:disabled {
+  background: var(--bg-1);
+  border-color: var(--border-1);
+  color: var(--fg-1);
+}
+.tagform__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* fm-mp1 — filter-tab (smart folder) pseudo-pathbar: the bound selector + scope
+   in place of a real cwd breadcrumb. */
+.pathbar--filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pathbar__filter-icon {
+  opacity: 0.7;
+}
+.pathbar__filter-selector {
+  font-family: var(--font-mono);
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pathbar__filter-scope {
+  color: var(--fg-3);
+  font-style: italic;
+}
+
 .tagform__hint-line {
   font-size: var(--fs-xs);
   color: var(--fg-3);

@@ -165,6 +165,7 @@ type Verb =
   | 'disconnect'
   | 'newtag'
   | 'dsltag'
+  | 'filter-tab'
   | 'tag'
   | 'untag'
   | 'run'
@@ -1728,6 +1729,94 @@ export const VERBS: VerbDef[] = [
     slots: [],
     execute: (_c, _p, api) => {
       window.dispatchEvent(new CustomEvent('fm:newDslTag'));
+      api.closeOverlay();
+    },
+  },
+  {
+    // fm-mp1 — open a tagDsl selector as a live FILTER-TAB (smart folder). The
+    // tab lists entries matching the selector across a scope (home by default),
+    // re-evaluated each time it's opened. The selector is free-text typed into
+    // the slot; saved DSL tags surface as one-tap `tag:<name>` starters.
+    id: 'filter-tab',
+    availableInTaskMode: false,
+    label: 'Open filter tab',
+    aliases: ['filter tab', 'smart folder', 'filter-tab', 'smart tab', 'tab filter'],
+    icon: '⧉',
+    describe: (c) => {
+      const q = c.searchQuery.trim();
+      return q
+        ? `Open a smart-folder tab for: ${q}`
+        : 'Open a smart-folder tab from a selector (ext = pdf and size > 4MB)';
+    },
+    isAvailable: () => ({ ok: true }),
+    slots: [
+      {
+        label: 'Selector',
+        getOptions: (c, _prev) => {
+          const expr = c.searchQuery.trim();
+          const opts: Option[] = [];
+          if (expr) {
+            try {
+              parseTagExpr(expr);
+              opts.push({
+                id: `expr:${expr}`,
+                label: expr,
+                detail: 'open as a live smart-folder tab',
+                available: true,
+              });
+            } catch (err) {
+              opts.push({
+                id: `expr:${expr}`,
+                label: expr,
+                detail: `invalid: ${err instanceof Error ? err.message : String(err)}`,
+                available: false,
+                reason: 'Fix the selector to open a tab',
+              });
+            }
+          }
+          for (const t of c.dslTags) {
+            const starter = `tag:${t.name}`;
+            opts.push({
+              id: `expr:${starter}`,
+              label: starter,
+              detail: t.selector ? `= ${t.selector}` : 'saved tag',
+              aliases: [t.name],
+              available: true,
+            });
+          }
+          if (opts.length === 0) {
+            opts.push({
+              id: 'expr:',
+              label: 'Type a selector…',
+              detail: 'e.g. ext = pdf and size > 1MB',
+              available: false,
+              reason: 'Type a tagDsl selector',
+            });
+          }
+          return opts;
+        },
+      },
+    ],
+    execute: (_c, [picked], api) => {
+      const expr = (picked ?? '').startsWith('expr:') ? picked.slice('expr:'.length) : picked;
+      const query = (expr ?? '').trim();
+      if (!query) {
+        api.dispatch({ type: 'setStatus', msg: 'no selector — nothing to open' });
+        return;
+      }
+      try {
+        parseTagExpr(query);
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `bad selector: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
+      window.dispatchEvent(
+        new CustomEvent('fm:openFilterTab', { detail: { selector: query } }),
+      );
+      api.dispatch({ type: 'setStatus', msg: `smart folder: ${query}` });
       api.closeOverlay();
     },
   },
