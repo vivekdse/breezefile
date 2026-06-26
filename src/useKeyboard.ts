@@ -121,6 +121,18 @@ export function useKeyboard(
       // keys don't double-fire as global verbs (e.g., `1` opening goto).
       if (document.body.dataset.composerOpen === 'true') return;
 
+      // fm-m7q — ⌘K / Ctrl+K opens the command palette: a browsable,
+      // searchable surface over the SAME verb registry the ':' picker uses.
+      // Handled before the text-entry bail so it works from any focus
+      // (folder list, editor, terminal) and on any tab kind. The palette
+      // itself dispatches into command mode, so execution never forks.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        clearTimer();
+        window.dispatchEvent(new Event('fm:openCommandPalette'));
+        return;
+      }
+
       if (isTextEntryTarget(e)) {
         // Tab-management mod-chords must escape focused inputs (notably
         // xterm's hidden textarea on task tabs, and the Milkdown markdown

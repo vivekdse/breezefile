@@ -16,6 +16,7 @@ import { Tabbar } from './components/Tabbar';
 import { ModeLine } from './components/ModeLine';
 import { Settings } from './components/Settings';
 import { ChipPrompt } from './components/ChipPrompt';
+import { CommandPalette } from './components/CommandPalette';
 import { PasteChip } from './components/PasteChip';
 import { ConfirmDialog, type ConfirmRequest } from './components/ConfirmDialog';
 import { ThemePicker } from './components/ThemePicker';
@@ -118,6 +119,8 @@ function Shell() {
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  // fm-m7q — Cmd-K command palette over the verb registry.
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState<boolean>(() => shouldShowWelcome());
   const [privacyHelpOpen, setPrivacyHelpOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -1093,6 +1096,9 @@ function Shell() {
     function onTheme() {
       setThemeOpen(true);
     }
+    function onCommandPalette() {
+      setPaletteOpen(true);
+    }
     function onPrivacyHelp() {
       setPrivacyHelpOpen(true);
     }
@@ -1218,6 +1224,7 @@ function Shell() {
     window.addEventListener('fm:openMkdir', onMkdir);
     window.addEventListener('fm:openTouch', onTouch);
     window.addEventListener('fm:openTheme', onTheme);
+    window.addEventListener('fm:openCommandPalette', onCommandPalette);
     window.addEventListener('fm:openPrivacyHelp', onPrivacyHelp);
     window.addEventListener('fm:openTutorial', onTutorial);
     window.addEventListener('fm:toggleTips', onToggleTips);
@@ -1243,6 +1250,7 @@ function Shell() {
       window.removeEventListener('fm:openMkdir', onMkdir);
       window.removeEventListener('fm:openTouch', onTouch);
       window.removeEventListener('fm:openTheme', onTheme);
+      window.removeEventListener('fm:openCommandPalette', onCommandPalette);
       window.removeEventListener('fm:openPrivacyHelp', onPrivacyHelp);
       window.removeEventListener('fm:openTutorial', onTutorial);
       window.removeEventListener('fm:toggleTips', onToggleTips);
@@ -1539,6 +1547,7 @@ function Shell() {
         />
       )}
       {themeOpen && <ThemePicker onClose={() => setThemeOpen(false)} />}
+      {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
       {welcomeOpen && <Welcome onClose={() => setWelcomeOpen(false)} />}
       {privacyHelpOpen && <PrivacyHelpDialog onClose={() => setPrivacyHelpOpen(false)} />}
       {tutorialOpen && (

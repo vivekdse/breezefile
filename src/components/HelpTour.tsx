@@ -95,6 +95,9 @@ const SLIDES: Slide[] = [
         Type <kbd>copy</kbd>, <kbd>move</kbd>, <kbd>tag</kbd>, or{' '}
         <kbd>share</kbd>. A small panel shows your choices. Pick one, hit{' '}
         <kbd>↵</kbd>. Every action works the same way — nothing to memorize.
+        Prefer to browse? Press <kbd>⌘K</kbd> to open the{' '}
+        <b>command palette</b> — every action in one searchable list, with its
+        keyboard shortcut and category shown.
       </>
     ),
   },
@@ -110,6 +113,7 @@ const SLIDES: Slide[] = [
       { name: 'open / parent', chord: '↵ / ⌫', what: 'enter folder / go up' },
       { name: 'top / bottom', chord: 'gg / G', what: 'first or last row' },
       { name: 'history', chord: 'H / L', what: 'back / forward' },
+      { name: 'command palette', chord: '⌘K', what: 'browse / search every action in one list — shows each verb’s shortcut + category, ordered by what you use most' },
       { name: 'find', chord: '⌘F or /', what: 'recursive search across folders' },
       { name: 'go to / find', what: 'type a folder OR file name in the chip prompt — folder picks navigate, file picks open the file in its default app' },
       { name: 'goto home', chord: 'gh', what: 'jump to ~ (also g/, ge, gu, gd, gp…)' },

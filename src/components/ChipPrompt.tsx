@@ -59,7 +59,7 @@ let shareHelperAvailable: boolean | null = null;
 // Context gathered once per overlay render — drives verb availability and
 // the object/destination options.
 // ────────────────────────────────────────────────────────────────────────────
-type Ctx = {
+export type Ctx = {
   cwd: string;
   entries: Entry[];
   cursor: Entry | undefined;
@@ -200,13 +200,21 @@ type Option = {
   kind?: 'verb' | 'find-folder' | 'find-file';
 };
 
-type VerbDef = {
+export type VerbDef = {
   id: Verb;
   label: string;
   aliases: string[]; // typed filter matches
   icon: string;
   describe: (ctx: Ctx) => string; // preview sentence
   isAvailable: (ctx: Ctx) => { ok: boolean; reason?: string };
+  // fm-m7q — single-source-of-truth metadata for the non-keyboard
+  // affordances (Cmd-K palette, native menu, help). `keybinding` is the
+  // human-readable accelerator the verb is bound to in useKeyboard.ts
+  // (e.g. '⌘F', '⌘C', 'F2'), shown in the palette but NOT the authority —
+  // the actual binding still lives in useKeyboard.ts. `category` groups
+  // verbs in the palette (Files / Selection / Navigate / View / Tools / Help).
+  keybinding?: string;
+  category?: string;
   // slots after the verb; empty = execute immediately
   slots: SlotDef[];
   execute: (ctx: Ctx, picks: string[], api: ExecApi) => Promise<void> | void;
@@ -332,7 +340,7 @@ function entryMatchesSelector(e: Entry, sel: SelectorId): boolean {
   return false;
 }
 
-const VERBS: VerbDef[] = [
+export const VERBS: VerbDef[] = [
   {
     id: 'select',
     availableInTaskMode: false,
@@ -2518,6 +2526,118 @@ const VERBS: VerbDef[] = [
   ...buildTaskVerbs(),
 ];
 
+// ────────────────────────────────────────────────────────────────────────────
+// fm-m7q — single-source-of-truth metadata for the verb registry.
+//
+// `keybinding`/`category` are kept OUT of the per-verb literals above (so the
+// big catalog stays readable) and merged in here. This table is the one place
+// keybinding + category live for the palette / menu / help affordances; the
+// ACTUAL key handling still lives in src/useKeyboard.ts (these strings are
+// display-only). Keep them in sync with useKeyboard's mod-chord handlers.
+//
+// Category names mirror the native menu sections (electron/main.ts buildAppMenu)
+// so the Cmd-K palette groups verbs the same way the menu bar does.
+const VERB_KEYBINDINGS: Partial<Record<Verb, string>> = {
+  goto: '⌘F',
+  copy: '⌘C',
+  move: '⌘X',
+  paste: '⌘V',
+  rename: 'F2',
+  showHidden: '⌘⇧.',
+  newTab: '⌘T',
+  closeTab: '⌘W',
+  restoreTab: '⌘⇧T',
+  maximize: '⌘⇧M',
+  help: '?',
+};
+
+const VERB_CATEGORIES: Partial<Record<Verb, string>> = {
+  // Selection / file ops
+  select: 'Selection',
+  'select-expr': 'Selection',
+  move: 'Selection',
+  copy: 'Selection',
+  paste: 'Selection',
+  delete: 'Selection',
+  'permanent-delete': 'Selection',
+  'copy-path': 'Selection',
+  'export-list': 'Selection',
+  'drag-out': 'Selection',
+  share: 'Selection',
+  // Files
+  rename: 'Files',
+  open: 'Files',
+  edit: 'Files',
+  'open-editor': 'Files',
+  'editor-save': 'Files',
+  'editor-revert': 'Files',
+  'editor-close': 'Files',
+  'open-with': 'Files',
+  reveal: 'Files',
+  create: 'Files',
+  note: 'Files',
+  notes: 'Files',
+  compress: 'Files',
+  extract: 'Files',
+  // Navigate
+  goto: 'Navigate',
+  back: 'Navigate',
+  forward: 'Navigate',
+  up: 'Navigate',
+  pin: 'Navigate',
+  unpin: 'Navigate',
+  switchTab: 'Navigate',
+  newTab: 'Navigate',
+  closeTab: 'Navigate',
+  restoreTab: 'Navigate',
+  // View
+  sort: 'View',
+  view: 'View',
+  showHidden: 'View',
+  foldersFirst: 'View',
+  theme: 'View',
+  tag: 'View',
+  untag: 'View',
+  newtag: 'View',
+  dsltag: 'View',
+  filter: 'View',
+  sidebyside: 'View',
+  maximize: 'View',
+  fullscreen: 'View',
+  // Tools
+  openTerminal: 'Tools',
+  term: 'Tools',
+  'term-close': 'Tools',
+  chat: 'Tools',
+  'remote-attach': 'Tools',
+  disconnect: 'Tools',
+  run: 'Tools',
+  task: 'Tools',
+  tasks: 'Tools',
+  projects: 'Tools',
+  'new-project': 'Tools',
+  settings: 'Tools',
+  secrets: 'Tools',
+  permissions: 'Tools',
+  upgrade: 'Tools',
+  // Help / app
+  help: 'Help',
+  tutorial: 'Help',
+  tips: 'Help',
+  welcome: 'Help',
+};
+
+// Decorate the catalog in place so VERBS is the single export carrying
+// keybinding + category. Done once at module load.
+for (const v of VERBS) {
+  if (v.keybinding === undefined && VERB_KEYBINDINGS[v.id] !== undefined) {
+    v.keybinding = VERB_KEYBINDINGS[v.id];
+  }
+  if (v.category === undefined && VERB_CATEGORIES[v.id] !== undefined) {
+    v.category = VERB_CATEGORIES[v.id];
+  }
+}
+
 function buildTaskVerbs(): VerbDef[] {
   const fire = (name: string, detail?: unknown) =>
     window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -3237,6 +3357,120 @@ function queryMatchesVerb(q: string, verbs: VerbDef[]): boolean {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// fm-m7q — shared verb context + effective-verb selection.
+//
+// `useVerbCtx` builds the same Ctx the ChipPrompt verb picker uses, so any
+// affordance (the Cmd-K command palette) can call a verb's isAvailable/describe
+// against the live app state without re-deriving it. The search-only fields
+// (searchResults / searchFiles / localSubdirs / searchQuery) are left empty —
+// they only feed the goto/destination flows that the palette doesn't drive; a
+// verb's isAvailable never depends on them.
+//
+// `effectiveVerbsFor` mirrors ChipPrompt's verb-gating (tasks-enabled,
+// task/tasks tab kinds) and appends the synthesized launcher verbs, so the
+// palette lists exactly the verbs the ':' picker would.
+// ────────────────────────────────────────────────────────────────────────────
+export function useVerbCtx(): Ctx | null {
+  const { state, activeTab } = useStore();
+  const [homedir, setHomedir] = useState('');
+  const [defaultTerminal, setDefaultTerminal] = useState<string | null>(null);
+  const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
+  const [remoteTargets, setRemoteTargets] = useState<string[]>([]);
+  const [connectedSources, setConnectedSources] = useState<string[]>([]);
+  const [launchers, setLaunchers] = useState<import('../bridge').Launcher[]>([]);
+  const [dslTags, setDslTags] = useState<import('../tagStore.d.mts').Tag[]>([]);
+
+  useEffect(() => {
+    void fm.homedir().then(setHomedir).catch(() => {});
+    void fm.getDefaultTerminal().then(setDefaultTerminal).catch(() => {});
+    void fm.listTerminals().then(setInstalledTerminals).catch(() => {});
+    void fm.remoteListTargets().then(setRemoteTargets).catch(() => {});
+    const loadSources = () =>
+      void fm
+        .sourcesList()
+        .then((ss) =>
+          setConnectedSources(
+            ss.filter((s) => s.kind === 'remote' && s.status === 'connected').map((s) => s.id),
+          ),
+        )
+        .catch(() => {});
+    loadSources();
+    const offSources = fm.onSourcesChanged(loadSources);
+    void fm.launchersList().then(setLaunchers).catch(() => {});
+    void fm.dslTags?.list().then(setDslTags).catch(() => {});
+    return () => offSources();
+  }, []);
+
+  return useMemo<Ctx | null>(() => {
+    if (!activeTab) return null;
+    const cwd = activeTab.trail[lastCol(activeTab)];
+    const entries = visibleEntries(state.entriesByPath[cwd], activeTab);
+    const cursor = currentEntry(activeTab, entries);
+    const markedPaths = Object.keys(activeTab.marks);
+    return {
+      cwd,
+      entries,
+      cursor,
+      markedPaths,
+      yankCount: state.yank.length,
+      bookmarks: state.bookmarks,
+      homedir,
+      recents: state.recents ?? [],
+      recentFiles: state.recentFiles ?? [],
+      pinned: state.pinned ?? [],
+      tabs: state.tabs.map((t, i) => ({
+        index: i,
+        id: t.id,
+        cwd: t.trail[t.trail.length - 1],
+        label: basename(t.trail[t.trail.length - 1]) || '/',
+        active: i === state.activeTab,
+      })),
+      canRestoreTab: !!state.lastClosedTab,
+      searchResults: [],
+      searchFiles: [],
+      searchQuery: '',
+      localSubdirs: [],
+      historyLen: activeTab.history.length,
+      forwardLen: activeTab.forward.length,
+      defaultTerminal,
+      installedTerminals,
+      remoteTargets,
+      connectedSources,
+      activeTabHasTerminal: !!activeTab.terminal,
+      activeTabTerminal: activeTab.terminal ? { ptyId: activeTab.terminal.ptyId } : undefined,
+      launchers,
+      customTags: state.customTags,
+      tagPaths: state.tagPaths,
+      tagFilter: activeTab.tagFilter,
+      activeTabKind: activeTab.kind,
+      activeTabFoldersFirst: activeTab.foldersFirst ?? true,
+      dslTags,
+    };
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, defaultTerminal, installedTerminals, remoteTargets, connectedSources, launchers, state.customTags, state.tagPaths, dslTags]);
+}
+
+// Compute the verbs that should be offered for the active tab — same gating
+// the ChipPrompt verb picker applies — and append synthesized launcher verbs.
+export function effectiveVerbsFor(opts: {
+  tasksEnabled: boolean;
+  tabKind: TabKind;
+  launchers: import('../bridge').Launcher[];
+}): VerbDef[] {
+  const { tasksEnabled, tabKind, launchers } = opts;
+  const inTaskMode = tabKind === 'task';
+  const inTasksTab = tabKind === 'tasks';
+  let base = tasksEnabled
+    ? VERBS
+    : VERBS.filter((v) => v.id !== 'task' && v.id !== 'tasks' && v.id !== 'run');
+  base = base.filter((v) => {
+    if (v.tabKinds) return v.tabKinds.includes(tabKind);
+    if (inTasksTab || inTaskMode) return v.availableInTaskMode !== false;
+    return true;
+  });
+  return [...base, ...synthesizeLauncherVerbs(launchers)];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // The overlay component
 // ────────────────────────────────────────────────────────────────────────────
 export function ChipPrompt({
@@ -3555,24 +3789,19 @@ export function ChipPrompt({
   // file-management verbs opt out by setting it false.
   const inTaskMode = activeTab.kind === 'task';
   const inTasksTab = activeTab.kind === 'tasks';
+  // fm-m7q — shared with the Cmd-K palette via effectiveVerbsFor so both
+  // surfaces list the identical verb set (tabKinds allowlist + task-mode
+  // gating + synthesized launcher verbs). See effectiveVerbsFor above.
+  void inTaskMode;
+  void inTasksTab;
   const effectiveVerbs: VerbDef[] = useMemo(
-    () => {
-      let base = tasksEnabled
-        ? VERBS
-        : VERBS.filter((v) => v.id !== 'task' && v.id !== 'tasks' && v.id !== 'run');
-      // fm-yi85 — tabKinds is an allowlist when present. When absent the
-      // verb falls back to availableInTaskMode for tab-kind gating: a verb
-      // okay-in-task-mode is also okay on the tasks-overview tab (settings,
-      // help, switch-tab, etc.), and file-management verbs that opt out of
-      // task mode also opt out of tasks mode.
-      base = base.filter((v) => {
-        if (v.tabKinds) return v.tabKinds.includes(activeTab.kind);
-        if (inTasksTab || inTaskMode) return v.availableInTaskMode !== false;
-        return true;
-      });
-      return [...base, ...synthesizeLauncherVerbs(launchers)];
-    },
-    [launchers, tasksEnabled, inTaskMode, inTasksTab, activeTab.kind],
+    () =>
+      effectiveVerbsFor({
+        tasksEnabled,
+        tabKind: activeTab.kind,
+        launchers,
+      }),
+    [launchers, tasksEnabled, activeTab.kind],
   );
 
   // Build options for current state.
