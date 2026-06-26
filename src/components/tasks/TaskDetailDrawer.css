@@ -222,6 +222,13 @@
 .tdd__overdue { color: var(--err); }
 .tdd__blocked { color: var(--err); }
 
+/* ── task details (embedded composer + read-only meta) ── */
+.tdd__details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
 /* ── config ── */
 .tdd__config { display: flex; flex-direction: column; gap: var(--sp-4); }
 /* full-screen: lay schedule + dependencies side-by-side when there's room */

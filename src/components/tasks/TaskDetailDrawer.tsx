@@ -48,10 +48,21 @@ import type {
   CategoryScopeSource,
   ResolvedInstructions,
 } from '../../projects/index.mjs';
+import { TaskComposer } from '../TaskComposer';
 import type { Project, Task, TaskRun } from '../../types';
 import './TaskDetailDrawer.css';
 
-type DrawerTab = 'trace' | 'config' | 'session';
+// task-b30e546672db — the former 'config' tab IS the task itself. It's renamed
+// "Task details", made the FIRST tab, and rendered by reusing the new-task
+// composer form (prefilled + editable). The legacy 'config' id is accepted on
+// the `initialTab` prop and mapped to 'details' for back-compat with callers
+// (TasksPage's openDetail still passes 'config').
+type DrawerTab = 'details' | 'trace' | 'session';
+type InitialTab = DrawerTab | 'config';
+function normalizeTab(t: InitialTab | undefined): DrawerTab | undefined {
+  if (t === 'config') return 'details';
+  return t;
+}
 
 // A live-status descriptor: the ONE colored signal per the design language
 // (working=accent, needs-you=warn, blocked=err, neutral otherwise).
@@ -76,7 +87,7 @@ export function TaskDetailDrawer({
   onClose,
 }: {
   task: Task;
-  initialTab?: DrawerTab;
+  initialTab?: InitialTab;
   onClose: () => void;
 }) {
   const { exit, state } = useOverlayExit(onClose);
@@ -105,7 +116,7 @@ export function TaskDetailDrawer({
   const { tone, label: liveLabel } = liveToneFor(task, running);
 
   const [tab, setTab] = useState<DrawerTab>(
-    initialTab ?? (running || latestRun ? 'trace' : 'config'),
+    normalizeTab(initialTab) ?? (running || latestRun ? 'trace' : 'details'),
   );
 
   const say = useCallback(
@@ -116,13 +127,14 @@ export function TaskDetailDrawer({
   // ── PHI body (lazy, memory-only) ──────────────────────────────────────────
   const [body, setBody] = useState<string | null>(task.notes ?? null);
   const reqRef = useRef(0);
-  useEffect(() => {
+  // task-b30e546672db — re-pull the decrypted body after an embedded-editor save
+  // so the read-only surfaces (and the next edit's prefill) reflect the change.
+  const refreshBody = useCallback(() => {
     if (!isTypebuild) {
       setBody(task.notes ?? null);
       return;
     }
     const myReq = ++reqRef.current;
-    setBody(null);
     void getTask(task.id, 'typebuild')
       .then((full) => {
         if (reqRef.current === myReq) setBody(full?.notes ?? null);
@@ -130,11 +142,19 @@ export function TaskDetailDrawer({
       .catch(() => {
         if (reqRef.current === myReq) setBody(null);
       });
+  }, [isTypebuild, task.id, task.notes]);
+  useEffect(() => {
+    if (!isTypebuild) {
+      setBody(task.notes ?? null);
+      return;
+    }
+    setBody(null);
+    refreshBody();
     return () => {
       // Drop the decrypted body the instant we leave this task.
       setBody(null);
     };
-  }, [task.id, isTypebuild, task.notes]);
+  }, [task.id, isTypebuild, task.notes, refreshBody]);
 
   // ── effective instruction set (foundation resolver) ───────────────────────
   // Resolve the project leg lazily (NON-PHI) and feed task notes as the task
@@ -291,9 +311,9 @@ export function TaskDetailDrawer({
         return;
       }
       if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
-      const order: DrawerTab[] = ['trace', 'config', 'session'];
-      if (e.key === '1') setTab('trace');
-      else if (e.key === '2') setTab('config');
+      const order: DrawerTab[] = ['details', 'trace', 'session'];
+      if (e.key === '1') setTab('details');
+      else if (e.key === '2') setTab('trace');
       else if (e.key === '3') setTab('session');
       else if (e.key === 'l' || e.key === 'ArrowRight') {
         const i = order.indexOf(tab);
@@ -359,9 +379,9 @@ export function TaskDetailDrawer({
           </div>
         )}
 
-        {/* segmented tabs */}
+        {/* segmented tabs — task-b30e546672db: "Task details" is now FIRST. */}
         <nav className="tdd__tabs" role="tablist" aria-label="Detail sections">
-          {(['trace', 'config', 'session'] as DrawerTab[]).map((id, i) => (
+          {(['details', 'trace', 'session'] as DrawerTab[]).map((id, i) => (
             <button
               key={id}
               type="button"
@@ -370,7 +390,7 @@ export function TaskDetailDrawer({
               className={['tdd__tab', tab === id && 'tdd__tab--on'].filter(Boolean).join(' ')}
               onClick={() => setTab(id)}
             >
-              {id === 'trace' ? 'Trace' : id === 'config' ? 'Config' : 'Session'}
+              {id === 'details' ? 'Task details' : id === 'trace' ? 'Trace' : 'Session'}
               <kbd>{i + 1}</kbd>
             </button>
           ))}
@@ -380,16 +400,40 @@ export function TaskDetailDrawer({
           {tab === 'trace' && (
             <TraceTab runs={runs} running={running} liveLabel={liveLabel} tone={tone} />
           )}
-          {tab === 'config' && (
-            <ConfigTab
-              task={task}
-              body={body}
-              today={today}
-              resolved={resolved}
-              claimedBy={claimedBy}
-              claimedByMe={claimedByMe}
-              onTeach={(entry) => setTaught((prev) => [...prev, entry])}
-            />
+          {tab === 'details' && (
+            <div className="tdd__details">
+              {/* task-b30e546672db — the task IS the config. Render the editor by
+                  reusing the new-task composer form, prefilled with this task's
+                  current values and fully editable; saves persist via the
+                  composer's update path (TypeBuild PATCH / local updateTask). */}
+              <TaskComposer
+                key={task.id}
+                mode="edit"
+                task={task}
+                embedded
+                onClose={() => {
+                  /* Cancel inside the embedded editor is a no-op — the dialog
+                     stays open; Esc on the dialog closes it. */
+                }}
+                onSaved={refreshBody}
+              />
+              {/* Read-only context the composer doesn't surface: schedule,
+                  dependency/containment relations, folder. */}
+              <DetailsMeta
+                task={task}
+                today={today}
+                claimedBy={claimedBy}
+                claimedByMe={claimedByMe}
+              />
+              {/* The effective instruction set + teach-in-the-moment is unique to
+                  the detail view (not part of create), so it lives below the
+                  editable form. */}
+              <InstructionSet
+                resolved={resolved}
+                task={task}
+                onTeach={(entry) => setTaught((prev) => [...prev, entry])}
+              />
+            </div>
           )}
           {tab === 'session' && (
             <SessionTab
@@ -493,89 +537,80 @@ function TraceTab({
   );
 }
 
-// ── CONFIG ───────────────────────────────────────────────────────────────────
-function ConfigTab({
+// ── DETAILS META ──────────────────────────────────────────────────────────────
+// task-b30e546672db — the editable fields now live in the embedded composer
+// (the "Task details" tab). This read-only block carries the supplementary
+// context the composer doesn't surface: dependency/containment relations, the
+// folder, and the resolved schedule (parent/depends_on/blocked_by/next_run).
+function DetailsMeta({
   task,
-  body,
   today,
-  resolved,
   claimedBy,
   claimedByMe,
-  onTeach,
 }: {
   task: Task;
-  body: string | null;
   today: string;
-  resolved: ResolvedInstructions;
   claimedBy: string | null;
   claimedByMe: boolean;
-  onTeach: (entry: {
-    scopeKind: 'task' | 'category' | 'project';
-    scopeLabel: string;
-    text: string;
-  }) => void;
 }) {
   const overdue =
     !!task.due_at && task.due_at < today && task.status !== 'done' && task.status !== 'cancelled';
+  const hasSchedule =
+    !!task.cron ||
+    (typeof task.next_run_at === 'number' && task.next_run_at > 0) ||
+    !!task.start_at ||
+    !!task.due_at ||
+    !!task.auto_agent;
+  const hasDeps =
+    !!task.parentTaskId ||
+    (!!task.dependsOn && task.dependsOn.length > 0) ||
+    (!!task.blockedBy && task.blockedBy.length > 0) ||
+    !!claimedBy;
   return (
     <div className="tdd__config">
-      {/* details / notes */}
-      <section className="tdd__sect">
-        <div className="tdd__sect-h">Details</div>
-        {body ? (
-          <p className="tdd__notes">{body}</p>
-        ) : (
-          <p className="tdd__muted">No details.</p>
-        )}
-      </section>
-
-      {/* meta grid */}
-      <section className="tdd__sect">
-        <div className="tdd__sect-h">When it runs</div>
-        <dl className="tdd__meta">
-          {task.cron && (
-            <div>
-              <dt>Recurring</dt>
-              <dd className="tdd__mono">↻ {task.cron}</dd>
-            </div>
-          )}
-          {typeof task.next_run_at === 'number' && task.next_run_at > 0 && (
-            <div>
-              <dt>Next run</dt>
-              <dd className="tdd__mono">{new Date(task.next_run_at).toLocaleString()}</dd>
-            </div>
-          )}
-          {task.start_at && (
-            <div>
-              <dt>Start</dt>
-              <dd>{shortDate(task.start_at, today)}</dd>
-            </div>
-          )}
-          {task.due_at && (
-            <div>
-              <dt>Due</dt>
-              <dd className={overdue ? 'tdd__overdue' : undefined}>
-                {shortDate(task.due_at, today)}
-              </dd>
-            </div>
-          )}
-          {task.auto_agent && (
-            <div>
-              <dt>Agent</dt>
-              <dd>{task.auto_agent}</dd>
-            </div>
-          )}
-          {!task.cron && !task.next_run_at && !task.start_at && !task.due_at && (
-            <div>
-              <dt>Schedule</dt>
-              <dd className="tdd__muted">Runs on demand</dd>
-            </div>
-          )}
-        </dl>
-      </section>
+      {/* schedule (read-only mirror of the composer's When/Start picks) */}
+      {hasSchedule && (
+        <section className="tdd__sect">
+          <div className="tdd__sect-h">When it runs</div>
+          <dl className="tdd__meta">
+            {task.cron && (
+              <div>
+                <dt>Recurring</dt>
+                <dd className="tdd__mono">↻ {task.cron}</dd>
+              </div>
+            )}
+            {typeof task.next_run_at === 'number' && task.next_run_at > 0 && (
+              <div>
+                <dt>Next run</dt>
+                <dd className="tdd__mono">{new Date(task.next_run_at).toLocaleString()}</dd>
+              </div>
+            )}
+            {task.start_at && (
+              <div>
+                <dt>Start</dt>
+                <dd>{shortDate(task.start_at, today)}</dd>
+              </div>
+            )}
+            {task.due_at && (
+              <div>
+                <dt>Due</dt>
+                <dd className={overdue ? 'tdd__overdue' : undefined}>
+                  {shortDate(task.due_at, today)}
+                </dd>
+              </div>
+            )}
+            {task.auto_agent && (
+              <div>
+                <dt>Agent</dt>
+                <dd>{task.auto_agent}</dd>
+              </div>
+            )}
+          </dl>
+        </section>
+      )}
 
       {/* dependencies / containment */}
-      {(task.parentTaskId || (task.dependsOn && task.dependsOn.length > 0) || (task.blockedBy && task.blockedBy.length > 0) || claimedBy) && (
+      {hasDeps && (
         <section className="tdd__sect">
           <div className="tdd__sect-h">Dependencies</div>
           <dl className="tdd__meta">
@@ -618,9 +653,6 @@ function ConfigTab({
           </p>
         </section>
       )}
-
-      {/* effective instruction set + teach-in-the-moment */}
-      <InstructionSet resolved={resolved} task={task} onTeach={onTeach} />
     </div>
   );
 }

@@ -158,7 +158,9 @@ function Shell() {
   // optional initial tab; any task row can dispatch it.
   const [taskDetail, setTaskDetail] = useState<{
     task: Task;
-    initialTab?: 'trace' | 'config' | 'session';
+    // task-b30e546672db — 'details' is the renamed/first tab; 'config' is still
+    // accepted from legacy callers and mapped to 'details' inside the drawer.
+    initialTab?: 'details' | 'trace' | 'config' | 'session';
   } | null>(null);
   // fm-femh — Run-task modal: pick a task to run in the active folder tab.
   const [runTaskCwd, setRunTaskCwd] = useState<string | null>(null);

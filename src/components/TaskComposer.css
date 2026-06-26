@@ -29,6 +29,23 @@
   flex: 1 1 auto;
 }
 
+/* task-b30e546672db — embedded inside the task-detail dialog's "Task details"
+   tab: the composer sizes to its content and lets the dialog body own scroll
+   (no nested scroll area, no full-pane flex grab). The footer sticks below the
+   form rather than pinning to a viewport edge. */
+.composer-pane--embedded {
+  flex: 0 0 auto;
+  overflow: visible;
+  animation: none;
+}
+.composer-pane--embedded .composer {
+  flex: 0 0 auto;
+  padding: 0;
+}
+.composer-pane--embedded .composer__main {
+  padding-top: 0;
+}
+
 /* ── Header ────────────────────────────────────────────────────────── */
 
 .composer__header {

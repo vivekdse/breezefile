@@ -48,7 +48,19 @@ export type TaskComposerRequest =
   | { mode: 'create'; defaultFolder: string }
   | { mode: 'edit'; task: Task };
 
-type Props = TaskComposerRequest & { onClose: () => void };
+// task-b30e546672db — `embedded` renders the composer INSIDE another surface
+// (the task-detail dialog's "Task details" tab) rather than as a standalone
+// pane. Embedded mode:
+//   - does NOT register the global window keydown handler (the host dialog owns
+//     keyboard: tab switching, Esc) so the two don't fight;
+//   - does NOT fade/exit after a successful save — it stays mounted and shows a
+//     transient "saved" flash, then fires `onSaved` so the host can refresh;
+//   - hides its own "Edit task / New task" crumb (the dialog already frames it).
+type Props = TaskComposerRequest & {
+  onClose: () => void;
+  embedded?: boolean;
+  onSaved?: () => void;
+};
 
 type QuestionId =
   | 'title'
@@ -223,13 +235,16 @@ const PIN_OPTIONS: { id: 'no' | 'yes'; label: string; hint?: string }[] = [
 
 function pickStartIdFromTask(task: Task | null, today: string): string {
   // For a brand-new task we default to "today" — most users start now.
-  // Edited tasks read whatever's actually stored.
+  // Edited tasks read whatever's actually stored. task-b30e546672db — for a
+  // TypeBuild task the "start" step is the server's defer date, so fall back to
+  // `deferUntil` when there's no local `start_at`.
   if (!task) return 'today';
-  if (!task.start_at) return 'none';
-  if (task.start_at === today) return 'today';
+  const startVal = task.start_at ?? task.deferUntil ?? null;
+  if (!startVal) return 'none';
+  if (startVal === today) return 'today';
   const t = new Date(today + 'T00:00:00');
   t.setDate(t.getDate() + 1);
-  if (task.start_at === t.toISOString().slice(0, 10)) return 'tomorrow';
+  if (startVal === t.toISOString().slice(0, 10)) return 'tomorrow';
   return 'pick-start';
 }
 
@@ -448,8 +463,8 @@ export function TaskComposer(props: Props) {
     pickStartIdFromTask(initial, todayISO()),
   );
   const [pickedStart, setPickedStart] = useState<string>(
-    initial?.start_at && pickStartIdFromTask(initial, todayISO()) === 'pick-start'
-      ? initial.start_at
+    pickStartIdFromTask(initial, todayISO()) === 'pick-start'
+      ? initial?.start_at ?? initial?.deferUntil ?? ''
       : '',
   );
 
@@ -1124,15 +1139,39 @@ export function TaskComposer(props: Props) {
         const t = await createTask(payload as TaskCreate, target);
         savedId = t.id;
       } else if (isTypebuild) {
-        // task-ab1d7955e23f — TypeBuild edits don't go through updateTask
-        // (canEdit is false / the source throws); management-field edits ride
-        // the S4 detail-panel PATCH. A project change is a management field, so
-        // route it through the same 'patch' source action ('' clears it). Other
-        // composer fields for TypeBuild edits are owned by the detail panel.
+        // task-ab1d7955e23f / task-b30e546672db — TypeBuild edits don't go
+        // through updateTask (canEdit is false / the source throws); the
+        // management fields the server's PATCH /chromeext/<id> verb accepts ride
+        // the 'patch' source action. Collect everything that CHANGED into one
+        // patch ('' clears a clearable field) so the embedded "Task details"
+        // editor persists its edits in a single round-trip.
+        //
+        // NOTE: title/notes (PHI) are NOT in the PATCH whitelist — the v2
+        // management verb only edits routing fields — so editing them here is a
+        // no-op server-side today (tracked separately); we only send the
+        // routing fields that actually persist.
+        const patch: Record<string, unknown> = {};
         if (projectId !== (initial?.projectId ?? '')) {
-          await taskSourceAction(target, props.task.id, 'patch', {
-            project_id: projectId,
-          });
+          patch.project_id = projectId;
+        }
+        // status — the PATCH verb accepts it; only send a real change.
+        if (status !== (initial?.status ?? 'pending')) {
+          patch.status = status;
+        }
+        // priority — '' (Unset) leaves the server default; only send a change.
+        if (parsedPriority !== undefined && parsedPriority !== (initial?.priority ?? undefined)) {
+          patch.priority = parsedPriority;
+        }
+        // due_at — '' clears it server-side.
+        if ((dueAt ?? '') !== (initial?.due_at ?? '')) {
+          patch.due_at = dueAt ?? '';
+        }
+        // defer_until — the composer's "start" pick maps onto defer for TB.
+        if ((resolvedStart ?? '') !== (initial?.deferUntil ?? '')) {
+          patch.defer_until = resolvedStart ?? '';
+        }
+        if (Object.keys(patch).length > 0) {
+          await taskSourceAction(target, props.task.id, 'patch', patch);
         }
         savedId = props.task.id;
       } else {
@@ -1156,7 +1195,16 @@ export function TaskComposer(props: Props) {
         new CustomEvent('fm:taskFlash', { detail: { taskId: savedId } }),
       );
       setCreated(true);
-      setTimeout(() => exit(), 900);
+      if (props.embedded) {
+        // task-b30e546672db — stay mounted inside the dialog: flash "saved",
+        // let the host refresh, then clear the flash so the form is editable
+        // again (don't tear down the whole dialog on a field edit).
+        props.onSaved?.();
+        setBusy(false);
+        setTimeout(() => setCreated(false), 1400);
+      } else {
+        setTimeout(() => exit(), 900);
+      }
     } catch (e) {
       setError(humanizeError(e).message);
       setBusy(false);
@@ -1349,10 +1397,15 @@ export function TaskComposer(props: Props) {
   };
 
   useEffect(() => {
+    // task-b30e546672db — embedded in the detail dialog the HOST owns global
+    // keyboard (Esc / tab switching); registering our window handler too would
+    // make Esc-Esc cancel and digit keys collide. Pointer/Enter interaction on
+    // the fields still works without it.
+    if (props.embedded) return;
     function onKey(e: KeyboardEvent) { handlerRef.current?.(e); }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [props.embedded]);
 
   // ── Render helpers ───────────────────────────────────────────────────
 
@@ -1490,18 +1543,24 @@ export function TaskComposer(props: Props) {
   }
 
   return (
-    <div className="composer-pane" data-state={state}>
+    <div
+      className={'composer-pane' + (props.embedded ? ' composer-pane--embedded' : '')}
+      data-state={state}
+    >
       <div
         className="composer"
         role="region"
-        aria-labelledby="composer-title"
+        aria-label={props.embedded ? 'Task details' : undefined}
+        aria-labelledby={props.embedded ? undefined : 'composer-title'}
         ref={sectionRef}
         tabIndex={-1}
       >
         <header className="composer__header">
-          <div className="composer__crumb" id="composer-title">
-            {props.mode === 'edit' ? 'Edit task' : 'New task'}
-          </div>
+          {!props.embedded && (
+            <div className="composer__crumb" id="composer-title">
+              {props.mode === 'edit' ? 'Edit task' : 'New task'}
+            </div>
+          )}
           {/* fm-m2s4 (S5) — save-target picker. Shown for a fresh create with
               more than one target (editing is pinned to the task's own source).
               TypeBuild is offered + defaulted when signed in (see `targets`);
