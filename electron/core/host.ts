@@ -45,6 +45,13 @@ export interface BreezeHost {
    *  so interactive tasks fall back to a headless run. Optional so old
    *  hosts default to headless-only. */
   hasInteractiveWindow?(): boolean;
+  /** fm-5xy — a grouped start-at / near-due reminder. PHI-FREE: callers pass
+   *  only counts (never task titles/bodies), so the host builds a generic
+   *  grouped message ("3 tasks start today"). `startCount` is tasks whose
+   *  start_at is today; `dueCount` is tasks due tomorrow (near-due). The host
+   *  raises ONE native notification summarizing both. Optional so old/headless
+   *  hosts default to log-only. */
+  onTaskReminders?(counts: { startCount: number; dueCount: number }): void;
 }
 
 const noop: BreezeHost = {
@@ -54,6 +61,7 @@ const noop: BreezeHost = {
   onRunSucceeded() {},
   onTaskTransitions() {},
   hasInteractiveWindow() { return false; },
+  onTaskReminders() {},
 };
 
 let current: BreezeHost = noop;

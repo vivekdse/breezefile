@@ -47,6 +47,14 @@
   white-space: pre-line;
 }
 
+/* fm-3vl — aggregate-stats headline in the destructive bulk-verb confirm
+   ("Will trash N files, X GB, oldest YYYY"). Slightly emphasized so the
+   count/size land before the user confirms. */
+.confirm__aggregate {
+  font-weight: 600;
+  margin-bottom: var(--sp-2);
+}
+
 .confirm__from-to {
   display: flex;
   align-items: center;

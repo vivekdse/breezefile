@@ -37,8 +37,13 @@ import {
 import type { CustomTag, Entry, SortKey, TabKind, TagFilter, TagPaths } from '../types';
 import { getAllTags } from '../tags';
 import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
+// fm-5oc / fm-3vl — tag-algebra selection + aggregate-stats confirmation.
+import { parse as parseTagExpr, evaluate as evaluateTagExpr } from '../tagDsl.mjs';
+import { makeResolveTag } from '../dslTagResolve.mjs';
+import { aggregateStats, summarizeStats } from '../selectionStats.mjs';
 import { loadSideBySidePrefs, splitFraction } from '../sideBySidePrefs';
 import { formatOpError } from '../errorMessages';
+import { isEditablePath } from '../fileTypes';
 import './ChipPrompt.css';
 
 // One-shot lazy probe for the native Share helper binary. Verbs'
@@ -103,10 +108,17 @@ type Ctx = {
   // fm-k9dg — current "directories first" state of the active tab,
   // surfaced so the foldersFirst verb's describe text reads true.
   activeTabFoldersFirst: boolean;
+  // fm-5oc — DSL-tag store records (name + selector + mode), preloaded so the
+  // "select by expression" verb can resolve `tag:name` atoms without a
+  // per-frame async fetch.
+  dslTags: import('../tagStore.d.mts').Tag[];
 };
 
 type Verb =
   | 'select'
+  | 'select-expr'
+  | 'export-list'
+  | 'drag-out'
   | 'move'
   | 'copy'
   | 'paste'
@@ -279,6 +291,36 @@ const EXT_GROUPS: Record<string, string[]> = {
   code: ['ts', 'tsx', 'js', 'jsx', 'json', 'py', 'rs', 'go', 'sh', 'rb', 'java', 'c', 'cpp', 'h', 'hpp', 'css', 'html'],
 };
 
+// fm-3vl — aggregate-stats confirmation body for the destructive bulk verbs
+// (trash / move / rename). Computes count + total size + oldest mtime over the
+// affected entries and renders a "Will <verb> N files, X GB, oldest YYYY" line
+// plus the scannable name preview. Deliberately NO "don't show again" — this
+// confirm is a permanent safety net for Phase-2 AI flows.
+//
+// `entriesByPath` maps the affected absolute paths back to their Entry (so we
+// have size/mtimeMs); paths with no live Entry still count toward N but don't
+// contribute size/age. `verbWord` is the present-tense verb ("trash", "move",
+// "rename").
+function aggregateConfirmBody(
+  paths: string[],
+  entryFor: (p: string) => Entry | undefined,
+  verbWord: string,
+): React.ReactNode {
+  const rows = paths.map((p) => entryFor(p)).filter((e): e is Entry => !!e);
+  const stats = aggregateStats(rows);
+  // Count is always the path count (covers rows we couldn't map to an Entry).
+  const headline = summarizeStats({ ...stats, count: paths.length }, 'file');
+  const names = paths.map((p) => basename(p));
+  return (
+    <>
+      <div className="confirm__aggregate">
+        Will {verbWord} {headline}.
+      </div>
+      {paths.length > 1 && summarizeNamesNode(names)}
+    </>
+  );
+}
+
 function entryMatchesSelector(e: Entry, sel: SelectorId): boolean {
   if (sel === 'all') return true;
   if (sel === 'none') return false;
@@ -375,6 +417,125 @@ const VERBS: VerbDef[] = [
     },
   },
   {
+    // fm-5oc — "Select by expression": evaluate a tag-algebra selector string
+    // (e.g. `tag:cleanup and not tag:keep`, `ext = pdf and size > 1MB`)
+    // against the visible entries and mark the matching rows. The selection is
+    // TRANSIENT — it lives in tab.marks like any other selection, clears on
+    // view/cwd change, and per-row checkboxes let the user untick to spare
+    // files before firing a bulk verb.
+    id: 'select-expr',
+    availableInTaskMode: false,
+    label: 'Select by expression',
+    aliases: ['select by expression', 'expr', 'selector', 'tag select', 'algebra', 'query select'],
+    icon: '⌬',
+    describe: (c) => {
+      const q = c.searchQuery.trim();
+      return q
+        ? `Select rows matching: ${q}`
+        : 'Select rows by a tag-algebra expression (tag:cleanup and not tag:keep)';
+    },
+    isAvailable: (c) => {
+      if (c.entries.length === 0) return { ok: false, reason: 'No files in this folder' };
+      return { ok: true };
+    },
+    slots: [
+      {
+        label: 'Expression',
+        // The expression is free-text typed into the slot filter. We surface a
+        // live preview option (valid → match count; invalid → the parse error)
+        // plus the user's saved DSL tags as quick `tag:<name>` starters.
+        getOptions: (c, _prev) => {
+          const expr = c.searchQuery.trim();
+          const opts: Option[] = [];
+          if (expr) {
+            try {
+              const ast = parseTagExpr(expr);
+              const resolveTag = makeResolveTag(c.dslTags as any);
+              let n = 0;
+              for (const e of c.entries) {
+                if (evaluateTagExpr(ast, e as any, { resolveTag })) n += 1;
+              }
+              opts.push({
+                id: `expr:${expr}`,
+                label: expr,
+                detail: `matches ${n} of ${c.entries.length}`,
+                available: true,
+              });
+            } catch (err) {
+              opts.push({
+                id: `expr:${expr}`,
+                label: expr,
+                detail: `invalid: ${err instanceof Error ? err.message : String(err)}`,
+                available: false,
+                reason: 'Fix the expression to select',
+              });
+            }
+          }
+          // Saved DSL tags as one-tap starters: `tag:<name>`.
+          for (const t of c.dslTags) {
+            const starter = `tag:${t.name}`;
+            opts.push({
+              id: `expr:${starter}`,
+              label: starter,
+              detail: t.selector ? `= ${t.selector}` : 'saved tag',
+              aliases: [t.name],
+              available: true,
+            });
+          }
+          if (opts.length === 0) {
+            opts.push({
+              id: 'expr:',
+              label: 'Type an expression…',
+              detail: 'e.g. ext = pdf and size > 1MB',
+              available: false,
+              reason: 'Type a tag-algebra expression',
+            });
+          }
+          return opts;
+        },
+      },
+    ],
+    execute: (c, [picked], api) => {
+      const expr = (picked ?? '').startsWith('expr:') ? picked.slice('expr:'.length) : picked;
+      const query = (expr ?? '').trim();
+      if (!query) {
+        api.dispatch({ type: 'setStatus', msg: 'no expression — nothing selected' });
+        return;
+      }
+      let ast;
+      try {
+        ast = parseTagExpr(query);
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `bad expression: ${err instanceof Error ? err.message : String(err)}`,
+        });
+        return;
+      }
+      const resolveTag = makeResolveTag(c.dslTags as any);
+      const newMarks: Record<string, true> = {};
+      for (const e of c.entries) {
+        try {
+          if (evaluateTagExpr(ast, e as any, { resolveTag })) newMarks[e.path] = true;
+        } catch {
+          // A row that throws mid-eval (shouldn't with a parsed ast) is skipped.
+        }
+      }
+      api.setTab({ marks: newMarks });
+      const count = Object.keys(newMarks).length;
+      api.dispatch({
+        type: 'setStatus',
+        msg:
+          count === 0
+            ? `no rows match “${query}”`
+            : `selected ${count} matching “${query}” — untick to spare, then run a verb`,
+      });
+      // Keep the palette open so the user can chain into a bulk verb
+      // (select-expr → trash/export/drag-out) the way smart-select does.
+      api.resetToVerbPick();
+    },
+  },
+  {
     id: 'move',
     availableInTaskMode: false,
     label: 'Move',
@@ -405,16 +566,38 @@ const VERBS: VerbDef[] = [
       const sources = implicitSources(c);
       const dst = resolveDestination(c, dest);
       if (!dst || sources.length === 0) return;
-      api.dispatch({
-        type: 'setYank',
-        yank: sources.map((p) => ({ path: p, mode: 'move' as const })),
-      });
-      api.setTab({ marks: {} });
-      api.navigateTo(dst);
-      api.dispatch({
-        type: 'setStatus',
-        msg: `staged ${sources.length} to move → ${basename(dst)} · press ph or click Paste`,
-      });
+      const stage = () => {
+        api.dispatch({
+          type: 'setYank',
+          yank: sources.map((p) => ({ path: p, mode: 'move' as const })),
+        });
+        api.setTab({ marks: {} });
+        api.navigateTo(dst);
+        api.dispatch({
+          type: 'setStatus',
+          msg: `staged ${sources.length} to move → ${basename(dst)} · press ph or click Paste`,
+        });
+      };
+      // fm-3vl — bulk move (operating on a multi-row Selection) gets the
+      // aggregate-stats confirm before staging; a single cursor move keeps the
+      // lightweight stage-then-paste flow.
+      if (c.markedPaths.length > 1) {
+        const entryFor = makeEntryLookup(c);
+        window.dispatchEvent(
+          new CustomEvent('fm:confirm', {
+            detail: {
+              title: `Move to ${basename(dst) || '/'}?`,
+              body: aggregateConfirmBody(sources, entryFor, 'move'),
+              confirmLabel: 'Move',
+              destructive: true,
+              onConfirm: () => stage(),
+            },
+          }),
+        );
+        api.closeOverlay();
+        return;
+      }
+      stage();
       api.closeOverlay();
     },
   },
@@ -535,18 +718,15 @@ const VERBS: VerbDef[] = [
     execute: (c, _picks, api) => {
       const sources = implicitSources(c);
       if (sources.length === 0) return;
-      const names = sources.map((p) => basename(p));
-      const noun = sources.length === 1 ? `“${names[0]}”` : `${sources.length} items`;
+      const entryFor = makeEntryLookup(c);
       window.dispatchEvent(
         new CustomEvent('fm:confirm', {
           detail: {
             title: 'Move to trash?',
-            body: (
-              <>
-                <div>Move {noun} to the trash. You can restore from Finder.</div>
-                {sources.length > 1 && summarizeNamesNode(names)}
-              </>
-            ),
+            // fm-3vl — aggregate stats (count, size, oldest) instead of a bare
+            // name list, so a bulk trash reads "Will trash 247 files, 14.2 GB,
+            // oldest 2019" before the user confirms.
+            body: aggregateConfirmBody(sources, entryFor, 'trash'),
             confirmLabel: 'Trash',
             destructive: true,
             confirmShortcuts: ['d'],
@@ -665,8 +845,7 @@ const VERBS: VerbDef[] = [
       // not its enclosing folder narrowed.
       if (dest.startsWith('file:')) {
         const filePath = dest.slice('file:'.length);
-        const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-        if (ext === 'md' || ext === 'mdx') {
+        if (isEditablePath(filePath)) {
           api.dispatch({ type: 'openEditTab', path: filePath, focus: true });
         } else {
           api.dispatch({ type: 'pushRecentFile', path: filePath });
@@ -983,6 +1162,96 @@ const VERBS: VerbDef[] = [
         msg: sources.length === 1 ? 'copied 1 path' : `copied ${sources.length} paths`,
       });
       api.closeOverlay();
+    },
+  },
+  {
+    // fm-3vl — export-list: write the selected paths to a text or JSON file
+    // via a Save dialog. Consumes the Selection (marks) like the other bulk
+    // verbs, falling back to the cursor. `.json` extension → a JSON array;
+    // anything else → newline-joined paths.
+    id: 'export-list',
+    availableInTaskMode: false,
+    label: 'Export list…',
+    aliases: ['export-list', 'export', 'save list', 'export selection', 'list', 'manifest'],
+    icon: '⤓',
+    describe: (c) => {
+      const n = c.markedPaths.length || (c.cursor ? 1 : 0);
+      return `Export ${n} path${n === 1 ? '' : 's'} to a file (text or JSON)`;
+    },
+    isAvailable: (c) => {
+      if (c.markedPaths.length === 0 && !c.cursor) {
+        return { ok: false, reason: 'Select files first or put the cursor on one' };
+      }
+      return { ok: true };
+    },
+    slots: [
+      {
+        label: 'Format',
+        getOptions: () => [
+          { id: 'txt', label: 'Text (one path per line)', detail: '.txt', available: true },
+          { id: 'json', label: 'JSON array', detail: '.json', available: true },
+        ],
+      },
+    ],
+    execute: async (c, [format], api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      const isJson = format === 'json';
+      const content = isJson
+        ? JSON.stringify(sources, null, 2) + '\n'
+        : sources.join('\n') + '\n';
+      const defaultName = `${basename(c.cwd) || 'selection'}-list.${isJson ? 'json' : 'txt'}`;
+      api.closeOverlay();
+      try {
+        const saved = await fm.saveList(content, defaultName);
+        if (saved) {
+          api.dispatch({
+            type: 'setStatus',
+            msg: `exported ${sources.length} path${sources.length === 1 ? '' : 's'} → ${basename(saved)}`,
+          });
+        }
+      } catch (err) {
+        api.dispatch({ type: 'setStatus', msg: formatOpError('export', err) });
+      }
+    },
+  },
+  {
+    // fm-3vl — drag-out as a verb: reuses the existing native drag-out
+    // primitive (fm.dragStart → main `drag:start` → webContents.startDrag),
+    // the same call FileRow.onDragStart makes. It primes the OS drag with the
+    // current Selection so the files can be dropped into another app. NOTE:
+    // an OS-native drag can only *begin* inside a real pointer-drag gesture,
+    // so firing this from the palette stages the payload but a mouse drag may
+    // still be needed depending on the platform; we surface that in status.
+    id: 'drag-out',
+    availableInTaskMode: false,
+    label: 'Drag out',
+    aliases: ['drag-out', 'dragout', 'drag', 'export drag', 'native drag'],
+    icon: '⇲',
+    describe: (c) => {
+      const n = c.markedPaths.length || (c.cursor ? 1 : 0);
+      return `Drag ${n} item${n === 1 ? '' : 's'} out to another app`;
+    },
+    isAvailable: (c) => {
+      if (c.markedPaths.length === 0 && !c.cursor) {
+        return { ok: false, reason: 'Select files first or put the cursor on one' };
+      }
+      return { ok: true };
+    },
+    slots: [],
+    execute: (c, _p, api) => {
+      const sources = implicitSources(c);
+      if (sources.length === 0) return;
+      api.closeOverlay();
+      try {
+        fm.dragStart(sources);
+        api.dispatch({
+          type: 'setStatus',
+          msg: `dragging ${sources.length} item${sources.length === 1 ? '' : 's'} out — drop into the target app`,
+        });
+      } catch (err) {
+        api.dispatch({ type: 'setStatus', msg: formatOpError('drag', err) });
+      }
     },
   },
   {
@@ -2710,6 +2979,15 @@ function implicitSources(c: Ctx): string[] {
   return [];
 }
 
+// fm-3vl — map an affected path back to its visible Entry (for size/mtime in
+// the aggregate confirm). Sources for the destructive verbs always come from
+// the current folder's marks/cursor, so c.entries covers them.
+function makeEntryLookup(c: Ctx): (p: string) => Entry | undefined {
+  const byPath = new Map<string, Entry>();
+  for (const e of c.entries) byPath.set(e.path, e);
+  return (p: string) => byPath.get(p);
+}
+
 // fm-60k — tag/untag verbs always target every visible row in the current
 // folder. We deliberately don't infer from marks / cursor / filter; the
 // user's mental model is "this folder" and one consistent answer beats
@@ -3000,6 +3278,9 @@ export function ChipPrompt({
   const [remoteTargets, setRemoteTargets] = useState<string[]>([]);
   const [connectedSources, setConnectedSources] = useState<string[]>([]);
   const [launchers, setLaunchers] = useState<import('../bridge').Launcher[]>([]);
+  // fm-5oc — preload the DSL-tag store so "select by expression" can resolve
+  // `tag:name` atoms synchronously while building the marks set.
+  const [dslTags, setDslTags] = useState<import('../tagStore.d.mts').Tag[]>([]);
   const searchTokenRef = useRef(0); // guards against out-of-order resolves
   const subdirsTokenRef = useRef(0);
   // Last query actually sent to the filesystem (per source). Used to skip
@@ -3034,6 +3315,10 @@ export function ChipPrompt({
     // fm-g6r — preload the user's launcher list so :claude/:codex/:gemini
     // surface in the verb picker without a per-frame async fetch.
     void fm.launchersList().then(setLaunchers).catch(() => {});
+    // fm-5oc — preload DSL tags so the "select by expression" verb resolves
+    // tag:name atoms without an async gap. Tolerate an older preload that
+    // predates fm.dslTags.
+    void fm.dslTags?.list().then(setDslTags).catch(() => {});
     return () => offSources();
   }, []);
 
@@ -3248,8 +3533,9 @@ export function ChipPrompt({
       tagFilter: activeTab.tagFilter,
       activeTabKind: activeTab.kind,
       activeTabFoldersFirst: activeTab.foldersFirst ?? true,
+      dslTags,
     };
-  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, remoteTargets, connectedSources, launchers, state.customTags, state.tagPaths]);
+  }, [activeTab, state.entriesByPath, state.yank, state.bookmarks, state.recents, state.recentFiles, state.pinned, state.tabs, state.activeTab, state.lastClosedTab, homedir, searchResults, searchFiles, filter, localSubdirs, defaultTerminal, installedTerminals, remoteTargets, connectedSources, launchers, state.customTags, state.tagPaths, dslTags]);
 
   if (!activeTab || !ctx) return null;
 
@@ -3485,8 +3771,7 @@ export function ChipPrompt({
       // inline so the user never visibly enters goto mode.
       if (opt.kind === 'find-file') {
         const filePath = opt.id.slice('file:'.length);
-        const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-        if (ext === 'md' || ext === 'mdx') {
+        if (isEditablePath(filePath)) {
           dispatch({ type: 'openEditTab', path: filePath, focus: true });
         } else {
           dispatch({ type: 'pushRecentFile', path: filePath });

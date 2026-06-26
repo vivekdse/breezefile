@@ -17,6 +17,7 @@ import {
 } from '../dragState';
 import type { HelpSlideId } from './HelpTour';
 import { formatOpError } from '../errorMessages';
+import { isEditablePath } from '../fileTypes';
 import './FolderList.css';
 
 type EmptyKind = 'loading' | 'truly-empty' | 'all-hidden' | 'filtered-out';
@@ -208,6 +209,31 @@ export function FolderList() {
                     forward: [],
                   },
                 });
+              },
+            } as MenuItem,
+          ]
+        : []),
+      // fm-o5z8 — explicit "Open With → Breeze Editor / Default App". The
+      // Breeze Editor item appears only for files whose extension is in the
+      // settings-driven editable set; Default App is the OS-open path.
+      ...(entry.kind !== 'dir' && isEditablePath(entry.path)
+        ? [
+            {
+              label: 'Open in Breeze Editor',
+              action: () => {
+                dispatch({ type: 'openEditTab', path: entry.path, focus: true });
+                dispatch({ type: 'pushRecentFile', path: entry.path });
+              },
+            } as MenuItem,
+          ]
+        : []),
+      ...(entry.kind !== 'dir'
+        ? [
+            {
+              label: 'Open in Default App',
+              action: () => {
+                dispatch({ type: 'pushRecentFile', path: entry.path });
+                void fm.open(entry.path);
               },
             } as MenuItem,
           ]

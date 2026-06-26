@@ -57,6 +57,7 @@ import { fm } from './bridge';
 import { taskSourceAction } from './tasks';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
 import { isTextEntryTarget } from './textFocus';
+import { isEditablePath } from './fileTypes';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
 import type { CustomTagCriterion, Entry, Task } from './types';
@@ -725,8 +726,7 @@ function Shell() {
               dispatch({ type: 'openOrFocusFolderTab', path: p, focus: true });
               result = { ok: true, kind: 'folder' };
             } else {
-              const ext = p.split('.').pop()?.toLowerCase() ?? '';
-              if (ext === 'md' || ext === 'mdx') {
+              if (isEditablePath(p)) {
                 dispatch({ type: 'openEditTab', path: p, focus: true });
                 result = { ok: true, kind: 'edit' };
               } else {
@@ -1502,10 +1502,9 @@ function Shell() {
             if (!name) { setTouchOpen(false); return; }
             const to = pathJoin(tab.trail[tab.trail.length - 1], name);
             await fm.touch(to);
-            const ext = name.split('.').pop()?.toLowerCase() ?? '';
-            if (ext === 'md' || ext === 'mdx') {
-              // Markdown opens straight into the in-app editor — same routing
-              // as goRight/:note — so you can start writing immediately.
+            if (isEditablePath(name)) {
+              // Editable files open straight into the in-app editor — same
+              // routing as goRight/:note — so you can start writing immediately.
               dispatch({ type: 'openEditTab', path: to, focus: true });
               dispatch({ type: 'pushRecentFile', path: to });
             } else {

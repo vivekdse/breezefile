@@ -6,6 +6,7 @@ import path from 'node:path';
 import { registerIpc } from './ipc';
 import { startApiServer } from './api-server';
 import { startScheduler } from './scheduler';
+import { startTaskReminders, setTaskReminderMode } from './task-reminders';
 import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
 import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
@@ -289,99 +290,25 @@ app.whenReady().then(() => {
   // headless host instead).
   setBreezeHost(ElectronBreezeHost);
   timeSync('boot:startApiServer', () => startApiServer());
-  // fm-zf3m — auto-executor for tasks with auto_mode=1 / cron set.
-  // Starts after the API server so the scheduler can rely on agent
-  // registration (electron/agents has already been side-effect imported).
-  // NOTE (fm-ued6): startScheduler() synchronously opens the local sqlite
-  // tasks.db (WAL pragma + full migration chain) via reapStaleRuns()/rearm()
-  // on the MAIN THREAD — a blocking cold-start cost tied to the local task
-  // store that the repo pivot is REMOVING (tasks are online now). Flagged as
-  // dead-weight in the profile.
-  timeSync('boot:startScheduler(opens sqlite)', () => startScheduler());
-  // Reconnect previously-connected remote breezed daemons (best-effort,
-  // never blocks startup).
-  timeSync('boot:restoreSources', () => restoreSources());
-  // fm-b5at.2 — TypeBuild Firebase auth IPC. Registers signIn/signOut/state
-  // handlers + the auth-state broadcaster, and restores any persisted
-  // (encrypted) session from a prior launch. Best-effort; never blocks.
-  timeSync('boot:registerTypebuildAuthIpc(restoreSession)', () =>
-    registerTypebuildAuthIpc(),
-  );
-  // User credential vault IPC (:secrets panel) — class-2 data (NPI, Tax ID,
-  // login IDs). Server-backed; no plaintext at rest in the client.
+
+  // fm-ued6 — IPC HANDLER registration only. These calls just wire up
+  // ipcMain.handle/on for auth/vault/projects/detection; they're cheap and
+  // MUST run before the renderer can invoke them, so they stay on the
+  // pre-paint path. The genuinely heavy work each used to drag in (a session
+  // restore, the immediate TypeBuild poll) is deferred below — restoreSession()
+  // inside registerTypebuildAuthIpc is already fire-and-forget (`void`), so
+  // registering the handler costs nothing at boot.
+  // fm-b5at.2 — TypeBuild Firebase auth IPC (signIn/signOut/state handlers +
+  // auth-state broadcaster). restoreSession() is kicked async inside.
+  timeSync('boot:registerTypebuildAuthIpc', () => registerTypebuildAuthIpc());
+  // User credential vault IPC (:secrets panel) — class-2 data. Server-backed.
   timeSync('boot:registerTypebuildVaultIpc', () => registerTypebuildVaultIpc());
   // task-ab1d7955e23f — TypeBuild Projects IPC (list/get/resolve/create).
-  // Named task containers; NON-PHI. Server-backed via the TypeBuild source.
   timeSync('boot:registerTypebuildProjectsIpc', () =>
     registerTypebuildProjectsIpc(),
   );
-  // fm-b5at.3 — TypeBuild onboarding prerequisite detection IPC
-  // (claude/chrome presence + the Claude Code install command). Used by the
-  // onboarding checklist in Settings.
+  // fm-b5at.3 — TypeBuild onboarding prerequisite detection IPC.
   timeSync('boot:registerTypebuildDetectIpc', () => registerTypebuildDetectIpc());
-  // fm-b5at.4 — register the TypeBuildTaskSource in the task-source registry
-  // exactly while signed in, so TypeBuild tasks appear in the existing
-  // TasksPage. Sign-in registers + starts polling; sign-out unregisters +
-  // stops polling (which clears the in-memory PHI-light cache). Each
-  // transition fires a `sources:changed` broadcast so the renderer's
-  // useTaskSources() re-pulls the capability map, plus a `tasks:changed`
-  // so the list re-pulls immediately.
-  // NOTE (fm-ued6): when already signed in, this synchronously constructs the
-  // TypeBuildTaskSource and calls startPolling(), which kicks an IMMEDIATE
-  // poll() — a network round-trip (GET /chromeext/tasks) fired during boot.
-  // The fetch itself is async (doesn't block the main thread), but it competes
-  // for the network/CPU during the sluggish first window.
-  timeSync('boot:wireTypebuildTaskSource(immediate poll)', () =>
-    wireTypebuildTaskSource(),
-  );
-  // fm-b5at.10 — TypeBuild MCP session-expiry clock. Watches the live-session
-  // registry (sessions.ts) and broadcasts a T-15min warning + an at-expiry
-  // prompt per session, re-evaluating on wake-from-sleep so a token that
-  // lapsed while suspended is caught the instant the machine resumes. The
-  // renderer turns 'expired' into a one-click relaunch via the IPC below.
-  timeSync('boot:startExpiryClock', () => startExpiryClock());
-  // fm-z7v — register UserPromptSubmit/Stop hooks so Claude Code reports
-  // working/idle state per pty. Idempotent; failures are logged and
-  // ignored. NOTE (fm-ued6): reads+writes ~/.claude/settings.json synchronously.
-  try {
-    const result = timeSync('boot:registerBreezeHooks(reads ~/.claude)', () =>
-      registerBreezeHooks(),
-    );
-    if (result === 'written') {
-      console.log('[hooks-register] updated ~/.claude/settings.json');
-    }
-  } catch (e) {
-    console.warn('[hooks-register] failed:', (e as Error).message);
-  }
-  // Browser-automation RUNTIME: install the helper CLIs (+ a bundled
-  // playwright-core) into ~/.breezefile/automation/ on launch, so the agent's
-  // `node <cli>` commands resolve from a stable user-owned path instead of a
-  // repo/resources path (which broke with MODULE_NOT_FOUND — see
-  // install-runtime.mjs). Runs here (APP_ROOT is set, the copy SOURCE) and well
-  // before any agent session can start. Best-effort; never blocks startup.
-  import('./browser/install-runtime.mjs')
-    .then(({ installAutomation }) => {
-      const { dir, installed, errors } = installAutomation();
-      if (installed.length) console.log(`[automation] installed into ${dir}:`, installed.join(', '));
-      if (errors.length) console.warn('[automation] errors:', errors.join('; '));
-    })
-    .catch((e) => console.warn('[automation] failed:', (e as Error).message));
-  // Browser playbook: the in-app task session drives the browser DIRECTLY (no
-  // sub-agent delegation). The playbook is seeded as workspace memory
-  // (~/.breezefile/tasks/CLAUDE.md via ensureTasksWorkspace) and auto-loaded
-  // from the session cwd, so the injected prompt carries only the task itself —
-  // see electron/sources/typebuild.ts and electron/browser/automation.ts.
-  // Tool Repository (docs/Playwright agent.md): install the bundled seed
-  // tools into ~/.breezefile/tools/ on every launch. Idempotent — only copies
-  // tools that aren't already present, so user/agent edits are never clobbered.
-  // Dynamic import keeps the .mjs out of the tsc graph (it pulls no TS deps).
-  import('./browser/tools/install.mjs')
-    .then(({ installSeedTools }) => {
-      const { installed, errors } = installSeedTools();
-      if (installed.length) console.log('[tool-seeds] installed:', installed.join(', '));
-      if (errors.length) console.warn('[tool-seeds] errors:', errors.join('; '));
-    })
-    .catch((e) => console.warn('[tool-seeds] failed:', (e as Error).message));
 
   // fm-c2w — dock badge IPC. Renderer passes a string ('' clears, '!' or
   // a count for active attention). On non-darwin, app.dock is undefined
@@ -403,6 +330,13 @@ app.whenReady().then(() => {
   // module. Default stays 'all' until the renderer reports in.
   ipcMain.on('settings:taskNotifications', (_e, value: string) => {
     setTaskNotifyVerbosity(value as 'all' | 'failures' | 'off');
+  });
+  // fm-5xy — start-at / near-due reminder mode mirror. Like the verbosity
+  // mirror above, the setting is renderer-owned (localStorage) but the daily
+  // 8am tick + startup catch-up that consume it run in MAIN (task-reminders.ts),
+  // which can't read localStorage. Renderer pushes its value on boot + change.
+  ipcMain.on('settings:taskReminders', (_e, value: string) => {
+    setTaskReminderMode(value);
   });
   // Window state verbs. Linux WMs commonly bind Alt+Space to a menu that
   // owns maximize / fullscreen, but Breezefile's chip prompt also uses
@@ -498,6 +432,14 @@ app.whenReady().then(() => {
   );
   timeSync('boot:buildAppMenu', () => buildAppMenu());
   mark('boot:sync-work-complete');
+  // fm-ued6 — paint FIRST. createWindow() only constructs the BrowserWindow and
+  // starts loading the renderer; the expensive boot steps (local sqlite open +
+  // migration, the ~/.claude hooks read/write, the immediate TypeBuild poll,
+  // breezed reconnect, automation/tool seeding) now run on the next tick via
+  // deferredBoot(), AFTER the window is on screen. None of them is needed before
+  // the renderer's first frame: the renderer reaches all of this lazily over IPC
+  // (and tolerates a not-yet-ready source), so deferring by a tick removes the
+  // blocking work from the critical path without changing behavior.
   timeSync('boot:createWindow', () => createWindow());
   mark('whenReady:exit');
 
@@ -511,7 +453,101 @@ app.whenReady().then(() => {
     dumpTimeline('renderer-first-paint');
   });
   setTimeout(() => dumpTimeline('fallback-timer-8s'), 8000).unref?.();
+
+  // fm-ued6 — run the heavy, paint-irrelevant boot steps on the next tick so
+  // the window paints first. setImmediate yields back to the event loop (and
+  // thus to window construction / the renderer's first load) before this runs.
+  setImmediate(() => {
+    void deferredBoot();
+  });
 });
+
+// fm-ued6 — everything here used to run synchronously inside whenReady BEFORE
+// createWindow, stalling first paint. It's all post-paint work: nothing the
+// renderer needs for its first frame. Order preserved within; each step stays
+// functionally identical, only the timing moved (now after the window exists).
+async function deferredBoot(): Promise<void> {
+  mark('deferredBoot:enter');
+  // fm-zf3m — auto-executor for tasks with auto_mode=1 / cron set. Opens the
+  // local sqlite tasks.db (WAL + full migration chain) via reapStaleRuns() /
+  // rearm() — the single biggest blocking cold-start cost, now off the paint
+  // path. The scheduler's startup catch-up still runs; it just runs a tick late.
+  try {
+    timeSync('defer:startScheduler(opens sqlite)', () => startScheduler());
+  } catch (e) {
+    console.warn('[scheduler] start failed:', (e as Error).message);
+  }
+  // fm-5xy — daily 8am + startup catch-up reminders for tasks whose start_at /
+  // due_at lands today. Runs after the scheduler so the DB handle + migrations
+  // (incl. the v6 last_notified_for_date column) are in place.
+  try {
+    timeSync('defer:startTaskReminders', () => startTaskReminders());
+  } catch (e) {
+    console.warn('[reminders] start failed:', (e as Error).message);
+  }
+  // Reconnect previously-connected remote breezed daemons (best-effort).
+  try {
+    timeSync('defer:restoreSources', () => restoreSources());
+  } catch (e) {
+    console.warn('[sources] restore failed:', (e as Error).message);
+  }
+  // fm-b5at.4 — register the TypeBuildTaskSource while signed in so TypeBuild
+  // tasks appear in TasksPage. When already signed in this constructs the
+  // source + kicks an immediate poll (GET /chromeext/tasks); deferring it keeps
+  // that network round-trip off the sluggish first window. The renderer already
+  // tolerates the source not being registered yet (it re-pulls on the
+  // sources:changed / tasks:changed broadcasts this fires).
+  try {
+    timeSync('defer:wireTypebuildTaskSource(immediate poll)', () =>
+      wireTypebuildTaskSource(),
+    );
+  } catch (e) {
+    console.warn('[typebuild] wire failed:', (e as Error).message);
+  }
+  // fm-b5at.10 — TypeBuild MCP session-expiry clock. No live session can exist
+  // at boot, so this is safe to arm a tick late.
+  try {
+    timeSync('defer:startExpiryClock', () => startExpiryClock());
+  } catch (e) {
+    console.warn('[expiry] start failed:', (e as Error).message);
+  }
+  // fm-z7v — register UserPromptSubmit/Stop hooks so Claude Code reports
+  // working/idle per pty. Reads + writes ~/.claude/settings.json synchronously
+  // (file IO) — moved off the paint path. Idempotent; failures logged + ignored.
+  try {
+    const result = timeSync('defer:registerBreezeHooks(reads ~/.claude)', () =>
+      registerBreezeHooks(),
+    );
+    if (result === 'written') {
+      console.log('[hooks-register] updated ~/.claude/settings.json');
+    }
+  } catch (e) {
+    console.warn('[hooks-register] failed:', (e as Error).message);
+  }
+  // Browser-automation RUNTIME: install the helper CLIs (+ a bundled
+  // playwright-core) into ~/.breezefile/automation/ on launch so the agent's
+  // `node <cli>` commands resolve from a stable user-owned path. Best-effort;
+  // runs well before any agent session can start.
+  try {
+    const { installAutomation } = await import('./browser/install-runtime.mjs');
+    const { dir, installed, errors } = installAutomation();
+    if (installed.length) console.log(`[automation] installed into ${dir}:`, installed.join(', '));
+    if (errors.length) console.warn('[automation] errors:', errors.join('; '));
+  } catch (e) {
+    console.warn('[automation] failed:', (e as Error).message);
+  }
+  // Tool Repository: install the bundled seed tools into ~/.breezefile/tools/.
+  // Idempotent — only copies tools that aren't already present.
+  try {
+    const { installSeedTools } = await import('./browser/tools/install.mjs');
+    const { installed, errors } = installSeedTools();
+    if (installed.length) console.log('[tool-seeds] installed:', installed.join(', '));
+    if (errors.length) console.warn('[tool-seeds] errors:', errors.join('; '));
+  } catch (e) {
+    console.warn('[tool-seeds] failed:', (e as Error).message);
+  }
+  mark('deferredBoot:exit');
+}
 
 // fm-b5at.4 — keep the TypeBuildTaskSource registered exactly while signed
 // in. Broadcasts sources:changed (so the renderer re-pulls the capability

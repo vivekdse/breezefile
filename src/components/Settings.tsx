@@ -4,12 +4,21 @@ import { fm, type Launcher } from '../bridge';
 import { formatOpError } from '../errorMessages';
 import { TypebuildAuthPanel } from './typebuild/TypebuildAuthPanel';
 import { SideBySideSettings } from './typebuild/SideBySideSettings';
+import {
+  getEditableExts,
+  addEditableExt,
+  removeEditableExt,
+  resetEditableExts,
+  subscribeEditableExts,
+  normalizeExt,
+} from '../fileTypes';
 import './Settings.css';
 
 type Props = { onClose: () => void; initialSection?: SectionId };
 
 type SectionId =
   | 'keybindings'
+  | 'editor'
   | 'task-management'
   | 'terminal'
   | 'chat-agent'
@@ -36,6 +45,24 @@ export function Settings({ onClose, initialSection }: Props) {
   // fm-at5 — inline result of the "Reset Claude integration" action.
   const [claudeResetMsg, setClaudeResetMsg] = useState<string | null>(null);
   const [claudeResetting, setClaudeResetting] = useState(false);
+  // fm-o5z8 — editable-extension registry. Source of truth lives in
+  // fileTypes.ts (localStorage-backed); we mirror it into local state and
+  // subscribe so adds/removes here propagate to the file-open call sites.
+  const [editableExts, setEditableExts] = useState<string[]>(() =>
+    [...getEditableExts()].sort(),
+  );
+  const [extDraft, setExtDraft] = useState('');
+
+  useEffect(() => {
+    return subscribeEditableExts((next) => setEditableExts([...next].sort()));
+  }, []);
+
+  function addExt() {
+    const norm = normalizeExt(extDraft);
+    if (!norm) return;
+    addEditableExt(norm);
+    setExtDraft('');
+  }
 
   async function resetClaudeIntegration() {
     if (claudeResetting) return;
@@ -210,6 +237,75 @@ export function Settings({ onClose, initialSection }: Props) {
                 </ul>
               </div>
             ))}
+          </AccordionSection>
+
+          <AccordionSection
+            id="editor"
+            title="Editor"
+            isOpen={openSection === 'editor'}
+            onToggle={() => toggle('editor')}
+            extra={
+              <button
+                className="settings__reset"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resetEditableExts();
+                }}
+              >
+                Reset to defaults
+              </button>
+            }
+          >
+            <div className="settings__row">
+              <span className="settings__path settings__hint">
+                Files with these extensions open in Breeze's in-app editor on
+                double-click (and via Open With → Breeze Editor). Anything not
+                listed opens in your OS default app.
+              </span>
+            </div>
+            <div className="settings__row">
+              <input
+                className="settings__input"
+                value={extDraft}
+                placeholder="add extension (e.g. md, txt, json)…"
+                onChange={(e) => setExtDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addExt();
+                  }
+                }}
+              />
+              <button
+                className="settings__key"
+                onClick={addExt}
+                disabled={!normalizeExt(extDraft)}
+              >
+                Add
+              </button>
+            </div>
+            <ul className="settings__list">
+              {editableExts.length === 0 && (
+                <li className="settings__empty">
+                  No editable extensions — every file opens in the OS default
+                  app.
+                </li>
+              )}
+              {editableExts.map((ext) => (
+                <li key={ext} className="settings__row">
+                  <span className="settings__action">
+                    <code>.{ext}</code>
+                  </span>
+                  <button
+                    className="settings__key"
+                    aria-label={`Remove .${ext}`}
+                    onClick={() => removeEditableExt(ext)}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
           </AccordionSection>
 
           <AccordionSection
@@ -396,6 +492,34 @@ export function Settings({ onClose, initialSection }: Props) {
                 <option value="all">All</option>
                 <option value="failures">Failures only</option>
                 <option value="off">Off</option>
+              </select>
+            </div>
+            {/* fm-5xy — start-at / near-due reminders. On launch and daily at
+                ~8am, a grouped notification for tasks coming into play today. */}
+            <div className="settings__row">
+              <span className="settings__action">
+                Task start reminders
+                <small className="settings__hint" style={{ display: 'block' }}>
+                  Notify on launch and daily (~8am) when tasks start today
+                </small>
+              </span>
+              <select
+                value={state.taskReminders}
+                onChange={(e) =>
+                  dispatch({
+                    type: 'setTaskReminders',
+                    value: e.target.value as
+                      | 'off'
+                      | 'start'
+                      | 'start-near-due',
+                  })
+                }
+              >
+                <option value="off">Off</option>
+                <option value="start">Tasks starting today</option>
+                <option value="start-near-due">
+                  Starting today + due tomorrow
+                </option>
               </select>
             </div>
           </AccordionSection>

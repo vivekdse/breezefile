@@ -22,6 +22,7 @@ import type {
 } from './types';
 import { fm } from './bridge';
 import { visibleEntries } from './actions';
+import { isEditablePath } from './fileTypes';
 
 const STORAGE_KEY = 'fm-state-v1';
 
@@ -142,6 +143,11 @@ const DEFAULT_KEYBINDS: Keybinds = {
 // notify-settings enum.
 export type TaskNotifyVerbosity = 'all' | 'failures' | 'off';
 
+// fm-5xy — start-at / near-due reminder mode. Mirrors the main-process
+// task-reminders module. 'off' = none; 'start' = tasks whose start_at is today
+// (default); 'start-near-due' = start-today plus tasks due tomorrow.
+export type TaskReminderMode = 'off' | 'start' | 'start-near-due';
+
 // Only durable preferences persist — tabs always start fresh at $HOME so a
 // stale trail never greets you on launch.
 type Persisted = {
@@ -188,6 +194,11 @@ type Persisted = {
   // main process (which owns the OS-notification gate) over the
   // settings:taskNotifications IPC on boot + on every change.
   taskNotifications: TaskNotifyVerbosity;
+  // fm-5xy — when to raise a start-at / near-due task reminder. 'off' = none;
+  // 'start' = notify on tasks whose start_at is today (default); 'start-near-due'
+  // = also remind about tasks due tomorrow. Mirrored to the main process (which
+  // owns the daily 8am tick + startup catch-up) over settings:taskReminders.
+  taskReminders: TaskReminderMode;
   // fm-hzo — when true, terminal spawns wrap in `tmux new-session -A -s
   // <tab-label>`. Two tabs with the same label share a tmux session;
   // closing & re-opening a terminal reattaches to the still-running
@@ -264,6 +275,7 @@ type Action =
   | { type: 'setNotifyOnAttention'; value: boolean }
   | { type: 'setSoundOnAttention'; value: boolean }
   | { type: 'setTaskNotifications'; value: TaskNotifyVerbosity }
+  | { type: 'setTaskReminders'; value: TaskReminderMode }
   | { type: 'bumpTasksBadge'; by?: number }
   | { type: 'clearTasksBadge' }
   | { type: 'setUseTmux'; value: boolean }
@@ -375,6 +387,7 @@ const initialState: State = {
   notifyOnAttention: true,
   soundOnAttention: true,
   taskNotifications: 'all',
+  taskReminders: 'start',
   useTmux: false,
   folderPrefs: {},
   entriesByPath: {},
@@ -619,6 +632,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, soundOnAttention: a.value };
     case 'setTaskNotifications':
       return { ...s, taskNotifications: a.value };
+    case 'setTaskReminders':
+      return { ...s, taskReminders: a.value };
     case 'bumpTasksBadge':
       return { ...s, tasksBadgeCount: s.tasksBadgeCount + (a.by ?? 1) };
     case 'clearTasksBadge':
@@ -832,6 +847,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           notifyOnAttention,
           soundOnAttention,
           taskNotifications,
+          taskReminders,
           useTmux,
           folderPrefs,
         } = parsed as Partial<Persisted>;
@@ -861,6 +877,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             taskNotifications === 'failures' ||
             taskNotifications === 'off'
               ? { taskNotifications }
+              : {}),
+            ...(taskReminders === 'off' ||
+            taskReminders === 'start' ||
+            taskReminders === 'start-near-due'
+              ? { taskReminders }
               : {}),
             ...(typeof useTmux === 'boolean' ? { useTmux } : {}),
             ...(folderPrefs && typeof folderPrefs === 'object' ? { folderPrefs } : {}),
@@ -940,6 +961,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       notifyOnAttention: state.notifyOnAttention,
       soundOnAttention: state.soundOnAttention,
       taskNotifications: state.taskNotifications,
+      taskReminders: state.taskReminders,
       useTmux: state.useTmux,
       folderPrefs: state.folderPrefs,
     };
@@ -959,6 +981,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     state.notifyOnAttention,
     state.soundOnAttention,
     state.taskNotifications,
+    state.taskReminders,
     state.useTmux,
     state.folderPrefs,
     hydrated,
@@ -972,6 +995,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!hydrated) return;
     fm.setTaskNotifications?.(state.taskNotifications);
   }, [state.taskNotifications, hydrated]);
+
+  // fm-5xy — mirror the start-at / near-due reminder mode to main (the daily
+  // 8am tick + startup catch-up run in main). Push on boot (after hydration)
+  // and on every change. Fire-and-forget; main defaults to 'start' until the
+  // first push lands.
+  useEffect(() => {
+    if (!hydrated) return;
+    fm.setTaskReminders?.(state.taskReminders);
+  }, [state.taskReminders, hydrated]);
 
   const activeTab = state.tabs[state.activeTab];
 
@@ -1124,6 +1156,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       dispatch({ type: 'pushRecent', path: p });
       await loadDir(p);
+    } else if (isEditablePath(p)) {
+      // Settings-driven editable types (md/mdx/txt/json/…) open in Breeze's
+      // in-app editor on double-click; everything else routes to the OS
+      // default app below (fm-o5z8).
+      dispatch({ type: 'openEditTab', path: p, focus: true });
+      dispatch({ type: 'pushRecentFile', path: p });
     } else {
       dispatch({ type: 'pushRecentFile', path: p });
       await fm.open(p);

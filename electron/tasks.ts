@@ -50,6 +50,13 @@ export type Task = {
   created_at: number;
   updated_at: number;
   completed_at: number | null;
+  /** fm-5xy — day-only 'YYYY-MM-DD' the task was last surfaced in a start/
+   *  near-due reminder, or null if never. Dedupe key so a restart or the daily
+   *  8am tick doesn't re-notify the same task for the same calendar day. This
+   *  is a LOCAL-store concern only; remote (TypeBuild) rows omit it, so it's
+   *  optional across the source seam. rowToTask always populates it for local
+   *  rows. */
+  last_notified_for_date?: string | null;
 };
 
 export type TaskCreate = {
@@ -301,6 +308,15 @@ function migrate(d: Database.Database) {
         CREATE INDEX idx_remote_schedule_next ON remote_schedule(next_run_at);
       `);
     },
+
+    // v6 — start_at / due_at reminder dedupe (fm-5xy). Records the day-only
+    // 'YYYY-MM-DD' a task was last surfaced in a start/near-due reminder, so a
+    // restart or the daily 8am tick never re-notifies the same task for the
+    // same day. NULL = never notified. The value is the LOCAL calendar day the
+    // notification was raised for (matches start_at/due_at's day-only shape).
+    (db) => {
+      db.exec(`ALTER TABLE tasks ADD COLUMN last_notified_for_date TEXT;`);
+    },
   ];
 
   const runFrom = current; // 0-indexed, matches array
@@ -332,6 +348,7 @@ function rowToTask(r: Record<string, unknown>): Task {
     created_at: r.created_at as number,
     updated_at: r.updated_at as number,
     completed_at: (r.completed_at as number | null) ?? null,
+    last_notified_for_date: (r.last_notified_for_date as string | null) ?? null,
   };
 }
 
@@ -878,6 +895,35 @@ export function dueAutoTasks(now: number): Task[] {
        ORDER BY next_run_at ASC`,
     )
     .all({ now }) as Record<string, unknown>[];
+  return rows.map(rowToTask);
+}
+
+/** fm-5xy — record that `id` was surfaced in a start/near-due reminder for the
+ *  given local calendar day ('YYYY-MM-DD'). Idempotent dedupe key: the reminder
+ *  scan skips tasks whose last_notified_for_date already equals today. Written
+ *  to the durable DB so a restart on the same day doesn't re-notify. Does NOT
+ *  bump updated_at or broadcast — this is bookkeeping, not a user-visible edit. */
+export function markNotifiedForDate(id: string, date: string): void {
+  const d = open();
+  d.prepare('UPDATE tasks SET last_notified_for_date = @date WHERE id = @id').run({
+    id,
+    date,
+  });
+}
+
+/** fm-5xy — open local tasks whose start_at or due_at is relevant for reminders
+ *  (not done/cancelled). Returns the raw Task rows; the pure selector in
+ *  core/task-reminders.mjs decides which actually fire for a given day + mode.
+ *  Cheap: bounded by the open-task count and only pulls dated rows. */
+export function reminderCandidates(): Task[] {
+  const d = open();
+  const rows = d
+    .prepare(
+      `SELECT * FROM tasks
+        WHERE status NOT IN ('done','cancelled')
+          AND (start_at IS NOT NULL OR due_at IS NOT NULL)`,
+    )
+    .all() as Record<string, unknown>[];
   return rows.map(rowToTask);
 }
 

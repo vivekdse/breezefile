@@ -13,6 +13,7 @@ import type { Entry, SortKey, YankMode } from './types';
 import { runPaste } from './clipboard';
 import { formatOpError } from './errorMessages';
 import { isTextEntryTarget } from './textFocus';
+import { isEditablePath } from './fileTypes';
 
 // Canonical key name — Ctrl chords prefixed with C-, like ranger's <C-x>.
 function keyName(e: KeyboardEvent): string {
@@ -707,8 +708,7 @@ export function useKeyboard(
           // OS default app. Plain `.txt` etc. used to land in the
           // terminal on some Linux MIME setups — route them through
           // the binding flow too so the user's chosen GUI editor wins.
-          const ext = entry.path.split('.').pop()?.toLowerCase() ?? '';
-          if (ext === 'md' || ext === 'mdx') {
+          if (isEditablePath(entry.path)) {
             dispatch({ type: 'openEditTab', path: entry.path, focus: true });
           } else {
             dispatch({ type: 'pushRecentFile', path: entry.path });

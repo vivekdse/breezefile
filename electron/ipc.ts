@@ -736,6 +736,36 @@ export function registerIpc() {
     return res.filePaths[0];
   });
 
+  // fm-3vl — export-list verb: show a Save dialog and write the supplied text
+  // (the selected paths, plain or JSON) to the chosen file. Returns the saved
+  // path, or null when the user cancels. The content is built renderer-side
+  // (newline-joined paths or a JSON array) so this stays a dumb writer.
+  ipcMain.handle(
+    'app:saveList',
+    async (
+      _e,
+      content: string,
+      defaultName?: string,
+    ): Promise<string | null> => {
+      const win = BrowserWindow.getFocusedWindow();
+      const opts: Electron.SaveDialogOptions = {
+        title: 'Export selection list',
+        defaultPath: defaultName || 'selection.txt',
+        filters: [
+          { name: 'Text', extensions: ['txt'] },
+          { name: 'JSON', extensions: ['json'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      };
+      const res = win
+        ? await dialog.showSaveDialog(win, opts)
+        : await dialog.showSaveDialog(opts);
+      if (res.canceled || !res.filePath) return null;
+      await fs.writeFile(res.filePath, content, 'utf8');
+      return res.filePath;
+    },
+  );
+
   ipcMain.handle('bindings:get', async () => {
     await loadBindings();
     return { ...bindings };

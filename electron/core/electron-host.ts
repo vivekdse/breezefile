@@ -131,6 +131,29 @@ export const ElectronBreezeHost: BreezeHost = {
     broadcast('task-runs:succeeded', { taskId: task.id });
   },
 
+  // fm-5xy — grouped start-at / near-due reminder. PHI-FREE: built ENTIRELY
+  // from counts (the caller never passes a title), so a PHI task's body never
+  // reaches the OS notification. One native notification summarizes both legs:
+  // "N tasks start today" (+ "M due tomorrow"). Clicking opens the Tasks page
+  // (no specific row — it's a grouped reminder). Always fires when the caller
+  // decided to (the start/near-due verbosity gate lives in the reminder driver,
+  // separate from the run-notification verbosity gate above).
+  onTaskReminders(counts: { startCount: number; dueCount: number }) {
+    const startCount = Math.max(0, counts?.startCount ?? 0);
+    const dueCount = Math.max(0, counts?.dueCount ?? 0);
+    if (startCount === 0 && dueCount === 0) return;
+    const parts: string[] = [];
+    if (startCount > 0) {
+      parts.push(`${startCount} task${startCount === 1 ? '' : 's'} start${startCount === 1 ? 's' : ''} today`);
+    }
+    if (dueCount > 0) {
+      parts.push(`${dueCount} task${dueCount === 1 ? '' : 's'} due tomorrow`);
+    }
+    const title = parts[0];
+    const body = parts.length > 1 ? parts.slice(1).join(' · ') : 'Open Tasks to review';
+    showTaskNotification({ title, body, silent: true });
+  },
+
   // fm-h8g7 — remote task transitions from a source poll. PHI-FREE end to end:
   // titles are NEVER available here; the OS notification label is built solely
   // from the opaque short id. Batch politeness: >3 transitions in one poll

@@ -111,6 +111,8 @@ export function EditShell({
   const tab = state.tabs[tabIndex];
   const filePath = tab?.editPath ?? '';
   const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+  // Markdown still gets the rich Milkdown view; other editable types fall
+  // back to the plain textarea. Editability itself is settings-driven.
   const isMd = ext === 'md' || ext === 'mdx';
 
   const [loaded, setLoaded] = useState(false);

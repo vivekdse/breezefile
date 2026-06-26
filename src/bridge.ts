@@ -65,6 +65,10 @@ type Fm = {
   openWith: (p: string, appName: string) => Promise<void>;
   pickApplication: () => Promise<string | null>;
   pickFolder: (defaultPath?: string) => Promise<string | null>;
+  // fm-3vl — export-list verb: show a Save dialog and write the supplied text
+  // (selected paths, plain or JSON) to the chosen file. Resolves to the saved
+  // path, or null when the user cancels.
+  saveList: (content: string, defaultName?: string) => Promise<string | null>;
   getBindings: () => Promise<Record<string, string>>;
   setBinding: (ext: string, appPath: string) => Promise<void>;
   clearBinding: (ext: string) => Promise<void>;
@@ -255,6 +259,8 @@ type Fm = {
     cb: (payload: { taskId?: string }) => void,
   ) => () => void;
   setTaskNotifications: (value: 'all' | 'failures' | 'off') => void;
+  // fm-5xy — start-at / near-due reminder mode mirror (see preload).
+  setTaskReminders: (value: 'off' | 'start' | 'start-near-due') => void;
   // fm-9fd — control bridge between the HTTP API server (main) and the
   // renderer (which owns tab state + navigation). Renderer listens for
   // control:request events and replies via sendControlReply.
