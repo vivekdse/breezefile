@@ -67,6 +67,16 @@
   grid-template-columns: 0px 1fr 0px var(--chat-w);
 }
 
+/* The Projects home renders neither Sidebar nor Preview (see App.tsx), so the
+   default side/preview rails would sit empty — a dead 240px gutter on the left
+   and 340px on the right. Zero both and give the whole row to the projects
+   surface, same treatment as the all-tasks inbox above. */
+.shell[data-tab-kind="projects"] {
+  --sidebar-w: 0px;
+  --preview-w: 0px;
+  grid-template-columns: 0px 1fr 0px var(--chat-w);
+}
+
 /* fm-dly3 — edit tabs render neither Sidebar nor Preview, but those columns
    still reserve width. That's harmless on its own (the no-chat editor centres
    in the leftover space), but once the chat panel opens the editor would be

@@ -22,9 +22,9 @@
 }
 
 .projects__page {
-  max-width: 980px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: var(--sp-6) var(--sp-5) var(--sp-8);
+  padding: var(--sp-6) var(--sp-6) var(--sp-8);
 }
 
 /* ── breadcrumb / zoom indicator ─────────────────────────────────────────── */
@@ -150,13 +150,10 @@
 /* ── L1 grid ─────────────────────────────────────────────────────────────── */
 .projects__grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Fill the reclaimed width: as many ~320px columns as fit, collapsing to a
+     single column on narrow windows — no fixed 2-up cap. */
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--sp-5);
-}
-@media (max-width: 720px) {
-  .projects__grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .pcard {
