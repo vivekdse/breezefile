@@ -342,10 +342,12 @@ type Fm = {
     audit: (taskId: string, limit?: number) => Promise<TaskAuditEvent[]>;
     // Credential vault — the user's OWN identifiers (NPI, Tax ID, login IDs),
     // NOT patient PHI. Values are encrypted on TypeBuild, scoped to the user,
-    // and never persisted to this machine's disk. `list` returns key names
-    // only; `reveal` decrypts a single value on explicit user action.
+    // and never persisted to this machine's disk. `list` returns NAMES only
+    // ({key, secret}); `reveal` decrypts a single value on explicit user
+    // action. The `secret` flag marks write-only fields (ssn/dob/bank_account)
+    // the server refuses to reveal — the panel disables their reveal toggle.
     vault: {
-      list: () => Promise<string[]>;
+      list: () => Promise<VaultEntry[]>;
       reveal: (ref: string) => Promise<string>;
       set: (key: string, value: string) => Promise<string>;
       remove: (ref: string) => Promise<void>;
@@ -389,6 +391,11 @@ type Fm = {
 };
 
 export type TypebuildAuthState = { signedIn: boolean; email?: string };
+
+// One credential-vault entry as it crosses the bridge (NAMES only — never a
+// value). `key` is the "me."-prefixed field; `secret` marks write-only fields
+// (ssn/dob/bank_account) the server's resolver refuses to reveal.
+export type VaultEntry = { key: string; secret: boolean };
 
 export type Launcher = {
   id: string;

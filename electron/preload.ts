@@ -17,6 +17,16 @@ type Project = {
   effectiveInstructions?: string;
 };
 
+// One credential-vault entry as it crosses the bridge (NAMES only — never a
+// value). `key` is the "me."-prefixed field; `secret` marks write-only fields
+// (ssn/dob/bank_account) the server's resolver refuses to reveal. Inlined here
+// for the same reason as Project (preload carries no shared-type imports);
+// mirrors `VaultEntry` in electron/typebuild/user-vault.ts. NON-PHI (names only).
+type VaultEntry = {
+  key: string;
+  secret: boolean;
+};
+
 const fm = {
   platform: process.platform,
   versions: process.versions,
@@ -624,9 +634,10 @@ const fm = {
       ipcRenderer.invoke('typebuild:detect:installCommand') as Promise<string>,
     // User credential vault (:secrets panel) — class-2 data (the user's OWN
     // identifiers: NPI, Tax ID, login IDs). Server-backed; values cross only on
-    // explicit reveal/save. `list` returns KEY names only.
+    // explicit reveal/save. `list` returns NAMES only ({key, secret}); the
+    // `secret` flag lets the panel disable reveal for write-only secret fields.
     vault: {
-      list: () => ipcRenderer.invoke('typebuild:vault:list') as Promise<string[]>,
+      list: () => ipcRenderer.invoke('typebuild:vault:list') as Promise<VaultEntry[]>,
       reveal: (ref: string) =>
         ipcRenderer.invoke('typebuild:vault:reveal', ref) as Promise<string>,
       set: (key: string, value: string) =>

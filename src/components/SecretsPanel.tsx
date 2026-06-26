@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fm } from '../bridge';
+import type { VaultEntry } from '../bridge';
 import { useOverlayExit } from '../useOverlayExit';
 import './SecretsPanel.css';
 
@@ -26,7 +27,7 @@ const MASK = '••••••••';
 export function SecretsPanel({ onClose }: { onClose: () => void }) {
   const { exit, state } = useOverlayExit(onClose);
 
-  const [keys, setKeys] = useState<string[]>([]);
+  const [keys, setKeys] = useState<VaultEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -58,7 +59,7 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
     setLoadError(null);
     try {
       const list = await fm.typebuild.vault.list();
-      setKeys([...list].sort((a, b) => a.localeCompare(b)));
+      setKeys([...list].sort((a, b) => a.key.localeCompare(b.key)));
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load secrets.');
     } finally {
@@ -203,7 +204,7 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
           </p>
         ) : (
           <ul className="secrets-panel__list">
-            {keys.map((ref) => {
+            {keys.map(({ key: ref, secret }) => {
               const isRevealed = revealedRef === ref;
               const isRevealing = revealing === ref;
               const isConfirming = confirmingDelete === ref;
@@ -217,7 +218,17 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
                     aria-live="polite"
                     data-revealed={isRevealed ? 'true' : 'false'}
                   >
-                    {isRevealed ? (
+                    {secret ? (
+                      // Write-only field: the server refuses to reveal it, so we
+                      // never even attempt a reveal — show a short note instead.
+                      <span className="secrets-panel__writeonly">
+                        {MASK}
+                        <span className="secrets-panel__writeonly-note">
+                          {' '}
+                          write-only (cannot be shown)
+                        </span>
+                      </span>
+                    ) : isRevealed ? (
                       <code className="secrets-panel__plain">
                         {revealedValue}
                       </code>
@@ -228,19 +239,34 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
                     )}
                   </span>
 
-                  <button
-                    type="button"
-                    className="secrets-panel__icon"
-                    onClick={() => void toggleReveal(ref)}
-                    disabled={isRevealing}
-                    aria-pressed={isRevealed}
-                    aria-label={
-                      isRevealed ? `Hide value of ${ref}` : `Reveal value of ${ref}`
-                    }
-                    title={isRevealed ? 'Hide' : 'Reveal'}
-                  >
-                    {isRevealing ? '…' : isRevealed ? '🙈' : '👁'}
-                  </button>
+                  {secret ? (
+                    // No reveal toggle for write-only fields — keep the column
+                    // aligned with a disabled, labelled placeholder.
+                    <button
+                      type="button"
+                      className="secrets-panel__icon"
+                      disabled
+                      aria-disabled="true"
+                      aria-label={`${ref} is write-only and cannot be revealed`}
+                      title="Write-only (cannot be shown)"
+                    >
+                      🔒
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="secrets-panel__icon"
+                      onClick={() => void toggleReveal(ref)}
+                      disabled={isRevealing}
+                      aria-pressed={isRevealed}
+                      aria-label={
+                        isRevealed ? `Hide value of ${ref}` : `Reveal value of ${ref}`
+                      }
+                      title={isRevealed ? 'Hide' : 'Reveal'}
+                    >
+                      {isRevealing ? '…' : isRevealed ? '🙈' : '👁'}
+                    </button>
+                  )}
 
                   {isConfirming ? (
                     <span className="secrets-panel__confirm">

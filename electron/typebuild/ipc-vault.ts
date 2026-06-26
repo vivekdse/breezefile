@@ -2,10 +2,14 @@
 // renderer. Class-2 data — the user's OWN identifiers (NPI, Tax ID, login IDs).
 // Server is the source of truth; main holds no plaintext at rest.
 //
-//   typebuild:vault:list    ()              -> string[]   (KEY names only)
+//   typebuild:vault:list    ()              -> VaultEntry[]  ({key, secret} — NAMES only)
 //   typebuild:vault:reveal  (ref)           -> string     (one value, on demand)
 //   typebuild:vault:set     (key, value)    -> string     (canonical ref written)
 //   typebuild:vault:delete  (ref)           -> void
+//
+// `list` returns each field's "me."-prefixed key plus a `secret` flag so the
+// renderer can DISABLE the reveal toggle for write-only secret fields (the
+// server's resolver refuses to reveal ssn/dob/bank_account).
 //
 // SECURITY: never log a value; the `reveal`/`set` payloads carry secrets, so
 // keep them out of any error message and any IPC/telemetry logging. Only key
