@@ -30,7 +30,11 @@ import { classifyTransitions } from './typebuild-transitions.mjs';
 import { getAuthState, getIdToken } from '../typebuild/auth';
 import { mintMcpToken } from '../typebuild/mcp-token';
 import { clearSession, registerSession } from '../typebuild/sessions';
-import { browserCliAllowRules } from '../browser/automation';
+import {
+  browserCliAllowRules,
+  browserPlaybookMarkdown,
+  playwrightPromptAddendum,
+} from '../browser/automation';
 import type {
   RunNowOptions,
   SourcedTask,
@@ -98,6 +102,10 @@ const MCP_INLINE_CONFIG = JSON.stringify({
 // task sessions out of whatever folder happens to be focused.
 const TASKS_DIR = path.join(os.homedir(), '.breezefile', 'tasks');
 const TASKS_SETTINGS = path.join(TASKS_DIR, '.claude', 'settings.json');
+// The browser playbook lives HERE as project memory rather than in the injected
+// prompt: a session launched with cwd=TASKS_DIR auto-loads it, so the prompt we
+// inject carries only the task. App-owned dir, so we (over)write-if-changed.
+const TASKS_CLAUDE_MD = path.join(TASKS_DIR, 'CLAUDE.md');
 
 // Tools the /work flow must call unattended:
 //   mcp__typebuild        — the TypeBuild MCP server (task lifecycle verbs)
@@ -137,6 +145,18 @@ function ensureTasksWorkspace(): { cwd: string; settingsPath: string } {
   perms.allow = allow;
   if (changed) {
     writeFileSync(TASKS_SETTINGS, JSON.stringify(settings, null, 2) + '\n');
+  }
+  // Seed the browser playbook as workspace memory (auto-loaded from cwd). Write
+  // only when content differs so we don't churn the file every launch.
+  const playbook = browserPlaybookMarkdown();
+  let playbookCurrent = '';
+  try {
+    playbookCurrent = readFileSync(TASKS_CLAUDE_MD, 'utf8');
+  } catch {
+    /* absent/unreadable — write it */
+  }
+  if (playbookCurrent !== playbook) {
+    writeFileSync(TASKS_CLAUDE_MD, playbook);
   }
   return { cwd: TASKS_DIR, settingsPath: TASKS_SETTINGS };
 }
@@ -1059,9 +1079,18 @@ export class TypeBuildTaskSource implements TaskSource {
       : `Run /mcp__typebuild__work and claim task ${id}`;
     // Prepend the project's effective instructions (NON-PHI) as context so the
     // agent operates with the project's cascading guidance from the first turn.
-    const prompt = projectCtx.instructions
+    const withInstructions = projectCtx.instructions
       ? `${projectCtx.instructions}\n\n---\n\n${basePrompt}`
       : basePrompt;
+    // The browser playbook normally rides the workspace CLAUDE.md (seeded in
+    // ensureTasksWorkspace, auto-loaded from cwd=TASKS_DIR). But a project task
+    // runs in the user's OWN folder (projectCtx.cwd), where that CLAUDE.md is
+    // out of scope and we won't write one into their repo — so fall back to
+    // carrying the playbook in the prompt for that case only.
+    const prompt =
+      projectCtx.cwd && !opts.resume
+        ? `${withInstructions}\n${playwrightPromptAddendum()}`
+        : withInstructions;
 
     let ptyId = 0;
     const res = await runTaskInteractive(synthetic, {

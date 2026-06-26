@@ -366,10 +366,11 @@ app.whenReady().then(() => {
       if (errors.length) console.warn('[automation] errors:', errors.join('; '));
     })
     .catch((e) => console.warn('[automation] failed:', (e as Error).message));
-  // Browser playbook: the in-app task session now drives the browser DIRECTLY
-  // (no sub-agent delegation) — the playbook rides the prompt via
-  // playwrightPromptAddendum() in electron/browser/automation.ts. The old
-  // `breeze-browser` sub-agent install was removed with that reversal.
+  // Browser playbook: the in-app task session drives the browser DIRECTLY (no
+  // sub-agent delegation). The playbook is seeded as workspace memory
+  // (~/.breezefile/tasks/CLAUDE.md via ensureTasksWorkspace) and auto-loaded
+  // from the session cwd, so the injected prompt carries only the task itself —
+  // see electron/sources/typebuild.ts and electron/browser/automation.ts.
   // Tool Repository (docs/Playwright agent.md): install the bundled seed
   // tools into ~/.breezefile/tools/ on every launch. Idempotent — only copies
   // tools that aren't already present, so user/agent edits are never clobbered.

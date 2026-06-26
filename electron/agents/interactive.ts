@@ -21,7 +21,7 @@ import { defaultAgentId } from './registry';
 import { flagsToArgs } from './flags';
 import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
-import { CDP_URL, BROWSER_CLI, TOOLS_CLI, playwrightPromptAddendum } from '../browser/automation';
+import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
 import { openBrowserWindow } from '../browser/window';
 
 export type InteractiveRunOptions = {
@@ -134,12 +134,13 @@ export async function runTaskInteractive(
   }
 
   // SPIKE (spike/playwright-cdp): the `playwright` flag is the in-app analog of
-  // `chrome`. Open the side-by-side browser WINDOW for the agent to drive and
-  // teach it (via the prompt) how to drive it. The CLI reads BREEZE_CDP_URL from
-  // env. omitPrompt = resume relaunch: the addendum was already delivered on the
-  // first run, and --continue must not be seeded with a fresh message.
-  const effectivePrompt =
-    playwright && !opts.omitPrompt ? prompt + '\n' + playwrightPromptAddendum() : prompt;
+  // `chrome` — it opens the side-by-side browser WINDOW (below) and points the
+  // helper CLIs at its CDP endpoint. The browser PLAYBOOK is no longer appended
+  // here: a browser session loads it from workspace memory (a seeded CLAUDE.md
+  // auto-loaded from cwd), or the caller folds it into the prompt when running
+  // outside that workspace (electron/sources/typebuild.ts). The prompt we were
+  // handed is therefore authoritative.
+  const effectivePrompt = prompt;
   // Positional prompt arg launches claude interactively pre-seeded with the
   // task; flags map to CLI args; --add-dir grants the cwd. No -p (that's
   // the headless one-shot mode). On a resume relaunch (omitPrompt) we drop

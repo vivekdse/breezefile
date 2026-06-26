@@ -44,16 +44,16 @@ export function browserCliAllowRules(): string[] {
   return [`Bash(node ${BROWSER_CLI}:*)`, `Bash(node ${TOOLS_CLI}:*)`];
 }
 
-/** Appended to a task session's prompt when the `playwright` flag is set. The
- *  session drives the live browser DIRECTLY — no sub-agent delegation. The full
- *  playbook rides here so the session has it in its own context (the same prose
- *  also lives in ~/.breezefile/browser actions/CLAUDE.md for manual sessions). */
-export function playwrightPromptAddendum(): string {
+/** The browser playbook prose (no leading separator / heading). The session
+ *  drives the live browser DIRECTLY — no sub-agent delegation. Shared by the
+ *  two delivery paths below: it normally rides a seeded CLAUDE.md in the task
+ *  workspace (browserPlaybookMarkdown), and falls back to the prompt only when
+ *  a session runs in a user's project folder where that CLAUDE.md can't load
+ *  (playwrightPromptAddendum). One source of truth so the two never drift. */
+function playbookBody(): string[] {
   const T = TOOLS_CLI; // tool repository CLI (absolute)
   const C = BROWSER_CLI; // raw driver CLI (absolute)
   return [
-    '',
-    '---',
     'Browser task. A live, side-by-side Breeze browser window is open over CDP —',
     'the user\'s REAL, signed-in session. Drive it YOURSELF; do NOT fetch pages',
     'out-of-band or use claude-in-chrome tools. Everything is installed: do not',
@@ -91,5 +91,19 @@ export function playwrightPromptAddendum(): string {
     '`me.npi`, `me.tax_id`) via the same fill-ref path; do NOT ask the human for',
     'them. Never read back or screenshot a filled sensitive field. A real',
     'submission (send/pay/file) needs explicit human confirmation before you click.',
-  ].join('\n');
+  ];
+}
+
+/** The playbook as a standalone CLAUDE.md document. Seeded into the app-owned
+ *  task workspace (~/.breezefile/tasks/CLAUDE.md) so a task session auto-loads
+ *  it from cwd — the injected prompt then carries only the task itself. */
+export function browserPlaybookMarkdown(): string {
+  return ['# Browser tasks', '', ...playbookBody(), ''].join('\n');
+}
+
+/** The playbook as a prompt addendum. Used ONLY as a fallback when a session
+ *  runs in a user's project folder (not the workspace), where the seeded
+ *  CLAUDE.md is out of scope and we won't write one into the user's repo. */
+export function playwrightPromptAddendum(): string {
+  return ['', '---', ...playbookBody()].join('\n');
 }
