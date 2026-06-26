@@ -565,9 +565,44 @@ function PlainEditor({
   registerFocus?: (fn: () => void) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const gutterRef = useRef<HTMLDivElement | null>(null);
+  // fm-uatz — gutter line count + active (caret) line. Both are plain state so
+  // the gutter rerenders as the doc grows and the caret moves. The textarea
+  // stays uncontrolled (native undo); we read its value/selection imperatively.
+  const [lineCount, setLineCount] = useState(() => initial.split('\n').length);
+  const [activeLine, setActiveLine] = useState(0);
   useEffect(() => {
     registerFocus?.(() => ref.current?.focus());
   }, [registerFocus]);
+
+  // fm-uatz — recompute the active line + the current-line highlight band from
+  // the caret. The highlight is a CSS background gradient on the textarea,
+  // positioned via the --edit-active-top var: (caretLine - firstVisibleLine) ×
+  // rowHeight, so it sits on the caret's row and scrolls naturally with the
+  // text (background-attachment defaults to scroll). rowHeight is read from the
+  // computed line-height so it tracks the shared --edit-line-height metric.
+  const syncCaret = () => {
+    const el = ref.current;
+    if (!el) return;
+    const value = el.value;
+    const upto = value.slice(0, el.selectionStart);
+    const caretLine = upto.split('\n').length - 1; // 0-based
+    setActiveLine(caretLine);
+    const cs = window.getComputedStyle(el);
+    const rowH = parseFloat(cs.lineHeight) || 20;
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    const top = padTop + caretLine * rowH - el.scrollTop;
+    el.style.setProperty('--edit-active-top', `${top}px`);
+  };
+
+  // Keep the gutter scrolled in lockstep with the textarea and the highlight
+  // band re-pinned to the caret row as the view moves.
+  const onScroll = () => {
+    const el = ref.current;
+    if (gutterRef.current && el) gutterRef.current.scrollTop = el.scrollTop;
+    syncCaret();
+  };
+
   // Restore caret + scroll on mount (this fires on every `key` remount, i.e.
   // every reload), and snapshot them on unmount so the next mount can replay.
   // Clamp the offsets to the new length since a reload may have changed it.
@@ -583,6 +618,10 @@ function PlainEditor({
         el.scrollTop = saved.scrollTop;
       }
     }
+    // Seed the gutter + highlight from the freshly-mounted contents.
+    setLineCount((el?.value ?? initial).split('\n').length);
+    syncCaret();
+    if (el && gutterRef.current) gutterRef.current.scrollTop = el.scrollTop;
     return () => {
       if (el && filePath) {
         plainStateByPath.set(filePath, {
@@ -592,21 +631,47 @@ function PlainEditor({
         });
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial, filePath]);
+
   // Uncontrolled so the browser keeps its native undo/redo stack
   // (a controlled `value` resets the stack on every keystroke). `key`
   // remounts with fresh contents only on a genuine reload, since the
   // parent changes `initial` only on file load — never on save.
   return (
-    <textarea
-      key={initial}
-      ref={ref}
-      autoFocus={autoFocus}
-      className="edit-shell__textarea"
-      defaultValue={initial}
-      spellCheck={false}
-      onChange={(e) => onChange(e.target.value)}
-    />
+    <div className="edit-shell__plain">
+      <div className="edit-shell__gutter" ref={gutterRef} aria-hidden>
+        {Array.from({ length: lineCount }, (_, n) => (
+          <span
+            key={n}
+            className={
+              'edit-shell__gutter-line' +
+              (n === activeLine ? ' edit-shell__gutter-line--active' : '')
+            }
+          >
+            {n + 1}
+          </span>
+        ))}
+      </div>
+      <textarea
+        key={initial}
+        ref={ref}
+        autoFocus={autoFocus}
+        className="edit-shell__textarea"
+        defaultValue={initial}
+        spellCheck={false}
+        onChange={(e) => {
+          setLineCount(e.target.value.split('\n').length);
+          syncCaret();
+          onChange(e.target.value);
+        }}
+        onScroll={onScroll}
+        onKeyUp={syncCaret}
+        onClick={syncCaret}
+        onSelect={syncCaret}
+        onFocus={syncCaret}
+      />
+    </div>
   );
 }
 

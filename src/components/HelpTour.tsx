@@ -25,6 +25,7 @@ export type HelpSlideId =
   | 'navigate'
   | 'select'
   | 'share'
+  | 'editor'
   | 'view-sort'
   | 'tags'
   | 'tasks-intro'
@@ -155,6 +156,23 @@ const SLIDES: Slide[] = [
       { name: 'save / :w', chord: '⌘S', what: 'save the current edit tab to disk' },
       { name: 'revert / reload', chord: '⌘R / Ctrl+R / F5 · ↻', what: 'reload the file from disk — discards unsaved changes (prompts if dirty). An edit tab also auto-refreshes when the file changes on disk underneath you (e.g. an agent editing it from the chat panel); your cursor and scroll position are kept approximately' },
       { name: 'close', what: 'close the current edit tab (prompts before discarding unsaved changes)' },
+    ],
+  },
+  {
+    kind: 'catalog',
+    id: 'editor',
+    section: 'Files',
+    glyph: '✎',
+    title: 'Edit files in the app',
+    lede: 'A themed in-app editor — markdown reads as a clean document, everything else gets a plain editor with a line-number gutter. The whole surface follows your theme (gutter, line numbers, selection, the current-line highlight all shift with light/dark and every palette).',
+    verbs: [
+      { name: 'open / edit', chord: '↵ / :e', what: 'open the cursor file in a new in-app edit tab — markdown (.md / .mdx) renders WYSIWYM via Milkdown (headings, bold, lists styled by your theme; the markup disappears as you type), any other text file gets a plain editor with a line-number gutter and a current-line highlight' },
+      { name: 'open-editor', what: 'force-open the focused file in the in-app editor even when another app is its default' },
+      { name: 'source-mode markdown', what: 'a markdown file Milkdown can\'t render (e.g. a malformed GFM table) automatically falls back to the plain source editor so the raw markdown is always editable instead of a blank pane' },
+      { name: 'save / :w', chord: '⌘S', what: 'save the current edit tab to disk · saves are atomic (tmp-file + rename) and refuse to clobber a file changed on disk since you opened it · edits also autosave a beat after you stop typing' },
+      { name: 'revert / reload', chord: '⌘R / Ctrl+R / F5 · ↻', what: 'reload the file from disk, discarding unsaved changes (prompts first if the buffer is dirty) · an edit tab also auto-refreshes when the file changes on disk underneath you (e.g. an agent editing it from the chat panel), keeping your cursor and scroll roughly in place' },
+      { name: 'dirty indicator', what: 'unsaved changes show a • dot next to the filename (and on the tab) plus an "Editing… / Saving…" note in the header; the dot clears once the save lands' },
+      { name: 'close', what: 'close the current edit tab — prompts before discarding unsaved changes' },
     ],
   },
   {

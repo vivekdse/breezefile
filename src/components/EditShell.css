@@ -124,23 +124,99 @@
   color: var(--err, #c44);
 }
 
-.edit-shell__textarea {
-  display: block;
+/* fm-uatz — plain-text editor chrome: a line-number gutter to the left of the
+   textarea, plus theme-aware selection + current-line highlight. The whole
+   surface reads off the LIVE theme tokens (no hardcoded colors), so it follows
+   light/dark and every editorial palette automatically via the cascade:
+   the gutter sits on the elevated --bg-2 surface, numbers in the muted-on-canvas
+   token, the active line number in --accent, a faint --rule divider between
+   gutter and text. Gutter + textarea share one set of monospace metrics (font,
+   size, line-height, vertical padding) so each line number tracks its line as
+   you scroll. */
+.edit-shell__plain {
+  /* Metrics shared by the gutter and the textarea — keep both in lockstep so
+     line numbers stay aligned with their lines. */
+  --edit-font-size: 13px;
+  --edit-line-height: 1.55;
+  --edit-pad-y: 16px;
+  display: grid;
+  grid-template-columns: auto 1fr;
   width: 100%;
   max-width: 900px;
   margin: 0 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.edit-shell__gutter {
+  overflow: hidden;
+  margin: 0;
+  padding: var(--edit-pad-y) 8px var(--edit-pad-y) 12px;
+  border-right: 1px solid var(--rule-on-panel, var(--border-2));
+  background: var(--bg-2, var(--panel-2));
+  color: var(--muted-on-canvas, var(--fg-3));
+  font-family: var(--font-mono);
+  font-size: var(--edit-font-size);
+  line-height: var(--edit-line-height);
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.edit-shell__gutter-line {
+  display: block;
+  min-width: 2ch;
+}
+
+/* The line the caret sits on reads in the accent so you can find your place at
+   a glance — it matches the caret-color and the dirty dot, so the accent is the
+   editor's single "you are here" signal across every theme. */
+.edit-shell__gutter-line--active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.edit-shell__textarea {
+  display: block;
+  width: 100%;
   height: 100%;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text-on-canvas, var(--fg-1));
   font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.55;
-  padding: 16px 20px;
+  font-size: var(--edit-font-size, 13px);
+  line-height: var(--edit-line-height, 1.55);
+  padding: var(--edit-pad-y, 16px) 20px;
   resize: none;
   tab-size: 2;
   caret-color: var(--accent);
+  /* Current-line highlight: one faint --accent-soft band that follows the caret.
+     The band is exactly one row tall (font-size × line-height) and is positioned
+     per-keystroke through a CSS var the editor updates (--edit-active-top).
+     Until the editor reports a caret row it parks off-screen (-100px), so a
+     fresh/unfocused buffer shows no stray band. */
+  background-image: linear-gradient(var(--accent-soft), var(--accent-soft));
+  background-repeat: no-repeat;
+  background-size: 100% calc(var(--edit-font-size, 13px) * var(--edit-line-height, 1.55));
+  background-position: 0 var(--edit-active-top, -100px);
+}
+
+/* Theme-aware text selection in both editors — the same --sel-bg / --sel-fg
+   tokens the file list uses, so a highlight in the editor matches a selected
+   file row in every palette. ::selection resolves vars at paint time, so we
+   reference the leaf tokens with safe fallbacks rather than a composite. */
+.edit-shell__textarea::selection,
+.edit-shell__milkdown .ProseMirror ::selection {
+  background: var(--sel-bg, var(--accent-soft));
+  color: var(--sel-fg, var(--text-on-canvas, var(--fg-1)));
+}
+.edit-shell__textarea::-moz-selection,
+.edit-shell__milkdown .ProseMirror ::-moz-selection {
+  background: var(--sel-bg, var(--accent-soft));
+  color: var(--sel-fg, var(--text-on-canvas, var(--fg-1)));
 }
 
 .edit-shell__milkdown {
