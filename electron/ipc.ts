@@ -2494,6 +2494,13 @@ end tell`;
     // The chat panel passes context via this flag instead of typing it as a
     // first message. Launchers without it fall back to the typed preamble.
     contextFlag?: string;
+    // fm-v3p — task-action-zone visibility overrides. The launcher DEFS stay
+    // visibility-agnostic in userData/launchers.json; the actual show/hide +
+    // default choice is a renderer-side pref (src/launcherPrefs.ts) applied at
+    // render time. These optional fields exist on the type so the def and the
+    // bridge Launcher type stay in sync; main does not currently populate them.
+    hidden?: boolean;
+    default?: boolean;
   };
   // fm-e66 — defaults seed the common modifier modes for each AI CLI.
   // Real users don't run `claude` once and forget; they run it three ways

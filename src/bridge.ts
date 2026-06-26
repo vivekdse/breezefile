@@ -437,6 +437,13 @@ export type Launcher = {
   // '--append-system-prompt'). The chat panel uses it to inject the folder /
   // document as a system prompt instead of a typed first message.
   contextFlag?: string;
+  // fm-v3p — task-action-zone visibility overrides. These are NOT persisted in
+  // the main-process launcher def; they're a renderer-side pref (see
+  // src/launcherPrefs.ts) layered on at render time. Declared here so call
+  // sites can reason about a launcher's effective visibility/default. Absent =
+  // visible, not-default — the additive, no-surprise baseline.
+  hidden?: boolean;
+  default?: boolean;
 };
 
 declare global {

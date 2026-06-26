@@ -24,6 +24,12 @@ import {
 } from '../tasks';
 import { invokeLauncher } from '../launchers';
 import { spawnTerminal } from '../terminalSpawn';
+import {
+  applyLauncherPrefs,
+  getLauncherPrefs,
+  subscribeLauncherPrefs,
+  type LauncherPrefs,
+} from '../launcherPrefs';
 import type { Launcher } from '../bridge';
 import type { Task } from '../types';
 import { TaskRunIndicator, TaskStatusDot } from './TaskIndicators';
@@ -67,6 +73,16 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
   useEffect(() => {
     void fm.launchersList().then(setLaunchers).catch(() => setLaunchers([]));
   }, []);
+
+  // fm-v3p — task-action-zone visibility prefs (which launchers show + which is
+  // the default/primary action). Renderer-side override; subscribe so toggles
+  // in Settings reflect here live.
+  const [launcherPrefs, setLauncherPrefs] = useState<LauncherPrefs>(getLauncherPrefs);
+  useEffect(() => subscribeLauncherPrefs(setLauncherPrefs), []);
+  const { visible: visibleLaunchers, defaultId: defaultLauncherId } = useMemo(
+    () => applyLauncherPrefs(launchers, launcherPrefs),
+    [launchers, launcherPrefs],
+  );
 
   // fm-mph — variant picker. Must live above the !task early return so
   // the hook count stays stable across renders (React Rules of Hooks).
@@ -313,31 +329,46 @@ export function TaskShell({ tabIndex }: { tabIndex: number }) {
           <span className="btn__label">Open Terminal</span>
           <span className="btn__sub">{basename(folder) || '/'}</span>
         </button>
-        {launchers.map((l) => (
-          <div key={l.id} className="taskshell__action-wrap">
-            <button
-              type="button"
-              className="btn btn--card btn--card-accent"
-              onClick={() => onLaunch(l)}
-              title={l.description ?? `Run ${l.command}`}
+        {visibleLaunchers.map((l) => {
+          const isDefault = l.id === defaultLauncherId;
+          return (
+            <div
+              key={l.id}
+              className={`taskshell__action-wrap${isDefault ? ' taskshell__action-wrap--default' : ''}`}
             >
-              <span className="btn__icon">⚡</span>
-              <span className="btn__label">{l.label}</span>
-              <span className="btn__sub">
-                {(l.variants?.length ?? 0) > 0
-                  ? `${l.command} · ${l.variants!.length + 1} modes`
-                  : l.command}
-              </span>
-            </button>
-            {pickerFor?.id === l.id && (
-              <VariantPicker
-                launcher={l}
-                onPick={(variantId) => void launch(l, variantId)}
-                onClose={() => setPickerFor(null)}
-              />
-            )}
+              <button
+                type="button"
+                className={`btn btn--card btn--card-accent${isDefault ? ' btn--card-default' : ''}`}
+                onClick={() => onLaunch(l)}
+                title={l.description ?? `Run ${l.command}`}
+              >
+                <span className="btn__icon">{isDefault ? '★' : '⚡'}</span>
+                <span className="btn__label">
+                  {l.label}
+                  {isDefault && <span className="btn__badge">default</span>}
+                </span>
+                <span className="btn__sub">
+                  {(l.variants?.length ?? 0) > 0
+                    ? `${l.command} · ${l.variants!.length + 1} modes`
+                    : l.command}
+                </span>
+              </button>
+              {pickerFor?.id === l.id && (
+                <VariantPicker
+                  launcher={l}
+                  onPick={(variantId) => void launch(l, variantId)}
+                  onClose={() => setPickerFor(null)}
+                />
+              )}
+            </div>
+          );
+        })}
+        {visibleLaunchers.length === 0 && launchers.length > 0 && (
+          <div className="taskshell__action-empty">
+            All launchers are hidden. Open Settings → Task action zone to show
+            one.
           </div>
-        ))}
+        )}
         {launchers.length === 0 && (
           <div className="taskshell__action-empty">
             No AI launchers configured. Open Settings to add Claude / Codex / Gemini.

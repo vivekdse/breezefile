@@ -12,6 +12,15 @@ import {
   subscribeEditableExts,
   normalizeExt,
 } from '../fileTypes';
+import {
+  getLauncherPrefs,
+  setLauncherHidden,
+  setDefaultLauncherId,
+  resetLauncherPrefs,
+  subscribeLauncherPrefs,
+  isLauncherHidden,
+  type LauncherPrefs,
+} from '../launcherPrefs';
 import './Settings.css';
 
 type Props = { onClose: () => void; initialSection?: SectionId };
@@ -20,6 +29,7 @@ type SectionId =
   | 'keybindings'
   | 'editor'
   | 'task-management'
+  | 'task-action-zone'
   | 'terminal'
   | 'chat-agent'
   | 'notifications'
@@ -52,10 +62,15 @@ export function Settings({ onClose, initialSection }: Props) {
     [...getEditableExts()].sort(),
   );
   const [extDraft, setExtDraft] = useState('');
+  // fm-v3p — task-action-zone launcher prefs (per-launcher visibility +
+  // default). Mirror into local state and subscribe so toggles reflect live.
+  const [launcherPrefs, setLauncherPrefs] = useState<LauncherPrefs>(getLauncherPrefs);
 
   useEffect(() => {
     return subscribeEditableExts((next) => setEditableExts([...next].sort()));
   }, []);
+
+  useEffect(() => subscribeLauncherPrefs(setLauncherPrefs), []);
 
   function addExt() {
     const norm = normalizeExt(extDraft);
@@ -336,6 +351,93 @@ export function Settings({ onClose, initialSection }: Props) {
                 <kbd>:tasks</kbd> verbs, and launchers that pass task context
                 to Claude / Codex / Gemini.
               </span>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection
+            id="task-action-zone"
+            title="Task action zone"
+            isOpen={openSection === 'task-action-zone'}
+            onToggle={() => toggle('task-action-zone')}
+            extra={
+              (launcherPrefs.hidden.length > 0 ||
+                launcherPrefs.defaultId !== null) && (
+                <button
+                  className="settings__reset"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    resetLauncherPrefs();
+                  }}
+                >
+                  Reset
+                </button>
+              )
+            }
+          >
+            <div className="settings__row">
+              <span className="settings__path settings__hint">
+                Choose which launchers appear in a task's action zone, and which
+                one is the <strong>default</strong> (shown as the primary
+                action). Hidden launchers stay available everywhere else (the
+                chip prompt, <kbd>:claude</kbd>/<kbd>:codex</kbd> verbs) — this
+                only trims the task action zone.
+              </span>
+            </div>
+            <ul className="settings__list">
+              {launchers.filter((l) => l.id !== 'term').length === 0 && (
+                <li className="settings__empty">
+                  No launchers configured yet.
+                </li>
+              )}
+              {launchers
+                .filter((l) => l.id !== 'term')
+                .map((l) => {
+                  const hidden = isLauncherHidden(l.id, launcherPrefs);
+                  const isDefault = launcherPrefs.defaultId === l.id;
+                  return (
+                    <li key={l.id} className="settings__row">
+                      <span className="settings__action">
+                        <label className="settings__inline-label">
+                          <input
+                            type="checkbox"
+                            checked={!hidden}
+                            onChange={(e) =>
+                              setLauncherHidden(l.id, !e.target.checked)
+                            }
+                          />
+                          <span>{l.label}</span>
+                        </label>
+                      </span>
+                      <label
+                        className="settings__inline-label"
+                        title={
+                          hidden
+                            ? 'Make this the default (also shows it)'
+                            : 'Make this the default action'
+                        }
+                      >
+                        <input
+                          type="radio"
+                          name="task-action-zone-default"
+                          checked={isDefault}
+                          onChange={() => setDefaultLauncherId(l.id)}
+                        />
+                        <span>Default</span>
+                      </label>
+                    </li>
+                  );
+                })}
+            </ul>
+            <div className="settings__row">
+              <label className="settings__inline-label">
+                <input
+                  type="radio"
+                  name="task-action-zone-default"
+                  checked={launcherPrefs.defaultId === null}
+                  onChange={() => setDefaultLauncherId(null)}
+                />
+                <span>No default (show launchers in their normal order)</span>
+              </label>
             </div>
           </AccordionSection>
 

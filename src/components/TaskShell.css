@@ -263,6 +263,28 @@
   width: 100%;
 }
 
+/* fm-v3p — the default launcher is the primary action: it spans the full
+   action grid and gets an accented ring + a "default" badge so it reads as
+   the headline verb, with the rest of the launchers below it. */
+.taskshell__action-wrap--default {
+  grid-column: 1 / -1;
+}
+.taskshell__action-wrap--default > .btn--card-default {
+  box-shadow: inset 0 0 0 2px var(--accent, #4c8bf5);
+}
+.btn__badge {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent, #4c8bf5);
+  color: var(--accent-fg, #fff);
+  vertical-align: middle;
+}
+
 .taskshell__variants {
   position: absolute;
   top: calc(100% + 4px);
