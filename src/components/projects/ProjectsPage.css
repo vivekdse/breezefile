@@ -644,6 +644,24 @@
   text-decoration: underline;
 }
 
+/* task-54e9281f0986 — opened-project header bar: Back · Add task · Add
+   sub-project · Archive, scoped to the open project. */
+.projects__l2bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.projects__l2bar .projects__back {
+  margin-bottom: 0;
+  margin-right: var(--sp-2);
+}
+/* Archive sits to the far right of the bar. */
+.projects__l2bar .projects__archive {
+  margin-left: auto;
+}
+
 .projects__l2head {
   margin: 0 0 var(--sp-4);
 }

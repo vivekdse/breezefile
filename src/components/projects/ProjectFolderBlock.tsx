@@ -85,7 +85,6 @@ export function ProjectHeader({
   scale,
   onOpenSelf,
   onOpenFolder,
-  onNewTask,
 }: {
   node: ProjectNode;
   attention: Map<string, ProjectAttention>;
@@ -96,7 +95,6 @@ export function ProjectHeader({
   scale: 'hero' | 'inline';
   onOpenSelf?: (projectId: string) => void;
   onOpenFolder?: (folder: string) => void;
-  onNewTask?: (projectId: string) => void;
 }) {
   const p = node.project;
   const att = attention.get(p.id);
@@ -194,21 +192,14 @@ export function ProjectHeader({
         )}
       </p>
 
+      {/* task-54e9281f0986 — the per-card "+ New task" button was removed; Add
+          task / Add project now live in the opened-project header bar
+          (ProjectDetail's projects__l2bar), scoped to the open project. */}
       <div className="pfolder-header__rule">
         {instructionTotal > 0 && (
           <span className="projects__ins" title={instructionSummary}>
             ⚖ Instruction scopes · {instructionTotal}
           </span>
-        )}
-        {onNewTask && (
-          <button
-            type="button"
-            className="projects__newtask pfolder-header__newtask"
-            onClick={() => onNewTask(p.id)}
-            title="New task in this project (n)"
-          >
-            + New task <kbd>n</kbd>
-          </button>
         )}
         <span className="ornament pfolder-header__ornament" role="presentation">
           <span className="mark">❦</span>
@@ -425,7 +416,6 @@ export function ProjectFolderBlock({
         scale={scale}
         onOpenSelf={onOpenSelf}
         onOpenFolder={onOpenFolder}
-        onNewTask={onNewTask}
       />
 
       {rows.length === 0 && node.children.length === 0 ? (

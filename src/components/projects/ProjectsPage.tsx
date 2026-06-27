@@ -579,10 +579,14 @@ function ProjectsPageInner() {
     setExpanded(new Set());
     setLevel(2);
     setCursorKey(node.project.id);
+    // task-54e9281f0986 — the create form is level-scoped; drop any open one so
+    // it doesn't bleed across the root ↔ detail boundary.
+    setShowCreate(false);
   }
   function backUp() {
     if (level === 2) {
       setLevel(1);
+      setShowCreate(false);
       return;
     }
     if (scopeId != null) {
@@ -1020,6 +1024,16 @@ function ProjectsPageInner() {
             onOpenFolder={openProjectFolder}
             onNewTask={(pid) => newProjectTask(pid)}
             onArchive={(next) => detailId && void setProjectArchived(detailId, next)}
+            showCreate={showCreate}
+            onShowCreate={() => setShowCreate(true)}
+            onCancelCreate={() => setShowCreate(false)}
+            onCreated={(p) => {
+              setShowCreate(false);
+              setProjects((prev) => [...prev, p]);
+              setReloadTick((t) => t + 1);
+              dispatch({ type: 'setStatus', msg: `project created · ${p.name}` });
+            }}
+            allProjects={projects}
           />
         ) : (
           <>
@@ -1503,6 +1517,11 @@ function ProjectDetail({
   onOpenFolder,
   onNewTask,
   onArchive,
+  showCreate,
+  onShowCreate,
+  onCancelCreate,
+  onCreated,
+  allProjects,
 }: {
   node: ProjectNode;
   project: Project;
@@ -1519,12 +1538,37 @@ function ProjectDetail({
   onNewTask: (projectId: string) => void;
   /** Archive (true) or unarchive (false) THIS project. */
   onArchive: (archived: boolean) => void;
+  // task-54e9281f0986 — Add task / Add project live in THIS header, scoped to
+  // the opened project (not on each card).
+  showCreate: boolean;
+  onShowCreate: () => void;
+  onCancelCreate: () => void;
+  onCreated: (p: Project) => void;
+  allProjects: Project[];
 }) {
   return (
     <>
       <div className="projects__l2bar">
         <button type="button" className="projects__back" onClick={onBack}>
           ‹ h — back to all projects
+        </button>
+        {/* task-54e9281f0986 — Add task + Add project (sub-project), scoped to
+            the opened project. These replace the per-card add-task button. */}
+        <button
+          type="button"
+          className="projects__newtask"
+          onClick={() => onNewTask(project.id)}
+          title="New task in this project (n)"
+        >
+          ＋ New task <kbd>n</kbd>
+        </button>
+        <button
+          type="button"
+          className="projects__newtask projects__btn--primary"
+          onClick={onShowCreate}
+          title="New sub-project"
+        >
+          ＋ New sub-project
         </button>
         {/* task-2c5448be520a — archive/unarchive this project. */}
         <button
@@ -1536,6 +1580,16 @@ function ProjectDetail({
           {project.archived === true ? '↺ Unarchive' : '⊟ Archive'}
         </button>
       </div>
+
+      {showCreate && (
+        <CreateForm
+          parentId={project.id}
+          parentName={project.name}
+          allProjects={allProjects}
+          onCancel={onCancelCreate}
+          onCreated={onCreated}
+        />
+      )}
 
       <ProjectFolderBlock
         node={node}
