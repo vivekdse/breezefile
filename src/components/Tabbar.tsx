@@ -164,7 +164,7 @@ export function Tabbar() {
     // fm-vu55 — edit tabs label by the file's basename.
     const editName = isEdit && t.editPath ? basename(t.editPath) : '';
     const label = isProjects
-      ? 'Projects'
+      ? 'Home'
       : isTasksOverview
       ? 'All tasks'
       : isBrowser
@@ -202,7 +202,7 @@ export function Tabbar() {
             : '';
     const shortcutHint = pos <= 9 ? ` (${modKey}${pos})` : '';
     const baseTitle = isProjects
-      ? 'Projects' + shortcutHint
+      ? 'Home' + shortcutHint
       : isTasksOverview
       ? 'All tasks' + shortcutHint
       : (isTask ? `${label} — ${cwd}` : cwd) + shortcutHint;

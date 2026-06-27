@@ -365,6 +365,111 @@
   white-space: nowrap;
 }
 
+/* ── Home root: vertical list of project folder blocks (task-9d54b7ab7972) ─── */
+.home-list {
+  display: flex;
+  flex-direction: column;
+}
+.home-block {
+  position: relative;
+}
+/* idle blocks below the fold read quieter until hovered/cursored. */
+.home-block--quiet {
+  opacity: 0.62;
+}
+.home-block--quiet:hover,
+.home-block--quiet.home-block--cursor {
+  opacity: 1;
+}
+/* the keyboard cursor highlights the block's header rail. */
+.home-block--cursor > .pfolder {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.home-block--archived > .pfolder .pfolder-header__title {
+  color: var(--fg-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--fg-dim);
+}
+/* per-block archive control, top-right; appears on hover/cursor. */
+.home-block__archive {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  z-index: 2;
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-sm);
+  opacity: 0;
+  transition: opacity var(--motion-hover), color var(--motion-hover);
+}
+.home-block:hover .home-block__archive,
+.home-block--cursor .home-block__archive {
+  opacity: 1;
+}
+.home-block__archive:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.home-block--inbox > .pfolder {
+  border-style: dashed;
+}
+.home-block__note {
+  padding: 0 var(--sp-5) var(--sp-3);
+  margin-top: calc(-1 * var(--sp-2));
+  font-size: var(--fs-2xs);
+  color: var(--fg-dim);
+}
+
+/* ── flat / by-project toggle + flat view (task-9d54b7ab7972, Phase 5) ─────── */
+.home-viewtoggle {
+  display: inline-flex;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.home-viewtoggle__btn {
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--panel-2, var(--panel));
+  color: var(--muted-on-panel);
+  border: 0;
+  cursor: pointer;
+}
+.home-viewtoggle__btn + .home-viewtoggle__btn {
+  border-left: 1px solid var(--rule-on-panel);
+}
+.home-viewtoggle__btn.is-on {
+  background: var(--accent-soft);
+  color: var(--text-on-panel);
+  font-weight: 650;
+}
+.home-flat__section {
+  margin-bottom: var(--sp-4);
+}
+.home-flat__count {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+  font-weight: 400;
+}
+.home-flat__sectionhead {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
 /* ── unified quick-switcher overlay (task-4b0168979921) ─────────────────────── */
 .qsw__scrim {
   position: fixed;

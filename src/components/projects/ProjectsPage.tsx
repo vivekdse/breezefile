@@ -46,19 +46,25 @@ import {
   breadcrumbPath,
   rollUpTaskStats,
   computeProjectAttention,
-  attentionSummary,
   resolveEffectiveDescription,
   resolveEffectiveInstructions,
 } from '../../projects/index.mjs';
 import type { ProjectNode, TaskStats, ProjectAttention } from '../../projects/index.mjs';
-import { resolveBlockedBy } from '../tasks/sections.mjs';
+import { resolveBlockedBy, partitionTasks } from '../tasks/sections.mjs';
 import {
   loadProjectsViewPrefs,
   saveProjectsViewPrefs,
 } from '../../projectsViewPrefs';
+import { ProjectFolderBlock } from './ProjectFolderBlock';
+import type { ProjectFolderRow, ProjectTasksProvider } from './ProjectFolderBlock';
+import { useProjectTaskRows } from './useProjectTaskRows';
 import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
+
+// Q4 — project-less tasks live in a synthetic "Inbox (no project)" block, always
+// first on Home root. This id never collides with a real project id.
+const INBOX_ID = '__inbox_no_project__';
 
 // ── status mapping (mirrors the foundation resolver's classifyTask) ──────────
 type RowStatus = 'working' | 'need' | 'blocked' | 'done' | 'passive';
@@ -95,22 +101,6 @@ const STATUS_GLYPH: Record<ProjStatus, string> = {
   idle: '◦',
   clear: '◌',
 };
-const STATUS_LABEL: Record<ProjStatus, string> = {
-  blocked: 'blocked',
-  need: 'needs you',
-  working: 'working',
-  idle: 'idle',
-  clear: 'clear',
-};
-
-function statsRollUpSentence(s: TaskStats): string {
-  const parts: string[] = [];
-  if (s.total > 0) parts.push(`${s.done} of ${s.total} done`);
-  if (s.inProgress > 0) parts.push(`${s.inProgress} working`);
-  if (s.needsYou > 0) parts.push(`${s.needsYou} needs you`);
-  if (s.blocked > 0) parts.push(`${s.blocked} blocked`);
-  return parts.join(' · ');
-}
 
 function ProjectsPageInner() {
   const { state, dispatch } = useStore();
@@ -187,17 +177,19 @@ function ProjectsPageInner() {
   const [scopeId, setScopeId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const [gridCursor, setGridCursor] = useState(0);
-  const [treeCursor, setTreeCursor] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
+  // task-9d54b7ab7972 (Phase 5, Q3) — Home shows tasks BY PROJECT (folders) by
+  // default; a 'flat' toggle folds the all-tasks inbox in as a flat view (the
+  // standalone :tasks tab is retained as a secondary surface, not retired).
+  const [homeView, setHomeView] = useState<'projects' | 'flat'>('projects');
+  const [flatDoneOpen, setFlatDoneOpen] = useState(false);
   // task-4b0168979921 — unified quick-switcher (projects AND tasks). '/' opens.
   const [showSwitcher, setShowSwitcher] = useState(false);
   // gg/G motion: remember a pending 'g' so the next 'g' jumps to the top.
   const gPendingRef = useRef(false);
 
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const treeRef = useRef<HTMLDivElement | null>(null);
 
   // The project nodes in scope for the current L1 grid (unranked).
   const scopeNodes: ProjectNode[] = useMemo(() => {
@@ -252,13 +244,9 @@ function ProjectsPageInner() {
     return showAll ? [...base, ...partitioned.idleNodes] : base;
   }, [partitioned, showAll]);
 
-  // Clamp the grid cursor when the visible set changes.
-  useEffect(() => {
-    if (gridCursor >= gridNodes.length) setGridCursor(0);
-  }, [gridNodes, gridCursor]);
-
   // ── L2 derived data ─────────────────────────────────────────────────────────
-  const detailProject = detailId ? nodeById.get(detailId)?.project ?? null : null;
+  const detailNode = detailId ? nodeById.get(detailId) ?? null : null;
+  const detailProject = detailNode?.project ?? null;
   const detailChain = useMemo(
     () => (detailId ? ancestorChain(roots, detailId) : []),
     [roots, detailId],
@@ -280,94 +268,305 @@ function ProjectsPageInner() {
     });
   }, [detailProject]);
 
-  // Tasks belonging to the drilled project (own only), shaped into a
-  // parent→child tree for the L2 view.
-  type TreeRow = { task: Task; depth: 0 | 1; childCount: number; doneChildCount: number };
-  const detailTasks = useMemo(
-    () => (detailId ? allTasks.filter((t) => t.projectId === detailId) : []),
-    [allTasks, detailId],
-  );
-  const treeRows: TreeRow[] = useMemo(() => {
-    if (detailTasks.length === 0) return [];
-    const byId = new Map(detailTasks.map((t) => [t.id, t]));
-    const childrenOf = new Map<string, Task[]>();
-    const roots2: Task[] = [];
-    for (const t of detailTasks) {
-      const pid = t.parentTaskId;
-      if (pid && byId.has(pid)) {
-        const arr = childrenOf.get(pid) ?? [];
-        arr.push(t);
-        childrenOf.set(pid, arr);
-      } else {
-        roots2.push(t);
-      }
-    }
-    const out: TreeRow[] = [];
-    for (const parent of roots2) {
-      const kids = childrenOf.get(parent.id) ?? [];
-      const done = kids.filter(
-        (k) => k.status === 'done' || k.status === 'cancelled',
-      ).length;
-      out.push({ task: parent, depth: 0, childCount: kids.length, doneChildCount: done });
-      if (expanded.has(parent.id)) {
-        for (const k of kids) {
-          out.push({ task: k, depth: 1, childCount: 0, doneChildCount: 0 });
-        }
-      }
-    }
-    return out;
-  }, [detailTasks, expanded]);
-
-  // Per-parent roll-up of child statuses → the muted sentence on the row.
-  const childStatsByParent = useMemo(() => {
-    const m = new Map<string, TaskStats>();
-    const empty = (): TaskStats => ({
-      total: 0,
-      open: 0,
-      inProgress: 0,
-      done: 0,
-      cancelled: 0,
-      blocked: 0,
-      needsYou: 0,
-    });
-    for (const t of detailTasks) {
-      const pid = t.parentTaskId;
-      if (!pid) continue;
-      const s = m.get(pid) ?? empty();
-      s.total += 1;
-      const rs = rowStatusOf(t);
-      if (rs === 'done') s.done += 1;
-      else if (rs === 'working') s.inProgress += 1;
-      else if (rs === 'blocked') {
-        s.blocked += 1;
-        s.needsYou += 1;
-      } else if (rs === 'need') s.needsYou += 1;
-      m.set(pid, s);
+  // ── folder-block task rows (task-1bf3a297c9f9) ──────────────────────────────
+  // A project renders its tasks as FILES (real TaskRows). rowsForProject shapes
+  // a project's own tasks into a (parent → child) folder list, honoring the
+  // shared `expanded` set so a parent collapses its children — the same model as
+  // the L2 tree, now reused by ProjectFolderBlock at any nesting level.
+  const tasksByProject = useMemo(() => {
+    const m = new Map<string, Task[]>();
+    for (const t of allTasks) {
+      // Q4 — project-less tasks bucket under the synthetic Inbox id.
+      const key = t.projectId ?? INBOX_ID;
+      const arr = m.get(key) ?? [];
+      arr.push(t);
+      m.set(key, arr);
     }
     return m;
-  }, [detailTasks]);
+  }, [allTasks]);
 
+  // Q4 — non-terminal project-less tasks (drives the synthetic Inbox block; it
+  // only appears when there is at least one open orphan task).
+  const inboxOpenCount = useMemo(
+    () =>
+      (tasksByProject.get(INBOX_ID) ?? []).filter(
+        (t) => t.status !== 'done' && t.status !== 'cancelled',
+      ).length,
+    [tasksByProject],
+  );
+  const inboxTotalCount = (tasksByProject.get(INBOX_ID) ?? []).length;
+
+  // A synthetic ProjectNode for the Inbox block (NON-PHI; name is a label).
+  const inboxNode = useMemo<ProjectNode>(
+    () => ({
+      project: {
+        id: INBOX_ID,
+        name: 'Inbox (no project)',
+        description: 'Tasks not yet filed under a project.',
+        instructions: null,
+        parentProjectId: null,
+        folders: [],
+        createdBy: null,
+        groupId: null,
+        createdAt: null,
+        updatedAt: null,
+      },
+      children: [],
+      depth: 0,
+      parentId: null,
+    }),
+    [],
+  );
+
+  // rollUp/attention for the synthetic Inbox so its header reads a real count.
+  // We only surface counts the data backs (open total + a "needs you" tally for
+  // pending/blocked orphans); no invented recency.
+  const inboxRollUp = useMemo(() => {
+    const own = tasksByProject.get(INBOX_ID) ?? [];
+    const empty: TaskStats = {
+      total: 0, open: 0, inProgress: 0, done: 0, cancelled: 0, blocked: 0, needsYou: 0,
+    };
+    const rolled: TaskStats = { ...empty };
+    for (const t of own) {
+      rolled.total += 1;
+      const rs = rowStatusOf(t);
+      if (rs === 'done') rolled.done += 1;
+      else if (rs === 'working') rolled.inProgress += 1;
+      else if (rs === 'blocked') { rolled.blocked += 1; rolled.needsYou += 1; rolled.open += 1; }
+      else if (rs === 'need') { rolled.needsYou += 1; rolled.open += 1; }
+    }
+    const m = new Map<string, { own: TaskStats; rolled: TaskStats }>(rollUp);
+    m.set(INBOX_ID, { own: rolled, rolled });
+    return m;
+  }, [tasksByProject, rollUp]);
+
+  const inboxAttention = useMemo(() => {
+    const r = inboxRollUp.get(INBOX_ID)?.rolled;
+    const m = new Map<string, ProjectAttention>(attention);
+    m.set(INBOX_ID, {
+      open: r?.open ?? 0,
+      blocked: r?.blocked ?? 0,
+      overdue: 0,
+      failed: 0,
+      total: r?.needsYou ?? 0,
+      score: r?.needsYou ?? 0,
+      lastActivityMs: null,
+      idle: false,
+    });
+    return m;
+  }, [inboxRollUp, attention]);
+
+  const rowsForProject = useMemo(
+    () =>
+      (projectId: string): ProjectFolderRow[] => {
+        const own = tasksByProject.get(projectId) ?? [];
+        if (own.length === 0) return [];
+        const byId = new Map(own.map((t) => [t.id, t]));
+        const childrenOf = new Map<string, Task[]>();
+        const parents: Task[] = [];
+        for (const t of own) {
+          const pid = t.parentTaskId;
+          if (pid && byId.has(pid)) {
+            const arr = childrenOf.get(pid) ?? [];
+            arr.push(t);
+            childrenOf.set(pid, arr);
+          } else {
+            parents.push(t);
+          }
+        }
+        const out: ProjectFolderRow[] = [];
+        for (const parent of parents) {
+          const kids = childrenOf.get(parent.id) ?? [];
+          const done = kids.filter(
+            (k) => k.status === 'done' || k.status === 'cancelled',
+          ).length;
+          out.push({ task: parent, depth: 0, childCount: kids.length, doneChildCount: done });
+          if (expanded.has(parent.id)) {
+            for (const k of kids) {
+              out.push({ task: k, depth: 1, childCount: 0, doneChildCount: 0 });
+            }
+          }
+        }
+        return out;
+      },
+    [tasksByProject, expanded],
+  );
+
+  // Selection + cursor for the folder-block surface. cursorKey is a task id OR a
+  // project id (sub-project rows). Phase 1 keeps selection light; Phase 4 wires
+  // the full flat keyboard model across headers + rows.
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+  const [cursorKey, setCursorKey] = useState<string | null>(null);
+
+  const taskRowState = useMemo(
+    () => ({ selected: selectedTasks, cursorKey, expanded }),
+    [selectedTasks, cursorKey, expanded],
+  );
+  const taskRowHandlers = useMemo(
+    () => ({
+      onRowClick: (_e: React.MouseEvent, task: Task) => setCursorKey(task.id),
+      onToggleSelect: (taskId: string) =>
+        setSelectedTasks((prev) => {
+          const next = new Set(prev);
+          if (next.has(taskId)) next.delete(taskId);
+          else next.add(taskId);
+          return next;
+        }),
+      onSetCursor: (taskId: string) => setCursorKey(taskId),
+      onToggleExpand: (taskId: string) => toggleExpand(taskId),
+      blockedByFor: undefined,
+      blockedByTitles: (task: Task) => resolveBlockedBy(task.blockedBy, allTasks),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allTasks],
+  );
+
+  const { renderTaskRow, overlays: taskRowOverlays, bulkApply } = useProjectTaskRows(
+    taskRowState,
+    taskRowHandlers,
+  );
+
+  const tasksProvider: ProjectTasksProvider = useMemo(
+    () => ({ rowsFor: rowsForProject, renderTaskRow }),
+    [rowsForProject, renderTaskRow],
+  );
+
+  // ── flat view (task-9d54b7ab7972, Phase 5) ──────────────────────────────────
+  // The all-tasks inbox folded into Home as a flat view. Reuses the shared
+  // partition (FOR YOU / FOR AGENTS / DONE) and the SAME renderTaskRow engine,
+  // so it reads identically to a folder list. Honors the shared `expanded` set
+  // for FOR AGENTS parent rows.
+  const flatPartition = useMemo(() => partitionTasks(allTasks, {}), [allTasks]);
+  type FlatSection = { id: string; title: string; rows: ProjectFolderRow[] };
+  const flatSections = useMemo<FlatSection[]>(() => {
+    const forYouRows: ProjectFolderRow[] = flatPartition.forYou.map((t) => ({
+      task: t,
+      depth: 0,
+      childCount: 0,
+      doneChildCount: 0,
+    }));
+    // FOR AGENTS carries parent/child grouping; collapse child rows under
+    // parents that aren't expanded (mirrors the flat TasksPage behavior).
+    const agentRows: ProjectFolderRow[] = [];
+    for (const r of flatPartition.forAgentsRows) {
+      if (
+        r.depth === 1 &&
+        r.task.parentTaskId &&
+        !expanded.has(r.task.parentTaskId)
+      ) {
+        continue;
+      }
+      agentRows.push({
+        task: r.task,
+        depth: r.depth,
+        childCount: r.childCount ?? 0,
+        doneChildCount: r.doneChildCount ?? 0,
+      });
+    }
+    const doneRows: ProjectFolderRow[] = flatDoneOpen
+      ? flatPartition.done.map((t) => ({
+          task: t,
+          depth: 0,
+          childCount: 0,
+          doneChildCount: 0,
+        }))
+      : [];
+    const out: FlatSection[] = [];
+    out.push({ id: 'for-you', title: 'For you', rows: forYouRows });
+    out.push({ id: 'for-agents', title: 'For agents', rows: agentRows });
+    if (flatPartition.doneTotal > 0) {
+      out.push({ id: 'done', title: `Done (${flatPartition.doneTotal})`, rows: doneRows });
+    }
+    return out;
+  }, [flatPartition, expanded, flatDoneOpen]);
+
+  // ── flat keyboard order (task-1bf3a297c9f9, Phase 4) ────────────────────────
+  // The visible cursor sequence, walked flat by j/k exactly like FolderList
+  // walks entries. It interleaves, in RENDER ORDER, project HEADERS + their TASK
+  // rows + SUB-PROJECT rows, matching the DOM so scrollIntoView + cursor classes
+  // line up. `key` is a project id (header / sub-project) or a task id.
+  type FlatRow =
+    | { kind: 'header'; key: string; projectId: string }
+    | { kind: 'task'; key: string; task: Task; isParent: boolean }
+    | { kind: 'subproject'; key: string; projectId: string };
+
+  const flatRows = useMemo<FlatRow[]>(() => {
+    const out: FlatRow[] = [];
+    const pushBlock = (node: ProjectNode, collapseSubs: boolean) => {
+      const pid = node.project.id;
+      out.push({ kind: 'header', key: pid, projectId: pid });
+      for (const row of rowsForProject(pid)) {
+        out.push({
+          kind: 'task',
+          key: row.task.id,
+          task: row.task,
+          isParent: row.childCount > 0,
+        });
+      }
+      if (collapseSubs) {
+        for (const child of node.children) {
+          out.push({
+            kind: 'subproject',
+            key: child.project.id,
+            projectId: child.project.id,
+          });
+        }
+      } else {
+        // drilled view: nested sub-projects are full blocks (recurse, still
+        // collapsing THEIR sub-sub-projects so deep trees stay shallow).
+        for (const child of node.children) pushBlock(child, true);
+      }
+    };
+
+    // Flat view (Phase 5): cursor walks the visible task rows across sections.
+    if (level === 1 && homeView === 'flat') {
+      for (const sec of flatSections) {
+        for (const row of sec.rows) {
+          out.push({
+            kind: 'task',
+            key: row.task.id,
+            task: row.task,
+            isParent: row.childCount > 0,
+          });
+        }
+      }
+      return out;
+    }
+    if (level === 2 && detailNode) {
+      pushBlock(detailNode, false);
+      return out;
+    }
+    // root: inbox first (Q4), then the ranked grid blocks (sub-projects collapsed)
+    if (scopeId == null && inboxTotalCount > 0) pushBlock(inboxNode, true);
+    for (const node of gridNodes) pushBlock(node, true);
+    return out;
+  }, [level, homeView, flatSections, detailNode, scopeId, inboxTotalCount, inboxNode, gridNodes, rowsForProject]);
+
+  const flatIndexOf = (key: string | null) =>
+    key == null ? -1 : flatRows.findIndex((r) => r.key === key);
+
+  // Clamp / seed the cursor when the visible set changes.
   useEffect(() => {
-    if (treeCursor >= treeRows.length) setTreeCursor(0);
-  }, [treeRows, treeCursor]);
+    if (flatRows.length === 0) {
+      if (cursorKey !== null) setCursorKey(null);
+      return;
+    }
+    if (cursorKey == null || flatIndexOf(cursorKey) < 0) {
+      setCursorKey(flatRows[0].key);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flatRows]);
 
   // ── navigation ──────────────────────────────────────────────────────────────
+  // Drill into a project = its full folder view (level 2), where sub-projects
+  // nest as nested blocks (Q5: full nesting only when drilled in). The old
+  // "re-scope the grid to a parent's children" path is retired — every project,
+  // with or without children, opens as a folder.
   function enterCard(node: ProjectNode) {
-    if (node.children.length > 0) {
-      // a project whose children are projects → re-scope the grid
-      setScopeId(node.project.id);
-      setGridCursor(0);
-      dispatch({
-        type: 'setStatus',
-        msg: `zoom → ${node.project.name} · ${node.children.length} sub-projects`,
-      });
-    } else {
-      // drill into the project's task tree
-      setDetailId(node.project.id);
-      setTreeCursor(0);
-      setExpanded(new Set());
-      setLevel(2);
-    }
+    setDetailId(node.project.id);
+    setExpanded(new Set());
+    setLevel(2);
+    setCursorKey(node.project.id);
   }
   function backUp() {
     if (level === 2) {
@@ -377,7 +576,6 @@ function ProjectsPageInner() {
     if (scopeId != null) {
       const parentNode = nodeById.get(scopeId);
       setScopeId(parentNode?.parentId ?? null);
-      setGridCursor(0);
     }
   }
   function openTaskDetail(task: Task) {
@@ -400,6 +598,41 @@ function ProjectsPageInner() {
         detail: { mode: 'create', defaultFolder: '', projectId },
       }),
     );
+  }
+  // task-3ff338f80de5 — "open project's bound folder" routes through the existing
+  // folder-tab path (cross-platform; the folder open is OS-agnostic). The bound
+  // folder shown in the project header becomes a click target → a folder tab.
+  function openProjectFolder(folder: string) {
+    if (!folder) return;
+    dispatch({
+      type: 'newTab',
+      tab: {
+        id: crypto.randomUUID(),
+        kind: 'folder',
+        taskId: null,
+        trail: [folder],
+        selected: { 0: 0 },
+        marks: {},
+        sortKey: 'name',
+        sortReverse: false,
+        showHidden: false,
+        viewMode: 'list',
+        foldersFirst: true,
+        filter: '',
+        tagViz: [],
+        tagFilter: { mode: 'off', ids: [] },
+        history: [],
+        forward: [],
+      },
+    });
+  }
+  // Drill into a (sub-)project from a folder block: reuse the detail-open path.
+  function openProjectDetail(projectId: string) {
+    if (!nodeById.has(projectId)) return;
+    setDetailId(projectId);
+    setExpanded(new Set());
+    setLevel(2);
+    setCursorKey(projectId);
   }
   // task-2c5448be520a — archive/unarchive a project, then re-fetch so the row
   // appears/disappears per the current Show-archived toggle. NON-PHI.
@@ -439,9 +672,9 @@ function ProjectsPageInner() {
       const id = (e as CustomEvent<{ projectId?: string }>).detail?.projectId;
       if (!id || !nodeById.has(id)) return;
       setDetailId(id);
-      setTreeCursor(0);
       setExpanded(new Set());
       setLevel(2);
+      setCursorKey(id);
     }
     // apply a stashed deep-link on mount (the open event may have fired before
     // this page mounted)
@@ -466,6 +699,54 @@ function ProjectsPageInner() {
   }, [nodeById]);
 
   // ── keyboard ────────────────────────────────────────────────────────────────
+  // ── `:` verbs act on the task selection (task-1bf3a297c9f9, Phase 4) ─────────
+  // The Home/projects tab now answers the same fm:tasks:* bulk events the flat
+  // Tasks page does (the verbs gained 'projects' in their tabKinds). Target =
+  // selection ∪ cursor-task; routed through the shared bulkApply engine.
+  const selectionTargets = (): Task[] => {
+    const ids = new Set(selectedTasks);
+    if (ids.size === 0 && cursorKey) {
+      const cur = flatRows.find((r) => r.key === cursorKey);
+      if (cur?.kind === 'task') ids.add(cur.task.id);
+    }
+    return allTasks.filter((t) => ids.has(t.id));
+  };
+  useEffect(() => {
+    if (!isActive) return;
+    const run = (verb: Parameters<typeof bulkApply>[0]) => () => {
+      void bulkApply(verb, selectionTargets()).then(() => setSelectedTasks(new Set()));
+    };
+    const handlers: Array<[string, EventListener]> = [
+      ['fm:tasks:done', run('done')],
+      ['fm:tasks:reopen', run('reopen')],
+      ['fm:tasks:cancel', run('cancel')],
+      ['fm:tasks:in-progress', run('in-progress')],
+      ['fm:tasks:pin', run('pin')],
+      ['fm:tasks:unpin', run('unpin')],
+      ['fm:tasks:delete', run('delete')],
+    ];
+    for (const [name, fn] of handlers) window.addEventListener(name, fn);
+    return () => {
+      for (const [name, fn] of handlers) window.removeEventListener(name, fn);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, selectedTasks, cursorKey, flatRows, allTasks, bulkApply]);
+
+  // Activate the cursor row: header → drill into project; sub-project → drill;
+  // task parent → expand/collapse; task leaf → open detail drawer.
+  function activateFlat(row: FlatRow | undefined) {
+    if (!row) return;
+    if (row.kind === 'header') {
+      const node = nodeById.get(row.projectId);
+      if (node) enterCard(node);
+    } else if (row.kind === 'subproject') {
+      openProjectDetail(row.projectId);
+    } else {
+      if (row.isParent) toggleExpand(row.task.id);
+      else openTaskDetail(row.task);
+    }
+  }
+
   useEffect(() => {
     if (!isActive) return;
     function onKey(e: KeyboardEvent) {
@@ -478,10 +759,16 @@ function ProjectsPageInner() {
       // While the quick-switcher overlay is open it owns the keyboard.
       if (showSwitcher) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      // '/' — open the unified quick-switcher over projects AND tasks. Available
-      // at any zoom level; the overlay owns its own keys once open (gated above
-      // by `showSwitcher` shortcutting the page handler via the `inField`/early
-      // returns it sets up).
+
+      const idx = flatIndexOf(cursorKey);
+      const setIdx = (i: number) => {
+        const clamped = Math.max(0, Math.min(flatRows.length - 1, i));
+        const row = flatRows[clamped];
+        if (row) setCursorKey(row.key);
+      };
+
+      // '/' — open the unified quick-switcher (the surface's search/filter over
+      // projects AND tasks). The overlay owns its keys once open.
       if (e.key === '/') {
         e.preventDefault();
         gPendingRef.current = false;
@@ -489,11 +776,14 @@ function ProjectsPageInner() {
         return;
       }
       if (e.key === ':') {
+        // ':' opens the command palette to act on the current task selection.
         e.preventDefault();
+        gPendingRef.current = false;
         dispatch({ type: 'setMode', mode: 'command', buffer: '' });
         return;
       }
       if (e.key === 'Escape' || e.key === 'h' || e.key === 'ArrowLeft') {
+        gPendingRef.current = false;
         if (showCreate) {
           setShowCreate(false);
           e.preventDefault();
@@ -505,78 +795,79 @@ function ProjectsPageInner() {
         }
         return;
       }
-      if (level === 1) {
-        // gg → top, G → bottom (vim motion over the inbox list).
-        if (e.key === 'g') {
-          e.preventDefault();
-          if (gPendingRef.current) {
-            gPendingRef.current = false;
-            setGridCursor(0);
-          } else {
-            gPendingRef.current = true;
-          }
-          return;
-        }
-        if (e.key === 'G') {
-          e.preventDefault();
-          gPendingRef.current = false;
-          setGridCursor(Math.max(0, gridNodes.length - 1));
-          return;
-        }
+      // n / a — new task scoped to the project in view (drilled) or the project
+      // whose header/row the cursor sits on (root).
+      if (e.key === 'n' || e.key === 'a') {
+        e.preventDefault();
         gPendingRef.current = false;
-        if (e.key === 'ArrowDown' || e.key === 'j') {
-          e.preventDefault();
-          setGridCursor((c) => Math.min(gridNodes.length - 1, c + 1));
-        } else if (e.key === 'ArrowUp' || e.key === 'k') {
-          e.preventDefault();
-          setGridCursor((c) => Math.max(0, c - 1));
-        } else if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
-          e.preventDefault();
-          const node = gridNodes[gridCursor];
-          if (node) enterCard(node);
+        const cur = idx >= 0 ? flatRows[idx] : undefined;
+        const rawTarget =
+          level === 2 && detailId
+            ? detailId
+            : cur?.kind === 'header' || cur?.kind === 'subproject'
+              ? cur.projectId
+              : cur?.kind === 'task'
+                ? cur.task.projectId ?? ''
+                : '';
+        // The synthetic Inbox is not a real project — create with no preselect.
+        newProjectTask(rawTarget === INBOX_ID ? '' : rawTarget ?? '');
+        return;
+      }
+      // gg → top, G → bottom (flat motion across the whole visible order).
+      if (e.key === 'g') {
+        e.preventDefault();
+        if (gPendingRef.current) {
+          gPendingRef.current = false;
+          setIdx(0);
+        } else {
+          gPendingRef.current = true;
         }
-      } else {
-        // level 2 — task tree
-        if (e.key === 'n' || e.key === 'a') {
-          // task-223d400ffc1a — new task scoped to THIS project (opens the
-          // shared composer with the project pre-selected).
+        return;
+      }
+      if (e.key === 'G') {
+        e.preventDefault();
+        gPendingRef.current = false;
+        setIdx(flatRows.length - 1);
+        return;
+      }
+      gPendingRef.current = false;
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault();
+        setIdx((idx < 0 ? -1 : idx) + 1);
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault();
+        setIdx((idx < 0 ? 1 : idx) - 1);
+      } else if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
+        e.preventDefault();
+        activateFlat(idx >= 0 ? flatRows[idx] : undefined);
+      } else if (e.key === ' ') {
+        // Space toggles selection on a task row (for bulk ops via : verbs).
+        const cur = idx >= 0 ? flatRows[idx] : undefined;
+        if (cur?.kind === 'task') {
           e.preventDefault();
-          if (detailId) newProjectTask(detailId);
-        } else if (e.key === 'ArrowDown' || e.key === 'j') {
-          e.preventDefault();
-          setTreeCursor((c) => Math.min(treeRows.length - 1, c + 1));
-        } else if (e.key === 'ArrowUp' || e.key === 'k') {
-          e.preventDefault();
-          setTreeCursor((c) => Math.max(0, c - 1));
-        } else if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
-          e.preventDefault();
-          const row = treeRows[treeCursor];
-          if (!row) return;
-          if (row.childCount > 0) toggleExpand(row.task.id);
-          else openTaskDetail(row.task);
+          setSelectedTasks((prev) => {
+            const next = new Set(prev);
+            if (next.has(cur.task.id)) next.delete(cur.task.id);
+            else next.add(cur.task.id);
+            return next;
+          });
         }
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, level, scopeId, gridNodes, gridCursor, treeRows, treeCursor, showCreate, detailId, showSwitcher]);
+  }, [isActive, level, scopeId, flatRows, cursorKey, showCreate, detailId, showSwitcher]);
 
-  // keep the cursor card in view. The grid now renders across multiple section
-  // <div>s (needs-attention / below-the-fold / idle), so query the whole page
-  // by the card's absolute data-grid-i rather than a single grid container.
+  // Keep the cursor row in view across the multi-section render. Each cursor
+  // target carries data-folder-key (header / sub-project) or data-task-id (task).
   useEffect(() => {
-    if (level !== 1) return;
-    document
-      .querySelector(`.projects__page [data-grid-i="${gridCursor}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  }, [gridCursor, level]);
-  useEffect(() => {
-    if (level !== 2) return;
-    treeRef.current
-      ?.querySelector(`[data-tree-i="${treeCursor}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  }, [treeCursor, level]);
+    if (!cursorKey) return;
+    const el =
+      document.querySelector(`.projects__page [data-task-id="${cursorKey}"]`) ??
+      document.querySelector(`.projects__page [data-folder-key="${cursorKey}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [cursorKey]);
 
   // ── L1 hero ──────────────────────────────────────────────────────────────────
   // task-6255239581b2 — hero counts come from the attention partition (stable
@@ -616,10 +907,9 @@ function ProjectsPageInner() {
             onClick={() => {
               setLevel(1);
               setScopeId(null);
-              setGridCursor(0);
             }}
           >
-            Projects
+            Home
           </button>
           {scopeProject && level === 1 && (
             <>
@@ -641,15 +931,38 @@ function ProjectsPageInner() {
           </span>
         </div>
 
-        {level === 1 ? (
-          <ProjectsGrid
+        {level === 1 && homeView === 'flat' ? (
+          <FlatView
+            sections={flatSections}
+            renderTaskRow={renderTaskRow}
+            totalOpen={flatPartition.forYou.length + flatPartition.forAgents.length}
+            doneTotal={flatPartition.doneTotal}
+            doneOpen={flatDoneOpen}
+            onToggleDone={() => setFlatDoneOpen((v) => !v)}
+            homeView={homeView}
+            onSetHomeView={setHomeView}
+            onNewTask={() => newProjectTask('')}
+          />
+        ) : level === 1 ? (
+          <HomeRoot
             gridRef={gridRef}
             attentionNodes={partitioned.attentionNodes}
             recentNodes={partitioned.recentNodes}
             idleNodes={partitioned.idleNodes}
-            gridNodes={gridNodes}
             rollUp={rollUp}
             attention={attention}
+            tasksProvider={tasksProvider}
+            cursorKey={cursorKey}
+            homeView={homeView}
+            onSetHomeView={setHomeView}
+            onOpenProject={openProjectDetail}
+            onOpenFolder={openProjectFolder}
+            onNewTask={(pid) => newProjectTask(pid)}
+            inboxNode={inboxNode}
+            inboxAttention={inboxAttention}
+            inboxRollUp={inboxRollUp}
+            inboxOpenCount={inboxOpenCount}
+            inboxTotalCount={inboxTotalCount}
             showAll={showAll}
             onToggleShowAll={() => setShowAll((v) => !v)}
             showArchived={showArchived}
@@ -657,7 +970,6 @@ function ProjectsPageInner() {
             onArchive={(id, next) => void setProjectArchived(id, next)}
             scopeProject={scopeProject}
             totalProjects={projects.length}
-            gridCursor={gridCursor}
             heroNeed={heroNeed}
             heroBlocked={heroBlocked}
             heroTarget={heroTarget}
@@ -672,33 +984,39 @@ function ProjectsPageInner() {
               setReloadTick((t) => t + 1);
               dispatch({ type: 'setStatus', msg: `project created · ${p.name}` });
             }}
-            onSetCursor={setGridCursor}
+            onSetCursor={(pid) => setCursorKey(pid)}
             onEnter={enterCard}
             onHeroOpen={(n) => enterCard(n)}
             allProjects={projects}
             scopeId={scopeId}
           />
-        ) : (
+        ) : detailProject && detailNode ? (
           <ProjectDetail
-            treeRef={treeRef}
+            node={detailNode}
             project={detailProject}
             effectiveDesc={effectiveDesc}
             instructionTotal={effectiveInstructions?.total ?? 0}
             instructionSummary={effectiveInstructions?.summary ?? ''}
-            rows={treeRows}
-            childStatsByParent={childStatsByParent}
-            expanded={expanded}
-            treeCursor={treeCursor}
-            allTasks={allTasks}
+            attention={attention}
+            rollUp={rollUp}
+            tasksProvider={tasksProvider}
+            cursorKey={cursorKey}
             onBack={() => setLevel(1)}
-            onSetCursor={setTreeCursor}
-            onToggleExpand={toggleExpand}
-            onOpenTask={openTaskDetail}
-            onNewTask={() => detailId && newProjectTask(detailId)}
+            onOpenProject={openProjectDetail}
+            onOpenFolder={openProjectFolder}
+            onNewTask={(pid) => newProjectTask(pid)}
             onArchive={(next) => detailId && void setProjectArchived(detailId, next)}
           />
+        ) : (
+          <>
+            <button type="button" className="projects__back" onClick={() => setLevel(1)}>
+              ‹ h — back to all projects
+            </button>
+            <div className="ptree__empty">Project not found.</div>
+          </>
         )}
       </div>
+      {taskRowOverlays}
       {showSwitcher && (
         <QuickSwitcher
           roots={roots}
@@ -721,15 +1039,157 @@ function ProjectsPageInner() {
   );
 }
 
-// ── L1: the projects grid ──────────────────────────────────────────────────────
-function ProjectsGrid({
+// ── flat / by-project toggle (task-9d54b7ab7972, Phase 5, Q3) ────────────────
+function HomeViewToggle({
+  view,
+  onSet,
+}: {
+  view: 'projects' | 'flat';
+  onSet: (v: 'projects' | 'flat') => void;
+}) {
+  return (
+    <div className="home-viewtoggle" role="group" aria-label="Home view">
+      <button
+        type="button"
+        className={['home-viewtoggle__btn', view === 'projects' ? 'is-on' : '']
+          .filter(Boolean)
+          .join(' ')}
+        aria-pressed={view === 'projects'}
+        onClick={() => onSet('projects')}
+        title="Group tasks by project (folders)"
+      >
+        By project
+      </button>
+      <button
+        type="button"
+        className={['home-viewtoggle__btn', view === 'flat' ? 'is-on' : '']
+          .filter(Boolean)
+          .join(' ')}
+        aria-pressed={view === 'flat'}
+        onClick={() => onSet('flat')}
+        title="Flat list of every task"
+      >
+        Flat
+      </button>
+    </div>
+  );
+}
+
+// ── flat view: the all-tasks inbox folded into Home (task-9d54b7ab7972) ───────
+// FOR YOU / FOR AGENTS / DONE sections, each a folder-list of real TaskRows via
+// the shared renderTaskRow — one Home, "All tasks" is a flat view of it. The
+// standalone :tasks tab is kept as a secondary surface (Q3).
+function FlatView({
+  sections,
+  renderTaskRow,
+  totalOpen,
+  doneTotal,
+  doneOpen,
+  onToggleDone,
+  homeView,
+  onSetHomeView,
+  onNewTask,
+}: {
+  sections: Array<{ id: string; title: string; rows: ProjectFolderRow[] }>;
+  renderTaskRow: (row: ProjectFolderRow) => React.ReactNode;
+  totalOpen: number;
+  doneTotal: number;
+  doneOpen: boolean;
+  onToggleDone: () => void;
+  homeView: 'projects' | 'flat';
+  onSetHomeView: (v: 'projects' | 'flat') => void;
+  onNewTask: () => void;
+}) {
+  return (
+    <>
+      <div className="projects__head">
+        <div className="projects__head-text">
+          <h1 className="projects__title">Home</h1>
+          <div className="projects__sub">
+            {totalOpen} open task{totalOpen === 1 ? '' : 's'} · flat view ·{' '}
+            <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
+          </div>
+        </div>
+        <div className="projects__head-actions">
+          <HomeViewToggle view={homeView} onSet={onSetHomeView} />
+          <button type="button" className="projects__btn" onClick={onNewTask} title="New task">
+            ＋ New task
+          </button>
+        </div>
+      </div>
+
+      {sections.map((sec) => {
+        const isDoneSec = sec.id === 'done';
+        return (
+          <section key={sec.id} className="pfolder home-flat__section">
+            <header className="pfolder-header pfolder-header--inline">
+              {isDoneSec ? (
+                <button
+                  type="button"
+                  className="home-flat__sectionhead"
+                  onClick={onToggleDone}
+                  aria-expanded={doneOpen}
+                >
+                  <span aria-hidden="true">{doneOpen ? '▾' : '▸'}</span>{' '}
+                  <span className="folder-header__title pfolder-header__title">{sec.title}</span>
+                </button>
+              ) : (
+                <h1 className="folder-header__title pfolder-header__title">
+                  {sec.title}
+                  <span className="home-flat__count"> · {sec.rows.length}</span>
+                </h1>
+              )}
+            </header>
+            {sec.rows.length > 0 ? (
+              <ul className="folder-list__list pfolder__list" role="list">
+                {sec.rows.map((row) => renderTaskRow(row))}
+              </ul>
+            ) : !isDoneSec ? (
+              <div className="pfolder__empty">
+                {sec.id === 'for-you' ? 'Nothing on your plate.' : 'No agent work queued.'}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
+      {doneTotal === 0 && totalOpen === 0 && (
+        <div className="projects__empty">
+          <div className="projects__empty-glyph">✓</div>
+          <div className="projects__empty-title">No tasks yet</div>
+          <div className="projects__empty-body">
+            Type <kbd>task</kbd> to add one — or use ＋ New task.
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Home root: projects-as-folders inbox (task-9d54b7ab7972 + task-4b0168979921)
+// Replaces the old .prow card/grid with a vertical LIST of ProjectFolderBlocks
+// (PROJECT = FOLDER). It PRESERVES task-4b0168979921's attention partition +
+// hero + "nothing needs you below" fold + show-all VERBATIM — only the row
+// presentation changes (one folder block per project, scale='inline', subs
+// collapsed per Q5). Q4: a synthetic "Inbox (no project)" block leads.
+function HomeRoot({
   gridRef,
   attentionNodes,
   recentNodes,
   idleNodes,
-  gridNodes,
   rollUp,
   attention,
+  tasksProvider,
+  cursorKey,
+  homeView,
+  onSetHomeView,
+  onOpenProject,
+  onOpenFolder,
+  onNewTask,
+  inboxNode,
+  inboxAttention,
+  inboxRollUp,
+  inboxOpenCount,
+  inboxTotalCount,
   showAll,
   onToggleShowAll,
   showArchived,
@@ -737,7 +1197,6 @@ function ProjectsGrid({
   onArchive,
   scopeProject,
   totalProjects,
-  gridCursor,
   heroNeed,
   heroBlocked,
   heroTarget,
@@ -757,10 +1216,20 @@ function ProjectsGrid({
   attentionNodes: ProjectNode[];
   recentNodes: ProjectNode[];
   idleNodes: ProjectNode[];
-  /** Full ordered visible sequence — defines the keyboard cursor index. */
-  gridNodes: ProjectNode[];
   rollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
   attention: Map<string, ProjectAttention>;
+  tasksProvider: ProjectTasksProvider;
+  cursorKey: string | null;
+  homeView: 'projects' | 'flat';
+  onSetHomeView: (v: 'projects' | 'flat') => void;
+  onOpenProject: (projectId: string) => void;
+  onOpenFolder: (folder: string) => void;
+  onNewTask: (projectId: string) => void;
+  inboxNode: ProjectNode;
+  inboxAttention: Map<string, ProjectAttention>;
+  inboxRollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
+  inboxOpenCount: number;
+  inboxTotalCount: number;
   showAll: boolean;
   onToggleShowAll: () => void;
   showArchived: boolean;
@@ -769,7 +1238,6 @@ function ProjectsGrid({
   onArchive: (id: string, archived: boolean) => void;
   scopeProject: Project | null;
   totalProjects: number;
-  gridCursor: number;
   heroNeed: number;
   heroBlocked: number;
   heroTarget: ProjectNode | null;
@@ -779,7 +1247,8 @@ function ProjectsGrid({
   onShowCreate: () => void;
   onCancelCreate: () => void;
   onCreated: (p: Project) => void;
-  onSetCursor: (i: number) => void;
+  /** Move the keyboard cursor onto a project header (mouse → cursor sync). */
+  onSetCursor: (projectId: string) => void;
   onEnter: (n: ProjectNode) => void;
   onHeroOpen: (n: ProjectNode) => void;
   allProjects: Project[];
@@ -789,84 +1258,49 @@ function ProjectsGrid({
   const empty = loaded && !loadErr && totalScoped === 0;
   const hiddenCount = idleNodes.length;
 
-  // Cursor index into the flat `gridNodes` sequence for a given node. We render
-  // in sections, so each card resolves its own absolute index for keyboard sync.
-  const indexOf = (id: string) => gridNodes.findIndex((n) => n.project.id === id);
-
-  // task-4b0168979921 — one project per LINE (folder-aesthetic inbox row):
-  // [status glyph] NAME — short description … [N need you] [⚑/◷ summary].
-  const renderRow = (node: ProjectNode, quiet: boolean) => {
+  // One project = one folder block. The cursor (keyboard or mouse) keys off the
+  // project id; the inner .pfolder carries data-folder-key for scroll-into-view.
+  const renderBlock = (node: ProjectNode, quiet: boolean) => {
     const p = node.project;
-    const rolled = rollUp.get(p.id)?.rolled;
-    const att = attention.get(p.id);
-    const status = projStatusOf(att, rolled);
-    const need = att?.total ?? 0;
-    const summary = att ? attentionSummary(att) : '';
-    const i = indexOf(p.id);
-    const hasKids = node.children.length > 0;
     const archived = p.archived === true;
     return (
       <div
         key={p.id}
-        data-grid-i={i}
-        role="listitem"
         className={[
-          'prow',
-          `prow--${status}`,
-          quiet ? 'prow--quiet' : '',
-          archived ? 'prow--archived' : '',
-          i === gridCursor ? 'cursor' : '',
+          'home-block',
+          quiet ? 'home-block--quiet' : '',
+          archived ? 'home-block--archived' : '',
+          cursorKey === p.id ? 'home-block--cursor' : '',
         ]
           .filter(Boolean)
           .join(' ')}
-        onClick={() => {
-          if (i >= 0) onSetCursor(i);
-          onEnter(node);
-        }}
+        onMouseDown={() => onSetCursor(p.id)}
       >
-        <span
-          className="prow__glyph"
-          title={STATUS_LABEL[status]}
-          aria-label={STATUS_LABEL[status]}
+        <button
+          type="button"
+          className="home-block__archive"
+          title={archived ? 'Unarchive project' : 'Archive project'}
+          aria-label={archived ? 'Unarchive project' : 'Archive project'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive(p.id, !archived);
+          }}
         >
-          {hasKids ? '▸' : STATUS_GLYPH[status]}
-        </span>
-        <span className="prow__main">
-          <span className="prow__name">{p.name}</span>
-          {archived && <span className="prow__tag">archived</span>}
-          {p.description ? (
-            <span className="prow__desc">{p.description}</span>
-          ) : (
-            <span className="prow__desc prow__desc--empty">
-              no description — no shared context for agents
-            </span>
-          )}
-          {hasKids && (
-            <span className="prow__subs">
-              · {node.children.length} sub-project{node.children.length === 1 ? '' : 's'}
-            </span>
-          )}
-        </span>
-        <span className="prow__meta">
-          {summary && <span className="prow__attn">{summary}</span>}
-          {need > 0 && (
-            <span className="prow__need">
-              ⚑ <span className="num">{need}</span>
-            </span>
-          )}
-          <button
-            type="button"
-            className="prow__action"
-            title={archived ? 'Unarchive project' : 'Archive project'}
-            aria-label={archived ? 'Unarchive project' : 'Archive project'}
-            onClick={(e) => {
-              e.stopPropagation();
-              onArchive(p.id, !archived);
-            }}
-          >
-            {archived ? '↺' : '⊟'}
-          </button>
-        </span>
+          {archived ? '↺' : '⊟'}
+        </button>
+        <ProjectFolderBlock
+          node={node}
+          attention={attention}
+          rollUp={rollUp}
+          effectiveDesc={p.description ?? ''}
+          tasks={tasksProvider}
+          scale="inline"
+          onOpenProject={onOpenProject}
+          onOpenSelf={() => onEnter(node)}
+          onOpenFolder={onOpenFolder}
+          onNewTask={onNewTask}
+          cursorKey={cursorKey}
+        />
       </div>
     );
   };
@@ -876,16 +1310,25 @@ function ProjectsGrid({
       <div className="projects__head">
         <div className="projects__head-text">
           <h1 className="projects__title">
-            {scopeProject ? scopeProject.name : 'Your projects'}
+            {scopeProject ? scopeProject.name : 'Home'}
           </h1>
           <div className="projects__sub">
             {scopeProject
               ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · scoped · ranked by what needs you · `
-              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · ranked by what needs you · `}
+              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · your tasks, ranked by what needs you · `}
             <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
           </div>
         </div>
         <div className="projects__head-actions">
+          <HomeViewToggle view={homeView} onSet={onSetHomeView} />
+          <button
+            type="button"
+            className="projects__btn"
+            onClick={() => onNewTask('')}
+            title="New task"
+          >
+            ＋ New task
+          </button>
           <button type="button" className="projects__btn projects__btn--primary" onClick={onShowCreate}>
             ＋ New {scopeProject ? 'sub-project' : 'project'}
           </button>
@@ -934,7 +1377,32 @@ function ProjectsGrid({
         )
       )}
 
-      {empty && !showCreate && (
+      {/* Q4 — the synthetic Inbox (no project) block, ALWAYS first at root. Only
+          shown when there are project-less tasks. Not part of the attention
+          partition (it isn't a real project); it leads as the catch-all. */}
+      {!scopeProject && inboxTotalCount > 0 && (
+        <div className="home-block home-block--inbox">
+          <ProjectFolderBlock
+            node={inboxNode}
+            attention={inboxAttention}
+            rollUp={inboxRollUp}
+            effectiveDesc={inboxNode.project.description ?? ''}
+            tasks={tasksProvider}
+            scale="inline"
+            onOpenProject={onOpenProject}
+            onOpenFolder={onOpenFolder}
+            onNewTask={onNewTask}
+            cursorKey={cursorKey}
+          />
+          {inboxOpenCount === 0 && (
+            <div className="home-block__note">
+              All inbox tasks are filed or done.
+            </div>
+          )}
+        </div>
+      )}
+
+      {empty && !showCreate && inboxTotalCount === 0 && (
         <div className="projects__empty">
           <div className="projects__empty-glyph">◳</div>
           <div className="projects__empty-title">
@@ -950,20 +1418,20 @@ function ProjectsGrid({
         </div>
       )}
 
-      {/* The inbox. Needs-attention leads; everything below the fold needs
-          nothing right now. One dense, scannable list. */}
+      {/* The inbox of project folders. Needs-attention leads; everything below
+          the fold needs nothing right now. A vertical list of folder blocks. */}
       {(attentionNodes.length > 0 || recentNodes.length > 0) && (
-        <div className="projects__inbox" ref={gridRef} role="list">
-          {attentionNodes.map((node) => renderRow(node, false))}
+        <div className="home-list" ref={gridRef} role="list">
+          {attentionNodes.map((node) => renderBlock(node, false))}
           {attentionNodes.length > 0 && recentNodes.length > 0 && (
             <div className="projects__fold" aria-hidden="true">
               <span>nothing needs you below</span>
             </div>
           )}
-          {recentNodes.map((node) => renderRow(node, false))}
+          {recentNodes.map((node) => renderBlock(node, false))}
           {showAll &&
             idleNodes.length > 0 &&
-            idleNodes.map((node) => renderRow(node, true))}
+            idleNodes.map((node) => renderBlock(node, true))}
         </div>
       )}
 
@@ -1009,181 +1477,74 @@ function ProjectsGrid({
   );
 }
 
-// ── L2: a single project's task tree ────────────────────────────────────────────
+// ── L2: a single project rendered as a FOLDER (task-1bf3a297c9f9) ──────────────
+// The drilled-in view: the project as a folder-hero header + its tasks as file
+// rows (real TaskRows) + nested sub-projects as nested folder blocks. Replaces
+// the bespoke ptree/projects__l2head markup with ProjectFolderBlock so the
+// surface reads exactly like a folder at the file-manager density.
 function ProjectDetail({
-  treeRef,
+  node,
   project,
   effectiveDesc,
   instructionTotal,
   instructionSummary,
-  rows,
-  childStatsByParent,
-  expanded,
-  treeCursor,
-  allTasks,
+  attention,
+  rollUp,
+  tasksProvider,
+  cursorKey,
   onBack,
-  onSetCursor,
-  onToggleExpand,
-  onOpenTask,
+  onOpenProject,
+  onOpenFolder,
   onNewTask,
   onArchive,
 }: {
-  treeRef: React.RefObject<HTMLDivElement | null>;
-  project: Project | null;
+  node: ProjectNode;
+  project: Project;
   effectiveDesc: string;
   instructionTotal: number;
   instructionSummary: string;
-  rows: Array<{ task: Task; depth: 0 | 1; childCount: number; doneChildCount: number }>;
-  childStatsByParent: Map<string, TaskStats>;
-  expanded: Set<string>;
-  treeCursor: number;
-  allTasks: Task[];
+  attention: Map<string, ProjectAttention>;
+  rollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
+  tasksProvider: ProjectTasksProvider;
+  cursorKey: string | null;
   onBack: () => void;
-  onSetCursor: (i: number) => void;
-  onToggleExpand: (id: string) => void;
-  onOpenTask: (t: Task) => void;
-  onNewTask: () => void;
+  onOpenProject: (projectId: string) => void;
+  onOpenFolder: (folder: string) => void;
+  onNewTask: (projectId: string) => void;
   /** Archive (true) or unarchive (false) THIS project. */
   onArchive: (archived: boolean) => void;
 }) {
-  if (!project) {
-    return (
-      <>
+  return (
+    <>
+      <div className="projects__l2bar">
         <button type="button" className="projects__back" onClick={onBack}>
           ‹ h — back to all projects
         </button>
-        <div className="ptree__empty">Project not found.</div>
-      </>
-    );
-  }
-  const bind = project.folders.length > 0 ? project.folders.join(' · ') : 'no folder bound';
-  return (
-    <>
-      <button type="button" className="projects__back" onClick={onBack}>
-        ‹ h — back to all projects
-      </button>
-      <div className="projects__l2head">
-        <div className="projects__l2top">
-          <h2 className="projects__l2name">{project.name}</h2>
-          <div className="projects__l2bind">
-            <span aria-hidden="true">⛓</span>
-            <span className="mono">{bind}</span>
-          </div>
-          {/* task-223d400ffc1a — per-project create. Opens the shared task
-              composer with this project pre-selected. */}
-          <button
-            type="button"
-            className="projects__newtask"
-            onClick={onNewTask}
-            title="New task in this project (n)"
-          >
-            + New task <kbd>n</kbd>
-          </button>
-          {/* task-2c5448be520a — archive/unarchive this project. */}
-          <button
-            type="button"
-            className="projects__newtask projects__archive"
-            onClick={() => onArchive(project.archived !== true)}
-            title={
-              project.archived === true ? 'Unarchive project' : 'Archive project'
-            }
-          >
-            {project.archived === true ? '↺ Unarchive' : '⊟ Archive'}
-          </button>
-        </div>
-        {effectiveDesc && (
-          <div className="projects__desc">
-            {effectiveDesc} <span className="pcard__ctx">{CTX_MARK}</span>
-          </div>
-        )}
-        {instructionTotal > 0 && (
-          <div className="projects__ins" title={instructionSummary}>
-            ⚖ Instruction scopes · {instructionTotal}
-          </div>
-        )}
+        {/* task-2c5448be520a — archive/unarchive this project. */}
+        <button
+          type="button"
+          className="projects__newtask projects__archive"
+          onClick={() => onArchive(project.archived !== true)}
+          title={project.archived === true ? 'Unarchive project' : 'Archive project'}
+        >
+          {project.archived === true ? '↺ Unarchive' : '⊟ Archive'}
+        </button>
       </div>
 
-      <div className="ptree" ref={treeRef} role="list">
-        {rows.length === 0 ? (
-          <div className="ptree__empty">No tasks in this project yet.</div>
-        ) : (
-          rows.map((row, i) => {
-            const t = row.task;
-            const rs = rowStatusOf(t);
-            const dotCls =
-              rs === 'working'
-                ? 'working'
-                : rs === 'blocked'
-                  ? 'blocked'
-                  : rs === 'need'
-                    ? 'need'
-                    : '';
-            const isParent = row.childCount > 0;
-            const childStats = isParent ? childStatsByParent.get(t.id) : undefined;
-            const rollSentence = childStats ? statsRollUpSentence(childStats) : '';
-            const blockedTitles =
-              rs === 'blocked' ? resolveBlockedBy(t.blockedBy, allTasks) : [];
-            return (
-              <div
-                key={t.id}
-                data-tree-i={i}
-                role="listitem"
-                className={[
-                  'trow',
-                  isParent ? 'parent' : 'leaf',
-                  row.depth === 1 ? 'child' : '',
-                  i === treeCursor ? 'cursor' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => {
-                  onSetCursor(i);
-                  if (isParent) onToggleExpand(t.id);
-                  else onOpenTask(t);
-                }}
-              >
-                {isParent ? (
-                  <button
-                    type="button"
-                    className="trow__twist"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSetCursor(i);
-                      onToggleExpand(t.id);
-                    }}
-                    aria-label={expanded.has(t.id) ? 'Collapse' : 'Expand'}
-                  >
-                    {expanded.has(t.id) ? '▾' : '▸'}
-                  </button>
-                ) : (
-                  <span className="trow__twist" aria-hidden="true" />
-                )}
-                <span className={['trow__dot', dotCls].filter(Boolean).join(' ')} aria-hidden="true" />
-                <div className="trow__body">
-                  <div className="trow__nm">
-                    {t.title}
-                    {rollSentence && <span className="trow__roll">{rollSentence}</span>}
-                  </div>
-                  {blockedTitles.length > 0 && (
-                    <div className="trow__meta">
-                      <span className="trow__dep">⛔ blocked by {blockedTitles.join(', ')}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="trow__right">
-                  {rs === 'blocked' ? (
-                    <span className="pbadge blocked">blocked</span>
-                  ) : rs === 'need' ? (
-                    <span className="pbadge need">needs you</span>
-                  ) : rs === 'working' ? (
-                    <span className="pbadge working">working</span>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+      <ProjectFolderBlock
+        node={node}
+        attention={attention}
+        rollUp={rollUp}
+        effectiveDesc={effectiveDesc}
+        instructionTotal={instructionTotal}
+        instructionSummary={instructionSummary}
+        tasks={tasksProvider}
+        scale="hero"
+        onOpenProject={onOpenProject}
+        onOpenFolder={onOpenFolder}
+        onNewTask={onNewTask}
+        cursorKey={cursorKey}
+      />
     </>
   );
 }

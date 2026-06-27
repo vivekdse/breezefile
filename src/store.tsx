@@ -1019,6 +1019,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     hydrated,
   ]);
 
+  // task-eaa5e794f448 (Phase 3) — Home is the greeting surface. On launch we
+  // keep the folder tab (setHome) but open + FOCUS the Home singleton beside it
+  // (Q1 = beside + focused), so the tasks-first Home is what greets the user
+  // while the file manager is one tab-click / :files away. Reversible: delete
+  // this effect to fall back to the file-manager-as-landing behavior.
+  //
+  // Sequenced AFTER hydration so we read the persisted taskManagementEnabled
+  // flag (Home is the task surface; if task management is off we leave the
+  // folder tab as the landing). One-shot via the ref guard — later manual tab
+  // changes are never overridden. openProjectsTab is a focus-or-spawn singleton,
+  // so this is idempotent even if it somehow runs twice.
+  const homeLandingDoneRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated) return;
+    if (homeLandingDoneRef.current) return;
+    // Wait for setHome to have created the initial folder tab.
+    if (state.tabs.length === 0) return;
+    homeLandingDoneRef.current = true;
+    if (!state.taskManagementEnabled) return;
+    // Append + focus the Home singleton (kind='projects'); the folder tab stays
+    // open at index 0, Home becomes the active tab.
+    dispatch({ type: 'openProjectsTab' });
+  }, [hydrated, state.tabs.length, state.taskManagementEnabled, dispatch]);
+
   // fm-h8g7 — mirror the task-notification verbosity to the main process so
   // the OS-notification gate (which runs in main) tracks the renderer's value.
   // Push on boot (after hydration) and on every change. Fire-and-forget; main
