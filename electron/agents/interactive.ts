@@ -216,9 +216,10 @@ export async function runTaskInteractive(
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);
   }
 
-  // SPIKE (spike/playwright-cdp): for playwright tasks, open the full-screen
-  // browser window with the agent chat widget docked over the page (mirrors
-  // this pty), so the user sees the page AND what Claude is doing at once.
+  // SPIKE (spike/playwright-cdp): for playwright tasks, open the operator
+  // session window — a split pane with the browser page LEFT and this pty's
+  // Claude-Code terminal RIGHT — so the user sees the page AND what Claude is
+  // doing at once. See electron/browser/window.ts + OperatorSession.tsx.
   if (playwright) openBrowserWindow('https://example.com', ptyId);
 
   return { run, ptyId, launched: true };

@@ -135,8 +135,29 @@ type Fm = {
   termWrite: (id: number, data: string) => void;
   termMirror: (id: number) => void;
   termUnmirror: (id: number) => void;
-  overlayMove: (dx: number, dy: number) => void;
-  overlayResize: (width: number, height: number) => void;
+  // ─── SPIKE (spike/playwright-cdp): operator session split-pane chrome.
+  operatorBrowserBounds: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    winW: number;
+    winH: number;
+  }) => void;
+  operatorNavigate: (url: string) => void;
+  operatorBack: () => void;
+  operatorForward: () => void;
+  operatorReload: () => void;
+  operatorSync: () => void;
+  operatorClose: () => void;
+  onOperatorBrowserState: (
+    cb: (s: {
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+    }) => void,
+  ) => () => void;
   termResize: (id: number, cols: number, rows: number) => void;
   termKill: (id: number, signal?: string) => Promise<void>;
   termStatus: (id: number) => Promise<{ alive: boolean; pid: number | null }>;

@@ -247,11 +247,38 @@ const fm = {
   // SPIKE (spike/playwright-cdp): agent-overlay window mirrors a pty's stream.
   termMirror: (id: number) => ipcRenderer.send('term:mirror', id),
   termUnmirror: (id: number) => ipcRenderer.send('term:unmirror', id),
-  // SPIKE (spike/playwright-cdp): the in-browser chat widget drives its own
-  // WebContentsView bounds — drag by a delta, resize to panel/bubble.
-  overlayMove: (dx: number, dy: number) => ipcRenderer.send('overlay:move', dx, dy),
-  overlayResize: (width: number, height: number) =>
-    ipcRenderer.send('overlay:resize', width, height),
+  // SPIKE (spike/playwright-cdp): the operator session's split-pane chrome
+  // positions the LEFT-pane page view (WebContentsView), drives its navigation,
+  // and closes the whole session (window + PTY) as one action. See
+  // electron/browser/window.ts (operator:* handlers) and
+  // src/components/OperatorSession.tsx.
+  operatorBrowserBounds: (rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    winW: number;
+    winH: number;
+  }) => ipcRenderer.send('operator:browser-bounds', rect),
+  operatorNavigate: (url: string) => ipcRenderer.send('operator:navigate', url),
+  operatorBack: () => ipcRenderer.send('operator:back'),
+  operatorForward: () => ipcRenderer.send('operator:forward'),
+  operatorReload: () => ipcRenderer.send('operator:reload'),
+  operatorSync: () => ipcRenderer.send('operator:sync'),
+  operatorClose: () => ipcRenderer.send('operator:close'),
+  onOperatorBrowserState: (
+    cb: (s: {
+      url: string;
+      title: string;
+      canGoBack: boolean;
+      canGoForward: boolean;
+    }) => void,
+  ) => {
+    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
+      cb(payload);
+    ipcRenderer.on('operator:browser-state', handler);
+    return () => ipcRenderer.off('operator:browser-state', handler);
+  },
   termResize: (id: number, cols: number, rows: number) =>
     ipcRenderer.send('term:resize', id, cols, rows),
   termKill: (id: number, signal?: string) =>

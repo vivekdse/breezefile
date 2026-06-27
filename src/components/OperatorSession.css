@@ -1,0 +1,154 @@
+/* task-f730389afa8a — operator session split-pane chrome.
+   Grid: [ browser | resizer | claude ]. The grid-template-columns is set
+   inline from the persisted divider fraction (and collapses the right two
+   tracks to 0 when the Claude pane is minimized). */
+.operator {
+  display: grid;
+  grid-template-rows: 1fr;
+  height: 100vh;
+  width: 100vw;
+  background: #0f1114;
+  color: #e6e6e6;
+  overflow: hidden;
+}
+
+/* ─── LEFT: browser pane ─────────────────────────────────────────────────── */
+.operator__browser {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid #23272e;
+}
+
+.operator__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #16191e;
+  border-bottom: 1px solid #23272e;
+}
+
+.operator__addr {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid #2a2f37;
+  border-radius: 6px;
+  background: #0f1114;
+  color: #e6e6e6;
+  font: 12px/1 system-ui, sans-serif;
+  outline: none;
+}
+.operator__addr:focus {
+  border-color: #3b82f6;
+}
+
+/* The native page WebContentsView is mirrored onto this rect by main. */
+.operator__view {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #1a1d22;
+}
+
+/* ─── RESIZER: the single divider driving both panes ─────────────────────── */
+.operator__resizer {
+  cursor: col-resize;
+  touch-action: none;
+  background: #23272e;
+  transition: background 0.12s ease;
+}
+.operator__resizer:hover {
+  background: #3b82f6;
+}
+
+/* ─── RIGHT: Claude Code terminal pane ───────────────────────────────────── */
+.operator__claude {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #0f1114;
+}
+
+.operator__claude-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font: 600 12px/1.4 system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  background: #16191e;
+  border-bottom: 1px solid #23272e;
+  user-select: none;
+}
+.operator__title {
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+.operator__spacer {
+  flex: 1 1 auto;
+}
+.operator__badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #d9822b;
+  color: #1b1300;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.operator--waiting .operator__claude-bar {
+  background: #2a1f0c;
+  border-bottom-color: #d9822b;
+}
+
+.operator__btn {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #9aa3af;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.operator__btn:hover:not(:disabled) {
+  background: #23272e;
+  color: #e6e6e6;
+}
+.operator__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.operator__btn--close:hover {
+  background: #7f1d1d;
+  color: #fff;
+}
+.operator__btn--show {
+  border: 1px solid #2a2f37;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.operator__term {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+.operator__no-pty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  opacity: 0.5;
+  font: 13px system-ui, sans-serif;
+}
