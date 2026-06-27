@@ -153,7 +153,7 @@ const SLIDES: Slide[] = [
     verbs: [
       { name: 'open', chord: '↵', what: 'open with default app' },
       { name: 'open with…', what: 'pick an app; optionally bind it as default for that extension' },
-      { name: 'drag out', chord: 'd or drag', what: 'drag any row (or selection) to Slack, Gmail, Finder, anywhere' },
+      { name: 'drag out', chord: 'drag a row', what: 'grab any row with the mouse and drag it to Slack, Gmail, Finder, anywhere — drag-out is a pointer gesture, not a command (an OS-native drag can only begin from a real mouse drag). For a keyboard hand-off, use Export list… or Copy path instead.' },
       { name: 'share', what: 'native macOS share sheet (Mail, Messages, AirDrop, …)' },
       { name: 'copy path', chord: 'yp / yn / yd', what: 'full path / name / parent dir to clipboard' },
       { name: 'reveal', chord: 'R', what: 'reveal in Finder' },

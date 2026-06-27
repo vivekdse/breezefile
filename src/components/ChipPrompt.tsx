@@ -1225,42 +1225,40 @@ export const VERBS: VerbDef[] = [
     },
   },
   {
-    // fm-3vl — drag-out as a verb: reuses the existing native drag-out
-    // primitive (fm.dragStart → main `drag:start` → webContents.startDrag),
-    // the same call FileRow.onDragStart makes. It primes the OS drag with the
-    // current Selection so the files can be dropped into another app. NOTE:
-    // an OS-native drag can only *begin* inside a real pointer-drag gesture,
-    // so firing this from the palette stages the payload but a mouse drag may
-    // still be needed depending on the platform; we surface that in status.
+    // fm-3vl — drag-out is a ROW-POINTER GESTURE, not a palette verb.
+    //
+    // An OS-native drag can only reliably *begin* inside a real pointer-drag
+    // gesture (FileRow.onDragStart → fm.dragStart → main `drag:start` →
+    // webContents.startDrag). A keyboard-triggered palette can stage the
+    // payload but cannot start the OS drag on macOS/Linux, so the old
+    // palette verb was misleading. Per the fm-3vl UX decision (option a) we
+    // keep this entry only as a SIGNPOST: it never starts a drag — it tells
+    // the user to grab a row with the mouse, and points keyboard users at the
+    // real hand-off paths (Export list… / Copy path). FileRow.onDragStart is
+    // the actual drag-out implementation and is left untouched.
     id: 'drag-out',
     availableInTaskMode: false,
     label: 'Drag out',
     aliases: ['drag-out', 'dragout', 'drag', 'export drag', 'native drag'],
     icon: '⇲',
-    describe: (c) => {
-      const n = c.markedPaths.length || (c.cursor ? 1 : 0);
-      return `Drag ${n} item${n === 1 ? '' : 's'} out to another app`;
-    },
-    isAvailable: (c) => {
-      if (c.markedPaths.length === 0 && !c.cursor) {
-        return { ok: false, reason: 'Select files first or put the cursor on one' };
-      }
-      return { ok: true };
-    },
+    describe: () =>
+      'Drag a row out with the mouse — drag-out is a pointer gesture, not a command',
+    // Always surfaced as a disabled hint: there is no reliable keyboard path
+    // to start an OS-native drag, so we never report ok:true.
+    isAvailable: () => ({
+      ok: false,
+      reason:
+        'Drag a row directly with the mouse (to Slack, Gmail, Finder…). For a keyboard hand-off use “Export list…” or “Copy path”.',
+    }),
     slots: [],
-    execute: (c, _p, api) => {
-      const sources = implicitSources(c);
-      if (sources.length === 0) return;
+    execute: (_c, _p, api) => {
+      // No-op: an OS-native drag cannot be initiated from the keyboard. Point
+      // the user at the real gestures rather than silently doing nothing.
       api.closeOverlay();
-      try {
-        fm.dragStart(sources);
-        api.dispatch({
-          type: 'setStatus',
-          msg: `dragging ${sources.length} item${sources.length === 1 ? '' : 's'} out — drop into the target app`,
-        });
-      } catch (err) {
-        api.dispatch({ type: 'setStatus', msg: formatOpError('drag', err) });
-      }
+      api.dispatch({
+        type: 'setStatus',
+        msg: 'Drag a row out with the mouse — or use Export list… / Copy path for a keyboard hand-off',
+      });
     },
   },
   {
