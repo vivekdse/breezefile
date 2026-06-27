@@ -27,6 +27,14 @@ type VaultEntry = {
   secret: boolean;
 };
 
+// One saved site login as it crosses the bridge for LISTING (NO password — the
+// password crosses only on an explicit resolve). Inlined like VaultEntry/Project.
+type SavedCredential = {
+  origin: string;
+  username: string;
+  updatedAt?: string;
+};
+
 // task-317c7fe41f90 — DSL-tag store record as it crosses the bridge. Inlined
 // for the same reason as Project/VaultEntry (preload carries no shared-type
 // imports); mirrors `Tag` in src/tagStore.d.mts. NON-PHI.
@@ -705,6 +713,25 @@ const fm = {
         ipcRenderer.invoke('typebuild:vault:set', key, value) as Promise<string>,
       remove: (ref: string) =>
         ipcRenderer.invoke('typebuild:vault:delete', ref) as Promise<void>,
+    },
+    // Site-keyed credential store — per-user web logins (origin, username) →
+    // password (Save-password prompt task-ad89064bf45f / vault task-d60860fb4d7f).
+    // The password is encrypted at rest server-side and crosses ONLY on save and
+    // on an explicit resolve. We never log it on this hop. `list` is value-free.
+    credentials: {
+      list: (origin?: string) =>
+        ipcRenderer.invoke('typebuild:cred:list', origin) as Promise<
+          SavedCredential[]
+        >,
+      resolve: (origin: string, username: string) =>
+        ipcRenderer.invoke('typebuild:cred:resolve', origin, username) as Promise<string>,
+      save: (cred: { origin: string; username: string; password: string }) =>
+        ipcRenderer.invoke('typebuild:cred:save', cred) as Promise<{
+          origin: string;
+          username: string;
+        }>,
+      remove: (origin: string, username: string) =>
+        ipcRenderer.invoke('typebuild:cred:delete', origin, username) as Promise<void>,
     },
     // task-ab1d7955e23f — TypeBuild Projects: named task containers with
     // optional instructions + owned folders. NON-PHI; server-backed via the
