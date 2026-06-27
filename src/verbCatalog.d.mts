@@ -17,6 +17,8 @@ export interface VerbMeta {
   accelerator?: string;
   /** When false, kept out of the native menu (defaults to true if category). */
   inMenu?: boolean;
+  /** One-line fallback `what` text for an auto-derived HelpTour catalog row. */
+  help?: string;
 }
 
 /** The verb metadata catalog. */
@@ -39,3 +41,9 @@ export function menuAcceleratorFor(meta: VerbMeta): string | undefined;
 
 /** Menu-eligible verbs grouped by category, in CATEGORY_ORDER. */
 export function menuVerbsByCategory(): Array<{ category: string; items: VerbMeta[] }>;
+
+/** Derive HelpTour catalog rows from the registry, skipping covered ids. */
+export function helpRowsForCategories(
+  categories: string[],
+  covered?: Iterable<string>,
+): Array<{ name: string; chord?: string; what: string }>;

@@ -20,6 +20,7 @@ import {
   keybindingToAccelerator,
   menuAcceleratorFor,
   menuVerbsByCategory,
+  helpRowsForCategories,
 } from '../src/verbCatalog.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -116,5 +117,46 @@ test('every catalog verb id exists as a verb in ChipPrompt.tsx', () => {
   for (const m of src.matchAll(/'([^']+)'\s+as\s+Verb/g)) declared.add(m[1]);
   for (const v of VERB_CATALOG) {
     assert.ok(declared.has(v.id), `catalog verb '${v.id}' is not declared in ChipPrompt.tsx`);
+  }
+});
+
+// ── HelpTour derivation (task-b79d10308ffd) ─────────────────────────────────
+
+test('helpRowsForCategories derives uncovered verbs and skips covered ones', () => {
+  const rows = helpRowsForCategories(['Navigate'], ['back', 'forward', 'up', 'goto']);
+  const names = rows.map((r) => r.name);
+  // Covered ids must NOT appear...
+  assert.ok(!names.includes('Back'));
+  assert.ok(!names.includes('Go to / Find'));
+  // ...while the remaining Navigate verbs do, carrying label + help text.
+  assert.ok(names.includes('Unpin from sidebar'));
+  const newTab = rows.find((r) => r.name === 'New tab');
+  assert.ok(newTab);
+  assert.equal(newTab.chord, '⌘T');
+  assert.ok(newTab.what.length > 0);
+});
+
+// Coverage guarantee: every file-management catalog verb (Selection / Files /
+// View / Navigate / Tools) is present in HelpTour — either curated (in a slide's
+// `covers`) or in a derived category — so no verb is dropped and a newly added
+// verb auto-surfaces. We read HelpTour.tsx as text (importing pulls in React).
+test('every file-management catalog verb is reachable in HelpTour.tsx', () => {
+  const help = readFileSync(
+    join(__dirname, '..', 'src', 'components', 'HelpTour.tsx'),
+    'utf8',
+  );
+  const covers = new Set();
+  for (const block of help.matchAll(/covers:\s*\[([\s\S]*?)\]/g)) {
+    for (const id of block[1].matchAll(/'([^']+)'/g)) covers.add(id[1]);
+  }
+  const deriveCats = new Set();
+  for (const block of help.matchAll(/categories:\s*\[([^\]]*)\]/g)) {
+    for (const c of block[1].matchAll(/'([^']+)'/g)) deriveCats.add(c[1]);
+  }
+  const fileMgmt = new Set(['Selection', 'Files', 'View', 'Navigate', 'Tools']);
+  for (const v of VERB_CATALOG) {
+    if (!v.category || !fileMgmt.has(v.category)) continue;
+    const reachable = covers.has(v.id) || deriveCats.has(v.category);
+    assert.ok(reachable, `verb '${v.id}' (${v.category}) is not reachable in HelpTour`);
   }
 });

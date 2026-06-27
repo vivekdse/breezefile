@@ -39,6 +39,11 @@
  * @property {boolean} [inMenu]  When false, the verb is kept OUT of the native
  *   menu even though it has a category (e.g. niche/duplicate verbs). Defaults
  *   to true for any verb carrying a category.
+ * @property {string} [help]  One-line description used as the fallback `what`
+ *   text for an AUTO-DERIVED HelpTour catalog row (task-b79d10308ffd). The
+ *   hand-curated help rows still carry richer prose; this only feeds a verb
+ *   that isn't otherwise covered by a curated row, so a newly added verb shows
+ *   up in help without a hand edit.
  */
 
 /**
@@ -52,83 +57,83 @@
  */
 export const VERB_CATALOG = [
   // ── Files ──────────────────────────────────────────────────────────────
-  { id: 'rename', label: 'Rename', category: 'Files', keybinding: 'F2', menuLabel: 'Rename…' },
-  { id: 'edit', label: 'Edit', category: 'Files', menuLabel: 'Edit File' },
-  { id: 'open', label: 'Open', category: 'Files' },
-  { id: 'open-editor', label: 'Open in editor', category: 'Files', inMenu: false },
-  { id: 'editor-save', label: 'Save', category: 'Files', inMenu: false },
-  { id: 'editor-revert', label: 'Revert to disk', category: 'Files', inMenu: false },
-  { id: 'editor-close', label: 'Close edit tab', category: 'Files', inMenu: false },
-  { id: 'open-with', label: 'Open With…', category: 'Files' },
-  { id: 'reveal', label: 'Reveal in Finder', category: 'Files', menuLabel: 'Reveal in File Manager' },
-  { id: 'create', label: 'Create', category: 'Files', inMenu: false },
-  { id: 'note', label: 'New note', category: 'Files', menuLabel: 'New Note' },
-  { id: 'notes', label: 'Notes folder', category: 'Files', menuLabel: 'Notes Folder' },
-  { id: 'compress', label: 'Compress', category: 'Files', menuLabel: 'Compress…' },
-  { id: 'extract', label: 'Extract', category: 'Files' },
+  { id: 'rename', label: 'Rename', category: 'Files', keybinding: 'F2', menuLabel: 'Rename…', help: 'rename the cursor file or folder' },
+  { id: 'edit', label: 'Edit', category: 'Files', menuLabel: 'Edit File', help: 'open the cursor file in a new in-app edit tab' },
+  { id: 'open', label: 'Open', category: 'Files', help: 'open with the default app' },
+  { id: 'open-editor', label: 'Open in editor', category: 'Files', inMenu: false, help: 'force-open the focused file in the in-app editor' },
+  { id: 'editor-save', label: 'Save', category: 'Files', inMenu: false, help: 'save the current edit tab to disk' },
+  { id: 'editor-revert', label: 'Revert to disk', category: 'Files', inMenu: false, help: 'reload the file from disk, discarding unsaved changes' },
+  { id: 'editor-close', label: 'Close edit tab', category: 'Files', inMenu: false, help: 'close the current edit tab' },
+  { id: 'open-with', label: 'Open With…', category: 'Files', help: 'pick an app; optionally bind it as default for that extension' },
+  { id: 'reveal', label: 'Reveal in Finder', category: 'Files', menuLabel: 'Reveal in File Manager', help: 'reveal in the system file manager' },
+  { id: 'create', label: 'Create', category: 'Files', inMenu: false, help: 'new folder / new file' },
+  { id: 'note', label: 'New note', category: 'Files', menuLabel: 'New Note', help: 'new date-named markdown note in the breeze notes folder' },
+  { id: 'notes', label: 'Notes folder', category: 'Files', menuLabel: 'Notes Folder', help: 'jump to the breeze notes folder' },
+  { id: 'compress', label: 'Compress', category: 'Files', menuLabel: 'Compress…', help: 'zip a selection' },
+  { id: 'extract', label: 'Extract', category: 'Files', help: 'expand an archive' },
 
   // ── Selection ──────────────────────────────────────────────────────────
-  { id: 'select', label: 'Select', category: 'Selection', menuLabel: 'Select…' },
-  { id: 'select-expr', label: 'Select by expression', category: 'Selection', inMenu: false },
-  { id: 'copy', label: 'Copy', category: 'Selection', keybinding: '⌘C' },
-  { id: 'move', label: 'Move', category: 'Selection', keybinding: '⌘X', menuLabel: 'Move (cut)' },
-  { id: 'paste', label: 'Paste here', category: 'Selection', keybinding: '⌘V', menuLabel: 'Paste' },
-  { id: 'delete', label: 'Delete', category: 'Selection', menuLabel: 'Move to Trash' },
-  { id: 'permanent-delete', label: 'Delete permanently', category: 'Selection', inMenu: false },
-  { id: 'copy-path', label: 'Copy path', category: 'Selection', menuLabel: 'Copy Path' },
-  { id: 'export-list', label: 'Export list…', category: 'Selection', inMenu: false },
-  { id: 'drag-out', label: 'Drag out', category: 'Selection', inMenu: false },
-  { id: 'share', label: 'Share', category: 'Selection', menuLabel: 'Share…' },
+  { id: 'select', label: 'Select', category: 'Selection', menuLabel: 'Select…', help: 'smart filters: images, videos, by extension, folders only…' },
+  { id: 'select-expr', label: 'Select by expression', category: 'Selection', inMenu: false, help: 'mark rows matching a tag-algebra selector' },
+  { id: 'copy', label: 'Copy', category: 'Selection', keybinding: '⌘C', help: 'stage files for copy' },
+  { id: 'move', label: 'Move', category: 'Selection', keybinding: '⌘X', menuLabel: 'Move (cut)', help: 'stage files for move' },
+  { id: 'paste', label: 'Paste here', category: 'Selection', keybinding: '⌘V', menuLabel: 'Paste', help: 'commit the staged copy/move here' },
+  { id: 'delete', label: 'Delete', category: 'Selection', menuLabel: 'Move to Trash', help: 'send to Trash' },
+  { id: 'permanent-delete', label: 'Delete permanently', category: 'Selection', inMenu: false, help: 'irreversible delete, bypasses the Trash' },
+  { id: 'copy-path', label: 'Copy path', category: 'Selection', menuLabel: 'Copy Path', help: 'copy the path(s) to the clipboard' },
+  { id: 'export-list', label: 'Export list…', category: 'Selection', inMenu: false, help: 'write the selected paths to a .txt or .json file' },
+  { id: 'drag-out', label: 'Drag out', category: 'Selection', inMenu: false, help: 'drag the selection out to another app' },
+  { id: 'share', label: 'Share', category: 'Selection', menuLabel: 'Share…', help: 'native share sheet' },
 
   // ── Navigate ───────────────────────────────────────────────────────────
-  { id: 'back', label: 'Back', category: 'Navigate' },
-  { id: 'forward', label: 'Forward', category: 'Navigate' },
-  { id: 'up', label: 'Up', category: 'Navigate' },
-  { id: 'goto', label: 'Go to / Find', category: 'Navigate', keybinding: '⌘F', menuLabel: 'Go to…' },
-  { id: 'switchTab', label: 'Switch tab', category: 'Navigate', menuLabel: 'Switch Tab…' },
-  { id: 'newTab', label: 'New tab', category: 'Navigate', keybinding: '⌘T', menuLabel: 'New Tab' },
-  { id: 'closeTab', label: 'Close tab', category: 'Navigate', keybinding: '⌘W', menuLabel: 'Close Tab' },
-  { id: 'restoreTab', label: 'Restore closed tab', category: 'Navigate', keybinding: '⌘⇧T', menuLabel: 'Reopen Closed Tab' },
-  { id: 'pin', label: 'Pin to sidebar', category: 'Navigate', menuLabel: 'Pin Folder' },
-  { id: 'unpin', label: 'Unpin from sidebar', category: 'Navigate', menuLabel: 'Unpin Folder' },
+  { id: 'back', label: 'Back', category: 'Navigate', help: 'go back in tab history' },
+  { id: 'forward', label: 'Forward', category: 'Navigate', help: 'go forward in tab history' },
+  { id: 'up', label: 'Up', category: 'Navigate', help: 'go to the parent folder' },
+  { id: 'goto', label: 'Go to / Find', category: 'Navigate', keybinding: '⌘F', menuLabel: 'Go to…', help: 'type a folder OR file name; folders navigate, files open' },
+  { id: 'switchTab', label: 'Switch tab', category: 'Navigate', menuLabel: 'Switch Tab…', help: 'jump to another open tab' },
+  { id: 'newTab', label: 'New tab', category: 'Navigate', keybinding: '⌘T', menuLabel: 'New Tab', help: 'open the current folder in a new tab' },
+  { id: 'closeTab', label: 'Close tab', category: 'Navigate', keybinding: '⌘W', menuLabel: 'Close Tab', help: 'close the active tab' },
+  { id: 'restoreTab', label: 'Restore closed tab', category: 'Navigate', keybinding: '⌘⇧T', menuLabel: 'Reopen Closed Tab', help: 're-open the most recently closed tab' },
+  { id: 'pin', label: 'Pin to sidebar', category: 'Navigate', menuLabel: 'Pin Folder', help: 'pin a folder to the sidebar Favorites' },
+  { id: 'unpin', label: 'Unpin from sidebar', category: 'Navigate', menuLabel: 'Unpin Folder', help: 'remove a pinned folder from the sidebar' },
 
   // ── View ───────────────────────────────────────────────────────────────
-  { id: 'view', label: 'View as', category: 'View', menuLabel: 'Change View…' },
-  { id: 'sort', label: 'Sort', category: 'View', menuLabel: 'Sort…' },
-  { id: 'showHidden', label: 'Show / Hide hidden files', category: 'View', keybinding: '⌘⇧.', menuLabel: 'Toggle Hidden Files' },
-  { id: 'foldersFirst', label: 'Folders first / Mixed', category: 'View', inMenu: false },
-  { id: 'theme', label: 'Theme', category: 'View', menuLabel: 'Theme…' },
-  { id: 'tag', label: 'Tag', category: 'View', menuLabel: 'Tag…' },
-  { id: 'untag', label: 'Untag', category: 'View', menuLabel: 'Untag…' },
-  { id: 'newtag', label: 'New tag', category: 'View', menuLabel: 'New Tag…' },
-  { id: 'dsltag', label: 'New DSL tag', category: 'View', inMenu: false },
-  { id: 'filter', label: 'Filter by tag', category: 'View', menuLabel: 'Filter by Tag…' },
-  { id: 'sidebyside', label: 'Side-by-side', category: 'View', inMenu: false },
-  { id: 'maximize', label: 'Maximize window', category: 'View', keybinding: '⌘⇧M', inMenu: false },
-  { id: 'fullscreen', label: 'Fullscreen', category: 'View', inMenu: false },
+  { id: 'view', label: 'View as', category: 'View', menuLabel: 'Change View…', help: 'list / grid / preview / tag' },
+  { id: 'sort', label: 'Sort', category: 'View', menuLabel: 'Sort…', help: 'name / size / mtime / ctime / type / ext' },
+  { id: 'showHidden', label: 'Show / Hide hidden files', category: 'View', keybinding: '⌘⇧.', menuLabel: 'Toggle Hidden Files', help: 'show / hide dotfiles (sticks per folder)' },
+  { id: 'foldersFirst', label: 'Folders first / Mixed', category: 'View', inMenu: false, help: 'pin folders to the top or interleave with files' },
+  { id: 'theme', label: 'Theme', category: 'View', menuLabel: 'Theme…', help: 'cycle dark/light or open the full theme picker' },
+  { id: 'tag', label: 'Tag', category: 'View', menuLabel: 'Tag…', help: 'add a tag to every file in this folder' },
+  { id: 'untag', label: 'Untag', category: 'View', menuLabel: 'Untag…', help: 'remove a tag from every file in this folder' },
+  { id: 'newtag', label: 'New tag', category: 'View', menuLabel: 'New Tag…', help: 'create a tag with a rule (extension / size / modified / name)' },
+  { id: 'dsltag', label: 'New DSL tag', category: 'View', inMenu: false, help: 'create/edit a tag from a selector query' },
+  { id: 'filter', label: 'Filter by tag', category: 'View', menuLabel: 'Filter by Tag…', help: 'narrow the folder to files carrying selected tags' },
+  { id: 'sidebyside', label: 'Side-by-side', category: 'View', inMenu: false, help: 'toggle the TypeBuild side-by-side (Chrome left / here right) layout' },
+  { id: 'maximize', label: 'Maximize window', category: 'View', keybinding: '⌘⇧M', inMenu: false, help: 'toggle window maximize from inside TypeBuild' },
+  { id: 'fullscreen', label: 'Fullscreen', category: 'View', inMenu: false, help: 'toggle fullscreen from inside TypeBuild' },
 
   // ── Tools ──────────────────────────────────────────────────────────────
-  { id: 'term', label: 'Open terminal pane', category: 'Tools', menuLabel: 'Terminal in this Folder' },
-  { id: 'openTerminal', label: 'Open external terminal here', category: 'Tools', menuLabel: 'Open External Terminal' },
-  { id: 'term-close', label: 'Close terminal pane', category: 'Tools', menuLabel: 'Close Terminal' },
-  { id: 'remote-attach', label: 'Connect host', category: 'Tools', menuLabel: 'Attach Remote (SSH)…' },
-  { id: 'disconnect', label: 'Disconnect host', category: 'Tools', menuLabel: 'Disconnect Remote' },
-  { id: 'chat', label: 'Chat with this folder / document', category: 'Tools', inMenu: false },
-  { id: 'run', label: 'Run a task', category: 'Tools', menuLabel: 'Run…' },
-  { id: 'task', label: 'New task', category: 'Tools', menuLabel: 'New Task' },
-  { id: 'tasks', label: 'All tasks', category: 'Tools', menuLabel: 'Tasks View' },
-  { id: 'projects', label: 'Projects', category: 'Tools', inMenu: false },
-  { id: 'new-project', label: 'New project', category: 'Tools', inMenu: false },
-  { id: 'settings', label: 'Settings', category: 'Tools' },
-  { id: 'secrets', label: 'Secrets', category: 'Tools', inMenu: false },
-  { id: 'permissions', label: 'Permissions', category: 'Tools' },
-  { id: 'upgrade', label: 'Upgrade', category: 'Tools', menuLabel: 'Check for Update' },
+  { id: 'term', label: 'Open terminal pane', category: 'Tools', menuLabel: 'Terminal in this Folder', help: 'open an embedded terminal pane rooted at this folder' },
+  { id: 'openTerminal', label: 'Open external terminal here', category: 'Tools', menuLabel: 'Open External Terminal', help: 'launch your default external terminal in this folder' },
+  { id: 'term-close', label: 'Close terminal pane', category: 'Tools', menuLabel: 'Close Terminal', help: 'dismiss the embedded terminal pane' },
+  { id: 'remote-attach', label: 'Connect host', category: 'Tools', menuLabel: 'Attach Remote (SSH)…', help: 'connect a host from your sshfs mounts as a task source' },
+  { id: 'disconnect', label: 'Disconnect host', category: 'Tools', menuLabel: 'Disconnect Remote', help: 'disconnect a connected remote task source' },
+  { id: 'chat', label: 'Chat with this folder / document', category: 'Tools', inMenu: false, help: 'dock an agent chat panel rooted at this folder or document' },
+  { id: 'run', label: 'Run a task', category: 'Tools', menuLabel: 'Run…', help: 'run a task with the active folder as cwd' },
+  { id: 'task', label: 'New task', category: 'Tools', menuLabel: 'New Task', help: 'open the inline task composer' },
+  { id: 'tasks', label: 'All tasks', category: 'Tools', menuLabel: 'Tasks View', help: 'open the singleton Tasks tab' },
+  { id: 'projects', label: 'Projects', category: 'Tools', inMenu: false, help: 'open the singleton Projects tab (Project Atlas)' },
+  { id: 'new-project', label: 'New project', category: 'Tools', inMenu: false, help: 'create a project via TypeBuild' },
+  { id: 'settings', label: 'Settings', category: 'Tools', help: 'view & rebind keys · per-launcher settings · notifications' },
+  { id: 'secrets', label: 'Secrets', category: 'Tools', inMenu: false, help: 'manage saved credentials the agent fills into forms' },
+  { id: 'permissions', label: 'Permissions', category: 'Tools', help: 'see and grant access to protected folders' },
+  { id: 'upgrade', label: 'Upgrade', category: 'Tools', menuLabel: 'Check for Update', help: 'upgrade TypeBuild and relaunch' },
 
   // ── Help / app ─────────────────────────────────────────────────────────
-  { id: 'help', label: 'Help', category: 'Help', keybinding: '?', accelerator: 'F1' },
-  { id: 'tutorial', label: 'Tutorial', category: 'Help' },
-  { id: 'tips', label: 'Tips', category: 'Help' },
-  { id: 'welcome', label: 'Welcome', category: 'Help' },
+  { id: 'help', label: 'Help', category: 'Help', keybinding: '?', accelerator: 'F1', help: 'open this help tour' },
+  { id: 'tutorial', label: 'Tutorial', category: 'Help', help: 'run the interactive walkthrough' },
+  { id: 'tips', label: 'Tips', category: 'Help', help: 'show quick tips' },
+  { id: 'welcome', label: 'Welcome', category: 'Help', help: 'show the welcome screen' },
 ];
 
 /**
@@ -189,6 +194,33 @@ export function keybindingToAccelerator(kb) {
 export function menuAcceleratorFor(meta) {
   if (meta.accelerator !== undefined) return meta.accelerator;
   return keybindingToAccelerator(meta.keybinding);
+}
+
+/**
+ * task-b79d10308ffd — derive HelpTour catalog rows ({ name, chord?, what })
+ * from the registry for the given categories, SKIPPING any verb id already
+ * covered by a curated row. This is what lets a newly added verb appear in help
+ * without a hand edit while the curated prose/chord/non-verb rows are preserved.
+ *
+ * @param {string[]} categories  catalog categories to pull verbs from
+ * @param {Iterable<string>} [covered]  verb ids already represented by a
+ *   curated row (so we don't duplicate them)
+ * @returns {Array<{ name: string, chord?: string, what: string }>}
+ */
+export function helpRowsForCategories(categories, covered = []) {
+  const cats = new Set(categories);
+  const skip = new Set(covered);
+  const rows = [];
+  for (const v of VERB_CATALOG) {
+    if (!v.category || !cats.has(v.category)) continue;
+    if (skip.has(v.id)) continue;
+    rows.push({
+      name: v.label,
+      ...(v.keybinding ? { chord: v.keybinding } : {}),
+      what: v.help ?? v.label,
+    });
+  }
+  return rows;
 }
 
 /**
