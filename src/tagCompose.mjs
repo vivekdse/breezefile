@@ -168,6 +168,41 @@ export function buildComposePrompt(description, sampleRows = [], opts = {}) {
   };
 }
 
+/**
+ * fm-5rk — build the refinement payload. Given the CURRENT selector, the
+ * original description, and the NEGATIVE EXAMPLES the user rejected (shaped
+ * metadata rows), ask the model for an IMPROVED selector that EXCLUDES those
+ * files while still matching everything the user wanted. The rejects are sent
+ * as examples to exclude — they are NOT persisted anywhere; the rule itself is
+ * regenerated.
+ */
+export function buildRefinePrompt(selector, rejectedRows = [], opts = {}) {
+  const sel = String(selector ?? '').trim();
+  if (sel === '') throw new Error('buildRefinePrompt: selector is empty');
+  const rejects = Array.isArray(rejectedRows) ? rejectedRows : [];
+  if (rejects.length === 0)
+    throw new Error('buildRefinePrompt: need at least one rejected example');
+  const desc = String(opts.description ?? '').trim();
+  const keptCount = typeof opts.keptCount === 'number' ? opts.keptCount : null;
+  const userText =
+    `The current tagDsl selector is:\n  ${sel}\n\n` +
+    (desc ? `It was meant to capture: ${JSON.stringify(desc)}\n\n` : '') +
+    `The user reviewed the matches and REJECTED these ${rejects.length} files ` +
+    `(metadata only — they should NOT be tagged):\n${JSON.stringify(rejects)}\n\n` +
+    (keptCount != null
+      ? `They kept ${keptCount} other matches, which must stay matched.\n\n`
+      : '') +
+    `Produce an IMPROVED selector that excludes the rejected files while still ` +
+    `matching the intended ones. Do NOT enumerate file names to ban — find the ` +
+    `metadata distinction (extension, size, date, depth, mime) that separates ` +
+    `rejected from kept. Return the same JSON object shape as before.`;
+  return {
+    model: opts.model || COMPOSE_MODELS.refine,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userText }],
+  };
+}
+
 // ── Response parsing + validation ────────────────────────────────────────────
 
 // Pull the first balanced JSON object out of a model response that may be

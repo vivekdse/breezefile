@@ -9,6 +9,7 @@ import {
   shapeRow,
   shapeRows,
   buildComposePrompt,
+  buildRefinePrompt,
   parseLlmResponse,
   slugifyName,
   pickColor,
@@ -103,6 +104,24 @@ test('buildComposePrompt rejects an empty description', () => {
 test('buildComposePrompt honors a model override', () => {
   const p = buildComposePrompt('x', [], { model: 'claude-sonnet-4-6' });
   assert.equal(p.model, 'claude-sonnet-4-6');
+});
+
+// ── buildRefinePrompt (fm-5rk) ──────────────────────────────────────────────
+test('buildRefinePrompt sends rejected files as negative examples and defaults to refine model', () => {
+  const rejects = shapeRows([{ name: 'keep-me.png', size: 5 }]);
+  const p = buildRefinePrompt('ext = png', rejects, { description: 'screenshots', keptCount: 7 });
+  assert.equal(p.model, COMPOSE_MODELS.refine);
+  assert.ok(p.messages[0].content.includes('ext = png'));
+  assert.ok(p.messages[0].content.includes('keep-me.png'));
+  assert.ok(p.messages[0].content.includes('REJECTED'));
+  assert.ok(p.messages[0].content.includes('kept 7'));
+  // must NOT instruct to enumerate names as a banlist — regenerates the rule
+  assert.ok(/metadata distinction/i.test(p.messages[0].content));
+});
+
+test('buildRefinePrompt requires a selector and at least one rejection', () => {
+  assert.throws(() => buildRefinePrompt('', [{ name: 'a' }]), /selector/);
+  assert.throws(() => buildRefinePrompt('ext = png', []), /rejected/);
 });
 
 // ── parseLlmResponse — JSON extraction + tagDsl validation ──────────────────

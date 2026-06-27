@@ -22,7 +22,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { parse } from '../tagDsl.mjs';
 import { computeSnapshot, filterEntries } from '../filterEntries.mjs';
-import { buildComposePrompt, parseLlmResponse, shapeRows } from '../tagCompose.mjs';
+import {
+  buildComposePrompt,
+  buildRefinePrompt,
+  parseLlmResponse,
+  shapeRows,
+} from '../tagCompose.mjs';
 import { TAG_PALETTE, newTagId } from '../tags';
 import { useOverlayExit } from '../useOverlayExit';
 import { fm } from '../bridge';
@@ -61,8 +66,9 @@ export function DslTagOverlay({
   const [genNote, setGenNote] = useState<string | null>(null);
   // The walked scope is cached so Generate/Refine/preview don't re-walk.
   const [scopeEntries, setScopeEntries] = useState<Entry[] | null>(null);
-  // Candidate matches for the CURRENT proposed selector (inspect before apply).
+  // Candidate matches for the CURRENT proposed selector + the user's rejections.
   const [matches, setMatches] = useState<Entry[] | null>(null);
+  const [rejected, setRejected] = useState<Set<string>>(new Set());
 
   // Probe whether the LLM frontend is configured (gates the NL box).
   useEffect(() => {
@@ -90,14 +96,15 @@ export function DslTagOverlay({
     return entries;
   }, [scopeEntries]);
 
-  // Apply a proposed selector: validate + recompute the candidate match set so
-  // the user can inspect it before saving. Returns the match count.
+  // Apply a proposed selector: validate, recompute the candidate match set, and
+  // clear any prior rejections. Returns the match count.
   const applyProposal = useCallback(
     async (proposed: string): Promise<number> => {
       const entries = await ensureScope();
       const tags = await fm.dslTags.list().catch(() => [] as DslTag[]);
       const matched = filterEntries(entries, proposed, { tags }) as Entry[];
       setMatches(matched);
+      setRejected(new Set());
       return matched.length;
     },
     [ensureScope],
@@ -141,6 +148,69 @@ export function DslTagOverlay({
     }
   }
 
+  // fm-5rk — Refine: send the rejected files back as NEGATIVE EXAMPLES and get
+  // an improved selector that excludes them while preserving intent. Rejections
+  // REGENERATE THE RULE — they are never stored as per-tag exceptions.
+  async function refine() {
+    if (genBusy || rejected.size === 0 || !matches) return;
+    const sel = selector.trim();
+    if (sel === '') return;
+    setGenBusy(true);
+    setGenError(null);
+    setGenNote(null);
+    try {
+      const rejRows = matches.filter((m) => rejected.has(m.path));
+      const keptCount = matches.length - rejRows.length;
+      const payload = buildRefinePrompt(sel, shapeRows(rejRows, 40), {
+        description: nlText.trim(),
+        keptCount,
+      });
+      const res = await fm.llm.run(payload);
+      if (!res.ok) {
+        setGenError(
+          res.code === 'no-api-key'
+            ? 'No Anthropic API key configured — set ANTHROPIC_API_KEY (or userData/llm.json).'
+            : res.error,
+        );
+        return;
+      }
+      const suggestion = parseLlmResponse(res.text, { palette: TAG_PALETTE });
+      setSelector(suggestion.selector);
+      const count = await applyProposal(suggestion.selector);
+      const stillRejected = (matchesAfter(suggestion.selector)).length;
+      setGenNote(
+        `Refined selector matches ${count} file${count === 1 ? '' : 's'}` +
+          (stillRejected > 0
+            ? ` · ${stillRejected} previously-rejected file${stillRejected === 1 ? '' : 's'} still match — refine again`
+            : ' · excludes the rejected files'),
+      );
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
+  // How many of the just-rejected files a candidate selector still matches —
+  // used to tell the user whether a refine actually excluded them.
+  function matchesAfter(candidate: string): Entry[] {
+    if (!matches || rejected.size === 0 || !scopeEntries) return [];
+    try {
+      const rej = matches.filter((m) => rejected.has(m.path));
+      return filterEntries(rej, candidate, {}) as Entry[];
+    } catch {
+      return [];
+    }
+  }
+
+  function toggleReject(path: string) {
+    setRejected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
 
   // fm-xr0 — when editing, hydrate the form from the stored record so the
   // mode toggle / snapshot count / selector all reflect the saved tag.
@@ -394,23 +464,47 @@ export function DslTagOverlay({
         {parseError && <div className="overlay__error">{parseError}</div>}
         {saveError && <div className="overlay__error">save failed: {saveError}</div>}
 
-        {/* fm-2ln — preview the proposed selector's matches BEFORE applying, so
-            the generated rule can be inspected. Nothing is tagged until save. */}
+        {/* fm-2ln / fm-5rk — preview the proposed selector's matches BEFORE
+            applying. Reject files that shouldn't be tagged, then Refine: the
+            rejected files are sent back as negative examples and the rule is
+            REGENERATED to exclude them (never stored as per-tag exceptions). */}
         {matches && (
           <div className="dsltag__preview">
             <div className="overlay__label tagform__divider">
-              Matches ({matches.length})
+              Matches ({matches.length}){' '}
+              {rejected.size > 0 && (
+                <span className="overlay__hint">· {rejected.size} marked to exclude</span>
+              )}
             </div>
             <ul className="dsltag__matchlist">
               {matches.slice(0, 50).map((m) => (
                 <li key={m.path} className="dsltag__matchrow">
-                  <span className="dsltag__matchname">{m.name}</span>
+                  <label className="dsltag__matchlabel">
+                    <input
+                      type="checkbox"
+                      checked={rejected.has(m.path)}
+                      onChange={() => toggleReject(m.path)}
+                      title="Exclude this file from the tag"
+                    />
+                    <span className="dsltag__matchname">{m.name}</span>
+                  </label>
                 </li>
               ))}
               {matches.length > 50 && (
                 <li className="overlay__hint">…and {matches.length - 50} more</li>
               )}
             </ul>
+            <div className="tagform__actions">
+              <button
+                type="button"
+                className="overlay__mode"
+                onClick={refine}
+                disabled={llmReady === false || genBusy || rejected.size === 0}
+                title="Regenerate the selector to exclude the marked files"
+              >
+                {genBusy ? 'refining…' : `Refine (exclude ${rejected.size})`}
+              </button>
+            </div>
           </div>
         )}
 

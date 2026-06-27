@@ -55,6 +55,12 @@ export function buildComposePrompt(
   opts?: { model?: string },
 ): ComposePayload;
 
+export function buildRefinePrompt(
+  selector: string,
+  rejectedRows?: ShapedRow[],
+  opts?: { model?: string; description?: string; keptCount?: number },
+): ComposePayload;
+
 export function parseLlmResponse(
   rawText: string,
   opts?: { palette?: PaletteEntry[] },
