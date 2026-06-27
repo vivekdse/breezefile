@@ -19,6 +19,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, WebContentsView, ipcMain, screen } from 'electron';
+import { killManagedPty } from '../ipc';
 
 // The bundle is ESM — `__dirname` doesn't exist. Derive it from this chunk's
 // URL (resolves to dist-electron/, where preload.mjs lives) so the operator
@@ -32,6 +33,11 @@ let browserWin: BrowserWindow | null = null;
 let pageView: WebContentsView | null = null;
 // Last URL requested for the page (used when the view is (re)created).
 let pendingUrl = 'https://example.com';
+// The agent PTY this operator session mirrors. Tracked so that closing the
+// window — via the single CLOSE button OR the OS window chrome — tears the PTY
+// down TOO (task-c4064f8a4994), routing through the existing onSessionExit /
+// release / keep-alive flow. null for the no-agent open-browser verb.
+let operatorPtyId: number | null = null;
 
 /** The live operator/browser window, or null if none is open. */
 export function getBrowserWindow(): BrowserWindow | null {
@@ -50,6 +56,7 @@ export function getOperatorPageView(): WebContentsView | null {
  *  navigation via the helper's `goto`. */
 export function openBrowserWindow(url?: string, ptyId?: number): void {
   if (url) pendingUrl = url;
+  if (ptyId != null) operatorPtyId = ptyId;
   const existing = getBrowserWindow();
   if (existing) {
     if (existing.isMinimized()) existing.restore();
@@ -68,10 +75,26 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
     },
   });
   browserWin = win;
+  // ONE elegant close (task-c4064f8a4994): whichever way the window goes away —
+  // the in-chrome CLOSE button (operator:close → win.close()) or the OS window
+  // chrome — tear the agent PTY down TOO so both halves end as one action.
+  // Killing the PTY fires its onExit, which for a TypeBuild session routes into
+  // onSessionExit (stopKeepAlive + the "release this task?" prompt). Idempotent:
+  // if the renderer already killed the PTY first, killManagedPty is a no-op.
+  win.on('close', () => {
+    if (operatorPtyId != null) {
+      try {
+        killManagedPty(operatorPtyId);
+      } catch {
+        /* already gone */
+      }
+    }
+  });
   win.on('closed', () => {
     if (browserWin === win) {
       browserWin = null;
       pageView = null;
+      operatorPtyId = null;
     }
   });
 
@@ -206,10 +229,10 @@ ipcMain.on('operator:sync', () => {
 });
 
 // Single CLOSE action (task-c4064f8a4994): tear down the page view + the window
-// together. The PTY teardown + release/keep-alive routing is handled on the
-// renderer side (it owns the ptyId) before this fires; here we only dispose the
-// window so both halves go down as one user action. The `closed` handler nulls
-// the singleton refs.
+// together. The renderer kills the PTY first (so its onExit → onSessionExit →
+// release/keep-alive routing fires deterministically), then asks us to close the
+// window here. The window's `close` handler ALSO kills the PTY as a backstop
+// (idempotent), so the OS window chrome's X is just as elegant.
 ipcMain.on('operator:close', () => {
   const win = getBrowserWindow();
   if (win) win.close();
