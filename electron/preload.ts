@@ -310,6 +310,14 @@ const fm = {
   browserBack: (id: number) => ipcRenderer.send('browser:back', id),
   browserForward: (id: number) => ipcRenderer.send('browser:forward', id),
   browserReload: (id: number) => ipcRenderer.send('browser:reload', id),
+  // Return-visit autofill (task-4b786c018d78): ask main to resolve the saved
+  // password for (origin, username) and type it into the page's login form. The
+  // password is resolved + injected in MAIN and NEVER crosses back to the
+  // renderer — this returns only a value-free outcome.
+  browserAutofill: (id: number, origin: string, username: string) =>
+    ipcRenderer.invoke('browser:autofill', id, origin, username) as Promise<
+      'filled' | 'no-form' | 'error' | 'no-credential'
+    >,
   browserSync: (id: number) => ipcRenderer.send('browser:sync', id),
   onBrowserState: (
     cb: (s: {

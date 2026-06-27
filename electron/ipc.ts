@@ -2569,6 +2569,35 @@ end tell`;
     browserViews.get(id)?.view.webContents.reload();
   });
 
+  // Return-visit autofill (task-4b786c018d78). Resolve the SAVED password for
+  // (origin, username) in MAIN and type it into the page's login form over the
+  // trusted hop — the value is NEVER returned to the renderer/agent. Returns a
+  // value-free FillResult ('filled' | 'no-form' | 'error' | 'no-credential').
+  ipcMain.handle(
+    'browser:autofill',
+    async (
+      _e,
+      id: number,
+      origin: string,
+      username: string,
+    ): Promise<'filled' | 'no-form' | 'error' | 'no-credential'> => {
+      const rec = browserViews.get(id);
+      if (!rec) return 'error';
+      const { resolveSiteCredential } = await import('./typebuild/site-credentials');
+      const { fillCredentialIntoPage } = await import('./browser/credential-fill');
+      let password: string;
+      try {
+        password = await resolveSiteCredential(origin, username);
+      } catch {
+        // 404 / not signed in / transport — value-free, never logged.
+        return 'no-credential';
+      }
+      // The password lives only in this scope and the page DOM; never logged,
+      // never sent back to the renderer.
+      return fillCredentialIntoPage(rec.view.webContents, username, password);
+    },
+  );
+
   // fm-z7v — busy/idle signal comes from Claude Code hooks
   // (UserPromptSubmit → busy, Stop/StopFailure → idle), routed through
   // the api-server and dispatched here as 'term:fg' keyed by ptyId.

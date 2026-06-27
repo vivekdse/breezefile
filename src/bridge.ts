@@ -172,6 +172,15 @@ type Fm = {
   browserForward: (id: number) => void;
   browserReload: (id: number) => void;
   browserSync: (id: number) => void;
+  // Return-visit autofill (task-4b786c018d78): resolve the saved password for
+  // (origin, username) in MAIN and type it into the page's login form. The
+  // password never crosses back to the renderer — returns only a value-free
+  // outcome.
+  browserAutofill: (
+    id: number,
+    origin: string,
+    username: string,
+  ) => Promise<'filled' | 'no-form' | 'error' | 'no-credential'>;
   onBrowserState: (
     cb: (s: {
       id: number;

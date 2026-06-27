@@ -60,6 +60,19 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
   // and on unmount. Never logged or persisted until the user accepts.
   const [pendingCred, setPendingCred] = useState<CapturedCredential | null>(null);
 
+  // Return-visit autofill offer (task-4b786c018d78): a saved login for the
+  // current origin we can fill. Holds NO password (origin+username only); the
+  // password is resolved + injected in main on accept and never reaches here.
+  const [autofillOffer, setAutofillOffer] = useState<{
+    origin: string;
+    username: string;
+    count: number;
+  } | null>(null);
+  const [autofilling, setAutofilling] = useState(false);
+  // Origins we've already offered/dismissed this mount, so a re-render or sub-
+  // frame nav doesn't re-pester. (Session-level, per pane.)
+  const offeredOrigins = useRef<Set<string>>(new Set());
+
   // Keyed on tabId, NOT url: the view persists across navigations, so we must
   // not tear it down when the (initial) url prop changes.
   useEffect(() => {
@@ -99,6 +112,32 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
       if (s.id !== idRef.current) return;
       if (!addrFocused.current) setAddr(s.url);
       setNav({ canGoBack: s.canGoBack, canGoForward: s.canGoForward });
+      // Return-visit autofill: if this origin has a saved login we haven't
+      // offered yet this mount, offer to fill it (task-4b786c018d78). Origins
+      // only — the password is never fetched here.
+      let origin = '';
+      try {
+        origin = new URL(s.url).origin;
+      } catch {
+        /* non-http(s) url — no autofill */
+      }
+      if (!origin || origin === 'null') return;
+      if (offeredOrigins.current.has(origin)) return;
+      offeredOrigins.current.add(origin);
+      void fm.typebuild.credentials
+        .list(origin)
+        .then((creds) => {
+          if (idRef.current == null || creds.length === 0) return;
+          // Offer the first saved username for this origin (minimal first cut).
+          setAutofillOffer({
+            origin,
+            username: creds[0].username,
+            count: creds.length,
+          });
+        })
+        .catch(() => {
+          /* not signed in / transport — silently skip the offer */
+        });
     });
 
     // Captured login submit → offer to save (task-1188c6535e91/ad89064bf45f).
@@ -148,6 +187,7 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
       offCred();
       // Drop any pending captured password when the pane unmounts (tab switch).
       setPendingCred(null);
+      setAutofillOffer(null);
       const id = idRef.current;
       // HIDE, don't destroy — the view survives the tab switch. reapBrowserViews
       // destroys it when the tab is actually closed.
@@ -211,6 +251,48 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
             }
           }}
         />
+        {!pendingCred && autofillOffer && (
+          <div className="save-pw" role="dialog" aria-label="Fill saved password">
+            <div className="save-pw__head">
+              <span className="save-pw__key" aria-hidden="true">
+                🔑
+              </span>
+              <span className="save-pw__title">
+                Fill saved password
+                {autofillOffer.username ? ` for ${autofillOffer.username}` : ''}?
+              </span>
+            </div>
+            <div className="save-pw__actions">
+              <button
+                type="button"
+                className="save-pw__btn save-pw__btn--primary"
+                disabled={autofilling}
+                onClick={() => {
+                  const id = idRef.current;
+                  if (id == null) return;
+                  setAutofilling(true);
+                  // Main resolves + injects the password; it never returns here.
+                  void fm
+                    .browserAutofill(id, autofillOffer.origin, autofillOffer.username)
+                    .finally(() => {
+                      setAutofilling(false);
+                      setAutofillOffer(null);
+                    });
+                }}
+              >
+                {autofilling ? 'Filling…' : 'Fill'}
+              </button>
+              <button
+                type="button"
+                className="save-pw__btn"
+                disabled={autofilling}
+                onClick={() => setAutofillOffer(null)}
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        )}
         {pendingCred && (
           <SavePasswordPrompt
             cred={pendingCred}
