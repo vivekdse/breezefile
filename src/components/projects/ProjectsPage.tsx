@@ -702,17 +702,31 @@ function ProjectsPageInner() {
       setLevel(2);
     }
     function onNew() {
-      // :new-project verb — surface the inline create form at the grid level.
-      setLevel(1);
-      setShowCreate(true);
+      // :new-project verb — open the inline create form, parented to the
+      // project in view: a sub-project when drilled in (level 2), else a
+      // top-level project at the grid. task-75493d416ab5 / task-54e9281f0986.
+      if (level === 2 && detailId) {
+        setShowCreate(true);
+      } else {
+        setLevel(1);
+        setShowCreate(true);
+      }
+    }
+    function onNewTaskEvt() {
+      // :new-task verb — create a task scoped to the project in view (the open
+      // project when drilled in, else unscoped). task-75493d416ab5.
+      const target = level === 2 && detailId ? detailId : scopeId ?? '';
+      newProjectTask(target === INBOX_ID ? '' : target);
     }
     window.addEventListener('fm:projects:focus', onFocus);
     window.addEventListener('fm:projects:new', onNew);
+    window.addEventListener('fm:projects:newtask', onNewTaskEvt);
     return () => {
       window.removeEventListener('fm:projects:focus', onFocus);
       window.removeEventListener('fm:projects:new', onNew);
+      window.removeEventListener('fm:projects:newtask', onNewTaskEvt);
     };
-  }, [nodeById]);
+  }, [nodeById, level, detailId, scopeId]);
 
   // ── keyboard ────────────────────────────────────────────────────────────────
   // ── `:` verbs act on the task selection (task-1bf3a297c9f9, Phase 4) ─────────
