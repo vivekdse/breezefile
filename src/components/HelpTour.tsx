@@ -210,6 +210,7 @@ const SLIDES: Slide[] = [
       { name: 'apply HUD', chord: 't', what: 'in tag view: type to find a tag, ↵ to add or remove on the whole folder' },
       { name: 'newtag', what: 'create a tag with a rule (extension / size / modified / name) or manual-only' },
       { name: 'dsltag', what: 'create/edit a tag from a selector query (e.g. ext = pdf and size > 4MB; supports and/or/not, comparisons, tag:other) — validated live; toggle Live ↔ Frozen (Frozen pins a snapshot of the matching paths at save time) and re-snapshot on demand' },
+      { name: 'describe (AI)', chord: '⌘↵ in the box', what: "in the DSL-tag editor, type a plain-English description (e.g. “old screenshots taking up space”) and Generate — an in-app, metadata-only LLM compiles it into a selector plus a suggested name and color, which you inspect (with a live match count) before applying. Nothing is tagged until you save. Needs an Anthropic API key (ANTHROPIC_API_KEY or userData/llm.json); without one the box is disabled. Only file metadata (names/sizes/dates) is sent — never file contents." },
       { name: 'filter-tab', what: 'open a selector as a live smart-folder tab — lists every file matching it across your home (recursively), re-evaluated each time you open the tab' },
       { name: 'tag / untag', what: 'add or remove a tag from every file in this folder (verb form)' },
       { name: 'filter', what: 'narrow the folder to files carrying selected tags · Match all / Match any' },

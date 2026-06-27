@@ -412,6 +412,20 @@ type Fm = {
     update: (id: string, patch: DslTagUpdate) => Promise<DslTag | null>;
     delete: (id: string) => Promise<boolean>;
   };
+  // fm-2ln / fm-5rk — metadata-only LLM tag frontend. The renderer sends a
+  // prompt payload built by src/tagCompose.mjs; main runs the in-process
+  // Anthropic call (key kept in main) and returns raw model text. `available`
+  // gates the NL input — when there is no key the feature degrades to disabled.
+  llm: {
+    available: () => Promise<boolean>;
+    run: (payload: {
+      model: string;
+      system: string;
+      messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+      maxTokens?: number;
+    }) => Promise<{ ok: true; text: string } | { ok: false; code?: string; error: string }>;
+    reloadKey: () => Promise<boolean>;
+  };
   // fm-ued6 — cold-start profiling: report the first committed frame to main.
   reportFirstPaint?: () => void;
 };
