@@ -111,7 +111,11 @@ export function isUserDataRef(ref: string): boolean {
  *  caller (api-server) maps the throw to a non-200 so the helper surfaces a
  *  clear error to the agent WITHOUT ever carrying the value into its context.
  *  Never logs the value. */
-export async function resolveTaskDataRef(taskId: string, ref: string): Promise<string> {
+export async function resolveTaskDataRef(
+  taskId: string,
+  ref: string,
+  format?: string,
+): Promise<string> {
   if (!ref) throw new Error('ref required');
 
   if (isUserDataRef(ref)) {
@@ -119,8 +123,10 @@ export async function resolveTaskDataRef(taskId: string, ref: string): Promise<s
     // signed-in user by the Firebase token; no task involved, so taskId is
     // intentionally unused. This path has its OWN parse (a richer resolved/
     // not-resolved response than class 1's plain {value}), so it does not reuse
-    // fetchDataValue.
-    return resolveUserField(ref);
+    // fetchDataValue. `format` (bare|dashed) is an OPTIONAL hint forwarded to the
+    // resolver — e.g. an NPI/EIN typed bare vs dashed into a particular field;
+    // omitted = server default. Class-1 (task PHI) refs ignore it.
+    return resolveUserField(ref, format);
   }
 
   // Class 1 — patient PHI on this task.
@@ -189,14 +195,18 @@ function joinNames(names: unknown): string {
  *    ambiguous        → "ambiguous — disambiguate" (may list candidate fields)
  *    ambiguous_secret → generic "ambiguous / refused" — discloses NOTHING.
  *  Never caches; one value per call. */
-async function resolveUserField(ref: string): Promise<string> {
+async function resolveUserField(ref: string, format?: string): Promise<string> {
   // Strip the reserved "me." prefix → the field. Multi-segment remainders pass
   // through verbatim (see header: location routing is a server/follow-up concern).
   const field = ref.slice(USER_REF_PREFIX.length);
   if (!field) throw new Error(`ref "${ref}" has no field after "me."`);
 
-  // entity defaults to `me`, so we omit it. format is left to the server default.
-  const reqUrl = `${API_BASE}/chromeext/entities/resolve?field=${encodeURIComponent(field)}`;
+  // entity defaults to `me`, so we omit it. `format` (bare|dashed) is forwarded
+  // only when the caller asks for a specific shape; omitted = server default.
+  const fmt = typeof format === 'string' ? format.trim() : '';
+  const reqUrl =
+    `${API_BASE}/chromeext/entities/resolve?field=${encodeURIComponent(field)}` +
+    (fmt ? `&format=${encodeURIComponent(fmt)}` : '');
   const res = await typebuildFetch(reqUrl);
   if (!res.ok) {
     throw Object.assign(new Error(`resolve failed for ref "${ref}" (${res.status})`), {
