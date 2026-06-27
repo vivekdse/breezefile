@@ -11,10 +11,25 @@ import { resolveCommandLine } from './launchers';
 import { spawnTerminal } from './terminalSpawn';
 import { basename, dirname } from './actions';
 import { formatOpError } from './errorMessages';
+import type { DocumentSelection } from './types';
 
 export type ChatTarget =
   | { kind: 'folder'; cwd: string }
-  | { kind: 'document'; filePath: string };
+  | { kind: 'document'; filePath: string; selection?: DocumentSelection };
+
+// Keep a long selection from blowing up the launch command / preamble: the
+// agent can always read the file for the rest. We cap the quoted text and mark
+// the truncation so the agent knows it isn't the whole selection.
+const MAX_SELECTION_CHARS = 2000;
+function describeSelection(sel: DocumentSelection): string {
+  const trimmed = sel.text.trim();
+  if (!trimmed) return '';
+  const body =
+    trimmed.length > MAX_SELECTION_CHARS
+      ? `${trimmed.slice(0, MAX_SELECTION_CHARS)}… [truncated]`
+      : trimmed;
+  return body;
+}
 
 // Structural subset of the store dispatch — kept local so this module doesn't
 // depend on the (unexported) store Action union.
@@ -63,7 +78,11 @@ async function pickAgent(agentId?: string): Promise<Launcher | null> {
 // user opened with this text; they press Enter to send.
 function preambleFor(target: ChatTarget): string {
   if (target.kind === 'document') {
-    return `I'm looking at this file — let's discuss and edit it together: ${target.filePath}\n`;
+    const sel = target.selection ? describeSelection(target.selection) : '';
+    const selLine = sel
+      ? `\nI have this text selected — focus on it:\n${sel}\n`
+      : '';
+    return `I'm looking at this file — let's discuss and edit it together: ${target.filePath}\n${selLine}`;
   }
   return `I'm working in this folder — help me explore and work with its files: ${target.cwd}\n`;
 }
@@ -72,10 +91,15 @@ function preambleFor(target: ChatTarget): string {
 // (e.g. claude --append-system-prompt). Never shown as a chat turn.
 function contextSentence(target: ChatTarget): string {
   if (target.kind === 'document') {
+    const sel = target.selection ? describeSelection(target.selection) : '';
+    const selPart = sel
+      ? ` The user has selected this text in the document — treat it as the focus ` +
+        `of the conversation: <<<${sel}>>>.`
+      : '';
     return (
       `You are assisting inside the Breeze editor. The user is working on the file ` +
       `${target.filePath} (your working directory is its folder). Help them discuss ` +
-      `and edit this file; read it first if useful.`
+      `and edit this file; read it first if useful.${selPart}`
     );
   }
   return (
