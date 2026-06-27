@@ -55,20 +55,8 @@
 .projects__crumb-sep {
   color: var(--fg-dim);
 }
-.projects__zoom {
-  margin-left: auto;
-  display: inline-flex;
-  gap: var(--sp-1);
-}
-.projects__zoom i {
-  width: var(--sp-2);
-  height: var(--sp-2);
-  border-radius: 50%;
-  background: var(--border-2);
-}
-.projects__zoom i.on {
-  background: var(--accent);
-}
+/* task-49c6662bc463 — the non-functional miller-zoom depth dots
+   (.projects__zoom) were removed; the miller columns already convey depth. */
 
 /* ── L1 head + hero ──────────────────────────────────────────────────────── */
 .projects__head {
