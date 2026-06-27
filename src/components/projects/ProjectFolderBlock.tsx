@@ -56,6 +56,9 @@ export interface ProjectFolderBlockProps {
   nest?: number;
   /** Drill into a sub-project (folder open). */
   onOpenProject?: (projectId: string) => void;
+  /** Drill into THIS block's own project (the inline header title is a drill
+   *  target at Home root; omitted in the drilled-in hero view). */
+  onOpenSelf?: (projectId: string) => void;
   /** Open the project's bound folder as a folder tab. */
   onOpenFolder?: (folder: string) => void;
   /** New task scoped to this project. */
@@ -80,6 +83,7 @@ export function ProjectHeader({
   instructionTotal,
   instructionSummary,
   scale,
+  onOpenSelf,
   onOpenFolder,
   onNewTask,
 }: {
@@ -90,6 +94,7 @@ export function ProjectHeader({
   instructionTotal: number;
   instructionSummary: string;
   scale: 'hero' | 'inline';
+  onOpenSelf?: (projectId: string) => void;
   onOpenFolder?: (folder: string) => void;
   onNewTask?: (projectId: string) => void;
 }) {
@@ -142,7 +147,18 @@ export function ProjectHeader({
       </div>
 
       <h1 className="folder-header__title pfolder-header__title" title={p.name}>
-        {p.name}
+        {onOpenSelf ? (
+          <button
+            type="button"
+            className="pfolder-header__open"
+            onClick={() => onOpenSelf(p.id)}
+            title={`Open ${p.name}`}
+          >
+            {p.name}
+          </button>
+        ) : (
+          p.name
+        )}
         {archived && <span className="pfolder-header__tag"> · archived</span>}
         {bound &&
           (onOpenFolder ? (
@@ -277,6 +293,7 @@ export function ProjectFolderBlock({
   scale,
   nest = 0,
   onOpenProject,
+  onOpenSelf,
   onOpenFolder,
   onNewTask,
   cursorKey,
@@ -301,6 +318,7 @@ export function ProjectFolderBlock({
         instructionTotal={instructionTotal}
         instructionSummary={instructionSummary}
         scale={scale}
+        onOpenSelf={onOpenSelf}
         onOpenFolder={onOpenFolder}
         onNewTask={onNewTask}
       />

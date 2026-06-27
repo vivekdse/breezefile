@@ -1858,14 +1858,25 @@ export const VERBS: VerbDef[] = [
     },
   },
   {
-    // task-83048f692491 — Projects home (Project Atlas). The calm projects
-    // grid → drill into a project's task tree, fully keyboard-operable. Lives
-    // in its own singleton tab alongside All tasks.
+    // task-3ff338f80de5 — Home: the tasks-first landing. Projects render as
+    // FOLDERS (a folder-style header + their tasks listed beneath like files),
+    // attention-ranked. Drill into a project to see it exactly like a folder.
+    // Internal tab kind stays `projects` (no migration); user-facing = "Home".
+    // (Aliases keep :projects/:atlas working for muscle memory.)
     id: 'projects',
-    label: 'Projects',
-    aliases: ['projects', 'project', 'atlas', 'project home', 'project atlas'],
-    icon: '◳',
-    describe: () => 'Open Projects — grid of every project, drill into its task tree',
+    label: 'Home',
+    aliases: [
+      'home',
+      'tasks home',
+      'projects',
+      'project',
+      'atlas',
+      'project home',
+      'project atlas',
+    ],
+    icon: '⌂',
+    describe: () =>
+      'Open Home — your tasks, ranked by what needs you, with projects as folders',
     isAvailable: () => ({ ok: true }),
     slots: [],
     execute: (_c, _p, api) => {

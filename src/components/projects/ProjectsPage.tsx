@@ -46,7 +46,6 @@ import {
   breadcrumbPath,
   rollUpTaskStats,
   computeProjectAttention,
-  attentionSummary,
   resolveEffectiveDescription,
   resolveEffectiveInstructions,
 } from '../../projects/index.mjs';
@@ -62,6 +61,10 @@ import { useProjectTaskRows } from './useProjectTaskRows';
 import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
+
+// Q4 — project-less tasks live in a synthetic "Inbox (no project)" block, always
+// first on Home root. This id never collides with a real project id.
+const INBOX_ID = '__inbox_no_project__';
 
 // ── status mapping (mirrors the foundation resolver's classifyTask) ──────────
 type RowStatus = 'working' | 'need' | 'blocked' | 'done' | 'passive';
@@ -97,13 +100,6 @@ const STATUS_GLYPH: Record<ProjStatus, string> = {
   working: '◷',
   idle: '◦',
   clear: '◌',
-};
-const STATUS_LABEL: Record<ProjStatus, string> = {
-  blocked: 'blocked',
-  need: 'needs you',
-  working: 'working',
-  idle: 'idle',
-  clear: 'clear',
 };
 
 function ProjectsPageInner() {
@@ -325,13 +321,85 @@ function ProjectsPageInner() {
   const tasksByProject = useMemo(() => {
     const m = new Map<string, Task[]>();
     for (const t of allTasks) {
-      if (!t.projectId) continue;
-      const arr = m.get(t.projectId) ?? [];
+      // Q4 — project-less tasks bucket under the synthetic Inbox id.
+      const key = t.projectId ?? INBOX_ID;
+      const arr = m.get(key) ?? [];
       arr.push(t);
-      m.set(t.projectId, arr);
+      m.set(key, arr);
     }
     return m;
   }, [allTasks]);
+
+  // Q4 — non-terminal project-less tasks (drives the synthetic Inbox block; it
+  // only appears when there is at least one open orphan task).
+  const inboxOpenCount = useMemo(
+    () =>
+      (tasksByProject.get(INBOX_ID) ?? []).filter(
+        (t) => t.status !== 'done' && t.status !== 'cancelled',
+      ).length,
+    [tasksByProject],
+  );
+  const inboxTotalCount = (tasksByProject.get(INBOX_ID) ?? []).length;
+
+  // A synthetic ProjectNode for the Inbox block (NON-PHI; name is a label).
+  const inboxNode = useMemo<ProjectNode>(
+    () => ({
+      project: {
+        id: INBOX_ID,
+        name: 'Inbox (no project)',
+        description: 'Tasks not yet filed under a project.',
+        instructions: null,
+        parentProjectId: null,
+        folders: [],
+        createdBy: null,
+        groupId: null,
+        createdAt: null,
+        updatedAt: null,
+      },
+      children: [],
+      depth: 0,
+      parentId: null,
+    }),
+    [],
+  );
+
+  // rollUp/attention for the synthetic Inbox so its header reads a real count.
+  // We only surface counts the data backs (open total + a "needs you" tally for
+  // pending/blocked orphans); no invented recency.
+  const inboxRollUp = useMemo(() => {
+    const own = tasksByProject.get(INBOX_ID) ?? [];
+    const empty: TaskStats = {
+      total: 0, open: 0, inProgress: 0, done: 0, cancelled: 0, blocked: 0, needsYou: 0,
+    };
+    const rolled: TaskStats = { ...empty };
+    for (const t of own) {
+      rolled.total += 1;
+      const rs = rowStatusOf(t);
+      if (rs === 'done') rolled.done += 1;
+      else if (rs === 'working') rolled.inProgress += 1;
+      else if (rs === 'blocked') { rolled.blocked += 1; rolled.needsYou += 1; rolled.open += 1; }
+      else if (rs === 'need') { rolled.needsYou += 1; rolled.open += 1; }
+    }
+    const m = new Map<string, { own: TaskStats; rolled: TaskStats }>(rollUp);
+    m.set(INBOX_ID, { own: rolled, rolled });
+    return m;
+  }, [tasksByProject, rollUp]);
+
+  const inboxAttention = useMemo(() => {
+    const r = inboxRollUp.get(INBOX_ID)?.rolled;
+    const m = new Map<string, ProjectAttention>(attention);
+    m.set(INBOX_ID, {
+      open: r?.open ?? 0,
+      blocked: r?.blocked ?? 0,
+      overdue: 0,
+      failed: 0,
+      total: r?.needsYou ?? 0,
+      score: r?.needsYou ?? 0,
+      lastActivityMs: null,
+      idle: false,
+    });
+    return m;
+  }, [inboxRollUp, attention]);
 
   const rowsForProject = useMemo(
     () =>
@@ -712,7 +780,7 @@ function ProjectsPageInner() {
               setGridCursor(0);
             }}
           >
-            Projects
+            Home
           </button>
           {scopeProject && level === 1 && (
             <>
@@ -735,7 +803,7 @@ function ProjectsPageInner() {
         </div>
 
         {level === 1 ? (
-          <ProjectsGrid
+          <HomeRoot
             gridRef={gridRef}
             attentionNodes={partitioned.attentionNodes}
             recentNodes={partitioned.recentNodes}
@@ -743,6 +811,16 @@ function ProjectsPageInner() {
             gridNodes={gridNodes}
             rollUp={rollUp}
             attention={attention}
+            tasksProvider={tasksProvider}
+            cursorKey={cursorKey}
+            onOpenProject={openProjectDetail}
+            onOpenFolder={openProjectFolder}
+            onNewTask={(pid) => newProjectTask(pid)}
+            inboxNode={inboxNode}
+            inboxAttention={inboxAttention}
+            inboxRollUp={inboxRollUp}
+            inboxOpenCount={inboxOpenCount}
+            inboxTotalCount={inboxTotalCount}
             showAll={showAll}
             onToggleShowAll={() => setShowAll((v) => !v)}
             showArchived={showArchived}
@@ -820,8 +898,13 @@ function ProjectsPageInner() {
   );
 }
 
-// ── L1: the projects grid ──────────────────────────────────────────────────────
-function ProjectsGrid({
+// ── Home root: projects-as-folders inbox (task-9d54b7ab7972 + task-4b0168979921)
+// Replaces the old .prow card/grid with a vertical LIST of ProjectFolderBlocks
+// (PROJECT = FOLDER). It PRESERVES task-4b0168979921's attention partition +
+// hero + "nothing needs you below" fold + show-all VERBATIM — only the row
+// presentation changes (one folder block per project, scale='inline', subs
+// collapsed per Q5). Q4: a synthetic "Inbox (no project)" block leads.
+function HomeRoot({
   gridRef,
   attentionNodes,
   recentNodes,
@@ -829,6 +912,16 @@ function ProjectsGrid({
   gridNodes,
   rollUp,
   attention,
+  tasksProvider,
+  cursorKey,
+  onOpenProject,
+  onOpenFolder,
+  onNewTask,
+  inboxNode,
+  inboxAttention,
+  inboxRollUp,
+  inboxOpenCount,
+  inboxTotalCount,
   showAll,
   onToggleShowAll,
   showArchived,
@@ -860,6 +953,16 @@ function ProjectsGrid({
   gridNodes: ProjectNode[];
   rollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
   attention: Map<string, ProjectAttention>;
+  tasksProvider: ProjectTasksProvider;
+  cursorKey: string | null;
+  onOpenProject: (projectId: string) => void;
+  onOpenFolder: (folder: string) => void;
+  onNewTask: (projectId: string) => void;
+  inboxNode: ProjectNode;
+  inboxAttention: Map<string, ProjectAttention>;
+  inboxRollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
+  inboxOpenCount: number;
+  inboxTotalCount: number;
   showAll: boolean;
   onToggleShowAll: () => void;
   showArchived: boolean;
@@ -888,84 +991,58 @@ function ProjectsGrid({
   const empty = loaded && !loadErr && totalScoped === 0;
   const hiddenCount = idleNodes.length;
 
-  // Cursor index into the flat `gridNodes` sequence for a given node. We render
-  // in sections, so each card resolves its own absolute index for keyboard sync.
+  // Cursor index into the flat `gridNodes` sequence for a given node (drives the
+  // header amber cursor + scrollIntoView via data-grid-i on the block wrapper).
   const indexOf = (id: string) => gridNodes.findIndex((n) => n.project.id === id);
 
-  // task-4b0168979921 — one project per LINE (folder-aesthetic inbox row):
-  // [status glyph] NAME — short description … [N need you] [⚑/◷ summary].
-  const renderRow = (node: ProjectNode, quiet: boolean) => {
+  // One project = one folder block. Each block carries its absolute grid index
+  // (data-grid-i) so the existing keyboard cursor + scroll-into-view still work;
+  // a per-block archive control rides on the block header wrapper.
+  const renderBlock = (node: ProjectNode, quiet: boolean) => {
     const p = node.project;
-    const rolled = rollUp.get(p.id)?.rolled;
-    const att = attention.get(p.id);
-    const status = projStatusOf(att, rolled);
-    const need = att?.total ?? 0;
-    const summary = att ? attentionSummary(att) : '';
     const i = indexOf(p.id);
-    const hasKids = node.children.length > 0;
     const archived = p.archived === true;
     return (
       <div
         key={p.id}
         data-grid-i={i}
-        role="listitem"
         className={[
-          'prow',
-          `prow--${status}`,
-          quiet ? 'prow--quiet' : '',
-          archived ? 'prow--archived' : '',
-          i === gridCursor ? 'cursor' : '',
+          'home-block',
+          quiet ? 'home-block--quiet' : '',
+          archived ? 'home-block--archived' : '',
+          i === gridCursor ? 'home-block--cursor' : '',
         ]
           .filter(Boolean)
           .join(' ')}
-        onClick={() => {
+        onMouseDown={() => {
           if (i >= 0) onSetCursor(i);
-          onEnter(node);
         }}
       >
-        <span
-          className="prow__glyph"
-          title={STATUS_LABEL[status]}
-          aria-label={STATUS_LABEL[status]}
+        <button
+          type="button"
+          className="home-block__archive"
+          title={archived ? 'Unarchive project' : 'Archive project'}
+          aria-label={archived ? 'Unarchive project' : 'Archive project'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive(p.id, !archived);
+          }}
         >
-          {hasKids ? '▸' : STATUS_GLYPH[status]}
-        </span>
-        <span className="prow__main">
-          <span className="prow__name">{p.name}</span>
-          {archived && <span className="prow__tag">archived</span>}
-          {p.description ? (
-            <span className="prow__desc">{p.description}</span>
-          ) : (
-            <span className="prow__desc prow__desc--empty">
-              no description — no shared context for agents
-            </span>
-          )}
-          {hasKids && (
-            <span className="prow__subs">
-              · {node.children.length} sub-project{node.children.length === 1 ? '' : 's'}
-            </span>
-          )}
-        </span>
-        <span className="prow__meta">
-          {summary && <span className="prow__attn">{summary}</span>}
-          {need > 0 && (
-            <span className="prow__need">
-              ⚑ <span className="num">{need}</span>
-            </span>
-          )}
-          <button
-            type="button"
-            className="prow__action"
-            title={archived ? 'Unarchive project' : 'Archive project'}
-            aria-label={archived ? 'Unarchive project' : 'Archive project'}
-            onClick={(e) => {
-              e.stopPropagation();
-              onArchive(p.id, !archived);
-            }}
-          >
-            {archived ? '↺' : '⊟'}
-          </button>
-        </span>
+          {archived ? '↺' : '⊟'}
+        </button>
+        <ProjectFolderBlock
+          node={node}
+          attention={attention}
+          rollUp={rollUp}
+          effectiveDesc={p.description ?? ''}
+          tasks={tasksProvider}
+          scale="inline"
+          onOpenProject={onOpenProject}
+          onOpenSelf={() => onEnter(node)}
+          onOpenFolder={onOpenFolder}
+          onNewTask={onNewTask}
+          cursorKey={cursorKey}
+        />
       </div>
     );
   };
@@ -975,16 +1052,24 @@ function ProjectsGrid({
       <div className="projects__head">
         <div className="projects__head-text">
           <h1 className="projects__title">
-            {scopeProject ? scopeProject.name : 'Your projects'}
+            {scopeProject ? scopeProject.name : 'Home'}
           </h1>
           <div className="projects__sub">
             {scopeProject
               ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · scoped · ranked by what needs you · `
-              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · ranked by what needs you · `}
+              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · your tasks, ranked by what needs you · `}
             <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
           </div>
         </div>
         <div className="projects__head-actions">
+          <button
+            type="button"
+            className="projects__btn"
+            onClick={() => onNewTask('')}
+            title="New task"
+          >
+            ＋ New task
+          </button>
           <button type="button" className="projects__btn projects__btn--primary" onClick={onShowCreate}>
             ＋ New {scopeProject ? 'sub-project' : 'project'}
           </button>
@@ -1033,7 +1118,32 @@ function ProjectsGrid({
         )
       )}
 
-      {empty && !showCreate && (
+      {/* Q4 — the synthetic Inbox (no project) block, ALWAYS first at root. Only
+          shown when there are project-less tasks. Not part of the attention
+          partition (it isn't a real project); it leads as the catch-all. */}
+      {!scopeProject && inboxTotalCount > 0 && (
+        <div className="home-block home-block--inbox" data-folder-key="__inbox__">
+          <ProjectFolderBlock
+            node={inboxNode}
+            attention={inboxAttention}
+            rollUp={inboxRollUp}
+            effectiveDesc={inboxNode.project.description ?? ''}
+            tasks={tasksProvider}
+            scale="inline"
+            onOpenProject={onOpenProject}
+            onOpenFolder={onOpenFolder}
+            onNewTask={onNewTask}
+            cursorKey={cursorKey}
+          />
+          {inboxOpenCount === 0 && (
+            <div className="home-block__note">
+              All inbox tasks are filed or done.
+            </div>
+          )}
+        </div>
+      )}
+
+      {empty && !showCreate && inboxTotalCount === 0 && (
         <div className="projects__empty">
           <div className="projects__empty-glyph">◳</div>
           <div className="projects__empty-title">
@@ -1049,20 +1159,20 @@ function ProjectsGrid({
         </div>
       )}
 
-      {/* The inbox. Needs-attention leads; everything below the fold needs
-          nothing right now. One dense, scannable list. */}
+      {/* The inbox of project folders. Needs-attention leads; everything below
+          the fold needs nothing right now. A vertical list of folder blocks. */}
       {(attentionNodes.length > 0 || recentNodes.length > 0) && (
-        <div className="projects__inbox" ref={gridRef} role="list">
-          {attentionNodes.map((node) => renderRow(node, false))}
+        <div className="home-list" ref={gridRef} role="list">
+          {attentionNodes.map((node) => renderBlock(node, false))}
           {attentionNodes.length > 0 && recentNodes.length > 0 && (
             <div className="projects__fold" aria-hidden="true">
               <span>nothing needs you below</span>
             </div>
           )}
-          {recentNodes.map((node) => renderRow(node, false))}
+          {recentNodes.map((node) => renderBlock(node, false))}
           {showAll &&
             idleNodes.length > 0 &&
-            idleNodes.map((node) => renderRow(node, true))}
+            idleNodes.map((node) => renderBlock(node, true))}
         </div>
       )}
 
