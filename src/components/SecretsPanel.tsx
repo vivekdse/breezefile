@@ -290,7 +290,11 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
           ×
         </button>
 
-        <div className="secrets-panel__eyebrow">Vault</div>
+        {/* task-875c6ad17f85 — the store had three names (eyebrow "Vault", title
+            "Secrets", footer "TypeBuild"). Standardize on "Secrets" as the one
+            name (matches the :secrets verb + Help), with "TypeBuild" only ever
+            naming the SERVICE it's stored on (eyebrow + footer). */}
+        <div className="secrets-panel__eyebrow">TypeBuild</div>
         <h2 id="secrets-panel__title" className="secrets-panel__title">
           Secrets
         </h2>
@@ -311,7 +315,7 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
         {!signedIn ? (
           <div className="secrets-panel__signin" role="status">
             <p className="secrets-panel__status">
-              Sign in to TypeBuild to view your vault.
+              Sign in to TypeBuild to view your secrets.
             </p>
             <button
               type="button"

@@ -1090,7 +1090,7 @@ function TasksPageInner() {
                   />
                   <Section
                     title="For agents"
-                    hint="TypeBuild + auto-execute tasks"
+                    hint="Tasks an agent runs for you"
                     tasks={visibleForAgents}
                     rows={visibleAgentRows}
                     blockedByFor={(t) => resolveBlockedBy(t.blockedBy, rawTasks)}

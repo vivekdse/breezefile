@@ -96,9 +96,14 @@ function rowStatusOf(t: Task): RowStatus {
 // ── minimal status-icon vocabulary (task-4b0168979921) ───────────────────────
 // One glyph per project row, derived from the SHARED attention partition — we
 // do NOT re-derive ranking here. Loudest signal wins: blocked/failed → recent
-// activity → needs-you → working → idle/quiet → clear.
-//   ⛔ blocked   ⚑ needs you   ◷ working   ◦ idle   ◌ clear
-type ProjStatus = 'blocked' | 'need' | 'working' | 'idle' | 'clear';
+// activity → needs-you → working → quiet.
+//   ⛔ blocked   ⚑ needs you   ◷ working   ◦ quiet
+// task-875c6ad17f85 — the old `◦ idle` and `◌ clear` glyphs were visually
+// indistinguishable and undocumented, so they read as noise. They're merged
+// into a single `quiet` state, and every glyph now carries a `title=` tooltip
+// (STATUS_LABEL) so the vocabulary is self-explaining instead of needing a
+// separate legend.
+type ProjStatus = 'blocked' | 'need' | 'working' | 'quiet';
 function projStatusOf(
   att: ProjectAttention | undefined,
   rolled: TaskStats | undefined,
@@ -108,15 +113,19 @@ function projStatusOf(
     if (att.total > 0) return 'need';
   }
   if ((rolled?.inProgress ?? 0) > 0) return 'working';
-  if (att?.idle) return 'idle';
-  return 'clear';
+  return 'quiet';
 }
 const STATUS_GLYPH: Record<ProjStatus, string> = {
   blocked: '⛔',
   need: '⚑',
   working: '◷',
-  idle: '◦',
-  clear: '◌',
+  quiet: '◦',
+};
+const STATUS_LABEL: Record<ProjStatus, string> = {
+  blocked: 'Blocked or failed',
+  need: 'Needs you',
+  working: 'Agents working',
+  quiet: 'Nothing pending',
 };
 
 function ProjectsPageInner() {
@@ -1266,7 +1275,7 @@ function FlatView({
           <div className="projects__empty-glyph">✓</div>
           <div className="projects__empty-title">No tasks yet</div>
           <div className="projects__empty-body">
-            Type <kbd>task</kbd> to add one — or use ＋ New task.
+            Type <kbd>:task</kbd> to add one — or use <b>＋ New task</b>.
           </div>
         </div>
       )}
@@ -1393,6 +1402,7 @@ function HomeRoot({
           node={node}
           statusGlyph={STATUS_GLYPH[status]}
           statusKind={status}
+          statusLabel={STATUS_LABEL[status]}
           total={rolled?.total ?? 0}
           need={att?.total ?? 0}
           subCount={node.children.length}
@@ -1495,7 +1505,7 @@ function HomeRoot({
         ) : (
           <div className="projects__hero" role="status">
             <b>
-              {heroNeed} {heroNeed === 1 ? 'thing needs' : 'things need'} you
+              {heroNeed} {heroNeed === 1 ? 'task needs' : 'tasks need'} you
               {heroBlocked > 0 ? `, ${heroBlocked} blocked` : ''}.
             </b>{' '}
             {heroTarget ? (
