@@ -647,17 +647,10 @@ export function TaskDetailDrawer({
                 claimedBy={claimedBy}
                 claimedByMe={claimedByMe}
               />
-              {/* The effective instruction set + teach-in-the-moment is unique to
-                  the detail view (not part of create), so it lives below the
-                  editable form. */}
-              {/* task-75f0715aa3ee — the effective instruction set stays here as
-                  READ-ONLY context; the "Teach" affordance now deep-links to the
-                  dedicated Teach tab (the one scope-picker surface) instead of
-                  opening an inline editor, so persistence never forks. */}
-              <InstructionSet
-                resolved={resolved}
-                onTeach={() => setTab('teach')}
-              />
+              {/* task-a784a424bd63 — the effective instruction set NO LONGER
+                  appears here. It lives ONLY in the Teach tab (rendered as a
+                  provenance document grouped by originating scope), so the
+                  Details tab doesn't duplicate it. */}
             </div>
           )}
           {tab === 'teach' && (
@@ -879,46 +872,88 @@ function DetailsMeta({
   );
 }
 
-// The cascading instruction set, shown READ-ONLY in the Details tab with a
-// provenance summary. task-75f0715aa3ee: the teach control here is now a
-// deep-link to the dedicated "Teach" tab (the one scope-picker surface) rather
-// than an inline editor — persistence lives in exactly one place (persistTeach).
-function InstructionSet({
-  resolved,
-  onTeach,
-}: {
-  resolved: ResolvedInstructions;
-  // Deep-link to the Teach tab — NOT a persistence call. The Teach tab owns the
-  // scope picker + the write-back.
-  onTeach: () => void;
-}) {
+// task-a784a424bd63 — the effective instruction set as a PROVENANCE DOCUMENT:
+// instead of a flat list with a one-word scope badge, group the resolved rules
+// by their originating scope (Project → Category/payer → Task, general→specific
+// per the resolver's `scopes` order) and render each scope as a titled section
+// that names the parent it comes from, with its rules underneath. This makes it
+// obvious WHERE each instruction comes from. Lives in the Teach tab only.
+function InstructionProvenance({ resolved }: { resolved: ResolvedInstructions }) {
+  // Human label for a scope KIND (the heading prefix). The scope's own label
+  // (e.g. a project name or "payer:HMO") names the specific parent.
+  const kindTitle = (kind: string): string => {
+    switch (kind) {
+      case 'organization':
+        return 'Organization';
+      case 'project':
+        return 'Project';
+      case 'category':
+        return 'Category';
+      case 'parent-task':
+        return 'Parent task';
+      case 'task':
+        return 'This task';
+      default:
+        return kind;
+    }
+  };
+
+  if (resolved.total === 0) {
+    return (
+      <div className="tdd__sect">
+        <div className="tdd__sect-h tdd__sect-h--row">
+          <span>Effective instructions</span>
+          <span className="tdd__prov" title="Effective instruction set across scopes">
+            none
+          </span>
+        </div>
+        <p className="tdd__muted">
+          No instructions resolved for this task’s scopes yet — teach one below.
+        </p>
+      </div>
+    );
+  }
+
+  // Only the scopes that contributed a surviving rule, in general→specific
+  // order. Group the rules under each scope by matching scopeId.
+  const groups = resolved.scopes.filter((s) => s.count > 0);
   return (
-    <section className="tdd__sect">
+    <div className="tdd__sect">
       <div className="tdd__sect-h tdd__sect-h--row">
-        <span>Instructions</span>
-        <span className="tdd__prov" title="Effective instruction set across scopes">
-          {resolved.total > 0 ? resolved.summary : 'none'}
+        <span>Effective instructions</span>
+        <span className="tdd__prov" title="Where these come from">
+          {resolved.summary}
         </span>
       </div>
-      {resolved.rules.length === 0 ? (
-        <p className="tdd__muted">No instructions resolved for this task’s scopes yet.</p>
-      ) : (
-        <ul className="tdd__rules">
-          {resolved.rules.map((r, i) => (
-            <li key={`${r.key}-${i}`} className="tdd__rule">
-              <span className="tdd__rule-text">{r.text}</span>
-              <span className={`tdd__rule-scope tdd__rule-scope--${r.scopeKind}`}>
-                {r.scopeLabel}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <button type="button" className="tdd__teach-open" onClick={onTeach}>
-        + Teach
-      </button>
-    </section>
+      <div className="tdd__prov-doc">
+        {groups.map((scope) => {
+          const rules = resolved.rules.filter((r) => r.scopeId === scope.id);
+          return (
+            <section
+              key={scope.id}
+              className={`tdd__prov-group tdd__prov-group--${scope.kind}`}
+            >
+              <header className="tdd__prov-group-head">
+                <span className="tdd__prov-group-kind">{kindTitle(scope.kind)}</span>
+                <span className="tdd__prov-group-name" title={scope.label}>
+                  {scope.label}
+                </span>
+                <span className="tdd__prov-group-count">
+                  {scope.count} rule{scope.count === 1 ? '' : 's'}
+                </span>
+              </header>
+              <ul className="tdd__prov-rules">
+                {rules.map((r, i) => (
+                  <li key={`${r.key}-${i}`} className="tdd__prov-rule">
+                    {r.text}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -1027,6 +1062,12 @@ function TeachTab({
 
   return (
     <div className="tdd__teachtab">
+      {/* task-a784a424bd63 — the effective instruction set as a provenance
+          DOCUMENT, grouped by originating scope (Project → Category → Task), so
+          the user sees exactly where each instruction comes from. This is the
+          ONLY place instructions render now (removed from the Details tab). */}
+      <InstructionProvenance resolved={resolved} />
+
       <div className="tdd__sect">
         <div className="tdd__sect-h">Teach the agent</div>
         <p className="tdd__muted">
@@ -1094,15 +1135,11 @@ function TeachTab({
         )}
       </div>
 
-      {/* CURRENT CONTEXT — what this scope already carries, so the user sees what
-          they're adding to. */}
+      {/* CURRENT CONTEXT — what the CHOSEN scope already carries, so the user
+          sees what their new rule is adding to. (The full cross-scope picture is
+          the provenance document at the top.) */}
       <div className="tdd__sect">
-        <div className="tdd__sect-h tdd__sect-h--row">
-          <span>Currently applies</span>
-          <span className="tdd__prov" title="Effective instruction set across scopes">
-            {resolved.total > 0 ? resolved.summary : 'none'}
-          </span>
-        </div>
+        <div className="tdd__sect-h">This {scope} already carries</div>
         {contextRules.length === 0 ? (
           <p className="tdd__muted">
             Nothing taught at this scope yet — your first rule starts the set.

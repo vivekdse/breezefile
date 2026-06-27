@@ -161,7 +161,8 @@ function Shell() {
     task: Task;
     // task-b30e546672db — 'details' is the renamed/first tab; 'config' is still
     // accepted from legacy callers and mapped to 'details' inside the drawer.
-    initialTab?: 'details' | 'trace' | 'config' | 'session';
+    // task-f60a8003efa9 — 'trace'/'session' map onto the clubbed 'activity' tab.
+    initialTab?: 'details' | 'trace' | 'config' | 'session' | 'activity';
   } | null>(null);
   // fm-femh — Run-task modal: pick a task to run in the active folder tab.
   const [runTaskCwd, setRunTaskCwd] = useState<string | null>(null);
@@ -1177,7 +1178,7 @@ function Shell() {
     }
     function onOpenTaskDetail(e: Event) {
       const detail = (e as CustomEvent).detail as
-        | { task?: Task; initialTab?: 'trace' | 'config' | 'session' }
+        | { task?: Task; initialTab?: 'trace' | 'config' | 'session' | 'activity' }
         | undefined;
       if (detail?.task) setTaskDetail({ task: detail.task, initialTab: detail.initialTab });
     }
