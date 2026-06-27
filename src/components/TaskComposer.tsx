@@ -287,9 +287,21 @@ const DUE_QUICK_PICKS: DueQuickPick[] = [
   { id: 'qp-mon', label: 'Monday', key: 'M', iso: (t) => nextWeekdayISO(t, 1) },
 ];
 
-function prettyFolder(p: string): string {
+// The current user's home dir, shortened to `~` in folder hints. Resolved from
+// the platform (os.homedir() via the `fm.homedir()` bridge), NOT a hardcoded
+// literal — a hardcoded path is wrong for every other user and on Linux, and
+// violates the cross-platform rule (no OS paths outside electron/platform/).
+// Cached at module scope and populated once (the bridge call is async); the
+// component below also keeps it in state to re-render hints once it loads.
+let cachedHome = '';
+function rememberHome(home: string): string {
+  cachedHome = home || '';
+  return cachedHome;
+}
+
+function prettyFolder(p: string, home: string = cachedHome): string {
   if (!p) return 'Any folder';
-  const home = '/Users/vivek.srinivasan';
+  if (!home) return p;
   if (p === home) return '~';
   if (p.startsWith(home + '/')) return '~/' + p.slice(home.length + 1);
   return p;
@@ -313,6 +325,14 @@ export function TaskComposer(props: Props) {
   // don't see a ⌘ they don't have.
   const submitKbd = caps.id === 'mac' ? '⌘↵' : 'Ctrl+↵';
   const initial: Task | null = props.mode === 'edit' ? props.task : null;
+
+  // Resolve the current user's home dir once (async via the bridge) so folder
+  // hints shorten to `~` for the ACTUAL user on both macOS and Linux. Seeded
+  // from the module cache so a second composer open is correct on first paint.
+  const [home, setHome] = useState(cachedHome);
+  useEffect(() => {
+    fm.homedir().then((h) => setHome(rememberHome(h))).catch(() => {});
+  }, []);
 
   // fm-m2s4 (S5) — save target. Editing an existing row stays pinned to that
   // row's source (you can't move a task between stores from the composer).
@@ -501,7 +521,7 @@ export function TaskComposer(props: Props) {
       out.push({
         id: 'this',
         label: 'This folder',
-        hint: prettyFolder(cwdSuggestion),
+        hint: prettyFolder(cwdSuggestion, home),
         v: cwdSuggestion,
       });
     }
@@ -520,7 +540,7 @@ export function TaskComposer(props: Props) {
       pick: true,
     });
     return out;
-  }, [cwdSuggestion]);
+  }, [cwdSuggestion, home]);
 
   // Claude scheduled tasks need a real folder (backend rule). Hide the
   // "Any folder" preset whenever the agent is the executor so the user
@@ -1531,7 +1551,7 @@ export function TaskComposer(props: Props) {
   }
   function folderSummary(): string {
     if (!folder) return 'Any folder';
-    return prettyFolder(folder);
+    return prettyFolder(folder, home);
   }
   function whoSummary(): string {
     return WHO_OPTIONS.find((w) => w.id === executor)?.label ?? 'Manual';
@@ -1855,7 +1875,7 @@ export function TaskComposer(props: Props) {
                       </span>
                       <span className="composer__attached-note">
                         {projectAutoAttached
-                          ? `auto-attached from ${prettyFolder(props.mode === 'create' ? props.defaultFolder : '')}`
+                          ? `auto-attached from ${prettyFolder(props.mode === 'create' ? props.defaultFolder : '', home)}`
                           : 'attached'}
                       </span>
                     </div>
