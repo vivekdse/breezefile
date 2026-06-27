@@ -228,6 +228,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (p === '/app/task-data' && m === 'GET') {
       const taskId = url.searchParams.get('taskId') ?? '';
       const ref = url.searchParams.get('ref') ?? '';
+      // Optional fill format (bare|dashed) for me.* entity refs — e.g. an NPI/EIN
+      // typed bare vs dashed into a particular field. Ignored for class-1 refs.
+      const format = url.searchParams.get('format') ?? undefined;
       const { resolveTaskDataRef, isUserDataRef } = await import('./typebuild/task-data');
       // A "me." ref resolves against the per-user vault (via the entity resolver,
       // GET /chromeext/entities/resolve) and needs no task — taskId is ignored
@@ -238,7 +241,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
           status: 400,
         });
       }
-      const value = await resolveTaskDataRef(taskId, ref);
+      const value = await resolveTaskDataRef(taskId, ref, format);
       return sendJson(res, 200, { ok: true, ref, value });
     }
 

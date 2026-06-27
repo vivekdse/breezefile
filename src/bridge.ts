@@ -207,6 +207,15 @@ type Fm = {
     count: number;
     webContentsId: number | null;
   }>;
+  // Return-visit autofill (task-4b786c018d78): resolve the saved password for
+  // (origin, username) in MAIN and type it into the page's login form. The
+  // password never crosses back to the renderer — returns only a value-free
+  // outcome.
+  browserAutofill: (
+    id: number,
+    origin: string,
+    username: string,
+  ) => Promise<'filled' | 'no-form' | 'error' | 'no-credential'>;
   onBrowserState: (
     cb: (s: {
       id: number;
@@ -218,6 +227,18 @@ type Fm = {
   ) => () => void;
   // SPIKE (spike/playwright-cdp): main → renderer "open a browser tab" request.
   onBrowserOpen: (cb: (s: { url?: string }) => void) => () => void;
+  // Login-submit capture (task-1188c6535e91 / task-ad89064bf45f): fired when the
+  // human submits a login form in an embedded browser tab. Carries the captured
+  // password — TRUSTED UI only: show the "Save password?" prompt, never persist
+  // or log it until the user accepts. Dropped on dismiss.
+  onBrowserCredentialCaptured: (
+    cb: (s: {
+      id: number;
+      origin: string;
+      username: string;
+      password: string;
+    }) => void,
+  ) => () => void;
   launchersList: () => Promise<Launcher[]>;
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;
@@ -402,6 +423,22 @@ type Fm = {
       set: (key: string, value: string) => Promise<string>;
       remove: (ref: string) => Promise<void>;
     };
+    // Site-keyed credential store — per-user web logins (origin, username) →
+    // password (task-ad89064bf45f prompt / task-d60860fb4d7f vault). The password
+    // is encrypted at rest server-side, origin-normalized, principal-scoped, and
+    // NEVER logged. `list`/`resolve` are value-free except resolve's single
+    // returned password (revealed on explicit user/agent action). Distinct from
+    // `vault` (the user's OWN identifiers); these are arbitrary site logins.
+    credentials: {
+      list: (origin?: string) => Promise<SavedCredential[]>;
+      resolve: (origin: string, username: string) => Promise<string>;
+      save: (cred: {
+        origin: string;
+        username: string;
+        password: string;
+      }) => Promise<{ origin: string; username: string }>;
+      remove: (origin: string, username: string) => Promise<void>;
+    };
     // task-ab1d7955e23f — TypeBuild Projects: named task containers with
     // optional instructions + owned folders. NON-PHI. `resolve` is the
     // auto-attach lookup (folder → owning project or null).
@@ -490,6 +527,15 @@ export type TypebuildAuthState = { signedIn: boolean; email?: string };
 // value). `key` is the "me."-prefixed field; `secret` marks write-only fields
 // (ssn/dob/bank_account) the server's resolver refuses to reveal.
 export type VaultEntry = { key: string; secret: boolean };
+
+// One saved site login as it crosses the bridge for LISTING (NO password — the
+// password only ever crosses on an explicit `credentials.resolve`). `updatedAt`
+// is an ISO/string timestamp from the server for ordering. NON-PHI metadata.
+export type SavedCredential = {
+  origin: string;
+  username: string;
+  updatedAt?: string;
+};
 
 export type Launcher = {
   id: string;

@@ -27,6 +27,14 @@ type VaultEntry = {
   secret: boolean;
 };
 
+// One saved site login as it crosses the bridge for LISTING (NO password — the
+// password crosses only on an explicit resolve). Inlined like VaultEntry/Project.
+type SavedCredential = {
+  origin: string;
+  username: string;
+  updatedAt?: string;
+};
+
 // task-317c7fe41f90 — DSL-tag store record as it crosses the bridge. Inlined
 // for the same reason as Project/VaultEntry (preload carries no shared-type
 // imports); mirrors `Tag` in src/tagStore.d.mts. NON-PHI.
@@ -329,6 +337,14 @@ const fm = {
   browserBack: (id: number) => ipcRenderer.send('browser:back', id),
   browserForward: (id: number) => ipcRenderer.send('browser:forward', id),
   browserReload: (id: number) => ipcRenderer.send('browser:reload', id),
+  // Return-visit autofill (task-4b786c018d78): ask main to resolve the saved
+  // password for (origin, username) and type it into the page's login form. The
+  // password is resolved + injected in MAIN and NEVER crosses back to the
+  // renderer — this returns only a value-free outcome.
+  browserAutofill: (id: number, origin: string, username: string) =>
+    ipcRenderer.invoke('browser:autofill', id, origin, username) as Promise<
+      'filled' | 'no-form' | 'error' | 'no-credential'
+    >,
   browserSync: (id: number) => ipcRenderer.send('browser:sync', id),
   // Teach-by-recording (task-01facbf6b0bc): record the human's actions in this
   // view, capturing every selector candidate so Claude Code can pick the
@@ -369,6 +385,24 @@ const fm = {
     const handler = (_e: unknown, payload: { url?: string }) => cb(payload);
     ipcRenderer.on('browser:open', handler);
     return () => ipcRenderer.off('browser:open', handler);
+  },
+  // Login-submit capture (task-1188c6535e91): main → renderer event carrying a
+  // captured { origin, username, password } from a human login in an embedded
+  // browser tab. SECURITY: the password is for the TRUSTED "Save password?"
+  // prompt ONLY — the renderer must not persist or log it until the user
+  // accepts. We forward it verbatim and never log it here.
+  onBrowserCredentialCaptured: (
+    cb: (s: {
+      id: number;
+      origin: string;
+      username: string;
+      password: string;
+    }) => void,
+  ) => {
+    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
+      cb(payload);
+    ipcRenderer.on('browser:credential-captured', handler);
+    return () => ipcRenderer.off('browser:credential-captured', handler);
   },
   // fm-z7v — process-tree foreground transitions for tab busy/idle tint.
   // `state` is the rich tri-state ('busy'|'idle'|'waiting'); 'waiting'
@@ -733,6 +767,25 @@ const fm = {
         ipcRenderer.invoke('typebuild:vault:set', key, value) as Promise<string>,
       remove: (ref: string) =>
         ipcRenderer.invoke('typebuild:vault:delete', ref) as Promise<void>,
+    },
+    // Site-keyed credential store — per-user web logins (origin, username) →
+    // password (Save-password prompt task-ad89064bf45f / vault task-d60860fb4d7f).
+    // The password is encrypted at rest server-side and crosses ONLY on save and
+    // on an explicit resolve. We never log it on this hop. `list` is value-free.
+    credentials: {
+      list: (origin?: string) =>
+        ipcRenderer.invoke('typebuild:cred:list', origin) as Promise<
+          SavedCredential[]
+        >,
+      resolve: (origin: string, username: string) =>
+        ipcRenderer.invoke('typebuild:cred:resolve', origin, username) as Promise<string>,
+      save: (cred: { origin: string; username: string; password: string }) =>
+        ipcRenderer.invoke('typebuild:cred:save', cred) as Promise<{
+          origin: string;
+          username: string;
+        }>,
+      remove: (origin: string, username: string) =>
+        ipcRenderer.invoke('typebuild:cred:delete', origin, username) as Promise<void>,
     },
     // task-ab1d7955e23f — TypeBuild Projects: named task containers with
     // optional instructions + owned folders. NON-PHI; server-backed via the

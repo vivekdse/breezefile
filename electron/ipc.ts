@@ -48,6 +48,7 @@ import { unsupported } from './core/task-source';
 import type { TypeBuildTaskSource } from './sources/typebuild';
 import { registerTagStoreIpc } from './tag-store';
 import { registerLlmIpc } from './llm';
+import { wireCredentialCapture } from './browser/credential-capture';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2486,6 +2487,21 @@ end tell`;
         try { wc.send('tb-record:set', true); } catch { /* page gone */ }
       }
     });
+    // Login-submit detection + credential capture (task-1188c6535e91). Injects a
+    // value-free capturing submit listener; on a human login it pulls
+    // { origin, username, password } into main and forwards it to the renderer's
+    // "Save password?" prompt. SECURITY: the password is memory-only — we send it
+    // straight over IPC and NEVER log it, screenshot it, or put it in
+    // browser:state. See electron/browser/credential-capture.ts.
+    wireCredentialCapture(wc, win, id, (cred) => {
+      if (win.webContents.isDestroyed()) return;
+      win.webContents.send('browser:credential-captured', {
+        id,
+        origin: cred.origin,
+        username: cred.username,
+        password: cred.password,
+      });
+    });
     // Open target=_blank / window.open in the same view rather than spawning a
     // native child window (keeps everything inside the tab for the spike).
     wc.setWindowOpenHandler(({ url }) => {
@@ -2597,6 +2613,35 @@ end tell`;
     stopBrowserRecording(opts || {}),
   );
   ipcMain.handle('browser:record:state', () => currentBrowserRecording());
+
+  // Return-visit autofill (task-4b786c018d78). Resolve the SAVED password for
+  // (origin, username) in MAIN and type it into the page's login form over the
+  // trusted hop — the value is NEVER returned to the renderer/agent. Returns a
+  // value-free FillResult ('filled' | 'no-form' | 'error' | 'no-credential').
+  ipcMain.handle(
+    'browser:autofill',
+    async (
+      _e,
+      id: number,
+      origin: string,
+      username: string,
+    ): Promise<'filled' | 'no-form' | 'error' | 'no-credential'> => {
+      const rec = browserViews.get(id);
+      if (!rec) return 'error';
+      const { resolveSiteCredential } = await import('./typebuild/site-credentials');
+      const { fillCredentialIntoPage } = await import('./browser/credential-fill');
+      let password: string;
+      try {
+        password = await resolveSiteCredential(origin, username);
+      } catch {
+        // 404 / not signed in / transport — value-free, never logged.
+        return 'no-credential';
+      }
+      // The password lives only in this scope and the page DOM; never logged,
+      // never sent back to the renderer.
+      return fillCredentialIntoPage(rec.view.webContents, username, password);
+    },
+  );
 
   // fm-z7v — busy/idle signal comes from Claude Code hooks
   // (UserPromptSubmit → busy, Stop/StopFailure → idle), routed through

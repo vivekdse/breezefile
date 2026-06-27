@@ -148,10 +148,12 @@ export async function listUserSecrets(): Promise<VaultEntry[]> {
  *  one-value-per-call discipline. The server refuses SECRET fields (the panel
  *  disables their toggle, but if reached the resolver throws a value-free
  *  "refused" error). Never cached, never logged. */
-export async function revealUserSecret(ref: string): Promise<string> {
+export async function revealUserSecret(ref: string, format?: string): Promise<string> {
   const canonical = toUserRef(ref);
-  // resolveTaskDataRef routes "me.*" to the entity resolver; taskId unused for class 2.
-  return resolveTaskDataRef('', canonical);
+  // resolveTaskDataRef routes "me.*" to the entity resolver; taskId unused for
+  // class 2. `format` (bare|dashed) is an optional shape hint; omitted = server
+  // default. The value is never cached or logged on this path.
+  return resolveTaskDataRef('', canonical, format);
 }
 
 /** Create or replace one secret via PUT /chromeext/entities/{id}/fields. Looks
