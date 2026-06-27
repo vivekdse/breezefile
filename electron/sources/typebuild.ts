@@ -1228,6 +1228,24 @@ export class TypeBuildTaskSource implements TaskSource {
     // session runs here and loads the seeded settings via --settings below.
     const { cwd: tasksCwd, settingsPath } = ensureTasksWorkspace();
 
+    // task-7bc1f1dfc202 — server-hosted operator instructions. Lead with the ONE
+    // GLOBAL doc (scope=global): fetch it at session start and append it as a
+    // system-prompt addendum so it layers onto BOTH delivery paths (workspace
+    // CLAUDE.md and project-folder prompt) uniformly. The fetch caches on disk and
+    // falls back to that cache offline; an unset/empty doc yields '' and we simply
+    // inject nothing (the bundled playbook still rides the workspace CLAUDE.md /
+    // prompt addendum). NON-PHI standing guidance — never a value; never logged.
+    // Defensive: any failure leaves operatorInstructions empty so the launch
+    // proceeds on the bundled default.
+    let operatorInstructions = '';
+    try {
+      const { fetchOperatorInstructions } = await import('../typebuild/operator-instructions');
+      const oi = await fetchOperatorInstructions('global');
+      operatorInstructions = oi.body.trim();
+    } catch {
+      /* server-hosted instructions are additive — never block a launch on them */
+    }
+
     // task-ab1d7955e23f (item 4) — project-derived launch context. When the
     // task belongs to a TypeBuild project, run it IN the project's folder and
     // inject the project's cascading instructions into the session. Resolved
@@ -1288,6 +1306,12 @@ export class TypeBuildTaskSource implements TaskSource {
       extraArgs: [
         '--settings', settingsPath,
         '--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG,
+        // task-7bc1f1dfc202 — the GLOBAL server-hosted operator instructions,
+        // layered on as a system-prompt addendum. Omitted entirely when the doc
+        // is unset/empty or the fetch failed (bundled playbook still applies).
+        ...(operatorInstructions
+          ? ['--append-system-prompt', operatorInstructions]
+          : []),
       ],
       env: {
         // The minted token, PTY env only. claude expands ${TYPEBUILD_MCP_TOKEN}

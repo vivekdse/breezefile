@@ -242,6 +242,44 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       return sendJson(res, 200, { ok: true, ref, value });
     }
 
+    // task-3c9b1146cee2 — shared ONLINE browser-automation memory. The agent's
+    // `breeze-tools memory` CLI (electron/browser/tools/memory.mjs) holds no
+    // Firebase token, so it proxies the site-scoped store through MAIN here,
+    // exactly like /app/task-data. NON-PHI: selectors/paths/how-to/code only —
+    // the SERVER PHI-guards every write (422). We never log a note body.
+    if (p === '/app/site-memory' && m === 'GET') {
+      const domain = url.searchParams.get('domain') ?? '';
+      if (!domain) throw Object.assign(new Error('domain required'), { status: 400 });
+      const kind = url.searchParams.get('kind') ?? undefined;
+      const { recallSiteMemory } = await import('./typebuild/site-memory');
+      const out = await recallSiteMemory(domain, { kind: kind || undefined });
+      return sendJson(res, 200, out);
+    }
+    if (p === '/app/site-memory' && m === 'POST') {
+      const body = await readJson<{
+        domain?: string;
+        body?: string;
+        kind?: string;
+        url_pattern?: string;
+      }>(req);
+      if (!body.domain || !body.body) {
+        throw Object.assign(new Error('domain and body required'), { status: 400 });
+      }
+      const { addSiteMemory } = await import('./typebuild/site-memory');
+      const out = await addSiteMemory(body.domain, body.body, {
+        kind: body.kind,
+        url_pattern: body.url_pattern,
+      });
+      return sendJson(res, 201, out);
+    }
+    if (p === '/app/site-memory' && m === 'DELETE') {
+      const noteId = url.searchParams.get('id') ?? '';
+      if (!noteId) throw Object.assign(new Error('id required'), { status: 400 });
+      const { deleteSiteMemory } = await import('./typebuild/site-memory');
+      const out = await deleteSiteMemory(noteId);
+      return sendJson(res, 200, out);
+    }
+
     // fm-awii — tagging API. Tags live in the renderer store, so every route
     // proxies through the control bridge to the focused window.
     if (p === '/tags' && m === 'GET') {

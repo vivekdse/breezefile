@@ -42,9 +42,9 @@ import {
   deleteTool,
 } from '../electron/browser/tools/registry.mjs';
 import {
-  getMemory,
-  addMemory,
-  deleteMemory,
+  getMemoryOnline,
+  addMemoryOnline,
+  deleteMemoryOnline,
   listMemory,
   memoryDir,
 } from '../electron/browser/tools/memory.mjs';
@@ -363,7 +363,11 @@ function cmdDelete(args) {
 }
 
 // ─── memory — durable NON-PHI notes, scoped by site or task ───────────────────
-function cmdMemory(args) {
+// `site` notes are SHARED ONLINE (task-3c9b1146cee2): routed through Breeze main
+// to /chromeext/site-memory, with the on-disk JSON as an offline cache. `task`
+// notes stay local (no fitting online store yet). The *Online helpers pick the
+// path per scope, so this command is now async.
+async function cmdMemory(args) {
   const sub = args._[1];
   const scope =
     args.site !== undefined ? 'site' : args.task !== undefined ? 'task' : null;
@@ -375,11 +379,13 @@ function cmdMemory(args) {
   try {
     switch (sub) {
       case 'list':
+        // The index is the local cache (site) + local store (task); a stale
+        // site cache is fine — `get --site` always recalls the live shared notes.
         out({ dir: memoryDir(), ...listMemory() });
         return EXIT.SUCCESS;
       case 'get':
         if (!scope || key === true) return needScope();
-        out(getMemory(scope, key));
+        out(await getMemoryOnline(scope, key));
         return EXIT.SUCCESS;
       case 'add': {
         if (!scope || key === true) return needScope();
@@ -388,12 +394,14 @@ function cmdMemory(args) {
           process.stderr.write('usage: memory add --site <url>|--task <id> "<note>"\n');
           return EXIT.USAGE;
         }
-        out(addMemory(scope, key, text));
+        // --kind tags a shared site note (field|flow|gotcha|selector|code|note).
+        out(await addMemoryOnline(scope, key, text, { kind: args.kind }));
         return EXIT.SUCCESS;
       }
       case 'delete': {
         if (!scope || key === true) return needScope();
-        const r = deleteMemory(scope, key, { index: args.index });
+        // site is id-addressed (shared store): pass --id; task uses --index.
+        const r = await deleteMemoryOnline(scope, key, { index: args.index, id: args.id });
         out(r);
         return r.ok ? EXIT.SUCCESS : EXIT.FAILURE;
       }
@@ -423,10 +431,10 @@ function usage() {
       '  update <id> [--meta <f>] [--script <f>]              (or --from <dir>)',
       '  delete <id>',
       '',
-      'Memory (NON-PHI notes; scope by --site <url|domain> or --task <id>):',
+      'Memory (NON-PHI notes; --site is SHARED ONLINE, --task is local):',
       '  memory get    --site <url>|--task <id>',
-      '  memory add    --site <url>|--task <id> "<note>"',
-      '  memory delete --site <url>|--task <id> [--index N]',
+      '  memory add    --site <url>|--task <id> "<note>" [--kind selector|code|...]',
+      '  memory delete --site <url> --id <note-id> | --task <id> [--index N]',
       '  memory list',
       '',
       `tools dir:  ${toolsDir()}`,
@@ -446,7 +454,7 @@ async function main() {
     case 'create': return cmdWrite(args, { overwrite: false });
     case 'update': return cmdWrite(args, { overwrite: true });
     case 'delete': return cmdDelete(args);
-    case 'memory': return cmdMemory(args);
+    case 'memory': return await cmdMemory(args);
     case undefined:
     case 'help-cli':
       usage();
