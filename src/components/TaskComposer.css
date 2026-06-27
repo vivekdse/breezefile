@@ -343,6 +343,26 @@
   box-shadow: none;
 }
 
+/* ── Project picker "Other…" type-ahead (task-201f5e3cde57) ────────── */
+.composer__option--other .composer__option-label { font-style: italic; }
+.composer__project-search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rule);
+}
+.composer__project-search-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.composer__project-search-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
 /* ── Date picker (when "Pick a date…" is chosen) ───────────────────── */
 
 .composer__date-row {
