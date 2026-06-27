@@ -6,20 +6,24 @@
 //           ONLINE (task-3c9b1146cee2): routed through Breeze main to the
 //           /chromeext/site-memory store so every machine + teammate sees it;
 //           the on-disk JSON is now an OFFLINE CACHE (server is canonical).
-//   task  — keyed by an opaque task id (e.g. a TypeBuild task id): context and
-//           progress notes for one task. STILL LOCAL — there is no fitting
-//           NON-PHI per-task online store yet (lessons are a PHI container;
-//           site-memory's domain key collapses task ids), so this stays on disk.
+//   task  — keyed by an opaque task id / task-type tag (e.g. a TypeBuild task id):
+//           context and progress notes for one task. NOW SHARED ONLINE
+//           (task-f2639aa68585): the /chromeext/site-memory store gained a
+//           `task_tag` keying dimension on 2026-06-27, so per-task learnings ride
+//           the SAME shared store as `site` — keyed by task_tag, which the server
+//           does NOT normalize to a domain (so distinct task ids stay distinct).
+//           The on-disk JSON is now an OFFLINE CACHE for `task` too, like `site`.
 //
 // Stored under ~/.breezefile/memory/{sites,tasks}/<key>.json (override with
 // $BREEZE_MEMORY_DIR), each as { scope, key, entries: [{ text, at }] }. The
 // directory listing IS the index — same self-describing model as the tool repo.
 //
-// ONLINE ROUTING (site scope). This .mjs runs as a CLI subprocess in the agent's
+// ONLINE ROUTING (BOTH scopes). This .mjs runs as a CLI subprocess in the agent's
 // session and holds NO Firebase token, so — exactly like cli.mjs `fill-ref` —
 // it reaches the shared store THROUGH Breeze main's localhost control API
-// (/app/site-memory). When main is unreachable (app not running / offline) the
-// site path FALLS BACK to the same local JSON used as the cache. The sync
+// (/app/site-memory). `site` keys by ?domain=, `task` keys by ?task_tag=. When
+// main is unreachable (app not running / offline) BOTH paths FALL BACK to the
+// same local JSON used as the cache. The sync
 // getMemory/addMemory/deleteMemory/listMemory below are the LOCAL layer; the
 // async *Online variants wrap them with the server round-trip.
 //
@@ -154,10 +158,20 @@ export function listMemory() {
   return result;
 }
 
-// ─── ONLINE layer (site scope, task-3c9b1146cee2) ────────────────────────────
-// Reaches the shared store through Breeze main's localhost control API. The
-// `task` scope has no online home yet, so the *Online variants delegate to the
-// sync LOCAL functions for it and only round-trip the server for `site`.
+// ─── ONLINE layer (site + task scopes, task-3c9b1146cee2 / task-f2639aa68585) ──
+// Reaches the shared store through Breeze main's localhost control API. Both
+// scopes now round-trip the server: `site` keys by ?domain=, `task` keys by
+// ?task_tag=. The sync LOCAL functions remain the offline-cache fallback.
+
+/** The online keying dimension + key for a scope:
+ *  site → { domain: <normalized host> }, task → { task_tag: <sanitized tag> }.
+ *  The server normalizes the domain to its registrable form; task_tag is passed
+ *  through (the server does NOT collapse it to a domain). */
+function onlineKey(scope, key) {
+  return scope === 'task'
+    ? { task_tag: safeKey('task', key) }
+    : { domain: siteKey(key) };
+}
 
 /** Call Breeze main's /app/site-memory control endpoint. Returns the parsed JSON
  *  body, or throws { offline:true } when main isn't reachable so callers can fall
@@ -197,64 +211,74 @@ function noteToEntry(n) {
   return { text: String(n?.body ?? ''), at: n?.updated_at ?? null, id: n?.id ?? null };
 }
 
-/** Mirror the recalled site entries into the local JSON cache so a LATER offline
+/** Mirror the recalled entries into the local JSON cache so a LATER offline
  *  recall (or `memory list`) still has them. Best-effort; never fails a recall.
- *  Main writes the canonical cache too — this just covers the CLI-only path. */
-function cacheSiteEntries(key, entries) {
+ *  Main writes the canonical cache too — this just covers the CLI-only path.
+ *  Works for both scopes: `site` caches under sites/<domain>, `task` under
+ *  tasks/<task_tag> (both sanitized by safeKey). */
+function cacheEntries(scope, key, entries) {
   try {
-    const f = fileFor('site', key);
+    const f = fileFor(scope, key);
     mkdirSync(path.dirname(f), { recursive: true });
     writeFileSync(
       f,
-      JSON.stringify({ scope: 'site', key: siteKey(key), entries }, null, 2) + '\n',
+      JSON.stringify({ scope, key: safeKey(scope, key), entries }, null, 2) + '\n',
     );
   } catch {
     /* cache is best-effort */
   }
 }
 
-/** Read a scope/key's notes. `site` → online (with local-cache fallback when
- *  Breeze isn't running); `task` → local. Returns { scope, key, entries, online }. */
+/** Read a scope/key's notes ONLINE (with local-cache fallback when Breeze isn't
+ *  running). Both scopes round-trip: `site` by ?domain=, `task` by ?task_tag=.
+ *  Returns { scope, key, entries, online }. */
 export async function getMemoryOnline(scope, key) {
   const k = safeKey(scope, key);
-  if (scope !== 'site') return { ...getMemory(scope, key), online: false };
+  const okey = onlineKey(scope, key);
+  const param = scope === 'task' ? 'task_tag' : 'domain';
   try {
     const data = await callMain(
       'GET',
-      `/app/site-memory?domain=${encodeURIComponent(siteKey(key))}`,
+      `/app/site-memory?${param}=${encodeURIComponent(okey[param])}`,
     );
     const entries = Array.isArray(data.notes) ? data.notes.map(noteToEntry) : [];
-    cacheSiteEntries(key, entries);
-    return { scope, key: data.domain || k, entries, online: !data.offline };
+    cacheEntries(scope, key, entries);
+    return { scope, key: data[param] || k, entries, online: !data.offline };
   } catch (e) {
     if (e.offline) return { ...getMemory(scope, key), online: false };
     throw e;
   }
 }
 
-/** Append one NON-PHI note. `site` → online POST (server PHI-guards); `task` →
- *  local. The optional `kind` rides the site write (default note). */
+/** Append one NON-PHI note ONLINE (server PHI-guards both scopes). `site` keys by
+ *  domain, `task` by task_tag. The optional `kind` rides the write (default note). */
 export async function addMemoryOnline(scope, key, text, { kind } = {}) {
   const t = String(text == null ? '' : text).trim();
   if (!t) throw new Error('memory text is required');
-  if (scope !== 'site') return { ...addMemory(scope, key, t), online: false };
+  const okey = onlineKey(scope, key);
+  const param = scope === 'task' ? 'task_tag' : 'domain';
   const data = await callMain('POST', '/app/site-memory', {
-    domain: siteKey(key),
+    ...okey,
     body: t,
     ...(kind ? { kind } : {}),
   });
-  return { ok: true, scope, key: data.note?.domain || siteKey(key), id: data.id, online: true };
+  return {
+    ok: true,
+    scope,
+    key: data.note?.[param] || okey[param],
+    id: data.id,
+    online: true,
+  };
 }
 
-/** Delete a site note by `id` (the online store is id-addressed), or fall back
- *  to the local index-based delete for the `task` scope. For `site`, pass the
- *  note id via `{ id }` (read it from `memory get`). */
-export async function deleteMemoryOnline(scope, key, { index, id } = {}) {
-  if (scope !== 'site') return { ...deleteMemory(scope, key, { index }), online: false };
+/** Delete a note by `id` (the online store is id-addressed for BOTH scopes). The
+ *  shared store is id-keyed, so pass the note id via `{ id }` (read it from
+ *  `memory get`); an index-based delete only makes sense for the local store. */
+export async function deleteMemoryOnline(scope, key, { id } = {}) {
   if (!id) {
     return {
       ok: false,
-      error: 'site memory is shared + id-addressed: pass --id <note-id> (from `memory get`)',
+      error: 'shared memory is id-addressed: pass --id <note-id> (from `memory get`)',
     };
   }
   const data = await callMain('DELETE', `/app/site-memory?id=${encodeURIComponent(id)}`);
