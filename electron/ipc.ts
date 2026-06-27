@@ -35,6 +35,7 @@ import {
 import { unsupported } from './core/task-source';
 import type { TypeBuildTaskSource } from './sources/typebuild';
 import { registerTagStoreIpc } from './tag-store';
+import { wireCredentialCapture } from './browser/credential-capture';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2456,6 +2457,21 @@ end tell`;
     wc.on('did-navigate', emit);
     wc.on('did-navigate-in-page', emit);
     wc.on('page-title-updated', emit);
+    // Login-submit detection + credential capture (task-1188c6535e91). Injects a
+    // value-free capturing submit listener; on a human login it pulls
+    // { origin, username, password } into main and forwards it to the renderer's
+    // "Save password?" prompt. SECURITY: the password is memory-only — we send it
+    // straight over IPC and NEVER log it, screenshot it, or put it in
+    // browser:state. See electron/browser/credential-capture.ts.
+    wireCredentialCapture(wc, win, id, (cred) => {
+      if (win.webContents.isDestroyed()) return;
+      win.webContents.send('browser:credential-captured', {
+        id,
+        origin: cred.origin,
+        username: cred.username,
+        password: cred.password,
+      });
+    });
     // Open target=_blank / window.open in the same view rather than spawning a
     // native child window (keeps everything inside the tab for the spike).
     wc.setWindowOpenHandler(({ url }) => {

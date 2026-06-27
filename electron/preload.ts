@@ -324,6 +324,24 @@ const fm = {
     ipcRenderer.on('browser:open', handler);
     return () => ipcRenderer.off('browser:open', handler);
   },
+  // Login-submit capture (task-1188c6535e91): main → renderer event carrying a
+  // captured { origin, username, password } from a human login in an embedded
+  // browser tab. SECURITY: the password is for the TRUSTED "Save password?"
+  // prompt ONLY — the renderer must not persist or log it until the user
+  // accepts. We forward it verbatim and never log it here.
+  onBrowserCredentialCaptured: (
+    cb: (s: {
+      id: number;
+      origin: string;
+      username: string;
+      password: string;
+    }) => void,
+  ) => {
+    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
+      cb(payload);
+    ipcRenderer.on('browser:credential-captured', handler);
+    return () => ipcRenderer.off('browser:credential-captured', handler);
+  },
   // fm-z7v — process-tree foreground transitions for tab busy/idle tint.
   // `state` is the rich tri-state ('busy'|'idle'|'waiting'); 'waiting'
   // is a mid-turn attention request (Claude permission prompt). `busy`

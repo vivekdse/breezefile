@@ -183,6 +183,18 @@ type Fm = {
   ) => () => void;
   // SPIKE (spike/playwright-cdp): main → renderer "open a browser tab" request.
   onBrowserOpen: (cb: (s: { url?: string }) => void) => () => void;
+  // Login-submit capture (task-1188c6535e91 / task-ad89064bf45f): fired when the
+  // human submits a login form in an embedded browser tab. Carries the captured
+  // password — TRUSTED UI only: show the "Save password?" prompt, never persist
+  // or log it until the user accepts. Dropped on dismiss.
+  onBrowserCredentialCaptured: (
+    cb: (s: {
+      id: number;
+      origin: string;
+      username: string;
+      password: string;
+    }) => void,
+  ) => () => void;
   launchersList: () => Promise<Launcher[]>;
   launchersSave: (list: Launcher[]) => Promise<void>;
   launchersConfigPath: () => Promise<string>;
