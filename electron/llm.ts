@@ -153,4 +153,34 @@ export function registerLlmIpc(): void {
     const key = await resolveKey();
     return !!key;
   });
+
+  // Set (or, with an empty string, clear) the userData/llm.json key, then
+  // reload the in-memory cache. Lets the Settings UI configure the key without
+  // exporting it into the launch env. SECURITY: the key value is written to the
+  // settings file and NEVER logged or echoed back — we return only a boolean
+  // reporting whether a key is now resolvable (env still wins over the file).
+  ipcMain.handle('llm:setKey', async (_e, key: unknown): Promise<boolean> => {
+    const trimmed = typeof key === 'string' ? key.trim() : '';
+    const file = settingsPath();
+    try {
+      if (trimmed) {
+        await fs.writeFile(
+          file,
+          JSON.stringify({ anthropicApiKey: trimmed }, null, 2),
+          { mode: 0o600 },
+        );
+      } else {
+        // Clear: drop the key. Remove the file entirely so no empty secret
+        // lingers on disk. Missing file is fine.
+        await fs.rm(file, { force: true });
+      }
+    } catch {
+      // Surface as "not available" rather than throwing the (possibly
+      // path-revealing) fs error across the bridge.
+      cachedFileKey = undefined;
+      return !!(await resolveKey());
+    }
+    cachedFileKey = undefined;
+    return !!(await resolveKey());
+  });
 }

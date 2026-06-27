@@ -70,19 +70,26 @@ export function DslTagOverlay({
   const [matches, setMatches] = useState<Entry[] | null>(null);
   const [rejected, setRejected] = useState<Set<string>>(new Set());
 
-  // Probe whether the LLM frontend is configured (gates the NL box).
+  // Probe whether the LLM frontend is configured (gates the NL box). Re-probe
+  // when Settings reports a key change (task-a99240404629) so the box re-enables
+  // without reopening the overlay.
   useEffect(() => {
     let cancelled = false;
-    fm.llm
-      .available()
-      .then((ok) => {
-        if (!cancelled) setLlmReady(ok);
-      })
-      .catch(() => {
-        if (!cancelled) setLlmReady(false);
-      });
+    const probe = () => {
+      fm.llm
+        .available()
+        .then((ok) => {
+          if (!cancelled) setLlmReady(ok);
+        })
+        .catch(() => {
+          if (!cancelled) setLlmReady(false);
+        });
+    };
+    probe();
+    window.addEventListener('llm:available-changed', probe);
     return () => {
       cancelled = true;
+      window.removeEventListener('llm:available-changed', probe);
     };
   }, []);
 
@@ -391,7 +398,7 @@ export function DslTagOverlay({
           value={nlText}
           placeholder={
             llmReady === false
-              ? 'Set ANTHROPIC_API_KEY to enable AI tag generation'
+              ? 'Add an Anthropic API key in Settings → AI to enable AI tag generation'
               : 'e.g. old screenshots taking up space'
           }
           spellCheck
@@ -422,8 +429,7 @@ export function DslTagOverlay({
           </button>
           {llmReady === false && (
             <span className="overlay__hint">
-              AI off — set <code>ANTHROPIC_API_KEY</code> or{' '}
-              <code>userData/llm.json</code>
+              AI off — add an Anthropic API key in <strong>Settings → AI</strong>
             </span>
           )}
         </div>

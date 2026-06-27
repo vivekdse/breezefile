@@ -629,6 +629,28 @@ let nextPtyId = 1;
 // terminal as the main window's tab. Keyed by pty id → set of webContents ids.
 const ptyMirrors = new Map<number, Set<number>>();
 
+// Bounded scrollback buffer per pty (the most recent ~256 KB of term:data). A
+// mirror that subscribes via 'term:mirror-with-replay' AFTER output was emitted
+// (e.g. the operator window's Claude pane remounts, or is re-shown from
+// collapsed) would otherwise show a blank pane until the next chunk arrives. We
+// replay this buffer to the subscriber on attach so the terminal repaints
+// immediately. Keyed by pty id → { chunks, bytes }. Cleared on pty exit.
+const PTY_REPLAY_MAX_BYTES = 256 * 1024;
+type ReplayBuffer = { chunks: string[]; bytes: number };
+const ptyReplay = new Map<number, ReplayBuffer>();
+
+/** Append a term:data chunk to a pty's bounded replay buffer, dropping the
+ *  oldest chunks once the byte budget is exceeded. */
+function appendReplay(id: number, data: string): void {
+  let buf = ptyReplay.get(id);
+  if (!buf) ptyReplay.set(id, (buf = { chunks: [], bytes: 0 }));
+  buf.chunks.push(data);
+  buf.bytes += data.length;
+  while (buf.bytes > PTY_REPLAY_MAX_BYTES && buf.chunks.length > 1) {
+    buf.bytes -= buf.chunks.shift()!.length;
+  }
+}
+
 /** Fan a pty event out to the owning window + any registered mirrors. */
 function sendToPtyClients(
   id: number,
@@ -695,6 +717,8 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
     // Read the CURRENT owner from the record (not the closure) so a future
     // retarget would be honored, and fan out to any overlay mirrors.
     const sid = ptys.get(id)?.senderId ?? opts.senderId;
+    // Buffer for late-joining mirrors (operator pane remount / re-show).
+    appendReplay(id, data);
     sendToPtyClients(id, sid, 'term:data', { id, data });
   });
   proc.onExit(({ exitCode, signal }) => {
@@ -702,6 +726,7 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
     sendToPtyClients(id, sid, 'term:exit', { id, code: exitCode, signal: signal ?? null });
     ptys.delete(id);
     ptyMirrors.delete(id);
+    ptyReplay.delete(id);
     try { opts.onExit?.({ exitCode, signal: signal ?? null }); } catch (e) {
       console.error('[pty] onExit hook:', e);
     }
@@ -2668,6 +2693,20 @@ end tell`;
     let set = ptyMirrors.get(id);
     if (!set) ptyMirrors.set(id, (set = new Set()));
     set.add(e.sender.id);
+  });
+  // Like term:mirror, but FIRST replays the pty's recent scrollback to the
+  // subscriber (task-6b9b0032feda) so a pane that mounts/re-shows AFTER output
+  // was emitted repaints immediately instead of staying blank until the next
+  // chunk. The replay is sent only to the subscribing webContents (not fanned
+  // out) so existing mirrors don't see duplicated output.
+  ipcMain.on('term:mirror-with-replay', (e, id: number) => {
+    let set = ptyMirrors.get(id);
+    if (!set) ptyMirrors.set(id, (set = new Set()));
+    set.add(e.sender.id);
+    const buf = ptyReplay.get(id);
+    if (buf && buf.chunks.length > 0 && !e.sender.isDestroyed()) {
+      e.sender.send('term:data', { id, data: buf.chunks.join('') });
+    }
   });
   ipcMain.on('term:unmirror', (e, id: number) => {
     ptyMirrors.get(id)?.delete(e.sender.id);
