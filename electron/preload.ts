@@ -303,6 +303,25 @@ const fm = {
   browserForward: (id: number) => ipcRenderer.send('browser:forward', id),
   browserReload: (id: number) => ipcRenderer.send('browser:reload', id),
   browserSync: (id: number) => ipcRenderer.send('browser:sync', id),
+  // Teach-by-recording (task-01facbf6b0bc): record the human's actions in this
+  // view, capturing every selector candidate so Claude Code can pick the
+  // stablest. Stop returns the recorded {action,url,candidates,best} list.
+  browserRecordStart: (id: number) =>
+    ipcRenderer.invoke('browser:record:start', id) as Promise<{ ok: boolean; error?: string }>,
+  browserRecordStop: (opts?: { skillName?: string }) =>
+    ipcRenderer.invoke('browser:record:stop', opts) as Promise<{
+      ok: boolean;
+      error?: string;
+      actions?: unknown[];
+      site?: string;
+      saved?: boolean;
+    }>,
+  browserRecordState: () =>
+    ipcRenderer.invoke('browser:record:state') as Promise<{
+      recording: boolean;
+      count: number;
+      webContentsId: number | null;
+    }>,
   onBrowserState: (
     cb: (s: {
       id: number;

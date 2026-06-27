@@ -172,6 +172,20 @@ type Fm = {
   browserForward: (id: number) => void;
   browserReload: (id: number) => void;
   browserSync: (id: number) => void;
+  // Teach-by-recording (task-01facbf6b0bc).
+  browserRecordStart: (id: number) => Promise<{ ok: boolean; error?: string }>;
+  browserRecordStop: (opts?: { skillName?: string }) => Promise<{
+    ok: boolean;
+    error?: string;
+    actions?: unknown[];
+    site?: string;
+    saved?: boolean;
+  }>;
+  browserRecordState: () => Promise<{
+    recording: boolean;
+    count: number;
+    webContentsId: number | null;
+  }>;
   onBrowserState: (
     cb: (s: {
       id: number;

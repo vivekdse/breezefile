@@ -37,6 +37,7 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
   const idRef = useRef<number | null>(null);
   const [addr, setAddr] = useState(url);
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false });
+  const [recording, setRecording] = useState(false);
   const addrFocused = useRef(false);
 
   // Keyed on tabId, NOT url: the view persists across navigations, so we must
@@ -132,6 +133,33 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
     fm.browserNavigate(id, target);
   };
 
+  // Teach-by-recording (task-01facbf6b0bc): record the human's actions in this
+  // view, capturing every selector candidate so Claude Code can learn the most
+  // stable one and save it as a shared NON-PHI skill. We capture STRUCTURE only,
+  // never field values. The agent's Playwright session must be paused while the
+  // human drives (CDP is single-client).
+  const toggleRecord = async () => {
+    const id = idRef.current;
+    if (id == null) return;
+    if (!recording) {
+      const r = await fm.browserRecordStart(id);
+      if (r.ok) setRecording(true);
+      else console.warn('[browser:record] start failed:', r.error);
+    } else {
+      const r = await fm.browserRecordStop();
+      setRecording(false);
+      if (r.ok) {
+        console.info(
+          `[browser:record] captured ${r.actions?.length ?? 0} action(s)` +
+            (r.site ? ` on ${r.site}` : '') +
+            (r.saved ? ' — saved to site memory' : ''),
+        );
+      } else {
+        console.warn('[browser:record] stop failed:', r.error);
+      }
+    }
+  };
+
   return (
     <div className="browser-pane" ref={paneRef}>
       <div className="browser-pane__bar" ref={barRef}>
@@ -157,6 +185,19 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
           title="Reload"
         >
           ⟳
+        </button>
+        <button
+          className={
+            'browser-pane__btn' + (recording ? ' browser-pane__btn--recording' : '')
+          }
+          onClick={() => void toggleRecord()}
+          title={
+            recording
+              ? 'Stop recording — save the captured actions as a skill'
+              : 'Record actions to teach a stable selector skill'
+          }
+        >
+          {recording ? '◼ Rec' : '● Rec'}
         </button>
         <input
           className="browser-pane__addr"

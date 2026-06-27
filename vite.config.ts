@@ -32,7 +32,25 @@ export default defineConfig({
         },
       },
       preload: {
-        input: 'electron/preload.ts',
+        // Two preloads: the main-window bridge, and the page-side
+        // teach-by-recording capture script injected into embedded browser
+        // views (electron/browser/record-preload.mjs). Both land in
+        // dist-electron/ as <name>.mjs. Multiple preload inputs require
+        // disabling Rollup's default inlineDynamicImports (single-entry only).
+        input: {
+          preload: 'electron/preload.ts',
+          'record-preload': 'electron/browser/record-preload.mjs',
+        },
+        vite: {
+          build: {
+            rollupOptions: {
+              output: {
+                inlineDynamicImports: false,
+                entryFileNames: '[name].mjs',
+              },
+            },
+          },
+        },
       },
       renderer: {},
     }),
