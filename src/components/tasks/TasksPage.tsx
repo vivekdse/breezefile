@@ -556,20 +556,30 @@ function TasksPageInner() {
   // source+message until the source recovers (a successful tasks:changed
   // clears the seen set so a later failure surfaces again). PHI-free.
   const sourceErrSeenRef = useRef<Map<string, string>>(new Map());
+  // task-81b7ce77a30a — a transient status-line flash vanished before a user
+  // who stepped away could see it. Keep the set of currently-failing sources in
+  // state so a thin, persistent banner stays above the list until the source
+  // recovers (a successful tasks:changed clears it). PHI-free: source label only.
+  const [failingSources, setFailingSources] = useState<string[]>([]);
   useEffect(() => {
     const offErr = fm.onTaskSourceError(({ source, message }) => {
+      const label = source === 'typebuild' ? 'TypeBuild' : source;
+      setFailingSources((prev) => (prev.includes(label) ? prev : [...prev, label]));
       const prev = sourceErrSeenRef.current.get(source);
       if (prev === message) return; // already announced this burst
       sourceErrSeenRef.current.set(source, message);
-      const label = source === 'typebuild' ? 'TypeBuild' : source;
       dispatch({
         type: 'setStatus',
         msg: `tasks from ${label} unavailable: ${message}`,
       });
     });
     // A successful list refresh means the source recovered — forget the seen
-    // messages so a NEW failure later still announces itself.
-    const offOk = fm.onTasksChanged(() => sourceErrSeenRef.current.clear());
+    // messages so a NEW failure later still announces itself, and drop the
+    // persistent banner.
+    const offOk = fm.onTasksChanged(() => {
+      sourceErrSeenRef.current.clear();
+      setFailingSources((prev) => (prev.length === 0 ? prev : []));
+    });
     return () => {
       offErr();
       offOk();
@@ -1024,6 +1034,25 @@ function TasksPageInner() {
 
           <div className="tasks__split">
             <div className="tasks__list" role="list" ref={listRef}>
+              {/* task-81b7ce77a30a — persistent banner while a source is down.
+                  The status-line flash cleared itself; this stays until the
+                  source recovers. PHI-free (source label only). */}
+              {failingSources.length > 0 && (
+                <div className="tasks__source-banner" role="alert">
+                  Couldn’t load tasks from {failingSources.join(', ')}. Check your
+                  connection — we’ll retry automatically.
+                </div>
+              )}
+
+              {/* task-81b7ce77a30a — loading placeholder for the first fetch
+                  (the list used to sit blank until tasks arrived). */}
+              {loading && total === 0 && (
+                <div className="tasks__empty">
+                  <div className="tasks__empty-glyph">◌</div>
+                  <div className="tasks__empty-title">Loading tasks…</div>
+                </div>
+              )}
+
               {empty && (
                 <div className="tasks__empty">
                   <div className="tasks__empty-glyph">✓</div>
@@ -1034,7 +1063,7 @@ function TasksPageInner() {
                 </div>
               )}
 
-              {!empty && (
+              {!empty && !(loading && total === 0) && (
                 <>
                   <Section
                     title="For you"

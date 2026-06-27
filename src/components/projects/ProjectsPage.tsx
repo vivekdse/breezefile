@@ -37,7 +37,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fm } from '../../bridge';
 import { useStore } from '../../store';
-import { useTasks } from '../../tasks';
+import { useTasks, useTypebuildAuth } from '../../tasks';
 import type { Project, Task } from '../../types';
 import {
   buildProjectTree,
@@ -69,6 +69,15 @@ import type { Launcher } from '../../bridge';
 import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
+
+// task-81b7ce77a30a — open the TypeBuild sign-in panel. The sidebar's account
+// chip already deep-links here via this event; reuse it so signed-out CTAs lead
+// somewhere real instead of a dead button.
+export function openTypebuildSignIn(): void {
+  window.dispatchEvent(
+    new CustomEvent('fm:openSettings', { detail: { section: 'typebuild' } }),
+  );
+}
 
 // Q4 — project-less tasks live in a synthetic "Inbox (no project)" block, always
 // first on Home root. This id never collides with a real project id.
@@ -161,6 +170,9 @@ function ProjectsPageInner() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  // task-81b7ce77a30a — signed-out Home shouldn't offer a "+ New project" CTA
+  // that can't succeed; gate the empty state to a sign-in prompt instead.
+  const { signedIn: tbSignedIn } = useTypebuildAuth();
 
   // "Show all" reveals idle projects; "Show archived" includes archived ones
   // (re-fetched with ?archived=1). Both persisted in projectsViewPrefs.
@@ -1054,6 +1066,8 @@ function ProjectsPageInner() {
             heroTarget={heroTarget}
             loaded={loaded}
             loadErr={loadErr}
+            signedIn={tbSignedIn}
+            onRetry={() => setReloadTick((t) => t + 1)}
             showCreate={showCreate}
             onShowCreate={() => setShowCreate(true)}
             onCancelCreate={() => setShowCreate(false)}
@@ -1297,6 +1311,8 @@ function HomeRoot({
   heroTarget,
   loaded,
   loadErr,
+  signedIn,
+  onRetry,
   showCreate,
   onShowCreate,
   onCancelCreate,
@@ -1338,6 +1354,8 @@ function HomeRoot({
   heroTarget: ProjectNode | null;
   loaded: boolean;
   loadErr: string | null;
+  signedIn: boolean;
+  onRetry: () => void;
   showCreate: boolean;
   onShowCreate: () => void;
   onCancelCreate: () => void;
@@ -1431,9 +1449,41 @@ function HomeRoot({
         />
       )}
 
-      {loadErr && (
+      {/* task-81b7ce77a30a — loading placeholder while the first fetch is in
+          flight (the page used to render blank). */}
+      {!loaded && !loadErr && (
+        <div className="projects__hero" role="status">
+          Loading your projects…
+        </div>
+      )}
+
+      {/* task-81b7ce77a30a — humanized, recoverable error. The raw exception
+          isn't shown to the user (it can leak internals); Retry re-fetches. */}
+      {loaded && loadErr && (
         <div className="projects__hero" role="alert">
-          Couldn’t load projects: {loadErr}
+          {signedIn ? (
+            <>
+              Couldn’t load your projects. Check your connection and try again.{' '}
+              <button
+                type="button"
+                className="projects__hero-open"
+                onClick={onRetry}
+              >
+                Retry →
+              </button>
+            </>
+          ) : (
+            <>
+              Sign in to TypeBuild to see your projects and tasks.{' '}
+              <button
+                type="button"
+                className="projects__hero-open"
+                onClick={openTypebuildSignIn}
+              >
+                Sign in →
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -1488,7 +1538,30 @@ function HomeRoot({
         </div>
       )}
 
-      {empty && !showCreate && inboxTotalCount === 0 && (
+      {/* task-81b7ce77a30a — a signed-out user hitting an empty list used to
+          see "No projects yet" + a "+ New project" CTA that can't succeed.
+          Point them to sign-in instead. */}
+      {empty && !showCreate && inboxTotalCount === 0 && !signedIn && (
+        <div className="projects__empty">
+          <div className="projects__empty-glyph">◳</div>
+          <div className="projects__empty-title">
+            Sign in to see your projects
+          </div>
+          <div className="projects__empty-body">
+            Sign in to TypeBuild to see your projects and tasks across your
+            machines.
+          </div>
+          <button
+            type="button"
+            className="projects__btn projects__btn--primary"
+            onClick={openTypebuildSignIn}
+          >
+            Sign in to TypeBuild
+          </button>
+        </div>
+      )}
+
+      {empty && !showCreate && inboxTotalCount === 0 && signedIn && (
         <div className="projects__empty">
           <div className="projects__empty-glyph">◳</div>
           <div className="projects__empty-title">

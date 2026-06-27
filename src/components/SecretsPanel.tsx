@@ -23,7 +23,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fm } from '../bridge';
 import type { VaultEntry, SavedCredential } from '../bridge';
 import { useOverlayExit } from '../useOverlayExit';
+import { useTypebuildAuth } from '../tasks';
 import './SecretsPanel.css';
+
+// task-81b7ce77a30a — open the TypeBuild sign-in panel (the sidebar account
+// chip deep-links here via this event); reuse so the signed-out CTA goes
+// somewhere real.
+function openTypebuildSignIn(): void {
+  window.dispatchEvent(
+    new CustomEvent('fm:openSettings', { detail: { section: 'typebuild' } }),
+  );
+}
 
 const MASK = '••••••••';
 
@@ -46,6 +56,9 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
   const [logins, setLogins] = useState<SavedCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // task-81b7ce77a30a — a signed-out user has nothing to load; show a sign-in
+  // prompt instead of a raw fetch failure.
+  const { signedIn } = useTypebuildAuth();
 
   // ── Reveal (one value at a time) ────────────────────────────────────────────
   const [revealedKey, setRevealedKey] = useState<RevealKey | null>(null);
@@ -293,9 +306,28 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
           aria-label="Search secrets"
         />
 
+        {/* task-81b7ce77a30a — signed-out users get a sign-in prompt, not a
+            raw thrown message. */}
+        {!signedIn ? (
+          <div className="secrets-panel__signin" role="status">
+            <p className="secrets-panel__status">
+              Sign in to TypeBuild to view your vault.
+            </p>
+            <button
+              type="button"
+              className="secrets-panel__signin-btn"
+              onClick={openTypebuildSignIn}
+            >
+              Sign in to TypeBuild
+            </button>
+          </div>
+        ) : (
+        <>
+        {/* task-81b7ce77a30a — humanize load failures; the raw thrown message
+            could leak internals and gave no recovery hint. */}
         {loadError && (
           <p className="secrets-panel__error" role="alert">
-            {loadError}
+            Couldn’t load your secrets — try again.
           </p>
         )}
 
@@ -625,6 +657,8 @@ export function SecretsPanel({ onClose }: { onClose: () => void }) {
               </form>
             </section>
           </>
+        )}
+        </>
         )}
 
         <p className="secrets-panel__privacy">

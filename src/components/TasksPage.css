@@ -1033,6 +1033,19 @@
   line-height: 1.5;
 }
 
+/* task-81b7ce77a30a — thin persistent banner shown above the list while a task
+   source is failing. Stays until the source recovers, unlike the status flash. */
+.tasks__source-banner {
+  margin: 0 0 var(--sp-2);
+  padding: 8px var(--sp-3);
+  border: 1px solid var(--danger, #c0392b);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--danger, #c0392b) 8%, transparent);
+  color: var(--danger, #c0392b);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
 /* ---- context menu ---- */
 .tasks__ctx {
   position: fixed;
