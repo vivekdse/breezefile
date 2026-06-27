@@ -359,6 +359,41 @@
 .tdd__teach-feedback--err { color: var(--err, #c0392b); }
 .tdd__teach-hint { font-size: var(--fs-xs); margin: 0; }
 
+/* ── teach tab (task-75f0715aa3ee) — dedicated scope-picker surface ── */
+.tdd__teachtab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.tdd__teach-blurb { margin: 0; }
+/* segmented scope picker: Project / Category / Task */
+.tdd__teach-seg {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.tdd__seg {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+  border-right: 1px solid var(--border-2);
+}
+.tdd__seg:last-child { border-right: none; }
+.tdd__seg:hover { color: var(--fg-1); background: var(--bg-1); }
+.tdd__seg--on {
+  background: var(--accent-soft);
+  color: var(--accent-strong, var(--accent));
+}
+.tdd__teach-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.tdd__rule-scope--task { color: var(--fg-2); border-color: var(--border-2); }
+
 /* ── trace timeline ── */
 .tdd__trace { display: flex; flex-direction: column; gap: var(--sp-3); }
 .tdd__trace-live {
