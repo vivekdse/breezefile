@@ -693,8 +693,11 @@ const fm = {
     // TypeBuild source. `resolve` is the auto-attach lookup (folder → owner or
     // null).
     projects: {
-      list: () =>
-        ipcRenderer.invoke('typebuild:projects:list') as Promise<Project[]>,
+      list: (includeArchived?: boolean) =>
+        ipcRenderer.invoke(
+          'typebuild:projects:list',
+          includeArchived,
+        ) as Promise<Project[]>,
       get: (id: string, effective?: boolean) =>
         ipcRenderer.invoke(
           'typebuild:projects:get',
@@ -725,6 +728,10 @@ const fm = {
           | { ok: true; project: Project }
           | { ok: false; reason: string; status: number }
         >,
+      archive: (id: string) =>
+        ipcRenderer.invoke('typebuild:projects:archive', id) as Promise<Project>,
+      unarchive: (id: string) =>
+        ipcRenderer.invoke('typebuild:projects:unarchive', id) as Promise<Project>,
     },
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
     // structured-result contract as projects.patch.

@@ -237,6 +237,7 @@ type ProjectRow = {
   created_at?: string | null;
   updated_at?: string | null;
   effective_instructions?: string | null;
+  archived?: boolean | null;
 };
 
 /** A TypeBuild Project as the renderer sees it (camelCase). `effectiveInstructions`
@@ -253,6 +254,9 @@ export type Project = {
   createdAt: string | null;
   updatedAt: string | null;
   effectiveInstructions?: string;
+  /** task-2c5448be520a — archived projects are hidden from the list by default
+   *  (the server omits them unless asked). NON-PHI routing flag. */
+  archived?: boolean;
 };
 
 // ─── Status mapping ──────────────────────────────────────────────────────
@@ -718,12 +722,19 @@ export class TypeBuildTaskSource implements TaskSource {
     if (typeof raw.effective_instructions === 'string') {
       project.effectiveInstructions = raw.effective_instructions;
     }
+    if (typeof raw.archived === 'boolean') {
+      project.archived = raw.archived;
+    }
     return project;
   }
 
   // GET /chromeext/projects → { projects: [...] }. Returns [] on a parse miss.
-  async listProjects(): Promise<Project[]> {
-    const res = await this.request('GET', '/chromeext/projects');
+  // task-2c5448be520a — archived projects are omitted by default; pass
+  // { includeArchived: true } (→ ?archived=1) to fetch them too for the
+  // "Show archived" toggle.
+  async listProjects(opts?: { includeArchived?: boolean }): Promise<Project[]> {
+    const qs = opts?.includeArchived ? '?archived=1' : '';
+    const res = await this.request('GET', `/chromeext/projects${qs}`);
     if (!res.ok) {
       throw new Error(`typebuild: list projects failed (${res.status})`);
     }
@@ -917,6 +928,64 @@ export class TypeBuildTaskSource implements TaskSource {
       return { ok: false, reason, status: res.status };
     }
     throw new Error(`typebuild: add task note failed (${res.status})`);
+  }
+
+  // POST /chromeext/projects/{id}/archive | /unarchive (task-2c5448be520a).
+  // Distinct, single-purpose verbs (NOT a generic update PATCH — that path is
+  // owned by a sibling task) so the two write paths don't collide. Returns the
+  // updated project when the server echoes one; otherwise re-fetches it so the
+  // caller always gets the new `archived` state. NON-PHI; bodies never logged.
+  private async setArchived(id: string, archived: boolean): Promise<Project> {
+    const verb = archived ? 'archive' : 'unarchive';
+    const res = await this.request(
+      'POST',
+      `/chromeext/projects/${encodeURIComponent(id)}/${verb}`,
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      const detail = data.reason ?? data.error ?? '';
+      throw new Error(
+        `typebuild: ${verb} project failed (${res.status})${
+          detail ? `: ${detail}` : ''
+        }`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      project?: ProjectRow;
+    };
+    if (data.project && data.project.id) {
+      return this.mapProjectRow(data.project);
+    }
+    // Server didn't echo the row — fetch it so callers get the new state. If
+    // the (now-archived) project is no longer visible, synthesize the flag.
+    const fetched = await this.getProject(id).catch(() => null);
+    if (fetched) return { ...fetched, archived };
+    return {
+      id,
+      name: '',
+      description: null,
+      instructions: null,
+      parentProjectId: null,
+      folders: [],
+      createdBy: null,
+      groupId: null,
+      createdAt: null,
+      updatedAt: null,
+      archived,
+    };
+  }
+
+  /** Archive a project (hidden from the default list). */
+  archiveProject(id: string): Promise<Project> {
+    return this.setArchived(id, true);
+  }
+
+  /** Unarchive a project (restore it to the default list). */
+  unarchiveProject(id: string): Promise<Project> {
+    return this.setArchived(id, false);
   }
 
   // ─── users registry (fm-j7w0/S4) ─────────────────────────────────────────

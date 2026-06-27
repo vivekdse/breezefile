@@ -2,17 +2,20 @@
 // project REST methods to the renderer. Projects are named containers with
 // optional instructions + a set of owned folders.
 //
-//   typebuild:projects:list     ()                  -> Project[]
-//   typebuild:projects:get      (id, effective?)    -> Project | null
-//   typebuild:projects:resolve  (folder)            -> Project | null
-//   typebuild:projects:create   (input)             -> Project
-//   typebuild:projects:patch    (id, patch)         -> { ok, project | reason }
-//   typebuild:tasks:note        (taskId, note)      -> { ok, reason? }
+//   typebuild:projects:list       (includeArchived?) -> Project[]
+//   typebuild:projects:get        (id, effective?)   -> Project | null
+//   typebuild:projects:resolve    (folder)           -> Project | null
+//   typebuild:projects:create     (input)            -> Project
+//   typebuild:projects:patch      (id, patch)        -> { ok, project | reason }
+//   typebuild:tasks:note          (taskId, note)     -> { ok, reason? }
+//   typebuild:projects:archive    (id)               -> Project   (task-2c5448be520a)
+//   typebuild:projects:unarchive  (id)               -> Project
 //
-// task-fdf3dc6b3c5c — the last two bridge the teach-in-the-moment write-back:
-// PROJECT scope → projects:patch (PATCH instructions; owner-only/PHI-guarded),
-// TASK scope → tasks:note (per-task teach note). Both return a STRUCTURED
-// result the renderer surfaces (so a 403/422 shows a message, never crashes).
+// task-fdf3dc6b3c5c — projects:patch + tasks:note bridge the teach-in-the-moment
+// write-back: PROJECT scope → projects:patch (PATCH instructions; owner-only/
+// PHI-guarded), TASK scope → tasks:note (per-task teach note). Both return a
+// STRUCTURED result the renderer surfaces (so a 403/422 shows a message, never
+// crashes). task-2c5448be520a — archive/unarchive hide projects from the list.
 //
 // NON-PHI: project name/description/instructions/folders are not patient data.
 // The source still never logs request/response bodies. Registered from
@@ -40,8 +43,10 @@ export function registerTypebuildProjectsIpc(): void {
   if (registered) return;
   registered = true;
 
-  ipcMain.handle('typebuild:projects:list', (): Promise<Project[]> =>
-    source().listProjects(),
+  ipcMain.handle(
+    'typebuild:projects:list',
+    (_e, includeArchived?: boolean): Promise<Project[]> =>
+      source().listProjects({ includeArchived: !!includeArchived }),
   );
   ipcMain.handle(
     'typebuild:projects:get',
@@ -82,5 +87,15 @@ export function registerTypebuildProjectsIpc(): void {
   ipcMain.handle(
     'typebuild:tasks:note',
     (_e, taskId: string, note: string) => source().addTaskNote(taskId, note),
+  );
+  // task-2c5448be520a — archive/unarchive. Distinct verbs (NOT a generic
+  // update PATCH, which a sibling task owns) so the two write paths don't clash.
+  ipcMain.handle(
+    'typebuild:projects:archive',
+    (_e, id: string): Promise<Project> => source().archiveProject(id),
+  );
+  ipcMain.handle(
+    'typebuild:projects:unarchive',
+    (_e, id: string): Promise<Project> => source().unarchiveProject(id),
   );
 }

@@ -371,7 +371,7 @@ type Fm = {
     // optional instructions + owned folders. NON-PHI. `resolve` is the
     // auto-attach lookup (folder → owning project or null).
     projects: {
-      list: () => Promise<Project[]>;
+      list: (includeArchived?: boolean) => Promise<Project[]>;
       get: (id: string, effective?: boolean) => Promise<Project | null>;
       resolve: (folder: string) => Promise<Project | null>;
       create: (input: {
@@ -390,6 +390,9 @@ type Fm = {
         | { ok: true; project: Project }
         | { ok: false; reason: string; status: number }
       >;
+      // task-2c5448be520a — archive/unarchive (hide from the default list).
+      archive: (id: string) => Promise<Project>;
+      unarchive: (id: string) => Promise<Project>;
     };
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (
