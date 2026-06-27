@@ -122,10 +122,22 @@ function ProjectsPageInner() {
   const [loaded, setLoaded] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
 
+  // "Show all" reveals idle projects; "Show archived" includes archived ones
+  // (re-fetched with ?archived=1). Both persisted in projectsViewPrefs.
+  const [showAll, setShowAll] = useState<boolean>(
+    () => loadProjectsViewPrefs().showAll,
+  );
+  const [showArchived, setShowArchived] = useState<boolean>(
+    () => loadProjectsViewPrefs().showArchived,
+  );
+  useEffect(() => {
+    saveProjectsViewPrefs({ showAll, showArchived });
+  }, [showAll, showArchived]);
+
   useEffect(() => {
     let cancelled = false;
     void fm.typebuild.projects
-      .list()
+      .list(showArchived)
       .then((list) => {
         if (cancelled) return;
         setProjects(list);
@@ -140,7 +152,7 @@ function ProjectsPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [reloadTick]);
+  }, [reloadTick, showArchived]);
 
   // Pull all tasks (incl. done) once; roll up per-project client-side. The
   // partition is by project, not owner, so we want the whole set.
@@ -167,16 +179,6 @@ function ProjectsPageInner() {
       }),
     [roots, allTasks],
   );
-
-  // "Show all projects" toggle — reveals hidden idle/quiet projects. Persisted
-  // in localStorage (projectsViewPrefs), matching the repo's self-contained
-  // UI-pref pattern (sideBySidePrefs / the fm.* flags).
-  const [showAll, setShowAll] = useState<boolean>(
-    () => loadProjectsViewPrefs().showAll,
-  );
-  useEffect(() => {
-    saveProjectsViewPrefs({ showAll });
-  }, [showAll]);
 
   // ── zoom state ─────────────────────────────────────────────────────────────
   // level 1 = grid; level 2 = a single project's task tree.
@@ -398,6 +400,29 @@ function ProjectsPageInner() {
         detail: { mode: 'create', defaultFolder: '', projectId },
       }),
     );
+  }
+  // task-2c5448be520a — archive/unarchive a project, then re-fetch so the row
+  // appears/disappears per the current Show-archived toggle. NON-PHI.
+  async function setProjectArchived(projectId: string, archived: boolean) {
+    const proj = nodeById.get(projectId)?.project;
+    try {
+      if (archived) await fm.typebuild.projects.archive(projectId);
+      else await fm.typebuild.projects.unarchive(projectId);
+      setReloadTick((t) => t + 1);
+      dispatch({
+        type: 'setStatus',
+        msg: `${archived ? 'archived' : 'unarchived'}${
+          proj ? ` · ${proj.name}` : ''
+        }`,
+      });
+    } catch (e) {
+      dispatch({
+        type: 'setStatus',
+        msg: `couldn't ${archived ? 'archive' : 'unarchive'}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      });
+    }
   }
   function toggleExpand(id: string) {
     setExpanded((prev) => {
@@ -627,6 +652,9 @@ function ProjectsPageInner() {
             attention={attention}
             showAll={showAll}
             onToggleShowAll={() => setShowAll((v) => !v)}
+            showArchived={showArchived}
+            onToggleShowArchived={() => setShowArchived((v) => !v)}
+            onArchive={(id, next) => void setProjectArchived(id, next)}
             scopeProject={scopeProject}
             totalProjects={projects.length}
             gridCursor={gridCursor}
@@ -667,6 +695,7 @@ function ProjectsPageInner() {
             onToggleExpand={toggleExpand}
             onOpenTask={openTaskDetail}
             onNewTask={() => detailId && newProjectTask(detailId)}
+            onArchive={(next) => detailId && void setProjectArchived(detailId, next)}
           />
         )}
       </div>
@@ -703,6 +732,9 @@ function ProjectsGrid({
   attention,
   showAll,
   onToggleShowAll,
+  showArchived,
+  onToggleShowArchived,
+  onArchive,
   scopeProject,
   totalProjects,
   gridCursor,
@@ -731,6 +763,10 @@ function ProjectsGrid({
   attention: Map<string, ProjectAttention>;
   showAll: boolean;
   onToggleShowAll: () => void;
+  showArchived: boolean;
+  onToggleShowArchived: () => void;
+  /** Archive (true) or unarchive (false) a project by id. */
+  onArchive: (id: string, archived: boolean) => void;
   scopeProject: Project | null;
   totalProjects: number;
   gridCursor: number;
@@ -768,9 +804,9 @@ function ProjectsGrid({
     const summary = att ? attentionSummary(att) : '';
     const i = indexOf(p.id);
     const hasKids = node.children.length > 0;
+    const archived = p.archived === true;
     return (
-      <button
-        type="button"
+      <div
         key={p.id}
         data-grid-i={i}
         role="listitem"
@@ -778,6 +814,7 @@ function ProjectsGrid({
           'prow',
           `prow--${status}`,
           quiet ? 'prow--quiet' : '',
+          archived ? 'prow--archived' : '',
           i === gridCursor ? 'cursor' : '',
         ]
           .filter(Boolean)
@@ -796,6 +833,7 @@ function ProjectsGrid({
         </span>
         <span className="prow__main">
           <span className="prow__name">{p.name}</span>
+          {archived && <span className="prow__tag">archived</span>}
           {p.description ? (
             <span className="prow__desc">{p.description}</span>
           ) : (
@@ -816,8 +854,20 @@ function ProjectsGrid({
               ⚑ <span className="num">{need}</span>
             </span>
           )}
+          <button
+            type="button"
+            className="prow__action"
+            title={archived ? 'Unarchive project' : 'Archive project'}
+            aria-label={archived ? 'Unarchive project' : 'Archive project'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onArchive(p.id, !archived);
+            }}
+          >
+            {archived ? '↺' : '⊟'}
+          </button>
         </span>
-      </button>
+      </div>
     );
   };
 
@@ -917,18 +967,41 @@ function ProjectsGrid({
         </div>
       )}
 
-      {/* Idle/quiet projects — hidden by default, revealed (dimmed) on toggle. */}
-      {hiddenCount > 0 && !empty && (
+      {/* Idle/quiet + archived toggles — both hidden by default, revealed on
+          their toggle. (task-2c5448be520a adds Show archived.) */}
+      {!empty && (hiddenCount > 0 || showArchived) && (
+        <div className="projects__showall">
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              className="projects__btn projects__showall-btn"
+              aria-pressed={showAll}
+              onClick={onToggleShowAll}
+            >
+              {showAll
+                ? `Hide idle projects (${hiddenCount})`
+                : `Show all projects (${hiddenCount} hidden)`}
+            </button>
+          )}
+          <button
+            type="button"
+            className="projects__btn projects__showall-btn"
+            aria-pressed={showArchived}
+            onClick={onToggleShowArchived}
+          >
+            {showArchived ? 'Hide archived' : 'Show archived'}
+          </button>
+        </div>
+      )}
+      {empty && !showCreate && (
         <div className="projects__showall">
           <button
             type="button"
             className="projects__btn projects__showall-btn"
-            aria-pressed={showAll}
-            onClick={onToggleShowAll}
+            aria-pressed={showArchived}
+            onClick={onToggleShowArchived}
           >
-            {showAll
-              ? `Hide idle projects (${hiddenCount})`
-              : `Show all projects (${hiddenCount} hidden)`}
+            {showArchived ? 'Hide archived' : 'Show archived'}
           </button>
         </div>
       )}
@@ -953,6 +1026,7 @@ function ProjectDetail({
   onToggleExpand,
   onOpenTask,
   onNewTask,
+  onArchive,
 }: {
   treeRef: React.RefObject<HTMLDivElement | null>;
   project: Project | null;
@@ -969,6 +1043,8 @@ function ProjectDetail({
   onToggleExpand: (id: string) => void;
   onOpenTask: (t: Task) => void;
   onNewTask: () => void;
+  /** Archive (true) or unarchive (false) THIS project. */
+  onArchive: (archived: boolean) => void;
 }) {
   if (!project) {
     return (
@@ -1002,6 +1078,17 @@ function ProjectDetail({
             title="New task in this project (n)"
           >
             + New task <kbd>n</kbd>
+          </button>
+          {/* task-2c5448be520a — archive/unarchive this project. */}
+          <button
+            type="button"
+            className="projects__newtask projects__archive"
+            onClick={() => onArchive(project.archived !== true)}
+            title={
+              project.archived === true ? 'Unarchive project' : 'Archive project'
+            }
+          >
+            {project.archived === true ? '↺ Unarchive' : '⊟ Archive'}
           </button>
         </div>
         {effectiveDesc && (

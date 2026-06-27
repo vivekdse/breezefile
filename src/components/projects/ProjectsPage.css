@@ -268,6 +268,48 @@
   opacity: 1;
 }
 
+/* task-2c5448be520a — archived rows + per-row archive/unarchive action. */
+.prow--archived .prow__name {
+  color: var(--fg-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--fg-dim);
+}
+.prow__tag {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--fg-3);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-1);
+  flex-shrink: 0;
+}
+.prow__action {
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-sm);
+  opacity: 0;
+  transition: opacity var(--motion-hover), color var(--motion-hover);
+}
+.prow:hover .prow__action,
+.prow.cursor .prow__action {
+  opacity: 1;
+}
+.prow__action:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.projects__showall {
+  gap: var(--sp-2);
+}
+.projects__archive {
+  margin-left: var(--sp-2);
+}
+
 /* '/' search hint kbd in the sub-line. */
 .projects__kbd {
   font-family: var(--font-mono);

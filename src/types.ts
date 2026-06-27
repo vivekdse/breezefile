@@ -315,6 +315,8 @@ export type Project = {
   createdAt: string | null;
   updatedAt: string | null;
   effectiveInstructions?: string;
+  /** task-2c5448be520a — archived projects are hidden from the default list. */
+  archived?: boolean;
 };
 
 export type TaskUpdate = Partial<{

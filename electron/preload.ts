@@ -693,8 +693,11 @@ const fm = {
     // TypeBuild source. `resolve` is the auto-attach lookup (folder → owner or
     // null).
     projects: {
-      list: () =>
-        ipcRenderer.invoke('typebuild:projects:list') as Promise<Project[]>,
+      list: (includeArchived?: boolean) =>
+        ipcRenderer.invoke(
+          'typebuild:projects:list',
+          includeArchived,
+        ) as Promise<Project[]>,
       get: (id: string, effective?: boolean) =>
         ipcRenderer.invoke(
           'typebuild:projects:get',
@@ -714,6 +717,10 @@ const fm = {
         folders?: string[];
       }) =>
         ipcRenderer.invoke('typebuild:projects:create', input) as Promise<Project>,
+      archive: (id: string) =>
+        ipcRenderer.invoke('typebuild:projects:archive', id) as Promise<Project>,
+      unarchive: (id: string) =>
+        ipcRenderer.invoke('typebuild:projects:unarchive', id) as Promise<Project>,
     },
     // fm-j7w0 (S4) — user registry for the assignee picker (NON-PHI identities).
     listUsers: () =>

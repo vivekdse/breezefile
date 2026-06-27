@@ -2,10 +2,12 @@
 // project REST methods to the renderer. Projects are named containers with
 // optional instructions + a set of owned folders.
 //
-//   typebuild:projects:list     ()                  -> Project[]
-//   typebuild:projects:get      (id, effective?)    -> Project | null
-//   typebuild:projects:resolve  (folder)            -> Project | null
-//   typebuild:projects:create   (input)             -> Project
+//   typebuild:projects:list       (includeArchived?) -> Project[]
+//   typebuild:projects:get        (id, effective?)   -> Project | null
+//   typebuild:projects:resolve    (folder)           -> Project | null
+//   typebuild:projects:create     (input)            -> Project
+//   typebuild:projects:archive    (id)               -> Project   (task-2c5448be520a)
+//   typebuild:projects:unarchive  (id)               -> Project
 //
 // NON-PHI: project name/description/instructions/folders are not patient data.
 // The source still never logs request/response bodies. Registered from
@@ -33,8 +35,10 @@ export function registerTypebuildProjectsIpc(): void {
   if (registered) return;
   registered = true;
 
-  ipcMain.handle('typebuild:projects:list', (): Promise<Project[]> =>
-    source().listProjects(),
+  ipcMain.handle(
+    'typebuild:projects:list',
+    (_e, includeArchived?: boolean): Promise<Project[]> =>
+      source().listProjects({ includeArchived: !!includeArchived }),
   );
   ipcMain.handle(
     'typebuild:projects:get',
@@ -58,5 +62,15 @@ export function registerTypebuildProjectsIpc(): void {
         folders?: string[];
       },
     ): Promise<Project> => source().createProject(input),
+  );
+  // task-2c5448be520a — archive/unarchive. Distinct verbs (NOT a generic
+  // update PATCH, which a sibling task owns) so the two write paths don't clash.
+  ipcMain.handle(
+    'typebuild:projects:archive',
+    (_e, id: string): Promise<Project> => source().archiveProject(id),
+  );
+  ipcMain.handle(
+    'typebuild:projects:unarchive',
+    (_e, id: string): Promise<Project> => source().unarchiveProject(id),
   );
 }
