@@ -17,6 +17,12 @@ import { useEffect, useState } from 'react';
 import { useOverlayExit } from '../useOverlayExit';
 import { useIsMac, fmtKeys } from '../platform';
 import { fm } from '../bridge';
+// task-b79d10308ffd — registry-backed catalog rows. The curated rows below
+// keep their hand-written prose, chords (gg/G, dD/dF…), and non-verb rows
+// (cursor motion, mark/all); helpRowsForCategories() derives the *remaining*
+// verbs from the SAME verbCatalog.mjs the palette + native menu use, so a newly
+// added verb shows up in help without a hand edit and can't silently drift.
+import { helpRowsForCategories } from '../verbCatalog.mjs';
 import './HelpTour.css';
 
 export type HelpSlideId =
@@ -58,6 +64,11 @@ type CatalogSlide = {
   title: string;
   lede: string;
   verbs: VerbItem[];
+  // task-b79d10308ffd — when present, registry-backed rows for these catalog
+  // categories are auto-appended from verbCatalog.mjs, SKIPPING the verb ids in
+  // `covers` (already represented by a curated row above). A new verb in one of
+  // these categories — not in `covers` — auto-surfaces here without a hand edit.
+  derive?: { categories: string[]; covers: string[] };
 };
 type NarrativeSlide = {
   kind: 'narrative';
@@ -142,6 +153,16 @@ const SLIDES: Slide[] = [
       { name: 'notes', chord: ':notes', what: 'jump to the breeze notes folder' },
       { name: 'duplicate', what: 'right-click → Duplicate' },
     ],
+    // Registry-backed Selection verbs. The curated rows above already cover
+    // these (note: copy-path/drag-out/share are curated on the Share slide); a
+    // NEW Selection verb auto-appends here.
+    derive: {
+      categories: ['Selection'],
+      covers: [
+        'select', 'select-expr', 'export-list', 'copy', 'move', 'paste',
+        'delete', 'permanent-delete', 'copy-path', 'drag-out', 'share',
+      ],
+    },
   },
   {
     kind: 'catalog',
@@ -164,6 +185,16 @@ const SLIDES: Slide[] = [
       { name: 'revert / reload', chord: '⌘R / Ctrl+R / F5 · ↻', what: 'reload the file from disk — discards unsaved changes (prompts if dirty). An edit tab also auto-refreshes when the file changes on disk underneath you (e.g. an agent editing it from the chat panel); your cursor and scroll position are kept approximately' },
       { name: 'close', what: 'close the current edit tab (prompts before discarding unsaved changes)' },
     ],
+    // Registry-backed Files verbs. Curated rows here + on the Select/Editor
+    // slides cover the current set; a NEW Files verb auto-appends here.
+    derive: {
+      categories: ['Files'],
+      covers: [
+        'open', 'open-with', 'edit', 'open-editor', 'editor-save',
+        'editor-revert', 'editor-close', 'reveal', 'rename', 'create',
+        'note', 'notes', 'compress', 'extract',
+      ],
+    },
   },
   {
     kind: 'catalog',
@@ -197,6 +228,16 @@ const SLIDES: Slide[] = [
       { name: 'folders first', chord: 'zd', what: 'pin folders to the top (default) or interleave with files — turn off in Downloads to see newest items without folders crowding the top' },
       { name: 'theme', chord: 'zT', what: 'cycle dark/light; or :theme for the full picker' },
     ],
+    // Registry-backed View verbs. The tag verbs live on the Tags slide and the
+    // window verbs on the Tabs slide; a NEW View verb auto-appends here.
+    derive: {
+      categories: ['View'],
+      covers: [
+        'view', 'sort', 'showHidden', 'foldersFirst', 'theme',
+        'tag', 'untag', 'newtag', 'dsltag', 'filter',
+        'sidebyside', 'maximize', 'fullscreen',
+      ],
+    },
   },
   {
     kind: 'catalog',
@@ -398,8 +439,34 @@ const SLIDES: Slide[] = [
       { name: 'permissions', what: 'see which protected folders TypeBuild can read; grant any still missing' },
       { name: 'upgrade', what: ':upgrade runs brew upgrade --cask breezefile and relaunches · the help dialog also surfaces an "Update available" banner when a newer release is out' },
     ],
+    // Registry-backed Navigate + Tools verbs. Most are curated above (and on the
+    // Tasks slides for the task/project/remote verbs); rows NOT in `covers`
+    // (e.g. unpin, term-close) auto-append here, as does any NEW verb in these
+    // categories — so the catalog can't drift from the registry.
+    derive: {
+      categories: ['Navigate', 'Tools'],
+      covers: [
+        // Navigate
+        'newTab', 'switchTab', 'closeTab', 'restoreTab', 'pin',
+        'goto', 'back', 'forward', 'up',
+        // Tools
+        'term', 'openTerminal', 'settings', 'permissions', 'upgrade',
+        'secrets', 'chat', 'remote-attach', 'disconnect', 'run',
+        'task', 'tasks', 'projects', 'new-project',
+      ],
+    },
   },
 ];
+
+// task-b79d10308ffd — append the registry-derived rows to each catalog slide
+// that declares a `derive` block. Curated rows stay first (and authoritative
+// for any id in `covers`); verbs in the listed categories that aren't covered
+// are pulled straight from verbCatalog.mjs. Done once at module load.
+for (const slide of SLIDES) {
+  if (slide.kind !== 'catalog' || !slide.derive) continue;
+  const derived = helpRowsForCategories(slide.derive.categories, slide.derive.covers);
+  if (derived.length) slide.verbs = [...slide.verbs, ...derived];
+}
 
 function indexOfSlide(id: HelpSlideId | undefined): number {
   if (!id) return 0;

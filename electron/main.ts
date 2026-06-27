@@ -10,6 +10,13 @@ import { startTaskReminders, setTaskReminderMode } from './task-reminders';
 import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
 import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
+// fm-m7q / task-1bf3ce50575a — native menu derives its verb rows from the SAME
+// build-safe metadata module the renderer registry uses. Pure data (no React),
+// so the electron-main Rollup build can bundle it.
+import {
+  menuVerbsByCategory,
+  menuAcceleratorFor,
+} from '../src/verbCatalog.mjs';
 import { restoreSources } from './sources';
 import { registerBreezeHooks } from './hooks-register';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
@@ -638,6 +645,21 @@ function verbItem(
   };
 }
 
+// fm-m7q / task-1bf3ce50575a — build the verb menu rows for one category
+// (Files / Selection / Navigate / View / Tools / Help) straight from
+// verbCatalog.mjs. Adding a verb with a category + keybinding to that module
+// surfaces it here WITHOUT editing main.ts. The accelerator follows the
+// catalog's single-chord rule (multi-chord bindings are display-only and never
+// shown as menu accelerators — menuAcceleratorFor returns undefined for them).
+const VERB_GROUPS = menuVerbsByCategory();
+function categoryVerbItems(category: string): Electron.MenuItemConstructorOptions[] {
+  const group = VERB_GROUPS.find((g) => g.category === category);
+  if (!group) return [];
+  return group.items.map((meta) =>
+    verbItem(meta.menuLabel ?? meta.label, meta.id, menuAcceleratorFor(meta)),
+  );
+}
+
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -645,54 +667,28 @@ function buildAppMenu() {
       ? ([{ role: 'appMenu' }] as Electron.MenuItemConstructorOptions[])
       : []),
     {
+      // fm-m7q / task-1bf3ce50575a — verb rows derived from verbCatalog.mjs
+      // (the 'Files' category). The two non-verb "New Folder…/New File…" items
+      // dispatch the create pseudo-verbs and stay hand-coded.
       label: 'File',
       submenu: [
-        verbItem('New Tab', 'newTab', 'CmdOrCtrl+T'),
-        verbItem('Close Tab', 'closeTab', 'CmdOrCtrl+W'),
-        verbItem('Reopen Closed Tab', 'restoreTab', 'CmdOrCtrl+Shift+T'),
-        { type: 'separator' },
         verbItem('New Folder…', 'folder'),
         verbItem('New File…', 'file'),
-        verbItem('New Note', 'note'),
         { type: 'separator' },
-        verbItem('Rename…', 'rename', 'F2'),
-        verbItem('Edit File', 'edit'),
-        verbItem('Open', 'open'),
-        verbItem('Open With…', 'open-with'),
-        verbItem('Reveal in File Manager', 'reveal'),
-        { type: 'separator' },
-        verbItem('Move to Trash', 'delete'),
-        verbItem('Compress…', 'compress'),
-        verbItem('Extract', 'extract'),
+        ...categoryVerbItems('Files'),
       ],
     },
     { role: 'editMenu' },
     {
+      // Navigate-category verbs from the catalog (Back/Forward/Up, Go to…, tab
+      // switching + new/close/reopen tab, pin/unpin).
       label: 'Navigate',
-      submenu: [
-        verbItem('Back', 'back'),
-        verbItem('Forward', 'forward'),
-        verbItem('Up', 'up'),
-        { type: 'separator' },
-        verbItem('Go to…', 'goto', 'CmdOrCtrl+F'),
-        verbItem('Notes Folder', 'notes'),
-        verbItem('Switch Tab…', 'switchTab'),
-        { type: 'separator' },
-        verbItem('Pin Folder', 'pin'),
-        verbItem('Unpin Folder', 'unpin'),
-      ],
+      submenu: [...categoryVerbItems('Navigate')],
     },
     {
+      // Selection-category verbs from the catalog.
       label: 'Selection',
-      submenu: [
-        verbItem('Select…', 'select'),
-        verbItem('Copy', 'copy', 'CmdOrCtrl+C'),
-        verbItem('Move (cut)', 'move', 'CmdOrCtrl+X'),
-        verbItem('Paste', 'paste', 'CmdOrCtrl+V'),
-        { type: 'separator' },
-        verbItem('Copy Path', 'copy-path'),
-        verbItem('Share…', 'share'),
-      ],
+      submenu: [...categoryVerbItems('Selection')],
     },
     {
       label: 'View',
@@ -759,35 +755,15 @@ function buildAppMenu() {
         },
         { role: 'togglefullscreen' },
         { type: 'separator' },
-        verbItem('Change View…', 'view'),
-        verbItem('Sort…', 'sort'),
-        verbItem('Toggle Hidden Files', 'showHidden', 'CmdOrCtrl+Shift+.'),
-        verbItem('Theme…', 'theme'),
-        { type: 'separator' },
-        verbItem('Tag…', 'tag'),
-        verbItem('Untag…', 'untag'),
-        verbItem('New Tag…', 'newtag'),
-        verbItem('Filter by Tag…', 'filter'),
+        // View-category verbs from verbCatalog.mjs (Change View…, Sort…, Toggle
+        // Hidden Files, Theme…, Tag…/Untag…/New Tag…, Filter by Tag…).
+        ...categoryVerbItems('View'),
       ],
     },
     {
+      // Tools-category verbs from the catalog.
       label: 'Tools',
-      submenu: [
-        verbItem('Terminal in this Folder', 'term'),
-        verbItem('Open External Terminal', 'openTerminal'),
-        verbItem('Close Terminal', 'term-close'),
-        { type: 'separator' },
-        verbItem('Attach Remote (SSH)…', 'remote-attach'),
-        verbItem('Disconnect Remote', 'disconnect'),
-        { type: 'separator' },
-        verbItem('Run…', 'run'),
-        verbItem('New Task', 'task'),
-        verbItem('Tasks View', 'tasks'),
-        { type: 'separator' },
-        verbItem('Settings', 'settings'),
-        verbItem('Permissions', 'permissions'),
-        verbItem('Check for Update', 'upgrade'),
-      ],
+      submenu: [...categoryVerbItems('Tools')],
     },
     // Custom Window menu — the default 'windowMenu' role binds ⌘W to
      // "Close Window", which stops the renderer from using ⌘W for "close
@@ -808,13 +784,9 @@ function buildAppMenu() {
       ],
     },
     {
+      // Help-category verbs from the catalog (Help, Tutorial, Tips, Welcome).
       role: 'help',
-      submenu: [
-        verbItem('Help', 'help', 'F1'),
-        verbItem('Tutorial', 'tutorial'),
-        verbItem('Tips', 'tips'),
-        verbItem('Welcome', 'welcome'),
-      ],
+      submenu: [...categoryVerbItems('Help')],
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
