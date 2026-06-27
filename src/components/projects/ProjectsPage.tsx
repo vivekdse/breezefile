@@ -55,7 +55,7 @@ import {
   loadProjectsViewPrefs,
   saveProjectsViewPrefs,
 } from '../../projectsViewPrefs';
-import { ProjectFolderBlock } from './ProjectFolderBlock';
+import { ProjectFolderBlock, ProjectRow } from './ProjectFolderBlock';
 import type { ProjectFolderRow, ProjectTasksProvider } from './ProjectFolderBlock';
 import { useProjectTaskRows } from './useProjectTaskRows';
 import './ProjectsPage.css';
@@ -123,9 +123,14 @@ function ProjectsPageInner() {
   const [showArchived, setShowArchived] = useState<boolean>(
     () => loadProjectsViewPrefs().showArchived,
   );
+  // task-6050fee0efb1 — Projects-first ('projects') vs Tasks-first ('flat'),
+  // persisted alongside the other view prefs.
+  const [homeView, setHomeView] = useState<'projects' | 'flat'>(
+    () => loadProjectsViewPrefs().homeView,
+  );
   useEffect(() => {
-    saveProjectsViewPrefs({ showAll, showArchived });
-  }, [showAll, showArchived]);
+    saveProjectsViewPrefs({ showAll, showArchived, homeView });
+  }, [showAll, showArchived, homeView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,10 +187,8 @@ function ProjectsPageInner() {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
-  // task-9d54b7ab7972 (Phase 5, Q3) — Home shows tasks BY PROJECT (folders) by
-  // default; a 'flat' toggle folds the all-tasks inbox in as a flat view (the
-  // standalone :tasks tab is retained as a secondary surface, not retired).
-  const [homeView, setHomeView] = useState<'projects' | 'flat'>('projects');
+  // homeView (Projects-first / Tasks-first) is declared + persisted above with
+  // the other view prefs (task-6050fee0efb1).
   const [flatDoneOpen, setFlatDoneOpen] = useState(false);
   // task-4b0168979921 — unified quick-switcher (projects AND tasks). '/' opens.
   const [showSwitcher, setShowSwitcher] = useState(false);
@@ -248,6 +251,8 @@ function ProjectsPageInner() {
   }, [partitioned, showAll]);
 
   // ── L2 derived data ─────────────────────────────────────────────────────────
+  // The Inbox stays an inline block (it's the project-less catch-all — there is
+  // no real folder to "open"), so detail drill-in resolves real nodes only.
   const detailNode = detailId ? nodeById.get(detailId) ?? null : null;
   const detailProject = detailNode?.project ?? null;
   const detailChain = useMemo(
@@ -539,9 +544,13 @@ function ProjectsPageInner() {
       pushBlock(detailNode, false);
       return out;
     }
-    // root: inbox first (Q4), then the ranked grid blocks (sub-projects collapsed)
+    // root (task-6050fee0efb1): the Inbox keeps its inline block (header +
+    // tasks), but every real project is now ONE compact row — no inline tasks,
+    // no expanded sub-projects — so the cursor walks just the project ids.
     if (scopeId == null && inboxTotalCount > 0) pushBlock(inboxNode, true);
-    for (const node of gridNodes) pushBlock(node, true);
+    for (const node of gridNodes) {
+      out.push({ kind: 'header', key: node.project.id, projectId: node.project.id });
+    }
     return out;
   }, [level, homeView, flatSections, detailNode, scopeId, inboxTotalCount, inboxNode, gridNodes, rowsForProject]);
 
@@ -1061,9 +1070,9 @@ function HomeViewToggle({
           .join(' ')}
         aria-pressed={view === 'projects'}
         onClick={() => onSet('projects')}
-        title="Group tasks by project (folders)"
+        title="Projects first — projects as folders; open one to see its tasks"
       >
-        By project
+        Projects first
       </button>
       <button
         type="button"
@@ -1072,9 +1081,9 @@ function HomeViewToggle({
           .join(' ')}
         aria-pressed={view === 'flat'}
         onClick={() => onSet('flat')}
-        title="Flat list of every task"
+        title="Tasks first — a flat list of every task"
       >
-        Flat
+        Tasks first
       </button>
     </div>
   );
@@ -1264,48 +1273,36 @@ function HomeRoot({
   const empty = loaded && !loadErr && totalScoped === 0;
   const hiddenCount = idleNodes.length;
 
-  // One project = one folder block. The cursor (keyboard or mouse) keys off the
-  // project id; the inner .pfolder carries data-folder-key for scroll-into-view.
+  // task-6050fee0efb1 — one project = ONE compact file/folder-style row. No
+  // inline task list (the file manager doesn't show a folder's contents inline);
+  // opening a row drills into the project to reveal its tasks + sub-projects.
+  // The cursor (keyboard or mouse) keys off the project id; the row carries
+  // data-folder-key for scroll-into-view.
   const renderBlock = (node: ProjectNode, quiet: boolean) => {
     const p = node.project;
     const archived = p.archived === true;
+    const att = attention.get(p.id);
+    const rolled = rollUp.get(p.id)?.rolled;
+    const status = projStatusOf(att, rolled);
     return (
       <div
         key={p.id}
-        className={[
-          'home-block',
-          quiet ? 'home-block--quiet' : '',
-          archived ? 'home-block--archived' : '',
-          cursorKey === p.id ? 'home-block--cursor' : '',
-        ]
+        className={['home-row-wrap', quiet ? 'home-row-wrap--quiet' : '']
           .filter(Boolean)
           .join(' ')}
-        onMouseDown={() => onSetCursor(p.id)}
       >
-        <button
-          type="button"
-          className="home-block__archive"
-          title={archived ? 'Unarchive project' : 'Archive project'}
-          aria-label={archived ? 'Unarchive project' : 'Archive project'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onArchive(p.id, !archived);
-          }}
-        >
-          {archived ? '↺' : '⊟'}
-        </button>
-        <ProjectFolderBlock
+        <ProjectRow
           node={node}
-          attention={attention}
-          rollUp={rollUp}
-          effectiveDesc={p.description ?? ''}
-          tasks={tasksProvider}
-          scale="inline"
-          onOpenProject={onOpenProject}
-          onOpenSelf={() => onEnter(node)}
-          onOpenFolder={onOpenFolder}
-          onNewTask={onNewTask}
-          cursorKey={cursorKey}
+          statusGlyph={STATUS_GLYPH[status]}
+          statusKind={status}
+          total={rolled?.total ?? 0}
+          need={att?.total ?? 0}
+          subCount={node.children.length}
+          archived={archived}
+          cursor={cursorKey === p.id}
+          onOpen={() => onEnter(node)}
+          onHover={onSetCursor}
+          onArchive={onArchive}
         />
       </div>
     );

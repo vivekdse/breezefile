@@ -274,6 +274,111 @@ export function SubProjectRow({
   );
 }
 
+// ── compact project row (task-6050fee0efb1) ───────────────────────────────────
+// One project = ONE file/folder-style row at Home root. Name on the left, a
+// minimal status glyph + counts on the right — mirrors FileRow's directory
+// affordance (folder icon, name, trailing chevron). NO inline task list: the
+// file manager doesn't show a folder's contents inline, and neither do we.
+// Opening (click / Enter) drills into the project to reveal its tasks + subs.
+//
+// The status glyph + counts are passed in by the host (it owns the shared
+// attention partition), so this row re-derives nothing.
+export interface ProjectRowProps {
+  node: ProjectNode;
+  /** Loudest status glyph for the project (host derives from attention). */
+  statusGlyph: string;
+  statusKind: string;
+  /** Rolled-up task total + "needs you" count (host-derived). */
+  total: number;
+  need: number;
+  /** Sub-project count (folder-has-subfolders affordance). */
+  subCount: number;
+  archived?: boolean;
+  cursor?: boolean;
+  onOpen?: (projectId: string) => void;
+  /** Mouse → cursor sync. */
+  onHover?: (projectId: string) => void;
+  /** Archive / unarchive toggle (host owns the mutation). */
+  onArchive?: (projectId: string, archived: boolean) => void;
+}
+
+export function ProjectRow({
+  node,
+  statusGlyph,
+  statusKind,
+  total,
+  need,
+  subCount,
+  archived = false,
+  cursor = false,
+  onOpen,
+  onHover,
+  onArchive,
+}: ProjectRowProps) {
+  const p = node.project;
+  return (
+    <div
+      role="listitem"
+      data-folder-key={p.id}
+      className={[
+        'pfolder-row',
+        cursor ? 'pfolder-row--cursor' : '',
+        archived ? 'pfolder-row--archived' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      onMouseDown={() => onHover?.(p.id)}
+      onClick={() => onOpen?.(p.id)}
+      title={`Open ${p.name}`}
+    >
+      <span
+        className={`pfolder-row__status pfolder-row__status--${statusKind}`}
+        aria-hidden="true"
+      >
+        {statusGlyph}
+      </span>
+      <span className="pfolder-row__icon" aria-hidden="true">
+        ▸
+      </span>
+      <span className="pfolder-row__name">{p.name}</span>
+      <span className="pfolder-row__meta">
+        {subCount > 0 && (
+          <span className="pfolder-row__subs">
+            {subCount} sub-project{subCount === 1 ? '' : 's'}
+          </span>
+        )}
+        {total > 0 && (
+          <span className="pfolder-row__count">
+            {total} {total === 1 ? 'task' : 'tasks'}
+          </span>
+        )}
+        {need > 0 && (
+          <span className="pfolder-row__need">
+            ⚑ <span className="num">{need}</span> need you
+          </span>
+        )}
+      </span>
+      {onArchive && (
+        <button
+          type="button"
+          className="pfolder-row__archive"
+          title={archived ? 'Unarchive project' : 'Archive project'}
+          aria-label={archived ? 'Unarchive project' : 'Archive project'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive(p.id, !archived);
+          }}
+        >
+          {archived ? '↺' : '⊟'}
+        </button>
+      )}
+      <span className="pfolder-row__chev" aria-hidden="true">
+        →
+      </span>
+    </div>
+  );
+}
+
 /**
  * One project as a folder: header + its task rows + nested sub-project blocks.
  *
