@@ -14,6 +14,7 @@ import { runPaste } from './clipboard';
 import { formatOpError } from './errorMessages';
 import { isTextEntryTarget } from './textFocus';
 import { isEditablePath } from './fileTypes.ts';
+import { tabIndexForPosition } from './tabOrder.mjs';
 
 // Canonical key name — Ctrl chords prefixed with C-, like ranger's <C-x>.
 function keyName(e: KeyboardEvent): string {
@@ -298,15 +299,14 @@ export function useKeyboard(
       if (mod && /^[1-9]$/.test(e.key)) {
         e.preventDefault();
         clearTimer();
-        // Match Tabbar's visual order: folder zone first, then task zone.
-        // Numbering shown on each tab is 1-based across this combined order.
-        const folderIdx: number[] = [];
-        const taskIdx: number[] = [];
-        cur.tabs.forEach((t, i) =>
-          (t.kind === 'task' ? taskIdx : folderIdx).push(i),
-        );
-        const ordered = [...folderIdx, ...taskIdx];
-        const target = ordered[Number(e.key) - 1];
+        // task-570f3471b28e / task-ee50c5c1be17 — index into the SAME visible
+        // order the Tabbar renders (folder zone first, then task zone), so the
+        // digit on each tab focuses that exact tab. The previous inline
+        // partition only routed kind:'task' into the task zone, leaving Home
+        // (kind:'home'), All-tasks (kind:'tasks') and Projects (kind:'projects')
+        // in the folder bucket here while the Tabbar painted them in the task
+        // zone — so e.g. ⌘1 focused Home instead of the tab shown as "1".
+        const target = tabIndexForPosition(cur.tabs, Number(e.key));
         if (target !== undefined)
           dispatch({ type: 'selectTab', index: target });
         return;
