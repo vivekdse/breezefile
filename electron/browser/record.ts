@@ -11,7 +11,11 @@
 //   3. ranks the candidates (selector-candidates.mjs) so each action carries the
 //      most-stable pick, and
 //   4. on stop, persists the recorded skill into the shared NON-PHI memory store
-//      (local site scope today; online write-through when that layer lands).
+//      ONLINE (task-8593b18bd7da): a recorded flow is shared site memory, so it
+//      WRITE-THROUGHs to /chromeext/site-memory (kind='flow') via the typed
+//      addSiteMemory helper — same store every machine + teammate recalls. The
+//      local JSON write stays as an OFFLINE cache so a recording made while the
+//      server is unreachable (or rejected) is never lost on the machine.
 //
 // SINGLE-CLIENT CDP: webContents.debugger.attach collides with Playwright's
 // connectOverCDP. During RECORD mode the human drives, so the agent's Playwright
@@ -24,6 +28,10 @@
 import type { WebContents } from 'electron';
 import { rankCandidates, bestCandidate } from './selector-candidates.mjs';
 import { addMemory } from './tools/memory.mjs';
+// MAIN-process write-through to the SHARED online site-memory store. record.ts
+// runs in MAIN (it holds the real Firebase token via typebuildFetch), so it
+// reaches the server directly — no localhost /app/site-memory proxy hop needed.
+import { addSiteMemory } from '../typebuild/site-memory';
 
 export type RawCandidate = { kind: string; selector: string };
 export type ScoredCandidate = RawCandidate & { matchCount?: number; score?: number };
@@ -229,16 +237,20 @@ export function startRecording(wc: WebContents): { ok: boolean; error?: string }
   return { ok: true };
 }
 
-/** Stop recording. Detaches the debugger, persists the recorded actions as a
- *  NON-PHI skill into the shared memory store (site scope), and returns the full
- *  recording so the caller can hand it to Claude Code. */
-export function stopRecording(opts: { skillName?: string } = {}): {
+/** Stop recording. Detaches the debugger, WRITE-THROUGHs the recorded actions as
+ *  a NON-PHI skill into the SHARED ONLINE site-memory store (kind='flow'), and
+ *  returns the full recording so the caller can hand it to Claude Code. Async
+ *  because the online write round-trips the server; on an offline/server error we
+ *  fall back to the LOCAL cache so a recording is never lost (`online` reports
+ *  which path persisted it). */
+export async function stopRecording(opts: { skillName?: string } = {}): Promise<{
   ok: boolean;
   error?: string;
   actions?: RecordedAction[];
   site?: string;
   saved?: boolean;
-} {
+  online?: boolean;
+}> {
   const session = active;
   if (!session) return { ok: false, error: 'not recording' };
   active = null;
@@ -259,19 +271,33 @@ export function stopRecording(opts: { skillName?: string } = {}): {
   const actions = session.actions.slice();
   const site = deriveSite(actions);
   let saved = false;
+  let online = false;
   if (site && actions.length) {
+    // Persist HOW-TO, not values: one NON-PHI note per session describing the
+    // stablest selector per step. The recorded flow fits the site-memory body/
+    // kind contract as kind='flow' (a multi-step how-to). The text is built from
+    // selectors + placeholder KEYS only (formatSkill); the server PHI-guards the
+    // write as a second line of defense (422 on a value-shaped body).
+    const text = formatSkill(opts.skillName, actions);
     try {
-      // Persist HOW-TO, not values: one NON-PHI note per session describing the
-      // stablest selector per step. memory.mjs enforces the shared/NON-PHI
-      // invariant; we feed it only selectors/placeholders.
-      const text = formatSkill(opts.skillName, actions);
-      addMemory('site', site, text);
+      // WRITE-THROUGH to the SHARED online store so the recorded skill is shared
+      // like other site memory. addSiteMemory also refreshes the local cache.
+      await addSiteMemory(site, text, { kind: 'flow' });
       saved = true;
+      online = true;
     } catch {
-      saved = false;
+      // Offline / server unreachable / rejected — keep the recording on THIS
+      // machine as the offline cache so it isn't lost. A later online recall
+      // serves the canonical store; this is the local fallback only.
+      try {
+        addMemory('site', site, text);
+        saved = true;
+      } catch {
+        saved = false;
+      }
     }
   }
-  return { ok: true, actions, site, saved };
+  return { ok: true, actions, site, saved, online };
 }
 
 /** Derive the site key (host) for the recording from its first action url. */

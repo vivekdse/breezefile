@@ -13,7 +13,7 @@
 //   node breeze-tools.mjs create <id> --meta f --script f   author a new tool
 //   node breeze-tools.mjs update <id> [--meta f] [--script f]
 //   node breeze-tools.mjs delete <id>
-//   node breeze-tools.mjs memory get|add|delete|list  --site <url>|--task <id>
+//   node breeze-tools.mjs memory get|add|delete|list  --site <url>|--task <tag>
 //
 // run() honors the OUTPUT CONTRACT (docs: "CLI Design"): structured JSON to
 // stdout, a human-readable step log to stderr, and a meaningful exit code
@@ -363,10 +363,10 @@ function cmdDelete(args) {
 }
 
 // ─── memory — durable NON-PHI notes, scoped by site or task ───────────────────
-// `site` notes are SHARED ONLINE (task-3c9b1146cee2): routed through Breeze main
-// to /chromeext/site-memory, with the on-disk JSON as an offline cache. `task`
-// notes stay local (no fitting online store yet). The *Online helpers pick the
-// path per scope, so this command is now async.
+// BOTH scopes are SHARED ONLINE (task-3c9b1146cee2 site; task-f2639aa68585 task):
+// routed through Breeze main to /chromeext/site-memory, with the on-disk JSON as
+// an offline cache. `site` keys by domain, `task` keys by task_tag. The *Online
+// helpers pick the path per scope, so this command is async.
 async function cmdMemory(args) {
   const sub = args._[1];
   const scope =
@@ -400,8 +400,8 @@ async function cmdMemory(args) {
       }
       case 'delete': {
         if (!scope || key === true) return needScope();
-        // site is id-addressed (shared store): pass --id; task uses --index.
-        const r = await deleteMemoryOnline(scope, key, { index: args.index, id: args.id });
+        // Both scopes are id-addressed (shared store): pass --id (from `get`).
+        const r = await deleteMemoryOnline(scope, key, { id: args.id });
         out(r);
         return r.ok ? EXIT.SUCCESS : EXIT.FAILURE;
       }
@@ -431,10 +431,10 @@ function usage() {
       '  update <id> [--meta <f>] [--script <f>]              (or --from <dir>)',
       '  delete <id>',
       '',
-      'Memory (NON-PHI notes; --site is SHARED ONLINE, --task is local):',
-      '  memory get    --site <url>|--task <id>',
-      '  memory add    --site <url>|--task <id> "<note>" [--kind selector|code|...]',
-      '  memory delete --site <url> --id <note-id> | --task <id> [--index N]',
+      'Memory (NON-PHI notes; --site AND --task are SHARED ONLINE):',
+      '  memory get    --site <url>|--task <tag>',
+      '  memory add    --site <url>|--task <tag> "<note>" [--kind selector|code|...]',
+      '  memory delete --site <url>|--task <tag> --id <note-id>',
       '  memory list',
       '',
       `tools dir:  ${toolsDir()}`,

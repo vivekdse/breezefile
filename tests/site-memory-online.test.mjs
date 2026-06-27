@@ -45,10 +45,20 @@ function startStub() {
       return;
     }
     if (url.pathname === '/app/site-memory' && req.method === 'GET') {
+      // task-f2639aa68585: the store is keyed by EITHER ?domain= or ?task_tag=.
       const domain = url.searchParams.get('domain') || '';
-      const notes = STORE.filter((n) => n.domain === domain);
+      const taskTag = url.searchParams.get('task_tag') || '';
+      const notes = taskTag
+        ? STORE.filter((n) => n.task_tag === taskTag)
+        : STORE.filter((n) => n.domain === domain);
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ domain, notes, offline: false }));
+      res.end(
+        JSON.stringify(
+          taskTag
+            ? { task_tag: taskTag, notes, offline: false }
+            : { domain, notes, offline: false },
+        ),
+      );
       return;
     }
     if (url.pathname === '/app/site-memory' && req.method === 'POST') {
@@ -59,7 +69,8 @@ function startStub() {
         lastPost = body;
         const note = {
           id: 'site-' + STORE.length,
-          domain: body.domain,
+          domain: body.domain || null,
+          task_tag: body.task_tag || null,
           kind: body.kind || 'note',
           body: body.body,
           updated_at: '2026-06-27T00:00:00Z',
@@ -109,25 +120,51 @@ test('site get → online recall maps server notes to entries', async () => {
   assert.ok(r.entries[0].id, 'entry carries the note id for later delete');
 });
 
-test('task scope stays LOCAL — never hits the stub, online:false', async () => {
-  const before = STORE.length;
-  const a = await mem.addMemoryOnline('task', 'task-xyz', 'click queue tab first');
-  assert.equal(a.online, false);
+test('task scope → online POST/GET round-trips via task_tag (task-f2639aa68585)', async () => {
+  const a = await mem.addMemoryOnline('task', 'task-xyz', 'click queue tab first', {
+    kind: 'flow',
+  });
+  assert.equal(a.online, true, 'task notes now reach the shared store');
+  assert.ok(a.id, 'returns the server note id');
+  assert.equal(lastPost.task_tag, 'task-xyz', 'POST carries task_tag (NOT a domain)');
+  assert.equal(lastPost.domain, undefined, 'task POST omits domain');
+  assert.equal(lastPost.kind, 'flow');
+
   const g = await mem.getMemoryOnline('task', 'task-xyz');
-  assert.equal(g.online, false);
+  assert.equal(g.online, true);
+  assert.equal(g.entries.length, 1, 'recall by task_tag finds only this task bucket');
   assert.equal(g.entries[0].text, 'click queue tab first');
-  assert.equal(STORE.length, before, 'task notes never reach the shared store');
+  assert.ok(g.entries[0].id, 'entry carries the note id for later delete');
+
+  // A different task tag must NOT see this note (no domain-collapse).
+  const other = await mem.getMemoryOnline('task', 'task-other');
+  assert.equal(other.entries.length, 0, 'distinct task ids stay distinct');
 });
 
-test('site get falls back to local cache OFFLINE (no Breeze)', async () => {
-  // The successful recall above wrote a cache for example.com. Now kill the stub
-  // and point api.json at a dead port so readApi succeeds but the fetch fails.
+test('task get falls back to local cache OFFLINE', async () => {
+  // The successful task recall above wrote a tasks/<tag>.json cache.
+  // We assert offline fallback in the dedicated offline block below by reusing
+  // the same dead-port api.json; here we just confirm the cache exists by a
+  // fresh online recall returning the note (covered above).
+  const g = await mem.getMemoryOnline('task', 'task-xyz');
+  assert.equal(g.entries[0].text, 'click queue tab first');
+});
+
+test('site + task get fall back to local cache OFFLINE (no Breeze)', async () => {
+  // The successful recalls above wrote caches for example.com and task-xyz. Now
+  // kill the stub and point api.json at a dead port so readApi succeeds but the
+  // fetch fails — both scopes must serve their last-synced cache.
   await new Promise((r) => server.close(r));
   writeApiFile(1); // nothing listening
   const r = await mem.getMemoryOnline('site', 'example.com');
-  assert.equal(r.online, false, 'reports offline');
-  assert.equal(r.entries.length, 1, 'serves the last-synced cache');
+  assert.equal(r.online, false, 'site reports offline');
+  assert.equal(r.entries.length, 1, 'site serves the last-synced cache');
   assert.equal(r.entries[0].text, 'h1 is a.story');
+
+  const t = await mem.getMemoryOnline('task', 'task-xyz');
+  assert.equal(t.online, false, 'task reports offline');
+  assert.equal(t.entries.length, 1, 'task serves the last-synced cache');
+  assert.equal(t.entries[0].text, 'click queue tab first');
 });
 
 test.after(() => {

@@ -251,9 +251,19 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     // exactly like /app/task-data. NON-PHI: selectors/paths/how-to/code only —
     // the SERVER PHI-guards every write (422). We never log a note body.
     if (p === '/app/site-memory' && m === 'GET') {
+      // task-f2639aa68585: the store is now keyed by EITHER ?domain= (per-site)
+      // OR ?task_tag= (per-task); exactly one is supplied by the CLI per scope.
       const domain = url.searchParams.get('domain') ?? '';
-      if (!domain) throw Object.assign(new Error('domain required'), { status: 400 });
+      const taskTag = url.searchParams.get('task_tag') ?? '';
       const kind = url.searchParams.get('kind') ?? undefined;
+      if (taskTag) {
+        const { recallTaskMemory } = await import('./typebuild/site-memory');
+        const out = await recallTaskMemory(taskTag, { kind: kind || undefined });
+        return sendJson(res, 200, out);
+      }
+      if (!domain) {
+        throw Object.assign(new Error('domain or task_tag required'), { status: 400 });
+      }
       const { recallSiteMemory } = await import('./typebuild/site-memory');
       const out = await recallSiteMemory(domain, { kind: kind || undefined });
       return sendJson(res, 200, out);
@@ -261,15 +271,26 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (p === '/app/site-memory' && m === 'POST') {
       const body = await readJson<{
         domain?: string;
+        task_tag?: string;
         body?: string;
         kind?: string;
         url_pattern?: string;
       }>(req);
-      if (!body.domain || !body.body) {
-        throw Object.assign(new Error('domain and body required'), { status: 400 });
+      if (!body.body || (!body.domain && !body.task_tag)) {
+        throw Object.assign(new Error('body and (domain or task_tag) required'), {
+          status: 400,
+        });
+      }
+      if (body.task_tag) {
+        const { addTaskMemory } = await import('./typebuild/site-memory');
+        const out = await addTaskMemory(body.task_tag, body.body, {
+          kind: body.kind,
+          url_pattern: body.url_pattern,
+        });
+        return sendJson(res, 201, out);
       }
       const { addSiteMemory } = await import('./typebuild/site-memory');
-      const out = await addSiteMemory(body.domain, body.body, {
+      const out = await addSiteMemory(body.domain as string, body.body, {
         kind: body.kind,
         url_pattern: body.url_pattern,
       });

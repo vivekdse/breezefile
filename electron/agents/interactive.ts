@@ -133,6 +133,33 @@ export async function runTaskInteractive(
     console.warn('[interactive] ignoring unknown task flags:', unknown.join(', '));
   }
 
+  // task-93576169693f — inject the GLOBAL server-hosted operator instructions
+  // into standalone interactive sessions too (TypeBuild-launched ones already do
+  // this in electron/sources/typebuild.ts; this covers the non-TypeBuild
+  // `claude` path). REUSES the same fetch+append helper.
+  //
+  // SCOPE DECISION: the operator-instructions doc is the BROWSER playbook —
+  // standing guidance for operating the user's browser (selectors / fast paths /
+  // gotchas). It is browser-operator-specific, NOT general agent guidance, so we
+  // inject it ONLY for browser runs — those carrying the `playwright` flag (the
+  // in-app analog of `chrome`, the flag that points the helper CLIs at Breeze's
+  // CDP and opens the operator window below). A plain interactive run (e.g. a
+  // coding task) gets nothing, so the doc never bloats unrelated sessions.
+  //
+  // Defensive + additive: any failure (offline, unset doc) leaves it empty and
+  // the launch proceeds on the bundled playbook. NON-PHI standing guidance —
+  // never a value; never logged.
+  let operatorInstructions = '';
+  if (playwright) {
+    try {
+      const { fetchOperatorInstructions } = await import('../typebuild/operator-instructions');
+      const oi = await fetchOperatorInstructions('global');
+      operatorInstructions = oi.body.trim();
+    } catch {
+      /* server-hosted instructions are additive — never block a launch on them */
+    }
+  }
+
   // SPIKE (spike/playwright-cdp): the `playwright` flag is the in-app analog of
   // `chrome` — it opens the side-by-side browser WINDOW (below) and points the
   // helper CLIs at its CDP endpoint. The browser PLAYBOOK is no longer appended
@@ -155,6 +182,9 @@ export async function runTaskInteractive(
   const args = [
     ...flagArgs,
     ...(opts.extraArgs ?? []),
+    // task-93576169693f — global operator instructions as a system-prompt
+    // addendum (browser runs only; empty when unset/offline → omitted).
+    ...(operatorInstructions ? ['--append-system-prompt', operatorInstructions] : []),
     '--add-dir', cwd,
     ...(opts.omitPrompt ? [] : ['--', effectivePrompt]),
   ];
