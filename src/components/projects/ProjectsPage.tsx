@@ -56,6 +56,9 @@ import {
   loadProjectsViewPrefs,
   saveProjectsViewPrefs,
 } from '../../projectsViewPrefs';
+import { ProjectFolderBlock } from './ProjectFolderBlock';
+import type { ProjectFolderRow, ProjectTasksProvider } from './ProjectFolderBlock';
+import { useProjectTaskRows } from './useProjectTaskRows';
 import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
@@ -102,15 +105,6 @@ const STATUS_LABEL: Record<ProjStatus, string> = {
   idle: 'idle',
   clear: 'clear',
 };
-
-function statsRollUpSentence(s: TaskStats): string {
-  const parts: string[] = [];
-  if (s.total > 0) parts.push(`${s.done} of ${s.total} done`);
-  if (s.inProgress > 0) parts.push(`${s.inProgress} working`);
-  if (s.needsYou > 0) parts.push(`${s.needsYou} needs you`);
-  if (s.blocked > 0) parts.push(`${s.blocked} blocked`);
-  return parts.join(' · ');
-}
 
 function ProjectsPageInner() {
   const { state, dispatch } = useStore();
@@ -258,7 +252,8 @@ function ProjectsPageInner() {
   }, [gridNodes, gridCursor]);
 
   // ── L2 derived data ─────────────────────────────────────────────────────────
-  const detailProject = detailId ? nodeById.get(detailId)?.project ?? null : null;
+  const detailNode = detailId ? nodeById.get(detailId) ?? null : null;
+  const detailProject = detailNode?.project ?? null;
   const detailChain = useMemo(
     () => (detailId ? ancestorChain(roots, detailId) : []),
     [roots, detailId],
@@ -318,38 +313,100 @@ function ProjectsPageInner() {
     return out;
   }, [detailTasks, expanded]);
 
-  // Per-parent roll-up of child statuses → the muted sentence on the row.
-  const childStatsByParent = useMemo(() => {
-    const m = new Map<string, TaskStats>();
-    const empty = (): TaskStats => ({
-      total: 0,
-      open: 0,
-      inProgress: 0,
-      done: 0,
-      cancelled: 0,
-      blocked: 0,
-      needsYou: 0,
-    });
-    for (const t of detailTasks) {
-      const pid = t.parentTaskId;
-      if (!pid) continue;
-      const s = m.get(pid) ?? empty();
-      s.total += 1;
-      const rs = rowStatusOf(t);
-      if (rs === 'done') s.done += 1;
-      else if (rs === 'working') s.inProgress += 1;
-      else if (rs === 'blocked') {
-        s.blocked += 1;
-        s.needsYou += 1;
-      } else if (rs === 'need') s.needsYou += 1;
-      m.set(pid, s);
-    }
-    return m;
-  }, [detailTasks]);
-
   useEffect(() => {
     if (treeCursor >= treeRows.length) setTreeCursor(0);
   }, [treeRows, treeCursor]);
+
+  // ── folder-block task rows (task-1bf3a297c9f9) ──────────────────────────────
+  // A project renders its tasks as FILES (real TaskRows). rowsForProject shapes
+  // a project's own tasks into a (parent → child) folder list, honoring the
+  // shared `expanded` set so a parent collapses its children — the same model as
+  // the L2 tree, now reused by ProjectFolderBlock at any nesting level.
+  const tasksByProject = useMemo(() => {
+    const m = new Map<string, Task[]>();
+    for (const t of allTasks) {
+      if (!t.projectId) continue;
+      const arr = m.get(t.projectId) ?? [];
+      arr.push(t);
+      m.set(t.projectId, arr);
+    }
+    return m;
+  }, [allTasks]);
+
+  const rowsForProject = useMemo(
+    () =>
+      (projectId: string): ProjectFolderRow[] => {
+        const own = tasksByProject.get(projectId) ?? [];
+        if (own.length === 0) return [];
+        const byId = new Map(own.map((t) => [t.id, t]));
+        const childrenOf = new Map<string, Task[]>();
+        const parents: Task[] = [];
+        for (const t of own) {
+          const pid = t.parentTaskId;
+          if (pid && byId.has(pid)) {
+            const arr = childrenOf.get(pid) ?? [];
+            arr.push(t);
+            childrenOf.set(pid, arr);
+          } else {
+            parents.push(t);
+          }
+        }
+        const out: ProjectFolderRow[] = [];
+        for (const parent of parents) {
+          const kids = childrenOf.get(parent.id) ?? [];
+          const done = kids.filter(
+            (k) => k.status === 'done' || k.status === 'cancelled',
+          ).length;
+          out.push({ task: parent, depth: 0, childCount: kids.length, doneChildCount: done });
+          if (expanded.has(parent.id)) {
+            for (const k of kids) {
+              out.push({ task: k, depth: 1, childCount: 0, doneChildCount: 0 });
+            }
+          }
+        }
+        return out;
+      },
+    [tasksByProject, expanded],
+  );
+
+  // Selection + cursor for the folder-block surface. cursorKey is a task id OR a
+  // project id (sub-project rows). Phase 1 keeps selection light; Phase 4 wires
+  // the full flat keyboard model across headers + rows.
+  const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+  const [cursorKey, setCursorKey] = useState<string | null>(null);
+
+  const taskRowState = useMemo(
+    () => ({ selected: selectedTasks, cursorKey, expanded }),
+    [selectedTasks, cursorKey, expanded],
+  );
+  const taskRowHandlers = useMemo(
+    () => ({
+      onRowClick: (_e: React.MouseEvent, task: Task) => setCursorKey(task.id),
+      onToggleSelect: (taskId: string) =>
+        setSelectedTasks((prev) => {
+          const next = new Set(prev);
+          if (next.has(taskId)) next.delete(taskId);
+          else next.add(taskId);
+          return next;
+        }),
+      onSetCursor: (taskId: string) => setCursorKey(taskId),
+      onToggleExpand: (taskId: string) => toggleExpand(taskId),
+      blockedByFor: undefined,
+      blockedByTitles: (task: Task) => resolveBlockedBy(task.blockedBy, allTasks),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allTasks],
+  );
+
+  const { renderTaskRow, overlays: taskRowOverlays } = useProjectTaskRows(
+    taskRowState,
+    taskRowHandlers,
+  );
+
+  const tasksProvider: ProjectTasksProvider = useMemo(
+    () => ({ rowsFor: rowsForProject, renderTaskRow }),
+    [rowsForProject, renderTaskRow],
+  );
 
   // ── navigation ──────────────────────────────────────────────────────────────
   function enterCard(node: ProjectNode) {
@@ -400,6 +457,42 @@ function ProjectsPageInner() {
         detail: { mode: 'create', defaultFolder: '', projectId },
       }),
     );
+  }
+  // task-3ff338f80de5 — "open project's bound folder" routes through the existing
+  // folder-tab path (cross-platform; the folder open is OS-agnostic). The bound
+  // folder shown in the project header becomes a click target → a folder tab.
+  function openProjectFolder(folder: string) {
+    if (!folder) return;
+    dispatch({
+      type: 'newTab',
+      tab: {
+        id: crypto.randomUUID(),
+        kind: 'folder',
+        taskId: null,
+        trail: [folder],
+        selected: { 0: 0 },
+        marks: {},
+        sortKey: 'name',
+        sortReverse: false,
+        showHidden: false,
+        viewMode: 'list',
+        foldersFirst: true,
+        filter: '',
+        tagViz: [],
+        tagFilter: { mode: 'off', ids: [] },
+        history: [],
+        forward: [],
+      },
+    });
+  }
+  // Drill into a (sub-)project from a folder block: reuse the detail-open path.
+  function openProjectDetail(projectId: string) {
+    if (!nodeById.has(projectId)) return;
+    setDetailId(projectId);
+    setTreeCursor(0);
+    setExpanded(new Set());
+    setLevel(2);
+    setCursorKey(projectId);
   }
   // task-2c5448be520a — archive/unarchive a project, then re-fetch so the row
   // appears/disappears per the current Show-archived toggle. NON-PHI.
@@ -678,27 +771,33 @@ function ProjectsPageInner() {
             allProjects={projects}
             scopeId={scopeId}
           />
-        ) : (
+        ) : detailProject && detailNode ? (
           <ProjectDetail
-            treeRef={treeRef}
+            node={detailNode}
             project={detailProject}
             effectiveDesc={effectiveDesc}
             instructionTotal={effectiveInstructions?.total ?? 0}
             instructionSummary={effectiveInstructions?.summary ?? ''}
-            rows={treeRows}
-            childStatsByParent={childStatsByParent}
-            expanded={expanded}
-            treeCursor={treeCursor}
-            allTasks={allTasks}
+            attention={attention}
+            rollUp={rollUp}
+            tasksProvider={tasksProvider}
+            cursorKey={cursorKey}
             onBack={() => setLevel(1)}
-            onSetCursor={setTreeCursor}
-            onToggleExpand={toggleExpand}
-            onOpenTask={openTaskDetail}
-            onNewTask={() => detailId && newProjectTask(detailId)}
+            onOpenProject={openProjectDetail}
+            onOpenFolder={openProjectFolder}
+            onNewTask={(pid) => newProjectTask(pid)}
             onArchive={(next) => detailId && void setProjectArchived(detailId, next)}
           />
+        ) : (
+          <>
+            <button type="button" className="projects__back" onClick={() => setLevel(1)}>
+              ‹ h — back to all projects
+            </button>
+            <div className="ptree__empty">Project not found.</div>
+          </>
         )}
       </div>
+      {taskRowOverlays}
       {showSwitcher && (
         <QuickSwitcher
           roots={roots}
@@ -1009,181 +1108,74 @@ function ProjectsGrid({
   );
 }
 
-// ── L2: a single project's task tree ────────────────────────────────────────────
+// ── L2: a single project rendered as a FOLDER (task-1bf3a297c9f9) ──────────────
+// The drilled-in view: the project as a folder-hero header + its tasks as file
+// rows (real TaskRows) + nested sub-projects as nested folder blocks. Replaces
+// the bespoke ptree/projects__l2head markup with ProjectFolderBlock so the
+// surface reads exactly like a folder at the file-manager density.
 function ProjectDetail({
-  treeRef,
+  node,
   project,
   effectiveDesc,
   instructionTotal,
   instructionSummary,
-  rows,
-  childStatsByParent,
-  expanded,
-  treeCursor,
-  allTasks,
+  attention,
+  rollUp,
+  tasksProvider,
+  cursorKey,
   onBack,
-  onSetCursor,
-  onToggleExpand,
-  onOpenTask,
+  onOpenProject,
+  onOpenFolder,
   onNewTask,
   onArchive,
 }: {
-  treeRef: React.RefObject<HTMLDivElement | null>;
-  project: Project | null;
+  node: ProjectNode;
+  project: Project;
   effectiveDesc: string;
   instructionTotal: number;
   instructionSummary: string;
-  rows: Array<{ task: Task; depth: 0 | 1; childCount: number; doneChildCount: number }>;
-  childStatsByParent: Map<string, TaskStats>;
-  expanded: Set<string>;
-  treeCursor: number;
-  allTasks: Task[];
+  attention: Map<string, ProjectAttention>;
+  rollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
+  tasksProvider: ProjectTasksProvider;
+  cursorKey: string | null;
   onBack: () => void;
-  onSetCursor: (i: number) => void;
-  onToggleExpand: (id: string) => void;
-  onOpenTask: (t: Task) => void;
-  onNewTask: () => void;
+  onOpenProject: (projectId: string) => void;
+  onOpenFolder: (folder: string) => void;
+  onNewTask: (projectId: string) => void;
   /** Archive (true) or unarchive (false) THIS project. */
   onArchive: (archived: boolean) => void;
 }) {
-  if (!project) {
-    return (
-      <>
+  return (
+    <>
+      <div className="projects__l2bar">
         <button type="button" className="projects__back" onClick={onBack}>
           ‹ h — back to all projects
         </button>
-        <div className="ptree__empty">Project not found.</div>
-      </>
-    );
-  }
-  const bind = project.folders.length > 0 ? project.folders.join(' · ') : 'no folder bound';
-  return (
-    <>
-      <button type="button" className="projects__back" onClick={onBack}>
-        ‹ h — back to all projects
-      </button>
-      <div className="projects__l2head">
-        <div className="projects__l2top">
-          <h2 className="projects__l2name">{project.name}</h2>
-          <div className="projects__l2bind">
-            <span aria-hidden="true">⛓</span>
-            <span className="mono">{bind}</span>
-          </div>
-          {/* task-223d400ffc1a — per-project create. Opens the shared task
-              composer with this project pre-selected. */}
-          <button
-            type="button"
-            className="projects__newtask"
-            onClick={onNewTask}
-            title="New task in this project (n)"
-          >
-            + New task <kbd>n</kbd>
-          </button>
-          {/* task-2c5448be520a — archive/unarchive this project. */}
-          <button
-            type="button"
-            className="projects__newtask projects__archive"
-            onClick={() => onArchive(project.archived !== true)}
-            title={
-              project.archived === true ? 'Unarchive project' : 'Archive project'
-            }
-          >
-            {project.archived === true ? '↺ Unarchive' : '⊟ Archive'}
-          </button>
-        </div>
-        {effectiveDesc && (
-          <div className="projects__desc">
-            {effectiveDesc} <span className="pcard__ctx">{CTX_MARK}</span>
-          </div>
-        )}
-        {instructionTotal > 0 && (
-          <div className="projects__ins" title={instructionSummary}>
-            ⚖ Instruction scopes · {instructionTotal}
-          </div>
-        )}
+        {/* task-2c5448be520a — archive/unarchive this project. */}
+        <button
+          type="button"
+          className="projects__newtask projects__archive"
+          onClick={() => onArchive(project.archived !== true)}
+          title={project.archived === true ? 'Unarchive project' : 'Archive project'}
+        >
+          {project.archived === true ? '↺ Unarchive' : '⊟ Archive'}
+        </button>
       </div>
 
-      <div className="ptree" ref={treeRef} role="list">
-        {rows.length === 0 ? (
-          <div className="ptree__empty">No tasks in this project yet.</div>
-        ) : (
-          rows.map((row, i) => {
-            const t = row.task;
-            const rs = rowStatusOf(t);
-            const dotCls =
-              rs === 'working'
-                ? 'working'
-                : rs === 'blocked'
-                  ? 'blocked'
-                  : rs === 'need'
-                    ? 'need'
-                    : '';
-            const isParent = row.childCount > 0;
-            const childStats = isParent ? childStatsByParent.get(t.id) : undefined;
-            const rollSentence = childStats ? statsRollUpSentence(childStats) : '';
-            const blockedTitles =
-              rs === 'blocked' ? resolveBlockedBy(t.blockedBy, allTasks) : [];
-            return (
-              <div
-                key={t.id}
-                data-tree-i={i}
-                role="listitem"
-                className={[
-                  'trow',
-                  isParent ? 'parent' : 'leaf',
-                  row.depth === 1 ? 'child' : '',
-                  i === treeCursor ? 'cursor' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => {
-                  onSetCursor(i);
-                  if (isParent) onToggleExpand(t.id);
-                  else onOpenTask(t);
-                }}
-              >
-                {isParent ? (
-                  <button
-                    type="button"
-                    className="trow__twist"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSetCursor(i);
-                      onToggleExpand(t.id);
-                    }}
-                    aria-label={expanded.has(t.id) ? 'Collapse' : 'Expand'}
-                  >
-                    {expanded.has(t.id) ? '▾' : '▸'}
-                  </button>
-                ) : (
-                  <span className="trow__twist" aria-hidden="true" />
-                )}
-                <span className={['trow__dot', dotCls].filter(Boolean).join(' ')} aria-hidden="true" />
-                <div className="trow__body">
-                  <div className="trow__nm">
-                    {t.title}
-                    {rollSentence && <span className="trow__roll">{rollSentence}</span>}
-                  </div>
-                  {blockedTitles.length > 0 && (
-                    <div className="trow__meta">
-                      <span className="trow__dep">⛔ blocked by {blockedTitles.join(', ')}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="trow__right">
-                  {rs === 'blocked' ? (
-                    <span className="pbadge blocked">blocked</span>
-                  ) : rs === 'need' ? (
-                    <span className="pbadge need">needs you</span>
-                  ) : rs === 'working' ? (
-                    <span className="pbadge working">working</span>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+      <ProjectFolderBlock
+        node={node}
+        attention={attention}
+        rollUp={rollUp}
+        effectiveDesc={effectiveDesc}
+        instructionTotal={instructionTotal}
+        instructionSummary={instructionSummary}
+        tasks={tasksProvider}
+        scale="hero"
+        onOpenProject={onOpenProject}
+        onOpenFolder={onOpenFolder}
+        onNewTask={onNewTask}
+        cursorKey={cursorKey}
+      />
     </>
   );
 }

@@ -1,0 +1,193 @@
+/*
+ * task-1bf3a297c9f9 — folder-aesthetic project block. A project rendered as a
+ * FOLDER: a folder-header (reusing .folder-header__* from FolderHeader.css) +
+ * a .folder-list__list of task rows + nested sub-project blocks.
+ *
+ * No new color/space primitives — every value rides existing tokens
+ * (--fs-*, --sp-*, --r-*, --accent*, --rule-on-panel, …). The header borrows
+ * FolderHeader's classes wholesale; the rules here only (a) re-scale the serif
+ * header for the "folder inside a list" context, (b) frame the block, and
+ * (c) lay out the collapsed sub-project row.
+ */
+
+.pfolder {
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-xl);
+  background: var(--panel-2, var(--panel));
+  overflow: hidden;
+  margin-bottom: var(--sp-4);
+}
+
+/* Nested sub-folders indent + lose the heavy frame so they read as contained. */
+.pfolder .pfolder {
+  margin: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-color: var(--border-1);
+  background: transparent;
+}
+.pfolder--nest-1 { border-left: 2px solid var(--accent-soft); }
+.pfolder--nest-2 { border-left: 2px solid var(--border-2); }
+.pfolder--nest-3 { border-left: 2px solid var(--border-1); }
+
+/* ── header: reuse folder-header__* but re-scale for in-list context ──────── */
+.pfolder-header {
+  padding: var(--sp-4) var(--sp-5) var(--sp-2);
+}
+/* the drilled "hero" scale keeps the big serif; the inline (root/nested) scale
+   drops the headline to a list-folder size. */
+.pfolder-header--inline {
+  padding: var(--sp-3) var(--sp-4) var(--sp-1);
+}
+.pfolder-header__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin: var(--sp-1) 0 var(--sp-1);
+}
+.pfolder-header--inline .pfolder-header__title {
+  /* a "folder inside a list" scale — not the 32px folder hero. */
+  font-size: var(--fs-lg);
+  font-variation-settings: 'opsz' 32;
+}
+.pfolder-header__tag {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--fg-3);
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+/* bound-folder kicker → a click target on the right of the title. */
+.pfolder-header__bind {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  align-self: center;
+}
+.pfolder-header__bind:hover {
+  text-decoration: underline;
+}
+.pfolder-header__bind .mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+}
+.pfolder-header__bind--static {
+  color: var(--fg-3);
+  cursor: default;
+}
+.pfolder-header__bind--static:hover {
+  text-decoration: none;
+}
+.pfolder-header__bind--none {
+  font-style: italic;
+}
+
+.pfolder-header__dek {
+  margin: 0 0 var(--sp-1);
+}
+.pfolder-header--inline .pfolder-header__dek {
+  font-size: 13px;
+}
+.pfolder-header__dek--empty {
+  color: var(--fg-dim);
+}
+.pfolder-header__need {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+/* the rule row: instruction-scope chip + new-task + ❦, on one line. */
+.pfolder-header__rule {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.pfolder-header__newtask {
+  font-family: var(--font-sans);
+}
+.pfolder-header__ornament {
+  flex: 1;
+  margin: 0;
+}
+
+/* ── task list (PROJECT = FOLDER, TASK = FILE) ───────────────────────────── */
+/* The shared .folder-list__list is a flex-1 scroller; here it's a static block
+   inside the page scroller, so neutralize flex/overflow and keep its density. */
+.pfolder__list.folder-list__list {
+  flex: none;
+  overflow: visible;
+  min-height: 0;
+  padding: var(--sp-1) 0 var(--sp-2);
+  border-top: 1px solid var(--rule-on-panel);
+}
+.pfolder__empty {
+  padding: var(--sp-4) var(--sp-5);
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm);
+  border-top: 1px solid var(--rule-on-panel);
+}
+
+.pfolder__subs {
+  padding: 0 0 var(--sp-2);
+}
+
+/* ── collapsed sub-project row (Q5) — a folder-like row, mirrors a dir row ── */
+.pfolder-subrow {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5);
+  cursor: pointer;
+  transition: background var(--motion-hover);
+}
+.pfolder-subrow:hover {
+  background: var(--bg-3, var(--accent-soft));
+}
+.pfolder-subrow.cursor {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.pfolder-subrow__glyph {
+  justify-self: center;
+  color: var(--fg-dim);
+}
+.pfolder-subrow__name {
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pfolder-subrow__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  justify-self: end;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.pfolder-subrow__need {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--warn);
+  font-weight: 650;
+}
+.pfolder-subrow__need .num {
+  font-variant-numeric: tabular-nums;
+}
+.pfolder-subrow__chev {
+  color: var(--fg-dim);
+}
