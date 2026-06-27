@@ -58,6 +58,14 @@ import {
 import { ProjectFolderBlock, ProjectRow } from './ProjectFolderBlock';
 import type { ProjectFolderRow, ProjectTasksProvider } from './ProjectFolderBlock';
 import { useProjectTaskRows } from './useProjectTaskRows';
+// task-49b7b37c8a02 — type-to-command: the Home quick-switcher blends verbs
+// (project/task + top-level) with project/task entity fallback, mirroring
+// ChipPrompt's allOptions/pickOption pattern.
+import { effectiveVerbsFor, useVerbCtx, type VerbDef } from '../ChipPrompt';
+import { rankPaletteVerbs } from '../../verbPalette.mjs';
+import type { PaletteVerb } from '../../verbPalette.mjs';
+import { fm as bridgeFm } from '../../bridge';
+import type { Launcher } from '../../bridge';
 import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
@@ -108,6 +116,45 @@ function ProjectsPageInner() {
   // 'projects'). Accept both so keyboard/event handling stays live on Home.
   const activeKind = state.tabs[state.activeTab]?.kind;
   const isActive = activeKind === 'home' || activeKind === 'projects';
+
+  // ── verbs for type-to-command (task-49b7b37c8a02) ───────────────────────────
+  // The Home quick-switcher blends VERBS (project/task + top-level, gated to the
+  // 'home' tab kind via effectiveVerbsFor) with the project/task entity
+  // fallback. Verbs run through the same path as the Cmd-K palette: hand the id
+  // to ChipPrompt via setMode/command, which owns slot collection + execution.
+  const verbCtx = useVerbCtx();
+  const [launchers, setLaunchers] = useState<Launcher[]>([]);
+  useEffect(() => {
+    void bridgeFm.launchersList().then(setLaunchers).catch(() => {});
+  }, []);
+  const paletteVerbs: PaletteVerb[] = useMemo(() => {
+    const defs: VerbDef[] = effectiveVerbsFor({
+      tasksEnabled: state.taskManagementEnabled,
+      tabKind: 'home',
+      launchers,
+    });
+    return defs.map((v) => {
+      const avail = verbCtx ? v.isAvailable(verbCtx) : { ok: true };
+      let description = '';
+      try {
+        description = verbCtx ? v.describe(verbCtx) : '';
+      } catch {
+        description = '';
+      }
+      return {
+        id: v.id,
+        label: v.label,
+        aliases: v.aliases,
+        category: v.category,
+        description,
+        available: avail.ok,
+        keybinding: v.keybinding,
+      };
+    });
+  }, [state.taskManagementEnabled, launchers, verbCtx]);
+  const runVerb = (verbId: string) => {
+    dispatch({ type: 'setMode', mode: 'command', verb: verbId });
+  };
 
   // ── data ──────────────────────────────────────────────────────────────────
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1065,6 +1112,11 @@ function ProjectsPageInner() {
           nodeById={nodeById}
           attention={attention}
           tasks={allTasks}
+          verbs={paletteVerbs}
+          onPickVerb={(id) => {
+            setShowSwitcher(false);
+            runVerb(id);
+          }}
           onClose={() => setShowSwitcher(false)}
           onPickProject={(id) => {
             setShowSwitcher(false);
@@ -1758,6 +1810,7 @@ function CreateForm({
 // fork the task. Task titles are PHI: rendered in-app for the operator only,
 // never written to disk/logs (same contract as the L2 tree).
 type SwitchItem =
+  | { kind: 'verb'; id: string; label: string; sub: string }
   | { kind: 'project'; id: string; label: string; sub: string; status: ProjStatus }
   | { kind: 'task'; task: Task; label: string; sub: string; status: RowStatus };
 
@@ -1766,6 +1819,8 @@ function QuickSwitcher({
   nodeById,
   attention,
   tasks,
+  verbs,
+  onPickVerb,
   onClose,
   onPickProject,
   onPickTask,
@@ -1774,6 +1829,9 @@ function QuickSwitcher({
   nodeById: Map<string, ProjectNode>;
   attention: Map<string, ProjectAttention>;
   tasks: Task[];
+  /** task-49b7b37c8a02 — verbs available on Home (project/task + top-level). */
+  verbs: PaletteVerb[];
+  onPickVerb: (id: string) => void;
   onClose: () => void;
   onPickProject: (id: string) => void;
   onPickTask: (t: Task) => void;
@@ -1831,10 +1889,31 @@ function QuickSwitcher({
       needle === '' ||
       it.label.toLowerCase().includes(needle) ||
       it.sub.toLowerCase().includes(needle);
+    // task-49b7b37c8a02 — VERBS first when the user is typing. Mirrors
+    // ChipPrompt: the verb picker leads, and entity hits blend in for non-empty
+    // queries. With an empty query we show only entities (no verb spam — the
+    // ':'/Cmd-K palette is the place to browse all verbs).
+    const verbItems: SwitchItem[] =
+      needle === ''
+        ? []
+        : rankPaletteVerbs(verbs, q, [])
+            .filter((v) => v.available)
+            .slice(0, 8)
+            .map((v) => ({
+              kind: 'verb' as const,
+              id: v.id,
+              label: v.label,
+              sub: v.description || (v.category ?? 'command'),
+            }));
     const projects = projectItems.filter(match).slice(0, 30);
     const tasksF = taskItems.filter(match).slice(0, 30);
-    return { projects, tasksF, flat: [...projects, ...tasksF] };
-  }, [q, projectItems, taskItems]);
+    return {
+      verbItems,
+      projects,
+      tasksF,
+      flat: [...verbItems, ...projects, ...tasksF],
+    };
+  }, [q, verbs, projectItems, taskItems]);
 
   useEffect(() => {
     if (cursor >= results.flat.length) setCursor(0);
@@ -1848,7 +1927,8 @@ function QuickSwitcher({
 
   function pick(it: SwitchItem | undefined) {
     if (!it) return;
-    if (it.kind === 'project') onPickProject(it.id);
+    if (it.kind === 'verb') onPickVerb(it.id);
+    else if (it.kind === 'project') onPickProject(it.id);
     else onPickTask(it.task);
   }
 
@@ -1871,19 +1951,29 @@ function QuickSwitcher({
 
   const renderItem = (it: SwitchItem, i: number) => {
     const glyph =
-      it.kind === 'project'
-        ? STATUS_GLYPH[it.status]
-        : it.status === 'blocked'
-          ? '⛔'
-          : it.status === 'need'
-            ? '⚑'
-            : it.status === 'working'
-              ? '◷'
-              : '◌';
+      it.kind === 'verb'
+        ? '⌘'
+        : it.kind === 'project'
+          ? STATUS_GLYPH[it.status]
+          : it.status === 'blocked'
+            ? '⛔'
+            : it.status === 'need'
+              ? '⚑'
+              : it.status === 'working'
+                ? '◷'
+                : '◌';
+    const key =
+      it.kind === 'verb'
+        ? `verb:${it.id}`
+        : it.kind === 'project'
+          ? `project:${it.id}`
+          : `task:${it.task.id}`;
+    const kindLabel =
+      it.kind === 'verb' ? 'command' : it.kind === 'project' ? 'project' : 'task';
     return (
       <button
         type="button"
-        key={`${it.kind}:${it.kind === 'project' ? it.id : it.task.id}`}
+        key={key}
         data-sw-i={i}
         className={['qsw__item', i === cursor ? 'cursor' : ''].filter(Boolean).join(' ')}
         onMouseMove={() => setCursor(i)}
@@ -1895,7 +1985,7 @@ function QuickSwitcher({
         <span className="qsw__body">
           <span className="qsw__label">{it.label}</span>
           <span className="qsw__sub">
-            {it.kind === 'project' ? 'project' : 'task'} · {it.sub}
+            {kindLabel} · {it.sub}
           </span>
         </span>
       </button>
@@ -1919,7 +2009,7 @@ function QuickSwitcher({
             setQ(e.target.value);
             setCursor(0);
           }}
-          placeholder="Search projects & tasks…"
+          placeholder="Type a command or search projects & tasks…"
           spellCheck={false}
         />
         <div className="qsw__list" ref={listRef}>
@@ -1927,13 +2017,22 @@ function QuickSwitcher({
             <div className="qsw__empty">No matches.</div>
           ) : (
             <>
+              {results.verbItems.length > 0 && (
+                <div className="qsw__group">Commands</div>
+              )}
+              {results.verbItems.map((it, n) => renderItem(it, n))}
               {results.projects.length > 0 && (
                 <div className="qsw__group">Projects</div>
               )}
-              {results.projects.map((it) => renderItem(it, results.flat.indexOf(it)))}
+              {results.projects.map((it, n) =>
+                renderItem(it, results.verbItems.length + n),
+              )}
               {results.tasksF.length > 0 && <div className="qsw__group">Tasks</div>}
-              {results.tasksF.map((it) =>
-                renderItem(it, results.projects.length + results.tasksF.indexOf(it)),
+              {results.tasksF.map((it, n) =>
+                renderItem(
+                  it,
+                  results.verbItems.length + results.projects.length + n,
+                ),
               )}
             </>
           )}
