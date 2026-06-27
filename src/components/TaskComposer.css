@@ -142,6 +142,17 @@
   flex-direction: column;
   gap: 14px;
 }
+/* task-aa513e612954 — a clear, always-visible label at the top-left of the
+   focused field so the user knows exactly what they're editing. */
+.composer__field-label {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent, var(--ink));
+  margin-bottom: -6px;
+}
 .composer__q-prompt {
   font-size: 18px;
   font-weight: 500;

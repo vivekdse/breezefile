@@ -695,6 +695,12 @@ export function TaskComposer(props: Props) {
   const dateInputRef = useRef<HTMLInputElement>(null);
   const cronInputRef = useRef<HTMLInputElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
+  // task-2d96db620f6b / task-aa513e612954 — the wrapper of the CURRENTLY active
+  // section. Each <section> assigns this ref while it's active, so we can scroll
+  // it to the top of the composer's scroll container when it activates (instead
+  // of letting its option list open below the fold) and anchor the focused-field
+  // label to it.
+  const activeSectionRef = useRef<HTMLElement>(null);
   const createBtnRef = useRef<HTMLButtonElement>(null);
   const startDateRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
@@ -723,6 +729,19 @@ export function TaskComposer(props: Props) {
       sectionRef.current?.focus();
     }
   }, [active]);
+
+  // task-2d96db620f6b — when a section becomes active, bring it to the TOP of
+  // the composer's scroll container so its options render in view rather than
+  // opening below the fold and forcing a manual scroll-up. Runs after the focus
+  // effect's layout settles (next frame) so the expanded body's height is known.
+  useEffect(() => {
+    const el = activeSectionRef.current;
+    if (!el) return;
+    const id = requestAnimationFrame(() => {
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [active, phase]);
 
   function goBack() {
     if (activeIdx > 0) setActiveIdx(activeIdx - 1);
@@ -1547,6 +1566,30 @@ export function TaskComposer(props: Props) {
   function isActiveSection(id: QuestionId): boolean {
     return phase === 'editing' && active === id;
   }
+  // task-2d96db620f6b / task-aa513e612954 — assign the shared active-section ref
+  // to whichever section is currently active (so we can scroll it to top and the
+  // label can anchor to it). Returns undefined for inactive sections.
+  function sectionRefFor(id: QuestionId) {
+    return isActiveSection(id) ? activeSectionRef : undefined;
+  }
+  // task-aa513e612954 — a clear, persistent label for the focused field, shown
+  // top-left of its active body so the user always knows what they're editing.
+  // Title is the headline (no label); the rest reuse labelFor's vocabulary,
+  // surfaced as a readable field name.
+  function fieldLabelFor(id: QuestionId): string | null {
+    if (id === 'title') return null;
+    if (id === 'who') return 'Who runs this';
+    if (id === 'start') return isTypebuild ? 'Defer until' : 'Start date';
+    if (id === 'when') return executor === 'claude' ? 'When it runs' : 'Due date';
+    const short = labelFor(id);
+    return short ? short.charAt(0).toUpperCase() + short.slice(1) : null;
+  }
+  // The top-left field label element for an active section.
+  function FieldLabel({ id }: { id: QuestionId }) {
+    const text = fieldLabelFor(id);
+    if (!text) return null;
+    return <div className="composer__field-label">{text}</div>;
+  }
 
   function renderInert(q: QuestionId) {
     // In edit mode every collapsed section should show the task's
@@ -1619,6 +1662,7 @@ export function TaskComposer(props: Props) {
         <main className="composer__main">
           {/* Q1 — Title */}
           <section
+            ref={sectionRefFor('title')}
             className={sectionClasses('title')}
             onClick={() => setActiveIdx(0)}
           >
@@ -1666,11 +1710,13 @@ export function TaskComposer(props: Props) {
               QUESTIONS_TYPEBUILD, so keyboard navigation skips it). */}
           {!isTypebuild && (
           <section
+            ref={sectionRefFor('folder')}
             className={sectionClasses('folder')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('folder'))}
           >
             {isActiveSection('folder') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="folder" />
                 <div className="composer__q-prompt">{promptFor('folder')}</div>
                 <ul className="composer__options" role="listbox">
                   {visibleFolderPresets.map((p, i) => (
@@ -1728,11 +1774,13 @@ export function TaskComposer(props: Props) {
               the user can override or pick None. Arrow + Enter to pick. */}
           {isTypebuild && (
             <section
+              ref={sectionRefFor('project')}
               className={sectionClasses('project')}
               onClick={() => setActiveIdx(QUESTIONS.indexOf('project'))}
             >
               {isActiveSection('project') ? (
                 <div className="composer__q-active-body">
+                  <FieldLabel id="project" />
                   <div className="composer__q-prompt">{promptFor('project')}</div>
                   {attachedProject && (
                     <div className="composer__attached" role="status">
@@ -1785,11 +1833,13 @@ export function TaskComposer(props: Props) {
 
           {/* Q3 — Who */}
           <section
+            ref={sectionRefFor('who')}
             className={sectionClasses('who')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('who'))}
           >
             {isActiveSection('who') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="who" />
                 <div className="composer__q-prompt">{promptFor('who')}</div>
                 <ul className="composer__options" role="listbox">
                   {WHO_OPTIONS.map((o, i) => (
@@ -1826,6 +1876,7 @@ export function TaskComposer(props: Props) {
           {/* Notes — sits right after Who: what / where / who / notes are
               the fields that matter; scheduling lives below. */}
           <section
+            ref={sectionRefFor('notes')}
             className={sectionClasses('notes')}
             onClick={() => {
               setActiveIdx(QUESTIONS.indexOf('notes'));
@@ -1834,6 +1885,7 @@ export function TaskComposer(props: Props) {
           >
             {isActiveSection('notes') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="notes" />
                 <div className="composer__q-prompt">{promptFor('notes')}</div>
                 <textarea
                   ref={notesRef}
@@ -1876,11 +1928,13 @@ export function TaskComposer(props: Props) {
 
           {/* Start */}
           <section
+            ref={sectionRefFor('start')}
             className={sectionClasses('start')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('start'))}
           >
             {isActiveSection('start') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="start" />
                 <div className="composer__q-prompt">{promptFor('start')}</div>
                 <ul className="composer__options" role="listbox">
                   {START_OPTIONS.map((o, i) => (
@@ -1939,11 +1993,13 @@ export function TaskComposer(props: Props) {
 
           {/* When (due / schedule) */}
           <section
+            ref={sectionRefFor('when')}
             className={sectionClasses('when')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('when'))}
           >
             {isActiveSection('when') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="when" />
                 <div className="composer__q-prompt">{promptFor('when')}</div>
                 <ul className="composer__options" role="listbox">
                   {visibleWhenOptions.map((w, i) => (
@@ -2046,11 +2102,13 @@ export function TaskComposer(props: Props) {
               ambiguous against the 0–10 labels). */}
           {isTypebuild && (
             <section
+              ref={sectionRefFor('priority')}
               className={sectionClasses('priority')}
               onClick={() => setActiveIdx(QUESTIONS.indexOf('priority'))}
             >
               {isActiveSection('priority') ? (
                 <div className="composer__q-active-body">
+                  <FieldLabel id="priority" />
                   <div className="composer__q-prompt">{promptFor('priority')}</div>
                   <ul className="composer__options composer__options--wrap" role="listbox">
                     {PRIORITY_OPTIONS.map((o, i) => (
@@ -2086,11 +2144,13 @@ export function TaskComposer(props: Props) {
 
           {/* Q5 — Status */}
           <section
+            ref={sectionRefFor('status')}
             className={sectionClasses('status')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('status'))}
           >
             {isActiveSection('status') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="status" />
                 <div className="composer__q-prompt">{promptFor('status')}</div>
                 <ul className="composer__options" role="listbox">
                   {STATUS_OPTIONS.map((o, i) => (
@@ -2126,11 +2186,13 @@ export function TaskComposer(props: Props) {
 
           {/* Pin */}
           <section
+            ref={sectionRefFor('pin')}
             className={sectionClasses('pin')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('pin'))}
           >
             {isActiveSection('pin') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="pin" />
                 <div className="composer__q-prompt">{promptFor('pin')}</div>
                 <ul className="composer__options" role="listbox">
                   {PIN_OPTIONS.map((o, i) => (
