@@ -234,11 +234,6 @@
   min-width: 0;
 }
 .browser-pane__bar {
-  /* Positioning context for the "Save password?" banner (.save-pw, top:100%),
-     so it anchors just BELOW the toolbar like Chrome's omnibox prompt. Without
-     this the absolute banner escapes to .browser-pane (full height) and lands
-     off the bottom edge, invisible (task-890b0a7483c5). */
-  position: relative;
   flex: 0 0 auto; /* never shrink — a shrunk bar clips the address input */
   display: flex;
   align-items: center;

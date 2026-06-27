@@ -292,65 +292,69 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
             }
           }}
         />
-        {!pendingCred && autofillOffer && (
-          <div className="save-pw" role="dialog" aria-label="Fill saved password">
-            <div className="save-pw__head">
-              <span className="save-pw__key" aria-hidden="true">
-                🔑
-              </span>
-              <span className="save-pw__title">
-                Fill saved password
-                {autofillOffer.username ? ` for ${autofillOffer.username}` : ''}?
-              </span>
-            </div>
-            <div className="save-pw__actions">
-              <button
-                type="button"
-                className="save-pw__btn save-pw__btn--primary"
-                disabled={autofilling}
-                onClick={() => {
-                  const id = idRef.current;
-                  if (id == null) return;
-                  setAutofilling(true);
-                  // Main resolves + injects the password; it never returns here.
-                  void fm
-                    .browserAutofill(id, autofillOffer.origin, autofillOffer.username)
-                    .finally(() => {
-                      setAutofilling(false);
-                      setAutofillOffer(null);
-                    });
-                }}
-              >
-                {autofilling ? 'Filling…' : 'Fill'}
-              </button>
-              <button
-                type="button"
-                className="save-pw__btn"
-                disabled={autofilling}
-                onClick={() => setAutofillOffer(null)}
-              >
-                Not now
-              </button>
-            </div>
-          </div>
-        )}
-        {pendingCred && (
-          <SavePasswordPrompt
-            cred={pendingCred}
-            onSave={async (c) => {
-              // Persist to the site-keyed credential vault (task-d60860fb4d7f):
-              // encrypted at rest server-side, never written to this machine.
-              await saveCapturedCredential(c);
-              setPendingCred(null);
-            }}
-            onDismiss={() => setPendingCred(null)}
-            onNever={(origin) => {
-              neverSaveOrigins.add(origin);
-              setPendingCred(null);
-            }}
-          />
-        )}
       </div>
+      {/* Credential banners live BETWEEN the toolbar and the page view, in flow,
+          so they take real column space and shrink the view slot (the native
+          WebContentsView composites over all DOM, so a floating overlay would be
+          hidden behind it). Main re-syncs the view below the banner. task-890b0a7483c5 */}
+      {!pendingCred && autofillOffer && (
+        <div className="save-pw" role="dialog" aria-label="Fill saved password">
+          <div className="save-pw__head">
+            <span className="save-pw__key" aria-hidden="true">
+              🔑
+            </span>
+            <span className="save-pw__title">
+              Fill saved password
+              {autofillOffer.username ? ` for ${autofillOffer.username}` : ''}?
+            </span>
+          </div>
+          <div className="save-pw__actions">
+            <button
+              type="button"
+              className="save-pw__btn save-pw__btn--primary"
+              disabled={autofilling}
+              onClick={() => {
+                const id = idRef.current;
+                if (id == null) return;
+                setAutofilling(true);
+                // Main resolves + injects the password; it never returns here.
+                void fm
+                  .browserAutofill(id, autofillOffer.origin, autofillOffer.username)
+                  .finally(() => {
+                    setAutofilling(false);
+                    setAutofillOffer(null);
+                  });
+              }}
+            >
+              {autofilling ? 'Filling…' : 'Fill'}
+            </button>
+            <button
+              type="button"
+              className="save-pw__btn"
+              disabled={autofilling}
+              onClick={() => setAutofillOffer(null)}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
+      {pendingCred && (
+        <SavePasswordPrompt
+          cred={pendingCred}
+          onSave={async (c) => {
+            // Persist to the site-keyed credential vault (task-d60860fb4d7f):
+            // encrypted at rest server-side, never written to this machine.
+            await saveCapturedCredential(c);
+            setPendingCred(null);
+          }}
+          onDismiss={() => setPendingCred(null)}
+          onNever={(origin) => {
+            neverSaveOrigins.add(origin);
+            setPendingCred(null);
+          }}
+        />
+      )}
       <div ref={viewRef} className="browser-pane__view" />
     </div>
   );

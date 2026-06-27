@@ -22,10 +22,6 @@
 }
 
 .operator__bar {
-  /* Positioning context for the "Save password?" banner (.save-pw, top:100%),
-     mirroring .browser-pane__bar — without it the absolute banner anchors to
-     the full-height pane and lands off-screen (task-890b0a7483c5). */
-  position: relative;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
