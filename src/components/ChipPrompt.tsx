@@ -3474,7 +3474,13 @@ export function useVerbCtx(): Ctx | null {
       cursor,
       markedPaths,
       yankCount: state.yank.length,
-      bookmarks: state.bookmarks,
+      // task-57542e3435af — root cause of the Home "No matches" bug: these were
+      // the only Ctx fields read straight off `state` without a `?? []`/`?? {}`
+      // fallback. When any is momentarily undefined (e.g. before hydration on
+      // the Home tab) the verbs whose isAvailable derefs them (`bookmark`,
+      // `filter`, …) threw, which blew up the whole paletteVerbs map and emptied
+      // the quick-switcher. Default them so the Ctx is always well-formed.
+      bookmarks: state.bookmarks ?? [],
       homedir,
       recents: state.recents ?? [],
       recentFiles: state.recentFiles ?? [],
@@ -3500,8 +3506,8 @@ export function useVerbCtx(): Ctx | null {
       activeTabHasTerminal: !!activeTab.terminal,
       activeTabTerminal: activeTab.terminal ? { ptyId: activeTab.terminal.ptyId } : undefined,
       launchers,
-      customTags: state.customTags,
-      tagPaths: state.tagPaths,
+      customTags: state.customTags ?? [], // task-57542e3435af
+      tagPaths: state.tagPaths ?? {}, // task-57542e3435af
       tagFilter: activeTab.tagFilter,
       activeTabKind: activeTab.kind,
       activeTabFoldersFirst: activeTab.foldersFirst ?? true,
@@ -3797,7 +3803,7 @@ export function ChipPrompt({
       cursor,
       markedPaths,
       yankCount: state.yank.length,
-      bookmarks: state.bookmarks,
+      bookmarks: state.bookmarks ?? [], // task-57542e3435af — see useVerbCtx
       homedir,
       recents: state.recents ?? [],
       recentFiles: state.recentFiles ?? [],
@@ -3823,8 +3829,8 @@ export function ChipPrompt({
       activeTabHasTerminal: !!activeTab.terminal,
       activeTabTerminal: activeTab.terminal ? { ptyId: activeTab.terminal.ptyId } : undefined,
       launchers,
-      customTags: state.customTags,
-      tagPaths: state.tagPaths,
+      customTags: state.customTags ?? [], // task-57542e3435af
+      tagPaths: state.tagPaths ?? {}, // task-57542e3435af
       tagFilter: activeTab.tagFilter,
       activeTabKind: activeTab.kind,
       activeTabFoldersFirst: activeTab.foldersFirst ?? true,
