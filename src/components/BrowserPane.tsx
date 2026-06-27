@@ -215,9 +215,8 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
           <SavePasswordPrompt
             cred={pendingCred}
             onSave={async (c) => {
-              // T4 wires this to the site-keyed credential vault
-              // (task-d60860fb4d7f). Until then, accepting drops the prompt
-              // without persisting — the password is never written anywhere.
+              // Persist to the site-keyed credential vault (task-d60860fb4d7f):
+              // encrypted at rest server-side, never written to this machine.
               await saveCapturedCredential(c);
               setPendingCred(null);
             }}
