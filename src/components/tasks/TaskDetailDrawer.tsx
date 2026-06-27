@@ -60,7 +60,11 @@ import './TaskDetailDrawer.css';
 // composer form (prefilled + editable). The legacy 'config' id is accepted on
 // the `initialTab` prop and mapped to 'details' for back-compat with callers
 // (TasksPage's openDetail still passes 'config').
-type DrawerTab = 'details' | 'trace' | 'session';
+// task-75f0715aa3ee — "Teach" is now a top-level tab (a SCOPE PICKER: Project /
+// Category / Task) sitting right after "Task details". The former inline
+// "+ Teach" button inside the Details tab deep-links here so there is exactly
+// ONE teach editor and ONE write-back (persistTeach) — no forked persistence.
+type DrawerTab = 'details' | 'teach' | 'trace' | 'session';
 type InitialTab = DrawerTab | 'config';
 function normalizeTab(t: InitialTab | undefined): DrawerTab | undefined {
   if (t === 'config') return 'details';
@@ -473,10 +477,11 @@ export function TaskDetailDrawer({
         return;
       }
       if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
-      const order: DrawerTab[] = ['details', 'trace', 'session'];
+      const order: DrawerTab[] = ['details', 'teach', 'trace', 'session'];
       if (e.key === '1') setTab('details');
-      else if (e.key === '2') setTab('trace');
-      else if (e.key === '3') setTab('session');
+      else if (e.key === '2') setTab('teach');
+      else if (e.key === '3') setTab('trace');
+      else if (e.key === '4') setTab('session');
       else if (e.key === 'l' || e.key === 'ArrowRight') {
         const i = order.indexOf(tab);
         setTab(order[Math.min(order.length - 1, i + 1)]);
@@ -548,7 +553,7 @@ export function TaskDetailDrawer({
 
         {/* segmented tabs — task-b30e546672db: "Task details" is now FIRST. */}
         <nav className="tdd__tabs" role="tablist" aria-label="Detail sections">
-          {(['details', 'trace', 'session'] as DrawerTab[]).map((id, i) => (
+          {(['details', 'teach', 'trace', 'session'] as DrawerTab[]).map((id, i) => (
             <button
               key={id}
               type="button"
@@ -557,7 +562,13 @@ export function TaskDetailDrawer({
               className={['tdd__tab', tab === id && 'tdd__tab--on'].filter(Boolean).join(' ')}
               onClick={() => setTab(id)}
             >
-              {id === 'details' ? 'Task details' : id === 'trace' ? 'Trace' : 'Session'}
+              {id === 'details'
+                ? 'Task details'
+                : id === 'teach'
+                  ? 'Teach'
+                  : id === 'trace'
+                    ? 'Trace'
+                    : 'Session'}
               <kbd>{i + 1}</kbd>
             </button>
           ))}
@@ -594,12 +605,23 @@ export function TaskDetailDrawer({
               {/* The effective instruction set + teach-in-the-moment is unique to
                   the detail view (not part of create), so it lives below the
                   editable form. */}
+              {/* task-75f0715aa3ee — the effective instruction set stays here as
+                  READ-ONLY context; the "Teach" affordance now deep-links to the
+                  dedicated Teach tab (the one scope-picker surface) instead of
+                  opening an inline editor, so persistence never forks. */}
               <InstructionSet
                 resolved={resolved}
-                task={task}
-                onTeach={persistTeach}
+                onTeach={() => setTab('teach')}
               />
             </div>
+          )}
+          {tab === 'teach' && (
+            <TeachTab
+              task={task}
+              resolved={resolved}
+              project={project}
+              onTeach={persistTeach}
+            />
           )}
           {tab === 'session' && (
             <SessionTab
@@ -639,7 +661,7 @@ export function TaskDetailDrawer({
           )}
           <span className="tdd__foot-spacer" />
           <span className="tdd__hint">
-            <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> tabs · <kbd>Esc</kbd> close
+            <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>/<kbd>4</kbd> tabs · <kbd>Esc</kbd> close
           </span>
         </footer>
       </aside>
@@ -773,73 +795,19 @@ function DetailsMeta({
   );
 }
 
-// The cascading instruction set, with provenance summary + a teach control that
-// lets the user pick the SCOPE (this task / a category / the project) to save a
-// correction to — wired to the foundation resolver's scope model.
+// The cascading instruction set, shown READ-ONLY in the Details tab with a
+// provenance summary. task-75f0715aa3ee: the teach control here is now a
+// deep-link to the dedicated "Teach" tab (the one scope-picker surface) rather
+// than an inline editor — persistence lives in exactly one place (persistTeach).
 function InstructionSet({
   resolved,
-  task,
   onTeach,
 }: {
   resolved: ResolvedInstructions;
-  task: Task;
-  // task-fdf3dc6b3c5c — onTeach now PERSISTS (project/task) and returns a
-  // structured result so the teach UI can show "saved", a "pending server
-  // endpoint" note (category), or a clear failure message.
-  onTeach: (entry: {
-    scopeKind: 'task' | 'category' | 'project';
-    scopeLabel: string;
-    text: string;
-  }) => Promise<{ ok: true; pending?: boolean } | { ok: false; message: string }>;
+  // Deep-link to the Teach tab — NOT a persistence call. The Teach tab owns the
+  // scope picker + the write-back.
+  onTeach: () => void;
 }) {
-  const [teaching, setTeaching] = useState(false);
-  const [text, setText] = useState('');
-  const cohorts = (task.flags ?? []).filter((f) => f.includes(':'));
-  const [scope, setScope] = useState<'task' | 'category' | 'project'>('task');
-  const [cohort, setCohort] = useState<string>(cohorts[0] ?? '');
-  const [saving, setSaving] = useState(false);
-  // Transient feedback after a save attempt: a success/pending/error line.
-  const [feedback, setFeedback] = useState<
-    { kind: 'ok' | 'pending' | 'err'; msg: string } | null
-  >(null);
-
-  const save = async () => {
-    if (saving) return;
-    const t = text.trim();
-    if (!t) {
-      setTeaching(false);
-      return;
-    }
-    setSaving(true);
-    setFeedback(null);
-    try {
-      const res = await onTeach({
-        scopeKind: scope,
-        scopeLabel: scope === 'category' ? cohort || 'category' : scope,
-        text: t,
-      });
-      if (res.ok) {
-        setText('');
-        setTeaching(false);
-        setFeedback(
-          res.pending
-            ? {
-                kind: 'pending',
-                // task-7961735a4ab6 — category instructions have no server
-                // store yet; the rule is kept only for this session.
-                msg: 'Saved for this session — category instructions aren’t persisted yet (server endpoint pending).',
-              }
-            : { kind: 'ok', msg: 'Saved.' },
-        );
-      } else {
-        // Keep the editor open with the text intact so the user can adjust.
-        setFeedback({ kind: 'err', msg: res.message });
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <section className="tdd__sect">
       <div className="tdd__sect-h tdd__sect-h--row">
@@ -863,99 +831,244 @@ function InstructionSet({
         </ul>
       )}
 
-      {/* task-fdf3dc6b3c5c — post-save feedback: "Saved.", the category
-          "pending server endpoint" note, or a clear failure message. */}
-      {feedback && (
-        <p
-          className={`tdd__teach-feedback tdd__teach-feedback--${feedback.kind}`}
-          role="status"
-        >
-          {feedback.msg}
-        </p>
-      )}
-
-      {!teaching ? (
-        <button
-          type="button"
-          className="tdd__teach-open"
-          onClick={() => {
-            setFeedback(null);
-            setTeaching(true);
-          }}
-        >
-          + Teach
-        </button>
-      ) : (
-        <div className="tdd__teach">
-          <textarea
-            className="tdd__teach-input"
-            placeholder="Add a correction or rule the agent should follow…"
-            value={text}
-            autoFocus
-            disabled={saving}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void save();
-              if (e.key === 'Escape') {
-                e.stopPropagation();
-                setTeaching(false);
-              }
-            }}
-          />
-          {/* task-7961735a4ab6 — category instructions have no server store yet;
-              make it explicit in the picker so a "Saved" there isn't mistaken
-              for durable persistence. */}
-          {scope === 'category' && (
-            <p className="tdd__teach-hint tdd__muted">
-              Category instructions aren’t persisted yet — saving keeps this rule
-              for the current session only (server endpoint pending).
-            </p>
-          )}
-          <div className="tdd__teach-scope">
-            <span className="tdd__teach-label">Save to</span>
-            <select
-              className="tdd__teach-select"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as typeof scope)}
-            >
-              <option value="task">This task</option>
-              {cohorts.length > 0 && <option value="category">A category</option>}
-              {task.projectId && <option value="project">The project</option>}
-            </select>
-            {scope === 'category' && cohorts.length > 0 && (
-              <select
-                className="tdd__teach-select"
-                value={cohort}
-                onChange={(e) => setCohort(e.target.value)}
-              >
-                {cohorts.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            )}
-            <span className="tdd__teach-spacer" />
-            <button
-              type="button"
-              className="tdd__btn tdd__btn--ghost"
-              onClick={() => setTeaching(false)}
-              disabled={saving}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="tdd__btn"
-              onClick={() => void save()}
-              disabled={saving}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
-      )}
+      <button type="button" className="tdd__teach-open" onClick={onTeach}>
+        + Teach
+      </button>
     </section>
+  );
+}
+
+// ── TEACH ─────────────────────────────────────────────────────────────────────
+// task-75f0715aa3ee — the dedicated Teach tab: a SCOPE PICKER (Project /
+// Category / Task) plus a text area and a Save that routes to the EXISTING
+// write-back (persistTeach) for the chosen scope. It shows the currently
+// effective instruction context so the user sees what they're adding to.
+//
+//   • PROJECT  → project-instructions PATCH (owner-only 403, PHI-guard 422 are
+//                surfaced as a clear message via persistTeach's structured fail).
+//   • TASK     → per-task note (claim-gated + PHI-guarded server-side).
+//   • CATEGORY → session-local fallback, clearly marked "server persistence
+//                pending" (task-7961735a4ab6 — no server store yet).
+//
+// This is distinct from teach-by-recording (task-01facbf6b0bc), which records
+// BROWSER actions — a different concept; this tab teaches text instructions.
+function TeachTab({
+  task,
+  resolved,
+  project,
+  onTeach,
+}: {
+  task: Task;
+  resolved: ResolvedInstructions;
+  project: Project | null;
+  onTeach: (entry: {
+    scopeKind: 'task' | 'category' | 'project';
+    scopeLabel: string;
+    text: string;
+  }) => Promise<{ ok: true; pending?: boolean } | { ok: false; message: string }>;
+}) {
+  const cohorts = (task.flags ?? []).filter((f) => f.includes(':'));
+  // Default scope: PROJECT when the task has one (the most reusable place to
+  // teach), else TASK. Documented in the header note above.
+  const [scope, setScope] = useState<'task' | 'category' | 'project'>(
+    task.projectId ? 'project' : 'task',
+  );
+  const [cohort, setCohort] = useState<string>(cohorts[0] ?? '');
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<
+    { kind: 'ok' | 'pending' | 'err'; msg: string } | null
+  >(null);
+
+  // The instruction context the chosen scope is ADDING TO, so the user sees the
+  // before-state. PROJECT → the project's own instructions (the resolver's
+  // project-scope rules); TASK/CATEGORY → the resolved rules for that scope.
+  const contextRules = useMemo(() => {
+    if (scope === 'project') {
+      const own = (project?.instructions ?? '').trim();
+      if (own) return own.split('\n').map((s) => s.trim()).filter(Boolean);
+    }
+    return resolved.rules
+      .filter((r) =>
+        scope === 'category'
+          ? r.scopeKind === 'category' && (!cohort || r.scopeLabel === cohort)
+          : r.scopeKind === scope,
+      )
+      .map((r) => r.text);
+  }, [scope, cohort, project, resolved.rules]);
+
+  const save = async () => {
+    if (saving) return;
+    const t = text.trim();
+    if (!t) {
+      setFeedback({ kind: 'err', msg: 'Nothing to save.' });
+      return;
+    }
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const res = await onTeach({
+        scopeKind: scope,
+        scopeLabel: scope === 'category' ? cohort || 'category' : scope,
+        text: t,
+      });
+      if (res.ok) {
+        setText('');
+        setFeedback(
+          res.pending
+            ? {
+                kind: 'pending',
+                // task-7961735a4ab6 — category instructions have no server store
+                // yet; the rule is kept only for this session.
+                msg: 'Saved for this session — category instructions aren’t persisted yet (server endpoint pending).',
+              }
+            : { kind: 'ok', msg: 'Saved.' },
+        );
+      } else {
+        // Keep the text intact so the user can adjust (e.g. PHI-guard 422 or
+        // owner-only 403 on project scope).
+        setFeedback({ kind: 'err', msg: res.message });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const scopeBlurb =
+    scope === 'project'
+      ? 'Teaches the whole PROJECT — applies to every task in it. Owner-only; PHI is rejected.'
+      : scope === 'category'
+        ? 'Teaches a CATEGORY cohort — applies to tasks sharing that tag.'
+        : 'Teaches just THIS task as a per-task note.';
+
+  return (
+    <div className="tdd__teachtab">
+      <div className="tdd__sect">
+        <div className="tdd__sect-h">Teach the agent</div>
+        <p className="tdd__muted">
+          Add an instruction or correction the agent should follow. Pick where it
+          applies — the broader the scope, the more tasks it shapes.
+        </p>
+      </div>
+
+      {/* SCOPE PICKER — segmented Project / Category / Task. */}
+      <div className="tdd__sect">
+        <div className="tdd__sect-h">Scope</div>
+        <div className="tdd__teach-seg" role="radiogroup" aria-label="Teach scope">
+          {task.projectId && (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={scope === 'project'}
+              className={['tdd__seg', scope === 'project' && 'tdd__seg--on'].filter(Boolean).join(' ')}
+              onClick={() => setScope('project')}
+            >
+              Project
+            </button>
+          )}
+          {cohorts.length > 0 && (
+            <button
+              type="button"
+              role="radio"
+              aria-checked={scope === 'category'}
+              className={['tdd__seg', scope === 'category' && 'tdd__seg--on'].filter(Boolean).join(' ')}
+              onClick={() => setScope('category')}
+            >
+              Category
+            </button>
+          )}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={scope === 'task'}
+            className={['tdd__seg', scope === 'task' && 'tdd__seg--on'].filter(Boolean).join(' ')}
+            onClick={() => setScope('task')}
+          >
+            Task
+          </button>
+        </div>
+        <p className="tdd__muted tdd__teach-blurb">{scopeBlurb}</p>
+        {scope === 'category' && cohorts.length > 0 && (
+          <select
+            className="tdd__teach-select"
+            value={cohort}
+            onChange={(e) => setCohort(e.target.value)}
+            aria-label="Category cohort"
+          >
+            {cohorts.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+        {scope === 'category' && (
+          <p className="tdd__teach-hint tdd__muted">
+            Category instructions aren’t persisted yet — saving keeps this rule for
+            the current session only (server endpoint pending).
+          </p>
+        )}
+      </div>
+
+      {/* CURRENT CONTEXT — what this scope already carries, so the user sees what
+          they're adding to. */}
+      <div className="tdd__sect">
+        <div className="tdd__sect-h tdd__sect-h--row">
+          <span>Currently applies</span>
+          <span className="tdd__prov" title="Effective instruction set across scopes">
+            {resolved.total > 0 ? resolved.summary : 'none'}
+          </span>
+        </div>
+        {contextRules.length === 0 ? (
+          <p className="tdd__muted">
+            Nothing taught at this scope yet — your first rule starts the set.
+          </p>
+        ) : (
+          <ul className="tdd__rules">
+            {contextRules.map((r, i) => (
+              <li key={i} className="tdd__rule">
+                <span className="tdd__rule-text">{r}</span>
+                <span className={`tdd__rule-scope tdd__rule-scope--${scope}`}>{scope}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* EDITOR + SAVE. */}
+      <div className="tdd__sect">
+        <div className="tdd__sect-h">New instruction</div>
+        <textarea
+          className="tdd__teach-input"
+          placeholder="Add a correction or rule the agent should follow…"
+          value={text}
+          disabled={saving}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void save();
+          }}
+        />
+        {feedback && (
+          <p
+            className={`tdd__teach-feedback tdd__teach-feedback--${feedback.kind}`}
+            role="status"
+          >
+            {feedback.msg}
+          </p>
+        )}
+        <div className="tdd__teach-actions">
+          <span className="tdd__teach-spacer" />
+          <button
+            type="button"
+            className="tdd__btn"
+            onClick={() => void save()}
+            disabled={saving || !text.trim()}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
