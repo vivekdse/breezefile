@@ -126,6 +126,13 @@ export type Tab = {
 export type YankMode = 'copy' | 'move' | 'symlink' | 'symlinkRel' | 'hardlink';
 export type YankEntry = { path: string; mode: YankMode };
 
+// fm-s163 — the open document's text selection, passed as agent context when
+// chatting from an edit tab. `start`/`end` are character offsets into the
+// document; `text` is the selected substring. NOT PHI here — it's local
+// document text the user is editing, not encrypted task body. Absent when the
+// editor has no (or a collapsed) selection.
+export type DocumentSelection = { start: number; end: number; text: string };
+
 // fm-k9dg — per-folder remembered view preferences. Keyed by absolute
 // folder path. Only fields the user has consciously set are present;
 // missing fields fall back to the tab's current state (no clobber on

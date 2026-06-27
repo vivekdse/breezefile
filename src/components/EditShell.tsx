@@ -10,8 +10,25 @@ import { fm } from '../bridge';
 import { basename, dirname } from '../actions';
 import { humanizeError } from '../errorMessages';
 import { isDefaultNoteName, notesDirFor } from './ChipPrompt';
-import type { Tab } from '../types';
+import type { DocumentSelection, Tab } from '../types';
 import './EditShell.css';
+
+// fm-s163 — live selection getters keyed by document path. Each mounted editor
+// (textarea or Milkdown) registers a getter that reads its CURRENT selection
+// straight from the DOM / prose view, so App can pass the open document's
+// selection as agent context at the moment chat opens. Returns null when there
+// is no live selection or the selection is collapsed (caret only).
+const selectionGetterByPath = new Map<string, () => DocumentSelection | null>();
+
+/** fm-s163 — read the current text selection for an open edit document, or
+ *  null when nothing is selected / the file isn't open in an editor. */
+export function getEditorSelection(filePath: string): DocumentSelection | null {
+  try {
+    return selectionGetterByPath.get(filePath)?.() ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // fm-notes — derive a filename from a markdown heading. Keep ASCII
 // letters/digits/dot/dash/underscore; collapse the rest to single dashes.
@@ -577,6 +594,23 @@ function PlainEditor({
     registerFocus?.(() => ref.current?.focus());
   }, [registerFocus]);
 
+  // fm-s163 — expose the live textarea selection so App can fold it into the
+  // chat context. Reads the DOM at call time (chat-open), not on every change.
+  useEffect(() => {
+    if (!filePath) return;
+    selectionGetterByPath.set(filePath, () => {
+      const el = ref.current;
+      if (!el) return null;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      if (start == null || end == null || start === end) return null;
+      return { start, end, text: el.value.slice(start, end) };
+    });
+    return () => {
+      selectionGetterByPath.delete(filePath);
+    };
+  }, [filePath]);
+
   // fm-uatz — recompute the active line + the current-line highlight band from
   // the caret. The highlight is a CSS background gradient on the textarea,
   // positioned via the --edit-active-top var: (caretLine - firstVisibleLine) ×
@@ -711,6 +745,28 @@ function MilkdownEditor({
   // view update), so a React error boundary wouldn't catch it — we catch
   // create() rejections and also probe the rendered DOM after mount.
   const [failed, setFailed] = useState(false);
+
+  // fm-s163 — expose the live Milkdown selection as agent chat context. The
+  // positions are ProseMirror doc offsets (not markdown char offsets — the
+  // mapping is lossy), so the *text* is the load-bearing part; we still report
+  // from/to for rough orientation. Collapsed selections (caret only) → null.
+  useEffect(() => {
+    if (!filePath) return;
+    selectionGetterByPath.set(filePath, () => {
+      const view = viewRef.current;
+      if (!view) return null;
+      const { from, to } = view.state.selection;
+      if (from === to) return null;
+      return {
+        start: from,
+        end: to,
+        text: view.state.doc.textBetween(from, to, '\n', '\n'),
+      };
+    });
+    return () => {
+      selectionGetterByPath.delete(filePath);
+    };
+  }, [filePath]);
 
   useEffect(() => {
     if (!hostRef.current) return;

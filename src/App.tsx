@@ -32,7 +32,7 @@ import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { ProjectsPage } from './components/projects/ProjectsPage';
 import { TaskShell } from './components/TaskShell';
-import { EditSplit } from './components/EditShell';
+import { EditSplit, getEditorSelection } from './components/EditShell';
 import { BrowserPane, reapBrowserViews } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
 import { ChatPanel } from './components/ChatPanel';
 import { openChatPanel, resolveAgent, isClaudeAgent, type ChatTarget } from './openChat';
@@ -598,7 +598,13 @@ function Shell() {
       }
       const target: ChatTarget =
         t.kind === 'edit' && t.editPath
-          ? { kind: 'document', filePath: t.editPath }
+          ? {
+              kind: 'document',
+              filePath: t.editPath,
+              // fm-s163 — read the editor's live selection at chat-open time so
+              // the agent sees what the user has highlighted (if anything).
+              selection: getEditorSelection(t.editPath) ?? undefined,
+            }
           : { kind: 'folder', cwd: t.trail[lastCol(t)] };
       // Resolve the agent up front so the picker can offer agent-specific
       // launch flags (Claude's --continue / skip-permissions) and degrade to a
