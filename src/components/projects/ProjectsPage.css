@@ -16,15 +16,43 @@
   width: 100%;
   height: 100%;
   overflow: auto;
+  /* task-5b833baa7a5e — match the file-manager plate: the recessed surface
+     colour + inset framing shadow read as the same "plate" as .shell__main. */
   background: var(--canvas, var(--panel));
+  box-shadow:
+    inset 0 8px 14px -10px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
   color: var(--text-on-panel);
   font-family: var(--font-sans);
+  position: relative;
+}
+
+/* task-5b833baa7a5e — the gradient blob the file view uses (App.css:166).
+   Same radial-gradient + theme tokens (--accent-soft) so Home tracks themes /
+   paper palettes exactly like the files surface. */
+.projects::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 220px;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    80% 120% at 20% 0%,
+    var(--accent-soft, transparent),
+    transparent 60%
+  );
 }
 
 .projects__page {
   max-width: 1320px;
   margin: 0 auto;
   padding: var(--sp-6) var(--sp-6) var(--sp-8);
+  /* sit above the gradient blob (mirrors .shell__main > * stacking) */
+  position: relative;
+  z-index: 1;
 }
 
 /* ── breadcrumb / zoom indicator ─────────────────────────────────────────── */
