@@ -316,25 +316,26 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
               ✕
             </button>
           )}
+          {/* "Save password?" prompt (task-890b0a7483c5). Must be a CHILD of the
+              positioned toolbar (.operator__bar): .save-pw uses position:absolute
+              top:100% to drop just below the bar, above the native page view that
+              floats over the React DOM. As a sibling of the bar it anchored to
+              the full-height pane and landed off the bottom edge, invisible. */}
+          {pendingCred && (
+            <SavePasswordPrompt
+              cred={pendingCred}
+              onSave={async (c) => {
+                await saveCapturedCredential(c);
+                setPendingCred(null);
+              }}
+              onDismiss={() => setPendingCred(null)}
+              onNever={(origin) => {
+                operatorNeverSaveOrigins.add(origin);
+                setPendingCred(null);
+              }}
+            />
+          )}
         </div>
-        {/* "Save password?" prompt (task-890b0a7483c5). Anchored in the toolbar
-            region (above the native page view, which floats over the React DOM),
-            exactly like the in-app BrowserPane — an overlay painted "on the page"
-            would be hidden behind the WebContentsView. */}
-        {pendingCred && (
-          <SavePasswordPrompt
-            cred={pendingCred}
-            onSave={async (c) => {
-              await saveCapturedCredential(c);
-              setPendingCred(null);
-            }}
-            onDismiss={() => setPendingCred(null)}
-            onNever={(origin) => {
-              operatorNeverSaveOrigins.add(origin);
-              setPendingCred(null);
-            }}
-          />
-        )}
         {/* Native page view is mirrored onto this rect by main. */}
         <div ref={leftRef} className="operator__view" />
       </div>
