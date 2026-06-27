@@ -64,10 +64,15 @@ import './TaskDetailDrawer.css';
 // Category / Task) sitting right after "Task details". The former inline
 // "+ Teach" button inside the Details tab deep-links here so there is exactly
 // ONE teach editor and ONE write-back (persistTeach) — no forked persistence.
-type DrawerTab = 'details' | 'teach' | 'trace' | 'session';
-type InitialTab = DrawerTab | 'config';
+// task-f60a8003efa9 — Trace + Session are CLUBBED into one "Activity" tab (the
+// run timeline + the live/replay session surface together), and that tab is
+// shown only when there's a run/session to show. The legacy 'trace'/'session'
+// ids are accepted on `initialTab` and mapped onto 'activity' for back-compat.
+type DrawerTab = 'details' | 'teach' | 'activity';
+type InitialTab = DrawerTab | 'config' | 'trace' | 'session';
 function normalizeTab(t: InitialTab | undefined): DrawerTab | undefined {
   if (t === 'config') return 'details';
+  if (t === 'trace' || t === 'session') return 'activity';
   return t;
 }
 
@@ -142,9 +147,28 @@ export function TaskDetailDrawer({
 
   const { tone, label: liveLabel } = liveToneFor(task, running);
 
-  const [tab, setTab] = useState<DrawerTab>(
-    normalizeTab(initialTab) ?? (running || latestRun ? 'trace' : 'details'),
+  // task-f60a8003efa9 — the Activity tab (clubbed Trace + Session) only exists
+  // when there's a run or session to show. "Has activity" = a live session, a
+  // resumable conversation, or any run in the timeline.
+  const hasActivity =
+    !!session || !!latestRun?.conversation_id || runs.length > 0;
+
+  // The visible tabs, in keyboard/digit order. Activity is appended only when
+  // there's something to show, so the digit map (1..N) stays contiguous.
+  const visibleTabs = useMemo<DrawerTab[]>(
+    () => (hasActivity ? ['details', 'teach', 'activity'] : ['details', 'teach']),
+    [hasActivity],
   );
+
+  const [tab, setTab] = useState<DrawerTab>(
+    normalizeTab(initialTab) ??
+      (hasActivity && (running || latestRun) ? 'activity' : 'details'),
+  );
+  // If the Activity tab disappears (e.g. a run is cleared) while it's selected,
+  // fall back to Details so we never sit on a hidden tab.
+  useEffect(() => {
+    if (!visibleTabs.includes(tab)) setTab('details');
+  }, [visibleTabs, tab]);
 
   const say = useCallback(
     (msg: string) => dispatch({ type: 'setStatus', msg }),
@@ -477,11 +501,23 @@ export function TaskDetailDrawer({
         return;
       }
       if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
-      const order: DrawerTab[] = ['details', 'teach', 'trace', 'session'];
-      if (e.key === '1') setTab('details');
-      else if (e.key === '2') setTab('teach');
-      else if (e.key === '3') setTab('trace');
-      else if (e.key === '4') setTab('session');
+      // task-f26ea21017b1 — while the embedded composer is being edited it sets
+      // body[data-composer-open]; suppress the PLAIN-digit→tab mapping AND the
+      // h/l tab walk so number keys select composer OPTIONS (and h/l type into
+      // text) instead of switching the drawer's tabs. (The global ⌘1-9 app-tab
+      // switch in useKeyboard.ts already bails on the same flag.) Esc/Stop/Enter
+      // -thread still work — only tab navigation is gated.
+      const editing = document.body.dataset.composerOpen === 'true';
+      if (editing) {
+        if (e.key === 's' && canStop) void stop();
+        else if (e.key === 'e' && canEnterThread) enterThread();
+        return;
+      }
+      // task-f60a8003efa9 — digit/arrow navigation walks the CURRENTLY VISIBLE
+      // tabs so numbering stays contiguous when Activity is hidden.
+      const order = visibleTabs;
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= order.length) setTab(order[n - 1]);
       else if (e.key === 'l' || e.key === 'ArrowRight') {
         const i = order.indexOf(tab);
         setTab(order[Math.min(order.length - 1, i + 1)]);
@@ -497,7 +533,7 @@ export function TaskDetailDrawer({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, canStop, canEnterThread, session, latestRun, raw]);
+  }, [tab, visibleTabs, canStop, canEnterThread, session, latestRun, raw]);
 
   return (
     <div
@@ -551,9 +587,11 @@ export function TaskDetailDrawer({
           </div>
         )}
 
-        {/* segmented tabs — task-b30e546672db: "Task details" is now FIRST. */}
+        {/* segmented tabs — task-b30e546672db: "Task details" is now FIRST.
+            task-f60a8003efa9: Trace + Session are clubbed into one "Activity"
+            tab, rendered only when there's a run/session (visibleTabs). */}
         <nav className="tdd__tabs" role="tablist" aria-label="Detail sections">
-          {(['details', 'teach', 'trace', 'session'] as DrawerTab[]).map((id, i) => (
+          {visibleTabs.map((id, i) => (
             <button
               key={id}
               type="button"
@@ -566,17 +604,24 @@ export function TaskDetailDrawer({
                 ? 'Task details'
                 : id === 'teach'
                   ? 'Teach'
-                  : id === 'trace'
-                    ? 'Trace'
-                    : 'Session'}
+                  : 'Activity'}
               <kbd>{i + 1}</kbd>
             </button>
           ))}
         </nav>
 
         <div className="tdd__body">
-          {tab === 'trace' && (
-            <TraceTab runs={runs} running={running} liveLabel={liveLabel} tone={tone} />
+          {tab === 'activity' && (
+            <ActivityTab
+              runs={runs}
+              running={running}
+              liveLabel={liveLabel}
+              tone={tone}
+              hasLiveSession={!!session}
+              latestRun={latestRun}
+              onOpenSession={openSession}
+              onEnterThread={canEnterThread ? enterThread : undefined}
+            />
           )}
           {tab === 'details' && (
             <div className="tdd__details">
@@ -623,14 +668,6 @@ export function TaskDetailDrawer({
               onTeach={persistTeach}
             />
           )}
-          {tab === 'session' && (
-            <SessionTab
-              hasLiveSession={!!session}
-              latestRun={latestRun}
-              onOpenSession={openSession}
-              onEnterThread={canEnterThread ? enterThread : undefined}
-            />
-          )}
         </div>
 
         <footer className="tdd__foot">
@@ -661,7 +698,13 @@ export function TaskDetailDrawer({
           )}
           <span className="tdd__foot-spacer" />
           <span className="tdd__hint">
-            <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>/<kbd>4</kbd> tabs · <kbd>Esc</kbd> close
+            {visibleTabs.map((_, i) => (
+              <span key={i}>
+                {i > 0 && '/'}
+                <kbd>{i + 1}</kbd>
+              </span>
+            ))}{' '}
+            tabs · <kbd>Esc</kbd> close
           </span>
         </footer>
       </aside>
@@ -669,8 +712,49 @@ export function TaskDetailDrawer({
   );
 }
 
-// ── TRACE ────────────────────────────────────────────────────────────────────
-function TraceTab({
+// ── ACTIVITY (clubbed Trace + Session) ───────────────────────────────────────
+// task-f60a8003efa9 — one tab for "what's happening / what happened": the live
+// (or replayable) session surface up top, then the run timeline below. Rendered
+// only when there's a run or session to show (gated by `hasActivity` in the
+// host), so the user never lands on an empty tab.
+function ActivityTab({
+  runs,
+  running,
+  liveLabel,
+  tone,
+  hasLiveSession,
+  latestRun,
+  onOpenSession,
+  onEnterThread,
+}: {
+  runs: TaskRun[];
+  running: boolean;
+  liveLabel: string;
+  tone: LiveTone;
+  hasLiveSession: boolean;
+  latestRun: TaskRun | null;
+  onOpenSession: () => void;
+  onEnterThread?: () => void;
+}) {
+  return (
+    <div className="tdd__activity">
+      <SessionBlock
+        hasLiveSession={hasLiveSession}
+        latestRun={latestRun}
+        onOpenSession={onOpenSession}
+        onEnterThread={onEnterThread}
+      />
+      <div className="tdd__activity-trace">
+        <div className="tdd__sect-h">Run timeline</div>
+        <RunTimeline runs={runs} running={running} liveLabel={liveLabel} tone={tone} />
+      </div>
+    </div>
+  );
+}
+
+// The run timeline (formerly the Trace tab body): the steps of a running /
+// completed run, with a live pulse while working.
+function RunTimeline({
   runs,
   running,
   liveLabel,
@@ -1072,8 +1156,13 @@ function TeachTab({
   );
 }
 
-// ── SESSION ──────────────────────────────────────────────────────────────────
-function SessionTab({
+// ── SESSION block (lives inside the Activity tab) ────────────────────────────
+// task-f60a8003efa9 — the live terminal / replay surface, now a block at the
+// top of the Activity tab above the run timeline. When there's no live session
+// and no resumable conversation, it renders nothing (the timeline carries the
+// "what happened" story on its own) — except to keep the Enter-thread button
+// reachable when offered.
+function SessionBlock({
   hasLiveSession,
   latestRun,
   onOpenSession,
@@ -1084,6 +1173,7 @@ function SessionTab({
   onOpenSession: () => void;
   onEnterThread?: () => void;
 }) {
+  if (!hasLiveSession && !latestRun?.conversation_id && !onEnterThread) return null;
   return (
     <div className="tdd__session">
       {hasLiveSession ? (

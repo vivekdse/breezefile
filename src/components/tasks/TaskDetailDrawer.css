@@ -394,6 +394,10 @@
 .tdd__teach-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .tdd__rule-scope--task { color: var(--fg-2); border-color: var(--border-2); }
 
+/* ── activity (task-f60a8003efa9 — clubbed Session + Trace into one tab) ── */
+.tdd__activity { display: flex; flex-direction: column; gap: var(--sp-4); }
+.tdd__activity-trace { display: flex; flex-direction: column; gap: var(--sp-2); }
+
 /* ── trace timeline ── */
 .tdd__trace { display: flex; flex-direction: column; gap: var(--sp-3); }
 .tdd__trace-live {
