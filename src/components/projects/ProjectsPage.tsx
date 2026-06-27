@@ -903,36 +903,38 @@ function ProjectsPageInner() {
   return (
     <div className="projects">
       <div className="projects__page">
-        <div className="projects__crumb">
-          <button
-            type="button"
-            className={scopeId == null && level === 1 ? 'projects__crumb-here' : 'projects__crumb-clk'}
-            onClick={() => {
-              setLevel(1);
-              setScopeId(null);
-            }}
-          >
-            Home
-          </button>
-          {scopeProject && level === 1 && (
-            <>
-              <span className="projects__crumb-sep">›</span>
-              <span className="projects__crumb-here">{scopeProject.name}</span>
-            </>
-          )}
-          {level === 2 && detailProject && (
-            <>
-              <span className="projects__crumb-sep">›</span>
-              <span className="projects__crumb-here">
-                {breadcrumbPath(roots, detailProject.id)}
-              </span>
-            </>
-          )}
-          <span className="projects__zoom" aria-hidden="true">
-            <i className="on" />
-            <i className={level >= 2 ? 'on' : ''} />
-          </span>
-        </div>
+        {/* task-2b54dc05c949 — the redundant root "Home" crumb is gone; the
+            titlebar Home button (task-6d0fd232d6c2) owns "go Home". The crumb
+            only renders once you've drilled into a project. A clickable Home
+            anchor heads the trail so you can climb back to root. */}
+        {((scopeProject && level === 1) || (level === 2 && detailProject)) && (
+          <div className="projects__crumb">
+            <button
+              type="button"
+              className="projects__crumb-clk"
+              onClick={() => {
+                setLevel(1);
+                setScopeId(null);
+              }}
+            >
+              Home
+            </button>
+            {scopeProject && level === 1 && (
+              <>
+                <span className="projects__crumb-sep">›</span>
+                <span className="projects__crumb-here">{scopeProject.name}</span>
+              </>
+            )}
+            {level === 2 && detailProject && (
+              <>
+                <span className="projects__crumb-sep">›</span>
+                <span className="projects__crumb-here">
+                  {breadcrumbPath(roots, detailProject.id)}
+                </span>
+              </>
+            )}
+          </div>
+        )}
 
         {level === 1 && homeView === 'flat' ? (
           <FlatView
@@ -1107,7 +1109,8 @@ function FlatView({
     <>
       <div className="projects__head">
         <div className="projects__head-text">
-          <h1 className="projects__title">Home</h1>
+          {/* task-2b54dc05c949 — redundant "Home" heading removed; the caption
+              subtitle carries the useful context on its own. */}
           <div className="projects__sub">
             {totalOpen} open task{totalOpen === 1 ? '' : 's'} · flat view ·{' '}
             <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
@@ -1312,9 +1315,12 @@ function HomeRoot({
     <>
       <div className="projects__head">
         <div className="projects__head-text">
-          <h1 className="projects__title">
-            {scopeProject ? scopeProject.name : 'Home'}
-          </h1>
+          {/* task-2b54dc05c949 — at root the redundant "Home" heading is gone;
+              the subtitle stands alone. Once scoped into a project we keep the
+              project name as the heading (that's drill-in context, not "Home"). */}
+          {scopeProject && (
+            <h1 className="projects__title">{scopeProject.name}</h1>
+          )}
           <div className="projects__sub">
             {scopeProject
               ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · scoped · ranked by what needs you · `
