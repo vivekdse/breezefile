@@ -28,6 +28,7 @@ type Props = { onClose: () => void; initialSection?: SectionId };
 type SectionId =
   | 'keybindings'
   | 'editor'
+  | 'ai'
   | 'task-management'
   | 'task-action-zone'
   | 'terminal'
@@ -65,6 +66,61 @@ export function Settings({ onClose, initialSection }: Props) {
   // fm-v3p — task-action-zone launcher prefs (per-launcher visibility +
   // default). Mirror into local state and subscribe so toggles reflect live.
   const [launcherPrefs, setLauncherPrefs] = useState<LauncherPrefs>(getLauncherPrefs);
+  // task-a99240404629 — Anthropic API key for NL-tag generation. The key value
+  // lives only in main (userData/llm.json); here we hold the masked DRAFT the
+  // user types plus a boolean reporting whether a key is currently configured
+  // (queried from main — the value itself never crosses back). On save we write
+  // via fm.llm.setKey and broadcast `llm:available-changed` so the NL box in
+  // DslTagOverlay re-enables without a reload.
+  const [aiKeyDraft, setAiKeyDraft] = useState('');
+  const [aiKeyReveal, setAiKeyReveal] = useState(false);
+  const [aiKeyConfigured, setAiKeyConfigured] = useState<boolean | null>(null);
+  const [aiKeyBusy, setAiKeyBusy] = useState(false);
+  const [aiKeyMsg, setAiKeyMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fm.llm
+      .available()
+      .then(setAiKeyConfigured)
+      .catch(() => setAiKeyConfigured(false));
+  }, []);
+
+  async function saveAiKey() {
+    if (aiKeyBusy) return;
+    setAiKeyBusy(true);
+    setAiKeyMsg(null);
+    try {
+      const ok = await fm.llm.setKey(aiKeyDraft.trim());
+      setAiKeyConfigured(ok);
+      setAiKeyDraft('');
+      setAiKeyReveal(false);
+      setAiKeyMsg(ok ? 'API key saved. AI tag generation enabled.' : 'Saved.');
+      // Tell open overlays (DslTagOverlay) to re-query llm:available.
+      window.dispatchEvent(new CustomEvent('llm:available-changed'));
+    } catch (err) {
+      setAiKeyMsg(formatOpError('save', err));
+    } finally {
+      setAiKeyBusy(false);
+    }
+  }
+
+  async function clearAiKey() {
+    if (aiKeyBusy) return;
+    setAiKeyBusy(true);
+    setAiKeyMsg(null);
+    try {
+      await fm.llm.setKey('');
+      setAiKeyConfigured(false);
+      setAiKeyDraft('');
+      setAiKeyReveal(false);
+      setAiKeyMsg('API key cleared.');
+      window.dispatchEvent(new CustomEvent('llm:available-changed'));
+    } catch (err) {
+      setAiKeyMsg(formatOpError('save', err));
+    } finally {
+      setAiKeyBusy(false);
+    }
+  }
 
   useEffect(() => {
     return subscribeEditableExts((next) => setEditableExts([...next].sort()));
@@ -321,6 +377,85 @@ export function Settings({ onClose, initialSection }: Props) {
                 </li>
               ))}
             </ul>
+          </AccordionSection>
+
+          <AccordionSection
+            id="ai"
+            title="AI"
+            isOpen={openSection === 'ai'}
+            onToggle={() => toggle('ai')}
+          >
+            <div className="settings__row">
+              <span className="settings__path settings__hint">
+                An Anthropic API key enables the <strong>Describe (AI)</strong>{' '}
+                box when authoring DSL tags — it compiles a plain-English
+                description into a selector. Only file <em>metadata</em>{' '}
+                (names, sizes, dates) is sent; never file contents. The key is
+                stored locally on this machine and never leaves it except to
+                call the Anthropic API. <code>ANTHROPIC_API_KEY</code> in the
+                environment, if set, takes precedence.
+              </span>
+            </div>
+            <div className="settings__row">
+              <span className="settings__action">Anthropic API key</span>
+              <span className="settings__path">
+                {aiKeyConfigured == null
+                  ? 'checking…'
+                  : aiKeyConfigured
+                    ? '✓ configured'
+                    : 'not set'}
+              </span>
+            </div>
+            <div className="settings__row">
+              <input
+                className="settings__input"
+                type={aiKeyReveal ? 'text' : 'password'}
+                value={aiKeyDraft}
+                placeholder="sk-ant-…"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoComplete="off"
+                aria-label="Anthropic API key"
+                onChange={(e) => setAiKeyDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && aiKeyDraft.trim() !== '') {
+                    e.preventDefault();
+                    void saveAiKey();
+                  }
+                }}
+              />
+              <button
+                className="settings__key"
+                type="button"
+                aria-label={aiKeyReveal ? 'Hide key' : 'Reveal key'}
+                onClick={() => setAiKeyReveal((v) => !v)}
+              >
+                {aiKeyReveal ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <div className="settings__row">
+              <button
+                className="settings__key"
+                type="button"
+                disabled={aiKeyBusy || aiKeyDraft.trim() === ''}
+                onClick={() => void saveAiKey()}
+              >
+                {aiKeyBusy ? 'Saving…' : 'Save key'}
+              </button>
+              <button
+                className="settings__reset"
+                type="button"
+                disabled={aiKeyBusy || !aiKeyConfigured}
+                onClick={() => void clearAiKey()}
+              >
+                Clear key
+              </button>
+            </div>
+            {aiKeyMsg && (
+              <div className="settings__row">
+                <span className="settings__path">{aiKeyMsg}</span>
+              </div>
+            )}
           </AccordionSection>
 
           <AccordionSection

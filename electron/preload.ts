@@ -913,6 +913,11 @@ const fm = {
         { ok: true; text: string } | { ok: false; code?: string; error: string }
       >,
     reloadKey: () => ipcRenderer.invoke('llm:reloadKey') as Promise<boolean>,
+    // Set/clear the userData/llm.json key (Settings UI). Pass '' to clear.
+    // SECURITY: the key crosses to main and is written there; it is never
+    // logged on this hop. Returns whether a key is now resolvable.
+    setKey: (key: string) =>
+      ipcRenderer.invoke('llm:setKey', key) as Promise<boolean>,
   },
   // fm-ued6 — cold-start profiling: the renderer fires this once after its
   // first committed frame so the main process can close out the startup

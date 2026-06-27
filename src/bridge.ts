@@ -516,6 +516,10 @@ type Fm = {
       maxTokens?: number;
     }) => Promise<{ ok: true; text: string } | { ok: false; code?: string; error: string }>;
     reloadKey: () => Promise<boolean>;
+    // Set/clear the userData/llm.json key from the Settings UI. Pass '' to
+    // clear. The key is written in main and never logged; resolves to whether a
+    // key is now resolvable (env still wins over the file).
+    setKey: (key: string) => Promise<boolean>;
   };
   // fm-ued6 — cold-start profiling: report the first committed frame to main.
   reportFirstPaint?: () => void;
