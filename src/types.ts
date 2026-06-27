@@ -35,7 +35,14 @@ export type TagFilter = { mode: TagFilterMode; ids: string[] };
 // task-83048f692491 — 'projects' is the singleton Projects-home tab (Project
 // Atlas): the calm projects grid → drill-into a project's task tree. Like
 // 'tasks' it ignores `trail` for rendering and gates its own scoped verbs.
-export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects';
+// task-97c0800ff55d — 'home' is the singleton Home surface (the tasks-first
+// landing: projects-as-folders, attention-ranked). It superseded the relabeled
+// 'projects' tab — Home now rides its own dedicated kind so it is the launch
+// surface and the file manager is one ability (`:files`) beside it. Renders the
+// same ProjectsPage component; like 'projects'/'tasks' it ignores `trail` for
+// rendering and gates its own scoped verbs. The bare file-manager folder tab
+// stays 'folder'; the flat all-tasks page stays 'tasks'.
+export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home';
 
 export type Tab = {
   id: string;

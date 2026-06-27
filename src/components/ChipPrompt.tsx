@@ -181,6 +181,7 @@ type Verb =
   | 'task'
   | 'tasks'
   | 'projects'
+  | 'files'
   | 'new-project'
   | 'sidebyside'
   | 'settings'
@@ -1885,6 +1886,26 @@ export const VERBS: VerbDef[] = [
     },
   },
   {
+    // task-97c0800ff55d — :files summons the file manager. Home replaced the
+    // file manager as the launch surface; the file surface is now ONE ability
+    // you invoke. Opens (or focuses) a folder tab at the current folder when
+    // one is known, else home. openOrFocusFolderTab appends a fresh folder tab
+    // when none exists — so this works from Home with no folder tab open.
+    id: 'files',
+    label: 'Files (file manager)',
+    aliases: ['files', 'file manager', 'file browser', 'folders', 'browse', 'open files'],
+    icon: '🗂',
+    describe: (c) =>
+      `Open the file manager at ${basename(c.cwd) || c.homedir || 'home'}`,
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (c, _p, api) => {
+      api.closeOverlay();
+      const path = c.cwd || c.homedir;
+      api.dispatch({ type: 'openOrFocusFolderTab', path, focus: true });
+    },
+  },
+  {
     // task-83048f692491 — create a project (or sub-project) inline. Opens the
     // Projects home with the create form expanded.
     id: 'new-project',
@@ -2684,7 +2705,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '✓',
       describe: () => 'Mark selected tasks as done',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks', 'projects'],
+      tabKinds: ['tasks', 'projects', 'home'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:done');
@@ -2698,7 +2719,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '↺',
       describe: () => 'Set selected tasks back to pending',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks', 'projects'],
+      tabKinds: ['tasks', 'projects', 'home'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:reopen');
@@ -2712,7 +2733,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '◐',
       describe: () => 'Mark selected tasks in progress',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks', 'projects'],
+      tabKinds: ['tasks', 'projects', 'home'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:in-progress');
@@ -2726,7 +2747,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '⊘',
       describe: () => 'Mark selected tasks cancelled',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks', 'projects'],
+      tabKinds: ['tasks', 'projects', 'home'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:cancel');
@@ -2740,7 +2761,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '★',
       describe: () => 'Pin selected tasks',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks', 'projects'],
+      tabKinds: ['tasks', 'projects', 'home'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:pin');
@@ -2754,7 +2775,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '☆',
       describe: () => 'Unpin selected tasks',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks', 'projects'],
+      tabKinds: ['tasks', 'projects', 'home'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:unpin');
@@ -2798,7 +2819,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '⌫',
       describe: () => 'Delete selected tasks (confirms)',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks', 'projects'],
+      tabKinds: ['tasks', 'projects', 'home'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:delete');

@@ -104,7 +104,10 @@ const STATUS_GLYPH: Record<ProjStatus, string> = {
 
 function ProjectsPageInner() {
   const { state, dispatch } = useStore();
-  const isActive = state.tabs[state.activeTab]?.kind === 'projects';
+  // task-97c0800ff55d — Home now rides kind:'home' (was the relabeled
+  // 'projects'). Accept both so keyboard/event handling stays live on Home.
+  const activeKind = state.tabs[state.activeTab]?.kind;
+  const isActive = activeKind === 'home' || activeKind === 'projects';
 
   // ── data ──────────────────────────────────────────────────────────────────
   const [projects, setProjects] = useState<Project[]>([]);

@@ -134,7 +134,14 @@ export function Tabbar() {
     // fm-yi85 — tasks-overview tab lives in the task zone too. The visual
     // grouping reads as "files on the left, task surfaces on the right",
     // and the All-tasks tab is the natural pivot point between those.
-    if (tab.kind === 'task' || tab.kind === 'tasks' || tab.kind === 'projects')
+    // task-97c0800ff55d — Home (kind:'home') lives in the task zone alongside
+    // the flat Tasks page and the legacy 'projects' kind.
+    if (
+      tab.kind === 'task' ||
+      tab.kind === 'tasks' ||
+      tab.kind === 'projects' ||
+      tab.kind === 'home'
+    )
       taskTabs.push({ tab, index });
     else folderTabs.push({ tab, index });
   });
@@ -155,7 +162,9 @@ export function Tabbar() {
     const folderName = basename(cwd) || '/';
     const isTask = t.kind === 'task';
     const isTasksOverview = t.kind === 'tasks';
-    const isProjects = t.kind === 'projects';
+    // task-97c0800ff55d — both the Home surface (kind:'home') and the legacy
+    // 'projects' kind label as "Home".
+    const isProjects = t.kind === 'projects' || t.kind === 'home';
     const isEdit = t.kind === 'edit';
     const isBrowser = t.kind === 'browser'; // SPIKE (spike/playwright-cdp)
     // Defensive: a task tab without a resolvable id/title falls back to
