@@ -161,6 +161,14 @@ type Fm = {
       canGoForward: boolean;
     }) => void,
   ) => () => void;
+  // Login-submit capture in the OPERATOR window (task-890b0a7483c5): fired when
+  // the human submits a login form in the operator's browser pane. Carries the
+  // captured password — TRUSTED UI only: show "Save password?", never persist or
+  // log it until the user accepts. Mirrors onBrowserCredentialCaptured (no id —
+  // a single operator page view).
+  onOperatorCredentialCaptured: (
+    cb: (s: { origin: string; username: string; password: string }) => void,
+  ) => () => void;
   termResize: (id: number, cols: number, rows: number) => void;
   termKill: (id: number, signal?: string) => Promise<void>;
   termStatus: (id: number) => Promise<{ alive: boolean; pid: number | null }>;

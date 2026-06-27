@@ -22,7 +22,24 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from './Terminal';
 import { fm } from '../bridge';
+import { SavePasswordPrompt, type CapturedCredential } from './SavePasswordPrompt';
 import './OperatorSession.css';
+
+// Origins the operator chose "Never for this site" — module-scoped so the
+// opt-out survives a re-render (mirrors BrowserPane's neverSaveOrigins).
+const operatorNeverSaveOrigins = new Set<string>();
+
+// Persist an accepted captured credential to the site-keyed credential vault
+// (task-d60860fb4d7f), the SAME path the in-app BrowserPane uses. Encrypted at
+// rest server-side; never written to this machine. Single chokepoint so the
+// prompt's "Save" has exactly one persist path.
+async function saveCapturedCredential(cred: CapturedCredential): Promise<void> {
+  await fm.typebuild.credentials.save({
+    origin: cred.origin,
+    username: cred.username,
+    password: cred.password,
+  });
+}
 
 // Persisted geometry. `frac` is the LEFT (browser) pane's fraction of the
 // window width when the Claude pane is OPEN; `collapsed` hides the Claude pane.
@@ -74,6 +91,9 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
   });
   const [addr, setAddr] = useState('');
   const addrFocused = useRef(false);
+  // Captured login awaiting the "Save password?" decision (task-890b0a7483c5).
+  // The password lives ONLY in this trusted-UI state and is dropped on dismiss.
+  const [pendingCred, setPendingCred] = useState<CapturedCredential | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const leftRef = useRef<HTMLDivElement>(null);
@@ -130,6 +150,18 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
       setNav({ url: s.url, canGoBack: s.canGoBack, canGoForward: s.canGoForward });
     });
     return off;
+  }, []);
+
+  // Captured login submit → offer to save (task-890b0a7483c5). Mirrors the
+  // in-app BrowserPane consumer: honor the per-origin "never" opt-out; the
+  // password rides this event into trusted-UI state and nowhere else. The
+  // operator window has a single page view, so there is no id to match. We
+  // synthesize id:0 only to satisfy SavePasswordPrompt's shared cred shape.
+  useEffect(() => {
+    return fm.onOperatorCredentialCaptured((c) => {
+      if (operatorNeverSaveOrigins.has(c.origin)) return;
+      setPendingCred({ id: 0, ...c });
+    });
   }, []);
 
   useEffect(() => {
@@ -285,6 +317,24 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
             </button>
           )}
         </div>
+        {/* "Save password?" prompt (task-890b0a7483c5). Anchored in the toolbar
+            region (above the native page view, which floats over the React DOM),
+            exactly like the in-app BrowserPane — an overlay painted "on the page"
+            would be hidden behind the WebContentsView. */}
+        {pendingCred && (
+          <SavePasswordPrompt
+            cred={pendingCred}
+            onSave={async (c) => {
+              await saveCapturedCredential(c);
+              setPendingCred(null);
+            }}
+            onDismiss={() => setPendingCred(null)}
+            onNever={(origin) => {
+              operatorNeverSaveOrigins.add(origin);
+              setPendingCred(null);
+            }}
+          />
+        )}
         {/* Native page view is mirrored onto this rect by main. */}
         <div ref={leftRef} className="operator__view" />
       </div>

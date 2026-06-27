@@ -20,6 +20,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, WebContentsView, ipcMain, screen } from 'electron';
 import { killManagedPty } from '../ipc';
+// Login-submit credential capture (task-1188c6535e91), wired onto the operator
+// page view so the "Save password?" prompt fires here too (task-890b0a7483c5).
+import { wireCredentialCapture } from './credential-capture';
 
 // The bundle is ESM — `__dirname` doesn't exist. Derive it from this chunk's
 // URL (resolves to dist-electron/, where preload.mjs lives) so the operator
@@ -151,6 +154,23 @@ function ensurePageView(win: BrowserWindow): void {
   wc.on('did-navigate', emit);
   wc.on('did-navigate-in-page', emit);
   wc.on('page-title-updated', emit);
+
+  // Login-submit credential capture (task-890b0a7483c5): mirror the in-app
+  // BrowserPane wiring (electron/ipc.ts) onto the operator page view so a human
+  // login here also offers "Save password?". The page view is preload-less, so
+  // capture uses the same inject + value-free console-sentinel channel.
+  // SECURITY: the captured password is memory-only — forwarded straight to the
+  // operator renderer's trusted prompt and NEVER logged, screenshotted, or put
+  // into operator:browser-state. There is one page view, so no id filtering is
+  // needed; we pass the webContents id only for symmetry with the in-app event.
+  wireCredentialCapture(wc, win, wc.id, (cred) => {
+    if (win.webContents.isDestroyed()) return;
+    win.webContents.send('operator:credential-captured', {
+      origin: cred.origin,
+      username: cred.username,
+      password: cred.password,
+    });
+  });
 
   // Give it a real viewport immediately, parked off-screen, so it lays out and
   // can be screenshotted/driven before the chrome reports bounds.

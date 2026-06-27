@@ -292,6 +292,18 @@ const fm = {
     ipcRenderer.on('operator:browser-state', handler);
     return () => ipcRenderer.off('operator:browser-state', handler);
   },
+  // Login-submit capture for the OPERATOR window (task-890b0a7483c5): mirrors
+  // onBrowserCredentialCaptured for the in-app tab. Carries the captured
+  // password — TRUSTED UI only: show the "Save password?" prompt, never persist
+  // or log it until the user accepts. There is one operator page view, so no id.
+  onOperatorCredentialCaptured: (
+    cb: (s: { origin: string; username: string; password: string }) => void,
+  ) => {
+    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
+      cb(payload);
+    ipcRenderer.on('operator:credential-captured', handler);
+    return () => ipcRenderer.off('operator:credential-captured', handler);
+  },
   termResize: (id: number, cols: number, rows: number) =>
     ipcRenderer.send('term:resize', id, cols, rows),
   termKill: (id: number, signal?: string) =>
