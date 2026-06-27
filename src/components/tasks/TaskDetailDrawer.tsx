@@ -80,6 +80,42 @@ function normalizeTab(t: InitialTab | undefined): DrawerTab | undefined {
 // (working=accent, needs-you=warn, blocked=err, neutral otherwise).
 type LiveTone = 'working' | 'needs-you' | 'blocked' | 'done' | 'neutral';
 
+// task-875c6ad17f85 — render every status in Title Case. The header used Title
+// Case for the common states but let `cancelled`/`failed`/`pending`/unknown
+// fall through to raw lowercase, and the Trace timeline printed the raw
+// `{r.status}` — so casing was inconsistent across the drawer. This single map
+// (+ statusLabel fallback) is the source of truth, reused by liveToneFor AND
+// TraceTab.
+const STATUS_LABELS: Record<string, string> = {
+  running: 'Working',
+  in_progress: 'Working',
+  working: 'Working',
+  claimed: 'Claimed',
+  blocked: 'Blocked',
+  waiting: 'Needs you',
+  needs_input: 'Needs you',
+  partial: 'Needs you',
+  pending: 'Pending',
+  open: 'Open',
+  queued: 'Queued',
+  done: 'Done',
+  succeeded: 'Done',
+  completed: 'Done',
+  cancelled: 'Cancelled',
+  canceled: 'Cancelled',
+  failed: 'Failed',
+  error: 'Failed',
+};
+function statusLabel(raw: string | null | undefined): string {
+  const key = (raw ?? '').toLowerCase();
+  if (STATUS_LABELS[key]) return STATUS_LABELS[key];
+  if (!key) return '—';
+  // Unknown status: Title-Case it (snake/kebab → spaces) rather than dumping raw.
+  return key
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function liveToneFor(task: Task, running: boolean): { tone: LiveTone; label: string } {
   const raw = (task.rawStatus ?? task.status).toLowerCase();
   if (running || raw === 'running' || raw === 'in_progress' || raw === 'working' || raw === 'claimed')
@@ -89,8 +125,7 @@ function liveToneFor(task: Task, running: boolean): { tone: LiveTone; label: str
     return { tone: 'needs-you', label: 'Needs you' };
   if (raw === 'done' || raw === 'succeeded' || raw === 'completed')
     return { tone: 'done', label: 'Done' };
-  if (raw === 'cancelled' || raw === 'failed') return { tone: 'neutral', label: raw };
-  return { tone: 'neutral', label: raw === 'pending' ? 'Pending' : raw };
+  return { tone: 'neutral', label: statusLabel(raw) };
 }
 
 // task-fdf3dc6b3c5c — humanize a structured teach-persist failure reason into a
@@ -785,7 +820,7 @@ function RunTimeline({
             <span className={`tdd__step-dot${live ? ' tdd__step-dot--live' : ''}`} aria-hidden="true" />
             <div className="tdd__step-main">
               <div className="tdd__step-head">
-                <span className={`tdd__run-status tdd__run-status--${r.status}`}>{r.status}</span>
+                <span className={`tdd__run-status tdd__run-status--${r.status}`}>{statusLabel(r.status)}</span>
                 <span className="tdd__mono">{new Date(start).toLocaleString()}</span>
                 {r.attempt > 1 && <span className="tdd__muted">attempt {r.attempt}</span>}
                 {dur && <span className="tdd__muted">{dur}</span>}
@@ -817,6 +852,29 @@ function DetailsMeta({
   claimedBy: string | null;
   claimedByMe: boolean;
 }) {
+  // task-875c6ad17f85 — resolve the parent's title instead of printing the raw
+  // `task-…` id (which means nothing to a person). Falls back to "Open parent →"
+  // if the lookup hasn't resolved a title. Title may be PHI — it lives only in
+  // this in-memory UI (same as the current task's title), never persisted.
+  const [parentTitle, setParentTitle] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!task.parentTaskId) {
+      setParentTitle(null);
+      return;
+    }
+    void getTask(task.parentTaskId, task.source)
+      .then((p) => {
+        if (!cancelled) setParentTitle(p?.title?.trim() || null);
+      })
+      .catch(() => {
+        if (!cancelled) setParentTitle(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [task.parentTaskId, task.source]);
+
   const hasDeps =
     !!task.parentTaskId ||
     (!!task.dependsOn && task.dependsOn.length > 0) ||
@@ -832,7 +890,7 @@ function DetailsMeta({
             {task.parentTaskId && (
               <div>
                 <dt>Parent</dt>
-                <dd className="tdd__mono">{task.parentTaskId}</dd>
+                <dd>{parentTitle ?? 'Open parent →'}</dd>
               </div>
             )}
             {task.dependsOn && task.dependsOn.length > 0 && (
@@ -1127,12 +1185,10 @@ function TeachTab({
             ))}
           </select>
         )}
-        {scope === 'category' && (
-          <p className="tdd__teach-hint tdd__muted">
-            Category instructions aren’t persisted yet — saving keeps this rule for
-            the current session only (server endpoint pending).
-          </p>
-        )}
+        {/* task-875c6ad17f85 — the "category instructions aren't persisted yet"
+            caveat appeared here AND again as the save-time feedback message; the
+            duplicate inline hint is dropped, keeping the save-time message which
+            fires exactly when it's relevant. */}
       </div>
 
       {/* CURRENT CONTEXT — what the CHOSEN scope already carries, so the user

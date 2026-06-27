@@ -37,7 +37,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fm } from '../../bridge';
 import { useStore } from '../../store';
-import { useTasks } from '../../tasks';
+import { useTasks, useTypebuildAuth } from '../../tasks';
 import type { Project, Task } from '../../types';
 import {
   buildProjectTree,
@@ -70,6 +70,15 @@ import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
 
+// task-81b7ce77a30a — open the TypeBuild sign-in panel. The sidebar's account
+// chip already deep-links here via this event; reuse it so signed-out CTAs lead
+// somewhere real instead of a dead button.
+export function openTypebuildSignIn(): void {
+  window.dispatchEvent(
+    new CustomEvent('fm:openSettings', { detail: { section: 'typebuild' } }),
+  );
+}
+
 // Q4 — project-less tasks live in a synthetic "Inbox (no project)" block, always
 // first on Home root. This id never collides with a real project id.
 const INBOX_ID = '__inbox_no_project__';
@@ -87,9 +96,14 @@ function rowStatusOf(t: Task): RowStatus {
 // ── minimal status-icon vocabulary (task-4b0168979921) ───────────────────────
 // One glyph per project row, derived from the SHARED attention partition — we
 // do NOT re-derive ranking here. Loudest signal wins: blocked/failed → recent
-// activity → needs-you → working → idle/quiet → clear.
-//   ⛔ blocked   ⚑ needs you   ◷ working   ◦ idle   ◌ clear
-type ProjStatus = 'blocked' | 'need' | 'working' | 'idle' | 'clear';
+// activity → needs-you → working → quiet.
+//   ⛔ blocked   ⚑ needs you   ◷ working   ◦ quiet
+// task-875c6ad17f85 — the old `◦ idle` and `◌ clear` glyphs were visually
+// indistinguishable and undocumented, so they read as noise. They're merged
+// into a single `quiet` state, and every glyph now carries a `title=` tooltip
+// (STATUS_LABEL) so the vocabulary is self-explaining instead of needing a
+// separate legend.
+type ProjStatus = 'blocked' | 'need' | 'working' | 'quiet';
 function projStatusOf(
   att: ProjectAttention | undefined,
   rolled: TaskStats | undefined,
@@ -99,15 +113,19 @@ function projStatusOf(
     if (att.total > 0) return 'need';
   }
   if ((rolled?.inProgress ?? 0) > 0) return 'working';
-  if (att?.idle) return 'idle';
-  return 'clear';
+  return 'quiet';
 }
 const STATUS_GLYPH: Record<ProjStatus, string> = {
   blocked: '⛔',
   need: '⚑',
   working: '◷',
-  idle: '◦',
-  clear: '◌',
+  quiet: '◦',
+};
+const STATUS_LABEL: Record<ProjStatus, string> = {
+  blocked: 'Blocked or failed',
+  need: 'Needs you',
+  working: 'Agents working',
+  quiet: 'Nothing pending',
 };
 
 function ProjectsPageInner() {
@@ -161,6 +179,9 @@ function ProjectsPageInner() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
+  // task-81b7ce77a30a — signed-out Home shouldn't offer a "+ New project" CTA
+  // that can't succeed; gate the empty state to a sign-in prompt instead.
+  const { signedIn: tbSignedIn } = useTypebuildAuth();
 
   // "Show all" reveals idle projects; "Show archived" includes archived ones
   // (re-fetched with ?archived=1). Both persisted in projectsViewPrefs.
@@ -1054,6 +1075,8 @@ function ProjectsPageInner() {
             heroTarget={heroTarget}
             loaded={loaded}
             loadErr={loadErr}
+            signedIn={tbSignedIn}
+            onRetry={() => setReloadTick((t) => t + 1)}
             showCreate={showCreate}
             onShowCreate={() => setShowCreate(true)}
             onCancelCreate={() => setShowCreate(false)}
@@ -1252,7 +1275,7 @@ function FlatView({
           <div className="projects__empty-glyph">✓</div>
           <div className="projects__empty-title">No tasks yet</div>
           <div className="projects__empty-body">
-            Type <kbd>task</kbd> to add one — or use ＋ New task.
+            Type <kbd>:task</kbd> to add one — or use <b>＋ New task</b>.
           </div>
         </div>
       )}
@@ -1297,6 +1320,8 @@ function HomeRoot({
   heroTarget,
   loaded,
   loadErr,
+  signedIn,
+  onRetry,
   showCreate,
   onShowCreate,
   onCancelCreate,
@@ -1338,6 +1363,8 @@ function HomeRoot({
   heroTarget: ProjectNode | null;
   loaded: boolean;
   loadErr: string | null;
+  signedIn: boolean;
+  onRetry: () => void;
   showCreate: boolean;
   onShowCreate: () => void;
   onCancelCreate: () => void;
@@ -1375,6 +1402,7 @@ function HomeRoot({
           node={node}
           statusGlyph={STATUS_GLYPH[status]}
           statusKind={status}
+          statusLabel={STATUS_LABEL[status]}
           total={rolled?.total ?? 0}
           need={att?.total ?? 0}
           subCount={node.children.length}
@@ -1431,9 +1459,41 @@ function HomeRoot({
         />
       )}
 
-      {loadErr && (
+      {/* task-81b7ce77a30a — loading placeholder while the first fetch is in
+          flight (the page used to render blank). */}
+      {!loaded && !loadErr && (
+        <div className="projects__hero" role="status">
+          Loading your projects…
+        </div>
+      )}
+
+      {/* task-81b7ce77a30a — humanized, recoverable error. The raw exception
+          isn't shown to the user (it can leak internals); Retry re-fetches. */}
+      {loaded && loadErr && (
         <div className="projects__hero" role="alert">
-          Couldn’t load projects: {loadErr}
+          {signedIn ? (
+            <>
+              Couldn’t load your projects. Check your connection and try again.{' '}
+              <button
+                type="button"
+                className="projects__hero-open"
+                onClick={onRetry}
+              >
+                Retry →
+              </button>
+            </>
+          ) : (
+            <>
+              Sign in to TypeBuild to see your projects and tasks.{' '}
+              <button
+                type="button"
+                className="projects__hero-open"
+                onClick={openTypebuildSignIn}
+              >
+                Sign in →
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -1445,7 +1505,7 @@ function HomeRoot({
         ) : (
           <div className="projects__hero" role="status">
             <b>
-              {heroNeed} {heroNeed === 1 ? 'thing needs' : 'things need'} you
+              {heroNeed} {heroNeed === 1 ? 'task needs' : 'tasks need'} you
               {heroBlocked > 0 ? `, ${heroBlocked} blocked` : ''}.
             </b>{' '}
             {heroTarget ? (
@@ -1488,7 +1548,30 @@ function HomeRoot({
         </div>
       )}
 
-      {empty && !showCreate && inboxTotalCount === 0 && (
+      {/* task-81b7ce77a30a — a signed-out user hitting an empty list used to
+          see "No projects yet" + a "+ New project" CTA that can't succeed.
+          Point them to sign-in instead. */}
+      {empty && !showCreate && inboxTotalCount === 0 && !signedIn && (
+        <div className="projects__empty">
+          <div className="projects__empty-glyph">◳</div>
+          <div className="projects__empty-title">
+            Sign in to see your projects
+          </div>
+          <div className="projects__empty-body">
+            Sign in to TypeBuild to see your projects and tasks across your
+            machines.
+          </div>
+          <button
+            type="button"
+            className="projects__btn projects__btn--primary"
+            onClick={openTypebuildSignIn}
+          >
+            Sign in to TypeBuild
+          </button>
+        </div>
+      )}
+
+      {empty && !showCreate && inboxTotalCount === 0 && signedIn && (
         <div className="projects__empty">
           <div className="projects__empty-glyph">◳</div>
           <div className="projects__empty-title">

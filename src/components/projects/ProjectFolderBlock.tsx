@@ -158,13 +158,18 @@ export function ProjectHeader({
           p.name
         )}
         {archived && <span className="pfolder-header__tag"> · archived</span>}
+        {/* task-875c6ad17f85 — "folder" was overloaded (project metaphor vs the
+            bound disk path vs file tabs); the disk binding is named the
+            "working folder" consistently. A project with no working folder is
+            fine, so the old "no folder bound" scold is dropped (absence isn't
+            an error to flag on every row). */}
         {bound &&
           (onOpenFolder ? (
             <button
               type="button"
               className="pfolder-header__bind"
               onClick={() => onOpenFolder(p.folders[0])}
-              title={`Open bound folder: ${bound}`}
+              title={`Open working folder: ${bound}`}
             >
               <span aria-hidden="true">⛓</span> <span className="mono">{bound}</span>
             </button>
@@ -173,11 +178,6 @@ export function ProjectHeader({
               <span aria-hidden="true">⛓</span> <span className="mono">{bound}</span>
             </span>
           ))}
-        {!bound && (
-          <span className="pfolder-header__bind pfolder-header__bind--static pfolder-header__bind--none">
-            no folder bound
-          </span>
-        )}
       </h1>
 
       <p className="folder-header__dek pfolder-header__dek">
@@ -185,10 +185,20 @@ export function ProjectHeader({
           <>
             {desc} <span className="pcard__ctx">{CTX_MARK}</span>
           </>
+        ) : onOpenSelf ? (
+          // task-875c6ad17f85 — a single subtle affordance instead of scolding
+          // every undescribed project ("no description — no shared context for
+          // agents"). Opens the project, where the description is edited.
+          <button
+            type="button"
+            className="pfolder-header__dek--add"
+            onClick={() => onOpenSelf(p.id)}
+            title="Add a description — shared context for agents working this project"
+          >
+            ＋ Add description
+          </button>
         ) : (
-          <span className="pfolder-header__dek--empty">
-            no description — no shared context for agents
-          </span>
+          <span className="pfolder-header__dek--empty">＋ Add description</span>
         )}
       </p>
 
@@ -279,6 +289,9 @@ export interface ProjectRowProps {
   /** Loudest status glyph for the project (host derives from attention). */
   statusGlyph: string;
   statusKind: string;
+  /** Human label for the glyph — used as a tooltip so the icon vocabulary is
+   *  self-explaining (task-875c6ad17f85). */
+  statusLabel?: string;
   /** Rolled-up task total + "needs you" count (host-derived). */
   total: number;
   need: number;
@@ -297,6 +310,7 @@ export function ProjectRow({
   node,
   statusGlyph,
   statusKind,
+  statusLabel,
   total,
   need,
   subCount,
@@ -324,7 +338,9 @@ export function ProjectRow({
     >
       <span
         className={`pfolder-row__status pfolder-row__status--${statusKind}`}
-        aria-hidden="true"
+        title={statusLabel}
+        aria-label={statusLabel}
+        role={statusLabel ? 'img' : undefined}
       >
         {statusGlyph}
       </span>
