@@ -1370,6 +1370,28 @@ export class TypeBuildTaskSource implements TaskSource {
     const body: Record<string, unknown> = {};
     const cachePatch: Partial<SourcedTask> = {};
 
+    // task-63b936d69127 — TITLE + BODY edits. The v2 management verb
+    // PATCH /chromeext/<id> accepts `title` and `task` (the decrypted body),
+    // re-encrypting them at rest server-side (verified against the server's
+    // patch_task → set_task_body path). So a TypeBuild task's title/notes ARE
+    // editable from the client now; the composer's TypeBuild edit-save sends
+    // them through this whitelist. PHI: both ride home in the request body to
+    // be encrypted at rest — that is allowed (the PHI invariant forbids
+    // PERSISTING decrypted content LOCALLY: to disk/logs/notifications). We
+    // never log the values, and we patch the (PHI, in-memory only) cache so the
+    // row reflects the rename without waiting for the poll. An empty string is
+    // a valid value server-side (clears the field); omitting the key leaves it.
+    if ('title' in input && typeof input.title === 'string') {
+      body.title = input.title;
+      // title is the ONE PHI field already held in the cache (mapListRow keeps
+      // titles in memory); reflect the rename optimistically.
+      cachePatch.title = input.title;
+    }
+    if ('task' in input && typeof input.task === 'string') {
+      // `task` is the decrypted body; the renderer maps it into `notes`.
+      body.task = input.task;
+      cachePatch.notes = input.task === '' ? null : input.task;
+    }
     if ('assigned_to' in input) {
       const v = input.assigned_to;
       // '' clears server-side; cache reflects null for the cleared case.
