@@ -584,35 +584,75 @@ export function TaskComposer(props: Props) {
     [],
   );
 
-  // task-ab1d7955e23f — project options: "None" (index 0) + one entry per
-  // project. value '' = no project. Hint surfaces the project description so
-  // the picker is glanceable.
-  const PROJECT_OPTIONS = useMemo(() => {
-    // task-7ef6be165783 — order projects by MOST ACTIVE tasks (desc), then
-    // alphabetically (case-insensitive) for a deterministic tie-break. A
-    // project with zero active tasks still appears — it just sorts last
-    // within its name group. "None" stays pinned at index 0.
-    const ordered = [...projects].sort((a, b) => {
+  // task-201f5e3cde57 — the project a task started with (edit: its own project;
+  // create: a pre-selected project). Used to pin it as option 1 + focused so
+  // Enter confirms the current project immediately.
+  const initialProjectId = initial?.projectId ?? preselectedProjectId;
+  // task-201f5e3cde57 — sentinel value for the "Other…" entry that opens the
+  // type-ahead over the full project list. Never a real project id.
+  const PROJECT_OTHER = '__other__';
+
+  // task-7ef6be165783 — projects ranked by MOST ACTIVE tasks (desc), then
+  // alphabetically (case-insensitive). Drives both the short list's "top 3
+  // others" and the type-ahead ranking.
+  const rankedProjects = useMemo(() => {
+    return [...projects].sort((a, b) => {
       const ca = activeCountByProject.get(a.id) ?? 0;
       const cb = activeCountByProject.get(b.id) ?? 0;
       if (cb !== ca) return cb - ca;
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     });
-    return [
-      { value: '', label: 'None', hint: 'no project' },
-      ...ordered.map((p) => ({
-        value: p.id,
-        label: p.name,
-        hint: p.description ?? undefined,
-      })),
-    ];
   }, [projects, activeCountByProject]);
+
+  const projectOpt = (p: Project) => ({
+    value: p.id,
+    label: p.name,
+    hint: p.description ?? undefined,
+  });
+
+  // task-201f5e3cde57 — the SHORT project list shown by default:
+  //   1. the task's CURRENT project (if any), focused so Enter confirms it,
+  //   2. the top 3 OTHER projects (by active-task count),
+  //   3. "None",
+  //   4. "Other…" — opens a type-ahead over every project.
+  // When there's no current project we just show the top 3 + None + Other.
+  const PROJECT_OPTIONS = useMemo(() => {
+    const current = rankedProjects.find((p) => p.id === initialProjectId) ?? null;
+    const others = rankedProjects.filter((p) => p.id !== current?.id);
+    const top3 = others.slice(0, 3);
+    const out: { value: string; label: string; hint?: string }[] = [];
+    if (current) out.push({ ...projectOpt(current), hint: current.description ?? 'current project' });
+    for (const p of top3) out.push(projectOpt(p));
+    out.push({ value: '', label: 'None', hint: 'no project' });
+    // Only offer "Other…" when there are more projects than the short list shows.
+    if (others.length > top3.length) {
+      out.push({ value: PROJECT_OTHER, label: 'Other…', hint: 'search all projects' });
+    }
+    return out;
+  }, [rankedProjects, initialProjectId]);
+
+  // task-201f5e3cde57 — type-ahead over the full ranked list (revealed by
+  // "Other…"). Filters by name, keeping the active-count ranking.
+  const [projectSearchOpen, setProjectSearchOpen] = useState(false);
+  const [projectQuery, setProjectQuery] = useState('');
+  const projectSearchRef = useRef<HTMLInputElement>(null);
+  const projectSearchResults = useMemo(() => {
+    const q = projectQuery.trim().toLowerCase();
+    const matches = q
+      ? rankedProjects.filter((p) => p.name.toLowerCase().includes(q))
+      : rankedProjects;
+    return matches.map(projectOpt);
+  }, [rankedProjects, projectQuery]);
+  const [projectSearchHighlight, setProjectSearchHighlight] = useState(0);
+
   const [projectHighlight, setProjectHighlight] = useState(0);
-  // Keep the highlight aligned with the chosen project as the list loads /
-  // the selection changes (e.g. after a folder auto-attach resolves).
+  // task-201f5e3cde57 — focus the CURRENT project (option 1) on open so Enter
+  // confirms it; otherwise keep the highlight aligned with the chosen project as
+  // the list loads / the selection changes (e.g. after a folder auto-attach).
   useEffect(() => {
     const i = PROJECT_OPTIONS.findIndex((o) => o.value === projectId);
     if (i >= 0) setProjectHighlight(i);
+    else setProjectHighlight(0);
   }, [PROJECT_OPTIONS, projectId]);
 
   // Load the signed-in user's projects once TypeBuild is the target and the
@@ -695,6 +735,12 @@ export function TaskComposer(props: Props) {
   const dateInputRef = useRef<HTMLInputElement>(null);
   const cronInputRef = useRef<HTMLInputElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
+  // task-2d96db620f6b / task-aa513e612954 — the wrapper of the CURRENTLY active
+  // section. Each <section> assigns this ref while it's active, so we can scroll
+  // it to the top of the composer's scroll container when it activates (instead
+  // of letting its option list open below the fold) and anchor the focused-field
+  // label to it.
+  const activeSectionRef = useRef<HTMLElement>(null);
   const createBtnRef = useRef<HTMLButtonElement>(null);
   const startDateRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
@@ -723,6 +769,19 @@ export function TaskComposer(props: Props) {
       sectionRef.current?.focus();
     }
   }, [active]);
+
+  // task-2d96db620f6b — when a section becomes active, bring it to the TOP of
+  // the composer's scroll container so its options render in view rather than
+  // opening below the fold and forcing a manual scroll-up. Runs after the focus
+  // effect's layout settles (next frame) so the expanded body's height is known.
+  useEffect(() => {
+    const el = activeSectionRef.current;
+    if (!el) return;
+    const id = requestAnimationFrame(() => {
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [active, phase]);
 
   function goBack() {
     if (activeIdx > 0) setActiveIdx(activeIdx - 1);
@@ -829,15 +888,40 @@ export function TaskComposer(props: Props) {
     goNext();
   }
 
-  // task-ab1d7955e23f — TypeBuild project pick. Index 0 is "None".
+  // task-ab1d7955e23f / task-201f5e3cde57 — TypeBuild project pick from the
+  // SHORT list. Picking "Other…" opens the type-ahead instead of advancing.
   function chooseProject(i: number) {
     const o = PROJECT_OPTIONS[i];
     if (!o) return;
-    setProjectId(o.value);
     setProjectHighlight(i);
+    if (o.value === PROJECT_OTHER) {
+      setProjectSearchOpen(true);
+      setProjectQuery('');
+      setProjectSearchHighlight(0);
+      setTimeout(() => projectSearchRef.current?.focus(), 0);
+      return;
+    }
+    setProjectId(o.value);
     setProjectTouched(true);
     // A manual pick is no longer an auto-attach (clears the "auto" chip note).
     setProjectAutoAttached(false);
+    setProjectSearchOpen(false);
+    goNext();
+  }
+
+  // task-201f5e3cde57 — pick a project from the type-ahead results (the long
+  // tail). Sets the project and advances like a normal pick.
+  function chooseProjectFromSearch(i: number) {
+    const o = projectSearchResults[i];
+    if (!o) return;
+    setProjectId(o.value);
+    setProjectTouched(true);
+    setProjectAutoAttached(false);
+    setProjectSearchOpen(false);
+    setProjectQuery('');
+    // Realign the short-list highlight to the chosen project if it's shown.
+    const si = PROJECT_OPTIONS.findIndex((opt) => opt.value === o.value);
+    if (si >= 0) setProjectHighlight(si);
     goNext();
   }
 
@@ -1309,16 +1393,17 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'project') {
-      // task-ab1d7955e23f — arrow + Enter only. Project lists can run past 9
-      // entries, so digit shortcuts would be ambiguous; ↑/↓ moved the
-      // highlight above. Digits 1–9 still pick the first few as a convenience.
+      // task-201f5e3cde57 — the SHORT list (current + top-3 + None + Other) is
+      // small, so digit shortcuts pick it cleanly; Enter picks the highlight
+      // (the current project is focused on open, so Enter confirms it). The
+      // type-ahead behind "Other…" is driven by the input's own handler.
       if (e.key === 'Enter') {
         e.preventDefault();
         chooseProject(projectHighlight);
         return;
       }
       const n = parseInt(e.key, 10);
-      if (!Number.isNaN(n) && n >= 1 && n <= Math.min(9, PROJECT_OPTIONS.length)) {
+      if (!Number.isNaN(n) && n >= 1 && n <= PROJECT_OPTIONS.length) {
         e.preventDefault();
         chooseProject(n - 1);
         return;
@@ -1547,6 +1632,30 @@ export function TaskComposer(props: Props) {
   function isActiveSection(id: QuestionId): boolean {
     return phase === 'editing' && active === id;
   }
+  // task-2d96db620f6b / task-aa513e612954 — assign the shared active-section ref
+  // to whichever section is currently active (so we can scroll it to top and the
+  // label can anchor to it). Returns undefined for inactive sections.
+  function sectionRefFor(id: QuestionId) {
+    return isActiveSection(id) ? activeSectionRef : undefined;
+  }
+  // task-aa513e612954 — a clear, persistent label for the focused field, shown
+  // top-left of its active body so the user always knows what they're editing.
+  // Title is the headline (no label); the rest reuse labelFor's vocabulary,
+  // surfaced as a readable field name.
+  function fieldLabelFor(id: QuestionId): string | null {
+    if (id === 'title') return null;
+    if (id === 'who') return 'Who runs this';
+    if (id === 'start') return isTypebuild ? 'Defer until' : 'Start date';
+    if (id === 'when') return executor === 'claude' ? 'When it runs' : 'Due date';
+    const short = labelFor(id);
+    return short ? short.charAt(0).toUpperCase() + short.slice(1) : null;
+  }
+  // The top-left field label element for an active section.
+  function FieldLabel({ id }: { id: QuestionId }) {
+    const text = fieldLabelFor(id);
+    if (!text) return null;
+    return <div className="composer__field-label">{text}</div>;
+  }
 
   function renderInert(q: QuestionId) {
     // In edit mode every collapsed section should show the task's
@@ -1619,6 +1728,7 @@ export function TaskComposer(props: Props) {
         <main className="composer__main">
           {/* Q1 — Title */}
           <section
+            ref={sectionRefFor('title')}
             className={sectionClasses('title')}
             onClick={() => setActiveIdx(0)}
           >
@@ -1666,11 +1776,13 @@ export function TaskComposer(props: Props) {
               QUESTIONS_TYPEBUILD, so keyboard navigation skips it). */}
           {!isTypebuild && (
           <section
+            ref={sectionRefFor('folder')}
             className={sectionClasses('folder')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('folder'))}
           >
             {isActiveSection('folder') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="folder" />
                 <div className="composer__q-prompt">{promptFor('folder')}</div>
                 <ul className="composer__options" role="listbox">
                   {visibleFolderPresets.map((p, i) => (
@@ -1728,11 +1840,13 @@ export function TaskComposer(props: Props) {
               the user can override or pick None. Arrow + Enter to pick. */}
           {isTypebuild && (
             <section
+              ref={sectionRefFor('project')}
               className={sectionClasses('project')}
               onClick={() => setActiveIdx(QUESTIONS.indexOf('project'))}
             >
               {isActiveSection('project') ? (
                 <div className="composer__q-active-body">
+                  <FieldLabel id="project" />
                   <div className="composer__q-prompt">{promptFor('project')}</div>
                   {attachedProject && (
                     <div className="composer__attached" role="status">
@@ -1746,6 +1860,8 @@ export function TaskComposer(props: Props) {
                       </span>
                     </div>
                   )}
+                  {/* task-201f5e3cde57 — short list: current project (focused) +
+                      top-3 others + None + "Other…". */}
                   <ul className="composer__options" role="listbox">
                     {PROJECT_OPTIONS.map((o, i) => (
                       <li key={o.value || 'none'}>
@@ -1755,7 +1871,8 @@ export function TaskComposer(props: Props) {
                           aria-selected={i === projectHighlight}
                           className={
                             'composer__option' +
-                            (i === projectHighlight ? ' composer__option--active' : '')
+                            (i === projectHighlight ? ' composer__option--active' : '') +
+                            (o.value === PROJECT_OTHER ? ' composer__option--other' : '')
                           }
                           onMouseEnter={() => setProjectHighlight(i)}
                           onClick={(e) => {
@@ -1763,11 +1880,7 @@ export function TaskComposer(props: Props) {
                             chooseProject(i);
                           }}
                         >
-                          {i < 9 ? (
-                            <kbd className="composer__option-key">{i + 1}</kbd>
-                          ) : (
-                            <span className="composer__option-key" aria-hidden="true" />
-                          )}
+                          <kbd className="composer__option-key">{i + 1}</kbd>
                           <span className="composer__option-label">{o.label}</span>
                           {o.hint && (
                             <span className="composer__option-hint">{o.hint}</span>
@@ -1776,6 +1889,80 @@ export function TaskComposer(props: Props) {
                       </li>
                     ))}
                   </ul>
+                  {/* task-201f5e3cde57 — "Other…" type-ahead over ALL projects,
+                      ranked by active-task count. ↑/↓ move, Enter picks, Esc
+                      closes back to the short list. */}
+                  {projectSearchOpen && (
+                    <div
+                      className="composer__project-search"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        ref={projectSearchRef}
+                        className="composer__path-input"
+                        type="text"
+                        placeholder="Search all projects…"
+                        value={projectQuery}
+                        onChange={(e) => {
+                          setProjectQuery(e.target.value);
+                          setProjectSearchHighlight(0);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            setProjectSearchHighlight((i) =>
+                              Math.min(projectSearchResults.length - 1, i + 1),
+                            );
+                          } else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            setProjectSearchHighlight((i) => Math.max(0, i - 1));
+                          } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            chooseProjectFromSearch(projectSearchHighlight);
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setProjectSearchOpen(false);
+                            setProjectQuery('');
+                            sectionRef.current?.focus();
+                          }
+                        }}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                      <ul className="composer__options composer__project-search-list" role="listbox">
+                        {projectSearchResults.length === 0 ? (
+                          <li className="composer__project-search-empty">No matching projects</li>
+                        ) : (
+                          projectSearchResults.map((o, i) => (
+                            <li key={o.value}>
+                              <button
+                                type="button"
+                                role="option"
+                                aria-selected={i === projectSearchHighlight}
+                                className={
+                                  'composer__option' +
+                                  (i === projectSearchHighlight ? ' composer__option--active' : '')
+                                }
+                                onMouseEnter={() => setProjectSearchHighlight(i)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  chooseProjectFromSearch(i);
+                                }}
+                              >
+                                <span className="composer__option-key" aria-hidden="true" />
+                                <span className="composer__option-label">{o.label}</span>
+                                {o.hint && (
+                                  <span className="composer__option-hint">{o.hint}</span>
+                                )}
+                              </button>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               ) : (
                 renderInert('project')
@@ -1785,11 +1972,13 @@ export function TaskComposer(props: Props) {
 
           {/* Q3 — Who */}
           <section
+            ref={sectionRefFor('who')}
             className={sectionClasses('who')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('who'))}
           >
             {isActiveSection('who') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="who" />
                 <div className="composer__q-prompt">{promptFor('who')}</div>
                 <ul className="composer__options" role="listbox">
                   {WHO_OPTIONS.map((o, i) => (
@@ -1826,6 +2015,7 @@ export function TaskComposer(props: Props) {
           {/* Notes — sits right after Who: what / where / who / notes are
               the fields that matter; scheduling lives below. */}
           <section
+            ref={sectionRefFor('notes')}
             className={sectionClasses('notes')}
             onClick={() => {
               setActiveIdx(QUESTIONS.indexOf('notes'));
@@ -1834,6 +2024,7 @@ export function TaskComposer(props: Props) {
           >
             {isActiveSection('notes') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="notes" />
                 <div className="composer__q-prompt">{promptFor('notes')}</div>
                 <textarea
                   ref={notesRef}
@@ -1876,11 +2067,13 @@ export function TaskComposer(props: Props) {
 
           {/* Start */}
           <section
+            ref={sectionRefFor('start')}
             className={sectionClasses('start')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('start'))}
           >
             {isActiveSection('start') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="start" />
                 <div className="composer__q-prompt">{promptFor('start')}</div>
                 <ul className="composer__options" role="listbox">
                   {START_OPTIONS.map((o, i) => (
@@ -1939,11 +2132,13 @@ export function TaskComposer(props: Props) {
 
           {/* When (due / schedule) */}
           <section
+            ref={sectionRefFor('when')}
             className={sectionClasses('when')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('when'))}
           >
             {isActiveSection('when') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="when" />
                 <div className="composer__q-prompt">{promptFor('when')}</div>
                 <ul className="composer__options" role="listbox">
                   {visibleWhenOptions.map((w, i) => (
@@ -2046,11 +2241,13 @@ export function TaskComposer(props: Props) {
               ambiguous against the 0–10 labels). */}
           {isTypebuild && (
             <section
+              ref={sectionRefFor('priority')}
               className={sectionClasses('priority')}
               onClick={() => setActiveIdx(QUESTIONS.indexOf('priority'))}
             >
               {isActiveSection('priority') ? (
                 <div className="composer__q-active-body">
+                  <FieldLabel id="priority" />
                   <div className="composer__q-prompt">{promptFor('priority')}</div>
                   <ul className="composer__options composer__options--wrap" role="listbox">
                     {PRIORITY_OPTIONS.map((o, i) => (
@@ -2086,11 +2283,13 @@ export function TaskComposer(props: Props) {
 
           {/* Q5 — Status */}
           <section
+            ref={sectionRefFor('status')}
             className={sectionClasses('status')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('status'))}
           >
             {isActiveSection('status') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="status" />
                 <div className="composer__q-prompt">{promptFor('status')}</div>
                 <ul className="composer__options" role="listbox">
                   {STATUS_OPTIONS.map((o, i) => (
@@ -2126,11 +2325,13 @@ export function TaskComposer(props: Props) {
 
           {/* Pin */}
           <section
+            ref={sectionRefFor('pin')}
             className={sectionClasses('pin')}
             onClick={() => setActiveIdx(QUESTIONS.indexOf('pin'))}
           >
             {isActiveSection('pin') ? (
               <div className="composer__q-active-body">
+                <FieldLabel id="pin" />
                 <div className="composer__q-prompt">{promptFor('pin')}</div>
                 <ul className="composer__options" role="listbox">
                   {PIN_OPTIONS.map((o, i) => (

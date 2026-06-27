@@ -310,6 +310,69 @@
 .tdd__rule-scope--project { color: var(--accent-strong, var(--accent)); border-color: var(--accent); }
 .tdd__rule-scope--category { color: var(--warn); border-color: var(--warn); }
 
+/* ── instruction provenance document (task-a784a424bd63) ── */
+.tdd__prov-doc { display: flex; flex-direction: column; gap: var(--sp-3); }
+.tdd__prov-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--border-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+}
+.tdd__prov-group--project { border-left-color: var(--accent); }
+.tdd__prov-group--category { border-left-color: var(--warn); }
+.tdd__prov-group--task { border-left-color: var(--fg-3); }
+.tdd__prov-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+.tdd__prov-group-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--fg-3);
+}
+.tdd__prov-group-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tdd__prov-group-count {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+.tdd__prov-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tdd__prov-rule {
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--fg-1);
+  padding-left: var(--sp-2);
+  position: relative;
+}
+.tdd__prov-rule::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--fg-3);
+}
+
 .tdd__teach-open {
   align-self: flex-start;
   appearance: none;
@@ -393,6 +456,10 @@
 }
 .tdd__teach-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .tdd__rule-scope--task { color: var(--fg-2); border-color: var(--border-2); }
+
+/* ── activity (task-f60a8003efa9 — clubbed Session + Trace into one tab) ── */
+.tdd__activity { display: flex; flex-direction: column; gap: var(--sp-4); }
+.tdd__activity-trace { display: flex; flex-direction: column; gap: var(--sp-2); }
 
 /* ── trace timeline ── */
 .tdd__trace { display: flex; flex-direction: column; gap: var(--sp-3); }

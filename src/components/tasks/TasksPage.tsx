@@ -234,7 +234,12 @@ function TasksPageInner() {
   // task-5e9d866a377f — open the full task detail DRAWER (Trace · Config ·
   // Session, Stop, Enter thread). Pass the task object so the drawer renders
   // without a refetch (the decrypted body is still lazy-loaded inside).
-  function openDetail(task: Task, initialTab?: 'trace' | 'config' | 'session') {
+  // task-f60a8003efa9 — 'trace'/'session' are accepted for back-compat and map
+  // onto the clubbed 'activity' tab inside the drawer; 'activity' is the new id.
+  function openDetail(
+    task: Task,
+    initialTab?: 'trace' | 'config' | 'session' | 'activity',
+  ) {
     window.dispatchEvent(
       new CustomEvent('fm:openTaskDetail', { detail: { task, initialTab } }),
     );
@@ -658,8 +663,9 @@ function TasksPageInner() {
           dispatch({ type: 'setStatus', msg: 'no task targeted' });
           return;
         }
-        const initialTab = (detail as { initialTab?: 'trace' | 'config' | 'session' } | undefined)
-          ?.initialTab;
+        const initialTab = (
+          detail as { initialTab?: 'trace' | 'config' | 'session' | 'activity' } | undefined
+        )?.initialTab;
         openDetail(t, initialTab);
       },
       'fm:tasks:open': () => {
