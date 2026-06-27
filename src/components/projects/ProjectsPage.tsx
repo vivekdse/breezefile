@@ -152,7 +152,19 @@ function ProjectsPageInner() {
       launchers,
     });
     return defs.map((v) => {
-      const avail = verbCtx ? v.isAvailable(verbCtx) : { ok: true };
+      // task-57542e3435af — a single verb's isAvailable / describe must NEVER
+      // blank the whole palette. BOTH are guarded: if one verb throws (e.g. it
+      // reaches for a Ctx field that's momentarily undefined on the Home tab),
+      // it must not take the entire command list down with it. That throw was
+      // exactly the "type 'file manager' → No matches" bug: a sibling verb's
+      // isAvailable threw, the paletteVerbs map blew up, and the Files command
+      // (and every other verb) silently vanished from the quick-switcher.
+      let avail: { ok: boolean; reason?: string } = { ok: true };
+      try {
+        if (verbCtx) avail = v.isAvailable(verbCtx);
+      } catch {
+        avail = { ok: true };
+      }
       let description = '';
       try {
         description = verbCtx ? v.describe(verbCtx) : '';

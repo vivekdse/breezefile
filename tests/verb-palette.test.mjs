@@ -85,3 +85,31 @@ test('description-only match is included but ranks low', () => {
   assert.equal(out[0].id, 'b');
   assert.equal(out[1].id, 'a');
 });
+
+// task-57542e3435af — the Home quick-switcher feeds the same rows the ':' /
+// Cmd-K palette builds. Typing "file manager" or "files" must surface the
+// Files command via its multi-word aliases (a sibling-verb crash used to
+// blank the whole palette; the ranking itself must still pick Files cleanly).
+test('multi-word alias prefix surfaces the Files command', () => {
+  const rows = [
+    {
+      id: 'files',
+      label: 'Files (file manager)',
+      aliases: ['files', 'file manager', 'file browser', 'folders', 'browse', 'open files'],
+      description: 'Open the file manager at home',
+      available: true,
+    },
+    { id: 'new-task', label: 'New task', aliases: ['new task', 'add task', 'task'], available: true },
+    { id: 'filter', label: 'Filter', aliases: ['grep', 'show only'], available: true },
+  ];
+  // The full bug-repro queries must rank Files first.
+  for (const q of ['file manager', 'files', 'file']) {
+    const out = rankPaletteVerbs(rows, q, []).filter((v) => v.available);
+    assert.ok(out.length > 0, `"${q}" yields at least one match`);
+    assert.equal(out[0].id, 'files', `"${q}" ranks the Files command first`);
+  }
+  // A bare "f" prefixes several labels (Filter, Files); Files need only be
+  // present, not necessarily first.
+  const f = rankPaletteVerbs(rows, 'f', []).filter((v) => v.available);
+  assert.ok(f.some((v) => v.id === 'files'), '"f" still surfaces the Files command');
+});

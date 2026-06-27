@@ -59,7 +59,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   // availability + description against the live context.
   const rows: PaletteVerb[] = useMemo(() => {
     return verbs.map((v) => {
-      const avail = ctx ? v.isAvailable(ctx) : { ok: true };
+      // task-57542e3435af — guard isAvailable as well as describe: one verb that
+      // throws (a Ctx field undefined for the active tab) must not blank the
+      // entire palette. Mirrors the same fix in ProjectsPage's quick-switcher.
+      let avail: { ok: boolean; reason?: string } = { ok: true };
+      try {
+        if (ctx) avail = v.isAvailable(ctx);
+      } catch {
+        avail = { ok: true };
+      }
       let description = '';
       try {
         description = ctx ? v.describe(ctx) : '';
