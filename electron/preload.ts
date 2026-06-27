@@ -254,6 +254,11 @@ const fm = {
   termWrite: (id: number, data: string) => ipcRenderer.send('term:write', id, data),
   // SPIKE (spike/playwright-cdp): agent-overlay window mirrors a pty's stream.
   termMirror: (id: number) => ipcRenderer.send('term:mirror', id),
+  // task-6b9b0032feda: like termMirror, but main first replays the pty's recent
+  // scrollback to THIS webContents so a pane mounting/re-showing after output
+  // was emitted repaints immediately (no blank-until-next-chunk gap).
+  termMirrorWithReplay: (id: number) =>
+    ipcRenderer.send('term:mirror-with-replay', id),
   termUnmirror: (id: number) => ipcRenderer.send('term:unmirror', id),
   // SPIKE (spike/playwright-cdp): the operator session's split-pane chrome
   // positions the LEFT-pane page view (WebContentsView), drives its navigation,

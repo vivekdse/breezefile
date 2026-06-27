@@ -134,6 +134,9 @@ type Fm = {
   remoteListTargets: () => Promise<string[]>;
   termWrite: (id: number, data: string) => void;
   termMirror: (id: number) => void;
+  // task-6b9b0032feda — mirror + replay recent scrollback to this window so a
+  // late-mounting/re-shown mirror pane repaints immediately.
+  termMirrorWithReplay: (id: number) => void;
   termUnmirror: (id: number) => void;
   // ─── SPIKE (spike/playwright-cdp): operator session split-pane chrome.
   operatorBrowserBounds: (rect: {

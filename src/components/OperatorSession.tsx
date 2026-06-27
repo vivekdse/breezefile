@@ -83,9 +83,17 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
   collapsedRef.current = collapsed;
 
   // ─── mirror the agent's PTY terminal into the right pane ─────────────────
+  // task-6b9b0032feda — subscribe WITH REPLAY: if this window's Claude pane
+  // mounts after the PTY already emitted output (the common case — the PTY is
+  // spawned by the main window before the operator window opens), main flushes
+  // the recent scrollback to us on subscribe so the terminal repaints
+  // immediately instead of showing nothing until the next chunk. The replay is
+  // delivered as a normal term:data event the child Terminal renders; its mount
+  // effect (and onTermData subscription) runs before this parent effect, so the
+  // flush is never missed.
   useEffect(() => {
     if (ptyId == null) return;
-    fm.termMirror(ptyId);
+    fm.termMirrorWithReplay(ptyId);
     const off = fm.onTermFg((id, _busy, _comm, state) => {
       if (id === ptyId) setWaiting(state === 'waiting');
     });
@@ -261,6 +269,19 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
               title="Show Claude (⅓)"
             >
               ✦ Claude
+            </button>
+          )}
+          {/* task-6b9b0032feda — when the Claude pane is collapsed the ✕ in its
+              chrome is hidden, so surface a persistent close affordance here.
+              Same teardown path (PTY + window) as the Claude-pane close. */}
+          {collapsed && (
+            <button
+              className="operator__btn operator__btn--close"
+              title="Close session (ends browser + Claude)"
+              aria-label="Close session"
+              onClick={() => void onClose()}
+            >
+              ✕
             </button>
           )}
         </div>
