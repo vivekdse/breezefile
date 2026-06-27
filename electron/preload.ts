@@ -844,6 +844,23 @@ const fm = {
     delete: (id: string) =>
       ipcRenderer.invoke('dsltags:delete', id) as Promise<boolean>,
   },
+  // ─── LLM tag frontend (fm-2ln / fm-5rk) ───────────────────────────
+  // Metadata-only NL→DSL compilation. The API key stays in main; the renderer
+  // sends a prebuilt prompt payload (assembled by src/tagCompose.mjs) and gets
+  // raw model text back, which it validates locally. `available` gates the UI.
+  llm: {
+    available: () => ipcRenderer.invoke('llm:available') as Promise<boolean>,
+    run: (payload: {
+      model: string;
+      system: string;
+      messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+      maxTokens?: number;
+    }) =>
+      ipcRenderer.invoke('llm:run', payload) as Promise<
+        { ok: true; text: string } | { ok: false; code?: string; error: string }
+      >,
+    reloadKey: () => ipcRenderer.invoke('llm:reloadKey') as Promise<boolean>,
+  },
   // fm-ued6 — cold-start profiling: the renderer fires this once after its
   // first committed frame so the main process can close out the startup
   // timeline at the "first interactive frame" boundary. NON-PHI, fire-and-forget.

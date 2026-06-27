@@ -19,13 +19,20 @@
 // Additive: this does NOT replace :newtag. Reachable via the :dsltag verb (new)
 // and the fm:editDslTag event (edit). Visual style mirrors CreateTagOverlay.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { parse } from '../tagDsl.mjs';
-import { computeSnapshot } from '../filterEntries.mjs';
+import { computeSnapshot, filterEntries } from '../filterEntries.mjs';
+import {
+  buildComposePrompt,
+  buildRefinePrompt,
+  parseLlmResponse,
+  shapeRows,
+} from '../tagCompose.mjs';
 import { TAG_PALETTE, newTagId } from '../tags';
 import { useOverlayExit } from '../useOverlayExit';
 import { fm } from '../bridge';
 import type { Tag as DslTag } from '../tagStore.d.mts';
+import type { Entry } from '../types';
 
 export function DslTagOverlay({
   onClose,
@@ -47,6 +54,163 @@ export function DslTagOverlay({
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId);
+
+  // ── fm-2ln / fm-5rk — natural-language tag generation ────────────────────
+  // The NL box compiles a description into a selector via the metadata-only LLM
+  // (main process). We keep the candidate matches so the user can inspect them,
+  // REJECT some, and Refine the selector (fm-5rk) to exclude the rejections.
+  const [llmReady, setLlmReady] = useState<boolean | null>(null); // null = checking
+  const [nlText, setNlText] = useState('');
+  const [genBusy, setGenBusy] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [genNote, setGenNote] = useState<string | null>(null);
+  // The walked scope is cached so Generate/Refine/preview don't re-walk.
+  const [scopeEntries, setScopeEntries] = useState<Entry[] | null>(null);
+  // Candidate matches for the CURRENT proposed selector + the user's rejections.
+  const [matches, setMatches] = useState<Entry[] | null>(null);
+  const [rejected, setRejected] = useState<Set<string>>(new Set());
+
+  // Probe whether the LLM frontend is configured (gates the NL box).
+  useEffect(() => {
+    let cancelled = false;
+    fm.llm
+      .available()
+      .then((ok) => {
+        if (!cancelled) setLlmReady(ok);
+      })
+      .catch(() => {
+        if (!cancelled) setLlmReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Walk the scope once (home) and cache the full-metadata entries. Shared by
+  // generate, refine, and the live match preview.
+  const ensureScope = useCallback(async (): Promise<Entry[]> => {
+    if (scopeEntries) return scopeEntries;
+    const scope = await fm.homedir();
+    const entries = (await fm.walkScope(scope)) as Entry[];
+    setScopeEntries(entries);
+    return entries;
+  }, [scopeEntries]);
+
+  // Apply a proposed selector: validate, recompute the candidate match set, and
+  // clear any prior rejections. Returns the match count.
+  const applyProposal = useCallback(
+    async (proposed: string): Promise<number> => {
+      const entries = await ensureScope();
+      const tags = await fm.dslTags.list().catch(() => [] as DslTag[]);
+      const matched = filterEntries(entries, proposed, { tags }) as Entry[];
+      setMatches(matched);
+      setRejected(new Set());
+      return matched.length;
+    },
+    [ensureScope],
+  );
+
+  // Generate: NL description → selector + name + color, then preview the matches.
+  async function generate() {
+    const desc = nlText.trim();
+    if (desc === '' || genBusy) return;
+    setGenBusy(true);
+    setGenError(null);
+    setGenNote(null);
+    try {
+      const entries = await ensureScope();
+      const payload = buildComposePrompt(desc, shapeRows(entries));
+      const res = await fm.llm.run(payload);
+      if (!res.ok) {
+        setGenError(
+          res.code === 'no-api-key'
+            ? 'No Anthropic API key configured — set ANTHROPIC_API_KEY (or userData/llm.json).'
+            : res.error,
+        );
+        return;
+      }
+      const suggestion = parseLlmResponse(res.text, { palette: TAG_PALETTE });
+      setSelector(suggestion.selector);
+      if (!editId && suggestion.name && name.trim() === '') setName(suggestion.name);
+      if (suggestion.color) {
+        const idx = TAG_PALETTE.findIndex((c) => c.color === suggestion.color);
+        if (idx >= 0) setColorIdx(idx);
+      }
+      const count = await applyProposal(suggestion.selector);
+      setGenNote(
+        `Proposed selector matches ${count} file${count === 1 ? '' : 's'}` +
+          (suggestion.confidence < 0.5 ? ' · low confidence — review before applying' : ''),
+      );
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
+  // fm-5rk — Refine: send the rejected files back as NEGATIVE EXAMPLES and get
+  // an improved selector that excludes them while preserving intent. Rejections
+  // REGENERATE THE RULE — they are never stored as per-tag exceptions.
+  async function refine() {
+    if (genBusy || rejected.size === 0 || !matches) return;
+    const sel = selector.trim();
+    if (sel === '') return;
+    setGenBusy(true);
+    setGenError(null);
+    setGenNote(null);
+    try {
+      const rejRows = matches.filter((m) => rejected.has(m.path));
+      const keptCount = matches.length - rejRows.length;
+      const payload = buildRefinePrompt(sel, shapeRows(rejRows, 40), {
+        description: nlText.trim(),
+        keptCount,
+      });
+      const res = await fm.llm.run(payload);
+      if (!res.ok) {
+        setGenError(
+          res.code === 'no-api-key'
+            ? 'No Anthropic API key configured — set ANTHROPIC_API_KEY (or userData/llm.json).'
+            : res.error,
+        );
+        return;
+      }
+      const suggestion = parseLlmResponse(res.text, { palette: TAG_PALETTE });
+      setSelector(suggestion.selector);
+      const count = await applyProposal(suggestion.selector);
+      const stillRejected = (matchesAfter(suggestion.selector)).length;
+      setGenNote(
+        `Refined selector matches ${count} file${count === 1 ? '' : 's'}` +
+          (stillRejected > 0
+            ? ` · ${stillRejected} previously-rejected file${stillRejected === 1 ? '' : 's'} still match — refine again`
+            : ' · excludes the rejected files'),
+      );
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
+  // How many of the just-rejected files a candidate selector still matches —
+  // used to tell the user whether a refine actually excluded them.
+  function matchesAfter(candidate: string): Entry[] {
+    if (!matches || rejected.size === 0 || !scopeEntries) return [];
+    try {
+      const rej = matches.filter((m) => rejected.has(m.path));
+      return filterEntries(rej, candidate, {}) as Entry[];
+    } catch {
+      return [];
+    }
+  }
+
+  function toggleReject(path: string) {
+    setRejected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
 
   // fm-xr0 — when editing, hydrate the form from the stored record so the
   // mode toggle / snapshot count / selector all reflect the saved tag.
@@ -217,6 +381,55 @@ export function DslTagOverlay({
           </div>
         )}
 
+        {/* fm-2ln — describe-as-tag: an LLM compiles a natural-language
+            description into a selector (+ name + color) you inspect before
+            applying. Degrades to a disabled box + hint when no API key. */}
+        <div className="overlay__label tagform__divider">Describe (AI)</div>
+        <textarea
+          className="overlay__input dsltag__nl"
+          rows={2}
+          value={nlText}
+          placeholder={
+            llmReady === false
+              ? 'Set ANTHROPIC_API_KEY to enable AI tag generation'
+              : 'e.g. old screenshots taking up space'
+          }
+          spellCheck
+          disabled={llmReady === false || genBusy}
+          onChange={(e) => setNlText(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+              e.preventDefault();
+              generate();
+            } else if (e.key === 'Escape') {
+              exit();
+            }
+          }}
+        />
+        <div className="tagform__actions">
+          <button
+            type="button"
+            className="overlay__mode"
+            onClick={generate}
+            disabled={llmReady === false || genBusy || nlText.trim() === ''}
+            title={
+              llmReady === false
+                ? 'No Anthropic API key configured'
+                : 'Compile this description into a selector (⌘↵)'
+            }
+          >
+            {genBusy ? 'generating…' : 'Generate selector'}
+          </button>
+          {llmReady === false && (
+            <span className="overlay__hint">
+              AI off — set <code>ANTHROPIC_API_KEY</code> or{' '}
+              <code>userData/llm.json</code>
+            </span>
+          )}
+        </div>
+        {genError && <div className="overlay__error">{genError}</div>}
+        {genNote && <div className="overlay__hint">{genNote}</div>}
+
         <div className="overlay__palette" role="radiogroup" aria-label="Tag color">
           {TAG_PALETTE.map((c, i) => (
             <button
@@ -250,6 +463,50 @@ export function DslTagOverlay({
         />
         {parseError && <div className="overlay__error">{parseError}</div>}
         {saveError && <div className="overlay__error">save failed: {saveError}</div>}
+
+        {/* fm-2ln / fm-5rk — preview the proposed selector's matches BEFORE
+            applying. Reject files that shouldn't be tagged, then Refine: the
+            rejected files are sent back as negative examples and the rule is
+            REGENERATED to exclude them (never stored as per-tag exceptions). */}
+        {matches && (
+          <div className="dsltag__preview">
+            <div className="overlay__label tagform__divider">
+              Matches ({matches.length}){' '}
+              {rejected.size > 0 && (
+                <span className="overlay__hint">· {rejected.size} marked to exclude</span>
+              )}
+            </div>
+            <ul className="dsltag__matchlist">
+              {matches.slice(0, 50).map((m) => (
+                <li key={m.path} className="dsltag__matchrow">
+                  <label className="dsltag__matchlabel">
+                    <input
+                      type="checkbox"
+                      checked={rejected.has(m.path)}
+                      onChange={() => toggleReject(m.path)}
+                      title="Exclude this file from the tag"
+                    />
+                    <span className="dsltag__matchname">{m.name}</span>
+                  </label>
+                </li>
+              ))}
+              {matches.length > 50 && (
+                <li className="overlay__hint">…and {matches.length - 50} more</li>
+              )}
+            </ul>
+            <div className="tagform__actions">
+              <button
+                type="button"
+                className="overlay__mode"
+                onClick={refine}
+                disabled={llmReady === false || genBusy || rejected.size === 0}
+                title="Regenerate the selector to exclude the marked files"
+              >
+                {genBusy ? 'refining…' : `Refine (exclude ${rejected.size})`}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* fm-xr0 — live ↔ frozen mode. Frozen pins the matching paths at save
             time; the re-snapshot button recaptures them on demand. */}

@@ -47,6 +47,7 @@ import {
 import { unsupported } from './core/task-source';
 import type { TypeBuildTaskSource } from './sources/typebuild';
 import { registerTagStoreIpc } from './tag-store';
+import { registerLlmIpc } from './llm';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2799,6 +2800,13 @@ end tell`;
   // tags.json. Additive — runs alongside the live criterion tag system. The
   // dsltags:* handlers live in electron/tag-store.ts.
   registerTagStoreIpc();
+
+  // ─── LLM tag frontend (fm-2ln / fm-5rk) ────────────────────────────
+  // Metadata-only, in-process Anthropic call that compiles a natural-language
+  // tag description into a tagDsl selector (+ name + color) and refines it from
+  // rejected examples. The API key lives in main only (env or userData/llm.json)
+  // — the llm:* handlers live in electron/llm.ts.
+  registerLlmIpc();
 
   // ─── Tasks (fm-dhc) ────────────────────────────────────────────────
   // SQLite-backed task store at ~/.breezefile/tasks.db. Reads run on the
