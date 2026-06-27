@@ -33,6 +33,10 @@ import type { WebContents, BrowserWindow } from 'electron';
 // Pure validation lives in a sibling .mjs (no Electron) so it is unit-testable;
 // different basename avoids the same-basename .mjs/.ts build gotcha.
 import { sanitizeCapturedCredential } from './credential-sanitize.mjs';
+// Pure, version-robust console-message parsing (the root cause of the
+// "Save password? never fires" bug — task-890b0a7483c5). Distinct basename, no
+// .ts sibling, so the bare-import build gotcha does not apply.
+import { consoleMessageText, matchSentinelNonce } from './credential-console.mjs';
 
 // One captured login as it crosses page→main→renderer. PHI-ish secret: the
 // `password` is memory-only and must never be logged or persisted by any
@@ -118,7 +122,12 @@ function captureScript(nonce: string, sentinel: string): string {
         } catch (e) { W.__bfCred = cred; }
         // Emit ONLY the value-free sentinel (marker + current nonce). NO
         // username, NO password ever touches the console.
-        try { console.debug(SENTINEL + ':' + W.__bfCredNonce); } catch (e) {}
+        // Use console.log (info level), NOT console.debug: Electron's
+        // webContents 'console-message' event does not reliably surface
+        // verbose/debug-level lines (renderer logging threshold), so a
+        // debug-level sentinel could be silently dropped before main ever
+        // sees it — a contributing cause of task-890b0a7483c5.
+        try { console.log(SENTINEL + ':' + W.__bfCredNonce); } catch (e) {}
       } catch (e) { /* never throw into the page's submit */ }
     }
 
@@ -180,24 +189,18 @@ export function wireCredentialCapture(
 
   // The ONLY thing crossing the console is the value-free sentinel; we use it
   // purely as a "go pull" signal, then read the credential out-of-band.
-  // Newer Electron passes a details object; older passes positional args. We
-  // accept both and look at the message text only to match our sentinel.
-  const onConsole = (
-    _e: unknown,
-    levelOrDetails: unknown,
-    message?: string,
-  ): void => {
-    const text =
-      typeof message === 'string'
-        ? message
-        : levelOrDetails && typeof levelOrDetails === 'object'
-          ? String((levelOrDetails as { message?: unknown }).message ?? '')
-          : '';
-    if (!text.startsWith(SENTINEL)) return;
+  // Electron's 'console-message' listener has shipped TWO signatures across
+  // majors — positional (event, level, message, line, source) and an
+  // object-details (event, { message, ... }) form. Reading the wrong arg means
+  // the sentinel never matches and capture silently no-ops (root cause of
+  // task-890b0a7483c5). `consoleMessageText` reads the text from whichever
+  // shape arrived; we pass every post-event arg so it is version-robust.
+  const onConsole = (_event: unknown, ...rest: unknown[]): void => {
+    const text = consoleMessageText(...rest);
     // The sentinel carries the nonce after the marker; require a match so a page
     // can't spoof a pull of a stale/foreign credential.
-    const got = text.slice(SENTINEL.length + 1);
-    if (got !== nonce) return;
+    const got = matchSentinelNonce(text, SENTINEL);
+    if (got == null || got !== nonce) return;
     void wc
       .executeJavaScript(pullScript(nonce), true)
       .then((raw) => {
