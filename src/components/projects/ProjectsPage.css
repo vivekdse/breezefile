@@ -147,53 +147,106 @@
   text-decoration: underline;
 }
 
-/* ── L1 grid ─────────────────────────────────────────────────────────────── */
-.projects__grid {
-  display: grid;
-  /* Fill the reclaimed width: as many ~320px columns as fit, collapsing to a
-     single column on narrow windows — no fixed 2-up cap. */
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: var(--sp-5);
-}
-
-.pcard {
-  background: var(--panel-2, var(--panel));
+/* ── L1 inbox (task-4b0168979921) ─────────────────────────────────────────────
+   A dense, email-inbox list aligned with the folder/file aesthetic (epic
+   task-3ff338f80de5): one project per LINE — a status glyph, the NAME, a short
+   DESCRIPTION, and a compact attention summary on the right. */
+.projects__inbox {
   border: 1px solid var(--rule-on-panel);
   border-radius: var(--r-xl);
-  padding: var(--sp-5);
-  cursor: pointer;
-  outline: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  text-align: left;
-  font: inherit;
-  color: inherit;
-  transition: border-color var(--motion-hover), box-shadow var(--motion-hover);
-}
-.pcard:hover {
-  border-color: var(--border-2);
-}
-.pcard.cursor {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--panel-2, var(--panel));
+  overflow: hidden;
 }
 
-.pcard__top {
+.prow {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-4);
+  border: 0;
+  border-bottom: 1px solid var(--rule-on-panel);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-hover);
+}
+.prow:last-child {
+  border-bottom: 0;
+}
+.prow:hover {
+  background: var(--bg-3, var(--accent-soft));
+}
+.prow.cursor {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.prow__glyph {
+  justify-self: center;
+  font-size: var(--fs-sm);
+  color: var(--fg-dim);
+  line-height: 1;
+}
+.prow--blocked .prow__glyph {
+  color: var(--err);
+}
+.prow--need .prow__glyph {
+  color: var(--warn);
+}
+.prow--working .prow__glyph {
+  color: var(--accent);
+}
+
+.prow__main {
+  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: var(--sp-2);
 }
-.pcard__name {
-  font-size: var(--fs-lg);
+.prow__name {
   font-weight: 650;
-  min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: 40%;
+}
+.prow__desc {
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.prow__desc--empty {
+  color: var(--fg-dim);
+  font-style: italic;
+}
+.prow__subs {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
   white-space: nowrap;
 }
-.pcard__need {
-  margin-left: auto;
+
+.prow__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-self: end;
+  white-space: nowrap;
+}
+.prow__attn {
+  font-size: var(--fs-xs);
+  color: var(--warn);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.prow__need {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
@@ -202,125 +255,40 @@
   color: var(--warn);
   background: var(--warn-soft);
   border-radius: var(--r-md);
-  padding: var(--sp-1) var(--sp-2);
-  white-space: nowrap;
+  padding: 0 var(--sp-2);
 }
-.pcard__need .num {
+.prow__need .num {
   font-variant-numeric: tabular-nums;
 }
-
-/* task-6255239581b2 — per-card attention summary ("3 open · 1 blocked · …").
-   Sits just under the name/pill; warm to echo the "needs you" amber. */
-.pcard__attn {
-  font-size: var(--fs-xs);
-  font-weight: 650;
-  color: var(--warn);
-  font-variant-numeric: tabular-nums;
-  margin-top: calc(-1 * var(--sp-1));
+.prow--quiet {
+  opacity: 0.55;
+}
+.prow--quiet:hover,
+.prow--quiet.cursor {
+  opacity: 1;
 }
 
-.pcard__desc {
-  font-size: var(--fs-sm);
-  color: var(--muted-on-panel);
-  line-height: var(--lh-normal);
-  /* clamp to keep cards aligned */
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.pcard__desc--empty {
-  color: var(--fg-dim);
-}
-.pcard__ctx {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-  font-size: var(--fs-2xs);
-  color: var(--fg-dim);
-  white-space: nowrap;
-}
-
-.pcard__subs {
-  font-size: var(--fs-xs);
-  color: var(--fg-3);
-}
-.pcard__add {
-  color: var(--accent);
-  cursor: pointer;
-  background: none;
-  border: 0;
-  font: inherit;
-  padding: 0;
-}
-.pcard__add:hover {
-  text-decoration: underline;
-}
-
-.pcard__bind {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--fg-3);
-  font-size: var(--fs-xs);
-}
-.pcard__bind .mono {
+/* '/' search hint kbd in the sub-line. */
+.projects__kbd {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* one proportion bar — the only encoding of the status mix */
-.segbar {
-  display: flex;
-  height: var(--sp-2);
+  background: var(--bg-2, var(--panel));
+  border: 1px solid var(--rule-on-panel);
   border-radius: var(--r-sm);
-  overflow: hidden;
-  background: var(--bg-3, var(--border-1));
-  margin-top: auto;
-}
-.segbar i {
-  display: block;
-  height: 100%;
-}
-.seg-working {
-  background: var(--accent);
-}
-.seg-need {
-  background: var(--warn);
-}
-.seg-blocked {
-  background: var(--err);
-}
-.seg-done {
-  background: var(--fg-dim);
-}
-.segcap {
-  font-size: var(--fs-2xs);
-  color: var(--fg-3);
-  display: flex;
-  gap: var(--sp-3);
-}
-.segcap .num {
-  color: var(--muted-on-panel);
-  font-variant-numeric: tabular-nums;
+  padding: 0 var(--sp-1);
 }
 
-/* ── task-6255239581b2 — the fold + secondary/idle sections ──────────────────
-   The needs-attention grid leads; everything below needs nothing right now.
-   The fold is a quiet labelled rule; secondary + idle grids reuse the grid
-   layout. Idle cards render dimmed/quiet so revealing them stays calm. */
+/* The fold — a quiet labelled rule inside the inbox. */
 .projects__fold {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  margin: var(--sp-6) 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-4);
   color: var(--fg-dim);
   font-size: var(--fs-2xs);
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide, 0.06em);
+  border-bottom: 1px solid var(--rule-on-panel);
 }
 .projects__fold::before,
 .projects__fold::after {
@@ -329,15 +297,12 @@
   height: 1px;
   background: var(--rule-on-panel);
 }
-.projects__grid--rest {
-  margin-top: 0;
-}
 
 /* "Show all projects (N hidden)" toggle. */
 .projects__showall {
   display: flex;
   justify-content: center;
-  margin: var(--sp-6) 0 var(--sp-2);
+  margin: var(--sp-4) 0 var(--sp-2);
 }
 .projects__showall-btn {
   font-size: var(--fs-xs);
@@ -348,20 +313,120 @@
   color: var(--text-on-panel);
 }
 
-/* Idle/quiet projects, revealed by the toggle — dimmed so they read as quiet. */
-.projects__grid--idle {
-  margin-top: var(--sp-3);
+/* kept for L2 (effective-description "given to agents as context" mark). */
+.pcard__ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-2xs);
+  color: var(--fg-dim);
+  white-space: nowrap;
 }
-.pcard--quiet {
-  opacity: 0.55;
-  background: var(--panel);
-  border-style: dashed;
+
+/* ── unified quick-switcher overlay (task-4b0168979921) ─────────────────────── */
+.qsw__scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim, rgba(0, 0, 0, 0.4));
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 60;
 }
-.pcard--quiet:hover {
-  opacity: 0.85;
+.qsw {
+  width: min(640px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2, var(--panel));
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.35));
+  overflow: hidden;
 }
-.pcard--quiet.cursor {
-  opacity: 1;
+.qsw__input {
+  font: inherit;
+  font-size: var(--fs-md);
+  border: 0;
+  border-bottom: 1px solid var(--rule-on-panel);
+  background: none;
+  color: var(--text-on-panel);
+  padding: var(--sp-3) var(--sp-4);
+  outline: 0;
+}
+.qsw__list {
+  overflow-y: auto;
+  padding: var(--sp-1);
+}
+.qsw__group {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--fg-3);
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
+}
+.qsw__item {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+}
+.qsw__item.cursor {
+  background: var(--accent-soft);
+}
+.qsw__glyph {
+  justify-self: center;
+  color: var(--fg-dim);
+}
+.qsw__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.qsw__label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qsw__sub {
+  font-size: var(--fs-2xs);
+  color: var(--fg-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qsw__empty {
+  padding: var(--sp-5);
+  text-align: center;
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm);
+}
+.qsw__hint {
+  border-top: 1px solid var(--rule-on-panel);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-2xs);
+  color: var(--fg-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.qsw__hint kbd {
+  font-family: var(--font-mono);
+  background: var(--bg-2, var(--panel));
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-1);
 }
 
 /* ── empty state ─────────────────────────────────────────────────────────── */

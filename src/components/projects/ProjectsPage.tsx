@@ -1,13 +1,19 @@
-// task-83048f692491 — Projects home (Project Atlas). A new singleton tab
-// (kind='projects') that lives in the existing shell alongside the Tasks page.
-// It consumes the projects bridge (window.fm.typebuild.projects.*) and the
-// pure foundation resolver (src/projects/) — it does NOT rebuild either.
+// task-83048f692491 / task-4b0168979921 — Projects home, now an INBOX.
+// A singleton tab (kind='projects') that lives in the existing shell alongside
+// the Tasks page. It consumes the projects bridge (window.fm.typebuild.projects.*)
+// and the pure foundation resolver (src/projects/) — it does NOT rebuild either.
+//
+// task-4b0168979921 reframes L1 from a calm CARD GRID to a dense, email-INBOX
+// LIST aligned with epic task-3ff338f80de5's folder/file aesthetic: a project
+// reads like a FOLDER row (a status glyph + the project NAME + a short
+// DESCRIPTION underneath), its tasks (files) listed when you drill in. One
+// project per line, minimal status-icon vocabulary, a folder-style breadcrumb.
 //
 // Three zoom levels, transitioned in-place (no new tabs):
-//   L1 GRID     every project as a calm card. The ONE bright thing is the
-//               amber "needs you" pill (only when > 0). Aggregate stats roll UP
-//               from sub-projects (rollUpTaskStats). Strict column alignment.
-//   L1 SCOPED   a project with children shows the SAME grid, scoped to its
+//   L1 INBOX    every project as one dense row. The ONE bright thing is the
+//               amber "needs you" count (only when > 0). Aggregate stats roll UP
+//               from sub-projects. Ranked by the shared attention partition.
+//   L1 SCOPED   a project with children shows the SAME list, scoped to its
 //               children, with a breadcrumb back to all projects.
 //   L2 DETAIL   drill into a project → its parent→child task tree with roll-up
 //               SENTENCES on parents ("4 of 6 done · 1 needs you") and visible
@@ -15,14 +21,18 @@
 //
 // Keyboard model (mirrors TasksPage's verb-first motion model):
 //   j/k or ↑/↓   move cursor
-//   l / Enter    drill in (card → scoped grid or project tree; tree row → task)
+//   gg / G       jump to top / bottom of the list
+//   l / Enter    drill in (row → scoped list or project tree; tree row → task)
 //   h / Esc      back up one zoom level
+//   /            open the UNIFIED quick-switcher (projects AND tasks). Picking a
+//                project drills into it; picking a task navigates to the Tasks
+//                page focused on that row (no fork — it reuses fm:tasks:focus).
 //   :            open the command palette (verbs act on the app)
 //
 // PHI: project name/description/instructions/folders are NON-PHI teaching
-// context — safe to render. Task TITLES are PHI; in the L2 tree we render task
-// titles for the human operating their own machine (same as TasksPage), never
-// to disk/logs.
+// context — safe to render. Task TITLES are PHI; in the L2 tree and the
+// quick-switcher we render task titles for the human operating their own
+// machine (same as TasksPage), never to disk/logs.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fm } from '../../bridge';
@@ -60,6 +70,39 @@ function rowStatusOf(t: Task): RowStatus {
   return 'need'; // pending / open — wants a human
 }
 
+// ── minimal status-icon vocabulary (task-4b0168979921) ───────────────────────
+// One glyph per project row, derived from the SHARED attention partition — we
+// do NOT re-derive ranking here. Loudest signal wins: blocked/failed → recent
+// activity → needs-you → working → idle/quiet → clear.
+//   ⛔ blocked   ⚑ needs you   ◷ working   ◦ idle   ◌ clear
+type ProjStatus = 'blocked' | 'need' | 'working' | 'idle' | 'clear';
+function projStatusOf(
+  att: ProjectAttention | undefined,
+  rolled: TaskStats | undefined,
+): ProjStatus {
+  if (att) {
+    if (att.blocked > 0 || att.failed > 0) return 'blocked';
+    if (att.total > 0) return 'need';
+  }
+  if ((rolled?.inProgress ?? 0) > 0) return 'working';
+  if (att?.idle) return 'idle';
+  return 'clear';
+}
+const STATUS_GLYPH: Record<ProjStatus, string> = {
+  blocked: '⛔',
+  need: '⚑',
+  working: '◷',
+  idle: '◦',
+  clear: '◌',
+};
+const STATUS_LABEL: Record<ProjStatus, string> = {
+  blocked: 'blocked',
+  need: 'needs you',
+  working: 'working',
+  idle: 'idle',
+  clear: 'clear',
+};
+
 function statsRollUpSentence(s: TaskStats): string {
   const parts: string[] = [];
   if (s.total > 0) parts.push(`${s.done} of ${s.total} done`);
@@ -67,28 +110,6 @@ function statsRollUpSentence(s: TaskStats): string {
   if (s.needsYou > 0) parts.push(`${s.needsYou} needs you`);
   if (s.blocked > 0) parts.push(`${s.blocked} blocked`);
   return parts.join(' · ');
-}
-
-// One proportion segment bar from a TaskStats roll-up.
-function SegBar({ stats }: { stats: TaskStats }) {
-  const working = stats.inProgress;
-  const need = stats.needsYou - stats.blocked > 0 ? stats.needsYou - stats.blocked : 0;
-  const blocked = stats.blocked;
-  const done = stats.done + stats.cancelled;
-  const total = working + need + blocked + done;
-  if (total === 0) {
-    return <div className="segbar" aria-hidden="true" />;
-  }
-  const seg = (cls: string, n: number) =>
-    n > 0 ? <i key={cls} className={cls} style={{ flex: n }} /> : null;
-  return (
-    <div className="segbar" aria-hidden="true">
-      {seg('seg-working', working)}
-      {seg('seg-need', need)}
-      {seg('seg-blocked', blocked)}
-      {seg('seg-done', done)}
-    </div>
-  );
 }
 
 function ProjectsPageInner() {
@@ -168,6 +189,10 @@ function ProjectsPageInner() {
   const [treeCursor, setTreeCursor] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
+  // task-4b0168979921 — unified quick-switcher (projects AND tasks). '/' opens.
+  const [showSwitcher, setShowSwitcher] = useState(false);
+  // gg/G motion: remember a pending 'g' so the next 'g' jumps to the top.
+  const gPendingRef = useRef(false);
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const treeRef = useRef<HTMLDivElement | null>(null);
@@ -425,7 +450,19 @@ function ProjectsPageInner() {
         target?.tagName === 'TEXTAREA' ||
         target?.isContentEditable;
       if (inField) return;
+      // While the quick-switcher overlay is open it owns the keyboard.
+      if (showSwitcher) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // '/' — open the unified quick-switcher over projects AND tasks. Available
+      // at any zoom level; the overlay owns its own keys once open (gated above
+      // by `showSwitcher` shortcutting the page handler via the `inField`/early
+      // returns it sets up).
+      if (e.key === '/') {
+        e.preventDefault();
+        gPendingRef.current = false;
+        setShowSwitcher(true);
+        return;
+      }
       if (e.key === ':') {
         e.preventDefault();
         dispatch({ type: 'setMode', mode: 'command', buffer: '' });
@@ -444,6 +481,24 @@ function ProjectsPageInner() {
         return;
       }
       if (level === 1) {
+        // gg → top, G → bottom (vim motion over the inbox list).
+        if (e.key === 'g') {
+          e.preventDefault();
+          if (gPendingRef.current) {
+            gPendingRef.current = false;
+            setGridCursor(0);
+          } else {
+            gPendingRef.current = true;
+          }
+          return;
+        }
+        if (e.key === 'G') {
+          e.preventDefault();
+          gPendingRef.current = false;
+          setGridCursor(Math.max(0, gridNodes.length - 1));
+          return;
+        }
+        gPendingRef.current = false;
         if (e.key === 'ArrowDown' || e.key === 'j') {
           e.preventDefault();
           setGridCursor((c) => Math.min(gridNodes.length - 1, c + 1));
@@ -480,7 +535,7 @@ function ProjectsPageInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, level, scopeId, gridNodes, gridCursor, treeRows, treeCursor, showCreate, detailId]);
+  }, [isActive, level, scopeId, gridNodes, gridCursor, treeRows, treeCursor, showCreate, detailId, showSwitcher]);
 
   // keep the cursor card in view. The grid now renders across multiple section
   // <div>s (needs-attention / below-the-fold / idle), so query the whole page
@@ -539,7 +594,7 @@ function ProjectsPageInner() {
               setGridCursor(0);
             }}
           >
-            Atlas
+            Projects
           </button>
           {scopeProject && level === 1 && (
             <>
@@ -615,6 +670,24 @@ function ProjectsPageInner() {
           />
         )}
       </div>
+      {showSwitcher && (
+        <QuickSwitcher
+          roots={roots}
+          nodeById={nodeById}
+          attention={attention}
+          tasks={allTasks}
+          onClose={() => setShowSwitcher(false)}
+          onPickProject={(id) => {
+            setShowSwitcher(false);
+            const node = nodeById.get(id);
+            if (node) enterCard(node);
+          }}
+          onPickTask={(t) => {
+            setShowSwitcher(false);
+            openTaskDetail(t);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -684,23 +757,17 @@ function ProjectsGrid({
   // in sections, so each card resolves its own absolute index for keyboard sync.
   const indexOf = (id: string) => gridNodes.findIndex((n) => n.project.id === id);
 
-  const renderCard = (node: ProjectNode, quiet: boolean) => {
+  // task-4b0168979921 — one project per LINE (folder-aesthetic inbox row):
+  // [status glyph] NAME — short description … [N need you] [⚑/◷ summary].
+  const renderRow = (node: ProjectNode, quiet: boolean) => {
     const p = node.project;
     const rolled = rollUp.get(p.id)?.rolled;
-    const stats: TaskStats = rolled ?? {
-      total: 0,
-      open: 0,
-      inProgress: 0,
-      done: 0,
-      cancelled: 0,
-      blocked: 0,
-      needsYou: 0,
-    };
     const att = attention.get(p.id);
+    const status = projStatusOf(att, rolled);
     const need = att?.total ?? 0;
     const summary = att ? attentionSummary(att) : '';
-    const bind = p.folders.length > 0 ? p.folders.join(' · ') : 'no folder bound';
     const i = indexOf(p.id);
+    const hasKids = node.children.length > 0;
     return (
       <button
         type="button"
@@ -708,8 +775,9 @@ function ProjectsGrid({
         data-grid-i={i}
         role="listitem"
         className={[
-          'pcard',
-          quiet ? 'pcard--quiet' : '',
+          'prow',
+          `prow--${status}`,
+          quiet ? 'prow--quiet' : '',
           i === gridCursor ? 'cursor' : '',
         ]
           .filter(Boolean)
@@ -719,43 +787,36 @@ function ProjectsGrid({
           onEnter(node);
         }}
       >
-        <div className="pcard__top">
-          <span className="pcard__name">{p.name}</span>
-          {need > 0 && (
-            <span className="pcard__need">
-              ⚑ <span className="num">{need}</span> need you
+        <span
+          className="prow__glyph"
+          title={STATUS_LABEL[status]}
+          aria-label={STATUS_LABEL[status]}
+        >
+          {hasKids ? '▸' : STATUS_GLYPH[status]}
+        </span>
+        <span className="prow__main">
+          <span className="prow__name">{p.name}</span>
+          {p.description ? (
+            <span className="prow__desc">{p.description}</span>
+          ) : (
+            <span className="prow__desc prow__desc--empty">
+              no description — no shared context for agents
             </span>
           )}
-        </div>
-        {summary && <div className="pcard__attn">{summary}</div>}
-        {p.description ? (
-          <div className="pcard__desc">
-            {p.description}{' '}
-            <span className="pcard__ctx">{CTX_MARK}</span>
-          </div>
-        ) : (
-          <div className="pcard__desc pcard__desc--empty">
-            No description yet — agents have no shared context for this project.
-          </div>
-        )}
-        {node.children.length > 0 && (
-          <div className="pcard__subs">
-            ▸ {node.children.length} sub-project{node.children.length === 1 ? '' : 's'}
-          </div>
-        )}
-        <div className="pcard__bind">
-          <span aria-hidden="true">⛓</span>
-          <span className="mono">{bind}</span>
-        </div>
-        <SegBar stats={stats} />
-        <div className="segcap">
-          <span>
-            <span className="num">{stats.inProgress}</span> working
-          </span>
-          <span>
-            <span className="num">{stats.done}</span> done
-          </span>
-        </div>
+          {hasKids && (
+            <span className="prow__subs">
+              · {node.children.length} sub-project{node.children.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </span>
+        <span className="prow__meta">
+          {summary && <span className="prow__attn">{summary}</span>}
+          {need > 0 && (
+            <span className="prow__need">
+              ⚑ <span className="num">{need}</span>
+            </span>
+          )}
+        </span>
       </button>
     );
   };
@@ -769,8 +830,9 @@ function ProjectsGrid({
           </h1>
           <div className="projects__sub">
             {scopeProject
-              ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · same view, scoped · ranked by what needs you`
-              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · ranked by what needs you`}
+              ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · scoped · ranked by what needs you · `
+              : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · ranked by what needs you · `}
+            <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
           </div>
         </div>
         <div className="projects__head-actions">
@@ -838,29 +900,21 @@ function ProjectsGrid({
         </div>
       )}
 
-      {/* Needs-attention — leads the page. */}
-      {attentionNodes.length > 0 && (
-        <div className="projects__grid" ref={gridRef} role="list">
-          {attentionNodes.map((node) => renderCard(node, false))}
-        </div>
-      )}
-
-      {/* The fold: everything below needs nothing from you right now. */}
-      {recentNodes.length > 0 && (
-        <>
-          {attentionNodes.length > 0 && (
+      {/* The inbox. Needs-attention leads; everything below the fold needs
+          nothing right now. One dense, scannable list. */}
+      {(attentionNodes.length > 0 || recentNodes.length > 0) && (
+        <div className="projects__inbox" ref={gridRef} role="list">
+          {attentionNodes.map((node) => renderRow(node, false))}
+          {attentionNodes.length > 0 && recentNodes.length > 0 && (
             <div className="projects__fold" aria-hidden="true">
               <span>nothing needs you below</span>
             </div>
           )}
-          <div
-            className="projects__grid projects__grid--rest"
-            ref={attentionNodes.length === 0 ? gridRef : undefined}
-            role="list"
-          >
-            {recentNodes.map((node) => renderCard(node, false))}
-          </div>
-        </>
+          {recentNodes.map((node) => renderRow(node, false))}
+          {showAll &&
+            idleNodes.length > 0 &&
+            idleNodes.map((node) => renderRow(node, true))}
+        </div>
       )}
 
       {/* Idle/quiet projects — hidden by default, revealed (dimmed) on toggle. */}
@@ -876,11 +930,6 @@ function ProjectsGrid({
               ? `Hide idle projects (${hiddenCount})`
               : `Show all projects (${hiddenCount} hidden)`}
           </button>
-        </div>
-      )}
-      {showAll && idleNodes.length > 0 && (
-        <div className="projects__grid projects__grid--idle" role="list">
-          {idleNodes.map((node) => renderCard(node, true))}
         </div>
       )}
     </>
@@ -1175,6 +1224,202 @@ function CreateForm({
         >
           {busy ? 'Creating…' : 'Create project'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── unified quick-switcher (task-4b0168979921) ──────────────────────────────────
+// '/' opens a single overlay over PROJECTS and TASKS. Picking a project drills
+// into it (re-uses the page's enterCard); picking a task navigates to the Tasks
+// page focused on that row via the existing fm:tasks:focus path — it does NOT
+// fork the task. Task titles are PHI: rendered in-app for the operator only,
+// never written to disk/logs (same contract as the L2 tree).
+type SwitchItem =
+  | { kind: 'project'; id: string; label: string; sub: string; status: ProjStatus }
+  | { kind: 'task'; task: Task; label: string; sub: string; status: RowStatus };
+
+function QuickSwitcher({
+  roots,
+  nodeById,
+  attention,
+  tasks,
+  onClose,
+  onPickProject,
+  onPickTask,
+}: {
+  roots: ProjectNode[];
+  nodeById: Map<string, ProjectNode>;
+  attention: Map<string, ProjectAttention>;
+  tasks: Task[];
+  onClose: () => void;
+  onPickProject: (id: string) => void;
+  onPickTask: (t: Task) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [cursor, setCursor] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Flatten the project forest → searchable items (name + description), with a
+  // folder-style path as the sub-line.
+  const projectItems: SwitchItem[] = useMemo(() => {
+    const out: SwitchItem[] = [];
+    const walk = (node: ProjectNode) => {
+      const p = node.project;
+      const att = attention.get(p.id);
+      out.push({
+        kind: 'project',
+        id: p.id,
+        label: p.name,
+        sub: breadcrumbPath(roots, p.id),
+        status: projStatusOf(att, undefined),
+      });
+      node.children.forEach(walk);
+    };
+    roots.forEach(walk);
+    return out;
+  }, [roots, attention]);
+
+  // Tasks → items (title + its project path). Skip terminal tasks to keep the
+  // switcher actionable.
+  const taskItems: SwitchItem[] = useMemo(() => {
+    const out: SwitchItem[] = [];
+    for (const t of tasks) {
+      if (t.status === 'done' || t.status === 'cancelled') continue;
+      const node = t.projectId ? nodeById.get(t.projectId) : undefined;
+      out.push({
+        kind: 'task',
+        task: t,
+        label: t.title,
+        sub: node ? breadcrumbPath(roots, node.project.id) : 'no project',
+        status: rowStatusOf(t),
+      });
+    }
+    return out;
+  }, [tasks, nodeById, roots]);
+
+  const results = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const match = (it: SwitchItem) =>
+      needle === '' ||
+      it.label.toLowerCase().includes(needle) ||
+      it.sub.toLowerCase().includes(needle);
+    const projects = projectItems.filter(match).slice(0, 30);
+    const tasksF = taskItems.filter(match).slice(0, 30);
+    return { projects, tasksF, flat: [...projects, ...tasksF] };
+  }, [q, projectItems, taskItems]);
+
+  useEffect(() => {
+    if (cursor >= results.flat.length) setCursor(0);
+  }, [results.flat.length, cursor]);
+
+  useEffect(() => {
+    listRef.current
+      ?.querySelector(`[data-sw-i="${cursor}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [cursor]);
+
+  function pick(it: SwitchItem | undefined) {
+    if (!it) return;
+    if (it.kind === 'project') onPickProject(it.id);
+    else onPickTask(it.task);
+  }
+
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    } else if (e.key === 'ArrowDown' || (e.key === 'n' && e.ctrlKey)) {
+      e.preventDefault();
+      setCursor((c) => Math.min(results.flat.length - 1, c + 1));
+    } else if (e.key === 'ArrowUp' || (e.key === 'p' && e.ctrlKey)) {
+      e.preventDefault();
+      setCursor((c) => Math.max(0, c - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      pick(results.flat[cursor]);
+    }
+  }
+
+  const renderItem = (it: SwitchItem, i: number) => {
+    const glyph =
+      it.kind === 'project'
+        ? STATUS_GLYPH[it.status]
+        : it.status === 'blocked'
+          ? '⛔'
+          : it.status === 'need'
+            ? '⚑'
+            : it.status === 'working'
+              ? '◷'
+              : '◌';
+    return (
+      <button
+        type="button"
+        key={`${it.kind}:${it.kind === 'project' ? it.id : it.task.id}`}
+        data-sw-i={i}
+        className={['qsw__item', i === cursor ? 'cursor' : ''].filter(Boolean).join(' ')}
+        onMouseMove={() => setCursor(i)}
+        onClick={() => pick(it)}
+      >
+        <span className="qsw__glyph" aria-hidden="true">
+          {glyph}
+        </span>
+        <span className="qsw__body">
+          <span className="qsw__label">{it.label}</span>
+          <span className="qsw__sub">
+            {it.kind === 'project' ? 'project' : 'task'} · {it.sub}
+          </span>
+        </span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="qsw__scrim" onClick={onClose}>
+      <div
+        className="qsw"
+        role="dialog"
+        aria-label="Search projects and tasks"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKey}
+      >
+        <input
+          ref={inputRef}
+          className="qsw__input"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setCursor(0);
+          }}
+          placeholder="Search projects & tasks…"
+          spellCheck={false}
+        />
+        <div className="qsw__list" ref={listRef}>
+          {results.flat.length === 0 ? (
+            <div className="qsw__empty">No matches.</div>
+          ) : (
+            <>
+              {results.projects.length > 0 && (
+                <div className="qsw__group">Projects</div>
+              )}
+              {results.projects.map((it) => renderItem(it, results.flat.indexOf(it)))}
+              {results.tasksF.length > 0 && <div className="qsw__group">Tasks</div>}
+              {results.tasksF.map((it) =>
+                renderItem(it, results.projects.length + results.tasksF.indexOf(it)),
+              )}
+            </>
+          )}
+        </div>
+        <div className="qsw__hint">
+          <kbd>↑</kbd>
+          <kbd>↓</kbd> move · <kbd>↵</kbd> open · <kbd>esc</kbd> close
+        </div>
       </div>
     </div>
   );
