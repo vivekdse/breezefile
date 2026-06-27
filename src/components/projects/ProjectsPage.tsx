@@ -55,9 +55,17 @@ import {
   loadProjectsViewPrefs,
   saveProjectsViewPrefs,
 } from '../../projectsViewPrefs';
-import { ProjectFolderBlock } from './ProjectFolderBlock';
+import { ProjectFolderBlock, ProjectRow } from './ProjectFolderBlock';
 import type { ProjectFolderRow, ProjectTasksProvider } from './ProjectFolderBlock';
 import { useProjectTaskRows } from './useProjectTaskRows';
+// task-49b7b37c8a02 — type-to-command: the Home quick-switcher blends verbs
+// (project/task + top-level) with project/task entity fallback, mirroring
+// ChipPrompt's allOptions/pickOption pattern.
+import { effectiveVerbsFor, useVerbCtx, type VerbDef } from '../ChipPrompt';
+import { rankPaletteVerbs } from '../../verbPalette.mjs';
+import type { PaletteVerb } from '../../verbPalette.mjs';
+import { fm as bridgeFm } from '../../bridge';
+import type { Launcher } from '../../bridge';
 import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
@@ -109,6 +117,45 @@ function ProjectsPageInner() {
   const activeKind = state.tabs[state.activeTab]?.kind;
   const isActive = activeKind === 'home' || activeKind === 'projects';
 
+  // ── verbs for type-to-command (task-49b7b37c8a02) ───────────────────────────
+  // The Home quick-switcher blends VERBS (project/task + top-level, gated to the
+  // 'home' tab kind via effectiveVerbsFor) with the project/task entity
+  // fallback. Verbs run through the same path as the Cmd-K palette: hand the id
+  // to ChipPrompt via setMode/command, which owns slot collection + execution.
+  const verbCtx = useVerbCtx();
+  const [launchers, setLaunchers] = useState<Launcher[]>([]);
+  useEffect(() => {
+    void bridgeFm.launchersList().then(setLaunchers).catch(() => {});
+  }, []);
+  const paletteVerbs: PaletteVerb[] = useMemo(() => {
+    const defs: VerbDef[] = effectiveVerbsFor({
+      tasksEnabled: state.taskManagementEnabled,
+      tabKind: 'home',
+      launchers,
+    });
+    return defs.map((v) => {
+      const avail = verbCtx ? v.isAvailable(verbCtx) : { ok: true };
+      let description = '';
+      try {
+        description = verbCtx ? v.describe(verbCtx) : '';
+      } catch {
+        description = '';
+      }
+      return {
+        id: v.id,
+        label: v.label,
+        aliases: v.aliases,
+        category: v.category,
+        description,
+        available: avail.ok,
+        keybinding: v.keybinding,
+      };
+    });
+  }, [state.taskManagementEnabled, launchers, verbCtx]);
+  const runVerb = (verbId: string) => {
+    dispatch({ type: 'setMode', mode: 'command', verb: verbId });
+  };
+
   // ── data ──────────────────────────────────────────────────────────────────
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -123,9 +170,14 @@ function ProjectsPageInner() {
   const [showArchived, setShowArchived] = useState<boolean>(
     () => loadProjectsViewPrefs().showArchived,
   );
+  // task-6050fee0efb1 — Projects-first ('projects') vs Tasks-first ('flat'),
+  // persisted alongside the other view prefs.
+  const [homeView, setHomeView] = useState<'projects' | 'flat'>(
+    () => loadProjectsViewPrefs().homeView,
+  );
   useEffect(() => {
-    saveProjectsViewPrefs({ showAll, showArchived });
-  }, [showAll, showArchived]);
+    saveProjectsViewPrefs({ showAll, showArchived, homeView });
+  }, [showAll, showArchived, homeView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,10 +234,8 @@ function ProjectsPageInner() {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
-  // task-9d54b7ab7972 (Phase 5, Q3) — Home shows tasks BY PROJECT (folders) by
-  // default; a 'flat' toggle folds the all-tasks inbox in as a flat view (the
-  // standalone :tasks tab is retained as a secondary surface, not retired).
-  const [homeView, setHomeView] = useState<'projects' | 'flat'>('projects');
+  // homeView (Projects-first / Tasks-first) is declared + persisted above with
+  // the other view prefs (task-6050fee0efb1).
   const [flatDoneOpen, setFlatDoneOpen] = useState(false);
   // task-4b0168979921 — unified quick-switcher (projects AND tasks). '/' opens.
   const [showSwitcher, setShowSwitcher] = useState(false);
@@ -248,6 +298,8 @@ function ProjectsPageInner() {
   }, [partitioned, showAll]);
 
   // ── L2 derived data ─────────────────────────────────────────────────────────
+  // The Inbox stays an inline block (it's the project-less catch-all — there is
+  // no real folder to "open"), so detail drill-in resolves real nodes only.
   const detailNode = detailId ? nodeById.get(detailId) ?? null : null;
   const detailProject = detailNode?.project ?? null;
   const detailChain = useMemo(
@@ -539,9 +591,13 @@ function ProjectsPageInner() {
       pushBlock(detailNode, false);
       return out;
     }
-    // root: inbox first (Q4), then the ranked grid blocks (sub-projects collapsed)
+    // root (task-6050fee0efb1): the Inbox keeps its inline block (header +
+    // tasks), but every real project is now ONE compact row — no inline tasks,
+    // no expanded sub-projects — so the cursor walks just the project ids.
     if (scopeId == null && inboxTotalCount > 0) pushBlock(inboxNode, true);
-    for (const node of gridNodes) pushBlock(node, true);
+    for (const node of gridNodes) {
+      out.push({ kind: 'header', key: node.project.id, projectId: node.project.id });
+    }
     return out;
   }, [level, homeView, flatSections, detailNode, scopeId, inboxTotalCount, inboxNode, gridNodes, rowsForProject]);
 
@@ -570,10 +626,14 @@ function ProjectsPageInner() {
     setExpanded(new Set());
     setLevel(2);
     setCursorKey(node.project.id);
+    // task-54e9281f0986 — the create form is level-scoped; drop any open one so
+    // it doesn't bleed across the root ↔ detail boundary.
+    setShowCreate(false);
   }
   function backUp() {
     if (level === 2) {
       setLevel(1);
+      setShowCreate(false);
       return;
     }
     if (scopeId != null) {
@@ -689,17 +749,31 @@ function ProjectsPageInner() {
       setLevel(2);
     }
     function onNew() {
-      // :new-project verb — surface the inline create form at the grid level.
-      setLevel(1);
-      setShowCreate(true);
+      // :new-project verb — open the inline create form, parented to the
+      // project in view: a sub-project when drilled in (level 2), else a
+      // top-level project at the grid. task-75493d416ab5 / task-54e9281f0986.
+      if (level === 2 && detailId) {
+        setShowCreate(true);
+      } else {
+        setLevel(1);
+        setShowCreate(true);
+      }
+    }
+    function onNewTaskEvt() {
+      // :new-task verb — create a task scoped to the project in view (the open
+      // project when drilled in, else unscoped). task-75493d416ab5.
+      const target = level === 2 && detailId ? detailId : scopeId ?? '';
+      newProjectTask(target === INBOX_ID ? '' : target);
     }
     window.addEventListener('fm:projects:focus', onFocus);
     window.addEventListener('fm:projects:new', onNew);
+    window.addEventListener('fm:projects:newtask', onNewTaskEvt);
     return () => {
       window.removeEventListener('fm:projects:focus', onFocus);
       window.removeEventListener('fm:projects:new', onNew);
+      window.removeEventListener('fm:projects:newtask', onNewTaskEvt);
     };
-  }, [nodeById]);
+  }, [nodeById, level, detailId, scopeId]);
 
   // ── keyboard ────────────────────────────────────────────────────────────────
   // ── `:` verbs act on the task selection (task-1bf3a297c9f9, Phase 4) ─────────
@@ -903,36 +977,38 @@ function ProjectsPageInner() {
   return (
     <div className="projects">
       <div className="projects__page">
-        <div className="projects__crumb">
-          <button
-            type="button"
-            className={scopeId == null && level === 1 ? 'projects__crumb-here' : 'projects__crumb-clk'}
-            onClick={() => {
-              setLevel(1);
-              setScopeId(null);
-            }}
-          >
-            Home
-          </button>
-          {scopeProject && level === 1 && (
-            <>
-              <span className="projects__crumb-sep">›</span>
-              <span className="projects__crumb-here">{scopeProject.name}</span>
-            </>
-          )}
-          {level === 2 && detailProject && (
-            <>
-              <span className="projects__crumb-sep">›</span>
-              <span className="projects__crumb-here">
-                {breadcrumbPath(roots, detailProject.id)}
-              </span>
-            </>
-          )}
-          <span className="projects__zoom" aria-hidden="true">
-            <i className="on" />
-            <i className={level >= 2 ? 'on' : ''} />
-          </span>
-        </div>
+        {/* task-2b54dc05c949 — the redundant root "Home" crumb is gone; the
+            titlebar Home button (task-6d0fd232d6c2) owns "go Home". The crumb
+            only renders once you've drilled into a project. A clickable Home
+            anchor heads the trail so you can climb back to root. */}
+        {((scopeProject && level === 1) || (level === 2 && detailProject)) && (
+          <div className="projects__crumb">
+            <button
+              type="button"
+              className="projects__crumb-clk"
+              onClick={() => {
+                setLevel(1);
+                setScopeId(null);
+              }}
+            >
+              Home
+            </button>
+            {scopeProject && level === 1 && (
+              <>
+                <span className="projects__crumb-sep">›</span>
+                <span className="projects__crumb-here">{scopeProject.name}</span>
+              </>
+            )}
+            {level === 2 && detailProject && (
+              <>
+                <span className="projects__crumb-sep">›</span>
+                <span className="projects__crumb-here">
+                  {breadcrumbPath(roots, detailProject.id)}
+                </span>
+              </>
+            )}
+          </div>
+        )}
 
         {level === 1 && homeView === 'flat' ? (
           <FlatView
@@ -1009,6 +1085,16 @@ function ProjectsPageInner() {
             onOpenFolder={openProjectFolder}
             onNewTask={(pid) => newProjectTask(pid)}
             onArchive={(next) => detailId && void setProjectArchived(detailId, next)}
+            showCreate={showCreate}
+            onShowCreate={() => setShowCreate(true)}
+            onCancelCreate={() => setShowCreate(false)}
+            onCreated={(p) => {
+              setShowCreate(false);
+              setProjects((prev) => [...prev, p]);
+              setReloadTick((t) => t + 1);
+              dispatch({ type: 'setStatus', msg: `project created · ${p.name}` });
+            }}
+            allProjects={projects}
           />
         ) : (
           <>
@@ -1026,6 +1112,11 @@ function ProjectsPageInner() {
           nodeById={nodeById}
           attention={attention}
           tasks={allTasks}
+          verbs={paletteVerbs}
+          onPickVerb={(id) => {
+            setShowSwitcher(false);
+            runVerb(id);
+          }}
           onClose={() => setShowSwitcher(false)}
           onPickProject={(id) => {
             setShowSwitcher(false);
@@ -1059,9 +1150,9 @@ function HomeViewToggle({
           .join(' ')}
         aria-pressed={view === 'projects'}
         onClick={() => onSet('projects')}
-        title="Group tasks by project (folders)"
+        title="Projects first — projects as folders; open one to see its tasks"
       >
-        By project
+        Projects first
       </button>
       <button
         type="button"
@@ -1070,9 +1161,9 @@ function HomeViewToggle({
           .join(' ')}
         aria-pressed={view === 'flat'}
         onClick={() => onSet('flat')}
-        title="Flat list of every task"
+        title="Tasks first — a flat list of every task"
       >
-        Flat
+        Tasks first
       </button>
     </div>
   );
@@ -1107,7 +1198,8 @@ function FlatView({
     <>
       <div className="projects__head">
         <div className="projects__head-text">
-          <h1 className="projects__title">Home</h1>
+          {/* task-2b54dc05c949 — redundant "Home" heading removed; the caption
+              subtitle carries the useful context on its own. */}
           <div className="projects__sub">
             {totalOpen} open task{totalOpen === 1 ? '' : 's'} · flat view ·{' '}
             <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
@@ -1261,48 +1353,36 @@ function HomeRoot({
   const empty = loaded && !loadErr && totalScoped === 0;
   const hiddenCount = idleNodes.length;
 
-  // One project = one folder block. The cursor (keyboard or mouse) keys off the
-  // project id; the inner .pfolder carries data-folder-key for scroll-into-view.
+  // task-6050fee0efb1 — one project = ONE compact file/folder-style row. No
+  // inline task list (the file manager doesn't show a folder's contents inline);
+  // opening a row drills into the project to reveal its tasks + sub-projects.
+  // The cursor (keyboard or mouse) keys off the project id; the row carries
+  // data-folder-key for scroll-into-view.
   const renderBlock = (node: ProjectNode, quiet: boolean) => {
     const p = node.project;
     const archived = p.archived === true;
+    const att = attention.get(p.id);
+    const rolled = rollUp.get(p.id)?.rolled;
+    const status = projStatusOf(att, rolled);
     return (
       <div
         key={p.id}
-        className={[
-          'home-block',
-          quiet ? 'home-block--quiet' : '',
-          archived ? 'home-block--archived' : '',
-          cursorKey === p.id ? 'home-block--cursor' : '',
-        ]
+        className={['home-row-wrap', quiet ? 'home-row-wrap--quiet' : '']
           .filter(Boolean)
           .join(' ')}
-        onMouseDown={() => onSetCursor(p.id)}
       >
-        <button
-          type="button"
-          className="home-block__archive"
-          title={archived ? 'Unarchive project' : 'Archive project'}
-          aria-label={archived ? 'Unarchive project' : 'Archive project'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onArchive(p.id, !archived);
-          }}
-        >
-          {archived ? '↺' : '⊟'}
-        </button>
-        <ProjectFolderBlock
+        <ProjectRow
           node={node}
-          attention={attention}
-          rollUp={rollUp}
-          effectiveDesc={p.description ?? ''}
-          tasks={tasksProvider}
-          scale="inline"
-          onOpenProject={onOpenProject}
-          onOpenSelf={() => onEnter(node)}
-          onOpenFolder={onOpenFolder}
-          onNewTask={onNewTask}
-          cursorKey={cursorKey}
+          statusGlyph={STATUS_GLYPH[status]}
+          statusKind={status}
+          total={rolled?.total ?? 0}
+          need={att?.total ?? 0}
+          subCount={node.children.length}
+          archived={archived}
+          cursor={cursorKey === p.id}
+          onOpen={() => onEnter(node)}
+          onHover={onSetCursor}
+          onArchive={onArchive}
         />
       </div>
     );
@@ -1312,9 +1392,12 @@ function HomeRoot({
     <>
       <div className="projects__head">
         <div className="projects__head-text">
-          <h1 className="projects__title">
-            {scopeProject ? scopeProject.name : 'Home'}
-          </h1>
+          {/* task-2b54dc05c949 — at root the redundant "Home" heading is gone;
+              the subtitle stands alone. Once scoped into a project we keep the
+              project name as the heading (that's drill-in context, not "Home"). */}
+          {scopeProject && (
+            <h1 className="projects__title">{scopeProject.name}</h1>
+          )}
           <div className="projects__sub">
             {scopeProject
               ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · scoped · ranked by what needs you · `
@@ -1500,6 +1583,11 @@ function ProjectDetail({
   onOpenFolder,
   onNewTask,
   onArchive,
+  showCreate,
+  onShowCreate,
+  onCancelCreate,
+  onCreated,
+  allProjects,
 }: {
   node: ProjectNode;
   project: Project;
@@ -1516,12 +1604,37 @@ function ProjectDetail({
   onNewTask: (projectId: string) => void;
   /** Archive (true) or unarchive (false) THIS project. */
   onArchive: (archived: boolean) => void;
+  // task-54e9281f0986 — Add task / Add project live in THIS header, scoped to
+  // the opened project (not on each card).
+  showCreate: boolean;
+  onShowCreate: () => void;
+  onCancelCreate: () => void;
+  onCreated: (p: Project) => void;
+  allProjects: Project[];
 }) {
   return (
     <>
       <div className="projects__l2bar">
         <button type="button" className="projects__back" onClick={onBack}>
           ‹ h — back to all projects
+        </button>
+        {/* task-54e9281f0986 — Add task + Add project (sub-project), scoped to
+            the opened project. These replace the per-card add-task button. */}
+        <button
+          type="button"
+          className="projects__newtask"
+          onClick={() => onNewTask(project.id)}
+          title="New task in this project (n)"
+        >
+          ＋ New task <kbd>n</kbd>
+        </button>
+        <button
+          type="button"
+          className="projects__newtask projects__btn--primary"
+          onClick={onShowCreate}
+          title="New sub-project"
+        >
+          ＋ New sub-project
         </button>
         {/* task-2c5448be520a — archive/unarchive this project. */}
         <button
@@ -1533,6 +1646,16 @@ function ProjectDetail({
           {project.archived === true ? '↺ Unarchive' : '⊟ Archive'}
         </button>
       </div>
+
+      {showCreate && (
+        <CreateForm
+          parentId={project.id}
+          parentName={project.name}
+          allProjects={allProjects}
+          onCancel={onCancelCreate}
+          onCreated={onCreated}
+        />
+      )}
 
       <ProjectFolderBlock
         node={node}
@@ -1687,6 +1810,7 @@ function CreateForm({
 // fork the task. Task titles are PHI: rendered in-app for the operator only,
 // never written to disk/logs (same contract as the L2 tree).
 type SwitchItem =
+  | { kind: 'verb'; id: string; label: string; sub: string }
   | { kind: 'project'; id: string; label: string; sub: string; status: ProjStatus }
   | { kind: 'task'; task: Task; label: string; sub: string; status: RowStatus };
 
@@ -1695,6 +1819,8 @@ function QuickSwitcher({
   nodeById,
   attention,
   tasks,
+  verbs,
+  onPickVerb,
   onClose,
   onPickProject,
   onPickTask,
@@ -1703,6 +1829,9 @@ function QuickSwitcher({
   nodeById: Map<string, ProjectNode>;
   attention: Map<string, ProjectAttention>;
   tasks: Task[];
+  /** task-49b7b37c8a02 — verbs available on Home (project/task + top-level). */
+  verbs: PaletteVerb[];
+  onPickVerb: (id: string) => void;
   onClose: () => void;
   onPickProject: (id: string) => void;
   onPickTask: (t: Task) => void;
@@ -1760,10 +1889,31 @@ function QuickSwitcher({
       needle === '' ||
       it.label.toLowerCase().includes(needle) ||
       it.sub.toLowerCase().includes(needle);
+    // task-49b7b37c8a02 — VERBS first when the user is typing. Mirrors
+    // ChipPrompt: the verb picker leads, and entity hits blend in for non-empty
+    // queries. With an empty query we show only entities (no verb spam — the
+    // ':'/Cmd-K palette is the place to browse all verbs).
+    const verbItems: SwitchItem[] =
+      needle === ''
+        ? []
+        : rankPaletteVerbs(verbs, q, [])
+            .filter((v) => v.available)
+            .slice(0, 8)
+            .map((v) => ({
+              kind: 'verb' as const,
+              id: v.id,
+              label: v.label,
+              sub: v.description || (v.category ?? 'command'),
+            }));
     const projects = projectItems.filter(match).slice(0, 30);
     const tasksF = taskItems.filter(match).slice(0, 30);
-    return { projects, tasksF, flat: [...projects, ...tasksF] };
-  }, [q, projectItems, taskItems]);
+    return {
+      verbItems,
+      projects,
+      tasksF,
+      flat: [...verbItems, ...projects, ...tasksF],
+    };
+  }, [q, verbs, projectItems, taskItems]);
 
   useEffect(() => {
     if (cursor >= results.flat.length) setCursor(0);
@@ -1777,7 +1927,8 @@ function QuickSwitcher({
 
   function pick(it: SwitchItem | undefined) {
     if (!it) return;
-    if (it.kind === 'project') onPickProject(it.id);
+    if (it.kind === 'verb') onPickVerb(it.id);
+    else if (it.kind === 'project') onPickProject(it.id);
     else onPickTask(it.task);
   }
 
@@ -1800,19 +1951,29 @@ function QuickSwitcher({
 
   const renderItem = (it: SwitchItem, i: number) => {
     const glyph =
-      it.kind === 'project'
-        ? STATUS_GLYPH[it.status]
-        : it.status === 'blocked'
-          ? '⛔'
-          : it.status === 'need'
-            ? '⚑'
-            : it.status === 'working'
-              ? '◷'
-              : '◌';
+      it.kind === 'verb'
+        ? '⌘'
+        : it.kind === 'project'
+          ? STATUS_GLYPH[it.status]
+          : it.status === 'blocked'
+            ? '⛔'
+            : it.status === 'need'
+              ? '⚑'
+              : it.status === 'working'
+                ? '◷'
+                : '◌';
+    const key =
+      it.kind === 'verb'
+        ? `verb:${it.id}`
+        : it.kind === 'project'
+          ? `project:${it.id}`
+          : `task:${it.task.id}`;
+    const kindLabel =
+      it.kind === 'verb' ? 'command' : it.kind === 'project' ? 'project' : 'task';
     return (
       <button
         type="button"
-        key={`${it.kind}:${it.kind === 'project' ? it.id : it.task.id}`}
+        key={key}
         data-sw-i={i}
         className={['qsw__item', i === cursor ? 'cursor' : ''].filter(Boolean).join(' ')}
         onMouseMove={() => setCursor(i)}
@@ -1824,7 +1985,7 @@ function QuickSwitcher({
         <span className="qsw__body">
           <span className="qsw__label">{it.label}</span>
           <span className="qsw__sub">
-            {it.kind === 'project' ? 'project' : 'task'} · {it.sub}
+            {kindLabel} · {it.sub}
           </span>
         </span>
       </button>
@@ -1848,7 +2009,7 @@ function QuickSwitcher({
             setQ(e.target.value);
             setCursor(0);
           }}
-          placeholder="Search projects & tasks…"
+          placeholder="Type a command or search projects & tasks…"
           spellCheck={false}
         />
         <div className="qsw__list" ref={listRef}>
@@ -1856,13 +2017,22 @@ function QuickSwitcher({
             <div className="qsw__empty">No matches.</div>
           ) : (
             <>
+              {results.verbItems.length > 0 && (
+                <div className="qsw__group">Commands</div>
+              )}
+              {results.verbItems.map((it, n) => renderItem(it, n))}
               {results.projects.length > 0 && (
                 <div className="qsw__group">Projects</div>
               )}
-              {results.projects.map((it) => renderItem(it, results.flat.indexOf(it)))}
+              {results.projects.map((it, n) =>
+                renderItem(it, results.verbItems.length + n),
+              )}
               {results.tasksF.length > 0 && <div className="qsw__group">Tasks</div>}
-              {results.tasksF.map((it) =>
-                renderItem(it, results.projects.length + results.tasksF.indexOf(it)),
+              {results.tasksF.map((it, n) =>
+                renderItem(
+                  it,
+                  results.verbItems.length + results.projects.length + n,
+                ),
               )}
             </>
           )}

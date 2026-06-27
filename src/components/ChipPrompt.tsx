@@ -182,6 +182,7 @@ type Verb =
   | 'tasks'
   | 'projects'
   | 'files'
+  | 'new-task'
   | 'new-project'
   | 'sidebyside'
   | 'settings'
@@ -1908,12 +1909,40 @@ export const VERBS: VerbDef[] = [
   {
     // task-83048f692491 — create a project (or sub-project) inline. Opens the
     // Projects home with the create form expanded.
+    // task-75493d416ab5 — verb-based "New task" on Home/Projects. Mirrors the
+    // n/a hotkey: creates a task scoped to the project in view (the open
+    // project when drilled in, else unscoped). ProjectsPage owns the scope and
+    // answers fm:projects:newtask.
+    id: 'new-task',
+    label: 'New task',
+    aliases: ['new task', 'add task', 'create task', 'mktask', 'task'],
+    icon: '＋',
+    keybinding: 'n',
+    category: 'Tasks',
+    describe: () => 'Create a task in the project in view (or unscoped)',
+    isAvailable: () => ({ ok: true }),
+    tabKinds: ['home', 'projects'],
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openProjects'));
+      // dispatch after the page is mounted so the handler reads the live scope
+      requestAnimationFrame(() =>
+        window.dispatchEvent(new CustomEvent('fm:projects:newtask')),
+      );
+    },
+  },
+  {
     id: 'new-project',
     label: 'New project',
     aliases: ['new project', 'add project', 'create project', 'mkproject', 'new sub-project'],
     icon: '＋',
+    category: 'Tasks',
     describe: () => 'Create a project / sub-project (name, parent, description, folder)',
     isAvailable: () => ({ ok: true }),
+    // task-75493d416ab5 — surface on Home/Projects (and folder tabs, where
+    // creating a project for the current folder is a natural entry point).
+    tabKinds: ['home', 'projects', 'folder'],
     slots: [],
     execute: (_c, _p, api) => {
       api.closeOverlay();

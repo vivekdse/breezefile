@@ -205,3 +205,97 @@
 .pfolder-subrow__chev {
   color: var(--fg-dim);
 }
+
+/* ── compact project row (task-6050fee0efb1) — one project = one file/folder
+   row at Home root. Mirrors FileRow (.row) density: status glyph · folder
+   glyph · name · right-aligned counts · archive · chevron. No inline tasks. */
+.pfolder-row {
+  display: grid;
+  grid-template-columns: 18px 18px 1fr auto 20px 14px;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 9px var(--sp-4);
+  margin: 0 var(--sp-1);
+  border-radius: var(--r-lg, var(--r-md));
+  border-bottom: 1px dotted var(--rule, var(--border-1));
+  color: var(--text-on-panel, var(--ink));
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background var(--motion-hover);
+}
+.pfolder-row:hover {
+  background: var(--panel-2, var(--bg-3, var(--accent-soft)));
+}
+.pfolder-row:hover .pfolder-row__name {
+  text-decoration: underline;
+  text-decoration-color: var(--rule, var(--border-1));
+  text-underline-offset: 3px;
+}
+.pfolder-row--cursor {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.pfolder-row--archived .pfolder-row__name {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.pfolder-row__status {
+  justify-self: center;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+.pfolder-row__status--blocked { color: var(--err); }
+.pfolder-row__status--need { color: var(--warn); }
+.pfolder-row__status--working { color: var(--accent); }
+
+.pfolder-row__icon {
+  justify-self: center;
+  color: var(--fg-dim);
+}
+.pfolder-row__name {
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pfolder-row__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  justify-self: end;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.pfolder-row__need {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--warn);
+  font-weight: 650;
+}
+.pfolder-row__need .num {
+  font-variant-numeric: tabular-nums;
+}
+.pfolder-row__archive {
+  justify-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity var(--motion-hover), color var(--motion-hover);
+}
+.pfolder-row:hover .pfolder-row__archive,
+.pfolder-row--cursor .pfolder-row__archive {
+  opacity: 1;
+}
+.pfolder-row__archive:hover {
+  color: var(--accent);
+}
+.pfolder-row__chev {
+  justify-self: center;
+  color: var(--fg-dim);
+}

@@ -2,10 +2,16 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 4px var(--sp-3);
-  background: var(--bg-0);
-  border-bottom: 1px solid var(--border-1);
+  /* task-6d0fd232d6c2 — the Tabbar now lives inside the titlebar row. It no
+     longer owns its own background/border/band; the titlebar provides those.
+     We keep only the inner layout + horizontal overflow so a long tab list
+     scrolls within the right-aligned slot instead of pushing the brand off. */
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
   overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* fm-8by — folder zone takes the natural left side; task zone is pushed

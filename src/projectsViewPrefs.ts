@@ -9,16 +9,23 @@
 
 const KEY = 'fm.projectsView.v1';
 
+/** task-6050fee0efb1 — root view orientation: 'projects' = Projects-first
+ *  (folder list), 'flat' = Tasks-first (the flat all-tasks inbox). */
+export type HomeView = 'projects' | 'flat';
+
 export type ProjectsViewPrefs = {
   /** Reveal hidden idle/quiet projects in the list. */
   showAll: boolean;
   /** Include archived projects (off by default — the server hides them too). */
   showArchived: boolean;
+  /** Projects-first vs Tasks-first root orientation (persisted). */
+  homeView: HomeView;
 };
 
 const DEFAULTS: ProjectsViewPrefs = {
   showAll: false,
   showArchived: false,
+  homeView: 'projects',
 };
 
 export function loadProjectsViewPrefs(): ProjectsViewPrefs {
@@ -34,6 +41,10 @@ export function loadProjectsViewPrefs(): ProjectsViewPrefs {
         typeof parsed.showArchived === 'boolean'
           ? parsed.showArchived
           : DEFAULTS.showArchived,
+      homeView:
+        parsed.homeView === 'flat' || parsed.homeView === 'projects'
+          ? parsed.homeView
+          : DEFAULTS.homeView,
     };
   } catch {
     return { ...DEFAULTS };
@@ -48,6 +59,7 @@ export function saveProjectsViewPrefs(prefs: ProjectsViewPrefs): void {
       JSON.stringify({
         showAll: !!prefs.showAll,
         showArchived: !!prefs.showArchived,
+        homeView: prefs.homeView === 'flat' ? 'flat' : 'projects',
       }),
     );
   } catch {

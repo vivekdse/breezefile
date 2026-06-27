@@ -30,8 +30,17 @@
   width: 68px;
 }
 
-/* Brand wordmark — Fraunces italic name + a small Inter tagline so first-
-   time users immediately see what the app is for. */
+/* task-6d0fd232d6c2 — left group holds the wordmark + permanent Home button.
+   Stays out of the way of the right-aligned tabs. */
+.titlebar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Brand wordmark — Fraunces italic "Type.Build". The caption was dropped
+   (task-6d0fd232d6c2) to collapse the chrome to a single row. */
 .titlebar__brand {
   margin-left: 0;
   display: flex;
@@ -53,12 +62,43 @@
   font-weight: 600;
   padding: 0 1px;
 }
-.titlebar__brand-tag {
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+
+/* Permanent Home button — always navigates to the Home/Projects tab.
+   Interactive, so it escapes the .drag region via -webkit-app-region. */
+.titlebar__home {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--rule-on-panel, var(--rule));
+  border-radius: var(--r-md, 6px);
+  color: var(--panel-ink, var(--ink));
+  cursor: pointer;
+  transition:
+    background var(--motion-hover, 120ms ease),
+    border-color var(--motion-hover, 120ms ease),
+    color var(--motion-hover, 120ms ease);
+}
+.titlebar__home:hover {
+  background: var(--accent-soft, rgba(255, 255, 255, 0.08));
+  border-color: var(--accent-glow, var(--accent));
   color: var(--accent);
-  white-space: nowrap;
+}
+
+/* task-6d0fd232d6c2 — tabs occupy the rest of the titlebar row, right-aligned.
+   margin-left:auto pushes the whole tab group to the right edge; the inner
+   Tabbar handles overflow scrolling. Escapes the drag region so tab clicks /
+   drags work. */
+.titlebar__tabs {
+  -webkit-app-region: no-drag;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
 }
 

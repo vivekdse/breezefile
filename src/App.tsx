@@ -12,7 +12,6 @@ import { DslTagOverlay } from './components/DslTagOverlay';
 import { TagPicker } from './components/TagPicker';
 import { Sidebar } from './components/Sidebar';
 import { Statusbar } from './components/Statusbar';
-import { Tabbar } from './components/Tabbar';
 import { ModeLine } from './components/ModeLine';
 import { Settings } from './components/Settings';
 import { ChipPrompt } from './components/ChipPrompt';
@@ -1370,13 +1369,13 @@ function Shell() {
       <div className="shell__title">
         <Titlebar />
       </div>
-      {/* chrome slot — Tabbar + (Pathbar | nothing). In task mode the
-          Pathbar would lie about what this tab is "at," so we drop it
-          and let the task header own the top edge of the main pane. */}
-      <div className="shell__chrome">
-        <Tabbar />
-        {!isTaskTab && !isTasksTab && !isProjectsTab && !isEditTab && !isBrowserTab && (
-          isFilterTab ? (
+      {/* chrome slot — Pathbar only. task-6d0fd232d6c2 moved the Tabbar up
+          into the titlebar row; this row now carries just the Pathbar for
+          folder tabs (and collapses to nothing on task/projects/edit/browser
+          tabs, where the Pathbar would lie about what the tab is "at"). */}
+      {!isTaskTab && !isTasksTab && !isProjectsTab && !isEditTab && !isBrowserTab && (
+        <div className="shell__chrome">
+          {isFilterTab ? (
             // fm-mp1 — a filter-tab has no real cwd to navigate; show the bound
             // selector + scope instead of the synthetic trail key.
             <div className="pathbar pathbar--filter" title={tab.boundSelector}>
@@ -1391,9 +1390,9 @@ function Shell() {
               path={tab.trail[tab.trail.length - 1]}
               onNavigate={(p) => setTab({ trail: [p], selected: { 0: 0 } })}
             />
-          )
-        )}
-      </div>
+          )}
+        </div>
+      )}
       {/* side slot — Sidebar (fm-4zi) fills the reserved 240px slot.
           Hidden in preview mode (fm-wq6) so the preview pane can claim
           the real estate. Hidden in terminal mode (fm-jtu) so the
