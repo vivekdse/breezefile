@@ -41,6 +41,9 @@ import { summarizeNames as summarizeNamesNode } from './ConfirmDialog';
 import { parse as parseTagExpr, evaluate as evaluateTagExpr } from '../tagDsl.mjs';
 import { makeResolveTag } from '../dslTagResolve.mjs';
 import { aggregateStats, summarizeStats } from '../selectionStats.mjs';
+// fm-m7q / task-1bf3ce50575a — verb metadata (keybinding/category) lives in the
+// build-safe verbCatalog.mjs so main.ts can share it; merged onto VERBS below.
+import { VERB_KEYBINDINGS, VERB_CATEGORIES } from '../verbCatalog.mjs';
 import { loadSideBySidePrefs, splitFraction } from '../sideBySidePrefs';
 import { formatOpError } from '../errorMessages';
 import { isEditablePath } from '../fileTypes.ts';
@@ -2616,106 +2619,16 @@ export const VERBS: VerbDef[] = [
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
-// fm-m7q — single-source-of-truth metadata for the verb registry.
+// fm-m7q / task-1bf3ce50575a — single-source-of-truth metadata for the verb
+// registry now lives in the build-safe, React-free module src/verbCatalog.mjs,
+// so the Electron MAIN process (electron/main.ts) can derive the native menu
+// from the SAME table the renderer registry uses. We import its id→keybinding
+// and id→category maps and merge them onto the VerbDef literals below.
 //
-// `keybinding`/`category` are kept OUT of the per-verb literals above (so the
-// big catalog stays readable) and merged in here. This table is the one place
-// keybinding + category live for the palette / menu / help affordances; the
-// ACTUAL key handling still lives in src/useKeyboard.ts (these strings are
-// display-only). Keep them in sync with useKeyboard's mod-chord handlers.
+// The ACTUAL key handling still lives in src/useKeyboard.ts (these strings are
+// display-only). Category names mirror the native menu sections so the Cmd-K
+// palette groups verbs the same way the menu bar does.
 //
-// Category names mirror the native menu sections (electron/main.ts buildAppMenu)
-// so the Cmd-K palette groups verbs the same way the menu bar does.
-const VERB_KEYBINDINGS: Partial<Record<Verb, string>> = {
-  goto: '⌘F',
-  copy: '⌘C',
-  move: '⌘X',
-  paste: '⌘V',
-  rename: 'F2',
-  showHidden: '⌘⇧.',
-  newTab: '⌘T',
-  closeTab: '⌘W',
-  restoreTab: '⌘⇧T',
-  maximize: '⌘⇧M',
-  help: '?',
-};
-
-const VERB_CATEGORIES: Partial<Record<Verb, string>> = {
-  // Selection / file ops
-  select: 'Selection',
-  'select-expr': 'Selection',
-  move: 'Selection',
-  copy: 'Selection',
-  paste: 'Selection',
-  delete: 'Selection',
-  'permanent-delete': 'Selection',
-  'copy-path': 'Selection',
-  'export-list': 'Selection',
-  'drag-out': 'Selection',
-  share: 'Selection',
-  // Files
-  rename: 'Files',
-  open: 'Files',
-  edit: 'Files',
-  'open-editor': 'Files',
-  'editor-save': 'Files',
-  'editor-revert': 'Files',
-  'editor-close': 'Files',
-  'open-with': 'Files',
-  reveal: 'Files',
-  create: 'Files',
-  note: 'Files',
-  notes: 'Files',
-  compress: 'Files',
-  extract: 'Files',
-  // Navigate
-  goto: 'Navigate',
-  back: 'Navigate',
-  forward: 'Navigate',
-  up: 'Navigate',
-  pin: 'Navigate',
-  unpin: 'Navigate',
-  switchTab: 'Navigate',
-  newTab: 'Navigate',
-  closeTab: 'Navigate',
-  restoreTab: 'Navigate',
-  // View
-  sort: 'View',
-  view: 'View',
-  showHidden: 'View',
-  foldersFirst: 'View',
-  theme: 'View',
-  tag: 'View',
-  untag: 'View',
-  newtag: 'View',
-  dsltag: 'View',
-  filter: 'View',
-  sidebyside: 'View',
-  maximize: 'View',
-  fullscreen: 'View',
-  // Tools
-  openTerminal: 'Tools',
-  term: 'Tools',
-  'term-close': 'Tools',
-  chat: 'Tools',
-  'remote-attach': 'Tools',
-  disconnect: 'Tools',
-  run: 'Tools',
-  task: 'Tools',
-  tasks: 'Tools',
-  projects: 'Tools',
-  'new-project': 'Tools',
-  settings: 'Tools',
-  secrets: 'Tools',
-  permissions: 'Tools',
-  upgrade: 'Tools',
-  // Help / app
-  help: 'Help',
-  tutorial: 'Help',
-  tips: 'Help',
-  welcome: 'Help',
-};
-
 // Decorate the catalog in place so VERBS is the single export carrying
 // keybinding + category. Done once at module load.
 for (const v of VERBS) {
