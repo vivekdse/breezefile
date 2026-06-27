@@ -70,7 +70,13 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
-      sandbox: false,
+      // Must match the main window (main.ts): the bundled preload.mjs is loaded
+      // as an ES module and contains a `require`, which only resolves under the
+      // sandboxed preload loader's require-shim. With sandbox:false Electron
+      // loads it as a native ESM where `require` is undefined → the preload
+      // throws ("require is not defined in ES module scope"), window.fm is never
+      // exposed, and OperatorSession/Terminal crash to a blank window.
+      sandbox: true,
       contextIsolation: true,
     },
   });
