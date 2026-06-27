@@ -14,6 +14,7 @@ import { useTasks } from '../tasks';
 import { useIsMac } from '../platform';
 import { formatOpError } from '../errorMessages';
 import type { Tab } from '../types';
+import { isTaskZone } from '../tabOrder.mjs';
 import './Tabbar.css';
 
 export function Tabbar() {
@@ -128,21 +129,16 @@ export function Tabbar() {
   // index, because every dispatch (selectTab, closeTab) targets state.tabs
   // by absolute index. Known limit: drag-reorder works only within a zone;
   // cross-zone DnD is intentionally deferred.
+  //
+  // task-570f3471b28e / task-ee50c5c1be17 — the zone membership test lives in
+  // tabOrder.mjs (isTaskZone) so this render and the ⌘/Ctrl+<n> shortcut share
+  // ONE definition of the visible order and can never drift. (fm-yi85: the
+  // All-tasks tab pivots between "files on the left, task surfaces on the
+  // right"; task-97c0800ff55d: Home (kind:'home') sits in the task zone too.)
   const folderTabs: Array<{ tab: Tab; index: number }> = [];
   const taskTabs: Array<{ tab: Tab; index: number }> = [];
   state.tabs.forEach((tab, index) => {
-    // fm-yi85 — tasks-overview tab lives in the task zone too. The visual
-    // grouping reads as "files on the left, task surfaces on the right",
-    // and the All-tasks tab is the natural pivot point between those.
-    // task-97c0800ff55d — Home (kind:'home') lives in the task zone alongside
-    // the flat Tasks page and the legacy 'projects' kind.
-    if (
-      tab.kind === 'task' ||
-      tab.kind === 'tasks' ||
-      tab.kind === 'projects' ||
-      tab.kind === 'home'
-    )
-      taskTabs.push({ tab, index });
+    if (isTaskZone(tab)) taskTabs.push({ tab, index });
     else folderTabs.push({ tab, index });
   });
 
