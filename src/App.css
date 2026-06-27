@@ -70,8 +70,12 @@
 /* The Projects home renders neither Sidebar nor Preview (see App.tsx), so the
    default side/preview rails would sit empty — a dead 240px gutter on the left
    and 340px on the right. Zero both and give the whole row to the projects
-   surface, same treatment as the all-tasks inbox above. */
-.shell[data-tab-kind="projects"] {
+   surface, same treatment as the all-tasks inbox above. task-97c0800ff55d —
+   Home now rides kind:'home' (renders the same ProjectsPage surface, also with
+   no Sidebar/Preview), so it needs the identical collapse — otherwise the dead
+   gutters reappear on Home. */
+.shell[data-tab-kind="projects"],
+.shell[data-tab-kind="home"] {
   --sidebar-w: 0px;
   --preview-w: 0px;
   grid-template-columns: 0px 1fr 0px var(--chat-w);

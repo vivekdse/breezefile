@@ -259,7 +259,11 @@ function ProjectsPageInner() {
   // the other view prefs (task-6050fee0efb1).
   const [flatDoneOpen, setFlatDoneOpen] = useState(false);
   // task-4b0168979921 — unified quick-switcher (projects AND tasks). '/' opens.
+  // task-49b7b37c8a02 — it also opens by simply typing: the first printable key
+  // seeds the search so type-to-command works without a leading '/'. The seed is
+  // the character that opened it (empty when opened via '/').
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const [switcherSeed, setSwitcherSeed] = useState('');
   // gg/G motion: remember a pending 'g' so the next 'g' jumps to the top.
   const gPendingRef = useRef(false);
 
@@ -870,6 +874,7 @@ function ProjectsPageInner() {
       if (e.key === '/') {
         e.preventDefault();
         gPendingRef.current = false;
+        setSwitcherSeed('');
         setShowSwitcher(true);
         return;
       }
@@ -893,24 +898,11 @@ function ProjectsPageInner() {
         }
         return;
       }
-      // n / a — new task scoped to the project in view (drilled) or the project
-      // whose header/row the cursor sits on (root).
-      if (e.key === 'n' || e.key === 'a') {
-        e.preventDefault();
-        gPendingRef.current = false;
-        const cur = idx >= 0 ? flatRows[idx] : undefined;
-        const rawTarget =
-          level === 2 && detailId
-            ? detailId
-            : cur?.kind === 'header' || cur?.kind === 'subproject'
-              ? cur.projectId
-              : cur?.kind === 'task'
-                ? cur.task.projectId ?? ''
-                : '';
-        // The synthetic Inbox is not a real project — create with no preselect.
-        newProjectTask(rawTarget === INBOX_ID ? '' : rawTarget ?? '');
-        return;
-      }
+      // task-49b7b37c8a02 — 'n'/'a' no longer create a task directly. Single
+      // letters belong to type-to-command now: "new task" is reachable by just
+      // typing it (the switcher ranks the verb), via the '＋ New task' button, or
+      // via ':'/Cmd-K. Hard-binding 'n'/'a' shadowed the verbs and broke typing
+      // any word that starts with them.
       // gg → top, G → bottom (flat motion across the whole visible order).
       if (e.key === 'g') {
         e.preventDefault();
@@ -950,6 +942,15 @@ function ProjectsPageInner() {
             return next;
           });
         }
+      } else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) {
+        // task-49b7b37c8a02 — type-to-command: any other printable alphanumeric
+        // key opens the unified switcher seeded with that character (verbs +
+        // project/task search), mirroring the file manager. Reserved vim motions
+        // (j/k/l/h/g/G) are handled above and never reach here; everything else —
+        // 'd', 'n', 'documents'… — starts a search.
+        e.preventDefault();
+        setSwitcherSeed(e.key);
+        setShowSwitcher(true);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -1136,6 +1137,7 @@ function ProjectsPageInner() {
           attention={attention}
           tasks={allTasks}
           verbs={paletteVerbs}
+          initialQuery={switcherSeed}
           onPickVerb={(id) => {
             setShowSwitcher(false);
             runVerb(id);
@@ -1707,9 +1709,9 @@ function ProjectDetail({
           type="button"
           className="projects__newtask"
           onClick={() => onNewTask(project.id)}
-          title="New task in this project (n)"
+          title="New task in this project"
         >
-          ＋ New task <kbd>n</kbd>
+          ＋ New task
         </button>
         <button
           type="button"
@@ -1903,6 +1905,7 @@ function QuickSwitcher({
   attention,
   tasks,
   verbs,
+  initialQuery,
   onPickVerb,
   onClose,
   onPickProject,
@@ -1914,18 +1917,26 @@ function QuickSwitcher({
   tasks: Task[];
   /** task-49b7b37c8a02 — verbs available on Home (project/task + top-level). */
   verbs: PaletteVerb[];
+  /** task-49b7b37c8a02 — the key that opened the switcher when triggered by
+   *  typing (empty when opened via '/'), used to seed the search box. */
+  initialQuery: string;
   onPickVerb: (id: string) => void;
   onClose: () => void;
   onPickProject: (id: string) => void;
   onPickTask: (t: Task) => void;
 }) {
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(initialQuery);
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    // Caret to the end so a seed char (type-to-command) keeps appending.
+    const n = el.value.length;
+    el.setSelectionRange(n, n);
   }, []);
 
   // Flatten the project forest → searchable items (name + description), with a
