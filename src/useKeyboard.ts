@@ -119,6 +119,11 @@ export function useKeyboard(
       // TaskComposer owns the keyboard while it's open. It sets
       // body[data-composer-open] on mount; we bail entirely so digit
       // keys don't double-fire as global verbs (e.g., `1` opening goto).
+      // task-f26ea21017b1 — this same flag suppresses the ⌘/Ctrl+number app-tab
+      // switch (below) while a task is being EDITED in the embedded composer
+      // (the task-detail dialog's "Task details" tab mounts the composer, which
+      // sets the flag). The drawer's own onKey suppresses its PLAIN-digit tab
+      // switch on the same flag, so number keys reliably pick composer options.
       if (document.body.dataset.composerOpen === 'true') return;
 
       // fm-m7q — ⌘K / Ctrl+K opens the command palette: a browsable,
