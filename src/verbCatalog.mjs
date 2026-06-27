@@ -90,6 +90,7 @@ export const VERB_CATALOG = [
   { id: 'forward', label: 'Forward', category: 'Navigate', help: 'go forward in tab history' },
   { id: 'up', label: 'Up', category: 'Navigate', help: 'go to the parent folder' },
   { id: 'goto', label: 'Go to / Find', category: 'Navigate', keybinding: '⌘F', menuLabel: 'Go to…', help: 'type a folder OR file name; folders navigate, files open' },
+  { id: 'files', label: 'Files (file manager)', category: 'Navigate', menuLabel: 'File Manager', help: 'summon the file manager — opens a folder tab (Home is the launch surface; the file surface is one ability you invoke)' },
   { id: 'switchTab', label: 'Switch tab', category: 'Navigate', menuLabel: 'Switch Tab…', help: 'jump to another open tab' },
   { id: 'newTab', label: 'New tab', category: 'Navigate', keybinding: '⌘T', menuLabel: 'New Tab', help: 'open the current folder in a new tab' },
   { id: 'closeTab', label: 'Close tab', category: 'Navigate', keybinding: '⌘W', menuLabel: 'Close Tab', help: 'close the active tab' },

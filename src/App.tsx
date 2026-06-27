@@ -1215,7 +1215,9 @@ function Shell() {
       const projectId = (e as CustomEvent).detail?.projectId as string | undefined;
       const w = window as unknown as { __fmProjectsDeepLink?: string };
       if (projectId !== undefined) w.__fmProjectsDeepLink = projectId;
-      dispatch({ type: 'openProjectsTab' });
+      // task-97c0800ff55d — Home now rides its own kind:'home'. :home / :projects
+      // both land here via fm:openProjects → the Home singleton.
+      dispatch({ type: 'openHomeTab' });
       if (projectId !== undefined) {
         window.dispatchEvent(
           new CustomEvent('fm:projects:focus', { detail: { projectId } }),
@@ -1343,7 +1345,10 @@ function Shell() {
   // takes over via TerminalSplit, identical to folder tabs.
   const isTaskTab = tab.kind === 'task';
   const isTasksTab = tab.kind === 'tasks';
-  const isProjectsTab = tab.kind === 'projects';
+  // task-97c0800ff55d — Home rides its own kind:'home' but renders the same
+  // ProjectsPage surface and shares all of 'projects'' chrome-hiding (no
+  // pathbar, no sidebar). Treat both kinds the same here.
+  const isProjectsTab = tab.kind === 'projects' || tab.kind === 'home';
   const isEditTab = tab.kind === 'edit';
   const isBrowserTab = tab.kind === 'browser'; // SPIKE (spike/playwright-cdp)
   const isFilterTab = !!tab.boundSelector; // fm-mp1 — smart folder (folder kind)

@@ -245,6 +245,7 @@ type Action =
   | { type: 'openTaskTab'; taskId: string; folder: string; focus?: boolean }
   | { type: 'openTasksTab'; focus?: boolean }
   | { type: 'openProjectsTab'; focus?: boolean }
+  | { type: 'openHomeTab'; focus?: boolean }
   | { type: 'openEditTab'; path: string; focus?: boolean }
   | { type: 'setTabDirty'; index: number; dirty: boolean }
   | { type: 'openOrFocusFolderTab'; path: string; focus?: boolean }
@@ -333,7 +334,7 @@ type Action =
 function makeTab(
   path: string,
   opts?: {
-    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects';
+    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home';
     taskId?: string | null;
     editPath?: string | null;
     browserUrl?: string;
@@ -500,6 +501,25 @@ function reducer(s: State, a: Action): State {
       const seedCwd =
         s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
       const tab = makeTab(seedCwd, { kind: 'projects' });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'openHomeTab': {
+      // task-97c0800ff55d — singleton Home surface (the tasks-first landing).
+      // Same focus-or-spawn lifecycle as openProjectsTab; the only difference
+      // is the dedicated kind:'home' so Home is the launch surface (and the
+      // file manager is a folder tab one :files away). Trail seeds from the
+      // active tab's cwd / home — unused for kind:'home' rendering.
+      const existing = s.tabs.findIndex((t) => t.kind === 'home');
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const seedCwd =
+        s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
+      const tab = makeTab(seedCwd, { kind: 'home' });
       return {
         ...s,
         tabs: [...s.tabs, tab],
@@ -1019,17 +1039,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     hydrated,
   ]);
 
-  // task-eaa5e794f448 (Phase 3) — Home is the greeting surface. On launch we
-  // keep the folder tab (setHome) but open + FOCUS the Home singleton beside it
-  // (Q1 = beside + focused), so the tasks-first Home is what greets the user
-  // while the file manager is one tab-click / :files away. Reversible: delete
-  // this effect to fall back to the file-manager-as-landing behavior.
+  // task-97c0800ff55d (Q1) — Home REPLACES the file manager as the launch
+  // surface. On launch Home is the ONLY thing open (tasks-first); the file
+  // manager is now a VERB (:files) / a "Go to folder" away, not a tab that
+  // greets you. We do NOT auto-open a folder tab beside Home anymore.
   //
-  // Sequenced AFTER hydration so we read the persisted taskManagementEnabled
-  // flag (Home is the task surface; if task management is off we leave the
-  // folder tab as the landing). One-shot via the ref guard — later manual tab
-  // changes are never overridden. openProjectsTab is a focus-or-spawn singleton,
-  // so this is idempotent even if it somehow runs twice.
+  // Mechanics: setHome creates exactly one startup tab (tabs are never
+  // persisted — every launch is fresh), so on first paint there is a single
+  // folder tab at index 0. Sequenced AFTER hydration (so the persisted
+  // taskManagementEnabled flag is settled), we REPLACE that sole startup tab
+  // with the Home singleton — leaving Home as the only open tab. If task
+  // management is off, Home is not the surface, so we leave the folder tab as
+  // the landing. One-shot via the ref guard; we only convert the pristine
+  // startup state (a single folder tab), never a session the user has already
+  // shaped. The file-manager paths (sidebar bookmarks, gh/goto-home,
+  // openOrFocusFolderTab/rowGotoFolder, :files, newTab) all append a folder tab
+  // on demand, so nothing breaks with no folder tab at startup.
   const homeLandingDoneRef = useRef(false);
   useEffect(() => {
     if (!hydrated) return;
@@ -1038,10 +1063,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (state.tabs.length === 0) return;
     homeLandingDoneRef.current = true;
     if (!state.taskManagementEnabled) return;
-    // Append + focus the Home singleton (kind='projects'); the folder tab stays
-    // open at index 0, Home becomes the active tab.
-    dispatch({ type: 'openProjectsTab' });
-  }, [hydrated, state.tabs.length, state.taskManagementEnabled, dispatch]);
+    // Only convert the pristine startup state: a single folder tab. If hydration
+    // somehow restored more, leave the user's tabs alone (defensive — tabs
+    // aren't persisted today).
+    if (state.tabs.length !== 1 || state.tabs[0].kind !== 'folder') {
+      // Fall back to focus-or-spawn so Home is still reachable/foregrounded.
+      dispatch({ type: 'openHomeTab' });
+      return;
+    }
+    // Replace the sole startup folder tab with the Home singleton (kind='home')
+    // so Home is the ONLY tab on launch. The folder tab is gone — the file
+    // manager is summoned on demand via :files / Go to folder.
+    const seed = state.tabs[0].trail.at(-1) ?? '/';
+    const home = makeTab(seed, { kind: 'home' });
+    dispatch({ type: 'replaceTab', index: 0, tab: home });
+    dispatch({ type: 'selectTab', index: 0 });
+  }, [hydrated, state.tabs, state.taskManagementEnabled, dispatch]);
 
   // fm-h8g7 — mirror the task-notification verbosity to the main process so
   // the OS-notification gate (which runs in main) tracks the renderer's value.

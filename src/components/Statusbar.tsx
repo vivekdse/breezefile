@@ -30,9 +30,11 @@ export function Statusbar() {
   const mode = state.mode.toUpperCase();
   // task-83048f692491 — the Projects tab has no folder listing; describe its
   // own motion model instead of reporting "0 items" for a placeholder trail.
-  const isProjects = activeTab.kind === 'projects';
+  // task-97c0800ff55d — Home now rides kind:'home' (was relabeled 'projects').
+  // Both render the same surface with no folder listing.
+  const isProjects = activeTab.kind === 'projects' || activeTab.kind === 'home';
   const summary = isProjects
-    ? 'Projects · drill into any one'
+    ? 'Home · your tasks, projects as folders · drill into any one'
     : markedCount > 0
       ? `${markedCount} of ${entries.length} selected · ${formatSize(selectedSize)}`
       : `${entries.length} items · ${formatSize(totalSize)}`;
