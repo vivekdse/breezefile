@@ -64,10 +64,22 @@ export interface ProjectTaskRowHandlers {
   blockedByTitles?: (task: Task) => string[];
 }
 
+/** A bulk verb the Home `:` palette can apply to the current task selection. */
+export type ProjectBulkVerb =
+  | 'done'
+  | 'reopen'
+  | 'cancel'
+  | 'in-progress'
+  | 'pin'
+  | 'unpin'
+  | 'delete';
+
 /**
  * Bundles the task-row engine for project folder blocks. Returns:
  *  - `renderTaskRow(row)` — a fully-wired TaskRow for one ProjectFolderRow.
  *  - `overlays` — the kebab menu + schedule modal JSX (render once in host).
+ *  - `bulkApply(verb, tasks)` — apply a `:` verb to a task selection (reuses
+ *    the SAME capability-aware engine as TasksPage).
  */
 export function useProjectTaskRows(
   state: ProjectTaskRowState,
@@ -75,6 +87,7 @@ export function useProjectTaskRows(
 ): {
   renderTaskRow: (row: ProjectFolderRow) => ReactNode;
   overlays: ReactNode;
+  bulkApply: (verb: ProjectBulkVerb, tasks: Task[]) => Promise<void>;
 } {
   const { state: appState, dispatch } = useStore();
   const actions = useTaskActions();
@@ -281,6 +294,48 @@ export function useProjectTaskRows(
     [state.selected, state.cursorKey, state.expanded, runCounts, overlayByKey, sessions, sourcesById, tbReady, myEmail, handlers],
   );
 
+  // `:` palette → selection. Reuses the same capability-aware bulk engine as
+  // TasksPage (actions.bulkPatch partitions by capability + reports skips).
+  async function bulkApply(verb: ProjectBulkVerb, tasks: Task[]): Promise<void> {
+    if (tasks.length === 0) {
+      dispatch({ type: 'setStatus', msg: 'no task selected' });
+      return;
+    }
+    switch (verb) {
+      case 'done':
+        await actions.bulkPatch(tasks, { status: 'done' }, 'marked done');
+        break;
+      case 'reopen':
+        await actions.bulkPatch(tasks, { status: 'pending' }, 'reopened');
+        break;
+      case 'cancel':
+        await actions.bulkPatch(tasks, { status: 'cancelled' }, 'cancelled');
+        break;
+      case 'in-progress':
+        await actions.bulkPatch(tasks, { status: 'in_progress' }, 'set in-progress');
+        break;
+      case 'pin':
+        await actions.bulkPatch(tasks, { pinned: true }, 'pinned');
+        break;
+      case 'unpin':
+        await actions.bulkPatch(tasks, { pinned: false }, 'unpinned');
+        break;
+      case 'delete': {
+        const req: ConfirmRequest = {
+          title: tasks.length === 1 ? `Delete "${tasks[0].title}"?` : `Delete ${tasks.length} tasks?`,
+          body: 'This cannot be undone. The folders themselves are not touched.',
+          confirmLabel: 'Delete',
+          destructive: true,
+          onConfirm: async () => {
+            await actions.bulkDelete(tasks);
+          },
+        };
+        window.dispatchEvent(new CustomEvent('fm:confirm', { detail: req }));
+        break;
+      }
+    }
+  }
+
   const overlays = (
     <>
       {kebabFor && (
@@ -317,5 +372,5 @@ export function useProjectTaskRows(
     </>
   );
 
-  return { renderTaskRow, overlays };
+  return { renderTaskRow, overlays, bulkApply };
 }

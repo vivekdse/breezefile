@@ -2684,7 +2684,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '✓',
       describe: () => 'Mark selected tasks as done',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
+      tabKinds: ['tasks', 'projects'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:done');
@@ -2698,7 +2698,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '↺',
       describe: () => 'Set selected tasks back to pending',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
+      tabKinds: ['tasks', 'projects'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:reopen');
@@ -2712,7 +2712,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '◐',
       describe: () => 'Mark selected tasks in progress',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
+      tabKinds: ['tasks', 'projects'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:in-progress');
@@ -2726,7 +2726,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '⊘',
       describe: () => 'Mark selected tasks cancelled',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
+      tabKinds: ['tasks', 'projects'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:cancel');
@@ -2740,7 +2740,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '★',
       describe: () => 'Pin selected tasks',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
+      tabKinds: ['tasks', 'projects'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:pin');
@@ -2754,7 +2754,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '☆',
       describe: () => 'Unpin selected tasks',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
+      tabKinds: ['tasks', 'projects'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:unpin');
@@ -2798,7 +2798,7 @@ function buildTaskVerbs(): VerbDef[] {
       icon: '⌫',
       describe: () => 'Delete selected tasks (confirms)',
       isAvailable: () => ({ ok: true }),
-      tabKinds: ['tasks'],
+      tabKinds: ['tasks', 'projects'],
       slots: [],
       execute: (_c, _p, api) => {
         fire('fm:tasks:delete');

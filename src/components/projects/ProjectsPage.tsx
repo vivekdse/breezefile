@@ -177,8 +177,6 @@ function ProjectsPageInner() {
   const [scopeId, setScopeId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const [gridCursor, setGridCursor] = useState(0);
-  const [treeCursor, setTreeCursor] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
   // task-4b0168979921 — unified quick-switcher (projects AND tasks). '/' opens.
@@ -187,7 +185,6 @@ function ProjectsPageInner() {
   const gPendingRef = useRef(false);
 
   const gridRef = useRef<HTMLDivElement | null>(null);
-  const treeRef = useRef<HTMLDivElement | null>(null);
 
   // The project nodes in scope for the current L1 grid (unranked).
   const scopeNodes: ProjectNode[] = useMemo(() => {
@@ -242,11 +239,6 @@ function ProjectsPageInner() {
     return showAll ? [...base, ...partitioned.idleNodes] : base;
   }, [partitioned, showAll]);
 
-  // Clamp the grid cursor when the visible set changes.
-  useEffect(() => {
-    if (gridCursor >= gridNodes.length) setGridCursor(0);
-  }, [gridNodes, gridCursor]);
-
   // ── L2 derived data ─────────────────────────────────────────────────────────
   const detailNode = detailId ? nodeById.get(detailId) ?? null : null;
   const detailProject = detailNode?.project ?? null;
@@ -270,48 +262,6 @@ function ProjectsPageInner() {
       },
     });
   }, [detailProject]);
-
-  // Tasks belonging to the drilled project (own only), shaped into a
-  // parent→child tree for the L2 view.
-  type TreeRow = { task: Task; depth: 0 | 1; childCount: number; doneChildCount: number };
-  const detailTasks = useMemo(
-    () => (detailId ? allTasks.filter((t) => t.projectId === detailId) : []),
-    [allTasks, detailId],
-  );
-  const treeRows: TreeRow[] = useMemo(() => {
-    if (detailTasks.length === 0) return [];
-    const byId = new Map(detailTasks.map((t) => [t.id, t]));
-    const childrenOf = new Map<string, Task[]>();
-    const roots2: Task[] = [];
-    for (const t of detailTasks) {
-      const pid = t.parentTaskId;
-      if (pid && byId.has(pid)) {
-        const arr = childrenOf.get(pid) ?? [];
-        arr.push(t);
-        childrenOf.set(pid, arr);
-      } else {
-        roots2.push(t);
-      }
-    }
-    const out: TreeRow[] = [];
-    for (const parent of roots2) {
-      const kids = childrenOf.get(parent.id) ?? [];
-      const done = kids.filter(
-        (k) => k.status === 'done' || k.status === 'cancelled',
-      ).length;
-      out.push({ task: parent, depth: 0, childCount: kids.length, doneChildCount: done });
-      if (expanded.has(parent.id)) {
-        for (const k of kids) {
-          out.push({ task: k, depth: 1, childCount: 0, doneChildCount: 0 });
-        }
-      }
-    }
-    return out;
-  }, [detailTasks, expanded]);
-
-  useEffect(() => {
-    if (treeCursor >= treeRows.length) setTreeCursor(0);
-  }, [treeRows, treeCursor]);
 
   // ── folder-block task rows (task-1bf3a297c9f9) ──────────────────────────────
   // A project renders its tasks as FILES (real TaskRows). rowsForProject shapes
@@ -466,7 +416,7 @@ function ProjectsPageInner() {
     [allTasks],
   );
 
-  const { renderTaskRow, overlays: taskRowOverlays } = useProjectTaskRows(
+  const { renderTaskRow, overlays: taskRowOverlays, bulkApply } = useProjectTaskRows(
     taskRowState,
     taskRowHandlers,
   );
@@ -476,23 +426,79 @@ function ProjectsPageInner() {
     [rowsForProject, renderTaskRow],
   );
 
-  // ── navigation ──────────────────────────────────────────────────────────────
-  function enterCard(node: ProjectNode) {
-    if (node.children.length > 0) {
-      // a project whose children are projects → re-scope the grid
-      setScopeId(node.project.id);
-      setGridCursor(0);
-      dispatch({
-        type: 'setStatus',
-        msg: `zoom → ${node.project.name} · ${node.children.length} sub-projects`,
-      });
-    } else {
-      // drill into the project's task tree
-      setDetailId(node.project.id);
-      setTreeCursor(0);
-      setExpanded(new Set());
-      setLevel(2);
+  // ── flat keyboard order (task-1bf3a297c9f9, Phase 4) ────────────────────────
+  // The visible cursor sequence, walked flat by j/k exactly like FolderList
+  // walks entries. It interleaves, in RENDER ORDER, project HEADERS + their TASK
+  // rows + SUB-PROJECT rows, matching the DOM so scrollIntoView + cursor classes
+  // line up. `key` is a project id (header / sub-project) or a task id.
+  type FlatRow =
+    | { kind: 'header'; key: string; projectId: string }
+    | { kind: 'task'; key: string; task: Task; isParent: boolean }
+    | { kind: 'subproject'; key: string; projectId: string };
+
+  const flatRows = useMemo<FlatRow[]>(() => {
+    const out: FlatRow[] = [];
+    const pushBlock = (node: ProjectNode, collapseSubs: boolean) => {
+      const pid = node.project.id;
+      out.push({ kind: 'header', key: pid, projectId: pid });
+      for (const row of rowsForProject(pid)) {
+        out.push({
+          kind: 'task',
+          key: row.task.id,
+          task: row.task,
+          isParent: row.childCount > 0,
+        });
+      }
+      if (collapseSubs) {
+        for (const child of node.children) {
+          out.push({
+            kind: 'subproject',
+            key: child.project.id,
+            projectId: child.project.id,
+          });
+        }
+      } else {
+        // drilled view: nested sub-projects are full blocks (recurse, still
+        // collapsing THEIR sub-sub-projects so deep trees stay shallow).
+        for (const child of node.children) pushBlock(child, true);
+      }
+    };
+
+    if (level === 2 && detailNode) {
+      pushBlock(detailNode, false);
+      return out;
     }
+    // root: inbox first (Q4), then the ranked grid blocks (sub-projects collapsed)
+    if (scopeId == null && inboxTotalCount > 0) pushBlock(inboxNode, true);
+    for (const node of gridNodes) pushBlock(node, true);
+    return out;
+  }, [level, detailNode, scopeId, inboxTotalCount, inboxNode, gridNodes, rowsForProject]);
+
+  const flatIndexOf = (key: string | null) =>
+    key == null ? -1 : flatRows.findIndex((r) => r.key === key);
+
+  // Clamp / seed the cursor when the visible set changes.
+  useEffect(() => {
+    if (flatRows.length === 0) {
+      if (cursorKey !== null) setCursorKey(null);
+      return;
+    }
+    if (cursorKey == null || flatIndexOf(cursorKey) < 0) {
+      setCursorKey(flatRows[0].key);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flatRows]);
+
+  // ── navigation ──────────────────────────────────────────────────────────────
+  // Drill into a project = its full folder view (level 2), where sub-projects
+  // nest as nested blocks (Q5: full nesting only when drilled in). The old
+  // "re-scope the grid to a parent's children" path is retired — every project,
+  // with or without children, opens as a folder.
+  function enterCard(node: ProjectNode) {
+    setDetailId(node.project.id);
+    setExpanded(new Set());
+    setLevel(2);
+    setCursorKey(node.project.id);
   }
   function backUp() {
     if (level === 2) {
@@ -502,7 +508,6 @@ function ProjectsPageInner() {
     if (scopeId != null) {
       const parentNode = nodeById.get(scopeId);
       setScopeId(parentNode?.parentId ?? null);
-      setGridCursor(0);
     }
   }
   function openTaskDetail(task: Task) {
@@ -557,7 +562,6 @@ function ProjectsPageInner() {
   function openProjectDetail(projectId: string) {
     if (!nodeById.has(projectId)) return;
     setDetailId(projectId);
-    setTreeCursor(0);
     setExpanded(new Set());
     setLevel(2);
     setCursorKey(projectId);
@@ -600,9 +604,9 @@ function ProjectsPageInner() {
       const id = (e as CustomEvent<{ projectId?: string }>).detail?.projectId;
       if (!id || !nodeById.has(id)) return;
       setDetailId(id);
-      setTreeCursor(0);
       setExpanded(new Set());
       setLevel(2);
+      setCursorKey(id);
     }
     // apply a stashed deep-link on mount (the open event may have fired before
     // this page mounted)
@@ -627,6 +631,54 @@ function ProjectsPageInner() {
   }, [nodeById]);
 
   // ── keyboard ────────────────────────────────────────────────────────────────
+  // ── `:` verbs act on the task selection (task-1bf3a297c9f9, Phase 4) ─────────
+  // The Home/projects tab now answers the same fm:tasks:* bulk events the flat
+  // Tasks page does (the verbs gained 'projects' in their tabKinds). Target =
+  // selection ∪ cursor-task; routed through the shared bulkApply engine.
+  const selectionTargets = (): Task[] => {
+    const ids = new Set(selectedTasks);
+    if (ids.size === 0 && cursorKey) {
+      const cur = flatRows.find((r) => r.key === cursorKey);
+      if (cur?.kind === 'task') ids.add(cur.task.id);
+    }
+    return allTasks.filter((t) => ids.has(t.id));
+  };
+  useEffect(() => {
+    if (!isActive) return;
+    const run = (verb: Parameters<typeof bulkApply>[0]) => () => {
+      void bulkApply(verb, selectionTargets()).then(() => setSelectedTasks(new Set()));
+    };
+    const handlers: Array<[string, EventListener]> = [
+      ['fm:tasks:done', run('done')],
+      ['fm:tasks:reopen', run('reopen')],
+      ['fm:tasks:cancel', run('cancel')],
+      ['fm:tasks:in-progress', run('in-progress')],
+      ['fm:tasks:pin', run('pin')],
+      ['fm:tasks:unpin', run('unpin')],
+      ['fm:tasks:delete', run('delete')],
+    ];
+    for (const [name, fn] of handlers) window.addEventListener(name, fn);
+    return () => {
+      for (const [name, fn] of handlers) window.removeEventListener(name, fn);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, selectedTasks, cursorKey, flatRows, allTasks, bulkApply]);
+
+  // Activate the cursor row: header → drill into project; sub-project → drill;
+  // task parent → expand/collapse; task leaf → open detail drawer.
+  function activateFlat(row: FlatRow | undefined) {
+    if (!row) return;
+    if (row.kind === 'header') {
+      const node = nodeById.get(row.projectId);
+      if (node) enterCard(node);
+    } else if (row.kind === 'subproject') {
+      openProjectDetail(row.projectId);
+    } else {
+      if (row.isParent) toggleExpand(row.task.id);
+      else openTaskDetail(row.task);
+    }
+  }
+
   useEffect(() => {
     if (!isActive) return;
     function onKey(e: KeyboardEvent) {
@@ -639,10 +691,16 @@ function ProjectsPageInner() {
       // While the quick-switcher overlay is open it owns the keyboard.
       if (showSwitcher) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      // '/' — open the unified quick-switcher over projects AND tasks. Available
-      // at any zoom level; the overlay owns its own keys once open (gated above
-      // by `showSwitcher` shortcutting the page handler via the `inField`/early
-      // returns it sets up).
+
+      const idx = flatIndexOf(cursorKey);
+      const setIdx = (i: number) => {
+        const clamped = Math.max(0, Math.min(flatRows.length - 1, i));
+        const row = flatRows[clamped];
+        if (row) setCursorKey(row.key);
+      };
+
+      // '/' — open the unified quick-switcher (the surface's search/filter over
+      // projects AND tasks). The overlay owns its keys once open.
       if (e.key === '/') {
         e.preventDefault();
         gPendingRef.current = false;
@@ -650,11 +708,14 @@ function ProjectsPageInner() {
         return;
       }
       if (e.key === ':') {
+        // ':' opens the command palette to act on the current task selection.
         e.preventDefault();
+        gPendingRef.current = false;
         dispatch({ type: 'setMode', mode: 'command', buffer: '' });
         return;
       }
       if (e.key === 'Escape' || e.key === 'h' || e.key === 'ArrowLeft') {
+        gPendingRef.current = false;
         if (showCreate) {
           setShowCreate(false);
           e.preventDefault();
@@ -666,78 +727,78 @@ function ProjectsPageInner() {
         }
         return;
       }
-      if (level === 1) {
-        // gg → top, G → bottom (vim motion over the inbox list).
-        if (e.key === 'g') {
-          e.preventDefault();
-          if (gPendingRef.current) {
-            gPendingRef.current = false;
-            setGridCursor(0);
-          } else {
-            gPendingRef.current = true;
-          }
-          return;
-        }
-        if (e.key === 'G') {
-          e.preventDefault();
-          gPendingRef.current = false;
-          setGridCursor(Math.max(0, gridNodes.length - 1));
-          return;
-        }
+      // n / a — new task scoped to the project in view (drilled) or the project
+      // whose header/row the cursor sits on (root).
+      if (e.key === 'n' || e.key === 'a') {
+        e.preventDefault();
         gPendingRef.current = false;
-        if (e.key === 'ArrowDown' || e.key === 'j') {
-          e.preventDefault();
-          setGridCursor((c) => Math.min(gridNodes.length - 1, c + 1));
-        } else if (e.key === 'ArrowUp' || e.key === 'k') {
-          e.preventDefault();
-          setGridCursor((c) => Math.max(0, c - 1));
-        } else if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
-          e.preventDefault();
-          const node = gridNodes[gridCursor];
-          if (node) enterCard(node);
+        const cur = idx >= 0 ? flatRows[idx] : undefined;
+        const targetProject =
+          level === 2 && detailId
+            ? detailId
+            : cur?.kind === 'header' || cur?.kind === 'subproject'
+              ? cur.projectId
+              : cur?.kind === 'task'
+                ? cur.task.projectId ?? ''
+                : '';
+        newProjectTask(targetProject ?? '');
+        return;
+      }
+      // gg → top, G → bottom (flat motion across the whole visible order).
+      if (e.key === 'g') {
+        e.preventDefault();
+        if (gPendingRef.current) {
+          gPendingRef.current = false;
+          setIdx(0);
+        } else {
+          gPendingRef.current = true;
         }
-      } else {
-        // level 2 — task tree
-        if (e.key === 'n' || e.key === 'a') {
-          // task-223d400ffc1a — new task scoped to THIS project (opens the
-          // shared composer with the project pre-selected).
+        return;
+      }
+      if (e.key === 'G') {
+        e.preventDefault();
+        gPendingRef.current = false;
+        setIdx(flatRows.length - 1);
+        return;
+      }
+      gPendingRef.current = false;
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault();
+        setIdx((idx < 0 ? -1 : idx) + 1);
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault();
+        setIdx((idx < 0 ? 1 : idx) - 1);
+      } else if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
+        e.preventDefault();
+        activateFlat(idx >= 0 ? flatRows[idx] : undefined);
+      } else if (e.key === ' ') {
+        // Space toggles selection on a task row (for bulk ops via : verbs).
+        const cur = idx >= 0 ? flatRows[idx] : undefined;
+        if (cur?.kind === 'task') {
           e.preventDefault();
-          if (detailId) newProjectTask(detailId);
-        } else if (e.key === 'ArrowDown' || e.key === 'j') {
-          e.preventDefault();
-          setTreeCursor((c) => Math.min(treeRows.length - 1, c + 1));
-        } else if (e.key === 'ArrowUp' || e.key === 'k') {
-          e.preventDefault();
-          setTreeCursor((c) => Math.max(0, c - 1));
-        } else if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
-          e.preventDefault();
-          const row = treeRows[treeCursor];
-          if (!row) return;
-          if (row.childCount > 0) toggleExpand(row.task.id);
-          else openTaskDetail(row.task);
+          setSelectedTasks((prev) => {
+            const next = new Set(prev);
+            if (next.has(cur.task.id)) next.delete(cur.task.id);
+            else next.add(cur.task.id);
+            return next;
+          });
         }
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, level, scopeId, gridNodes, gridCursor, treeRows, treeCursor, showCreate, detailId, showSwitcher]);
+  }, [isActive, level, scopeId, flatRows, cursorKey, showCreate, detailId, showSwitcher]);
 
-  // keep the cursor card in view. The grid now renders across multiple section
-  // <div>s (needs-attention / below-the-fold / idle), so query the whole page
-  // by the card's absolute data-grid-i rather than a single grid container.
+  // Keep the cursor row in view across the multi-section render. Each cursor
+  // target carries data-folder-key (header / sub-project) or data-task-id (task).
   useEffect(() => {
-    if (level !== 1) return;
-    document
-      .querySelector(`.projects__page [data-grid-i="${gridCursor}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  }, [gridCursor, level]);
-  useEffect(() => {
-    if (level !== 2) return;
-    treeRef.current
-      ?.querySelector(`[data-tree-i="${treeCursor}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  }, [treeCursor, level]);
+    if (!cursorKey) return;
+    const el =
+      document.querySelector(`.projects__page [data-task-id="${cursorKey}"]`) ??
+      document.querySelector(`.projects__page [data-folder-key="${cursorKey}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [cursorKey]);
 
   // ── L1 hero ──────────────────────────────────────────────────────────────────
   // task-6255239581b2 — hero counts come from the attention partition (stable
@@ -777,7 +838,6 @@ function ProjectsPageInner() {
             onClick={() => {
               setLevel(1);
               setScopeId(null);
-              setGridCursor(0);
             }}
           >
             Home
@@ -808,7 +868,6 @@ function ProjectsPageInner() {
             attentionNodes={partitioned.attentionNodes}
             recentNodes={partitioned.recentNodes}
             idleNodes={partitioned.idleNodes}
-            gridNodes={gridNodes}
             rollUp={rollUp}
             attention={attention}
             tasksProvider={tasksProvider}
@@ -828,7 +887,6 @@ function ProjectsPageInner() {
             onArchive={(id, next) => void setProjectArchived(id, next)}
             scopeProject={scopeProject}
             totalProjects={projects.length}
-            gridCursor={gridCursor}
             heroNeed={heroNeed}
             heroBlocked={heroBlocked}
             heroTarget={heroTarget}
@@ -843,7 +901,7 @@ function ProjectsPageInner() {
               setReloadTick((t) => t + 1);
               dispatch({ type: 'setStatus', msg: `project created · ${p.name}` });
             }}
-            onSetCursor={setGridCursor}
+            onSetCursor={(pid) => setCursorKey(pid)}
             onEnter={enterCard}
             onHeroOpen={(n) => enterCard(n)}
             allProjects={projects}
@@ -909,7 +967,6 @@ function HomeRoot({
   attentionNodes,
   recentNodes,
   idleNodes,
-  gridNodes,
   rollUp,
   attention,
   tasksProvider,
@@ -929,7 +986,6 @@ function HomeRoot({
   onArchive,
   scopeProject,
   totalProjects,
-  gridCursor,
   heroNeed,
   heroBlocked,
   heroTarget,
@@ -949,8 +1005,6 @@ function HomeRoot({
   attentionNodes: ProjectNode[];
   recentNodes: ProjectNode[];
   idleNodes: ProjectNode[];
-  /** Full ordered visible sequence — defines the keyboard cursor index. */
-  gridNodes: ProjectNode[];
   rollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
   attention: Map<string, ProjectAttention>;
   tasksProvider: ProjectTasksProvider;
@@ -971,7 +1025,6 @@ function HomeRoot({
   onArchive: (id: string, archived: boolean) => void;
   scopeProject: Project | null;
   totalProjects: number;
-  gridCursor: number;
   heroNeed: number;
   heroBlocked: number;
   heroTarget: ProjectNode | null;
@@ -981,7 +1034,8 @@ function HomeRoot({
   onShowCreate: () => void;
   onCancelCreate: () => void;
   onCreated: (p: Project) => void;
-  onSetCursor: (i: number) => void;
+  /** Move the keyboard cursor onto a project header (mouse → cursor sync). */
+  onSetCursor: (projectId: string) => void;
   onEnter: (n: ProjectNode) => void;
   onHeroOpen: (n: ProjectNode) => void;
   allProjects: Project[];
@@ -991,32 +1045,23 @@ function HomeRoot({
   const empty = loaded && !loadErr && totalScoped === 0;
   const hiddenCount = idleNodes.length;
 
-  // Cursor index into the flat `gridNodes` sequence for a given node (drives the
-  // header amber cursor + scrollIntoView via data-grid-i on the block wrapper).
-  const indexOf = (id: string) => gridNodes.findIndex((n) => n.project.id === id);
-
-  // One project = one folder block. Each block carries its absolute grid index
-  // (data-grid-i) so the existing keyboard cursor + scroll-into-view still work;
-  // a per-block archive control rides on the block header wrapper.
+  // One project = one folder block. The cursor (keyboard or mouse) keys off the
+  // project id; the inner .pfolder carries data-folder-key for scroll-into-view.
   const renderBlock = (node: ProjectNode, quiet: boolean) => {
     const p = node.project;
-    const i = indexOf(p.id);
     const archived = p.archived === true;
     return (
       <div
         key={p.id}
-        data-grid-i={i}
         className={[
           'home-block',
           quiet ? 'home-block--quiet' : '',
           archived ? 'home-block--archived' : '',
-          i === gridCursor ? 'home-block--cursor' : '',
+          cursorKey === p.id ? 'home-block--cursor' : '',
         ]
           .filter(Boolean)
           .join(' ')}
-        onMouseDown={() => {
-          if (i >= 0) onSetCursor(i);
-        }}
+        onMouseDown={() => onSetCursor(p.id)}
       >
         <button
           type="button"
