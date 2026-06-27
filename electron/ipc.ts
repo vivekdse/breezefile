@@ -1,7 +1,19 @@
 import { ipcMain, shell, app, BrowserWindow, WebContentsView, webContents, clipboard, nativeImage, dialog } from 'electron';
 import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
+// Teach-by-recording (task-01facbf6b0bc): capture human browser actions +
+// selector candidates over the embedded view. Stateful main wrapper — import
+// the .ts explicitly so Rollup picks the wrapper, not the sibling .mjs core.
+import {
+  startRecording as startBrowserRecording,
+  stopRecording as stopBrowserRecording,
+  currentRecording as currentBrowserRecording,
+} from './browser/record.ts';
+
+// This chunk is bundled into dist-electron/ (same dir as the built preloads).
+const __ipcDir = path.dirname(fileURLToPath(import.meta.url));
 import { spawn, execFile } from 'node:child_process';
 import { existsSync, watch as fsWatch, type FSWatcher } from 'node:fs';
 import crypto from 'node:crypto';
@@ -2426,7 +2438,17 @@ end tell`;
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return -1;
     const id = nextBrowserId++;
-    const view = new WebContentsView();
+    const view = new WebContentsView({
+      webPreferences: {
+        // Teach-by-recording capture preload (idle until 'tb-record:set' true).
+        // It only reads selector STRUCTURE and exfiltrates over sendToHost; it
+        // never reads field values. Keep contextIsolation on (the preload uses
+        // contextBridge defensively) and the default sandbox.
+        preload: path.join(__ipcDir, 'record-preload.mjs'),
+        sandbox: true,
+        contextIsolation: true,
+      },
+    });
     // Give the page a REAL viewport immediately, sized to the window, so it
     // lays out and can be screenshotted/driven even when the browser tab is not
     // the active Breeze tab. Without this the view stays 0×0 until BrowserPane
@@ -2456,6 +2478,13 @@ end tell`;
     wc.on('did-navigate', emit);
     wc.on('did-navigate-in-page', emit);
     wc.on('page-title-updated', emit);
+    // Each full load re-runs the record preload, which starts idle — re-arm it
+    // if a recording is live so a navigation mid-session keeps capturing.
+    wc.on('did-finish-load', () => {
+      if (currentBrowserRecording().webContentsId === wc.id) {
+        try { wc.send('tb-record:set', true); } catch { /* page gone */ }
+      }
+    });
     // Open target=_blank / window.open in the same view rather than spawning a
     // native child window (keeps everything inside the tab for the spike).
     wc.setWindowOpenHandler(({ url }) => {
@@ -2552,6 +2581,21 @@ end tell`;
   ipcMain.on('browser:reload', (_e, id: number) => {
     browserViews.get(id)?.view.webContents.reload();
   });
+
+  // ─── Teach-by-recording (task-01facbf6b0bc) ───────────────────────────────
+  // Record the HUMAN's actions in an embedded browser view + capture every
+  // selector candidate, so Claude Code can pick the most stable one and save it
+  // as a shared NON-PHI skill. The agent's Playwright session must be released
+  // first (CDP is single-client — see connect.mjs releaseForRecording).
+  ipcMain.handle('browser:record:start', (_e, id: number) => {
+    const rec = browserViews.get(id);
+    if (!rec) return { ok: false, error: 'no such browser view' };
+    return startBrowserRecording(rec.view.webContents);
+  });
+  ipcMain.handle('browser:record:stop', (_e, opts?: { skillName?: string }) =>
+    stopBrowserRecording(opts || {}),
+  );
+  ipcMain.handle('browser:record:state', () => currentBrowserRecording());
 
   // fm-z7v — busy/idle signal comes from Claude Code hooks
   // (UserPromptSubmit → busy, Stop/StopFailure → idle), routed through

@@ -127,3 +127,42 @@ export async function listPages(browser) {
 export function loc(page, selector) {
   return page.locator(selector).first();
 }
+
+// ─── Record-mode time-share (teach-by-recording) ─────────────────────────────
+//
+// CRITICAL CONSTRAINT: CDP allows exactly ONE debugger client per target. The
+// teach recorder attaches Electron's built-in webContents.debugger to read the
+// accessibility tree (role + accessible name). That COLLIDES with Playwright's
+// connectOverCDP — only one can hold the page's CDP at a time. So we TIME-SHARE:
+// during RECORD mode the HUMAN drives (not the agent), so we drop Playwright's
+// CDP client, let the recorder use the debugger, and on finish reconnect
+// Playwright for replay. NEVER run both at once.
+//
+// These helpers make that explicit and symmetric. They operate on a Playwright
+// Browser handle (from connect()); the recorder's debugger.attach lives in MAIN
+// (electron/browser/record.ts), this side only releases/reacquires Playwright.
+
+/** Release Playwright's CDP client so the recorder's webContents.debugger can
+ *  attach without colliding. Closing the Browser drops only the CDP connection;
+ *  it does NOT close Breeze or the embedded tab (same as elsewhere in this
+ *  file). Returns true if a live browser was released. Never throws. */
+export async function releaseForRecording(browser) {
+  if (!browser) return false;
+  try {
+    await browser.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Reacquire a Playwright CDP client after recording finishes (the recorder has
+ *  detached its debugger). Returns a fresh connected Browser, or null if Breeze
+ *  isn't reachable. Caller then resolvePage()s again to drive replay. */
+export async function reconnectAfterRecording(cdpUrl = CDP_URL) {
+  try {
+    return await connect(cdpUrl);
+  } catch {
+    return null;
+  }
+}

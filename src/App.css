@@ -258,6 +258,23 @@
   opacity: 0.35;
   cursor: default;
 }
+/* Teach-by-recording (task-01facbf6b0bc): the Record toggle carries a text
+   label, so let it size to content; turn it red while a session is live. */
+.browser-pane__btn--recording,
+.browser-pane__btn[title^='Stop recording'],
+.browser-pane__btn[title^='Record actions'] {
+  width: auto;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.browser-pane__btn--recording {
+  color: #fff;
+  background: var(--danger, #d9483b);
+}
+.browser-pane__btn--recording:hover:not(:disabled) {
+  background: var(--danger, #c23e32);
+}
 .browser-pane__addr {
   flex: 1;
   height: 28px;
