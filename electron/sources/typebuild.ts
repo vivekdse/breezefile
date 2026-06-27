@@ -819,6 +819,106 @@ export class TypeBuildTaskSource implements TaskSource {
     return this.mapProjectRow(data.project);
   }
 
+  // ─── update project (task-fdf3dc6b3c5c — teach-in-the-moment write-back) ───
+  // PATCH /chromeext/projects/{id}. The teach affordance's PROJECT scope writes
+  // a correction into a project's `instructions` here. NON-PHI (instructions are
+  // teaching context, not patient data) — but we still never log the body.
+  //
+  // Server contract (verified against patch_project, chromeext.py ~1718):
+  //   - OWNER-ONLY: 403 { reason:'not_owner' } when created_by != the caller.
+  //   - PHI-GUARDED: 422 when name/description/instructions look PHI-shaped.
+  //   - 404 when the project is not visible / not found.
+  //   - 200 → { project } (the updated row).
+  // We surface 403/422/404 as a STRUCTURED { ok:false, reason } so the renderer
+  // can show a clear message instead of crashing (the teach UI keeps its local
+  // fallback on a structured failure). Other non-2xx throw (genuine error).
+  async updateProject(
+    id: string,
+    patch: { name?: string; description?: string; instructions?: string },
+  ): Promise<
+    | { ok: true; project: Project }
+    | { ok: false; reason: string; status: number }
+  > {
+    const body: Record<string, unknown> = {};
+    if (patch.name !== undefined) body.name = patch.name;
+    if (patch.description !== undefined) body.description = patch.description;
+    if (patch.instructions !== undefined) body.instructions = patch.instructions;
+
+    const res = await this.request(
+      'PATCH',
+      `/chromeext/projects/${encodeURIComponent(id)}`,
+      body,
+    );
+    if (res.status === 200) {
+      const data = (await res.json().catch(() => ({}))) as {
+        project?: ProjectRow;
+      };
+      if (!data.project || !data.project.id) {
+        throw new Error('typebuild: update project returned no project');
+      }
+      return { ok: true, project: this.mapProjectRow(data.project) };
+    }
+    if (res.status === 403 || res.status === 404 || res.status === 422) {
+      const data = (await res.json().catch(() => ({}))) as {
+        reason?: string;
+        error?: string;
+      };
+      // 403 → not_owner; 422 → PHI guard rejection; 404 → not visible.
+      const reason =
+        data.reason ??
+        (res.status === 403
+          ? 'not_owner'
+          : res.status === 422
+            ? 'phi_rejected'
+            : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    throw new Error(`typebuild: update project failed (${res.status})`);
+  }
+
+  // ─── per-task teach note (task-fdf3dc6b3c5c — TASK scope write-back) ───────
+  // POST /chromeext/{id}/notes — the dedicated NON-PHI progress-note endpoint
+  // (field `note`). The teach affordance's TASK scope writes a per-task
+  // instruction here. NON-PHI (teaching text, never patient data) — but we
+  // never log the body. Server contract (verified against add_task_note,
+  // chromeext.py ~2717): requires you hold the claim; 422 on PHI-shaped text;
+  // 400 on empty; 404 not found; 409 claim conflict. We surface those as a
+  // STRUCTURED { ok:false, reason } so the renderer keeps its local fallback
+  // and shows a clear message rather than crashing.
+  async addTaskNote(
+    taskId: string,
+    note: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const res = await this.request(
+      'POST',
+      `/chromeext/${encodeURIComponent(taskId)}/notes`,
+      { note },
+    );
+    if (res.status === 200 || res.status === 201) {
+      await res.json().catch(() => ({}));
+      return { ok: true };
+    }
+    if (
+      res.status === 400 ||
+      res.status === 404 ||
+      res.status === 409 ||
+      res.status === 422
+    ) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 422
+          ? 'phi_rejected'
+          : res.status === 409
+            ? 'claim_conflict'
+            : res.status === 400
+              ? 'empty'
+              : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    throw new Error(`typebuild: add task note failed (${res.status})`);
+  }
+
   // ─── users registry (fm-j7w0/S4) ─────────────────────────────────────────
   // GET /chromeext/users → { users: [{ principal, email, display_name, ... }] }.
   // Non-PHI (identities, not patient data). The assignee picker fetches this

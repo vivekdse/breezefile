@@ -349,6 +349,15 @@
   font-size: var(--fs-xs);
   padding: 3px 6px;
 }
+/* task-fdf3dc6b3c5c — teach write-back feedback + pending-scope hint. */
+.tdd__teach-feedback {
+  font-size: var(--fs-xs);
+  margin: var(--sp-1) 0 0;
+}
+.tdd__teach-feedback--ok { color: var(--ok, var(--accent)); }
+.tdd__teach-feedback--pending { color: var(--warn, var(--fg-3)); }
+.tdd__teach-feedback--err { color: var(--err, #c0392b); }
+.tdd__teach-hint { font-size: var(--fs-xs); margin: 0; }
 
 /* ── trace timeline ── */
 .tdd__trace { display: flex; flex-direction: column; gap: var(--sp-3); }

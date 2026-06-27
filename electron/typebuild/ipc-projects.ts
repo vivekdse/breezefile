@@ -6,6 +6,13 @@
 //   typebuild:projects:get      (id, effective?)    -> Project | null
 //   typebuild:projects:resolve  (folder)            -> Project | null
 //   typebuild:projects:create   (input)             -> Project
+//   typebuild:projects:patch    (id, patch)         -> { ok, project | reason }
+//   typebuild:tasks:note        (taskId, note)      -> { ok, reason? }
+//
+// task-fdf3dc6b3c5c — the last two bridge the teach-in-the-moment write-back:
+// PROJECT scope → projects:patch (PATCH instructions; owner-only/PHI-guarded),
+// TASK scope → tasks:note (per-task teach note). Both return a STRUCTURED
+// result the renderer surfaces (so a 403/422 shows a message, never crashes).
 //
 // NON-PHI: project name/description/instructions/folders are not patient data.
 // The source still never logs request/response bodies. Registered from
@@ -58,5 +65,22 @@ export function registerTypebuildProjectsIpc(): void {
         folders?: string[];
       },
     ): Promise<Project> => source().createProject(input),
+  );
+  // task-fdf3dc6b3c5c — PROJECT-scope teach write-back. Returns a structured
+  // result ({ ok:false, reason } on owner/PHI/visibility failures) so the
+  // renderer keeps its local fallback and shows a clear message, not a crash.
+  ipcMain.handle(
+    'typebuild:projects:patch',
+    (
+      _e,
+      id: string,
+      patch: { name?: string; description?: string; instructions?: string },
+    ) => source().updateProject(id, patch),
+  );
+  // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
+  // structured-result contract.
+  ipcMain.handle(
+    'typebuild:tasks:note',
+    (_e, taskId: string, note: string) => source().addTaskNote(taskId, note),
   );
 }

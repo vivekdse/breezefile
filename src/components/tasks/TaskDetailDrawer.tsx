@@ -84,6 +84,26 @@ function liveToneFor(task: Task, running: boolean): { tone: LiveTone; label: str
   return { tone: 'neutral', label: raw === 'pending' ? 'Pending' : raw };
 }
 
+// task-fdf3dc6b3c5c — humanize a structured teach-persist failure reason into a
+// clear one-liner for the teach UI. Covers the server's owner/PHI/claim/
+// visibility vocabularies for both the project PATCH and the per-task note.
+function teachReason(scope: 'project' | 'task', reason: string): string {
+  switch (reason) {
+    case 'not_owner':
+      return 'Only the project owner can edit its instructions.';
+    case 'phi_rejected':
+      return 'That looks like it contains PHI — keep teaching text PHI-free.';
+    case 'claim_conflict':
+      return 'Claim this task first to add a note.';
+    case 'empty':
+      return 'Nothing to save.';
+    case 'not_visible':
+      return scope === 'project' ? 'Project not found.' : 'Task not found.';
+    default:
+      return 'Couldn’t save the correction.';
+  }
+}
+
 export function TaskDetailDrawer({
   task,
   initialTab,
@@ -163,6 +183,18 @@ export function TaskDetailDrawer({
   // Resolve the project leg lazily (NON-PHI) and feed task notes as the task
   // scope. Category cohorts ride on task.flags (e.g. 'payer:HMO') when present.
   const [project, setProject] = useState<Project | null>(null);
+  // task-fdf3dc6b3c5c — reusable project (re-)load so a successful PROJECT-scope
+  // teach can pull the freshly-persisted instructions (effective=1) back in.
+  const loadProject = useCallback(() => {
+    if (!task.projectId) {
+      setProject(null);
+      return Promise.resolve();
+    }
+    return fm.typebuild.projects
+      .get(task.projectId, true)
+      .then((p) => setProject(p))
+      .catch(() => setProject(null));
+  }, [task.projectId]);
   useEffect(() => {
     let cancelled = false;
     if (!task.projectId) {
@@ -182,11 +214,19 @@ export function TaskDetailDrawer({
     };
   }, [task.projectId]);
 
-  // Local teach-in-the-moment additions, keyed by scope, applied on top of the
-  // resolved set this session (the real persistence is a follow-up — the scope
-  // model + provenance is wired now).
+  // task-fdf3dc6b3c5c — teach-in-the-moment write-back. Saves now PERSIST to
+  // the server for PROJECT + TASK scopes (CATEGORY stays session-local until
+  // its server store ships — task-7961735a4ab6). We still keep a local `taught`
+  // list so every successful save shows IMMEDIATELY in the resolved set without
+  // waiting for a project re-fetch, and so the CATEGORY fallback has somewhere
+  // to live. Each entry records how it was persisted for the (optional) UI hint.
   const [taught, setTaught] = useState<
-    Array<{ scopeKind: 'task' | 'category' | 'project'; scopeLabel: string; text: string }>
+    Array<{
+      scopeKind: 'task' | 'category' | 'project';
+      scopeLabel: string;
+      text: string;
+      persisted: 'project' | 'task' | 'local-pending';
+    }>
   >([]);
 
   const categories: CategoryScopeSource[] = useMemo(() => {
@@ -224,6 +264,72 @@ export function TaskDetailDrawer({
           : undefined,
     });
   }, [project, categories, taught, body]);
+
+  // task-fdf3dc6b3c5c — persist a teach correction to the chosen SCOPE.
+  //   PROJECT  → PATCH /chromeext/projects/{id} `instructions` (append the new
+  //              rule to the project's own instructions). OWNER-ONLY (403
+  //              not_owner) and PHI-guarded (422). On a structured failure we
+  //              surface a clear message and DO NOT add the rule locally (no
+  //              fake persistence). On success we re-load the project so the
+  //              freshly-persisted instructions flow through the resolver, and
+  //              ALSO add it to local `taught` for an instant echo.
+  //   TASK     → POST /chromeext/{id}/notes (per-task teach note). Claim-gated
+  //              + PHI-guarded server-side. Same success/failure handling.
+  //   CATEGORY → NO server store yet (task-7961735a4ab6: GET/PUT
+  //              /chromeext/category-instructions). Until that ships we keep
+  //              the category rule in the session-local `taught` fallback,
+  //              clearly marked 'local-pending' — NOT faked as persisted.
+  // Returns a result the teach UI renders (ok | a human reason). NON-PHI text.
+  const persistTeach = useCallback(
+    async (entry: {
+      scopeKind: 'task' | 'category' | 'project';
+      scopeLabel: string;
+      text: string;
+    }): Promise<{ ok: true; pending?: boolean } | { ok: false; message: string }> => {
+      const text = entry.text.trim();
+      if (!text) return { ok: false, message: 'Nothing to save.' };
+
+      if (entry.scopeKind === 'category') {
+        // task-7961735a4ab6 — pending server endpoint. Session-local only.
+        setTaught((prev) => [...prev, { ...entry, text, persisted: 'local-pending' }]);
+        return { ok: true, pending: true };
+      }
+
+      if (entry.scopeKind === 'project') {
+        if (!task.projectId) return { ok: false, message: 'No project to teach.' };
+        // Append the new rule to the project's OWN instructions (not the merged
+        // effective block) so we don't re-persist inherited ancestor rules.
+        const own = (project?.instructions ?? '').trim();
+        const next = own ? `${own}\n${text}` : text;
+        try {
+          const res = await fm.typebuild.projects.patch(task.projectId, {
+            instructions: next,
+          });
+          if (res.ok) {
+            await loadProject();
+            setTaught((prev) => [...prev, { ...entry, text, persisted: 'project' }]);
+            return { ok: true };
+          }
+          return { ok: false, message: teachReason('project', res.reason) };
+        } catch {
+          return { ok: false, message: 'Couldn’t reach TypeBuild to save.' };
+        }
+      }
+
+      // TASK scope → per-task teach note.
+      try {
+        const res = await fm.typebuild.taskNote(task.id, text);
+        if (res.ok) {
+          setTaught((prev) => [...prev, { ...entry, text, persisted: 'task' }]);
+          return { ok: true };
+        }
+        return { ok: false, message: teachReason('task', res.reason) };
+      } catch {
+        return { ok: false, message: 'Couldn’t reach TypeBuild to save.' };
+      }
+    },
+    [task.id, task.projectId, project, loadProject],
+  );
 
   // ── controls ──────────────────────────────────────────────────────────────
   const claimedBy = task.claimedBy ?? null;
@@ -491,7 +597,7 @@ export function TaskDetailDrawer({
               <InstructionSet
                 resolved={resolved}
                 task={task}
-                onTeach={(entry) => setTaught((prev) => [...prev, entry])}
+                onTeach={persistTeach}
               />
             </div>
           )}
@@ -677,31 +783,61 @@ function InstructionSet({
 }: {
   resolved: ResolvedInstructions;
   task: Task;
+  // task-fdf3dc6b3c5c — onTeach now PERSISTS (project/task) and returns a
+  // structured result so the teach UI can show "saved", a "pending server
+  // endpoint" note (category), or a clear failure message.
   onTeach: (entry: {
     scopeKind: 'task' | 'category' | 'project';
     scopeLabel: string;
     text: string;
-  }) => void;
+  }) => Promise<{ ok: true; pending?: boolean } | { ok: false; message: string }>;
 }) {
   const [teaching, setTeaching] = useState(false);
   const [text, setText] = useState('');
   const cohorts = (task.flags ?? []).filter((f) => f.includes(':'));
   const [scope, setScope] = useState<'task' | 'category' | 'project'>('task');
   const [cohort, setCohort] = useState<string>(cohorts[0] ?? '');
+  const [saving, setSaving] = useState(false);
+  // Transient feedback after a save attempt: a success/pending/error line.
+  const [feedback, setFeedback] = useState<
+    { kind: 'ok' | 'pending' | 'err'; msg: string } | null
+  >(null);
 
-  const save = () => {
+  const save = async () => {
+    if (saving) return;
     const t = text.trim();
     if (!t) {
       setTeaching(false);
       return;
     }
-    onTeach({
-      scopeKind: scope,
-      scopeLabel: scope === 'category' ? cohort || 'category' : scope,
-      text: t,
-    });
-    setText('');
-    setTeaching(false);
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const res = await onTeach({
+        scopeKind: scope,
+        scopeLabel: scope === 'category' ? cohort || 'category' : scope,
+        text: t,
+      });
+      if (res.ok) {
+        setText('');
+        setTeaching(false);
+        setFeedback(
+          res.pending
+            ? {
+                kind: 'pending',
+                // task-7961735a4ab6 — category instructions have no server
+                // store yet; the rule is kept only for this session.
+                msg: 'Saved for this session — category instructions aren’t persisted yet (server endpoint pending).',
+              }
+            : { kind: 'ok', msg: 'Saved.' },
+        );
+      } else {
+        // Keep the editor open with the text intact so the user can adjust.
+        setFeedback({ kind: 'err', msg: res.message });
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -727,8 +863,26 @@ function InstructionSet({
         </ul>
       )}
 
+      {/* task-fdf3dc6b3c5c — post-save feedback: "Saved.", the category
+          "pending server endpoint" note, or a clear failure message. */}
+      {feedback && (
+        <p
+          className={`tdd__teach-feedback tdd__teach-feedback--${feedback.kind}`}
+          role="status"
+        >
+          {feedback.msg}
+        </p>
+      )}
+
       {!teaching ? (
-        <button type="button" className="tdd__teach-open" onClick={() => setTeaching(true)}>
+        <button
+          type="button"
+          className="tdd__teach-open"
+          onClick={() => {
+            setFeedback(null);
+            setTeaching(true);
+          }}
+        >
           + Teach
         </button>
       ) : (
@@ -738,15 +892,25 @@ function InstructionSet({
             placeholder="Add a correction or rule the agent should follow…"
             value={text}
             autoFocus
+            disabled={saving}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void save();
               if (e.key === 'Escape') {
                 e.stopPropagation();
                 setTeaching(false);
               }
             }}
           />
+          {/* task-7961735a4ab6 — category instructions have no server store yet;
+              make it explicit in the picker so a "Saved" there isn't mistaken
+              for durable persistence. */}
+          {scope === 'category' && (
+            <p className="tdd__teach-hint tdd__muted">
+              Category instructions aren’t persisted yet — saving keeps this rule
+              for the current session only (server endpoint pending).
+            </p>
+          )}
           <div className="tdd__teach-scope">
             <span className="tdd__teach-label">Save to</span>
             <select
@@ -772,11 +936,21 @@ function InstructionSet({
               </select>
             )}
             <span className="tdd__teach-spacer" />
-            <button type="button" className="tdd__btn tdd__btn--ghost" onClick={() => setTeaching(false)}>
+            <button
+              type="button"
+              className="tdd__btn tdd__btn--ghost"
+              onClick={() => setTeaching(false)}
+              disabled={saving}
+            >
               Cancel
             </button>
-            <button type="button" className="tdd__btn" onClick={save}>
-              Save
+            <button
+              type="button"
+              className="tdd__btn"
+              onClick={() => void save()}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </div>
