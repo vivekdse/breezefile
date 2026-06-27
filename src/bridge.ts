@@ -381,7 +381,23 @@ type Fm = {
         parentProjectId?: string;
         folders?: string[];
       }) => Promise<Project>;
+      // task-fdf3dc6b3c5c — PROJECT-scope teach write-back. Structured result so
+      // the UI surfaces owner-only (403) / PHI-guard (422) failures gracefully.
+      patch: (
+        id: string,
+        patch: { name?: string; description?: string; instructions?: string },
+      ) => Promise<
+        | { ok: true; project: Project }
+        | { ok: false; reason: string; status: number }
+      >;
     };
+    // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
+    taskNote: (
+      taskId: string,
+      note: string,
+    ) => Promise<
+      { ok: true } | { ok: false; reason: string; status: number }
+    >;
   };
   // fm-b5at.6 — TypeBuild side-by-side layout. Chrome left / our window
   // right while a session runs. Self-contained namespaced block; the OS work

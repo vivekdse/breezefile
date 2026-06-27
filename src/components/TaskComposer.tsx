@@ -1162,11 +1162,21 @@ export function TaskComposer(props: Props) {
         // patch ('' clears a clearable field) so the embedded "Task details"
         // editor persists its edits in a single round-trip.
         //
-        // NOTE: title/notes (PHI) are NOT in the PATCH whitelist — the v2
-        // management verb only edits routing fields — so editing them here is a
-        // no-op server-side today (tracked separately); we only send the
-        // routing fields that actually persist.
+        // task-63b936d69127 — title + body/notes ARE editable now: the v2
+        // management verb accepts `title` and `task` (re-encrypted at rest),
+        // and the source's patch whitelist forwards them. PHI rides the request
+        // body to be encrypted server-side (allowed — the invariant only forbids
+        // LOCAL persistence of decrypted content, never the encrypting POST).
         const patch: Record<string, unknown> = {};
+        // title — send only a real change. save() already guards a blank title,
+        // so we never emit an empty title (which would clear it server-side).
+        if (title.trim() !== (initial?.title ?? '')) {
+          patch.title = title.trim();
+        }
+        // body/notes → the server's `task` field. '' clears it server-side.
+        if ((trimmedNotes || '') !== (initial?.notes ?? '')) {
+          patch.task = trimmedNotes;
+        }
         if (projectId !== (initial?.projectId ?? '')) {
           patch.project_id = projectId;
         }

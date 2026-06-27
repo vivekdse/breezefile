@@ -714,7 +714,24 @@ const fm = {
         folders?: string[];
       }) =>
         ipcRenderer.invoke('typebuild:projects:create', input) as Promise<Project>,
+      // task-fdf3dc6b3c5c — PROJECT-scope teach write-back. Structured result:
+      // { ok:true, project } | { ok:false, reason, status } (403 not_owner /
+      // 422 phi_rejected / 404 not_visible) so the UI shows a message, not a crash.
+      patch: (
+        id: string,
+        patch: { name?: string; description?: string; instructions?: string },
+      ) =>
+        ipcRenderer.invoke('typebuild:projects:patch', id, patch) as Promise<
+          | { ok: true; project: Project }
+          | { ok: false; reason: string; status: number }
+        >,
     },
+    // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
+    // structured-result contract as projects.patch.
+    taskNote: (taskId: string, note: string) =>
+      ipcRenderer.invoke('typebuild:tasks:note', taskId, note) as Promise<
+        { ok: true } | { ok: false; reason: string; status: number }
+      >,
     // fm-j7w0 (S4) — user registry for the assignee picker (NON-PHI identities).
     listUsers: () =>
       ipcRenderer.invoke('typebuild:listUsers') as Promise<
