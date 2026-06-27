@@ -26,6 +26,14 @@ export default defineConfig({
                 '@homebridge/node-pty-prebuilt-multiarch',
                 'better-sqlite3',
                 'electron',
+                // Playwright must load from node_modules at runtime, not be
+                // bundled into the main ESM bundle: its coreBundle.js pulls in
+                // an unresolved 'chromium-bidi' require that Rollup externalizes
+                // and which then crashes the main process on load (ERR_MODULE_
+                // NOT_FOUND). The browser helper already runs playwright from
+                // node_modules, so keep main consistent.
+                'playwright-core',
+                'chromium-bidi',
               ],
             },
           },
