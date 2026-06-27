@@ -425,6 +425,51 @@
   color: var(--fg-dim);
 }
 
+/* ── flat / by-project toggle + flat view (task-9d54b7ab7972, Phase 5) ─────── */
+.home-viewtoggle {
+  display: inline-flex;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.home-viewtoggle__btn {
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--panel-2, var(--panel));
+  color: var(--muted-on-panel);
+  border: 0;
+  cursor: pointer;
+}
+.home-viewtoggle__btn + .home-viewtoggle__btn {
+  border-left: 1px solid var(--rule-on-panel);
+}
+.home-viewtoggle__btn.is-on {
+  background: var(--accent-soft);
+  color: var(--text-on-panel);
+  font-weight: 650;
+}
+.home-flat__section {
+  margin-bottom: var(--sp-4);
+}
+.home-flat__count {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+  font-weight: 400;
+}
+.home-flat__sectionhead {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
 /* ── unified quick-switcher overlay (task-4b0168979921) ─────────────────────── */
 .qsw__scrim {
   position: fixed;

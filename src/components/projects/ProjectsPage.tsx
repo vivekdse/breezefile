@@ -50,7 +50,7 @@ import {
   resolveEffectiveInstructions,
 } from '../../projects/index.mjs';
 import type { ProjectNode, TaskStats, ProjectAttention } from '../../projects/index.mjs';
-import { resolveBlockedBy } from '../tasks/sections.mjs';
+import { resolveBlockedBy, partitionTasks } from '../tasks/sections.mjs';
 import {
   loadProjectsViewPrefs,
   saveProjectsViewPrefs,
@@ -179,6 +179,11 @@ function ProjectsPageInner() {
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
+  // task-9d54b7ab7972 (Phase 5, Q3) — Home shows tasks BY PROJECT (folders) by
+  // default; a 'flat' toggle folds the all-tasks inbox in as a flat view (the
+  // standalone :tasks tab is retained as a secondary surface, not retired).
+  const [homeView, setHomeView] = useState<'projects' | 'flat'>('projects');
+  const [flatDoneOpen, setFlatDoneOpen] = useState(false);
   // task-4b0168979921 — unified quick-switcher (projects AND tasks). '/' opens.
   const [showSwitcher, setShowSwitcher] = useState(false);
   // gg/G motion: remember a pending 'g' so the next 'g' jumps to the top.
@@ -426,6 +431,55 @@ function ProjectsPageInner() {
     [rowsForProject, renderTaskRow],
   );
 
+  // ── flat view (task-9d54b7ab7972, Phase 5) ──────────────────────────────────
+  // The all-tasks inbox folded into Home as a flat view. Reuses the shared
+  // partition (FOR YOU / FOR AGENTS / DONE) and the SAME renderTaskRow engine,
+  // so it reads identically to a folder list. Honors the shared `expanded` set
+  // for FOR AGENTS parent rows.
+  const flatPartition = useMemo(() => partitionTasks(allTasks, {}), [allTasks]);
+  type FlatSection = { id: string; title: string; rows: ProjectFolderRow[] };
+  const flatSections = useMemo<FlatSection[]>(() => {
+    const forYouRows: ProjectFolderRow[] = flatPartition.forYou.map((t) => ({
+      task: t,
+      depth: 0,
+      childCount: 0,
+      doneChildCount: 0,
+    }));
+    // FOR AGENTS carries parent/child grouping; collapse child rows under
+    // parents that aren't expanded (mirrors the flat TasksPage behavior).
+    const agentRows: ProjectFolderRow[] = [];
+    for (const r of flatPartition.forAgentsRows) {
+      if (
+        r.depth === 1 &&
+        r.task.parentTaskId &&
+        !expanded.has(r.task.parentTaskId)
+      ) {
+        continue;
+      }
+      agentRows.push({
+        task: r.task,
+        depth: r.depth,
+        childCount: r.childCount ?? 0,
+        doneChildCount: r.doneChildCount ?? 0,
+      });
+    }
+    const doneRows: ProjectFolderRow[] = flatDoneOpen
+      ? flatPartition.done.map((t) => ({
+          task: t,
+          depth: 0,
+          childCount: 0,
+          doneChildCount: 0,
+        }))
+      : [];
+    const out: FlatSection[] = [];
+    out.push({ id: 'for-you', title: 'For you', rows: forYouRows });
+    out.push({ id: 'for-agents', title: 'For agents', rows: agentRows });
+    if (flatPartition.doneTotal > 0) {
+      out.push({ id: 'done', title: `Done (${flatPartition.doneTotal})`, rows: doneRows });
+    }
+    return out;
+  }, [flatPartition, expanded, flatDoneOpen]);
+
   // ── flat keyboard order (task-1bf3a297c9f9, Phase 4) ────────────────────────
   // The visible cursor sequence, walked flat by j/k exactly like FolderList
   // walks entries. It interleaves, in RENDER ORDER, project HEADERS + their TASK
@@ -464,6 +518,20 @@ function ProjectsPageInner() {
       }
     };
 
+    // Flat view (Phase 5): cursor walks the visible task rows across sections.
+    if (level === 1 && homeView === 'flat') {
+      for (const sec of flatSections) {
+        for (const row of sec.rows) {
+          out.push({
+            kind: 'task',
+            key: row.task.id,
+            task: row.task,
+            isParent: row.childCount > 0,
+          });
+        }
+      }
+      return out;
+    }
     if (level === 2 && detailNode) {
       pushBlock(detailNode, false);
       return out;
@@ -472,7 +540,7 @@ function ProjectsPageInner() {
     if (scopeId == null && inboxTotalCount > 0) pushBlock(inboxNode, true);
     for (const node of gridNodes) pushBlock(node, true);
     return out;
-  }, [level, detailNode, scopeId, inboxTotalCount, inboxNode, gridNodes, rowsForProject]);
+  }, [level, homeView, flatSections, detailNode, scopeId, inboxTotalCount, inboxNode, gridNodes, rowsForProject]);
 
   const flatIndexOf = (key: string | null) =>
     key == null ? -1 : flatRows.findIndex((r) => r.key === key);
@@ -733,7 +801,7 @@ function ProjectsPageInner() {
         e.preventDefault();
         gPendingRef.current = false;
         const cur = idx >= 0 ? flatRows[idx] : undefined;
-        const targetProject =
+        const rawTarget =
           level === 2 && detailId
             ? detailId
             : cur?.kind === 'header' || cur?.kind === 'subproject'
@@ -741,7 +809,8 @@ function ProjectsPageInner() {
               : cur?.kind === 'task'
                 ? cur.task.projectId ?? ''
                 : '';
-        newProjectTask(targetProject ?? '');
+        // The synthetic Inbox is not a real project — create with no preselect.
+        newProjectTask(rawTarget === INBOX_ID ? '' : rawTarget ?? '');
         return;
       }
       // gg → top, G → bottom (flat motion across the whole visible order).
@@ -862,7 +931,19 @@ function ProjectsPageInner() {
           </span>
         </div>
 
-        {level === 1 ? (
+        {level === 1 && homeView === 'flat' ? (
+          <FlatView
+            sections={flatSections}
+            renderTaskRow={renderTaskRow}
+            totalOpen={flatPartition.forYou.length + flatPartition.forAgents.length}
+            doneTotal={flatPartition.doneTotal}
+            doneOpen={flatDoneOpen}
+            onToggleDone={() => setFlatDoneOpen((v) => !v)}
+            homeView={homeView}
+            onSetHomeView={setHomeView}
+            onNewTask={() => newProjectTask('')}
+          />
+        ) : level === 1 ? (
           <HomeRoot
             gridRef={gridRef}
             attentionNodes={partitioned.attentionNodes}
@@ -872,6 +953,8 @@ function ProjectsPageInner() {
             attention={attention}
             tasksProvider={tasksProvider}
             cursorKey={cursorKey}
+            homeView={homeView}
+            onSetHomeView={setHomeView}
             onOpenProject={openProjectDetail}
             onOpenFolder={openProjectFolder}
             onNewTask={(pid) => newProjectTask(pid)}
@@ -956,6 +1039,132 @@ function ProjectsPageInner() {
   );
 }
 
+// ── flat / by-project toggle (task-9d54b7ab7972, Phase 5, Q3) ────────────────
+function HomeViewToggle({
+  view,
+  onSet,
+}: {
+  view: 'projects' | 'flat';
+  onSet: (v: 'projects' | 'flat') => void;
+}) {
+  return (
+    <div className="home-viewtoggle" role="group" aria-label="Home view">
+      <button
+        type="button"
+        className={['home-viewtoggle__btn', view === 'projects' ? 'is-on' : '']
+          .filter(Boolean)
+          .join(' ')}
+        aria-pressed={view === 'projects'}
+        onClick={() => onSet('projects')}
+        title="Group tasks by project (folders)"
+      >
+        By project
+      </button>
+      <button
+        type="button"
+        className={['home-viewtoggle__btn', view === 'flat' ? 'is-on' : '']
+          .filter(Boolean)
+          .join(' ')}
+        aria-pressed={view === 'flat'}
+        onClick={() => onSet('flat')}
+        title="Flat list of every task"
+      >
+        Flat
+      </button>
+    </div>
+  );
+}
+
+// ── flat view: the all-tasks inbox folded into Home (task-9d54b7ab7972) ───────
+// FOR YOU / FOR AGENTS / DONE sections, each a folder-list of real TaskRows via
+// the shared renderTaskRow — one Home, "All tasks" is a flat view of it. The
+// standalone :tasks tab is kept as a secondary surface (Q3).
+function FlatView({
+  sections,
+  renderTaskRow,
+  totalOpen,
+  doneTotal,
+  doneOpen,
+  onToggleDone,
+  homeView,
+  onSetHomeView,
+  onNewTask,
+}: {
+  sections: Array<{ id: string; title: string; rows: ProjectFolderRow[] }>;
+  renderTaskRow: (row: ProjectFolderRow) => React.ReactNode;
+  totalOpen: number;
+  doneTotal: number;
+  doneOpen: boolean;
+  onToggleDone: () => void;
+  homeView: 'projects' | 'flat';
+  onSetHomeView: (v: 'projects' | 'flat') => void;
+  onNewTask: () => void;
+}) {
+  return (
+    <>
+      <div className="projects__head">
+        <div className="projects__head-text">
+          <h1 className="projects__title">Home</h1>
+          <div className="projects__sub">
+            {totalOpen} open task{totalOpen === 1 ? '' : 's'} · flat view ·{' '}
+            <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
+          </div>
+        </div>
+        <div className="projects__head-actions">
+          <HomeViewToggle view={homeView} onSet={onSetHomeView} />
+          <button type="button" className="projects__btn" onClick={onNewTask} title="New task">
+            ＋ New task
+          </button>
+        </div>
+      </div>
+
+      {sections.map((sec) => {
+        const isDoneSec = sec.id === 'done';
+        return (
+          <section key={sec.id} className="pfolder home-flat__section">
+            <header className="pfolder-header pfolder-header--inline">
+              {isDoneSec ? (
+                <button
+                  type="button"
+                  className="home-flat__sectionhead"
+                  onClick={onToggleDone}
+                  aria-expanded={doneOpen}
+                >
+                  <span aria-hidden="true">{doneOpen ? '▾' : '▸'}</span>{' '}
+                  <span className="folder-header__title pfolder-header__title">{sec.title}</span>
+                </button>
+              ) : (
+                <h1 className="folder-header__title pfolder-header__title">
+                  {sec.title}
+                  <span className="home-flat__count"> · {sec.rows.length}</span>
+                </h1>
+              )}
+            </header>
+            {sec.rows.length > 0 ? (
+              <ul className="folder-list__list pfolder__list" role="list">
+                {sec.rows.map((row) => renderTaskRow(row))}
+              </ul>
+            ) : !isDoneSec ? (
+              <div className="pfolder__empty">
+                {sec.id === 'for-you' ? 'Nothing on your plate.' : 'No agent work queued.'}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
+      {doneTotal === 0 && totalOpen === 0 && (
+        <div className="projects__empty">
+          <div className="projects__empty-glyph">✓</div>
+          <div className="projects__empty-title">No tasks yet</div>
+          <div className="projects__empty-body">
+            Type <kbd>task</kbd> to add one — or use ＋ New task.
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Home root: projects-as-folders inbox (task-9d54b7ab7972 + task-4b0168979921)
 // Replaces the old .prow card/grid with a vertical LIST of ProjectFolderBlocks
 // (PROJECT = FOLDER). It PRESERVES task-4b0168979921's attention partition +
@@ -971,6 +1180,8 @@ function HomeRoot({
   attention,
   tasksProvider,
   cursorKey,
+  homeView,
+  onSetHomeView,
   onOpenProject,
   onOpenFolder,
   onNewTask,
@@ -1009,6 +1220,8 @@ function HomeRoot({
   attention: Map<string, ProjectAttention>;
   tasksProvider: ProjectTasksProvider;
   cursorKey: string | null;
+  homeView: 'projects' | 'flat';
+  onSetHomeView: (v: 'projects' | 'flat') => void;
   onOpenProject: (projectId: string) => void;
   onOpenFolder: (folder: string) => void;
   onNewTask: (projectId: string) => void;
@@ -1107,6 +1320,7 @@ function HomeRoot({
           </div>
         </div>
         <div className="projects__head-actions">
+          <HomeViewToggle view={homeView} onSet={onSetHomeView} />
           <button
             type="button"
             className="projects__btn"
@@ -1167,7 +1381,7 @@ function HomeRoot({
           shown when there are project-less tasks. Not part of the attention
           partition (it isn't a real project); it leads as the catch-all. */}
       {!scopeProject && inboxTotalCount > 0 && (
-        <div className="home-block home-block--inbox" data-folder-key="__inbox__">
+        <div className="home-block home-block--inbox">
           <ProjectFolderBlock
             node={inboxNode}
             attention={inboxAttention}
