@@ -63,6 +63,10 @@ export interface ProjectFolderBlockProps {
   onOpenFolder?: (folder: string) => void;
   /** New task scoped to this project. */
   onNewTask?: (projectId: string) => void;
+  /** task-0ab7bbc30a11 — open the inline editor for THIS project's
+   *  name/description. When provided, the header's "＋ Add description"
+   *  affordance opens the editor instead of (or in addition to) drilling in. */
+  onEditDescription?: () => void;
   /** Cursor target id (project id OR task id) for keyboard sync. */
   cursorKey?: string | null;
 }
@@ -85,6 +89,7 @@ export function ProjectHeader({
   scale,
   onOpenSelf,
   onOpenFolder,
+  onEditDescription,
 }: {
   node: ProjectNode;
   attention: Map<string, ProjectAttention>;
@@ -95,6 +100,7 @@ export function ProjectHeader({
   scale: 'hero' | 'inline';
   onOpenSelf?: (projectId: string) => void;
   onOpenFolder?: (folder: string) => void;
+  onEditDescription?: () => void;
 }) {
   const p = node.project;
   const att = attention.get(p.id);
@@ -184,11 +190,38 @@ export function ProjectHeader({
         {desc ? (
           <>
             {desc} <span className="pcard__ctx">{CTX_MARK}</span>
+            {/* task-0ab7bbc30a11 — when the drilled-in editor is available, the
+                description is editable in place via a subtle "edit" affordance
+                (the L2 "✎ Edit" button does the same). */}
+            {onEditDescription && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="pfolder-header__dek--edit"
+                  onClick={onEditDescription}
+                  title="Edit name and description"
+                >
+                  ✎ edit
+                </button>
+              </>
+            )}
           </>
+        ) : onEditDescription ? (
+          // task-0ab7bbc30a11 — the "＋ Add description" affordance now OPENS the
+          // inline editor (it previously only drilled in via onOpenSelf, with no
+          // editor on the other side).
+          <button
+            type="button"
+            className="pfolder-header__dek--add"
+            onClick={onEditDescription}
+            title="Add a description — shared context for agents working this project"
+          >
+            ＋ Add description
+          </button>
         ) : onOpenSelf ? (
-          // task-875c6ad17f85 — a single subtle affordance instead of scolding
-          // every undescribed project ("no description — no shared context for
-          // agents"). Opens the project, where the description is edited.
+          // task-875c6ad17f85 — at Home root (no inline editor) the affordance
+          // drills into the project, where the description IS now editable.
           <button
             type="button"
             className="pfolder-header__dek--add"
@@ -411,6 +444,7 @@ export function ProjectFolderBlock({
   onOpenProject,
   onOpenSelf,
   onOpenFolder,
+  onEditDescription,
   cursorKey,
 }: ProjectFolderBlockProps) {
   const p = node.project;
@@ -434,6 +468,7 @@ export function ProjectFolderBlock({
         scale={scale}
         onOpenSelf={onOpenSelf}
         onOpenFolder={onOpenFolder}
+        onEditDescription={onEditDescription}
       />
 
       {rows.length === 0 && node.children.length === 0 ? (
