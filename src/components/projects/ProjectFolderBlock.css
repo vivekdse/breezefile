@@ -133,6 +133,58 @@
   color: var(--warn);
   font-weight: 700;
 }
+/* task-18902d433658 — the kicker "N need you" becomes a filter toggle. As a
+   <button> it must shed default chrome and read like the surrounding kicker. */
+.pfolder-header__need--clickable {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: var(--warn);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.pfolder-header__need--clickable:hover {
+  text-decoration-style: solid;
+}
+.pfolder-header__need--clickable.is-on {
+  text-decoration-style: solid;
+}
+.pfolder-header__need--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* task-18902d433658 — active "needs you" filter chip + clear affordance. */
+.pfolder__filterbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-1) 0;
+}
+.pfolder__filterchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  border: 1px solid var(--warn);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.pfolder__filterchip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.pfolder__filterchip-x {
+  opacity: 0.7;
+}
 
 /* the rule row: instruction-scope chip + new-task + ❦, on one line. */
 .pfolder-header__rule {
@@ -291,6 +343,26 @@
 }
 .pfolder-row__need .num {
   font-variant-numeric: tabular-nums;
+}
+/* task-18902d433658 — clickable "N need you" pill on a project row. As a
+   <button> it sheds default chrome and keeps the inline-flex warn styling. */
+.pfolder-row__need--clickable {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.pfolder-row__need--clickable:hover {
+  text-decoration-style: solid;
+}
+.pfolder-row__need--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .pfolder-row__archive {
   justify-self: center;

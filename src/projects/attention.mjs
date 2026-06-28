@@ -43,7 +43,7 @@ function isTerminal(task) {
 }
 
 /** Per-task attention classification → which buckets (if any) it lands in. */
-function classify(task, today) {
+export function classify(task, today = todayKey()) {
   const terminal = isTerminal(task);
   const raw = (task.rawStatus ?? task.status ?? '').toLowerCase();
 
@@ -74,6 +74,17 @@ function classify(task, today) {
     !task.claimedBy;
 
   return { open, blocked, overdue, failed };
+}
+
+// task-18902d433658 — the SINGLE predicate that decides whether a task counts
+// toward a project's "N need you" tally. The per-project count (bucket.attention
+// at the call site below) and any UI that FILTERS a task list to "needs you"
+// MUST both go through this, so the count and the filtered list can never
+// disagree. A task needs attention iff it lands in any classify() bucket
+// (open/blocked/overdue/failed).
+export function needsAttention(task, today = todayKey()) {
+  const c = classify(task, today);
+  return c.open || c.blocked || c.overdue || c.failed;
 }
 
 /** Max(created_at, updated_at) for one task, ignoring non-finite values. */
@@ -142,6 +153,9 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
     if (c.blocked) bucket.blocked += 1;
     if (c.overdue) bucket.overdue += 1;
     if (c.failed) bucket.failed += 1;
+    // Same OR as needsAttention() — kept inline here only because we've already
+    // computed the buckets; needsAttention(t, today) is the exported equivalent
+    // the UI filter uses, so the count and the filtered list stay identical.
     if (c.open || c.blocked || c.overdue || c.failed) bucket.attention += 1;
     // A timestamp STRICTLY OLDER than the floor (page-mount time) is a real
     // server stamp; anything at/after the floor is the now()-placeholder the

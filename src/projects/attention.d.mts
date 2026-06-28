@@ -30,6 +30,20 @@ export interface ProjectAttention {
 /** Today as a 'YYYY-MM-DD' string (local). Exported for callers/tests. */
 export function todayKey(now?: number): string;
 
+/** Which attention buckets a single task lands in (open/blocked/overdue/failed). */
+export function classify(
+  task: Task,
+  today?: string,
+): { open: boolean; blocked: boolean; overdue: boolean; failed: boolean };
+
+/**
+ * task-18902d433658 — the single predicate behind a project's "N need you"
+ * tally: true iff the task lands in ANY classify() bucket. Use this (not a
+ * re-implemented OR) to FILTER a task list to exactly the tasks the count
+ * counts, so the count and the filtered list can never disagree.
+ */
+export function needsAttention(task: Task, today?: string): boolean;
+
 /**
  * Compute per-project attention from the already-loaded task list, rolling
  * descendant project tasks UP into ancestors (same containment model as
