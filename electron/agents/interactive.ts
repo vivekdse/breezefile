@@ -22,7 +22,6 @@ import { flagsToArgs } from './flags';
 import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
 import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
-import { openBrowserWindow } from '../browser/window';
 
 export type InteractiveRunOptions = {
   /** Agent id for the run row. Defaults to task.auto_agent or the registry
@@ -246,11 +245,16 @@ export async function runTaskInteractive(
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);
   }
 
-  // SPIKE (spike/playwright-cdp): for playwright tasks, open the operator
-  // session window — a split pane with the browser page LEFT and this pty's
-  // Claude-Code terminal RIGHT — so the user sees the page AND what Claude is
-  // doing at once. See electron/browser/window.ts + OperatorSession.tsx.
-  if (playwright) openBrowserWindow('https://example.com', ptyId);
+  // The session runs as a normal terminal TAB in the main window — the
+  // `tasks:interactiveRun` broadcast above attaches this pty to a fresh tab
+  // (src/App.tsx), exactly like the "Open Claude Code in a folder" verb. We no
+  // longer open a separate "operator" window: it was sticky to the first
+  // session's ptyId (#operator=<ptyId> baked in at creation) so subsequent
+  // Starts showed a dead, unresponsive mirror, and it leaked a WebContentsView
+  // per launch. For `playwright` tasks the agent opens an EMBEDDED browser tab
+  // on demand (POST /app/open-browser → kind:'browser' BrowserPane), which is
+  // the same CDP target it drives. The `playwright` flag still wires the CDP
+  // env above (BREEZE_CDP_URL etc.) — it just no longer spawns a window.
 
   return { run, ptyId, launched: true };
 }

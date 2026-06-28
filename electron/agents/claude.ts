@@ -51,6 +51,13 @@ function probeWellKnown(): string | null {
     return null;
   }
   const candidates = [
+    // Claude Code's local installer (`claude migrate-installer`) puts the
+    // launcher here on both macOS and Linux. Newer versions default to this
+    // and REMOVE the old ~/.local/bin/claude, exposing it only via a shell
+    // alias — invisible to a non-interactive PATH probe. Check it first so a
+    // self-update relocation doesn't leave us spawning a bare `claude`
+    // (ENOENT → the pty dies instantly, no agent).
+    path.join(os.homedir(), '.claude/local/claude'),
     path.join(os.homedir(), '.local/bin/claude'),
     '/opt/homebrew/bin/claude',
     '/usr/local/bin/claude',
@@ -64,10 +71,19 @@ function probeLoginShell(): Promise<string | null> {
   return new Promise((resolve) => {
     // Windows GUI apps inherit the system PATH, so `where` resolves a global
     // install directly — no login shell needed (and zsh doesn't exist).
+    // Prefer the user's actual login shell ($SHELL); fall back to whichever of
+    // zsh/bash exists. Hardcoding /bin/zsh broke on machines without zsh (e.g.
+    // a stock Linux box) — the spawn ENOENTs and this probe always returned
+    // null, leaving resolveClaudeBin to spawn a bare `claude`.
+    const loginShell =
+      (process.env.SHELL && existsSync(process.env.SHELL) && process.env.SHELL) ||
+      (existsSync('/bin/zsh') && '/bin/zsh') ||
+      (existsSync('/bin/bash') && '/bin/bash') ||
+      '/bin/sh';
     const [cmd, args] =
       process.platform === 'win32'
         ? ['where', ['claude']]
-        : ['/bin/zsh', ['-lc', 'command -v claude']];
+        : [loginShell, ['-lc', 'command -v claude']];
     const c = spawn(cmd, args as string[], {
       stdio: ['ignore', 'pipe', 'ignore'],
       shell: process.platform === 'win32',

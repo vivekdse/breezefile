@@ -106,6 +106,16 @@ app.on(
 // Remove this whole block (and the spikeView code in createWindow) to revert.
 app.commandLine.appendSwitch('remote-debugging-port', '9222');
 
+// Linux: Electron only auto-detects the OS keyring on GNOME/KDE. On other
+// desktops (LXQt, etc.) safeStorage.isEncryptionAvailable() returns false even
+// when gnome-keyring is running, so the TypeBuild refresh token can't persist
+// and the user is signed out on every launch (electron/typebuild/auth.ts). Force
+// the libsecret backend so the running keyring is used. Harmless where libsecret
+// isn't the backend (Electron falls back). Must be set before app is ready.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('password-store', 'gnome-libsecret');
+}
+
 process.env.APP_ROOT = path.join(__dirname, '..');
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist');
