@@ -71,6 +71,12 @@ import {
   listMemory,
   memoryDir,
 } from '../electron/browser/tools/memory.mjs';
+import {
+  BINDING_KIND,
+  formatBinding,
+  validateBinding,
+  bindingsFromEntries,
+} from '../electron/browser/tools/param-bindings.mjs';
 // NOTE: connect.mjs is imported LAZILY inside cmdRun() only. It pulls in
 // playwright-core; discovery (available/help/list) must work without a browser
 // library present, since the agent runs `available <url>` first on every task.
@@ -569,6 +575,84 @@ async function cmdMemory(args) {
   }
 }
 
+// ─── bindings — param-binding memory (task-a7e56f6bc583, Operator Speed) ──────
+// Remembers WHICH task `data` placeholder KEY feeds WHICH tool param, keyed by
+// (domain, task_tag), so a REPEAT run on the same (site, task_tag) fills params
+// without re-reasoning. Rides the SAME shared task-scope memory (kind
+// 'param-binding'); the domain is carried inside the note so one task_tag across
+// several sites stays disambiguated. KEYS ONLY — never a value (PHI invariant):
+// param-bindings.mjs validates every part is an identifier / placeholder key.
+//
+//   bindings record --task <tag> --domain <url> --tool <id> --param <p> --data <key>
+//                                  (repeat --param/--data pairs, or one each)
+//   bindings recall --task <tag> [--domain <url>] [--tool <id>]
+async function cmdBindings(args) {
+  const sub = args._[1];
+  const taskTag = args.task;
+  if (sub !== 'record' && sub !== 'recall') {
+    process.stderr.write(
+      'usage: bindings record|recall --task <tag> [--domain <url>] [--tool <id>] ...\n',
+    );
+    return EXIT.USAGE;
+  }
+  if (!taskTag || taskTag === true) {
+    process.stderr.write('bindings needs --task <tag> (the task id / task-type tag)\n');
+    return EXIT.USAGE;
+  }
+  try {
+    if (sub === 'recall') {
+      // Pull the task bucket's notes and surface ONLY the structured bindings,
+      // optionally filtered to a tool and/or domain. KEYS ONLY by construction.
+      const mem = await getMemoryOnline('task', taskTag);
+      const bindings = bindingsFromEntries(mem.entries, {
+        tool: args.tool && args.tool !== true ? args.tool : undefined,
+        domain: args.domain && args.domain !== true ? args.domain : undefined,
+      }).map(({ domain, tool, param, dataKey, id }) => ({ domain, tool, param, dataKey, id }));
+      out({ task_tag: taskTag, online: mem.online, count: bindings.length, bindings });
+      return EXIT.SUCCESS;
+    }
+    // record: accept one --param/--data, or matching arrays of them.
+    const params = [].concat(args.param ?? []);
+    const dataKeys = [].concat(args.data ?? []);
+    if (!args.tool || args.tool === true) {
+      process.stderr.write('bindings record needs --tool <id>\n');
+      return EXIT.USAGE;
+    }
+    if (!params.length || params.length !== dataKeys.length) {
+      process.stderr.write(
+        'bindings record needs matching --param <p> and --data <key> (one or more pairs)\n',
+      );
+      return EXIT.USAGE;
+    }
+    const recorded = [];
+    for (let i = 0; i < params.length; i++) {
+      const binding = {
+        domain: args.domain,
+        tool: args.tool,
+        param: params[i],
+        dataKey: dataKeys[i],
+      };
+      // Validate BEFORE any write — a value-shaped --data is rejected here, never
+      // reaching the shared store (first line of the PHI defense).
+      const v = validateBinding(binding);
+      if (!v.ok) {
+        out({ status: 'error', error: v.error });
+        return EXIT.FAILURE;
+      }
+      // formatBinding emits the canonical keys-only line; addMemoryOnline writes
+      // it to the shared task bucket tagged as a param-binding.
+      const line = formatBinding(binding);
+      const r = await addMemoryOnline('task', taskTag, line, { kind: BINDING_KIND });
+      recorded.push({ domain: v.domain, param: params[i], dataKey: dataKeys[i], id: r.id });
+    }
+    out({ status: 'success', task_tag: taskTag, tool: args.tool, count: recorded.length, recorded });
+    return EXIT.SUCCESS;
+  } catch (e) {
+    out({ status: 'error', error: e.message });
+    return EXIT.FAILURE;
+  }
+}
+
 function usage() {
   process.stderr.write(
     [
@@ -596,6 +680,11 @@ function usage() {
       '  memory delete --site <url>|--task <tag> --id <note-id>',
       '  memory list',
       '',
+      'Param bindings (which data KEY feeds which tool param; keyed by domain+task;',
+      'KEYS ONLY, never a value — recall to fill params on a repeat run instantly):',
+      '  bindings recall --task <tag> [--domain <url>] [--tool <id>]',
+      '  bindings record --task <tag> --domain <url> --tool <id> --param <p> --data <key>',
+      '',
       `tools dir:  ${toolsDir()}`,
       `memory dir: ${memoryDir()}`,
     ].join('\n') + '\n',
@@ -614,6 +703,7 @@ async function main() {
     case 'update': return cmdWrite(args, { overwrite: true });
     case 'delete': return cmdDelete(args);
     case 'memory': return await cmdMemory(args);
+    case 'bindings': return await cmdBindings(args);
     case undefined:
     case 'help-cli':
       usage();
