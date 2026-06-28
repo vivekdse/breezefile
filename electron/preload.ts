@@ -265,52 +265,15 @@ const fm = {
   // terminal uses this so the session runs in ONE place, not a main-window
   // owner tab + an operator mirror.
   termAdopt: (id: number) => ipcRenderer.send('term:adopt', id),
-  // SPIKE (spike/playwright-cdp): the operator session's split-pane chrome
-  // positions the LEFT-pane page view (WebContentsView), drives its navigation,
-  // and closes the whole session (window + PTY) as one action. See
-  // electron/browser/window.ts (operator:* handlers) and
-  // src/components/OperatorSession.tsx.
-  operatorBrowserBounds: (rect: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    winW: number;
-    winH: number;
-  }) => ipcRenderer.send('operator:browser-bounds', rect),
-  operatorNavigate: (url: string) => ipcRenderer.send('operator:navigate', url),
-  operatorBack: () => ipcRenderer.send('operator:back'),
-  operatorForward: () => ipcRenderer.send('operator:forward'),
-  operatorReload: () => ipcRenderer.send('operator:reload'),
-  operatorSync: () => ipcRenderer.send('operator:sync'),
+  // SPIKE (spike/playwright-cdp): the operator session's split-pane chrome. The
+  // LEFT-pane page view is now driven by the shared browser* methods (keyed by
+  // the view id in the operator chrome's `view=` hash); only the window-level
+  // verbs remain operator-specific — close the whole session (window + PTY) as
+  // one action, and report the theme for the start splash. See
+  // electron/browser/window.ts and src/components/OperatorSession.tsx.
   operatorClose: () => ipcRenderer.send('operator:close'),
   operatorSetTheme: (theme: string) =>
     ipcRenderer.send('operator:set-theme', theme),
-  onOperatorBrowserState: (
-    cb: (s: {
-      url: string;
-      title: string;
-      canGoBack: boolean;
-      canGoForward: boolean;
-    }) => void,
-  ) => {
-    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
-      cb(payload);
-    ipcRenderer.on('operator:browser-state', handler);
-    return () => ipcRenderer.off('operator:browser-state', handler);
-  },
-  // Login-submit capture for the OPERATOR window (task-890b0a7483c5): mirrors
-  // onBrowserCredentialCaptured for the in-app tab. Carries the captured
-  // password — TRUSTED UI only: show the "Save password?" prompt, never persist
-  // or log it until the user accepts. There is one operator page view, so no id.
-  onOperatorCredentialCaptured: (
-    cb: (s: { origin: string; username: string; password: string }) => void,
-  ) => {
-    const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>
-      cb(payload);
-    ipcRenderer.on('operator:credential-captured', handler);
-    return () => ipcRenderer.off('operator:credential-captured', handler);
-  },
   termResize: (id: number, cols: number, rows: number) =>
     ipcRenderer.send('term:resize', id, cols, rows),
   termKill: (id: number, signal?: string) =>

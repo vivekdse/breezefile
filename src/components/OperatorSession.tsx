@@ -1,16 +1,18 @@
 // task-f730389afa8a — the operator session split-pane chrome.
 //
 // Rendered (instead of the full App) as the WHOLE webContents of the operator
-// window — see electron/browser/window.ts (`#operator=<ptyId>`) and main.tsx.
-// Replaces the old floating, draggable AgentOverlay.
+// window — see electron/browser/window.ts (`#operator=<ptyId>&view=<id>`) and
+// main.tsx. Replaces the old floating, draggable AgentOverlay.
 //
 // Layout: browser on the LEFT (resizable), Claude Code terminal on the RIGHT,
-// divided by ONE resizer. The page is a main-process WebContentsView that
-// floats ABOVE this React DOM (React can neither position nor clip it), so the
-// LEFT pane is just a measured placeholder div whose viewport rect we stream to
-// main (`operator:browser-bounds`); main mirrors the page view onto exactly
-// that rect (stopping at the divider). The RIGHT pane renders the agent's PTY
-// terminal (a mirror of the same pty shown in the main app tab).
+// divided by ONE resizer. The browser pane is the SHARED BrowserSurface (the
+// same component the in-app tab uses) bound to a pre-created view id — so it has
+// full parity (Record + saved-login autofill + "Save password?" capture) and
+// streams its own bounds over `browser:*`. The page is a main-process
+// WebContentsView that floats ABOVE this React DOM; BrowserSurface measures its
+// placeholder and main mirrors the page onto exactly that rect (stopping at the
+// divider, since the operator view is created with fill:'rect'). The RIGHT pane
+// renders the agent's PTY terminal.
 //
 // A minimize button toggles the RIGHT (Claude) pane between 1/3 and 0 width;
 // default is 1/3. The divider fraction + collapsed state persist to
@@ -23,24 +25,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from './Terminal';
 import { fm } from '../bridge';
 import { useTheme } from '../theme';
-import { SavePasswordPrompt, type CapturedCredential } from './SavePasswordPrompt';
+import { BrowserSurface } from './BrowserSurface';
 import './OperatorSession.css';
-
-// Origins the operator chose "Never for this site" — module-scoped so the
-// opt-out survives a re-render (mirrors BrowserPane's neverSaveOrigins).
-const operatorNeverSaveOrigins = new Set<string>();
-
-// Persist an accepted captured credential to the site-keyed credential vault
-// (task-d60860fb4d7f), the SAME path the in-app BrowserPane uses. Encrypted at
-// rest server-side; never written to this machine. Single chokepoint so the
-// prompt's "Save" has exactly one persist path.
-async function saveCapturedCredential(cred: CapturedCredential): Promise<void> {
-  await fm.typebuild.credentials.save({
-    origin: cred.origin,
-    username: cred.username,
-    password: cred.password,
-  });
-}
 
 // Persisted geometry. `frac` is the LEFT (browser) pane's fraction of the
 // window width when the Claude pane is OPEN; `collapsed` hides the Claude pane.
@@ -80,7 +66,13 @@ function writeGeom(g: Geom): void {
   }
 }
 
-export function OperatorSession({ ptyId }: { ptyId: number | null }) {
+export function OperatorSession({
+  ptyId,
+  viewId,
+}: {
+  ptyId: number | null;
+  viewId: number | null;
+}) {
   const initial = useRef(readGeom());
   // The user's chosen UI theme. We report it to main so the "task starting"
   // splash in the page view matches the client (task-3a49fb5adf24); main only
@@ -91,19 +83,8 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
   const [frac, setFrac] = useState(initial.current.frac);
   const [collapsed, setCollapsed] = useState(initial.current.collapsed);
   const [waiting, setWaiting] = useState(false);
-  const [nav, setNav] = useState({
-    url: '',
-    canGoBack: false,
-    canGoForward: false,
-  });
-  const [addr, setAddr] = useState('');
-  const addrFocused = useRef(false);
-  // Captured login awaiting the "Save password?" decision (task-890b0a7483c5).
-  // The password lives ONLY in this trusted-UI state and is dropped on dismiss.
-  const [pendingCred, setPendingCred] = useState<CapturedCredential | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
-  const leftRef = useRef<HTMLDivElement>(null);
   const fracRef = useRef(frac);
   fracRef.current = frac;
   const collapsedRef = useRef(collapsed);
@@ -139,65 +120,6 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
   useEffect(() => {
     fm.operatorSetTheme(theme);
   }, [theme]);
-
-  // ─── stream the LEFT pane's on-screen rect to main (page-view bounds) ─────
-  // The effective browser fraction: full width when the Claude pane is
-  // collapsed, else `frac`. We re-report whenever it changes or the window
-  // resizes; a ResizeObserver on the placeholder catches layout settling.
-  const reportBounds = useCallback(() => {
-    const el = leftRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) return;
-    fm.operatorBrowserBounds({
-      x: r.left,
-      y: r.top,
-      width: r.width,
-      height: r.height,
-      winW: window.innerWidth,
-      winH: window.innerHeight,
-    });
-  }, []);
-
-  useEffect(() => {
-    // Initial sync of url/nav state (the page may have navigated already).
-    fm.operatorSync();
-    const off = fm.onOperatorBrowserState((s) => {
-      if (!addrFocused.current) setAddr(s.url);
-      setNav({ url: s.url, canGoBack: s.canGoBack, canGoForward: s.canGoForward });
-    });
-    return off;
-  }, []);
-
-  // Captured login submit → offer to save (task-890b0a7483c5). Mirrors the
-  // in-app BrowserPane consumer: honor the per-origin "never" opt-out; the
-  // password rides this event into trusted-UI state and nowhere else. The
-  // operator window has a single page view, so there is no id to match. We
-  // synthesize id:0 only to satisfy SavePasswordPrompt's shared cred shape.
-  useEffect(() => {
-    return fm.onOperatorCredentialCaptured((c) => {
-      if (operatorNeverSaveOrigins.has(c.origin)) return;
-      setPendingCred({ id: 0, ...c });
-    });
-  }, []);
-
-  useEffect(() => {
-    let raf = 0;
-    const schedule = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(reportBounds);
-    };
-    schedule();
-    const ro = new ResizeObserver(schedule);
-    if (leftRef.current) ro.observe(leftRef.current);
-    window.addEventListener('resize', schedule);
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      window.removeEventListener('resize', schedule);
-    };
-    // Re-run when the split changes so the page view follows the divider.
-  }, [frac, collapsed, reportBounds]);
 
   // ─── the single resizer drives BOTH panes ────────────────────────────────
   const dragging = useRef(false);
@@ -245,19 +167,34 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
     fm.operatorClose();
   }, [ptyId]);
 
-  // Address-bar navigation.
-  const go = () => {
-    let target = addr.trim();
-    if (!target) return;
-    if (!/^[a-z]+:\/\//i.test(target)) target = 'https://' + target;
-    fm.operatorNavigate(target);
-  };
-
   // Grid: [ browser | resizer | claude ]. When collapsed the Claude column and
   // the resizer collapse to 0 so the browser fills the window.
   const cols = collapsed
     ? '1fr 0px 0px'
     : `${frac}fr ${RESIZER_W}px ${1 - frac}fr`;
+
+  // When the Claude pane is collapsed its chrome (incl. ✕) is hidden, so surface
+  // Show + Close affordances IN the browser toolbar (in-flow — a floating
+  // overlay would be hidden behind the native page view). task-6b9b0032feda
+  const collapsedControls = collapsed ? (
+    <>
+      <button
+        className="operator__btn operator__btn--show"
+        onClick={toggleCollapsed}
+        title="Show Claude (⅓)"
+      >
+        ✦ Claude
+      </button>
+      <button
+        className="operator__btn operator__btn--close"
+        title="Close session (ends browser + Claude)"
+        aria-label="Close session"
+        onClick={() => void onClose()}
+      >
+        ✕
+      </button>
+    </>
+  ) : null;
 
   return (
     <div
@@ -265,97 +202,9 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
       className={`operator${waiting ? ' operator--waiting' : ''}`}
       style={{ gridTemplateColumns: cols }}
     >
-      {/* LEFT — browser pane (toolbar + measured page-view placeholder) */}
-      <div className="operator__browser">
-        <div className="operator__bar">
-          <button
-            className="operator__btn"
-            disabled={!nav.canGoBack}
-            onClick={() => fm.operatorBack()}
-            title="Back"
-          >
-            ‹
-          </button>
-          <button
-            className="operator__btn"
-            disabled={!nav.canGoForward}
-            onClick={() => fm.operatorForward()}
-            title="Forward"
-          >
-            ›
-          </button>
-          <button
-            className="operator__btn"
-            onClick={() => fm.operatorReload()}
-            title="Reload"
-          >
-            ⟳
-          </button>
-          <input
-            className="operator__addr"
-            value={addr}
-            spellCheck={false}
-            onFocus={(e) => {
-              addrFocused.current = true;
-              e.currentTarget.select();
-            }}
-            onBlur={() => {
-              addrFocused.current = false;
-            }}
-            onChange={(e) => setAddr(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                go();
-                e.currentTarget.blur();
-              }
-            }}
-          />
-          {collapsed && (
-            <button
-              className="operator__btn operator__btn--show"
-              onClick={toggleCollapsed}
-              title="Show Claude (⅓)"
-            >
-              ✦ Claude
-            </button>
-          )}
-          {/* task-6b9b0032feda — when the Claude pane is collapsed the ✕ in its
-              chrome is hidden, so surface a persistent close affordance here.
-              Same teardown path (PTY + window) as the Claude-pane close. */}
-          {collapsed && (
-            <button
-              className="operator__btn operator__btn--close"
-              title="Close session (ends browser + Claude)"
-              aria-label="Close session"
-              onClick={() => void onClose()}
-            >
-              ✕
-            </button>
-          )}
-        </div>
-        {/* "Save password?" prompt (task-890b0a7483c5). In-flow BETWEEN the
-            toolbar and the page view so it takes real column space and shrinks
-            the view slot — the native WebContentsView composites over all DOM,
-            so a floating overlay would be hidden behind it. Main re-syncs the
-            view below this banner. */}
-        {pendingCred && (
-          <SavePasswordPrompt
-            cred={pendingCred}
-            onSave={async (c) => {
-              await saveCapturedCredential(c);
-              setPendingCred(null);
-            }}
-            onDismiss={() => setPendingCred(null)}
-            onNever={(origin) => {
-              operatorNeverSaveOrigins.add(origin);
-              setPendingCred(null);
-            }}
-          />
-        )}
-        {/* Native page view is mirrored onto this rect by main. */}
-        <div ref={leftRef} className="operator__view" />
-      </div>
+      {/* LEFT — the shared browser surface bound to the pre-created view id. It
+          owns its toolbar, bounds streaming, credential capture/fill + record. */}
+      <BrowserSurface viewId={viewId ?? undefined} toolbarExtra={collapsedControls} />
 
       {/* RESIZER — one divider driving both panes */}
       <div

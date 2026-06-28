@@ -1,7 +1,6 @@
-import { ipcMain, shell, app, BrowserWindow, WebContentsView, webContents, clipboard, nativeImage, dialog } from 'electron';
+import { ipcMain, shell, app, BrowserWindow, webContents, clipboard, nativeImage, dialog } from 'electron';
 import { promises as fs, constants as fsc } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 // Teach-by-recording (task-01facbf6b0bc): capture human browser actions +
 // selector candidates over the embedded view. Stateful main wrapper — import
@@ -12,8 +11,6 @@ import {
   currentRecording as currentBrowserRecording,
 } from './browser/record.ts';
 
-// This chunk is bundled into dist-electron/ (same dir as the built preloads).
-const __ipcDir = path.dirname(fileURLToPath(import.meta.url));
 import { spawn, execFile } from 'node:child_process';
 import { existsSync, watch as fsWatch, type FSWatcher } from 'node:fs';
 import crypto from 'node:crypto';
@@ -48,8 +45,14 @@ import { unsupported } from './core/task-source';
 import type { TypeBuildTaskSource } from './sources/typebuild';
 import { registerTagStoreIpc } from './tag-store';
 import { registerLlmIpc } from './llm';
-import { wireCredentialCapture } from './browser/credential-capture';
-import { splashDataUrl } from './browser/start-splash';
+import {
+  createBrowserView,
+  setBrowserViewBounds,
+  getBrowserView,
+  hideBrowserView,
+  destroyBrowserView,
+  reBroadcastState,
+} from './browser/views';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2454,94 +2457,21 @@ end tell`;
   // ─── SPIKE (spike/playwright-cdp): embedded browser views, one per
   // 'browser'-kind tab. A WebContentsView is an OS-level overlay parented to
   // the window's contentView — it floats ABOVE the React DOM, so the renderer
-  // can't position or clip it. The BrowserPane component measures its
+  // can't position or clip it. The BrowserSurface component measures its
   // placeholder div and streams bounds here via 'browser:bounds'; we mirror
   // the view onto that rect and toggle visibility on tab switch. Each view is
   // a real Chromium webContents, so Playwright drives it over CDP (port 9222).
-  type BrowserRec = { view: WebContentsView; win: BrowserWindow; emit: () => void };
-  const browserViews = new Map<number, BrowserRec>();
-  let nextBrowserId = 1;
+  //
+  // The view registry + lifecycle live in electron/browser/views.ts so the
+  // SAME backend drives both the in-app tab here AND the operator window's left
+  // pane (electron/browser/window.ts). These handlers are thin delegations.
 
   ipcMain.handle('browser:attach', (e, opts: { url?: string }): number => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return -1;
-    const id = nextBrowserId++;
-    const view = new WebContentsView({
-      webPreferences: {
-        // Teach-by-recording capture preload (idle until 'tb-record:set' true).
-        // It only reads selector STRUCTURE and exfiltrates over sendToHost; it
-        // never reads field values. Keep contextIsolation on (the preload uses
-        // contextBridge defensively) and the default sandbox.
-        preload: path.join(__ipcDir, 'record-preload.mjs'),
-        sandbox: true,
-        contextIsolation: true,
-      },
-    });
-    // Give the page a REAL viewport immediately, sized to the window, so it
-    // lays out and can be screenshotted/driven even when the browser tab is not
-    // the active Breeze tab. Without this the view stays 0×0 until BrowserPane
-    // reports on-screen bounds — so a tab the agent opened but the user isn't
-    // looking at renders nothing (innerWidth=0, screenshots fail "0 width").
-    // We keep it parked off-screen + hidden until BrowserPane positions it.
-    const cb0init = win.getContentBounds();
-    view.setBounds({
-      x: -(cb0init.width + 100),
-      y: 0,
-      width: cb0init.width,
-      height: cb0init.height,
-    });
-    view.setVisible(false); // stay hidden until the first bounds report
-    win.contentView.addChildView(view);
-    const wc = view.webContents;
-    const emit = () => {
-      if (win.webContents.isDestroyed()) return;
-      win.webContents.send('browser:state', {
-        id,
-        url: wc.getURL(),
-        title: wc.getTitle(),
-        canGoBack: wc.navigationHistory.canGoBack(),
-        canGoForward: wc.navigationHistory.canGoForward(),
-      });
-    };
-    wc.on('did-navigate', emit);
-    wc.on('did-navigate-in-page', emit);
-    wc.on('page-title-updated', emit);
-    // Each full load re-runs the record preload, which starts idle — re-arm it
-    // if a recording is live so a navigation mid-session keeps capturing.
-    wc.on('did-finish-load', () => {
-      if (currentBrowserRecording().webContentsId === wc.id) {
-        try { wc.send('tb-record:set', true); } catch { /* page gone */ }
-      }
-    });
-    // Login-submit detection + credential capture (task-1188c6535e91). Injects a
-    // value-free capturing submit listener; on a human login it pulls
-    // { origin, username, password } into main and forwards it to the renderer's
-    // "Save password?" prompt. SECURITY: the password is memory-only — we send it
-    // straight over IPC and NEVER log it, screenshot it, or put it in
-    // browser:state. See electron/browser/credential-capture.ts.
-    wireCredentialCapture(wc, win, id, (cred) => {
-      if (win.webContents.isDestroyed()) return;
-      win.webContents.send('browser:credential-captured', {
-        id,
-        origin: cred.origin,
-        username: cred.username,
-        password: cred.password,
-      });
-    });
-    // Open target=_blank / window.open in the same view rather than spawning a
-    // native child window (keeps everything inside the tab for the spike).
-    wc.setWindowOpenHandler(({ url }) => {
-      wc.loadURL(url);
-      return { action: 'deny' };
-    });
-    // No real URL → show the themed "task starting" splash instead of a
-    // meaningless example.com (task-3a49fb5adf24). This legacy in-app tab path
-    // isn't wired to the renderer's chosen theme (unlike the operator window),
-    // so it falls back to the default-theme splash; in practice a real
-    // opts.url is almost always supplied here.
-    void wc.loadURL(opts?.url || splashDataUrl(undefined));
-    browserViews.set(id, { view, win, emit });
-    return id;
+    // In-app tab: it collapses every other panel, so the view runs to the window
+    // edges ('edge'). The operator pane uses 'rect' (it stops at the divider).
+    return createBrowserView(win, { url: opts?.url, fill: 'edge' });
   });
 
   ipcMain.on(
@@ -2557,77 +2487,32 @@ end tell`;
         winW: number;
         winH: number;
       },
-    ) => {
-      const rec = browserViews.get(id);
-      if (!rec) return;
-      // setBounds works in device-independent pixels (DIP); the renderer's
-      // getBoundingClientRect is in CSS pixels. On HiDPI / fractionally-scaled
-      // displays these differ, so scale the CSS-px corner into DIP using the
-      // ratio between the window's DIP size and the renderer's reported CSS
-      // size. Take the corner from the renderer, the extent from the window
-      // (a browser tab collapses every other panel → it runs to the edges).
-      const cb = rec.win.getContentBounds();
-      const sx = rect.winW > 0 ? cb.width / rect.winW : 1;
-      const sy = rect.winH > 0 ? cb.height / rect.winH : 1;
-      const x = Math.round(rect.x * sx);
-      const y = Math.round(rect.y * sy);
-      const b = {
-        x,
-        y,
-        width: Math.max(0, cb.width - x),
-        height: Math.max(0, cb.height - y),
-      };
-      rec.view.setBounds(b);
-      rec.view.setVisible(true);
-    },
+    ) => setBrowserViewBounds(id, rect),
   );
 
   // Re-broadcast a view's current url/title/nav on demand. The renderer calls
-  // this when a BrowserPane (re)mounts so its address bar reflects where the
+  // this when a BrowserSurface (re)mounts so its address bar reflects where the
   // view actually IS — it may have navigated while the tab was inactive (and
   // thus had no live state listener).
-  ipcMain.on('browser:sync', (_e, id: number) => {
-    browserViews.get(id)?.emit();
-  });
+  ipcMain.on('browser:sync', (_e, id: number) => reBroadcastState(id));
 
-  ipcMain.on('browser:hide', (_e, id: number) => {
-    const rec = browserViews.get(id);
-    if (!rec) return;
-    // Park the view OFF-SCREEN at full size rather than setVisible(false): the
-    // page keeps a real viewport (and keeps rendering) while the tab is in the
-    // background, so the agent can still drive + screenshot it. BrowserPane
-    // brings it back on-screen via bounds when the tab is shown again.
-    const cb = rec.win.getContentBounds();
-    rec.view.setBounds({
-      x: -(cb.width + 100),
-      y: 0,
-      width: cb.width,
-      height: cb.height,
-    });
-    rec.view.setVisible(false);
-  });
+  ipcMain.on('browser:hide', (_e, id: number) => hideBrowserView(id));
 
-  ipcMain.handle('browser:destroy', (_e, id: number) => {
-    const rec = browserViews.get(id);
-    if (!rec) return;
-    try { rec.win.contentView.removeChildView(rec.view); } catch { /* gone */ }
-    try { rec.view.webContents.close(); } catch { /* gone */ }
-    browserViews.delete(id);
-  });
+  ipcMain.handle('browser:destroy', (_e, id: number) => destroyBrowserView(id));
 
   ipcMain.on('browser:navigate', (_e, id: number, url: string) => {
-    void browserViews.get(id)?.view.webContents.loadURL(url);
+    void getBrowserView(id)?.webContents.loadURL(url);
   });
   ipcMain.on('browser:back', (_e, id: number) => {
-    const h = browserViews.get(id)?.view.webContents.navigationHistory;
+    const h = getBrowserView(id)?.webContents.navigationHistory;
     if (h?.canGoBack()) h.goBack();
   });
   ipcMain.on('browser:forward', (_e, id: number) => {
-    const h = browserViews.get(id)?.view.webContents.navigationHistory;
+    const h = getBrowserView(id)?.webContents.navigationHistory;
     if (h?.canGoForward()) h.goForward();
   });
   ipcMain.on('browser:reload', (_e, id: number) => {
-    browserViews.get(id)?.view.webContents.reload();
+    getBrowserView(id)?.webContents.reload();
   });
 
   // ─── Teach-by-recording (task-01facbf6b0bc) ───────────────────────────────
@@ -2636,9 +2521,9 @@ end tell`;
   // as a shared NON-PHI skill. The agent's Playwright session must be released
   // first (CDP is single-client — see connect.mjs releaseForRecording).
   ipcMain.handle('browser:record:start', (_e, id: number) => {
-    const rec = browserViews.get(id);
-    if (!rec) return { ok: false, error: 'no such browser view' };
-    return startBrowserRecording(rec.view.webContents);
+    const view = getBrowserView(id);
+    if (!view) return { ok: false, error: 'no such browser view' };
+    return startBrowserRecording(view.webContents);
   });
   ipcMain.handle('browser:record:stop', (_e, opts?: { skillName?: string }) =>
     stopBrowserRecording(opts || {}),
@@ -2657,8 +2542,8 @@ end tell`;
       origin: string,
       username: string,
     ): Promise<'filled' | 'no-form' | 'error' | 'no-credential'> => {
-      const rec = browserViews.get(id);
-      if (!rec) return 'error';
+      const view = getBrowserView(id);
+      if (!view) return 'error';
       const { resolveSiteCredential } = await import('./typebuild/site-credentials');
       const { fillCredentialIntoPage } = await import('./browser/credential-fill');
       let password: string;
@@ -2670,7 +2555,7 @@ end tell`;
       }
       // The password lives only in this scope and the page DOM; never logged,
       // never sent back to the renderer.
-      return fillCredentialIntoPage(rec.view.webContents, username, password);
+      return fillCredentialIntoPage(view.webContents, username, password);
     },
   );
 

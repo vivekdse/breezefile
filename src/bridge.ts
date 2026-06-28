@@ -142,42 +142,16 @@ type Fm = {
   // (retarget owner + replay), so the operator window renders it directly
   // instead of mirroring a redundant main-window owner tab.
   termAdopt: (id: number) => void;
-  // ─── SPIKE (spike/playwright-cdp): operator session split-pane chrome.
-  operatorBrowserBounds: (rect: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    winW: number;
-    winH: number;
-  }) => void;
-  operatorNavigate: (url: string) => void;
-  operatorBack: () => void;
-  operatorForward: () => void;
-  operatorReload: () => void;
-  operatorSync: () => void;
+  // ─── SPIKE (spike/playwright-cdp): operator session split-pane chrome. The
+  // browser pane is driven by the shared fm.browser* methods (keyed by the view
+  // id baked into the operator chrome's `view=` hash) — only the window-level
+  // verbs remain operator-specific.
   operatorClose: () => void;
   // Report the user's chosen UI theme to main so the "task starting" splash
   // shown in the page view matches the client (task-3a49fb5adf24). Main
   // re-themes the splash only while it's still showing (before the agent's
   // first real navigation).
   operatorSetTheme: (theme: string) => void;
-  onOperatorBrowserState: (
-    cb: (s: {
-      url: string;
-      title: string;
-      canGoBack: boolean;
-      canGoForward: boolean;
-    }) => void,
-  ) => () => void;
-  // Login-submit capture in the OPERATOR window (task-890b0a7483c5): fired when
-  // the human submits a login form in the operator's browser pane. Carries the
-  // captured password — TRUSTED UI only: show "Save password?", never persist or
-  // log it until the user accepts. Mirrors onBrowserCredentialCaptured (no id —
-  // a single operator page view).
-  onOperatorCredentialCaptured: (
-    cb: (s: { origin: string; username: string; password: string }) => void,
-  ) => () => void;
   termResize: (id: number, cols: number, rows: number) => void;
   termKill: (id: number, signal?: string) => Promise<void>;
   termStatus: (id: number) => Promise<{ alive: boolean; pid: number | null }>;

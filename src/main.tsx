@@ -17,18 +17,27 @@ import './styles/typography.css';
 applyTheme(getStoredTheme());
 
 // task-f730389afa8a — the operator session window loads this same bundle with
-// `#operator=<ptyId>` (or bare `#operator` for the no-agent open-browser verb).
-// It renders the split-pane chrome (browser LEFT + Claude terminal RIGHT)
-// instead of the full app. See electron/browser/window.ts and
-// src/components/OperatorSession.tsx.
-const operatorHash = new URLSearchParams(window.location.hash.slice(1)).get('operator');
+// `#operator=<ptyId>&view=<id>` (or bare `#operator` for the no-agent
+// open-browser verb). It renders the split-pane chrome (browser LEFT + Claude
+// terminal RIGHT) instead of the full app. The `view` id is the shared browser
+// view (electron/browser/views.ts) the left pane drives over `browser:*`. See
+// electron/browser/window.ts and src/components/OperatorSession.tsx.
+const operatorParams = new URLSearchParams(window.location.hash.slice(1));
+const operatorHash = operatorParams.get('operator');
 const isOperator = operatorHash != null;
 const operatorPty =
   operatorHash != null && operatorHash !== '' ? Number(operatorHash) : null;
+const operatorViewParam = operatorParams.get('view');
+const operatorView =
+  operatorViewParam != null && operatorViewParam !== '' ? Number(operatorViewParam) : null;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {isOperator ? <OperatorSession ptyId={operatorPty} /> : <App />}
+    {isOperator ? (
+      <OperatorSession ptyId={operatorPty} viewId={operatorView} />
+    ) : (
+      <App />
+    )}
   </React.StrictMode>,
 );
 

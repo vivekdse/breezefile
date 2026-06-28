@@ -2,10 +2,13 @@
 //
 // A single window split into TWO panes: the browser page on the LEFT and the
 // agent's Claude-Code terminal on the RIGHT, divided by ONE resizer. The whole
-// window is the Breeze React bundle (loaded with `#operator=<ptyId>`, rendered
-// by src/components/OperatorSession.tsx); the page itself is a child
-// WebContentsView the React chrome positions into the left pane (mirror-onto-
-// rect, the same trick BrowserPane uses) and Playwright drives over CDP.
+// window is the Breeze React bundle (loaded with `#operator=<ptyId>&view=<id>`,
+// rendered by src/components/OperatorSession.tsx); the page itself is a child
+// WebContentsView created via electron/browser/views.ts — the SAME backend the
+// in-app browser tab uses — so the operator pane has full PARITY (Record +
+// saved-login autofill + credential capture). The React surface
+// (BrowserSurface) positions + drives it over the shared `browser:*` IPC keyed
+// by its view id, and Playwright drives the page over CDP.
 //
 // This REPLACES the old floating, draggable chat overlay (a WebContentsView
 // docked bottom-right over a full-window page) — there is no more
@@ -18,27 +21,33 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, WebContentsView, ipcMain, screen } from 'electron';
+import { BrowserWindow, ipcMain, screen } from 'electron';
 import { killManagedPty } from '../ipc';
-// Login-submit credential capture (task-1188c6535e91), wired onto the operator
-// page view so the "Save password?" prompt fires here too (task-890b0a7483c5).
-import { wireCredentialCapture } from './credential-capture';
+// The shared embedded-browser view backend (one registry drives both the in-app
+// tab and this operator pane). Credential capture + record + autofill all ride
+// the view created here — no operator-specific browser IPC any more.
+import { createBrowserView, getBrowserView, destroyBrowserView } from './views';
 // The themed "task starting" splash shown until the agent's first real
 // navigation (task-3a49fb5adf24) — replaces the old example.com placeholder.
 import { splashDataUrl, isSplashUrl, SPLASH_DEFAULT_THEME } from './start-splash';
 
 // The bundle is ESM — `__dirname` doesn't exist. Derive it from this chunk's
 // URL (resolves to dist-electron/, where preload.mjs lives) so the operator
-// chrome + page view get the same preload as the main window.
+// chrome gets the same preload as the main window.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
 let browserWin: BrowserWindow | null = null;
-// The page WebContentsView living in the LEFT pane of the operator window.
-let pageView: WebContentsView | null = null;
-// Last URL requested for the page (used when the view is (re)created). Default
-// is the themed "task starting" splash (task-3a49fb5adf24) rather than a
+// The id of the shared browser view living in the LEFT pane of the operator
+// window (registered in electron/browser/views.ts). Baked into the operator
+// chrome's `view=<id>` hash so the React surface drives it over `browser:*`.
+// Tracked at module scope so a window REUSE (a fresh Start) re-bakes the SAME
+// id — the view is parented to the window's contentView and survives the chrome
+// reload, so the browser pane stays live while only the terminal re-attaches.
+let operatorViewId: number | null = null;
+// Last URL requested for the page (used when the view is created). Default is
+// the themed "task starting" splash (task-3a49fb5adf24) rather than a
 // meaningless example.com — the agent drives the first REAL navigation via the
 // helper's `goto`, which replaces this. Starts on the default theme; the
 // operator renderer reports the user's actual chosen theme via
@@ -54,11 +63,6 @@ let operatorPtyId: number | null = null;
 /** The live operator/browser window, or null if none is open. */
 export function getBrowserWindow(): BrowserWindow | null {
   return browserWin && !browserWin.isDestroyed() ? browserWin : null;
-}
-
-/** The page WebContentsView the agent drives (left pane), or null. */
-export function getOperatorPageView(): WebContentsView | null {
-  return pageView && !pageView.webContents.isDestroyed() ? pageView : null;
 }
 
 /** Open (or focus) the operator session window: browser LEFT, Claude Code
@@ -77,11 +81,12 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
     // Re-point the terminal pane to a NEW session. The ptyId is baked into the
     // React chrome's `#operator=<ptyId>` hash at load time, so a reused window
     // keeps mirroring the FIRST session's (now-dead) PTY unless we reload it
-    // with the new id. The page WebContentsView is parented to the window's
-    // contentView (not the chrome's webContents), so it survives this reload —
-    // the browser pane is untouched; only the Claude terminal re-attaches.
+    // with the new id. The page view is parented to the window's contentView
+    // (not the chrome's webContents), so it survives this reload — we re-bake
+    // the SAME view id so the browser pane stays untouched; only the Claude
+    // terminal re-attaches.
     if (ptyId != null && ptyId !== prevPtyId) {
-      loadOperatorChrome(existing, ptyId);
+      loadOperatorChrome(existing, ptyId, operatorViewId);
     }
     return;
   }
@@ -119,37 +124,40 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
     }
   });
   win.on('closed', () => {
-    // Explicitly tear down the page WebContentsView. Electron does not always
-    // GC a child view when its window closes, which otherwise leaks one live
-    // off-screen page (a stray CDP target) per operator session.
-    if (pageView && !pageView.webContents.isDestroyed()) {
-      try {
-        pageView.webContents.close();
-      } catch {
-        /* already gone */
-      }
-    }
+    // Explicitly tear down the page view AND drop its registry entry. Electron
+    // does not always GC a child view when its window closes, which otherwise
+    // leaks one live off-screen page (a stray CDP target) + a BrowserRec per
+    // operator session.
+    if (operatorViewId != null) destroyBrowserView(operatorViewId);
     if (browserWin === win) {
       browserWin = null;
-      pageView = null;
+      operatorViewId = null;
       operatorPtyId = null;
     }
   });
 
+  // Create the page view FIRST (eagerly, in MAIN) so the agent's CDP target
+  // exists before the React chrome mounts: api-server (`open-browser`) and
+  // agents/interactive.ts open this window then immediately drive Playwright.
+  // fill:'rect' so the page honors the measured left-pane width and STOPS AT
+  // THE DIVIDER (unlike an in-app tab, which fills to the window edge).
+  operatorViewId = createBrowserView(win, { url: pendingUrl, fill: 'rect' });
+
   // The whole window is the operator React chrome. It renders a left
-  // placeholder for the page and a right terminal pane, measures the
-  // placeholder, and streams its rect via `operator:browser-bounds`.
-  loadOperatorChrome(win, ptyId);
+  // BrowserSurface bound to the view id above (measuring its placeholder +
+  // streaming bounds over `browser:bounds`) and a right terminal pane.
+  loadOperatorChrome(win, ptyId, operatorViewId);
 
   fillScreen(win);
-  ensurePageView(win);
 }
 
-// Load (or reload) the operator React chrome with the `#operator=<ptyId>` hash
-// that pins which PTY the right pane mirrors. Reused on a fresh Start to
-// re-point an already-open window at the new session.
-function loadOperatorChrome(win: BrowserWindow, ptyId?: number): void {
-  const hash = ptyId != null ? `operator=${ptyId}` : 'operator';
+// Load (or reload) the operator React chrome with the `#operator=<ptyId>&view=<id>`
+// hash that pins which PTY the right pane mirrors and which shared browser view
+// the left pane drives. Reused on a fresh Start to re-point an already-open
+// window at the new session while keeping the same browser view.
+function loadOperatorChrome(win: BrowserWindow, ptyId?: number, viewId?: number | null): void {
+  let hash = ptyId != null ? `operator=${ptyId}` : 'operator';
+  if (viewId != null) hash += `&view=${viewId}`;
   if (VITE_DEV_SERVER_URL) {
     void win.webContents.loadURL(`${VITE_DEV_SERVER_URL}#${hash}`);
   } else {
@@ -158,63 +166,6 @@ function loadOperatorChrome(win: BrowserWindow, ptyId?: number): void {
       { hash },
     );
   }
-}
-
-// Create the page WebContentsView (the agent's CDP target) parented to the
-// operator window. Parked off-screen + hidden until the React chrome reports
-// the left pane's on-screen rect via `operator:browser-bounds`.
-function ensurePageView(win: BrowserWindow): void {
-  if (getOperatorPageView()) return;
-  const view = new WebContentsView({
-    webPreferences: { contextIsolation: true },
-  });
-  pageView = view;
-  const wc = view.webContents;
-  // Keep target=_blank / window.open inside this same view.
-  wc.setWindowOpenHandler(({ url }) => {
-    void wc.loadURL(url);
-    return { action: 'deny' };
-  });
-  wc.on('did-fail-load', (_e, code, desc, validatedURL) => {
-    console.error(`[operator:page] did-fail-load ${code} ${desc} ${validatedURL}`);
-  });
-  const emit = () => {
-    if (win.webContents.isDestroyed()) return;
-    win.webContents.send('operator:browser-state', {
-      url: wc.getURL(),
-      title: wc.getTitle(),
-      canGoBack: wc.navigationHistory.canGoBack(),
-      canGoForward: wc.navigationHistory.canGoForward(),
-    });
-  };
-  wc.on('did-navigate', emit);
-  wc.on('did-navigate-in-page', emit);
-  wc.on('page-title-updated', emit);
-
-  // Login-submit credential capture (task-890b0a7483c5): mirror the in-app
-  // BrowserPane wiring (electron/ipc.ts) onto the operator page view so a human
-  // login here also offers "Save password?". The page view is preload-less, so
-  // capture uses the same inject + value-free console-sentinel channel.
-  // SECURITY: the captured password is memory-only — forwarded straight to the
-  // operator renderer's trusted prompt and NEVER logged, screenshotted, or put
-  // into operator:browser-state. There is one page view, so no id filtering is
-  // needed; we pass the webContents id only for symmetry with the in-app event.
-  wireCredentialCapture(wc, win, wc.id, (cred) => {
-    if (win.webContents.isDestroyed()) return;
-    win.webContents.send('operator:credential-captured', {
-      origin: cred.origin,
-      username: cred.username,
-      password: cred.password,
-    });
-  });
-
-  // Give it a real viewport immediately, parked off-screen, so it lays out and
-  // can be screenshotted/driven before the chrome reports bounds.
-  const cb = win.getContentBounds();
-  view.setBounds({ x: -(cb.width + 100), y: 0, width: cb.width, height: cb.height });
-  view.setVisible(false);
-  win.contentView.addChildView(view);
-  void wc.loadURL(pendingUrl);
 }
 
 // Size the operator window to the full work area of the display under the
@@ -233,34 +184,6 @@ function fillScreen(bwin: BrowserWindow): void {
   }
 }
 
-// ─── operator page-view control (from src/components/OperatorSession.tsx) ────
-// The React chrome measures the LEFT pane and streams its CSS-px rect; we scale
-// into device-independent pixels (what setBounds expects) and position the page
-// view there EXACTLY (honoring the measured width/height — unlike the in-app
-// BrowserPane handler, the page does NOT run to the window edge here, it stops
-// at the divider). winW/winH are the renderer's CSS window size for the scale.
-ipcMain.on(
-  'operator:browser-bounds',
-  (
-    _e,
-    rect: { x: number; y: number; width: number; height: number; winW: number; winH: number },
-  ) => {
-    const view = getOperatorPageView();
-    if (!view || !browserWin) return;
-    const cb = browserWin.getContentBounds();
-    const sx = rect.winW > 0 ? cb.width / rect.winW : 1;
-    const sy = rect.winH > 0 ? cb.height / rect.winH : 1;
-    const b = {
-      x: Math.round(rect.x * sx),
-      y: Math.round(rect.y * sy),
-      width: Math.max(0, Math.round(rect.width * sx)),
-      height: Math.max(0, Math.round(rect.height * sy)),
-    };
-    view.setBounds(b);
-    view.setVisible(b.width > 1 && b.height > 1);
-  },
-);
-
 // The operator renderer reports the user's chosen UI theme on mount
 // (task-3a49fb5adf24). If the page view is STILL showing the start splash (the
 // agent hasn't navigated yet), re-render it in that theme so the splash matches
@@ -272,37 +195,8 @@ ipcMain.on('operator:set-theme', (_e, theme: string) => {
   const next = splashDataUrl(splashTheme);
   // Keep pendingUrl current so a view (re)created later uses the right theme.
   if (isSplashUrl(pendingUrl)) pendingUrl = next;
-  const wc = getOperatorPageView()?.webContents;
+  const wc = (operatorViewId != null ? getBrowserView(operatorViewId) : null)?.webContents;
   if (wc && isSplashUrl(wc.getURL())) void wc.loadURL(next);
-});
-
-// Navigation verbs from the operator chrome's address bar / nav buttons.
-ipcMain.on('operator:navigate', (_e, url: string) => {
-  const view = getOperatorPageView();
-  if (view) void view.webContents.loadURL(url);
-});
-ipcMain.on('operator:back', () => {
-  const wc = getOperatorPageView()?.webContents;
-  if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
-});
-ipcMain.on('operator:forward', () => {
-  const wc = getOperatorPageView()?.webContents;
-  if (wc?.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
-});
-ipcMain.on('operator:reload', () => {
-  getOperatorPageView()?.webContents.reload();
-});
-// The chrome (re)mounted — push current url/nav so its address bar is accurate.
-ipcMain.on('operator:sync', () => {
-  const view = getOperatorPageView();
-  const wc = view?.webContents;
-  if (!wc || !browserWin || browserWin.webContents.isDestroyed()) return;
-  browserWin.webContents.send('operator:browser-state', {
-    url: wc.getURL(),
-    title: wc.getTitle(),
-    canGoBack: wc.navigationHistory.canGoBack(),
-    canGoForward: wc.navigationHistory.canGoForward(),
-  });
 });
 
 // Single CLOSE action (task-c4064f8a4994): tear down the page view + the window
