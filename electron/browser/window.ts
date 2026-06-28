@@ -23,6 +23,9 @@ import { killManagedPty } from '../ipc';
 // Login-submit credential capture (task-1188c6535e91), wired onto the operator
 // page view so the "Save password?" prompt fires here too (task-890b0a7483c5).
 import { wireCredentialCapture } from './credential-capture';
+// The themed "task starting" splash shown until the agent's first real
+// navigation (task-3a49fb5adf24) — replaces the old example.com placeholder.
+import { splashDataUrl, isSplashUrl, SPLASH_DEFAULT_THEME } from './start-splash';
 
 // The bundle is ESM — `__dirname` doesn't exist. Derive it from this chunk's
 // URL (resolves to dist-electron/, where preload.mjs lives) so the operator
@@ -34,8 +37,14 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 let browserWin: BrowserWindow | null = null;
 // The page WebContentsView living in the LEFT pane of the operator window.
 let pageView: WebContentsView | null = null;
-// Last URL requested for the page (used when the view is (re)created).
-let pendingUrl = 'https://example.com';
+// Last URL requested for the page (used when the view is (re)created). Default
+// is the themed "task starting" splash (task-3a49fb5adf24) rather than a
+// meaningless example.com — the agent drives the first REAL navigation via the
+// helper's `goto`, which replaces this. Starts on the default theme; the
+// operator renderer reports the user's actual chosen theme via
+// `operator:set-theme` once it mounts (re-themes the splash if still showing).
+let splashTheme: string = SPLASH_DEFAULT_THEME;
+let pendingUrl = splashDataUrl(splashTheme);
 // The agent PTY this operator session mirrors. Tracked so that closing the
 // window — via the single CLOSE button OR the OS window chrome — tears the PTY
 // down TOO (task-c4064f8a4994), routing through the existing onSessionExit /
@@ -251,6 +260,21 @@ ipcMain.on(
     view.setVisible(b.width > 1 && b.height > 1);
   },
 );
+
+// The operator renderer reports the user's chosen UI theme on mount
+// (task-3a49fb5adf24). If the page view is STILL showing the start splash (the
+// agent hasn't navigated yet), re-render it in that theme so the splash matches
+// the client. Once the agent issues a real `goto`, the page is no longer a
+// splash and we leave it alone. Idempotent: skip if the theme didn't change.
+ipcMain.on('operator:set-theme', (_e, theme: string) => {
+  if (typeof theme !== 'string' || theme === splashTheme) return;
+  splashTheme = theme;
+  const next = splashDataUrl(splashTheme);
+  // Keep pendingUrl current so a view (re)created later uses the right theme.
+  if (isSplashUrl(pendingUrl)) pendingUrl = next;
+  const wc = getOperatorPageView()?.webContents;
+  if (wc && isSplashUrl(wc.getURL())) void wc.loadURL(next);
+});
 
 // Navigation verbs from the operator chrome's address bar / nav buttons.
 ipcMain.on('operator:navigate', (_e, url: string) => {

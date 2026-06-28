@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from './Terminal';
 import { fm } from '../bridge';
+import { useTheme } from '../theme';
 import { SavePasswordPrompt, type CapturedCredential } from './SavePasswordPrompt';
 import './OperatorSession.css';
 
@@ -81,6 +82,12 @@ function writeGeom(g: Geom): void {
 
 export function OperatorSession({ ptyId }: { ptyId: number | null }) {
   const initial = useRef(readGeom());
+  // The user's chosen UI theme. We report it to main so the "task starting"
+  // splash in the page view matches the client (task-3a49fb5adf24); main only
+  // re-themes the splash while it's still showing. `theme` updates live if the
+  // user restyles, so a theme change before the agent navigates re-themes the
+  // splash too.
+  const [theme] = useTheme();
   const [frac, setFrac] = useState(initial.current.frac);
   const [collapsed, setCollapsed] = useState(initial.current.collapsed);
   const [waiting, setWaiting] = useState(false);
@@ -127,6 +134,11 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
       off();
     };
   }, [ptyId]);
+
+  // Tell main which theme the splash should use (and re-tell on restyle).
+  useEffect(() => {
+    fm.operatorSetTheme(theme);
+  }, [theme]);
 
   // ─── stream the LEFT pane's on-screen rect to main (page-view bounds) ─────
   // The effective browser fraction: full width when the Claude pane is
