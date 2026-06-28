@@ -51,6 +51,34 @@ export async function openBrowserTab(url) {
   if (!res.ok) throw new Error(`open-browser returned ${res.status}: ${await res.text()}`);
 }
 
+/** Resolve a placeholder ref (a TypeBuild task `data` key, e.g. "patient.ssn",
+ *  or a "me.*" vault key) to its real value via Breeze MAIN's localhost control
+ *  API. Main fetches + decrypts and returns the value over /app/task-data; it
+ *  lands in THIS helper process only — never in the agent's argv/stdout/context.
+ *  The task id comes from $BREEZE_TYPEBUILD_TASK_ID. See docs/pii-data-injection.
+ *
+ *  Shared so BOTH the raw driver (cli.mjs fill-ref/type-ref) AND the tool runner
+ *  (bin/breeze-tools.mjs ctx.fillRef, used by auto-emitted tools) resolve refs
+ *  identically. Throws an Error (never prints the value) on any failure. */
+export async function resolveDataRef(ref) {
+  const taskId = (process.env.BREEZE_TYPEBUILD_TASK_ID || '').trim();
+  if (!taskId) {
+    throw new Error('fill-ref/type-ref require $BREEZE_TYPEBUILD_TASK_ID (TypeBuild sessions only)');
+  }
+  const api = readApi();
+  if (!api) throw new Error(`cannot read ${API_FILE} — is Breeze running?`);
+  const res = await fetch(
+    `http://127.0.0.1:${api.port}/app/task-data` +
+      `?taskId=${encodeURIComponent(taskId)}&ref=${encodeURIComponent(ref)}`,
+    { headers: { authorization: `Bearer ${api.token}` } },
+  ).catch((e) => { throw new Error(`task-data request failed: ${e.message}`); });
+  // The error envelope from main carries only the opaque ref key, never a value.
+  if (!res.ok) throw new Error(`could not resolve ref "${ref}" (${res.status}): ${await res.text()}`);
+  const body = await res.json().catch(() => ({}));
+  if (typeof body.value !== 'string') throw new Error(`ref "${ref}" returned no value`);
+  return body.value;
+}
+
 /** Is this one of Breeze's OWN pages (the React renderer or DevTools) rather
  *  than the user-facing embedded browser tab? We never drive those. */
 export function isOwnPage(url) {

@@ -39,6 +39,20 @@
 //   screenshot [path] [full]    PNG of the tab (default ./browser-shot.png in
 //                               the cwd, viewport; `full` = whole page)
 //
+//   ── NETWORK (the Playwright speed lever — skip the UI, use the page's API) ──
+//   net-observe [urlFilter] [--ms n] [--assets]   watch the page's XHR/fetch and
+//                               print the API requests seen (NON-PHI metadata:
+//                               method/url/status/content-type — NEVER bodies).
+//                               Run it, then nudge the page, to learn WHICH
+//                               request carries the data — that's the fast path.
+//   net-replay <url> [--method M] [--data s] [--header k:v]   re-issue a request
+//                               through the page's OWN signed-in context (no DOM,
+//                               no re-auth) and print {status,content_type,body}.
+//                               GET/HEAD are safe reads; a MUTATING method is a
+//                               side effect and is REFUSED unless --allow-mutation
+//                               (the human-gated-submit rule — pass it only on a
+//                               confirmed submit).
+//
 // Output goes to stdout (plain text or JSON); errors to stderr with exit 1.
 // The process always detaches cleanly (browser.close() drops the CDP client;
 // it does NOT close Breeze or the tab).
@@ -51,14 +65,40 @@ import {
   resolvePage,
   listPages,
   loc,
-  readApi,
-  API_FILE,
+  resolveDataRef as resolveDataRefShared,
 } from './connect.mjs';
 import { scrubError } from './scrub.mjs';
+import { observeNetwork, replayRequest } from './net.mjs';
 
 function fail(msg) {
   process.stderr.write(String(msg) + '\n');
   process.exit(1);
+}
+
+/** Split a verb's `rest` into positional args + --flags. Minimal (the rest of
+ *  this CLI is positional); used only by the network verbs which take options.
+ *  `--ms 4000` → { ms:'4000' }; `--assets` → { assets:true }; repeated --header
+ *  collects into an array. */
+function splitFlags(rest) {
+  const pos = [];
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a.startsWith('--')) {
+      const key = a.slice(2);
+      const next = rest[i + 1];
+      if (next === undefined || next.startsWith('--')) {
+        flags[key] = true;
+      } else {
+        if (flags[key] === undefined) flags[key] = next;
+        else flags[key] = [].concat(flags[key], next);
+        i++;
+      }
+    } else {
+      pos.push(a);
+    }
+  }
+  return { pos, flags };
 }
 
 // Resolve a placeholder ref (a TypeBuild task `data` key, e.g. "patient.ssn")
@@ -66,28 +106,16 @@ function fail(msg) {
 // returns it over the localhost control API; it lands in THIS helper process
 // only — it never appears in the agent's argv, stdout, or context. The task id
 // comes from $BREEZE_TYPEBUILD_TASK_ID (injected for TypeBuild sessions). See
-// docs/pii-data-injection-design.md. We never print the resolved value.
+// docs/pii-data-injection-design.md. We never print the resolved value. The
+// resolution itself lives in connect.mjs (resolveDataRef) so the tool runner's
+// auto-emitted tools resolve refs the same way; here we adapt its thrown error
+// to this CLI's fail() convention.
 async function resolveDataRef(ref) {
-  const taskId = (process.env.BREEZE_TYPEBUILD_TASK_ID || '').trim();
-  // NOTE: a "me.*" ref resolves against the per-user vault and is task-independent
-  // (main routes it to the entity resolver, ignoring taskId). We still require a
-  // TypeBuild session for it today to keep one gate; relaxing this so non-task
-  // sessions can fill `me.*` credentials is a follow-up.
-  if (!taskId) {
-    fail('fill-ref/type-ref require $BREEZE_TYPEBUILD_TASK_ID (TypeBuild sessions only)');
+  try {
+    return await resolveDataRefShared(ref);
+  } catch (e) {
+    fail(e.message || String(e));
   }
-  const api = readApi();
-  if (!api) fail(`cannot read ${API_FILE} — is Breeze running?`);
-  const res = await fetch(
-    `http://127.0.0.1:${api.port}/app/task-data` +
-      `?taskId=${encodeURIComponent(taskId)}&ref=${encodeURIComponent(ref)}`,
-    { headers: { authorization: `Bearer ${api.token}` } },
-  ).catch((e) => fail(`task-data request failed: ${e.message}`));
-  // The error envelope from main carries only the opaque ref key, never a value.
-  if (!res.ok) fail(`could not resolve ref "${ref}" (${res.status}): ${await res.text()}`);
-  const body = await res.json().catch(() => ({}));
-  if (typeof body.value !== 'string') fail(`ref "${ref}" returned no value`);
-  return body.value;
 }
 
 async function main() {
@@ -222,6 +250,49 @@ async function main() {
           rest.find((a) => a !== 'full') || path.join(process.cwd(), 'browser-shot.png');
         await page.screenshot({ path: out, fullPage: full });
         process.stdout.write(out + '\n');
+        break;
+      }
+      case 'net-observe': {
+        // Watch the page's XHR/fetch and print the API requests seen (NON-PHI
+        // metadata only — method/url/status/content-type, never bodies). The
+        // discovery step for the API shortcut: run it, then nudge the page, and
+        // read which request actually carries the data.
+        const { pos, flags } = splitFlags(rest);
+        const filter = pos[0] || '';
+        const durationMs = flags.ms && flags.ms !== true ? Number(flags.ms) : 4000;
+        const includeAssets = !!flags.assets;
+        const result = await observeNetwork(page, { filter, durationMs, includeAssets });
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        break;
+      }
+      case 'net-replay': {
+        // Re-issue a request through the page's OWN signed-in context (no DOM,
+        // no re-auth). GET/HEAD are safe reads; a MUTATING method (POST/PUT/…)
+        // is a side effect, REFUSED unless --allow-mutation (human-gated-submit).
+        // NOTE: --data carries a literal payload, so this verb must NOT be used
+        // with raw PHI/credential values — resolve those via fill-ref equivalents
+        // in a tool step, not on this argv. Body lands in stdout (this process).
+        const { pos, flags } = splitFlags(rest);
+        const url = pos[0];
+        if (!url) fail('net-replay needs a url (e.g. net-replay https://host/api/x --method GET)');
+        const method = flags.method && flags.method !== true ? String(flags.method) : 'GET';
+        const headers = {};
+        for (const h of [].concat(flags.header ?? [])) {
+          if (h === true) continue;
+          const idx = String(h).indexOf(':');
+          if (idx > 0) headers[String(h).slice(0, idx).trim()] = String(h).slice(idx + 1).trim();
+        }
+        const data = flags.data && flags.data !== true ? flags.data : undefined;
+        try {
+          const result = await replayRequest(
+            page,
+            { method, url, headers: Object.keys(headers).length ? headers : undefined, data },
+            { allowMutation: !!flags['allow-mutation'] },
+          );
+          process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        } catch (e) {
+          fail(e.message || String(e));
+        }
         break;
       }
       default:

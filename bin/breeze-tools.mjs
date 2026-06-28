@@ -77,6 +77,11 @@ import {
   validateBinding,
   bindingsFromEntries,
 } from '../electron/browser/tools/param-bindings.mjs';
+import {
+  scaffoldTool,
+  actionsFromRecording,
+  promotionDecision,
+} from '../electron/browser/tools/promote.mjs';
 // NOTE: connect.mjs is imported LAZILY inside cmdRun() only. It pulls in
 // playwright-core; discovery (available/help/list) must work without a browser
 // library present, since the agent runs `available <url>` first on every task.
@@ -307,11 +312,13 @@ async function cmdRun(args) {
   if (plan.skip.length) log.ok(`resuming — skipping done steps: ${plan.skip.join(', ')}`);
 
   // Lazy-load the CDP layer (playwright-core) — only `run` needs a browser.
-  let CDP_URL, connect, openBrowserTab, resolvePage, loc;
+  let CDP_URL, connect, openBrowserTab, resolvePage, loc, resolveDataRef;
+  let replayRequest;
   try {
-    ({ CDP_URL, connect, openBrowserTab, resolvePage, loc } = await import(
+    ({ CDP_URL, connect, openBrowserTab, resolvePage, loc, resolveDataRef } = await import(
       '../electron/browser/connect.mjs'
     ));
+    ({ replayRequest } = await import('../electron/browser/net.mjs'));
   } catch (e) {
     log.fail(`browser layer unavailable: ${e.message}`);
     out({ status: 'error', code: EXIT.PRECONDITION, error: withCause({ category: 'precondition_not_met', message: `playwright-core not available: ${e.message}` }) });
@@ -340,7 +347,18 @@ async function cmdRun(args) {
   // selector) for a later step. NON-PHI by convention — never put a form value
   // here. `ctx.state` is also visible to a legacy single-`run` tool (harmless).
   const state = {};
-  const ctx = { page, browser, log, loc, EXIT, ToolError, params, verbose, state };
+  // ctx.fillRef + ctx.replay: the helpers an AUTO-EMITTED tool (promotion hook)
+  // uses so a captured fill / API-shortcut runs WITHOUT the value ever entering
+  // the tool's code. fillRef resolves a placeholder KEY (data:/me.*) in-process
+  // and fills it (value never returned to the step); replay re-issues a request
+  // through the page's own signed-in context (net.mjs gates mutating methods).
+  const fillRef = async (selector, ref) => {
+    const value = await resolveDataRef(ref);
+    await loc(page, selector).fill(value); // value stays in this process
+    return { filled: selector, ref }; // NON-PHI: the KEY, never the value
+  };
+  const replay = async (spec, opts) => replayRequest(page, spec, opts);
+  const ctx = { page, browser, log, loc, EXIT, ToolError, params, verbose, state, fillRef, replay };
 
   // Steps skipped by the resume plan count as already done — seed the cursor so
   // a fresh partial record still reflects the full completed set.
@@ -399,6 +417,12 @@ async function cmdRun(args) {
     }
     log.ok(`SUCCESS${started ? ` (${Date.now() - started}ms)` : ''}`);
     finish('success', EXIT.SUCCESS, { result: lastResult, validation: lastResult.__validation, warnings: lastResult.__warnings, suggestions: lastResult.__suggestions });
+    // PROMOTION HOOK (candidate → active). A tool auto-emitted by the promotion
+    // path starts status:candidate; once it's actually worked a run or two it
+    // graduates to active. finish() just appended this success to runs.jsonl, so
+    // toolHealth now reflects it. promotionDecision is pure + conservative (only
+    // promotes a candidate with enough clean runs and a 100% rate).
+    maybePromote(t, log);
     return EXIT.SUCCESS;
   } catch (e) {
     // Which step broke? The next not-yet-done step is where a resume restarts.
@@ -428,6 +452,26 @@ async function cmdRun(args) {
   } finally {
     // Detach the CDP client only — never close Breeze or the tab.
     if (browser) await browser.close().catch(() => {});
+  }
+}
+
+/** After a successful run, promote a candidate tool to active if its health now
+ *  crosses the threshold (promote.mjs promotionDecision). Best-effort + quiet on
+ *  failure: a promotion miss must never fail the run that just succeeded. We
+ *  re-read health from disk (finish() just appended the success). */
+function maybePromote(t, log) {
+  try {
+    if ((t.meta.status || 'active') !== 'candidate') return;
+    const health = toolHealth(t.runsPath);
+    const decision = promotionDecision('candidate', health);
+    if (decision.changed) {
+      const r = writeTool(t.id, { meta: { ...t.meta, status: decision.status } }, { overwrite: true });
+      if (r.ok) log.ok(`PROMOTED ${t.id}: candidate → ${decision.status} (${decision.reason})`);
+    } else {
+      log.debug(`candidate ${t.id}: ${decision.reason}`);
+    }
+  } catch {
+    /* promotion is advisory — never fail a successful run over it */
   }
 }
 
@@ -504,6 +548,85 @@ function cmdWrite(args, { overwrite }) {
   }
   if (!r.ok) { out({ status: 'error', errors: r.errors }); return EXIT.FAILURE; }
   out({ status: 'success', action: r.action, id: r.id, path: r.path });
+  return EXIT.SUCCESS;
+}
+
+// ─── promote-from — the auto-promotion hook (Operator Speed) ─────────────────
+// AUTO-EMIT a reusable, step-structured CANDIDATE tool from a full-agent solve,
+// so a novel page is paid for ONCE. Input is the captured successful raw-driver
+// sequence and/or a recorded flow (electron/browser/record.ts), as JSON files
+// (file-based so multi-line content survives the shell):
+//
+//   promote-from <id> --match <url> [--name n] [--description d]
+//                     --actions <captured.json>     captured raw-driver verbs, OR
+//                     --recording <recorded.json>   a record.ts RecordedAction[]
+//
+// captured.json is an array of { verb, ... } in the cli.mjs vocab (goto/click/
+// fill/type/press/wait/net-replay); a fill carries a placeholder KEY or {{param}}
+// ref, NEVER a value (scaffoldTool rejects a literal value — PHI guard). The
+// emitted tool is written via writeTool as status:candidate. It syncs as a
+// NON-PHI code artifact through the same channel the tool repo uses.
+function cmdPromoteFrom(args) {
+  const id = args._[1];
+  if (!id) {
+    process.stderr.write(
+      'usage: promote-from <id> --match <url> [--name n] [--description d] --actions <f.json> | --recording <f.json>\n',
+    );
+    return EXIT.USAGE;
+  }
+  if (!args.match || args.match === true) {
+    out({ status: 'error', error: 'promote-from needs --match <url-pattern> so the emitted tool is discoverable' });
+    return EXIT.USAGE;
+  }
+  // Read the captured input (actions and/or a recording).
+  const readJson = (p, label) => {
+    const raw = readFileArg(p);
+    if (raw === undefined) return undefined;
+    if (raw.__err) return { __err: raw.__err };
+    try { return JSON.parse(raw); } catch (e) { return { __err: `${label} is not valid JSON: ${e.message}` }; }
+  };
+  const actions = args.actions !== undefined ? readJson(args.actions, '--actions') : undefined;
+  const recording = args.recording !== undefined ? readJson(args.recording, '--recording') : undefined;
+  if (actions && actions.__err) { out({ status: 'error', error: actions.__err }); return EXIT.FAILURE; }
+  if (recording && recording.__err) { out({ status: 'error', error: recording.__err }); return EXIT.FAILURE; }
+  if (actions === undefined && recording === undefined) {
+    out({ status: 'error', error: 'promote-from needs --actions <f.json> and/or --recording <f.json>' });
+    return EXIT.USAGE;
+  }
+
+  let scaffold;
+  try {
+    scaffold = scaffoldTool({
+      id,
+      name: args.name && args.name !== true ? args.name : undefined,
+      description: args.description && args.description !== true ? args.description : undefined,
+      match: args.match,
+      // Prefer explicit actions; otherwise derive from the recording.
+      actions: actions ?? (recording ? actionsFromRecording(recording) : undefined),
+    });
+  } catch (e) {
+    // A PHI-leak (literal value in a captured fill) or an unknown verb lands here.
+    out({ status: 'error', error: e.message });
+    return EXIT.FAILURE;
+  }
+
+  let r;
+  try {
+    r = writeTool(id, { meta: scaffold.meta, script: scaffold.script }, { overwrite: !!args.force });
+  } catch (e) {
+    out({ status: 'error', error: e.message });
+    return EXIT.FAILURE;
+  }
+  if (!r.ok) { out({ status: 'error', errors: r.errors }); return EXIT.FAILURE; }
+  out({
+    status: 'success',
+    action: r.action,
+    id: r.id,
+    path: r.path,
+    tool_status: scaffold.meta.status, // 'candidate'
+    steps: scaffold.meta.steps.map((s) => ({ name: s.name, sideEffect: s.sideEffect })),
+    note: 'emitted as a CANDIDATE — promoted to active after it passes a run or two (toolHealth).',
+  });
   return EXIT.SUCCESS;
 }
 
@@ -669,9 +792,15 @@ function usage() {
       '      --dry-run              print the resume plan (steps + side-effect',
       '                             marks) without a browser',
       '',
-      'Author (learn): tool = a dir with tool.json + tool.mjs (exports run(ctx,params))',
+      'Author (learn): tool = a dir with tool.json + tool.mjs (exports run/steps)',
       '  create <id> --meta <tool.json> --script <tool.mjs>   (or --from <dir>)',
       '  update <id> [--meta <f>] [--script <f>]              (or --from <dir>)',
+      '  promote-from <id> --match <url> [--name n] [--description d]',
+      '      --actions <captured.json> | --recording <recorded.json>',
+      '                             AUTO-EMIT a step-structured CANDIDATE tool from',
+      '                             a full-agent solve (captured raw-driver verbs',
+      '                             and/or a record.ts flow). KEYS/params only, never',
+      '                             a value. Promoted to active after a run or two.',
       '  delete <id>',
       '',
       'Memory (NON-PHI notes; --site AND --task are SHARED ONLINE):',
@@ -701,6 +830,7 @@ async function main() {
     case 'run': return await cmdRun(args);
     case 'create': return cmdWrite(args, { overwrite: false });
     case 'update': return cmdWrite(args, { overwrite: true });
+    case 'promote-from': return cmdPromoteFrom(args);
     case 'delete': return cmdDelete(args);
     case 'memory': return await cmdMemory(args);
     case 'bindings': return await cmdBindings(args);

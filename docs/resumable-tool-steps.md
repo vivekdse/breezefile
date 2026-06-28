@@ -153,9 +153,52 @@ authoritative export) plus the last `runs.jsonl` cursor — names, statuses and
 indices only, never params/values. A legacy single-`run` tool declares no steps,
 so `steps` is `null` and `cursor.resumable` is `false`.
 
+## The API shortcut (network observe / replay)
+
+Playwright's biggest speed edge: read/replay the page's OWN XHR/fetch and skip
+the rendered UI. Two raw-driver verbs (`electron/browser/net.mjs`, surfaced in
+`electron/browser/cli.mjs`):
+
+- `net-observe [urlFilter] [--ms n]` — watch the page's xhr/fetch for a window and
+  report the API requests seen as **NON-PHI metadata** (method, url, status,
+  content-type, header *names* — never values, never bodies). The discovery step:
+  run it, nudge the page, learn which request carries the data.
+- `net-replay <url> [--method M] [--data s]` — re-issue that request through the
+  page's own signed-in context (`page.request.fetch`), no DOM, no re-auth. A
+  GET/HEAD is a safe read; a **mutating** method (POST/PUT/PATCH/DELETE) is a side
+  effect and is **refused** unless `--allow-mutation` (the human-gated-submit
+  rule). The runner exposes the same helpers to a tool as `ctx.replay`.
+
+The playbook (`playbookBody()`) makes the API shortcut the on-ramp to tier 1: when
+a flow can be satisfied by the page's underlying request, prefer it and **capture
+it as the tool's fast path** (a `net-replay` step).
+
+## Auto-promotion (full-agent solve → candidate tool)
+
+A full-agent (tier-4) solve **auto-emits a reusable tool** so a novel page is paid
+for ONCE. `electron/browser/tools/promote.mjs` `scaffoldTool()` turns a captured
+raw-driver verb sequence (and/or a `record.ts` recorded flow) into a
+**step-structured** `tool.mjs` + `tool.json`, written via
+`breeze-tools promote-from <id> --match <url> --actions <f.json>` (or
+`--recording`). The emitted tool:
+
+- is **step-structured** (one step per captured action; a mutating `net-replay`
+  becomes a `sideEffect:true` step the runner gates + never re-fires on resume),
+- is **NON-PHI**: a captured fill carries a placeholder KEY (`patient.ssn`) or a
+  `{{param}}` ref, **never a value** — `scaffoldTool()` *refuses* a literal value;
+  the tool syncs as a code artifact through the same channel the tool repo uses,
+- starts `status: candidate` and **auto-promotes to `active`** after it proves
+  itself: `promotionDecision()` flips it once it has `PROMOTE_MIN_SUCCESSES` (2)
+  clean runs at a 100% rate (a failure keeps it candidate so the agent repairs it
+  first). The runner calls `maybePromote()` after each successful run.
+
+The playbook's promotion hook is now concrete: it names `promote-from` as the move
+after a full-agent solve.
+
 ## Deferred follow-ups
 
-- **Auto-promotion emit:** the playbook *references* the promotion hook, but the
-  actual auto-emit of a tool after a full-agent solve is a separate task.
 - **API channel (tier 1):** the playbook states the tier order (API → tool →
-  repair → full agent) but a direct API/integration channel is not yet wired.
+  repair → full agent) and the API *shortcut* (observe/replay above) is the
+  on-ramp, but a direct first-class API/integration channel — a typed call with
+  token auth, cron-able, no browser, no LLM — is still a separate architectural
+  task (`task-f83843b6c053`), held for the human.

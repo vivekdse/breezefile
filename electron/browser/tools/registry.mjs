@@ -132,7 +132,10 @@ export class ToolError extends Error {
 export const TOOL_SCHEMA = {
   required: ['id', 'name', 'description', 'match'],
   optional: [
-    'status',       // 'active' (default) | 'deprecated' | 'maintenance'
+    'status',       // 'active' (default) | 'candidate' | 'deprecated' | 'maintenance'
+                    //   'candidate' = auto-emitted by the promotion hook, not yet
+                    //   proven; promoted to 'active' after a run or two passes
+                    //   (electron/browser/tools/promote.mjs promotionDecision).
     'version',      // semver-ish string; default '1.0'
     'params',       // { name: { required, type, description } }
     'output',       // { field: description } — shape of result on success
@@ -366,7 +369,7 @@ export function validateTool(meta) {
       if (typeof p !== 'string' || !p.trim()) errors.push(`match entry is not a non-empty string: ${JSON.stringify(p)}`);
     }
   }
-  if (meta.status && !['active', 'deprecated', 'maintenance'].includes(meta.status)) {
+  if (meta.status && !['active', 'candidate', 'deprecated', 'maintenance'].includes(meta.status)) {
     errors.push(`invalid status: ${meta.status}`);
   }
   return { ok: errors.length === 0, errors };
