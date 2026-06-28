@@ -9,6 +9,7 @@ import {
   computeProjectAttention,
   attentionSummary,
   todayKey,
+  needsAttention,
 } from '../src/projects/attention.mjs';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -141,6 +142,52 @@ test('recent (no attention, fresh real activity) is not idle', () => {
     activityFloorMs: NOW - 1000,
   }).get('p');
   assert.equal(a.idle, false);
+});
+
+// task-18902d433658 — the filter behind "N need you" must use the SAME
+// predicate as the count, so the filtered list and the count can never disagree.
+test('needsAttention matches each classify bucket (open/blocked/overdue/failed)', () => {
+  const today = todayKey(NOW);
+  const yesterday = todayKey(NOW - DAY);
+  // counts: open, blocked, overdue, failed
+  assert.equal(needsAttention(task({ status: 'pending' }), today), true); // open
+  assert.equal(
+    needsAttention(task({ status: 'pending', rawStatus: 'blocked' }), today),
+    true,
+  ); // blocked
+  assert.equal(
+    needsAttention(task({ status: 'pending', due_at: yesterday }), today),
+    true,
+  ); // overdue
+  assert.equal(
+    needsAttention(task({ status: 'pending', attempts: 3, maxAttempts: 3 }), today),
+    true,
+  ); // failed (exhausted)
+  // does NOT count: in_progress, done, claimed-by-an-agent.
+  assert.equal(needsAttention(task({ status: 'in_progress' }), today), false);
+  assert.equal(needsAttention(task({ status: 'done' }), today), false);
+  assert.equal(
+    needsAttention(task({ status: 'pending', claimedBy: 'agent@x' }), today),
+    false,
+  );
+});
+
+test('needsAttention filter cardinality equals the project attention total', () => {
+  const roots = buildProjectTree([proj({ id: 'p' })]);
+  const today = todayKey(NOW);
+  const yesterday = todayKey(NOW - DAY);
+  const tasks = [
+    task({ projectId: 'p', status: 'pending' }),
+    task({ projectId: 'p', status: 'pending', rawStatus: 'blocked' }),
+    task({ projectId: 'p', status: 'pending', due_at: yesterday }),
+    task({ projectId: 'p', status: 'pending', attempts: 3, maxAttempts: 3 }),
+    task({ projectId: 'p', status: 'in_progress' }),
+    task({ projectId: 'p', status: 'done' }),
+    task({ projectId: 'p', status: 'pending', claimedBy: 'agent@x' }),
+  ];
+  const total = computeProjectAttention(roots, tasks, { now: NOW }).get('p').total;
+  const filtered = tasks.filter((t) => needsAttention(t, today)).length;
+  assert.equal(filtered, total); // the list shows EXACTLY the counted tasks
 });
 
 test('attentionSummary lists only non-zero buckets in order', () => {

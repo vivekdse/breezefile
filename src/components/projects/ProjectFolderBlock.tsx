@@ -69,6 +69,12 @@ export interface ProjectFolderBlockProps {
   onEditDescription?: () => void;
   /** Cursor target id (project id OR task id) for keyboard sync. */
   cursorKey?: string | null;
+  /** task-18902d433658 — "needs you" filter state for THIS block's project. When
+   *  active, `tasks.rowsFor` already returns only the attention tasks; this just
+   *  drives the header toggle's pressed state + the filter chip. */
+  needsYouActive?: boolean;
+  /** Toggle the "needs you" filter (omit → no clickable filter affordance). */
+  onToggleNeedsYou?: (projectId: string) => void;
 }
 
 function bindLabel(project: Project): string {
@@ -90,6 +96,8 @@ export function ProjectHeader({
   onOpenSelf,
   onOpenFolder,
   onEditDescription,
+  needsYouActive = false,
+  onToggleNeedsYou,
 }: {
   node: ProjectNode;
   attention: Map<string, ProjectAttention>;
@@ -101,6 +109,10 @@ export function ProjectHeader({
   onOpenSelf?: (projectId: string) => void;
   onOpenFolder?: (folder: string) => void;
   onEditDescription?: () => void;
+  /** task-18902d433658 — whether the "needs you" filter is on for THIS project. */
+  needsYouActive?: boolean;
+  /** Toggle the "needs you" filter (omit → the kicker count is static text). */
+  onToggleNeedsYou?: (projectId: string) => void;
 }) {
   const p = node.project;
   const att = attention.get(p.id);
@@ -137,9 +149,34 @@ export function ProjectHeader({
         {need > 0 && (
           <>
             <span className="folder-header__sep" aria-hidden />
-            <span className="folder-header__kicker-item pfolder-header__need">
-              {need} need{need === 1 ? 's' : ''} you
-            </span>
+            {onToggleNeedsYou ? (
+              // task-18902d433658 — clickable: toggles the project list down to
+              // exactly these N tasks (same predicate that produced the count).
+              <button
+                type="button"
+                className={[
+                  'folder-header__kicker-item',
+                  'pfolder-header__need',
+                  'pfolder-header__need--clickable',
+                  needsYouActive ? 'is-on' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                aria-pressed={needsYouActive}
+                onClick={() => onToggleNeedsYou(p.id)}
+                title={
+                  needsYouActive
+                    ? 'Showing only the tasks that need you — click to show all'
+                    : `Show only the ${need} task${need === 1 ? '' : 's'} that need you`
+                }
+              >
+                {need} need{need === 1 ? 's' : ''} you
+              </button>
+            ) : (
+              <span className="folder-header__kicker-item pfolder-header__need">
+                {need} need{need === 1 ? 's' : ''} you
+              </span>
+            )}
           </>
         )}
         {summary && (
@@ -337,6 +374,9 @@ export interface ProjectRowProps {
   onHover?: (projectId: string) => void;
   /** Archive / unarchive toggle (host owns the mutation). */
   onArchive?: (projectId: string, archived: boolean) => void;
+  /** task-18902d433658 — click the "N need you" pill → drill in filtered to
+   *  exactly those attention tasks. When omitted the pill is static text. */
+  onNeedsYou?: (projectId: string) => void;
 }
 
 export function ProjectRow({
@@ -352,6 +392,7 @@ export function ProjectRow({
   onOpen,
   onHover,
   onArchive,
+  onNeedsYou,
 }: ProjectRowProps) {
   const p = node.project;
   return (
@@ -392,11 +433,24 @@ export function ProjectRow({
             {total} {total === 1 ? 'task' : 'tasks'}
           </span>
         )}
-        {need > 0 && (
-          <span className="pfolder-row__need">
-            ⚑ <span className="num">{need}</span> need you
-          </span>
-        )}
+        {need > 0 &&
+          (onNeedsYou ? (
+            <button
+              type="button"
+              className="pfolder-row__need pfolder-row__need--clickable"
+              title={`Show the ${need} task${need === 1 ? '' : 's'} needing you`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onNeedsYou(p.id);
+              }}
+            >
+              ⚑ <span className="num">{need}</span> need you
+            </button>
+          ) : (
+            <span className="pfolder-row__need">
+              ⚑ <span className="num">{need}</span> need you
+            </span>
+          ))}
       </span>
       {onArchive && (
         <button
@@ -446,10 +500,14 @@ export function ProjectFolderBlock({
   onOpenFolder,
   onEditDescription,
   cursorKey,
+  needsYouActive = false,
+  onToggleNeedsYou,
 }: ProjectFolderBlockProps) {
   const p = node.project;
   const rows = tasks.rowsFor(p.id);
   const desc = effectiveDesc ?? p.description ?? '';
+  const att = attention.get(p.id);
+  const needCount = att?.total ?? 0;
 
   return (
     <section
@@ -469,10 +527,33 @@ export function ProjectFolderBlock({
         onOpenSelf={onOpenSelf}
         onOpenFolder={onOpenFolder}
         onEditDescription={onEditDescription}
+        needsYouActive={needsYouActive}
+        onToggleNeedsYou={onToggleNeedsYou}
       />
 
+      {/* task-18902d433658 — active filter chip: tells the user the list is
+          narrowed to "needs you" and lets them clear it back to all tasks. */}
+      {needsYouActive && onToggleNeedsYou && (
+        <div className="pfolder__filterbar">
+          <button
+            type="button"
+            className="pfolder__filterchip is-on"
+            aria-pressed
+            onClick={() => onToggleNeedsYou(p.id)}
+            title="Clear the filter — show all tasks in this project"
+          >
+            ⚑ Needs you · {needCount}
+            <span className="pfolder__filterchip-x" aria-hidden="true"> ✕</span>
+          </button>
+        </div>
+      )}
+
       {rows.length === 0 && node.children.length === 0 ? (
-        <div className="pfolder__empty">No tasks in this project yet.</div>
+        <div className="pfolder__empty">
+          {needsYouActive
+            ? 'Nothing needs you in this project right now.'
+            : 'No tasks in this project yet.'}
+        </div>
       ) : (
         <ul className="folder-list__list pfolder__list" role="list">
           {rows.map((row) => tasks.renderTaskRow(row))}

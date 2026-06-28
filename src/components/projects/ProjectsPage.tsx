@@ -46,6 +46,7 @@ import {
   breadcrumbPath,
   rollUpTaskStats,
   computeProjectAttention,
+  needsAttention,
   resolveEffectiveDescription,
   resolveEffectiveInstructions,
 } from '../../projects/index.mjs';
@@ -263,6 +264,12 @@ function ProjectsPageInner() {
   // L1 scope: null = all roots; else a project id whose CHILDREN we show.
   const [scopeId, setScopeId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // task-18902d433658 — "Needs you" filter for the DRILLED-IN project list. When
+  // set to the open project's id, ProjectFolderBlock shows ONLY the tasks the
+  // attention classifier counts toward "N need you" (open/blocked/overdue/
+  // failed) — the same predicate that drives the count, so the two can't drift.
+  // null = show every task (the default folder view).
+  const [needsYouFilter, setNeedsYouFilter] = useState<string | null>(null);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
@@ -450,7 +457,15 @@ function ProjectsPageInner() {
   const rowsForProject = useMemo(
     () =>
       (projectId: string): ProjectFolderRow[] => {
-        const own = tasksByProject.get(projectId) ?? [];
+        const all = tasksByProject.get(projectId) ?? [];
+        if (all.length === 0) return [];
+        // task-18902d433658 — when the "Needs you" filter targets THIS project,
+        // narrow to exactly the tasks the attention classifier counts (the same
+        // predicate behind "N need you"), so the filtered list and the count can
+        // never disagree. A surviving child whose parent is filtered out simply
+        // becomes a top-level row below (its parent isn't in `byId`).
+        const own =
+          needsYouFilter === projectId ? all.filter((t) => needsAttention(t)) : all;
         if (own.length === 0) return [];
         const byId = new Map(own.map((t) => [t.id, t]));
         const childrenOf = new Map<string, Task[]>();
@@ -480,7 +495,7 @@ function ProjectsPageInner() {
         }
         return out;
       },
-    [tasksByProject, expanded],
+    [tasksByProject, expanded, needsYouFilter],
   );
 
   // Selection + cursor for the folder-block surface. cursorKey is a task id OR a
@@ -660,9 +675,19 @@ function ProjectsPageInner() {
     setExpanded(new Set());
     setLevel(2);
     setCursorKey(node.project.id);
+    setNeedsYouFilter(null);
     // task-54e9281f0986 — the create form is level-scoped; drop any open one so
     // it doesn't bleed across the root ↔ detail boundary.
     setShowCreate(false);
+  }
+  // task-18902d433658 — drill into a project AND filter its task list to exactly
+  // the "needs you" tasks (the clickable count affordance). Reuses enterCard's
+  // drill-in, then arms the filter for that project.
+  function openProjectNeedsYou(projectId: string) {
+    const node = nodeById.get(projectId);
+    if (!node) return;
+    enterCard(node);
+    setNeedsYouFilter(projectId);
   }
   function backUp() {
     if (level === 2) {
@@ -730,6 +755,7 @@ function ProjectsPageInner() {
     setExpanded(new Set());
     setLevel(2);
     setCursorKey(projectId);
+    setNeedsYouFilter(null);
   }
   // task-2c5448be520a — archive/unarchive a project, then re-fetch so the row
   // appears/disappears per the current Show-archived toggle. NON-PHI.
@@ -772,6 +798,7 @@ function ProjectsPageInner() {
       setExpanded(new Set());
       setLevel(2);
       setCursorKey(id);
+      setNeedsYouFilter(null);
     }
     // apply a stashed deep-link on mount (the open event may have fired before
     // this page mounted)
@@ -1099,6 +1126,8 @@ function ProjectsPageInner() {
             onSetCursor={(pid) => setCursorKey(pid)}
             onEnter={enterCard}
             onHeroOpen={(n) => enterCard(n)}
+            onHeroNeedsYou={(n) => openProjectNeedsYou(n.project.id)}
+            onProjectNeedsYou={openProjectNeedsYou}
             allProjects={projects}
             scopeId={scopeId}
           />
@@ -1113,6 +1142,10 @@ function ProjectsPageInner() {
             rollUp={rollUp}
             tasksProvider={tasksProvider}
             cursorKey={cursorKey}
+            needsYouActive={needsYouFilter === detailProject.id}
+            onToggleNeedsYou={(pid) =>
+              setNeedsYouFilter((cur) => (cur === pid ? null : pid))
+            }
             onBack={() => setLevel(1)}
             onOpenProject={openProjectDetail}
             onOpenFolder={openProjectFolder}
@@ -1348,6 +1381,8 @@ function HomeRoot({
   onSetCursor,
   onEnter,
   onHeroOpen,
+  onHeroNeedsYou,
+  onProjectNeedsYou,
   allProjects,
   scopeId,
 }: {
@@ -1392,6 +1427,9 @@ function HomeRoot({
   onSetCursor: (projectId: string) => void;
   onEnter: (n: ProjectNode) => void;
   onHeroOpen: (n: ProjectNode) => void;
+  /** Drill into a project AND filter its list to its "needs you" tasks. */
+  onHeroNeedsYou: (n: ProjectNode) => void;
+  onProjectNeedsYou: (projectId: string) => void;
   allProjects: Project[];
   scopeId: string | null;
 }) {
@@ -1430,6 +1468,7 @@ function HomeRoot({
           onOpen={() => onEnter(node)}
           onHover={onSetCursor}
           onArchive={onArchive}
+          onNeedsYou={() => onProjectNeedsYou(p.id)}
         />
       </div>
     );
@@ -1523,10 +1562,27 @@ function HomeRoot({
           </div>
         ) : (
           <div className="projects__hero" role="status">
-            <b>
-              {heroNeed} {heroNeed === 1 ? 'task needs' : 'tasks need'} you
-              {heroBlocked > 0 ? `, ${heroBlocked} blocked` : ''}.
-            </b>{' '}
+            {/* task-18902d433658 — the count is a clickable affordance: it drills
+                into the most-needy project AND filters its task list to exactly
+                those "needs you" tasks (same predicate as the count). */}
+            {heroTarget ? (
+              <button
+                type="button"
+                className="projects__hero-need"
+                onClick={() => onHeroNeedsYou(heroTarget)}
+                title={`Show the ${heroNeed} task${heroNeed === 1 ? '' : 's'} needing you in ${heroTarget.project.name}`}
+              >
+                <b>
+                  {heroNeed} {heroNeed === 1 ? 'task needs' : 'tasks need'} you
+                  {heroBlocked > 0 ? `, ${heroBlocked} blocked` : ''}.
+                </b>
+              </button>
+            ) : (
+              <b>
+                {heroNeed} {heroNeed === 1 ? 'task needs' : 'tasks need'} you
+                {heroBlocked > 0 ? `, ${heroBlocked} blocked` : ''}.
+              </b>
+            )}{' '}
             {heroTarget ? (
               <button
                 type="button"
@@ -1691,6 +1747,8 @@ function ProjectDetail({
   onCreated,
   onUpdated,
   allProjects,
+  needsYouActive,
+  onToggleNeedsYou,
 }: {
   node: ProjectNode;
   project: Project;
@@ -1701,6 +1759,8 @@ function ProjectDetail({
   rollUp: Map<string, { own: TaskStats; rolled: TaskStats }>;
   tasksProvider: ProjectTasksProvider;
   cursorKey: string | null;
+  needsYouActive: boolean;
+  onToggleNeedsYou: (projectId: string) => void;
   onBack: () => void;
   onOpenProject: (projectId: string) => void;
   onOpenFolder: (folder: string) => void;
@@ -1801,6 +1861,8 @@ function ProjectDetail({
         onNewTask={onNewTask}
         onEditDescription={() => setShowEdit(true)}
         cursorKey={cursorKey}
+        needsYouActive={needsYouActive}
+        onToggleNeedsYou={onToggleNeedsYou}
       />
     </>
   );

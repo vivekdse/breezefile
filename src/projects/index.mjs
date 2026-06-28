@@ -21,4 +21,6 @@ export {
   computeProjectAttention,
   attentionSummary,
   todayKey,
+  classify,
+  needsAttention,
 } from './attention.mjs';

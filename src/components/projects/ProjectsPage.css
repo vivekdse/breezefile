@@ -162,6 +162,26 @@
 .projects__hero-open:hover {
   text-decoration: underline;
 }
+/* task-18902d433658 — the hero count is a button that drills into the most-needy
+   project filtered to exactly those tasks. It stays visually the warn-bold count
+   (the inner <b> keeps the color) with a dotted underline as a click cue. */
+.projects__hero-need {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.projects__hero-need:hover {
+  text-decoration-style: solid;
+}
+.projects__hero-need:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* ── L1 inbox (task-4b0168979921) ─────────────────────────────────────────────
    A dense, email-inbox list aligned with the folder/file aesthetic (epic

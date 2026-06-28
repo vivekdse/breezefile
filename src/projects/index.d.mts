@@ -30,4 +30,6 @@ export {
   computeProjectAttention,
   attentionSummary,
   todayKey,
+  classify,
+  needsAttention,
 } from './attention.d.mts';
