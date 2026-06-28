@@ -584,7 +584,11 @@ function ProjectsPageInner() {
 
   const flatRows = useMemo<FlatRow[]>(() => {
     const out: FlatRow[] = [];
-    const pushBlock = (node: ProjectNode, collapseSubs: boolean) => {
+    // A project block: its header, its OWN task rows, then ONE collapsed row per
+    // sub-project (file-manager model — a sub-project's tasks live behind its
+    // own drill-in, never inline under the parent). Matches the DOM so the
+    // cursor + scrollIntoView line up.
+    const pushBlock = (node: ProjectNode) => {
       const pid = node.project.id;
       out.push({ kind: 'header', key: pid, projectId: pid });
       for (const row of rowsForProject(pid)) {
@@ -595,18 +599,12 @@ function ProjectsPageInner() {
           isParent: row.childCount > 0,
         });
       }
-      if (collapseSubs) {
-        for (const child of node.children) {
-          out.push({
-            kind: 'subproject',
-            key: child.project.id,
-            projectId: child.project.id,
-          });
-        }
-      } else {
-        // drilled view: nested sub-projects are full blocks (recurse, still
-        // collapsing THEIR sub-sub-projects so deep trees stay shallow).
-        for (const child of node.children) pushBlock(child, true);
+      for (const child of node.children) {
+        out.push({
+          kind: 'subproject',
+          key: child.project.id,
+          projectId: child.project.id,
+        });
       }
     };
 
@@ -625,13 +623,13 @@ function ProjectsPageInner() {
       return out;
     }
     if (level === 2 && detailNode) {
-      pushBlock(detailNode, false);
+      pushBlock(detailNode);
       return out;
     }
     // root (task-6050fee0efb1): the Inbox keeps its inline block (header +
     // tasks), but every real project is now ONE compact row — no inline tasks,
     // no expanded sub-projects — so the cursor walks just the project ids.
-    if (scopeId == null && inboxTotalCount > 0) pushBlock(inboxNode, true);
+    if (scopeId == null && inboxTotalCount > 0) pushBlock(inboxNode);
     for (const node of gridNodes) {
       out.push({ kind: 'header', key: node.project.id, projectId: node.project.id });
     }

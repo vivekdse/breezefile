@@ -387,12 +387,16 @@ export function ProjectRow({
 }
 
 /**
- * One project as a folder: header + its task rows + nested sub-project blocks.
+ * One project as a folder: header + its task rows + a single collapsed row per
+ * sub-project — the file-manager model (PROJECT = FOLDER, TASK = FILE).
  *
- * - `scale='hero'` (drilled-in project view): full folder-hero header, nested
- *   sub-projects rendered as full nested ProjectFolderBlocks (collapsed=false).
- * - `scale='inline'` (Home root): tighter header; sub-projects collapse to a
- *   single SubProjectRow (Q5) so the root stays scannable.
+ * Sub-projects ALWAYS collapse to one SubProjectRow (folder affordance: name +
+ * counts, opened to reveal its own tasks). This holds at every level:
+ * - `scale='hero'` (drilled-in project view): full folder-hero header; the
+ *   opened project shows its OWN tasks, and each sub-project is one folder row.
+ * - `scale='inline'` (Home root / recursion): tighter header; same one-row subs.
+ * A project's tasks are never shown inline under a *parent* — you open the
+ * sub-project to see them, exactly like opening a folder.
  */
 export function ProjectFolderBlock({
   node,
@@ -407,13 +411,11 @@ export function ProjectFolderBlock({
   onOpenProject,
   onOpenSelf,
   onOpenFolder,
-  onNewTask,
   cursorKey,
 }: ProjectFolderBlockProps) {
   const p = node.project;
   const rows = tasks.rowsFor(p.id);
   const desc = effectiveDesc ?? p.description ?? '';
-  const collapseSubs = scale === 'inline';
 
   return (
     <section
@@ -442,37 +444,21 @@ export function ProjectFolderBlock({
         </ul>
       )}
 
-      {/* Sub-projects: collapsed to one row at root (Q5), full nested blocks
-          when drilled in. */}
+      {/* Sub-projects: one collapsed folder row each (name + counts). Opening a
+          row drills into that sub-project to reveal its own tasks — the file
+          manager never shows a folder's contents inline, and neither do we. */}
       {node.children.length > 0 && (
         <div className="pfolder__subs">
-          {collapseSubs
-            ? node.children.map((child) => (
-                <SubProjectRow
-                  key={child.project.id}
-                  node={child}
-                  attention={attention}
-                  rollUp={rollUp}
-                  onOpen={onOpenProject}
-                  cursor={cursorKey === child.project.id}
-                />
-              ))
-            : node.children.map((child) => (
-                <ProjectFolderBlock
-                  key={child.project.id}
-                  node={child}
-                  attention={attention}
-                  rollUp={rollUp}
-                  effectiveDesc={child.project.description ?? ''}
-                  tasks={tasks}
-                  scale="inline"
-                  nest={nest + 1}
-                  onOpenProject={onOpenProject}
-                  onOpenFolder={onOpenFolder}
-                  onNewTask={onNewTask}
-                  cursorKey={cursorKey}
-                />
-              ))}
+          {node.children.map((child) => (
+            <SubProjectRow
+              key={child.project.id}
+              node={child}
+              attention={attention}
+              rollUp={rollUp}
+              onOpen={onOpenProject}
+              cursor={cursorKey === child.project.id}
+            />
+          ))}
         </div>
       )}
     </section>
