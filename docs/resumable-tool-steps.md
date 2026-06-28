@@ -131,10 +131,30 @@ no-double-submit invariant above). Full-agent is reached only after N failed
 repairs; after a full-agent solve the playbook references a **promotion hook**
 (emit a tool) so the flow graduates back to tier 2.
 
+## Step plan + cursor health in `help`/`available`
+
+`help <tool>` and `available <url>` surface a NON-PHI **step-plan + cursor**
+summary (`registry.mjs` `stepPlanSummary()`), so a human or LLM sees a tool's
+ordered steps, which are side-effecting, and where it's resumable from WITHOUT
+importing the module or parsing `runs.jsonl` by hand:
+
+```jsonc
+"_step_plan": {                       // help; "step_plan" on available entries
+  "steps": [ { "index": 0, "name": "locate-fields", "sideEffect": false, "description": "…" },
+             { "index": 1, "name": "submit", "sideEffect": true,  "description": "…" } ],
+  "side_effecting": ["submit"],       // the irreversible / gated steps
+  "cursor": { "status": "partial", "steps_done": ["locate-fields"],
+              "failed_step": "submit", "resume_from": "submit", "resumable": true }
+}
+```
+
+It reads ONLY the DECLARED `tool.json` `steps` (advisory mirror of the module's
+authoritative export) plus the last `runs.jsonl` cursor — names, statuses and
+indices only, never params/values. A legacy single-`run` tool declares no steps,
+so `steps` is `null` and `cursor.resumable` is `false`.
+
 ## Deferred follow-ups
 
-- Convert the remaining seed tools (`web-form-login`, `extract-table`) to `steps[]`
-  (login: locate-fields step [idempotent] + submit step [side-effect]).
 - **Auto-promotion emit:** the playbook *references* the promotion hook, but the
   actual auto-emit of a tool after a full-agent solve is a separate task.
 - **API channel (tier 1):** the playbook states the tier order (API → tool →

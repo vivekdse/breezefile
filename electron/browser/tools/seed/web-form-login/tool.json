@@ -3,8 +3,12 @@
   "name": "Generic Web Form Login",
   "description": "Logs into a standard username/password web form. Auto-detects the username, password, and submit controls using accessibility-first heuristics, so it works across many sites without per-site selectors. The doc's 'consolidated Web form login' tool (see docs/Playwright agent.md 'Generalization Over Time').",
   "match": ["*"],
-  "version": "1.0",
+  "version": "1.1",
   "status": "active",
+  "steps": [
+    { "name": "locate-fields", "sideEffect": false, "description": "navigate (if --url), find the username/password/submit controls and type the credentials (idempotent — typing is reversible and re-running just re-types; nothing is POSTed)" },
+    { "name": "submit", "sideEffect": true, "description": "click Submit / press Enter (IRREVERSIBLE — POSTs the credentials and starts the auth transaction), then confirm login. Recorded once done so a resume never re-submits." }
+  ],
   "params": {
     "url": { "required": false, "type": "string", "description": "login page URL; if omitted, uses the current page" },
     "username": { "required": true, "type": "string", "description": "username or email" },

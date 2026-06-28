@@ -6,16 +6,23 @@
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, appendFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, appendFileSync, readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 import {
   normalizeSteps,
   planResume,
   lastCursor,
+  stepPlanSummary,
   EXIT,
 } from '../electron/browser/tools/registry.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const seedDir = join(here, '..', 'electron', 'browser', 'tools', 'seed');
+const loadSeedMeta = (id) => JSON.parse(readFileSync(join(seedDir, id, 'tool.json'), 'utf8'));
+const importSeed = (id) => import(`../electron/browser/tools/seed/${id}/tool.mjs`);
 
 const noop = async () => ({});
 
@@ -159,4 +166,104 @@ test('lastCursor is empty for no history', () => {
 
 test('EXIT.PARTIAL is the resumable signal (6)', () => {
   assert.equal(EXIT.PARTIAL, 6);
+});
+
+// ─── seed-tool conversions: web-form-login & extract-table ───────────────────
+// The module's exported steps[] is authoritative; tool.json mirrors it (name +
+// sideEffect) for help/discovery. These pin both halves stay in sync and that
+// the side-effect/idempotence marks are right.
+
+test('web-form-login: steps[] is locate-fields (idempotent) → submit (side-effect)', async () => {
+  const mod = await importSeed('web-form-login');
+  const n = normalizeSteps(mod);
+  assert.equal(n.ok, true);
+  assert.deepEqual(n.steps.map((s) => s.name), ['locate-fields', 'submit']);
+  // locate-fields just types creds (reversible) — idempotent.
+  assert.equal(n.steps[0].sideEffect, false);
+  // submit POSTs the form — the irreversible / human-gated step.
+  assert.equal(n.steps[1].sideEffect, true);
+  // back-compat shim preserved.
+  assert.equal(typeof mod.run, 'function');
+});
+
+test('web-form-login: tool.json DECLARES the same steps + sideEffect marks (and bumped version)', () => {
+  const meta = loadSeedMeta('web-form-login');
+  assert.equal(meta.version, '1.1');
+  assert.deepEqual(meta.steps.map((s) => s.name), ['locate-fields', 'submit']);
+  assert.equal(meta.steps[0].sideEffect, false);
+  assert.equal(meta.steps[1].sideEffect, true);
+});
+
+test('web-form-login: resume REFUSES re-running a completed submit (no double-submit)', async () => {
+  const mod = await importSeed('web-form-login');
+  const steps = normalizeSteps(mod).steps;
+  // submit already recorded done → any resume that would re-run it is refused.
+  const p = planResume(steps, 'submit', ['locate-fields', 'submit']);
+  assert.equal(p.ok, false);
+  assert.ok(p.errors.some((e) => /re-run completed side-effecting step "submit"/.test(e)));
+});
+
+test('web-form-login: resume AT submit after a break is allowed (first fire, not replay)', async () => {
+  const mod = await importSeed('web-form-login');
+  const steps = normalizeSteps(mod).steps;
+  // locate-fields done, submit broke and was NOT recorded → resume at submit.
+  const p = planResume(steps, 'submit', ['locate-fields']);
+  assert.equal(p.ok, true);
+  assert.equal(p.startIndex, 1);
+  assert.deepEqual(p.skip, ['locate-fields']);
+  assert.deepEqual(p.plan, ['submit']);
+});
+
+test('extract-table: steps[] are all idempotent reads (extract → validate)', async () => {
+  const mod = await importSeed('extract-table');
+  const n = normalizeSteps(mod);
+  assert.equal(n.ok, true);
+  assert.deepEqual(n.steps.map((s) => s.name), ['extract', 'validate']);
+  assert.equal(n.steps.every((s) => s.sideEffect === false), true);
+  assert.equal(typeof mod.run, 'function'); // back-compat shim
+  // No side-effect step → no replay/skip refusal anywhere; resume at any step ok.
+  assert.equal(planResume(n.steps, 'validate', ['extract']).ok, true);
+});
+
+test('extract-table: tool.json mirrors steps (all sideEffect:false, bumped version)', () => {
+  const meta = loadSeedMeta('extract-table');
+  assert.equal(meta.version, '1.1');
+  assert.deepEqual(meta.steps.map((s) => s.name), ['extract', 'validate']);
+  assert.equal(meta.steps.every((s) => s.sideEffect === false), true);
+});
+
+// ─── stepPlanSummary (help/available surface) ────────────────────────────────
+test('stepPlanSummary surfaces the declared plan + side-effecting steps (NON-PHI)', () => {
+  const meta = loadSeedMeta('web-form-login');
+  const s = stepPlanSummary(meta, null); // no runs.jsonl
+  assert.deepEqual(s.steps.map((x) => x.name), ['locate-fields', 'submit']);
+  assert.deepEqual(s.steps.map((x) => x.index), [0, 1]);
+  assert.deepEqual(s.side_effecting, ['submit']);
+  // No history → nothing resumable.
+  assert.equal(s.cursor.status, null);
+  assert.equal(s.cursor.resumable, false);
+  assert.equal(s.cursor.resume_from, null);
+});
+
+test('stepPlanSummary reads a partial cursor and reports resume_from', () => {
+  const meta = loadSeedMeta('web-form-login');
+  const dir2 = mkdtempSync(join(tmpdir(), 'bt-plan-'));
+  try {
+    const runs = join(dir2, 'runs.jsonl');
+    appendFileSync(runs, JSON.stringify({ timestamp: '2026-06-28T00:00:00Z', status: 'partial', steps_done: ['locate-fields'], failed_step: 'submit' }) + '\n');
+    const s = stepPlanSummary(meta, runs);
+    assert.equal(s.cursor.status, 'partial');
+    assert.deepEqual(s.cursor.steps_done, ['locate-fields']);
+    assert.equal(s.cursor.failed_step, 'submit');
+    assert.equal(s.cursor.resume_from, 'submit');
+    assert.equal(s.cursor.resumable, true);
+  } finally { rmSync(dir2, { recursive: true, force: true }); }
+});
+
+test('stepPlanSummary: a legacy tool with no declared steps yields steps:null, non-resumable', () => {
+  const s = stepPlanSummary({ id: 'legacy', name: 'x' }, null);
+  assert.equal(s.steps, null);
+  assert.deepEqual(s.side_effecting, []);
+  assert.equal(s.cursor.resume_from, null);
+  assert.equal(s.cursor.resumable, false);
 });

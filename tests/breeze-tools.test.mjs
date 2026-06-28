@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -119,6 +119,53 @@ test('help on a missing tool exits 1', () => {
   const dir = freshRepoWithSeeds();
   try {
     assert.equal(run(['help', 'nope'], dir).status, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('help surfaces the step plan (names + sideEffect markers) and a cursor', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    const r = run(['help', 'web-form-login'], dir);
+    assert.equal(r.status, 0);
+    const meta = JSON.parse(r.stdout);
+    const plan = meta._step_plan;
+    assert.ok(plan, '_step_plan present');
+    assert.deepEqual(plan.steps.map((s) => s.name), ['locate-fields', 'submit']);
+    // sideEffect markers visible without importing the module.
+    assert.equal(plan.steps[0].sideEffect, false);
+    assert.equal(plan.steps[1].sideEffect, true);
+    assert.deepEqual(plan.side_effecting, ['submit']);
+    // cursor block present (no history yet → nothing resumable).
+    assert.equal(plan.cursor.resumable, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('help cursor reflects a partial run in runs.jsonl (resume_from)', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    appendFileSync(
+      join(dir, 'web-form-login', 'runs.jsonl'),
+      JSON.stringify({ timestamp: '2026-06-28T00:00:00Z', status: 'partial', steps_done: ['locate-fields'], failed_step: 'submit' }) + '\n',
+    );
+    const meta = JSON.parse(run(['help', 'web-form-login'], dir).stdout);
+    assert.equal(meta._step_plan.cursor.status, 'partial');
+    assert.equal(meta._step_plan.cursor.resume_from, 'submit');
+    assert.equal(meta._step_plan.cursor.resumable, true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('available surfaces step_plan per tool', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    const r = run(['available', 'https://intranet.local/x'], dir);
+    assert.equal(r.status, 0);
+    const tools = JSON.parse(r.stdout).tools;
+    const login = tools.find((t) => t.id === 'web-form-login');
+    assert.ok(login.step_plan, 'step_plan present on available entry');
+    assert.deepEqual(login.step_plan.side_effecting, ['submit']);
+    const table = tools.find((t) => t.id === 'extract-table');
+    assert.deepEqual(table.step_plan.steps.map((s) => s.name), ['extract', 'validate']);
+    assert.deepEqual(table.step_plan.side_effecting, []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -237,12 +284,33 @@ test('resume REFUSES to re-fire a completed side-effect step (exit 7)', () => {
 test('legacy single-run tool dry-run shows ONE implicit side-effect step', () => {
   const dir = freshRepoWithSeeds();
   try {
-    // web-form-login is still a single-`run` tool — proves back-compat.
-    const r = run(['run', 'web-form-login', '--username', 'u', '--password', 'p', '--dry-run'], dir);
+    // A genuinely legacy tool exporting only `run` (no steps[]) — proves the
+    // single-`run` back-compat path (normalized to one implicit side-effect step).
+    mkdirSync(join(dir, 'legacy-runner'), { recursive: true });
+    writeFileSync(join(dir, 'legacy-runner', 'tool.json'),
+      JSON.stringify({ id: 'legacy-runner', name: 'Legacy', description: 'legacy', match: ['*'] }) + '\n');
+    writeFileSync(join(dir, 'legacy-runner', 'tool.mjs'),
+      'export async function run(){return {ok:true};}\n');
+    const r = run(['run', 'legacy-runner', '--dry-run'], dir);
     assert.equal(r.status, 0, r.stderr);
     const o = JSON.parse(r.stdout);
     assert.equal(o.implicit_single_step, true);
     assert.deepEqual(o.steps, [{ name: 'run', sideEffect: true }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('converted web-form-login dry-run shows the 2-step plan (locate-fields → submit)', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    const r = run(['run', 'web-form-login', '--username', 'u', '--password', 'p', '--dry-run'], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const o = JSON.parse(r.stdout);
+    assert.equal(o.implicit_single_step, false);
+    assert.deepEqual(o.steps, [
+      { name: 'locate-fields', sideEffect: false },
+      { name: 'submit', sideEffect: true },
+    ]);
+    assert.deepEqual(o.plan, ['locate-fields', 'submit']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

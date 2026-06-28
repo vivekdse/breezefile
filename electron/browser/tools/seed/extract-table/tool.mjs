@@ -8,9 +8,27 @@
 // success.
 //
 //   params = { selector?, max_rows?, headers? }
+//
+// RESUMABLE STEPS (Operator Speed). This tool is expressed as ORDERED, NAMED
+// steps instead of one opaque `run` (see docs/resumable-tool-steps.md). Both
+// steps are IDEMPOTENT (sideEffect:false) — extraction is a pure READ of the
+// page, with no irreversible effect, so either step is always safe to re-run/
+// resume:
+//
+//   extract  — read the chosen table out of the DOM into headers + rows. Pure
+//              read; safe to re-run. Stashes the parsed result in `state`.
+//   validate — run the data sanity checks (empty/ragged/all-blank columns) over
+//              the extracted rows and shape the final output. Pure; safe to re-run.
+//
+// The exported `steps` array is authoritative; tool.json also DECLARES the same
+// names + sideEffect:false marks so `help`/discovery shows the plan. `state`
+// carries the extracted rows (page-derived data, not credentials) between steps.
 
-export async function run(ctx, params) {
-  const { page, log, ToolError } = ctx;
+/** Step 1 — extract: read the target table out of the DOM into headers + rows.
+ *  Pure read (sideEffect:false). Stashes the parsed result on `state` for the
+ *  validate step. */
+async function extract(ctx, params) {
+  const { page, log, ToolError, state } = ctx;
 
   const maxRows = Number(params.max_rows) > 0 ? Number(params.max_rows) : 500;
   const forcedHeaders = params.headers
@@ -77,7 +95,7 @@ export async function run(ctx, params) {
   );
 
   if (extracted.error === 'no_table') {
-    throw new ctx.ToolError('selector_not_found', params.selector ? `no table matched: ${params.selector}` : 'no table found on the page', {
+    throw new ToolError('selector_not_found', params.selector ? `no table matched: ${params.selector}` : 'no table found on the page', {
       action: 'pass --selector',
     });
   }
@@ -85,6 +103,22 @@ export async function run(ctx, params) {
     throw new ToolError('unexpected_state', 'table found but it has no rows');
   }
 
+  // Stash the parsed result (page-derived data, not credentials) for validate.
+  state.extracted = extracted;
+  log.ok(`parsed ${extracted.rows.length} row(s) × ${extracted.headers.length} column(s)`);
+  return { extracted: true, rows_parsed: extracted.rows.length, columns: extracted.headers.length };
+}
+
+/** Step 2 — validate: run the data sanity checks over the extracted rows and
+ *  shape the final output. Pure (sideEffect:false). Reads `state.extracted`
+ *  (or re-extracts via a direct call when run as the back-compat shim). */
+async function validate(ctx, params) {
+  const { log, ToolError, state } = ctx;
+
+  const extracted = state.extracted;
+  if (!extracted) {
+    throw new ToolError('unexpected_state', 'validate ran without an extracted table (extract step did not complete)');
+  }
   const { headers, rows, ragged, total_rows } = extracted;
 
   // ── data sanity checks (validation beyond binary success) ──
@@ -120,4 +154,18 @@ export async function run(ctx, params) {
     __warnings: warnings,
     __suggestions: suggestions,
   };
+}
+
+export const steps = [
+  { name: 'extract', sideEffect: false, run: extract },
+  { name: 'validate', sideEffect: false, run: validate },
+];
+
+// Back-compat shim: a single `run` that drives the steps in order. Kept so any
+// caller still importing `run` directly (outside the breeze-tools runner) keeps
+// working. The runner itself uses `steps` and ignores this.
+export async function run(ctx, params) {
+  ctx.state = ctx.state || {};
+  await extract(ctx, params);
+  return validate(ctx, params);
 }

@@ -296,6 +296,59 @@ export function lastCursor(runsPath) {
   return empty;
 }
 
+/** Build a NON-PHI step-plan + cursor-health summary for `help`/`available`, so
+ *  a human or LLM sees a tool's ordered steps, which are side-effecting, and
+ *  where the tool is resumable from — WITHOUT importing the module or parsing
+ *  runs.jsonl by hand.
+ *
+ *  Reads ONLY the DECLARED steps in tool.json (`meta.steps`, advisory mirror of
+ *  the module's authoritative `steps` export) and the last cursor from runs.jsonl.
+ *  Both are NON-PHI: step names, statuses and indices only — never params/values.
+ *
+ *  Returns:
+ *    {
+ *      steps: [{ index, name, sideEffect, description? }] | null,  // null when undeclared
+ *      side_effecting: [names],     // the irreversible steps (the gated ones)
+ *      cursor: {                    // last-known resumability from runs.jsonl
+ *        status, steps_done:[names], failed_step, resume_from, resumable:boolean
+ *      }
+ *    }
+ *  When a tool declares no steps, `steps` is null and `cursor.resume_from` is null
+ *  (a legacy single-`run` tool is non-resumable). */
+export function stepPlanSummary(meta, runsPath) {
+  const declared = Array.isArray(meta?.steps) ? meta.steps : null;
+  const steps = declared
+    ? declared.map((s, i) => ({
+        index: i,
+        name: s?.name ?? `step_${i + 1}`,
+        sideEffect: s?.sideEffect === true,
+        ...(s?.description ? { description: s.description } : {}),
+      }))
+    : null;
+  const side_effecting = steps ? steps.filter((s) => s.sideEffect).map((s) => s.name) : [];
+
+  const c = lastCursor(runsPath);
+  // resume_from: where a next run would restart. After a partial break that's the
+  // failed step; if the cursor recorded done-steps but no explicit failed_step,
+  // it's the first declared step not yet done. Null when nothing is resumable.
+  let resume_from = c.failed_step ?? null;
+  if (!resume_from && steps && c.status === 'partial' && c.steps_done.length) {
+    const next = steps.find((s) => !c.steps_done.includes(s.name));
+    resume_from = next ? next.name : null;
+  }
+  return {
+    steps,
+    side_effecting,
+    cursor: {
+      status: c.status,
+      steps_done: c.steps_done,
+      failed_step: c.failed_step,
+      resume_from,
+      resumable: c.status === 'partial' && !!resume_from,
+    },
+  };
+}
+
 /** Validate a parsed tool.json. Returns { ok, errors[] }. Conservative: only
  *  flags things that would break discovery or execution. */
 export function validateTool(meta) {

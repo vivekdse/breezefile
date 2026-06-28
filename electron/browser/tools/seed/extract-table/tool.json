@@ -3,8 +3,12 @@
   "name": "Extract HTML Table",
   "description": "Extracts a tabular dataset from the current page into structured JSON (array of row objects keyed by header). Works on real <table> elements and on ARIA grid/role-based tables. Includes data sanity checks (the doc's 'validation beyond binary success/failure').",
   "match": ["*"],
-  "version": "1.0",
+  "version": "1.1",
   "status": "active",
+  "steps": [
+    { "name": "extract", "sideEffect": false, "description": "read the chosen table out of the DOM into headers + rows (pure read — safe to re-run/resume)" },
+    { "name": "validate", "sideEffect": false, "description": "run the data sanity checks (empty/ragged/all-blank columns) and shape the final output (pure — safe to re-run/resume)" }
+  ],
   "params": {
     "selector": { "required": false, "type": "string", "description": "CSS selector for the table; defaults to the first/largest table on the page" },
     "max_rows": { "required": false, "type": "number", "description": "cap on rows returned (default 500)" },

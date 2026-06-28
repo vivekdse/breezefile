@@ -62,6 +62,7 @@ import {
   normalizeSteps,
   planResume,
   lastCursor,
+  stepPlanSummary,
 } from '../electron/browser/tools/registry.mjs';
 import {
   getMemoryOnline,
@@ -141,6 +142,11 @@ function cmdAvailable(args) {
     status: t.meta.status || 'active',
     params: t.meta.params || {},
     health: toolHealth(t.runsPath),
+    // Step plan + last-known resume cursor (NON-PHI: names/statuses/indices only)
+    // so the agent sees, per tool, the ordered steps, which are side-effecting,
+    // and where it's resumable from — without importing the module or parsing
+    // runs.jsonl. See docs/resumable-tool-steps.md.
+    step_plan: stepPlanSummary(t.meta, t.runsPath),
   }));
   out({ url, count: matches.length, tools: matches });
   return EXIT.SUCCESS;
@@ -156,7 +162,17 @@ function cmdHelp(args) {
     return EXIT.FAILURE;
   }
   const v = validateTool(t.meta);
-  out({ ...t.meta, _valid: v.ok, _errors: v.errors, _health: toolHealth(t.runsPath) });
+  // _step_plan: the ordered step plan (names + sideEffect markers) and the
+  // last-known cursor/health from runs.jsonl (steps_done / failed_step /
+  // resume_from), so a human or LLM sees where the tool is resumable from
+  // WITHOUT parsing runs.jsonl by hand. NON-PHI: names/statuses/indices only.
+  out({
+    ...t.meta,
+    _valid: v.ok,
+    _errors: v.errors,
+    _health: toolHealth(t.runsPath),
+    _step_plan: stepPlanSummary(t.meta, t.runsPath),
+  });
   return EXIT.SUCCESS;
 }
 
@@ -559,8 +575,9 @@ function usage() {
       'breeze-tools — reusable Playwright tool repository + memory',
       '',
       'Discover & run:',
-      '  available <url>            tools matching a URL (JSON)',
-      '  help <tool-id>             full metadata for one tool (JSON)',
+      '  available <url>            tools matching a URL (JSON; incl. step_plan + cursor)',
+      '  help <tool-id>             full metadata + _step_plan (steps, side-effect',
+      '                             marks, last cursor / resume_from) for one tool (JSON)',
       '  list [--json]             every tool + health',
       '  run <tool-id> [--p v ...]  execute a tool over CDP (step-by-step)',
       '      --resume-from <step>   resume a partial run AT a step (never re-fires',
