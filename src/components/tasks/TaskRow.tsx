@@ -72,6 +72,15 @@ export function TaskRow({
     task.status !== 'done' &&
     task.status !== 'cancelled';
   const isClosed = task.status === 'done' || task.status === 'cancelled';
+  // task-9907ba321561 — the dimmed (muted) row is the ONLY visual that's
+  // unexplained: bright = open/in-progress/blocked/failed, dull = closed.
+  // Give the whole row a tooltip on hover so the dimming is self-explanatory,
+  // and distinguish cancelled from done (they look identical otherwise).
+  const closedTooltip = isClosed
+    ? task.status === 'cancelled'
+      ? 'Cancelled — closed without completing (dimmed)'
+      : 'Done — completed (dimmed)'
+    : undefined;
   // Source-native status that didn't map into the local enum (TypeBuild
   // failed/partial/blocked/done).
   const rawBadge =
@@ -124,6 +133,7 @@ export function TaskRow({
       ]
         .filter(Boolean)
         .join(' ')}
+      title={closedTooltip}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
