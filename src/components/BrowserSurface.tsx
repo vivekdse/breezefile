@@ -95,23 +95,29 @@ export function BrowserSurface({
   // and on unmount. Never logged or persisted until the user accepts.
   const [pendingCred, setPendingCred] = useState<CapturedCredential | null>(null);
 
-  // A saved login available for the CURRENT origin (task-4b786c018d78). Holds NO
-  // password (origin+username+count only); the password is resolved + injected
-  // in main on fill and never reaches here. Set SILENTLY on navigation when the
-  // vault has a match — it drives the toolbar key button, NOT a pop-out. The
-  // user triggers the fill explicitly via the 🔑 key button (matches the
-  // operator session, which never auto-offers).
+  // The saved logins available for the CURRENT origin (task-4b786c018d78 +
+  // ef6d465816b3). Holds NO passwords — origin + the list of usernames only; the
+  // password is resolved + injected in main on fill and never reaches here. Set
+  // SILENTLY on navigation when the vault has a match — it drives the toolbar key
+  // button, NOT a pop-out. The user triggers the fill explicitly via the 🔑 key
+  // button (matches the operator session, which never auto-offers). When MORE
+  // THAN ONE login exists for the origin we show a username PICKER instead of
+  // silently filling the first.
   const [savedLogin, setSavedLogin] = useState<{
     origin: string;
-    username: string;
-    count: number;
+    usernames: string[];
   } | null>(null);
   // Whether the manual fill-confirm dialog is open (opened by the key button).
   const [fillDialogOpen, setFillDialogOpen] = useState(false);
   const [autofilling, setAutofilling] = useState(false);
   // The origin we last queried the vault for, so a re-render or in-page nav
-  // doesn't re-query the same origin. (Per mount.)
+  // doesn't re-query the SAME origin within one page visit. Reset on every
+  // committed navigation (did-navigate) so a sign-out / fresh load RE-OFFERS the
+  // saved login rather than offering only once per mount.
   const checkedOrigin = useRef<string>('');
+  // The full URL we last saw, so a same-origin navigation (e.g. an explicit
+  // sign-out) re-enables the offer without a vault re-query (task-ef6d465816b3).
+  const lastUrl = useRef<string>('');
 
   // View lifecycle + state/credential listeners. Keyed on tabId (tab mode) or
   // viewId (operator mode) — whichever identifies the bound view.
@@ -164,7 +170,22 @@ export function BrowserSurface({
       }
       if (!origin || origin === 'null') {
         setSavedLogin(null);
+        checkedOrigin.current = '';
+        lastUrl.current = '';
         return;
+      }
+      // RE-OFFER discipline (task-ef6d465816b3): a committed navigation to a new
+      // URL — including a same-origin sign-out (…/account → …/login) — should let
+      // the saved login be offered AGAIN, not just once per mount. So we key the
+      // "already offered" guard on the full URL, and re-enable the fill dialog's
+      // availability whenever the URL changes. We still only HIT the vault when
+      // the ORIGIN changes (the username list is origin-keyed), reusing the cached
+      // list on same-origin navigations to avoid a re-fetch storm in SPAs.
+      const urlChanged = s.url !== lastUrl.current;
+      lastUrl.current = s.url;
+      if (urlChanged) {
+        // A fresh page: close any left-open dialog so the next offer is explicit.
+        setFillDialogOpen(false);
       }
       if (origin === checkedOrigin.current) return;
       checkedOrigin.current = origin;
@@ -177,8 +198,10 @@ export function BrowserSurface({
           // Ignore a late reply if the view is gone or we've since moved on.
           if (idRef.current == null || origin !== checkedOrigin.current) return;
           if (creds.length === 0) return;
-          // Note the first saved username for this origin (minimal first cut).
-          setSavedLogin({ origin, username: creds[0].username, count: creds.length });
+          // Keep ALL usernames for this origin so the UI can offer a PICKER when
+          // there is more than one (task-ef6d465816b3). Names only — never a
+          // value. Order is the vault's (most-recently-updated first).
+          setSavedLogin({ origin, usernames: creds.map((c) => c.username) });
         })
         .catch(() => {
           /* not signed in / transport — silently skip */
@@ -331,6 +354,22 @@ export function BrowserSurface({
         console.warn('[browser:record] stop failed:', r.error);
       }
     }
+  };
+
+  // Resolve + inject the saved password for one chosen username (task-4b786c018d78
+  // + ef6d465816b3). Main resolves the value from the vault and injects it into
+  // the page; it NEVER returns here — only a value-free FillResult. Used by both
+  // the single-login Fill button and the multi-login picker.
+  const fillSavedLogin = (username: string): void => {
+    const id = idRef.current;
+    if (id == null || !savedLogin) return;
+    setAutofilling(true);
+    void fm
+      .browserAutofill(id, savedLogin.origin, username)
+      .finally(() => {
+        setAutofilling(false);
+        setFillDialogOpen(false);
+      });
   };
 
   return (
@@ -507,7 +546,11 @@ export function BrowserSurface({
           onClick={() => savedLogin && setFillDialogOpen(true)}
           title={
             savedLogin
-              ? `Fill saved password${savedLogin.username ? ` for ${savedLogin.username}` : ''}`
+              ? savedLogin.usernames.length > 1
+                ? `Fill a saved password (${savedLogin.usernames.length} logins)`
+                : `Fill saved password${
+                    savedLogin.usernames[0] ? ` for ${savedLogin.usernames[0]}` : ''
+                  }`
               : 'No saved login for this site'
           }
         >
@@ -526,30 +569,41 @@ export function BrowserSurface({
               🔑
             </span>
             <span className="save-pw__title">
-              Fill saved password
-              {savedLogin.username ? ` for ${savedLogin.username}` : ''}?
+              {savedLogin.usernames.length > 1
+                ? 'Fill which saved login?'
+                : `Fill saved password${
+                    savedLogin.usernames[0] ? ` for ${savedLogin.usernames[0]}` : ''
+                  }?`}
             </span>
           </div>
           <div className="save-pw__actions">
-            <button
-              type="button"
-              className="save-pw__btn save-pw__btn--primary"
-              disabled={autofilling}
-              onClick={() => {
-                const id = idRef.current;
-                if (id == null) return;
-                setAutofilling(true);
-                // Main resolves + injects the password; it never returns here.
-                void fm
-                  .browserAutofill(id, savedLogin.origin, savedLogin.username)
-                  .finally(() => {
-                    setAutofilling(false);
-                    setFillDialogOpen(false);
-                  });
-              }}
-            >
-              {autofilling ? 'Filling…' : 'Fill'}
-            </button>
+            {savedLogin.usernames.length > 1 ? (
+              // PICKER (task-ef6d465816b3): one button per saved username so the
+              // user chooses instead of us silently filling the first. The
+              // username is a NAME only; the password is resolved + injected in
+              // main on click and never reaches the renderer.
+              savedLogin.usernames.map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  className="save-pw__btn save-pw__btn--primary"
+                  disabled={autofilling}
+                  onClick={() => fillSavedLogin(u)}
+                  title={`Fill saved password for ${u}`}
+                >
+                  {u || '(no username)'}
+                </button>
+              ))
+            ) : (
+              <button
+                type="button"
+                className="save-pw__btn save-pw__btn--primary"
+                disabled={autofilling}
+                onClick={() => fillSavedLogin(savedLogin.usernames[0] ?? '')}
+              >
+                {autofilling ? 'Filling…' : 'Fill'}
+              </button>
+            )}
             <button
               type="button"
               className="save-pw__btn"
