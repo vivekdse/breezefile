@@ -220,6 +220,15 @@ export type Task = {
   rawStatus?: string;
   priority?: number;
   claimedBy?: string | null;
+  // task-b8306d2b85c2 — lifecycle timestamps for the task timeline + claim
+  // freshness. RAW ISO strings (NON-PHI: time + email principals only, never
+  // task text). `claimedAt` rides the detail endpoint; the create timestamps
+  // are present only when the server returns them — the timeline derives the
+  // rest from the audit trail rather than faking data.
+  claimedAt?: string | null;
+  createdAtIso?: string | null;
+  updatedAtIso?: string | null;
+  createdBy?: string | null;
   // fm-j7w0 (S4) — assignee principal/email (server `assigned_to`). Non-PHI
   // (a user identity, not patient data); safe to render. null/undefined when
   // unassigned.

@@ -7,6 +7,7 @@
 import type { PrimaryAction } from './primaryAction.mjs';
 import { PrimaryActionButton } from './PrimaryActionButton';
 import { homeRel, shortDate } from './helpers';
+import { claimSummary, claimFreshness } from './lifecycle.mjs';
 import { TaskStatusDot } from '../TaskIndicators';
 import type { RemoteSchedule, Task } from '../../types';
 
@@ -191,15 +192,21 @@ export function TaskRow({
             // fm-jw9m — icon-only claimed marker. The text "you" / email used to
             // tack a second token onto every claimed row; collapse it to a
             // single glyph (accent when it's mine) with the who in the tooltip.
+            // task-b8306d2b85c2 — the tooltip now carries claim FRESHNESS (who +
+            // relative age + near-expiry) when the row has a claim timestamp;
+            // it gracefully degrades to bare ownership on list rows (the list
+            // endpoint carries no timestamps), and tints near-expiry holds.
             <span
               className={[
                 'tasks__row-claimed',
                 claimedByMe && 'tasks__row-claimed--me',
+                claimFreshness(task.claimedAt ?? null)?.expiresSoon &&
+                  'tasks__row-claimed--expiring',
               ]
                 .filter(Boolean)
                 .join(' ')}
-              aria-label={claimedByMe ? 'Claimed by you' : `Claimed by ${claimedBy}`}
-              title={claimedByMe ? 'Claimed by you' : `Claimed by ${claimedBy}`}
+              aria-label={claimSummary(claimedBy, claimedByMe, task.claimedAt ?? null)}
+              title={claimSummary(claimedBy, claimedByMe, task.claimedAt ?? null)}
             >
               ◆
             </span>

@@ -212,6 +212,13 @@ type DetailRow = ListRow & {
   task?: string | null; // decrypted body
   notes?: string | null;
   claimed_at?: string | number | null;
+  // task-b8306d2b85c2 — lifecycle timestamps the timeline UI consumes. Typed
+  // OPTIONAL: the server may not return them yet on the detail endpoint, in
+  // which case the timeline derives Created from the audit trail rather than
+  // faking it. NON-PHI (timestamps + an email principal).
+  created_at?: string | null;
+  updated_at?: string | null;
+  created_by?: string | null;
   skills?: unknown;
   // fm-lji6 (S2) — detail-only dependency fields. Memory-only; ids are
   // opaque (non-PHI) so they're safe to carry, but never persisted/logged.
@@ -310,6 +317,22 @@ function dateOnly(iso: string | null | undefined): string | null {
   // ISO 8601 'T' separator; pass through anything already day-only.
   const t = iso.indexOf('T');
   return t > 0 ? iso.slice(0, t) : iso.slice(0, 10);
+}
+
+// task-b8306d2b85c2 — normalize a claimed_at that may arrive as an ISO string
+// or an epoch (seconds or ms) into a single ISO string the UI can parse. NON-
+// PHI (a timestamp). Returns null for nullish/empty/unparseable input.
+function toIso(v: string | number | null | undefined): string | null {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') {
+    // Heuristic: < 1e12 is seconds (server epochs are seconds), else ms.
+    const ms = v < 1e12 ? v * 1000 : v;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  // Already a string — trust it as ISO (the server emits ISO 8601). Validate
+  // cheaply so a garbage value doesn't reach the UI.
+  return Number.isNaN(Date.parse(v)) ? null : v;
 }
 
 function mapListRow(row: ListRow): SourcedTask {
@@ -579,6 +602,15 @@ export class TypeBuildTaskSource implements TaskSource {
       ...base,
       // Decrypted body → notes (PHI; rendered from React state only).
       notes: detail.task ?? detail.notes ?? null,
+      // task-b8306d2b85c2 — lifecycle timestamps (NON-PHI). `claimed_at` is on
+      // the detail wire (string ISO or epoch); normalize to an ISO string so
+      // the UI's relative-age + near-expiry math has one shape. created_at/
+      // updated_at/created_by pass through verbatim when the server returns
+      // them (typed-optional — the list endpoint carries no timestamps).
+      claimedAt: toIso(detail.claimed_at),
+      createdAtIso: detail.created_at ?? null,
+      updatedAtIso: detail.updated_at ?? null,
+      createdBy: detail.created_by ?? null,
       // fm-lji6 (S2) — dependency fields (detail only). Memory-only; ids are
       // opaque (non-PHI). Used by S3's "waiting on N tasks" presentation.
       dependsOn: Array.isArray(detail.depends_on) ? detail.depends_on : undefined,

@@ -1548,3 +1548,93 @@
   text-decoration: underline;
   font: inherit;
 }
+
+/* task-b8306d2b85c2 — vertical lifecycle timeline (Created → Claimed → status
+   transitions). A node per event on a single vertical rail; the rail is drawn
+   by a ::before on each row that connects to the next. */
+.tasks__timeline-wrap {
+  margin-top: 8px;
+}
+.tasks__timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.tasks__tl-row {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 0 0 12px 0;
+}
+/* the connecting rail: a vertical line behind the node, hidden on the last row */
+.tasks__tl-row::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 12px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--border-on-panel, rgba(127, 127, 127, 0.3));
+}
+.tasks__tl-row:last-child::before {
+  display: none;
+}
+.tasks__tl-node {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--muted-on-panel);
+  box-shadow: 0 0 0 2px var(--panel-bg, var(--bg));
+}
+.tasks__tl-node--created {
+  background: var(--muted-on-panel);
+}
+.tasks__tl-node--claimed,
+.tasks__tl-node--renewed {
+  background: var(--accent);
+}
+.tasks__tl-node--released {
+  background: var(--warn, #d9a441);
+}
+.tasks__tl-node--status {
+  background: var(--accent);
+}
+.tasks__tl-main {
+  min-width: 0;
+  flex: 1;
+}
+.tasks__tl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  justify-content: space-between;
+}
+.tasks__tl-label {
+  font-size: var(--fs-sm);
+  color: var(--fg-on-panel);
+  font-weight: 500;
+}
+.tasks__tl-time {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tasks__tl-actor {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+
+/* task-b8306d2b85c2 — claim-freshness near-expiry emphasis (detail line + row
+   glyph). The 2h hold is about to lapse; tint it warn so a stale claim reads
+   as such. */
+.tasks__claim-expiry {
+  color: var(--warn, #d9a441);
+}
+.tasks__row-claimed--expiring {
+  color: var(--warn, #d9a441);
+}

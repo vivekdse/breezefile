@@ -45,6 +45,8 @@ import { PrimaryActionButton } from './PrimaryActionButton';
 import { formatOpError, formatSourceReason } from '../../errorMessages';
 import { TaskStatusDot } from '../TaskIndicators';
 import { homeRel } from './helpers';
+import { claimSummary } from './lifecycle.mjs';
+import { TaskTimeline } from './TaskTimeline';
 import '../TasksPage.css';
 import { resolveEffectiveInstructions } from '../../projects/index.mjs';
 import type {
@@ -909,11 +911,27 @@ function DetailsMeta({
             )}
             {claimedBy && (
               <div>
-                <dt>Claimed by</dt>
-                <dd>{claimedByMe ? 'you' : claimedBy}</dd>
+                <dt>Claimed</dt>
+                {/* task-b8306d2b85c2 — claim freshness (who + relative age +
+                    near-expiry against the 2h TTL), not just ownership. */}
+                <dd>
+                  {claimSummary(
+                    claimedBy,
+                    claimedByMe,
+                    task.claimedAt ?? null,
+                  ).replace(/^claimed by /, '')}
+                </dd>
               </div>
             )}
           </dl>
+        </section>
+      )}
+
+      {/* task-b8306d2b85c2 — lifecycle timeline (Created → Claimed → status
+          transitions), folded from the per-task audit trail. */}
+      {task.source === 'typebuild' && (
+        <section className="tdd__sect">
+          <TaskTimeline task={task} />
         </section>
       )}
 
