@@ -739,8 +739,6 @@ function buildAppMenu() {
             if (response === 1) target.webContents.reloadIgnoringCache();
           },
         },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomIn', accelerator: 'CmdOrCtrl+=' },
@@ -769,7 +767,26 @@ function buildAppMenu() {
     {
       // Tools-category verbs from the catalog.
       label: 'Tools',
-      submenu: [...categoryVerbItems('Tools')],
+      submenu: [
+        {
+          // DevTools is hidden on a fresh session (opt-in via BREEZE_DEVTOOLS);
+          // this gives an explicit, discoverable way to open it on demand.
+          label: 'Developer Console',
+          accelerator: 'CmdOrCtrl+Alt+I',
+          click() {
+            const w =
+              BrowserWindow.getFocusedWindow() ??
+              BrowserWindow.getAllWindows().find((b) => !b.isDestroyed()) ??
+              null;
+            if (!w) return;
+            if (w.webContents.isDevToolsOpened())
+              w.webContents.closeDevTools();
+            else w.webContents.openDevTools({ mode: 'detach' });
+          },
+        },
+        { type: 'separator' },
+        ...categoryVerbItems('Tools'),
+      ],
     },
     // Custom Window menu — the default 'windowMenu' role binds ⌘W to
      // "Close Window", which stops the renderer from using ⌘W for "close
