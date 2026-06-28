@@ -25,8 +25,8 @@
 //   l / Enter    drill in (row → scoped list or project tree; tree row → task)
 //   h / Esc      back up one zoom level
 //   /            open the UNIFIED quick-switcher (projects AND tasks). Picking a
-//                project drills into it; picking a task navigates to the Tasks
-//                page focused on that row (no fork — it reuses fm:tasks:focus).
+//                project drills into it; picking a task opens its detail DRAWER
+//                in place (no fork — it reuses fm:openTaskDetail).
 //   :            open the command palette (verbs act on the app)
 //
 // PHI: project name/description/instructions/folders are NON-PHI teaching
@@ -701,14 +701,11 @@ function ProjectsPageInner() {
     }
   }
   function openTaskDetail(task: Task) {
-    // Reuse the Tasks-tab focus path: open the Tasks tab and focus the row so
-    // the detail panel / session are reachable (same as a sidebar click).
-    dispatch({ type: 'openTasksTab' });
-    requestAnimationFrame(() => {
-      window.dispatchEvent(
-        new CustomEvent('fm:tasks:focus', { detail: { taskId: task.id } }),
-      );
-    });
+    // Open the task DETAIL DRAWER in place (same path as the double-click
+    // rowActivate → openDetail flow) so activating a task never abandons the
+    // Home/projects surface for the singleton Tasks tab — where a filtered /
+    // collapsed row would appear to vanish.
+    window.dispatchEvent(new CustomEvent('fm:openTaskDetail', { detail: { task } }));
   }
   // task-223d400ffc1a — project-scoped create now opens the SHARED TaskComposer
   // with the project pre-selected (replacing the retired ProjectTaskProposal
@@ -2126,8 +2123,8 @@ function EditProjectForm({
 
 // ── unified quick-switcher (task-4b0168979921) ──────────────────────────────────
 // '/' opens a single overlay over PROJECTS and TASKS. Picking a project drills
-// into it (re-uses the page's enterCard); picking a task navigates to the Tasks
-// page focused on that row via the existing fm:tasks:focus path — it does NOT
+// into it (re-uses the page's enterCard); picking a task opens its detail
+// drawer in place via the existing fm:openTaskDetail path — it does NOT
 // fork the task. Task titles are PHI: rendered in-app for the operator only,
 // never written to disk/logs (same contract as the L2 tree).
 type SwitchItem =
