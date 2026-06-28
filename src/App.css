@@ -293,6 +293,88 @@
 .browser-pane__addr:focus {
   border-color: var(--accent, #6ea8fe);
 }
+/* ─── Address-bar autocomplete (task-ff707aea93d8) ─────────────────────────
+   The wrapper takes the input's flex slot and anchors the ghost overlay +
+   dropdown. */
+.browser-pane__addrwrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.browser-pane__addrwrap .browser-pane__addr {
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Inline ghost completion: overlaid on the input, same font/metrics, so the
+   muted "rest" appears right after the typed text. Typed portion is transparent
+   (the real input shows it); only the rest is visible. */
+.browser-pane__ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 13px;
+  line-height: 28px;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
+}
+.browser-pane__ghost-typed {
+  color: transparent;
+}
+.browser-pane__ghost-rest {
+  color: var(--muted, #7a818c);
+}
+/* Suggestion dropdown. Anchored under the address bar; sits above the native
+   page view because the toolbar (real DOM) is composited over it within its own
+   stacking context — kept high z so it wins over sibling toolbar controls. */
+.browser-ac {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--panel, var(--bg-1, #1a1d22));
+  border: 1px solid var(--rule, var(--border-1, #2a2f37));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 50;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.browser-ac__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink, var(--fg-1));
+}
+.browser-ac__row--active {
+  background: var(--accent-soft, rgba(110, 168, 254, 0.18));
+}
+.browser-ac__kind {
+  flex: 0 0 auto;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.browser-ac__host {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+.browser-ac__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted, #7a818c);
+}
 .browser-pane__view {
   flex: 1;
   min-height: 0;

@@ -333,6 +333,13 @@ const fm = {
       'filled' | 'no-form' | 'error' | 'no-credential'
     >,
   browserSync: (id: number) => ipcRenderer.send('browser:sync', id),
+  // Address-bar autocomplete (task-ff707aea93d8): ranked suggestions from
+  // visited-URL history + a known-host seed, computed in main. NON-PHI (plain
+  // urls/titles). Mirrors `UrlSuggestion` in src/bridge.ts.
+  browserSuggest: (query: string) =>
+    ipcRenderer.invoke('browser:suggest', query) as Promise<
+      { url: string; host: string; title?: string; kind: 'history' | 'bookmark' | 'known' }[]
+    >,
   // Teach-by-recording (task-01facbf6b0bc): record the human's actions in this
   // view, capturing every selector candidate so Claude Code can pick the
   // stablest. Stop returns the recorded {action,url,candidates,best} list.

@@ -53,6 +53,7 @@ import {
   destroyBrowserView,
   reBroadcastState,
 } from './browser/views';
+import { suggest as suggestUrls, type Suggestion } from './browser/history-store';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2514,6 +2515,15 @@ end tell`;
   ipcMain.on('browser:reload', (_e, id: number) => {
     getBrowserView(id)?.webContents.reload();
   });
+
+  // Address-bar autocomplete (task-ff707aea93d8). Ranked suggestions from
+  // visited-URL history + a small known-host seed, computed in main. Shared by
+  // both surfaces (in-app tab + operator pane) since BrowserSurface is the one
+  // address bar. NON-PHI: returns plain URLs/titles only.
+  ipcMain.handle(
+    'browser:suggest',
+    (_e, query: string): Promise<Suggestion[]> => suggestUrls(query),
+  );
 
   // ─── Teach-by-recording (task-01facbf6b0bc) ───────────────────────────────
   // Record the HUMAN's actions in an embedded browser view + capture every
