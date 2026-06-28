@@ -153,6 +153,11 @@ type Fm = {
   operatorReload: () => void;
   operatorSync: () => void;
   operatorClose: () => void;
+  // Report the user's chosen UI theme to main so the "task starting" splash
+  // shown in the page view matches the client (task-3a49fb5adf24). Main
+  // re-themes the splash only while it's still showing (before the agent's
+  // first real navigation).
+  operatorSetTheme: (theme: string) => void;
   onOperatorBrowserState: (
     cb: (s: {
       url: string;

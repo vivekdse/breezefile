@@ -279,6 +279,8 @@ const fm = {
   operatorReload: () => ipcRenderer.send('operator:reload'),
   operatorSync: () => ipcRenderer.send('operator:sync'),
   operatorClose: () => ipcRenderer.send('operator:close'),
+  operatorSetTheme: (theme: string) =>
+    ipcRenderer.send('operator:set-theme', theme),
   onOperatorBrowserState: (
     cb: (s: {
       url: string;

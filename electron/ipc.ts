@@ -49,6 +49,7 @@ import type { TypeBuildTaskSource } from './sources/typebuild';
 import { registerTagStoreIpc } from './tag-store';
 import { registerLlmIpc } from './llm';
 import { wireCredentialCapture } from './browser/credential-capture';
+import { splashDataUrl } from './browser/start-splash';
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -2533,7 +2534,12 @@ end tell`;
       wc.loadURL(url);
       return { action: 'deny' };
     });
-    void wc.loadURL(opts?.url || 'https://example.com');
+    // No real URL → show the themed "task starting" splash instead of a
+    // meaningless example.com (task-3a49fb5adf24). This legacy in-app tab path
+    // isn't wired to the renderer's chosen theme (unlike the operator window),
+    // so it falls back to the default-theme splash; in practice a real
+    // opts.url is almost always supplied here.
+    void wc.loadURL(opts?.url || splashDataUrl(undefined));
     browserViews.set(id, { view, win, emit });
     return id;
   });
