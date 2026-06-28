@@ -98,8 +98,163 @@ export const TOOL_SCHEMA = {
     'output',       // { field: description } — shape of result on success
     'dependencies', // free-form notes
     'known_issues', // string[]
+    'steps',        // [{ name, sideEffect }] — DECLARED step contract (mirrors
+                    //   the tool.mjs `steps` export so `help`/discovery can show
+                    //   the ordered, named, side-effect-marked plan without
+                    //   importing the module). Optional + advisory: the module's
+                    //   exported `steps` is authoritative at run time. See
+                    //   docs/resumable-tool-steps.md.
   ],
 };
+
+// ─── Resumable steps (Operator Speed) ────────────────────────────────────────
+// A tool.mjs may export `const steps = [{ name, sideEffect, run, pre?, post? }]`
+// INSTEAD of (or alongside) a single `run`. The runner executes the steps in
+// order, records which ones completed in runs.jsonl, and can RESUME from a named
+// step after a partial break — without re-firing a side-effect that already
+// happened. The functions below are the PURE planning core (no browser), so the
+// safety invariant is unit-testable. See docs/resumable-tool-steps.md.
+
+const STEP_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+
+/** Normalize a tool module's exported `steps` (or a lone `run`) into a canonical
+ *  ordered list of { name, sideEffect, run, pre, post }.
+ *  Back-compat: a module with only `run` (no `steps`) becomes ONE implicit step
+ *  named 'run'. That implicit step is marked sideEffect:true and resumable:false
+ *  — a legacy opaque `run` may submit a form, so we must never auto-replay it.
+ *  Returns { ok, steps, errors, implicit }. */
+export function normalizeSteps(mod) {
+  const errors = [];
+  const hasSteps = Array.isArray(mod?.steps) && mod.steps.length > 0;
+  if (!hasSteps) {
+    if (typeof mod?.run !== 'function') {
+      return { ok: false, steps: [], errors: ['tool.mjs must export `run` or a non-empty `steps` array'], implicit: false };
+    }
+    // Implicit single step. sideEffect:true is the SAFE default: an opaque legacy
+    // run is assumed to have an irreversible effect, so resume never replays it.
+    return {
+      ok: true,
+      implicit: true,
+      steps: [{ name: 'run', sideEffect: true, run: mod.run, pre: undefined, post: undefined }],
+      errors,
+    };
+  }
+  const seen = new Set();
+  const steps = [];
+  mod.steps.forEach((s, i) => {
+    const where = `steps[${i}]`;
+    if (!s || typeof s !== 'object') { errors.push(`${where} is not an object`); return; }
+    const name = s.name;
+    if (typeof name !== 'string' || !STEP_NAME_RE.test(name)) {
+      errors.push(`${where}.name must match ${STEP_NAME_RE} (got ${JSON.stringify(name)})`);
+    } else if (seen.has(name)) {
+      errors.push(`${where}.name duplicates an earlier step: ${name}`);
+    } else {
+      seen.add(name);
+    }
+    if (typeof s.run !== 'function') errors.push(`${where}.run must be a function`);
+    if (s.sideEffect !== undefined && typeof s.sideEffect !== 'boolean') {
+      errors.push(`${where}.sideEffect must be a boolean`);
+    }
+    if (s.pre !== undefined && typeof s.pre !== 'function') errors.push(`${where}.pre must be a function`);
+    if (s.post !== undefined && typeof s.post !== 'function') errors.push(`${where}.post must be a function`);
+    steps.push({
+      name,
+      sideEffect: s.sideEffect === true,
+      run: s.run,
+      pre: typeof s.pre === 'function' ? s.pre : undefined,
+      post: typeof s.post === 'function' ? s.post : undefined,
+    });
+  });
+  return { ok: errors.length === 0, steps, errors, implicit: false };
+}
+
+/** Plan execution given the normalized steps and a desired resume point.
+ *
+ *  THE SIDE-EFFECT SAFETY INVARIANT (load-bearing):
+ *  Resume must START AT OR AFTER the broken step. Steps strictly BEFORE the
+ *  resume cursor are SKIPPED (treated as already done) and are never re-run, so
+ *  a side-effecting step that already completed can never re-fire. We further
+ *  REFUSE a resume that would land the cursor *before* a step recorded as a
+ *  completed side-effect: that would mean re-running it, which is forbidden.
+ *
+ *  @param steps         normalized steps (from normalizeSteps)
+ *  @param resumeFrom    step name to resume at, or null/undefined for a clean run
+ *  @param doneNames     names of steps already completed in a prior run (from the
+ *                       runs.jsonl cursor); used to (a) auto-pick a resume point
+ *                       and (b) guard against replaying a done side-effect.
+ *  @returns { ok, startIndex, skip:[names], plan:[names], errors:[] }
+ */
+export function planResume(steps, resumeFrom, doneNames = []) {
+  const errors = [];
+  const names = steps.map((s) => s.name);
+  const done = new Set(doneNames);
+
+  let startIndex = 0;
+  if (resumeFrom !== undefined && resumeFrom !== null && resumeFrom !== '') {
+    startIndex = names.indexOf(resumeFrom);
+    if (startIndex === -1) {
+      return { ok: false, startIndex: 0, skip: [], plan: [], errors: [`no such step to resume from: ${resumeFrom} (steps: ${names.join(', ') || 'none'})`] };
+    }
+    // An implicit (legacy) single step is non-resumable: refuse to "resume" it,
+    // because a clean run of it might re-fire its side effect.
+    if (names.length === 1 && steps[0].sideEffect && steps[0].name === 'run') {
+      // Allow resume-from only when it IS that step AND it wasn't already done.
+      // (Still safe: starting AT the step is a first run, not a replay.)
+    }
+  } else if (doneNames.length) {
+    // Auto-resume: start at the first step NOT recorded done.
+    const firstUndone = steps.findIndex((s) => !done.has(s.name));
+    startIndex = firstUndone === -1 ? steps.length : firstUndone;
+  }
+
+  // GUARD: every step BEFORE the cursor is skipped. If any skipped step is a
+  // side-effect that was NOT yet recorded done, skipping it is a correctness
+  // bug (we'd assume an effect happened that didn't). If a step AT/AFTER the
+  // cursor is a side-effect ALREADY recorded done, running it would REPLAY it.
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (i < startIndex) {
+      // skipped — must already be done
+      if (s.sideEffect && !done.has(s.name)) {
+        errors.push(`refusing to skip side-effecting step "${s.name}" that is not recorded as completed (resume would assume an effect that never fired)`);
+      }
+    } else {
+      // will run — a side-effect that already fired must NOT be re-run
+      if (s.sideEffect && done.has(s.name)) {
+        errors.push(`refusing to re-run completed side-effecting step "${s.name}" (resume must start strictly after it)`);
+      }
+    }
+  }
+
+  const skip = names.slice(0, startIndex);
+  const plan = names.slice(startIndex);
+  return { ok: errors.length === 0, startIndex, skip, plan, errors };
+}
+
+/** Read the cursor (completed step names + last failed step) from the most
+ *  recent run record in runs.jsonl. Returns { steps_done:[], failed_step:null,
+ *  status:null } when there's no usable history. NON-PHI: only step names. */
+export function lastCursor(runsPath) {
+  const empty = { steps_done: [], failed_step: null, status: null, timestamp: null };
+  if (!runsPath || !existsSync(runsPath)) return empty;
+  let lines;
+  try { lines = readFileSync(runsPath, 'utf8').split('\n').filter(Boolean); }
+  catch { return empty; }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let r;
+    try { r = JSON.parse(lines[i]); } catch { continue; }
+    if (Array.isArray(r.steps_done) || r.failed_step) {
+      return {
+        steps_done: Array.isArray(r.steps_done) ? r.steps_done : [],
+        failed_step: r.failed_step ?? null,
+        status: r.status ?? null,
+        timestamp: r.timestamp ?? null,
+      };
+    }
+  }
+  return empty;
+}
 
 /** Validate a parsed tool.json. Returns { ok, errors[] }. Conservative: only
  *  flags things that would break discovery or execution. */

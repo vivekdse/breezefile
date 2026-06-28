@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -130,6 +130,72 @@ test('run with a missing required param exits 7 (precondition) with JSON', () =>
     const out = JSON.parse(r.stdout);
     assert.equal(out.code, 7);
     assert.equal(out.error.category, 'precondition_not_met');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ─── resumable steps (Operator Speed) — offline via --dry-run ────────────────
+
+test('--dry-run shows the step plan for a steps[] tool (no browser)', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    const r = run(['run', 'gmail-prefill-send', '--to', 'a@b.com', '--dry-run'], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const o = JSON.parse(r.stdout);
+    assert.equal(o.dry_run, true);
+    assert.equal(o.implicit_single_step, false);
+    // ordered, named, side-effect-marked
+    assert.deepEqual(o.steps, [
+      { name: 'compose', sideEffect: false },
+      { name: 'send', sideEffect: true },
+    ]);
+    assert.deepEqual(o.plan, ['compose', 'send']); // clean run plans all
+    assert.deepEqual(o.skip, []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('--dry-run --resume-from send skips the done compose step', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    // Seed a partial cursor: compose done, send broke (not done).
+    appendFileSync(
+      join(dir, 'gmail-prefill-send', 'runs.jsonl'),
+      JSON.stringify({ timestamp: '2026-06-28T00:00:00Z', status: 'partial', steps_done: ['compose'], failed_step: 'send' }) + '\n',
+    );
+    const r = run(['run', 'gmail-prefill-send', '--to', 'a@b.com', '--resume-from', 'send', '--dry-run'], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const o = JSON.parse(r.stdout);
+    assert.equal(o.start_index, 1);
+    assert.deepEqual(o.skip, ['compose']);
+    assert.deepEqual(o.plan, ['send']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('resume REFUSES to re-fire a completed side-effect step (exit 7)', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    // Cursor says send ALREADY fired. Asking to resume-from send must be refused
+    // — this is the load-bearing no-double-submit gate.
+    appendFileSync(
+      join(dir, 'gmail-prefill-send', 'runs.jsonl'),
+      JSON.stringify({ timestamp: '2026-06-28T00:00:00Z', status: 'partial', steps_done: ['compose', 'send'], failed_step: null }) + '\n',
+    );
+    const r = run(['run', 'gmail-prefill-send', '--to', 'a@b.com', '--resume-from', 'send', '--dry-run'], dir);
+    assert.equal(r.status, 7, r.stdout + r.stderr);
+    const o = JSON.parse(r.stdout);
+    assert.equal(o.error.category, 'precondition_not_met');
+    assert.match(o.error.message, /re-run completed side-effecting step "send"/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('legacy single-run tool dry-run shows ONE implicit side-effect step', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    // web-form-login is still a single-`run` tool — proves back-compat.
+    const r = run(['run', 'web-form-login', '--username', 'u', '--password', 'p', '--dry-run'], dir);
+    assert.equal(r.status, 0, r.stderr);
+    const o = JSON.parse(r.stdout);
+    assert.equal(o.implicit_single_step, true);
+    assert.deepEqual(o.steps, [{ name: 'run', sideEffect: true }]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

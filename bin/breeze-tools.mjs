@@ -40,6 +40,9 @@ import {
   toolHealth,
   writeTool,
   deleteTool,
+  normalizeSteps,
+  planResume,
+  lastCursor,
 } from '../electron/browser/tools/registry.mjs';
 import {
   getMemoryOnline,
@@ -184,8 +187,10 @@ async function cmdRun(args) {
     }
   }
   // Pass through any extra --flags too (tools may accept undeclared params).
+  // Runner-reserved flags never become tool params.
+  const RESERVED = new Set(['_', 'verbose', 'headed', 'json', 'resume-from', 'dry-run', 'target']);
   for (const [k, val] of Object.entries(args)) {
-    if (k === '_' || k === 'verbose' || k === 'headed' || k === 'json') continue;
+    if (RESERVED.has(k)) continue;
     if (params[k] === undefined) params[k] = val;
   }
 
@@ -198,12 +203,55 @@ async function cmdRun(args) {
     out({ status: 'error', code: EXIT.FAILURE, error: { category: 'precondition_not_met', message: `tool.mjs load failed: ${e.message}` } });
     return EXIT.FAILURE;
   }
-  if (typeof mod.run !== 'function') {
-    out({ status: 'error', code: EXIT.FAILURE, error: { category: 'precondition_not_met', message: 'tool.mjs must export `async function run(ctx, params)`' } });
+
+  // Normalize into ordered, named steps. A legacy single-`run` tool becomes ONE
+  // implicit, non-resumable, side-effect step (see normalizeSteps).
+  const norm = normalizeSteps(mod);
+  if (!norm.ok) {
+    out({ status: 'error', code: EXIT.FAILURE, error: { category: 'precondition_not_met', message: norm.errors.join('; ') } });
     return EXIT.FAILURE;
+  }
+  const steps = norm.steps;
+
+  // Plan a resume. `--resume-from <step>` is explicit; otherwise, if the last
+  // run left a cursor, we AUTO-resume from the first not-yet-completed step.
+  const resumeFrom = args['resume-from'] === true ? null : args['resume-from'];
+  const cursor = lastCursor(t.runsPath);
+  // Only use the prior cursor for auto-resume when that run ended PARTIAL
+  // (code 6). A clean success or a hard failure starts fresh unless the agent
+  // explicitly asks with --resume-from.
+  const autoDone = (!resumeFrom && cursor.status === 'partial') ? cursor.steps_done : [];
+  const explicitDone = resumeFrom ? cursor.steps_done : autoDone;
+  const plan = planResume(steps, resumeFrom, explicitDone);
+  if (!plan.ok) {
+    // A refused resume is a precondition error — NOT a silent re-run. This is the
+    // load-bearing side-effect-safety gate.
+    log.fail(`resume refused: ${plan.errors.join('; ')}`);
+    out({ status: 'error', code: EXIT.PRECONDITION, error: { category: 'precondition_not_met', message: plan.errors.join('; '), resumable: steps.filter((s) => !s.sideEffect).map((s) => s.name) } });
+    return EXIT.PRECONDITION;
+  }
+
+  // --dry-run: print the plan and exit WITHOUT a browser. Lets the agent (and
+  // tests) verify resume math + the side-effect gate offline.
+  if (args['dry-run']) {
+    out({
+      status: 'success',
+      code: EXIT.SUCCESS,
+      tool: t.id,
+      dry_run: true,
+      implicit_single_step: norm.implicit,
+      resume_from: resumeFrom || null,
+      cursor: { steps_done: cursor.steps_done, failed_step: cursor.failed_step, status: cursor.status },
+      start_index: plan.startIndex,
+      skip: plan.skip,
+      plan: plan.plan,
+      steps: steps.map((s) => ({ name: s.name, sideEffect: s.sideEffect })),
+    });
+    return EXIT.SUCCESS;
   }
 
   log.ok(`${t.meta.name} v${t.meta.version || '1.0'}`);
+  if (plan.skip.length) log.ok(`resuming — skipping done steps: ${plan.skip.join(', ')}`);
 
   // Lazy-load the CDP layer (playwright-core) — only `run` needs a browser.
   let CDP_URL, connect, openBrowserTab, resolvePage, loc;
@@ -235,10 +283,24 @@ async function cmdRun(args) {
     return code;
   }
 
-  const ctx = { page, browser, log, loc, EXIT, ToolError, params, verbose };
-  const finish = (status, code, payload) => {
+  // `state` is the cross-step scratchpad: a step can stash data (e.g. a located
+  // selector) for a later step. NON-PHI by convention — never put a form value
+  // here. `ctx.state` is also visible to a legacy single-`run` tool (harmless).
+  const state = {};
+  const ctx = { page, browser, log, loc, EXIT, ToolError, params, verbose, state };
+
+  // Steps skipped by the resume plan count as already done — seed the cursor so
+  // a fresh partial record still reflects the full completed set.
+  const stepsDone = [...plan.skip];
+  const finish = (status, code, payload, extra = {}) => {
     const duration = started ? Date.now() - started : null;
-    recordRun(t.runsPath, { timestamp: nowIso(), status, code, duration_ms: duration, params: redact(params, declared) });
+    // runs.jsonl is NON-PHI: only step NAMES, statuses, indices — never values.
+    recordRun(t.runsPath, {
+      timestamp: nowIso(), status, code, duration_ms: duration,
+      params: redact(params, declared),
+      steps_done: stepsDone,
+      failed_step: extra.failed_step ?? null,
+    });
     out({
       status,
       code,
@@ -246,25 +308,70 @@ async function cmdRun(args) {
       version: t.meta.version || '1.0',
       timestamp: nowIso(),
       duration_ms: duration,
+      steps_done: stepsDone,
       ...payload,
     });
   };
 
   try {
-    const result = (await mod.run(ctx, params)) ?? {};
+    let lastResult = {};
+    for (let i = plan.startIndex; i < steps.length; i++) {
+      const step = steps[i];
+      const tag = `[${i + 1}/${steps.length}] ${step.name}${step.sideEffect ? ' (side-effect)' : ''}`;
+      // Optional pre-condition hook: a falsy/throwing pre aborts BEFORE the
+      // step's body runs — for a side-effect step this is the human-gate / guard
+      // point (it never fired). A thrown ToolError is categorized as usual.
+      if (step.pre) {
+        log.debug(`pre: ${step.name}`);
+        const okPre = await step.pre(ctx, params, state);
+        if (okPre === false) {
+          throw new ToolError('precondition_not_met', `pre-condition for step "${step.name}" not met`, { step: step.name });
+        }
+      }
+      log.step(tag);
+      const r = (await step.run(ctx, params, state)) ?? {};
+      // Optional post-condition hook: verify the step actually achieved its goal.
+      if (step.post) {
+        log.debug(`post: ${step.name}`);
+        const okPost = await step.post(ctx, params, state, r);
+        if (okPost === false) {
+          throw new ToolError('validation_failed', `post-condition for step "${step.name}" failed`, { step: step.name });
+        }
+      }
+      // A step completes ONLY after its body (and post) succeed. Recording here
+      // is what makes a side-effect step's completion durable: on the next
+      // resume, planResume sees it in steps_done and refuses to re-run it.
+      stepsDone.push(step.name);
+      lastResult = (r && typeof r === 'object') ? { ...lastResult, ...r } : lastResult;
+    }
     log.ok(`SUCCESS${started ? ` (${Date.now() - started}ms)` : ''}`);
-    finish('success', EXIT.SUCCESS, { result, validation: result.__validation, warnings: result.__warnings, suggestions: result.__suggestions });
+    finish('success', EXIT.SUCCESS, { result: lastResult, validation: lastResult.__validation, warnings: lastResult.__warnings, suggestions: lastResult.__suggestions });
     return EXIT.SUCCESS;
   } catch (e) {
+    // Which step broke? The next not-yet-done step is where a resume restarts.
+    const failedStep = steps[stepsDone.length === plan.skip.length ? plan.startIndex : steps.findIndex((s) => !stepsDone.includes(s.name))];
+    const failed_step = failedStep ? failedStep.name : null;
+    const nextStep = failed_step; // resume restarts AT the broken step
     if (e instanceof ToolError) {
-      const code = ERROR_CATEGORY[e.category] ?? EXIT.FAILURE;
+      let code = ERROR_CATEGORY[e.category] ?? EXIT.FAILURE;
+      // A break PARTWAY through a multi-step tool is a PARTIAL (exit 6) when some
+      // steps already completed — the resumable signal. A break on the very
+      // first step keeps the category's own code (nothing to resume yet).
+      const madeProgress = stepsDone.length > plan.skip.length;
+      if (madeProgress && steps.length > 1) code = EXIT.PARTIAL;
       log.fail(`${e.category}: ${e.message}`);
-      finish('failure', code, { error: { category: e.category, message: e.message, ...e.extra } });
+      finish(code === EXIT.PARTIAL ? 'partial' : 'failure', code,
+        { error: { category: e.category, message: e.message, ...e.extra }, failed_step, resume_from: nextStep },
+        { failed_step });
       return code;
     }
     log.fail(e.message || String(e));
-    finish('error', EXIT.FAILURE, { error: { category: 'unexpected_state', message: e.message || String(e), stack: verbose ? e.stack : undefined } });
-    return EXIT.FAILURE;
+    const madeProgress = stepsDone.length > plan.skip.length;
+    const code = (madeProgress && steps.length > 1) ? EXIT.PARTIAL : EXIT.FAILURE;
+    finish(code === EXIT.PARTIAL ? 'partial' : 'error', code,
+      { error: { category: 'unexpected_state', message: e.message || String(e), stack: verbose ? e.stack : undefined }, failed_step, resume_from: nextStep },
+      { failed_step });
+    return code;
   } finally {
     // Detach the CDP client only — never close Breeze or the tab.
     if (browser) await browser.close().catch(() => {});
@@ -424,7 +531,11 @@ function usage() {
       '  available <url>            tools matching a URL (JSON)',
       '  help <tool-id>             full metadata for one tool (JSON)',
       '  list [--json]             every tool + health',
-      '  run <tool-id> [--p v ...]  execute a tool over CDP',
+      '  run <tool-id> [--p v ...]  execute a tool over CDP (step-by-step)',
+      '      --resume-from <step>   resume a partial run AT a step (never re-fires',
+      '                             a completed side-effect step; exit 6 = partial)',
+      '      --dry-run              print the resume plan (steps + side-effect',
+      '                             marks) without a browser',
       '',
       'Author (learn): tool = a dir with tool.json + tool.mjs (exports run(ctx,params))',
       '  create <id> --meta <tool.json> --script <tool.mjs>   (or --from <dir>)',

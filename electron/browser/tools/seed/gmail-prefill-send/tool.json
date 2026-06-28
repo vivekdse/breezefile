@@ -4,8 +4,12 @@
   "description": "Opens a Gmail compose window pre-filled with to/subject/body using Gmail's prefill URL, instead of clicking Compose and filling fields one by one. Optionally clicks Send. This is the canonical 'prefer a faster path than UI' tool (see docs/Playwright agent.md).",
   "match": ["mail.google.com"],
   "opens": "https://mail.google.com/mail/u/0/#inbox",
-  "version": "1.0",
+  "version": "1.1",
   "status": "active",
+  "steps": [
+    { "name": "compose", "sideEffect": false, "description": "navigate to the prefill URL and confirm the compose window rendered (idempotent — safe to re-run/resume)" },
+    { "name": "send", "sideEffect": true, "description": "click Send (IRREVERSIBLE). Gated on --send; recorded once done so a resume never re-fires it." }
+  ],
   "params": {
     "to": { "required": true, "type": "string", "description": "recipient email(s), comma-separated" },
     "subject": { "required": false, "type": "string", "description": "subject line" },

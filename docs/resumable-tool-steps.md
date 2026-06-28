@@ -1,0 +1,117 @@
+# Resumable tool steps (Operator Speed)
+
+A browser-automation **tool** used to be one opaque `async run(ctx, params)`. Its
+"steps" were just `log.step()` lines, so a partial break could not be resumed and
+a re-run re-fired side effects (e.g. a double form-submit — which violates the
+human-gated-submit rule). This change turns a tool into **ordered, named steps**,
+each marked idempotent vs side-effecting, with a runner that can **resume** from a
+given step without re-firing a completed side effect.
+
+Code: `electron/browser/tools/registry.mjs` (pure planning core) and
+`bin/breeze-tools.mjs` (`run` command). Worked example:
+`electron/browser/tools/seed/gmail-prefill-send/`.
+
+## The `steps[]` schema
+
+A `tool.mjs` may export an ordered `steps` array **instead of (or alongside)** a
+single `run`:
+
+```js
+export const steps = [
+  { name: 'compose', sideEffect: false, run: composeFn },
+  { name: 'send',    sideEffect: true,  pre: gateFn, post: verifyFn, run: sendFn },
+];
+```
+
+Each step is:
+
+| field        | required | meaning |
+|--------------|----------|---------|
+| `name`       | yes      | unique, `^[a-z0-9][a-z0-9_-]*$`. The resume handle + the only thing written to `runs.jsonl`. |
+| `sideEffect` | no (default `false`) | `true` = irreversible (submit/send/pay). Governs the safety gate. |
+| `run`        | yes      | `async (ctx, params, state) => result` — the step body. |
+| `pre`        | no       | `async (ctx, params, state) => boolean` — guard run **before** the body. Returning `false` aborts the step *before* it fires (the human-gate point for a side effect). |
+| `post`       | no       | `async (ctx, params, state, result) => boolean` — verify the step achieved its goal; `false` fails it. |
+
+`ctx` gains a `state` scratchpad shared across steps (NON-PHI by convention —
+never a form value). `tool.json` may also **declare** `steps: [{ name, sideEffect,
+description }]` so `help`/discovery can show the plan without importing the module;
+the module's exported `steps` is authoritative at run time.
+
+### Back-compatibility
+
+A tool that exports **only `run`** (no `steps`) is normalized to **one implicit
+step** named `run`, marked `sideEffect: true` and non-resumable. `sideEffect:true`
+is the *safe* default: an opaque legacy run might submit a form, so the runner must
+never auto-replay it. Existing single-`run` tools and existing playbook calls work
+unchanged.
+
+## Cursor / resume mechanism
+
+The cursor lives in the **existing `runs.jsonl`** (no parallel store). Each run
+record gains two NON-PHI fields:
+
+```jsonc
+{ "timestamp": "...", "status": "partial", "code": 6,
+  "steps_done": ["compose"], "failed_step": "send", "params": { ... } }
+```
+
+- On a partial break (some steps done, more remain) the runner emits **exit code 6
+  (PARTIAL)** — the pre-existing "partial" signal — and the JSON output carries
+  `failed_step` + `resume_from` (the step to restart at).
+- `run <tool> --resume-from <step>` restarts **at** that named step. Steps before
+  it are skipped (treated as already done).
+- With no `--resume-from`, if the **last** run record was `partial`, the runner
+  **auto-resumes** from the first step not in `steps_done`. A clean success or a
+  hard failure starts fresh.
+- `run <tool> --dry-run` prints the computed plan (`skip`, `plan`, `start_index`,
+  per-step `sideEffect`) **without a browser** — the offline check used by tests
+  and by an agent deciding how to resume.
+
+`lastCursor()` reads the most recent record carrying step data; `planResume()`
+computes `{ startIndex, skip, plan }` purely.
+
+## The side-effect-safety invariant (load-bearing)
+
+> **Resume must START AT OR AFTER the broken step, and a completed side-effect
+> step must never re-fire.**
+
+This is enforced in `planResume()` by two checks over the steps, given the resume
+cursor (`startIndex`) and the set of `steps_done` from `runs.jsonl`:
+
+1. **No replay.** For every step **at or after** the cursor: if it is a
+   `sideEffect` step that is **already in `steps_done`**, the resume is *refused*
+   (exit 7, precondition) — running it would re-fire it. Because a step is written
+   to `steps_done` **only after its body (and `post`) succeed**, a completed side
+   effect is durably recorded; a resume can therefore only legally start *strictly
+   after* it.
+
+2. **No phantom skip.** For every step **before** the cursor (which will be
+   skipped): if it is a `sideEffect` step **not** in `steps_done`, the resume is
+   refused — skipping it would falsely assume an effect that never happened.
+
+Why this is provably safe for the load-bearing case (double-submit):
+
+- A side-effect step is recorded done **only on success**. So after a partial
+  break, the broken side-effect step is *either* recorded done (it fired) *or*
+  not (it didn't).
+- If it fired: it is in `steps_done`. Any resume that would run it again (cursor
+  at-or-before it) is refused by check (1). The only legal resume starts *after*
+  it — so it cannot fire twice.
+- If it did not fire: it is the failed step; resume restarts **at** it (a first
+  attempt, not a replay). Skipping it is impossible without tripping check (2).
+
+The default `--resume-from <broken-step>` always lands the cursor **at** the
+broken step, never before it — so completed earlier side effects are in the `skip`
+set *and* recorded done (passing check 2), and the broken step is run for the first
+time. There is no resume path that re-runs a recorded side effect.
+
+Additionally, the legacy implicit `run` step is `sideEffect:true`, so the runner
+never auto-resumes it.
+
+## Deferred follow-ups
+
+- Convert the remaining seed tools (`web-form-login`, `extract-table`) to `steps[]`
+  (login: locate-fields step [idempotent] + submit step [side-effect]).
+- Wire a **repair tier** in `electron/browser/automation.ts` / the playbook so an
+  exit-6 partial auto-suggests `--resume-from <failed_step>` after a tool patch.
