@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { BrowserWindow, WebContentsView } from 'electron';
 import { currentRecording as currentBrowserRecording } from './record.ts';
 import { wireCredentialCapture } from './credential-capture';
-import { splashDataUrl } from './start-splash';
+import { resolveStartUrl } from './start-splash';
 
 // This chunk is bundled into dist-electron/ (same dir as the built preloads),
 // so record-preload.mjs resolves here exactly as it does from ipc.ts/window.ts.
@@ -133,7 +133,10 @@ export function createBrowserView(
     void wc.loadURL(url);
     return { action: 'deny' };
   });
-  void wc.loadURL(opts.url || splashDataUrl(undefined));
+  // THE chokepoint: empty/missing OR a stale example.com placeholder both
+  // resolve to the themed splash — example.com must never load on task start
+  // (task-d85d23f3aea4). A real url passes through.
+  void wc.loadURL(resolveStartUrl(opts.url));
   browserViews.set(id, { view, win, emit, fill: opts.fill });
   return id;
 }

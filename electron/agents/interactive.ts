@@ -259,7 +259,13 @@ export async function runTaskInteractive(
   // doing at once. See electron/browser/window.ts + OperatorSession.tsx.
   // Reuse re-points the window to THIS ptyId (window.ts), so a second Start
   // shows the new session instead of a stale, dead mirror.
-  if (playwright) openBrowserWindow('https://example.com', ptyId);
+  //
+  // No start url: the operator page view defaults to the themed "starting your
+  // task" splash (task-3a49fb5adf24 / task-d85d23f3aea4) and the agent drives
+  // the first REAL navigation via the helper's `goto`. We used to pass a literal
+  // 'https://example.com' here, which made task start flash that meaningless
+  // placeholder instead of the splash — never do that.
+  if (playwright) openBrowserWindow(undefined, ptyId);
 
   return { run, ptyId, launched: true };
 }

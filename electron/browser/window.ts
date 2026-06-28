@@ -29,7 +29,12 @@ import { killManagedPty } from '../ipc';
 import { createBrowserView, getBrowserView, destroyBrowserView } from './views';
 // The themed "task starting" splash shown until the agent's first real
 // navigation (task-3a49fb5adf24) — replaces the old example.com placeholder.
-import { splashDataUrl, isSplashUrl, SPLASH_DEFAULT_THEME } from './start-splash';
+import {
+  splashDataUrl,
+  isSplashUrl,
+  resolveStartUrl,
+  SPLASH_DEFAULT_THEME,
+} from './start-splash';
 
 // The bundle is ESM — `__dirname` doesn't exist. Derive it from this chunk's
 // URL (resolves to dist-electron/, where preload.mjs lives) so the operator
@@ -71,7 +76,14 @@ export function getBrowserWindow(): BrowserWindow | null {
  *  HTTP `open-browser` verb). Reuse does NOT renavigate — the agent drives
  *  navigation via the helper's `goto`. */
 export function openBrowserWindow(url?: string, ptyId?: number): void {
-  if (url) pendingUrl = url;
+  // Resolve the requested url through the single chokepoint: empty/missing OR a
+  // stale example.com placeholder both become the themed splash (in the current
+  // splashTheme) rather than overriding it — example.com must never load on task
+  // start (task-d85d23f3aea4). interactive.ts used to pass a literal
+  // 'https://example.com' here; the resolver neutralizes that and any
+  // example.com start_url that reaches the `open-browser` verb. A REAL url
+  // (the agent's explicit `goto` target) still passes through.
+  pendingUrl = resolveStartUrl(url, splashTheme);
   const prevPtyId = operatorPtyId;
   if (ptyId != null) operatorPtyId = ptyId;
   const existing = getBrowserWindow();
