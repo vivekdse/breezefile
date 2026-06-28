@@ -19,6 +19,7 @@ import { writeFileSync, unlinkSync, chmodSync, mkdirSync, existsSync } from 'nod
 import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { dispatchTerminalFg } from './ipc';
+import { openBrowserWindow } from './browser/window';
 import { clearSessionTokens } from './session-tokens';
 import { createTaskApi, sendJson, send, readJson } from './core/task-http';
 
@@ -207,15 +208,14 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const result = await controlRenderer<unknown>({ kind: 'listTabs' });
       return sendJson(res, 200, result);
     }
-    // SPIKE (spike/playwright-cdp): open an EMBEDDED browser tab on demand in
-    // the main window (kind:'browser' → BrowserPane), which the in-app agent
-    // (via electron/browser/cli.mjs `open`) then drives over CDP. Previously
-    // this opened a separate "operator" window; the session + browser now both
-    // live in the main window (the operator window was sticky to one ptyId and
-    // leaked a view per launch — see electron/agents/interactive.ts).
+    // SPIKE (spike/playwright-cdp): open (or focus) the operator session window
+    // on demand. Lets the in-app agent (via electron/browser/cli.mjs `open`)
+    // navigate the browser pane it drives over CDP. The window already exists
+    // for an interactive playwright session (interactive.ts opens it at launch);
+    // this just points it at the requested url.
     if (p === '/app/open-browser' && m === 'POST') {
       const body = await readJson<{ url?: string }>(req).catch(() => ({}) as { url?: string });
-      await controlRenderer({ kind: 'openBrowser', url: body.url });
+      openBrowserWindow(body.url);
       return sendJson(res, 200, { ok: true });
     }
     // Cooperative-boundary PII/data injection (docs/pii-data-injection-design.md).

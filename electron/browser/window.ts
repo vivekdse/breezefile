@@ -59,11 +59,21 @@ export function getOperatorPageView(): WebContentsView | null {
  *  navigation via the helper's `goto`. */
 export function openBrowserWindow(url?: string, ptyId?: number): void {
   if (url) pendingUrl = url;
+  const prevPtyId = operatorPtyId;
   if (ptyId != null) operatorPtyId = ptyId;
   const existing = getBrowserWindow();
   if (existing) {
     if (existing.isMinimized()) existing.restore();
     existing.focus();
+    // Re-point the terminal pane to a NEW session. The ptyId is baked into the
+    // React chrome's `#operator=<ptyId>` hash at load time, so a reused window
+    // keeps mirroring the FIRST session's (now-dead) PTY unless we reload it
+    // with the new id. The page WebContentsView is parented to the window's
+    // contentView (not the chrome's webContents), so it survives this reload —
+    // the browser pane is untouched; only the Claude terminal re-attaches.
+    if (ptyId != null && ptyId !== prevPtyId) {
+      loadOperatorChrome(existing, ptyId);
+    }
     return;
   }
   const win = new BrowserWindow({
@@ -100,6 +110,16 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
     }
   });
   win.on('closed', () => {
+    // Explicitly tear down the page WebContentsView. Electron does not always
+    // GC a child view when its window closes, which otherwise leaks one live
+    // off-screen page (a stray CDP target) per operator session.
+    if (pageView && !pageView.webContents.isDestroyed()) {
+      try {
+        pageView.webContents.close();
+      } catch {
+        /* already gone */
+      }
+    }
     if (browserWin === win) {
       browserWin = null;
       pageView = null;
@@ -110,6 +130,16 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
   // The whole window is the operator React chrome. It renders a left
   // placeholder for the page and a right terminal pane, measures the
   // placeholder, and streams its rect via `operator:browser-bounds`.
+  loadOperatorChrome(win, ptyId);
+
+  fillScreen(win);
+  ensurePageView(win);
+}
+
+// Load (or reload) the operator React chrome with the `#operator=<ptyId>` hash
+// that pins which PTY the right pane mirrors. Reused on a fresh Start to
+// re-point an already-open window at the new session.
+function loadOperatorChrome(win: BrowserWindow, ptyId?: number): void {
   const hash = ptyId != null ? `operator=${ptyId}` : 'operator';
   if (VITE_DEV_SERVER_URL) {
     void win.webContents.loadURL(`${VITE_DEV_SERVER_URL}#${hash}`);
@@ -119,9 +149,6 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
       { hash },
     );
   }
-
-  fillScreen(win);
-  ensurePageView(win);
 }
 
 // Create the page WebContentsView (the agent's CDP target) parented to the
