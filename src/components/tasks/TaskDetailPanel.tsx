@@ -18,7 +18,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getTask,
-  getTypebuildAudit,
   listTypebuildUsers,
   taskSourceAction,
   todayISO,
@@ -29,10 +28,11 @@ import { formatOpError, formatSourceReason } from '../../errorMessages';
 import { TaskRunIndicator, TaskStatusDot } from '../TaskIndicators';
 import { PrimaryActionButton } from './PrimaryActionButton';
 import { STATUS_LABEL, homeRel, shortDate } from './helpers';
+import { claimSummary } from './lifecycle.mjs';
+import { TaskTimeline } from './TaskTimeline';
 import type { PrimaryAction } from './primaryAction.mjs';
 import type {
   Task,
-  TaskAuditEvent,
   TaskSourceCapabilities,
   TaskStatus,
   TaskUser,
@@ -521,8 +521,16 @@ function AgentDetail({
             header (with the raw status in its tooltip) is the status signal. */}
         {claimedBy && (
           <div>
-            <dt>Claimed by</dt>
-            <dd>{claimedByMe ? 'you' : claimedBy}</dd>
+            <dt>Claimed</dt>
+            {/* task-b8306d2b85c2 — claim FRESHNESS, not just ownership: who +
+                relative age + a near-expiry flag against the 2h claim TTL. */}
+            <dd>
+              <ClaimFreshnessLine
+                claimedBy={claimedBy}
+                claimedByMe={claimedByMe}
+                claimedAt={task.claimedAt ?? null}
+              />
+            </dd>
           </div>
         )}
         {/* fm-j7w0 (S4) — assignee row + lazy picker. */}
@@ -634,8 +642,10 @@ function AgentDetail({
         )}
       </div>
 
-      {/* fm-k6wz (S7) — lazy audit history. */}
-      <AuditHistory taskId={task.id} />
+      {/* task-b8306d2b85c2 — lifecycle timeline (Created → Claimed → status
+          transitions), folded from the per-task audit trail. Supersedes the
+          old flat "History" list. */}
+      <TaskTimeline task={task} />
 
       {/* fm-iwlc (S6) — Delete (creator-only server-side; a 403 not_owner /
           409 in_progress_elsewhere surfaces a distinct status-line reason).
@@ -750,119 +760,32 @@ function PriorityStepper({
   );
 }
 
-// ── audit history (fm-k6wz/S7) ──────────────────────────────────────────────
-// A collapsed "History" section; on expand it lazily fetches the per-task audit
-// rows and renders compact lines "<relative time> · <actor short> · <action>"
-// with the detail string as a tooltip. Memory-only — rows live in component
-// state and are re-fetched on task change. Audit actions are NON-PHI.
-function AuditHistory({ taskId }: { taskId: string }) {
-  const [open, setOpen] = useState(false);
-  const [events, setEvents] = useState<TaskAuditEvent[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const reqRef = useRef(0);
-
-  // Re-fetch on task change while expanded; collapse-reset on task change so a
-  // newly-selected task doesn't show the prior task's history.
+// ── claim freshness line (task-b8306d2b85c2) ────────────────────────────────
+// "you · 12m ago" / "alice · 1h 50m ago (expires soon)". Re-renders on a 60s
+// tick so the relative age stays honest while the panel is open. The summary
+// math lives in the pure lifecycle.mjs helper (shared with the row tooltip).
+function ClaimFreshnessLine({
+  claimedBy,
+  claimedByMe,
+  claimedAt,
+}: {
+  claimedBy: string | null;
+  claimedByMe: boolean;
+  claimedAt: string | null;
+}) {
+  const [, tick] = useState(0);
   useEffect(() => {
-    setOpen(false);
-    setEvents(null);
-    setError(false);
-  }, [taskId]);
-
-  const load = useCallback(() => {
-    const myReq = ++reqRef.current;
-    setLoading(true);
-    setError(false);
-    void getTypebuildAudit(taskId, 20)
-      .then((rows) => {
-        if (reqRef.current === myReq) setEvents(rows);
-      })
-      .catch(() => {
-        if (reqRef.current === myReq) {
-          setEvents([]);
-          setError(true);
-        }
-      })
-      .finally(() => {
-        if (reqRef.current === myReq) setLoading(false);
-      });
-  }, [taskId]);
-
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && events === null && !loading) load();
-  };
-
-  return (
-    <div className="tasks__detail-notes">
-      <button
-        type="button"
-        className="tasks__detail-section tasks__history-toggle"
-        aria-expanded={open}
-        onClick={toggle}
-      >
-        {open ? '▾' : '▸'} History
-      </button>
-      {open && (
-        <div className="tasks__history">
-          {loading && <p className="tasks__detail-muted">Loading…</p>}
-          {!loading && error && (
-            <p className="tasks__detail-muted">
-              Couldn’t load history.{' '}
-              <button type="button" className="tasks__history-retry" onClick={load}>
-                Retry
-              </button>
-            </p>
-          )}
-          {!loading && !error && events && events.length === 0 && (
-            <p className="tasks__detail-muted">No history yet.</p>
-          )}
-          {!loading && !error && events && events.length > 0 && (
-            <ul className="tasks__history-list">
-              {events.map((e, i) => (
-                <li
-                  key={`${e.at}-${i}`}
-                  className="tasks__history-row"
-                  title={e.detail || undefined}
-                >
-                  <span className="tasks__history-time">{relativeTime(e.at)}</span>
-                  <span className="tasks__history-sep">·</span>
-                  <span className="tasks__history-actor">{shortActor(e.user)}</span>
-                  <span className="tasks__history-sep">·</span>
-                  <span className="tasks__history-action">{e.action}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
+    const h = setInterval(() => tick((n) => n + 1), 60_000);
+    return () => clearInterval(h);
+  }, []);
+  // claimSummary already prefixes "claimed by …"; strip it for the <dd> since
+  // the <dt> already reads "Claimed".
+  const summary = claimSummary(claimedBy, claimedByMe, claimedAt).replace(
+    /^claimed by /,
+    '',
   );
-}
-
-// Short form of an actor principal: the local-part of an email, else the raw
-// principal. Non-PHI (an identity).
-function shortActor(user: string): string {
-  if (!user) return 'unknown';
-  const at = user.indexOf('@');
-  return at > 0 ? user.slice(0, at) : user;
-}
-
-// Coarse relative time from an ISO timestamp. Falls back to the raw string if
-// it can't be parsed.
-function relativeTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso || '—';
-  const diff = Date.now() - t;
-  const s = Math.round(diff / 1000);
-  if (s < 60) return 'just now';
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24);
-  if (d < 30) return `${d}d ago`;
-  return new Date(t).toLocaleDateString();
+  const expiry = /expires soon|lapsed/.test(summary);
+  return (
+    <span className={expiry ? 'tasks__claim-expiry' : undefined}>{summary}</span>
+  );
 }

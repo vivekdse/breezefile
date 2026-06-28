@@ -52,6 +52,17 @@ export type SourcedTask = Omit<Task, 'folder'> & {
   rawStatus?: string;
   priority?: number;
   claimedBy?: string | null;
+  // task-b8306d2b85c2 — lifecycle timestamps surfaced for the task timeline /
+  // claim-freshness UI. Carried as the server's RAW ISO strings (NON-PHI: time
+  // + email principals only, never task text) alongside the numeric created_at/
+  // updated_at the local sort uses. `claimedAt` is on the DETAIL endpoint;
+  // `createdAtIso`/`updatedAtIso`/`createdBy` are populated only when the
+  // server returns them (the list endpoint carries no timestamps). Absent
+  // pieces are derived from the audit trail in the UI, never faked.
+  claimedAt?: string | null;
+  createdAtIso?: string | null;
+  updatedAtIso?: string | null;
+  createdBy?: string | null;
   // fm-j7w0 (S4) — assignee principal/email (server `assigned_to`). Non-PHI
   // (a user identity); null/undefined when unassigned.
   assignedTo?: string | null;
