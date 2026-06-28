@@ -26,7 +26,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { breezeHost } from '../core/host';
+import type { TasksChangedDetail } from '../core/host';
 import { classifyTransitions } from './typebuild-transitions.mjs';
+import { diffSkeleton, diffIsEmpty } from './task-skeleton-schema.mjs';
+import type { SkeletonDiff } from './task-skeleton-schema.mjs';
+import {
+  loadLiveSkeleton,
+  reconcile as reconcileSkeleton,
+  patchSkeleton,
+  loadProjects as loadProjectSkeleton,
+  reconcileProjects,
+  clearSkeleton,
+  type SkeletonTask,
+} from './task-skeleton-store';
 import { getAuthState, getIdToken } from '../typebuild/auth';
 import { mintMcpToken } from '../typebuild/mcp-token';
 import { clearSession, registerSession } from '../typebuild/sessions';
@@ -407,6 +419,15 @@ export class TypeBuildTaskSource implements TaskSource {
   // In-memory cache of the last list payload, by id. PHI-light: titles only,
   // no bodies. Memory only — never persisted. Cleared when the source is
   // unregistered (sign-out drops the whole instance).
+  //
+  // task-b3fb2928bb3c (Phase 1) — the cache is now BACKED by a PHI-free
+  // persistent skeleton (task-skeleton-store). On construction we hydrate the
+  // cache from disk so Home renders INSTANTLY on cold start, BEFORE the first
+  // network round-trip. The hydrated rows carry the NON-PHI routing skeleton
+  // (status/claim/counts/timestamps) but NO title — `title` falls back to the
+  // opaque short id until the first list pull layers the (memory-only) titles
+  // back on top. Order/filter/counts come from the skeleton; human text
+  // hydrates from memory.
   private cache = new Map<string, SourcedTask>();
   // Serialized form of the last list, used to detect changes between polls
   // without diffing structurally.
@@ -436,6 +457,130 @@ export class TypeBuildTaskSource implements TaskSource {
     string,
     ReturnType<typeof setInterval>
   >();
+
+  // task-b3fb2928bb3c (Phase 1) — hydrate the in-memory cache from the
+  // PHI-free persistent skeleton on construction so the first list/poll has a
+  // last-known set to diff against AND Home renders instantly from disk before
+  // any network round-trip. Hydrated rows carry NO title (PHI) — `title` is the
+  // opaque short id placeholder until the first pull layers titles in memory.
+  constructor() {
+    try {
+      const skeleton = loadLiveSkeleton();
+      this.cache = new Map(
+        skeleton.map((s) => [s.id, this.skeletonToCacheRow(s)]),
+      );
+    } catch (e) {
+      // A corrupt/locked skeleton db must never block sign-in; start empty and
+      // let the first pull rebuild it. PHI-free log (message only).
+      console.warn('[typebuild] skeleton hydrate failed:', (e as Error).message);
+      this.cache = new Map();
+    }
+  }
+
+  // Build an in-memory cache row from a persisted NON-PHI skeleton row. The
+  // title is unknown on disk (PHI lives in memory only), so we use the opaque
+  // short id as a placeholder the first list pull overwrites with the real
+  // (memory-only) title. notes stays null (body is fetched on demand).
+  private skeletonToCacheRow(s: SkeletonTask): SourcedTask {
+    return {
+      id: s.id,
+      title: `TypeBuild task ${shortId(s.id)}`,
+      notes: null,
+      status: s.status ?? 'pending',
+      folder: undefined,
+      start_at: null,
+      due_at: s.due_at ?? null,
+      pinned: false,
+      cron: null,
+      next_run_at: null,
+      auto_mode: false,
+      auto_agent: null,
+      auto_prompt: null,
+      created_at: s.created_at ?? Date.now(),
+      updated_at: s.updated_at ?? Date.now(),
+      completed_at: s.completed_at ?? null,
+      source: 'typebuild',
+      rawStatus: s.rawStatus,
+      priority: s.priority,
+      claimedBy: s.claimedBy ?? null,
+      assignedTo: s.assignedTo ?? null,
+      attempts: s.attempts,
+      maxAttempts: s.maxAttempts,
+      flags: Array.isArray(s.flags) ? s.flags : [],
+      deferUntil: s.deferUntil ?? null,
+      parentTaskId: s.parentTaskId ?? null,
+      projectId: s.projectId ?? null,
+      createdAtIso: s.createdAtIso ?? null,
+      updatedAtIso: s.updatedAtIso ?? null,
+      claimedAt: s.claimedAt ?? null,
+    };
+  }
+
+  // Project an in-memory cache row to the NON-PHI skeleton shape the persistent
+  // store accepts. STRUCTURALLY PHI-SAFE: it picks ONLY routing fields and
+  // never reads `title`/`notes`, so task text cannot reach disk through here.
+  private cacheRowToSkeleton(t: SourcedTask): SkeletonTask {
+    return {
+      id: t.id,
+      status: t.status,
+      rawStatus: t.rawStatus,
+      claimedBy: t.claimedBy ?? null,
+      assignedTo: t.assignedTo ?? null,
+      attempts: t.attempts,
+      maxAttempts: t.maxAttempts,
+      flags: Array.isArray(t.flags) ? t.flags : [],
+      priority: t.priority,
+      due_at: t.due_at ?? null,
+      deferUntil: t.deferUntil ?? null,
+      projectId: t.projectId ?? null,
+      parentTaskId: t.parentTaskId ?? null,
+      created_at: t.created_at,
+      updated_at: t.updated_at,
+      completed_at: t.completed_at ?? null,
+      createdAtIso: t.createdAtIso ?? null,
+      updatedAtIso: t.updatedAtIso ?? null,
+      claimedAt: t.claimedAt ?? null,
+    };
+  }
+
+  // task-b3fb2928bb3c (Phase 1) — the cold-start → reconcile → diff-broadcast
+  // core. Given a fresh server list (ListRow[]), rebuild the in-memory cache
+  // (titles layered from the fresh payload, memory only), persist the NON-PHI
+  // skeleton to disk computing the added/changed/removed diff, and return that
+  // diff so the caller can broadcast ONLY what moved (not "everything changed").
+  // PHI: only routing fields hit disk; titles/bodies stay in `this.cache`.
+  private reconcileFromRows(rows: ListRow[]): SkeletonDiff {
+    const fresh = new Map(rows.map((r) => [r.id, mapListRow(r)]));
+    // Persist the NON-PHI skeleton + get the diff vs. what was live on disk.
+    let diff: SkeletonDiff;
+    try {
+      diff = reconcileSkeleton(
+        [...fresh.values()].map((t) => this.cacheRowToSkeleton(t)),
+      );
+    } catch (e) {
+      // A persistence failure must not break the live list. Fall back to a
+      // structural diff against the in-memory cache so the broadcast still
+      // carries an honest (PHI-free) diff. Message-only log.
+      console.warn('[typebuild] skeleton reconcile failed:', (e as Error).message);
+      diff = diffSkeleton(
+        [...this.cache.values()].map((t) => this.cacheRowToSkeleton(t)),
+        [...fresh.values()].map((t) => this.cacheRowToSkeleton(t)),
+      );
+    }
+    // Swap the in-memory cache to the fresh rows (titles in memory only).
+    this.cache = fresh;
+    return diff;
+  }
+
+  // Wrap a SkeletonDiff into the PHI-free broadcast detail for tasks:changed.
+  private toChangedDetail(diff: SkeletonDiff): TasksChangedDetail {
+    return {
+      source: this.id,
+      added: diff.added,
+      changed: diff.changed,
+      removed: diff.removed,
+    };
+  }
 
   // ─── REST helper ────────────────────────────────────────────────────────
   // One fetch with a Bearer token. On 401, retry once with a fresh token
@@ -515,8 +660,10 @@ export class TypeBuildTaskSource implements TaskSource {
       throw err;
     }
 
-    // Refresh the in-memory cache from the fresh list.
-    this.cache = new Map(rows.map((r) => [r.id, mapListRow(r)]));
+    // task-b3fb2928bb3c (Phase 1) — refresh the in-memory cache from the fresh
+    // list AND persist the NON-PHI skeleton to disk (titles stay memory-only).
+    // reconcileFromRows swaps this.cache and upserts/tombstones the skeleton.
+    this.reconcileFromRows(rows);
     this.lastSignature = this.signatureOf(rows);
 
     return this.applyFilter([...this.cache.values()], filter);
@@ -766,15 +913,60 @@ export class TypeBuildTaskSource implements TaskSource {
   // "Show archived" toggle.
   async listProjects(opts?: { includeArchived?: boolean }): Promise<Project[]> {
     const qs = opts?.includeArchived ? '?archived=1' : '';
-    const res = await this.request('GET', `/chromeext/projects${qs}`);
-    if (!res.ok) {
-      throw new Error(`typebuild: list projects failed (${res.status})`);
+    // task-b3fb2928bb3c (Phase 1) — projects are NON-PHI and had no cache; a
+    // transient fetch failure used to surface as an empty project list. Serve
+    // the persisted project skeleton (id + name + archived) on any failure so
+    // cold start / a blip still renders project names. We only fall through to
+    // throw when we have nothing cached.
+    let rows: ProjectRow[];
+    try {
+      const res = await this.request('GET', `/chromeext/projects${qs}`);
+      if (!res.ok) {
+        throw new Error(`typebuild: list projects failed (${res.status})`);
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        projects?: ProjectRow[];
+      };
+      rows = Array.isArray(data.projects) ? data.projects : [];
+    } catch (err) {
+      try {
+        const cached = loadProjectSkeleton();
+        if (cached.length > 0) {
+          console.warn(
+            '[typebuild] list projects failed, serving skeleton:',
+            (err as Error).message,
+          );
+          return cached
+            .filter((p) => (opts?.includeArchived ? true : !p.archived))
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              description: null,
+              instructions: null,
+              parentProjectId: null,
+              folders: [],
+              createdBy: null,
+              groupId: null,
+              createdAt: null,
+              updatedAt: null,
+              archived: p.archived,
+            }));
+        }
+      } catch {
+        /* skeleton unavailable — fall through to the original throw */
+      }
+      throw err;
     }
-    const data = (await res.json().catch(() => ({}))) as {
-      projects?: ProjectRow[];
-    };
-    const rows = Array.isArray(data.projects) ? data.projects : [];
-    return rows.map((r) => this.mapProjectRow(r));
+    const projects = rows.map((r) => this.mapProjectRow(r));
+    // Persist the NON-PHI project skeleton (id + name + archived) for cold
+    // start. Only when we fetched the FULL list (no archived filter narrowing
+    // it) so we don't drop archived rows the default fetch omits.
+    try {
+      if (opts?.includeArchived) reconcileProjects(projects);
+    } catch (e) {
+      console.warn('[typebuild] project skeleton persist failed:', (e as Error).message);
+    }
+    return projects;
   }
 
   // GET /chromeext/projects/{id}(?effective=1). 404 (not found / not visible)
@@ -1736,7 +1928,18 @@ export class TypeBuildTaskSource implements TaskSource {
   // titles or bodies, and never log them.
   private patchCacheAndBroadcast(taskId: string, patch: Partial<SourcedTask>): void {
     const row = this.cache.get(taskId);
-    if (row) this.cache.set(taskId, { ...row, ...patch });
+    if (row) {
+      const next = { ...row, ...patch };
+      this.cache.set(taskId, next);
+      // task-b3fb2928bb3c (Phase 1) — mirror the NON-PHI routing fields to disk
+      // so an optimistic mutation survives a restart-before-next-poll. Projects
+      // the row through cacheRowToSkeleton (title/body never read). Best-effort.
+      try {
+        patchSkeleton(taskId, this.cacheRowToSkeleton(next));
+      } catch (e) {
+        console.warn('[typebuild] skeleton patch failed:', (e as Error).message);
+      }
+    }
     // Immediate broadcast so the UI flips without the poll latency.
     breezeHost().onTasksChanged();
     // Reconcile against the server in the background. A failure here is
@@ -1884,6 +2087,16 @@ export class TypeBuildTaskSource implements TaskSource {
     this.cache.clear();
     this.lastSignature = '';
     this.firstPoll = true;
+    // task-b3fb2928bb3c (Phase 1) — sign-out drops the source. Wipe the
+    // persistent skeleton so a different principal signing in on this machine
+    // never sees the prior account's routing skeleton on cold start. PHI-free
+    // either way (skeleton holds no titles/bodies), but the routing set is
+    // account-scoped so it must not leak across sign-ins.
+    try {
+      clearSkeleton();
+    } catch (e) {
+      console.warn('[typebuild] skeleton clear failed:', (e as Error).message);
+    }
   }
 
   private async poll(): Promise<void> {
@@ -1932,10 +2145,20 @@ export class TypeBuildTaskSource implements TaskSource {
         // refresh — swallow and continue. Never log task content.
       }
 
-      this.cache = new Map(rows.map((r) => [r.id, mapListRow(r)]));
+      // task-b3fb2928bb3c (Phase 1) — reconcile the fresh rows into the
+      // in-memory cache (titles memory-only) AND the persistent NON-PHI
+      // skeleton, computing the added/changed/removed diff. We broadcast ONLY
+      // the diff so the renderer prunes removed rows / re-pulls only on real
+      // adds/changes — instead of treating every poll as "everything changed".
+      const diff = this.reconcileFromRows(rows);
       this.lastSignature = sig;
       this.firstPoll = false;
-      breezeHost().onTasksChanged();
+      // Defensive: the signature already proved something moved, but if the
+      // structured diff is empty (e.g. a title-only rename, which the skeleton
+      // doesn't track) still broadcast WITHOUT a detail so the renderer
+      // re-pulls and picks up the new (memory-only) title.
+      if (diffIsEmpty(diff)) breezeHost().onTasksChanged();
+      else breezeHost().onTasksChanged(this.toChangedDetail(diff));
     } catch {
       // Signed-out / network blip — stay quiet; the next poll retries, and
       // sign-out unregisters this source anyway.

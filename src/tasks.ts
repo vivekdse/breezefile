@@ -117,7 +117,43 @@ export function useTasks(filter: TaskFilter = {}): {
       }
     };
     load();
-    const unsub = fm.onTasksChanged(load);
+    // task-b3fb2928bb3c (Phase 1) — diff-aware change handler. When the
+    // broadcast carries a PHI-free diff ({ added, changed, removed } — opaque
+    // ids only) AND nothing was added or changed, we PRUNE the removed ids from
+    // the held list in place instead of re-serializing the WHOLE list over IPC.
+    // Any added/changed id (or a legacy payload-free broadcast) falls back to a
+    // full re-pull, so correctness never depends on the diff. This is what
+    // keeps a 30s poll that only removed a finished task from re-pulling the
+    // entire inventory across the IPC boundary.
+    const onChanged = (detail?: {
+      added: string[];
+      changed: string[];
+      removed: string[];
+    }) => {
+      if (
+        detail &&
+        detail.added.length === 0 &&
+        detail.changed.length === 0 &&
+        detail.removed.length > 0
+      ) {
+        const gone = new Set(detail.removed);
+        const pruned = lastListRef.current.filter((t) => !gone.has(t.id));
+        lastListRef.current = pruned;
+        if (!cancelled) setTasks(applyPendingPatches(pruned));
+        return;
+      }
+      // No-op diff (nothing moved for any source) → skip the re-pull entirely.
+      if (
+        detail &&
+        detail.added.length === 0 &&
+        detail.changed.length === 0 &&
+        detail.removed.length === 0
+      ) {
+        return;
+      }
+      void load();
+    };
+    const unsub = fm.onTasksChanged(onChanged);
     // Re-apply the overlay when a fresh patch is recorded (no re-fetch yet).
     const onPending = () => {
       if (!cancelled) setTasks(applyPendingPatches(lastListRef.current));

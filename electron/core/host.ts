@@ -10,9 +10,27 @@
 // Default is a no-op so importing tasks.ts in a test / tool that never
 // calls setBreezeHost() is harmless.
 
+/** task-b3fb2928bb3c (Phase 1) — an OPTIONAL diff payload riding `tasks:changed`.
+ *  PHI-FREE: opaque ids only, never titles/bodies. Lets the renderer prune
+ *  removed rows in place and skip a full IPC re-pull when nothing was added or
+ *  changed. Backward-compatible: omitted (undefined) on every legacy caller, in
+ *  which case subscribers fall back to the existing full re-pull. */
+export type TasksChangedDetail = {
+  /** Source id whose list moved ('typebuild'). */
+  source: string;
+  /** Ids newly present in the source list. */
+  added: string[];
+  /** Ids whose routing fields changed. */
+  changed: string[];
+  /** Ids the source list no longer carries (tombstoned). */
+  removed: string[];
+};
+
 export interface BreezeHost {
-  /** A task row changed (create/update/delete). */
-  onTasksChanged(): void;
+  /** A task row changed (create/update/delete). The optional `detail` carries a
+   *  PHI-free added/changed/removed diff so subscribers can avoid a full
+   *  re-pull; omitted by legacy callers (full re-pull fallback). */
+  onTasksChanged(detail?: TasksChangedDetail): void;
   /** A run row changed for `taskId` (scheduled/queued/finished). */
   onRunsChanged(taskId: string): void;
   /** An auto/scheduled run terminally failed. */
@@ -55,7 +73,7 @@ export interface BreezeHost {
 }
 
 const noop: BreezeHost = {
-  onTasksChanged() {},
+  onTasksChanged(_detail?: TasksChangedDetail) {},
   onRunsChanged() {},
   onRunFailed() {},
   onRunSucceeded() {},

@@ -516,8 +516,30 @@ const fm = {
     ipcRenderer.invoke('tasks:writeActiveSidecar', id, source) as Promise<
       string | null
     >,
-  onTasksChanged: (cb: () => void) => {
-    const handler = () => cb();
+  // task-b3fb2928bb3c (Phase 1) — `tasks:changed` may now carry an OPTIONAL
+  // PHI-free diff payload ({ source, added, changed, removed } — opaque ids
+  // only). Forwarded to the callback so the renderer can prune removed rows /
+  // skip a full re-pull. Legacy emitters send no payload (cb gets undefined),
+  // preserving the existing full-re-pull contract.
+  onTasksChanged: (
+    cb: (
+      detail?: {
+        source: string;
+        added: string[];
+        changed: string[];
+        removed: string[];
+      },
+    ) => void,
+  ) => {
+    const handler = (
+      _e: unknown,
+      detail?: {
+        source: string;
+        added: string[];
+        changed: string[];
+        removed: string[];
+      },
+    ) => cb(detail);
     ipcRenderer.on('tasks:changed', handler);
     return () => ipcRenderer.off('tasks:changed', handler);
   },

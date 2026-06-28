@@ -279,7 +279,18 @@ type Fm = {
   tasksDbExists: () => Promise<boolean>;
   // fm-adc — write the per-task sidecar markdown for AI launchers
   tasksWriteActiveSidecar: (id: string, source?: string) => Promise<string | null>;
-  onTasksChanged: (cb: () => void) => () => void;
+  // task-b3fb2928bb3c (Phase 1) — `detail` is an OPTIONAL PHI-free diff
+  // ({ source, added, changed, removed } — opaque ids only). Subscribers that
+  // ignore it keep the existing full-re-pull behavior; useTasks uses it to
+  // prune removed rows and skip a re-pull when nothing was added/changed.
+  onTasksChanged: (
+    cb: (detail?: {
+      source: string;
+      added: string[];
+      changed: string[];
+      removed: string[];
+    }) => void,
+  ) => () => void;
   // fm-lji6 (S2) — per-source list failures (broadcast from the tasks:list
   // aggregation). The list itself stays a bare array (one source failing
   // degrades to its cache rather than throwing), but subscribers can surface

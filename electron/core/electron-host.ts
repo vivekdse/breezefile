@@ -5,7 +5,7 @@
 // setBreezeHost(); behavior is identical to the pre-refactor inline code.
 
 import { BrowserWindow, Notification } from 'electron';
-import type { BreezeHost } from './host';
+import type { BreezeHost, TasksChangedDetail } from './host';
 import {
   shouldNotifyFailure,
   shouldNotifySuccess,
@@ -73,8 +73,11 @@ function shortId(id: string): string {
 }
 
 export const ElectronBreezeHost: BreezeHost = {
-  onTasksChanged() {
-    broadcast('tasks:changed');
+  onTasksChanged(detail?: TasksChangedDetail) {
+    // task-b3fb2928bb3c (Phase 1) — forward the PHI-free diff (opaque ids only)
+    // when present so the renderer can prune removed rows / skip a full re-pull.
+    // Legacy callers pass nothing → payload is undefined → full re-pull path.
+    broadcast('tasks:changed', detail);
   },
 
   onRunsChanged(taskId: string) {

@@ -1,0 +1,416 @@
+// task-b3fb2928bb3c (Phase 1) — PHI-FREE persistent skeleton store for the
+// TypeBuild task cache. Backs TypeBuildTaskSource.cache so Home renders
+// INSTANTLY on cold start from disk, before the first network round-trip.
+//
+// PHI INVARIANT (non-negotiable): decrypted TITLES and BODIES are PHI and live
+// in MEMORY ONLY. This store persists ONLY the NON-PHI routing skeleton — the
+// columns in task-skeleton-schema.mjs. There is NO title/body/notes column,
+// by construction, and the upsert NEVER receives task text. A SourcedTask's
+// `title`/`notes` are simply not read here. The schema module's
+// SKELETON_COLUMNS + the no-PHI-columns test enforce this structurally.
+//
+// Lives at ~/.breezefile/typebuild-skeleton.db (its OWN db file, separate from
+// tasks.db — the local tasks store; this keeps the remote routing cache from
+// entangling with the local task schema/migration chain). WAL like the rest.
+//
+// Timestamps (load-bearing — see typebuild.ts:340 attention-floor note): the
+// server LIST endpoint carries no created/updated timestamps, so mapListRow
+// uses Date.now() as a benign placeholder floor. We persist whatever the
+// caller hands us (server value when present, else that floor). On RELOAD from
+// disk we return the STORED epoch, which is "the first time we saw this row" —
+// strictly >= the server's true created_at and stable across restarts, so the
+// attention-floor ordering does not regress (a row keeps a stable sort key
+// instead of jumping to now() on every poll). Phase 2 swaps these for real
+// server updated_at once the server emits them.
+
+import Database from 'better-sqlite3';
+import path from 'node:path';
+import os from 'node:os';
+import { existsSync, mkdirSync } from 'node:fs';
+import {
+  SKELETON_TABLE_SQL,
+  SKELETON_INDEX_SQL,
+  PROJECT_TABLE_SQL,
+  diffSkeleton,
+  type SkeletonDiff,
+} from './task-skeleton-schema.mjs';
+import type { SourcedTask } from '../core/task-source';
+import type { Project } from './typebuild';
+
+// The non-PHI routing skeleton as persisted/loaded. A strict subset of
+// SourcedTask — NO title/notes. Loaded rows are layered UNDER the in-memory
+// title/body in TypeBuildTaskSource (the skeleton drives order/filter/counts;
+// human text hydrates from memory).
+export type SkeletonTask = Pick<
+  SourcedTask,
+  | 'id'
+  | 'status'
+  | 'rawStatus'
+  | 'claimedBy'
+  | 'assignedTo'
+  | 'attempts'
+  | 'maxAttempts'
+  | 'flags'
+  | 'priority'
+  | 'due_at'
+  | 'deferUntil'
+  | 'projectId'
+  | 'parentTaskId'
+  | 'created_at'
+  | 'updated_at'
+  | 'completed_at'
+  | 'createdAtIso'
+  | 'updatedAtIso'
+  | 'claimedAt'
+>;
+
+type SkelRow = {
+  id: string;
+  status: string | null;
+  raw_status: string | null;
+  claimed_by: string | null;
+  assigned_to: string | null;
+  attempts: number | null;
+  max_attempts: number | null;
+  flags: string | null;
+  priority: number | null;
+  due_at: string | null;
+  defer_until: string | null;
+  project_id: string | null;
+  parent_task_id: string | null;
+  created_at: number | null;
+  updated_at: number | null;
+  completed_at: number | null;
+  created_at_iso: string | null;
+  updated_at_iso: string | null;
+  claimed_at: string | null;
+  tombstone: number;
+  seen_at: number;
+};
+
+let db: Database.Database | null = null;
+
+function dbPath(): string {
+  return path.join(os.homedir(), '.breezefile', 'typebuild-skeleton.db');
+}
+
+function ensureDir(): void {
+  const dir = path.dirname(dbPath());
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+function open(): Database.Database {
+  if (db) return db;
+  ensureDir();
+  db = new Database(dbPath());
+  db.pragma('journal_mode = WAL');
+  db.exec(SKELETON_TABLE_SQL);
+  db.exec(SKELETON_INDEX_SQL);
+  db.exec(PROJECT_TABLE_SQL);
+  return db;
+}
+
+function parseFlags(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rowToSkeleton(r: SkelRow): SkeletonTask {
+  const status = (r.status ?? 'pending') as SourcedTask['status'];
+  return {
+    id: r.id,
+    status,
+    rawStatus: r.raw_status ?? undefined,
+    claimedBy: r.claimed_by ?? null,
+    assignedTo: r.assigned_to ?? null,
+    attempts: r.attempts == null ? undefined : r.attempts,
+    maxAttempts: r.max_attempts == null ? undefined : r.max_attempts,
+    flags: parseFlags(r.flags),
+    priority: r.priority == null ? undefined : r.priority,
+    due_at: r.due_at ?? null,
+    deferUntil: r.defer_until ?? null,
+    projectId: r.project_id ?? null,
+    parentTaskId: r.parent_task_id ?? null,
+    created_at: r.created_at ?? Date.now(),
+    updated_at: r.updated_at ?? Date.now(),
+    completed_at: r.completed_at ?? null,
+    createdAtIso: r.created_at_iso ?? null,
+    updatedAtIso: r.updated_at_iso ?? null,
+    claimedAt: r.claimed_at ?? null,
+  };
+}
+
+// ─── Skeleton reads ────────────────────────────────────────────────────────
+
+/** All LIVE (non-tombstoned) skeleton rows, for cold-start hydration of the
+ *  in-memory cache. PHI-free by construction. */
+export function loadLiveSkeleton(): SkeletonTask[] {
+  const d = open();
+  const rows = d
+    .prepare('SELECT * FROM task_skeleton WHERE tombstone = 0')
+    .all() as SkelRow[];
+  return rows.map(rowToSkeleton);
+}
+
+/** A single live skeleton row (or null) — used to preserve a stable created_at
+ *  floor across upserts. */
+function existingRow(d: Database.Database, id: string): SkelRow | undefined {
+  return d.prepare('SELECT * FROM task_skeleton WHERE id = ?').get(id) as
+    | SkelRow
+    | undefined;
+}
+
+// ─── Reconcile ─────────────────────────────────────────────────────────────
+// Replace the live set with `fresh`, computing the added/changed/removed diff
+// against what was live. Upserts every fresh row (clearing any tombstone),
+// tombstones ids that are now absent, and returns the diff so the caller can
+// broadcast ONLY what moved. Done in one transaction so a crash mid-reconcile
+// can't leave a torn view.
+//
+// `fresh` carries the NON-PHI skeleton projection of the server list. The
+// in-memory title/body is NOT passed here and is never persisted.
+export function reconcile(fresh: SkeletonTask[]): SkeletonDiff {
+  const d = open();
+  const now = Date.now();
+
+  // Previous LIVE rows (for the diff). Project to the schema-snake shape the
+  // pure diff expects.
+  const prevRows = d
+    .prepare('SELECT * FROM task_skeleton WHERE tombstone = 0')
+    .all() as SkelRow[];
+  const prevForDiff = prevRows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    raw_status: r.raw_status,
+    claimed_by: r.claimed_by,
+    assigned_to: r.assigned_to,
+    attempts: r.attempts,
+    max_attempts: r.max_attempts,
+    priority: r.priority,
+    due_at: r.due_at,
+    defer_until: r.defer_until,
+    project_id: r.project_id,
+    parent_task_id: r.parent_task_id,
+  }));
+  const freshForDiff = fresh.map((t) => ({
+    id: t.id,
+    status: t.status ?? null,
+    raw_status: t.rawStatus ?? null,
+    claimed_by: t.claimedBy ?? null,
+    assigned_to: t.assignedTo ?? null,
+    attempts: t.attempts ?? null,
+    max_attempts: t.maxAttempts ?? null,
+    priority: t.priority ?? null,
+    due_at: t.due_at ?? null,
+    defer_until: t.deferUntil ?? null,
+    project_id: t.projectId ?? null,
+    parent_task_id: t.parentTaskId ?? null,
+  }));
+
+  const diff = diffSkeleton(prevForDiff, freshForDiff);
+
+  const upsert = d.prepare(`
+    INSERT INTO task_skeleton (
+      id, status, raw_status, claimed_by, assigned_to,
+      attempts, max_attempts, flags, priority,
+      due_at, defer_until, project_id, parent_task_id,
+      created_at, updated_at, completed_at,
+      created_at_iso, updated_at_iso, claimed_at,
+      tombstone, seen_at
+    ) VALUES (
+      @id, @status, @raw_status, @claimed_by, @assigned_to,
+      @attempts, @max_attempts, @flags, @priority,
+      @due_at, @defer_until, @project_id, @parent_task_id,
+      @created_at, @updated_at, @completed_at,
+      @created_at_iso, @updated_at_iso, @claimed_at,
+      0, @seen_at
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      raw_status = excluded.raw_status,
+      claimed_by = excluded.claimed_by,
+      assigned_to = excluded.assigned_to,
+      attempts = excluded.attempts,
+      max_attempts = excluded.max_attempts,
+      flags = excluded.flags,
+      priority = excluded.priority,
+      due_at = excluded.due_at,
+      defer_until = excluded.defer_until,
+      project_id = excluded.project_id,
+      parent_task_id = excluded.parent_task_id,
+      -- created_at is a stable floor: keep the EARLIEST value we've seen so a
+      -- row's sort key doesn't jump to now() each poll (attention-floor note).
+      created_at = MIN(task_skeleton.created_at, excluded.created_at),
+      updated_at = excluded.updated_at,
+      completed_at = excluded.completed_at,
+      created_at_iso = COALESCE(excluded.created_at_iso, task_skeleton.created_at_iso),
+      updated_at_iso = COALESCE(excluded.updated_at_iso, task_skeleton.updated_at_iso),
+      claimed_at = COALESCE(excluded.claimed_at, task_skeleton.claimed_at),
+      tombstone = 0,
+      seen_at = excluded.seen_at
+  `);
+
+  const freshIds = new Set(fresh.map((t) => t.id));
+
+  const txn = d.transaction(() => {
+    for (const t of fresh) {
+      const prev = existingRow(d, t.id);
+      // Stable created_at floor: prefer the earliest of (existing, incoming).
+      const incomingCreated = t.created_at ?? now;
+      const created =
+        prev?.created_at != null
+          ? Math.min(prev.created_at, incomingCreated)
+          : incomingCreated;
+      upsert.run({
+        id: t.id,
+        status: t.status ?? null,
+        raw_status: t.rawStatus ?? null,
+        claimed_by: t.claimedBy ?? null,
+        assigned_to: t.assignedTo ?? null,
+        attempts: t.attempts ?? null,
+        max_attempts: t.maxAttempts ?? null,
+        flags: JSON.stringify(Array.isArray(t.flags) ? t.flags : []),
+        priority: t.priority ?? null,
+        due_at: t.due_at ?? null,
+        defer_until: t.deferUntil ?? null,
+        project_id: t.projectId ?? null,
+        parent_task_id: t.parentTaskId ?? null,
+        created_at: created,
+        updated_at: t.updated_at ?? now,
+        completed_at: t.completed_at ?? null,
+        created_at_iso: t.createdAtIso ?? null,
+        updated_at_iso: t.updatedAtIso ?? null,
+        claimed_at: t.claimedAt ?? null,
+        seen_at: now,
+      });
+    }
+    // Tombstone live rows that the fresh list no longer carries.
+    const liveIds = (
+      d.prepare('SELECT id FROM task_skeleton WHERE tombstone = 0').all() as {
+        id: string;
+      }[]
+    ).map((r) => r.id);
+    const tomb = d.prepare(
+      'UPDATE task_skeleton SET tombstone = 1, seen_at = ? WHERE id = ?',
+    );
+    for (const id of liveIds) {
+      if (!freshIds.has(id)) tomb.run(now, id);
+    }
+  });
+  txn();
+  return diff;
+}
+
+/** Optimistic single-row patch mirror (fm-kmhq) — when the in-memory cache is
+ *  patched after a succeeded mutation, mirror the NON-PHI routing fields to
+ *  disk so a restart-before-next-poll keeps the optimistic state. Title/body
+ *  are never touched. Unknown ids are ignored (the next reconcile inserts). */
+export function patchSkeleton(id: string, patch: Partial<SkeletonTask>): void {
+  const d = open();
+  const row = existingRow(d, id);
+  if (!row) return;
+  const merged = { ...rowToSkeleton(row), ...patch };
+  d.prepare(
+    `UPDATE task_skeleton SET
+       status = @status,
+       raw_status = @raw_status,
+       claimed_by = @claimed_by,
+       assigned_to = @assigned_to,
+       attempts = @attempts,
+       max_attempts = @max_attempts,
+       priority = @priority,
+       due_at = @due_at,
+       defer_until = @defer_until,
+       project_id = @project_id,
+       parent_task_id = @parent_task_id,
+       completed_at = @completed_at,
+       updated_at = @updated_at
+     WHERE id = @id`,
+  ).run({
+    id,
+    status: merged.status ?? null,
+    raw_status: merged.rawStatus ?? null,
+    claimed_by: merged.claimedBy ?? null,
+    assigned_to: merged.assignedTo ?? null,
+    attempts: merged.attempts ?? null,
+    max_attempts: merged.maxAttempts ?? null,
+    priority: merged.priority ?? null,
+    due_at: merged.due_at ?? null,
+    defer_until: merged.deferUntil ?? null,
+    project_id: merged.projectId ?? null,
+    parent_task_id: merged.parentTaskId ?? null,
+    completed_at: merged.completed_at ?? null,
+    updated_at: Date.now(),
+  });
+}
+
+// ─── Projects skeleton ─────────────────────────────────────────────────────
+// Projects are NON-PHI; we cache id + name + archived so cold start renders
+// names instantly. The full detail (instructions) stays a per-call fetch.
+
+export function loadProjects(): Array<Pick<Project, 'id' | 'name' | 'archived'>> {
+  const d = open();
+  const rows = d.prepare('SELECT id, name, archived FROM project_skeleton').all() as {
+    id: string;
+    name: string | null;
+    archived: number;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name ?? '',
+    archived: r.archived === 1,
+  }));
+}
+
+/** Replace the cached project skeleton with `fresh`. Rows absent from `fresh`
+ *  are deleted (projects have no tombstone semantics — they're cheap to refetch
+ *  and not part of the attention rollups). */
+export function reconcileProjects(fresh: Project[]): void {
+  const d = open();
+  const now = Date.now();
+  const upsert = d.prepare(`
+    INSERT INTO project_skeleton (id, name, archived, seen_at)
+    VALUES (@id, @name, @archived, @seen_at)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      archived = excluded.archived,
+      seen_at = excluded.seen_at
+  `);
+  const ids = new Set(fresh.map((p) => p.id));
+  const txn = d.transaction(() => {
+    for (const p of fresh) {
+      upsert.run({
+        id: p.id,
+        name: p.name ?? '',
+        archived: p.archived ? 1 : 0,
+        seen_at: now,
+      });
+    }
+    const existing = (
+      d.prepare('SELECT id FROM project_skeleton').all() as { id: string }[]
+    ).map((r) => r.id);
+    const del = d.prepare('DELETE FROM project_skeleton WHERE id = ?');
+    for (const id of existing) if (!ids.has(id)) del.run(id);
+  });
+  txn();
+}
+
+/** Drop the whole skeleton (sign-out). Keeps the file but empties both tables
+ *  so a different principal never sees the prior account's routing skeleton. */
+export function clearSkeleton(): void {
+  const d = open();
+  d.exec('DELETE FROM task_skeleton; DELETE FROM project_skeleton;');
+}
+
+// For tests / explicit cleanup. Production never calls this.
+export function _closeForTests(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
