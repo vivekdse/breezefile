@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { fm } from '../bridge';
+import { fm, type UrlSuggestion } from '../bridge';
 import { SavePasswordPrompt, type CapturedCredential } from './SavePasswordPrompt';
 
 // The ONE embedded-browser surface (browser/operator unification). Drives a
@@ -70,6 +70,25 @@ export function BrowserSurface({
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false });
   const [recording, setRecording] = useState(false);
   const addrFocused = useRef(false);
+
+  // ─── Address-bar autocomplete (task-ff707aea93d8) ─────────────────────────
+  // Suggestions come from MAIN (visited-URL history + known-host seed, ranked
+  // there); we own the dropdown, keyboard selection, and inline "ghost"
+  // completion of the most-likely host. Lives in this ONE shared surface, so
+  // both the in-app tab and the operator pane get it automatically.
+  const addrRef = useRef<HTMLInputElement>(null);
+  const [suggestions, setSuggestions] = useState<UrlSuggestion[]>([]);
+  const [acOpen, setAcOpen] = useState(false);
+  // Highlighted suggestion index; -1 = "the typed text itself" (no row).
+  const [acIndex, setAcIndex] = useState(-1);
+  // The inline ghost completion: the remaining host characters after what the
+  // user typed (e.g. typed "git" → ghost "hub.com"). Empty when not applicable.
+  const [ghost, setGhost] = useState('');
+  // Guards: don't re-fetch/complete on programmatic value changes (ↆ/Enter), and
+  // suppress the ghost right after a Backspace/Delete so deletion isn't fought.
+  const suppressComplete = useRef(false);
+  // Monotonic token so a slow suggest() reply can't clobber a newer query.
+  const acSeq = useRef(0);
 
   // The pending "Save password?" capture for THIS view (task-ad89064bf45f).
   // Holds the captured password in trusted-UI state ONLY; cleared on save/dismiss
@@ -229,13 +248,62 @@ export function BrowserSurface({
     };
   }, [tabId, viewId, operatorMode]);
 
-  const go = () => {
+  // Navigate to an explicit URL/term, normalizing a bare host to https://.
+  const navigateTo = (raw: string) => {
     const id = idRef.current;
     if (id == null) return;
-    let target = addr.trim();
+    let target = raw.trim();
     if (!target) return;
     if (!/^[a-z]+:\/\//i.test(target)) target = 'https://' + target;
+    closeAutocomplete();
     fm.browserNavigate(id, target);
+  };
+
+  // Enter / Go: navigate to the highlighted suggestion if one is selected,
+  // otherwise to what the user typed (plus any accepted ghost completion).
+  const go = () => {
+    if (acOpen && acIndex >= 0 && suggestions[acIndex]) {
+      navigateTo(suggestions[acIndex].url);
+      return;
+    }
+    navigateTo(addr + ghost);
+  };
+
+  const closeAutocomplete = () => {
+    setAcOpen(false);
+    setAcIndex(-1);
+    setSuggestions([]);
+    setGhost('');
+  };
+
+  // Fetch + rank suggestions for the current query, set the dropdown, and
+  // compute the inline ghost. Ghost only when the top suggestion's HOST starts
+  // with what the user typed (so accepting it just finishes the host) and we
+  // aren't mid-deletion.
+  const refreshSuggestions = (query: string) => {
+    const seq = ++acSeq.current;
+    const q = query.trim();
+    if (!q) {
+      closeAutocomplete();
+      return;
+    }
+    void fm.browserSuggest(q).then((list) => {
+      if (seq !== acSeq.current) return; // a newer query superseded us
+      if (!addrFocused.current) return; // bar lost focus while we waited
+      setSuggestions(list);
+      setAcOpen(list.length > 0);
+      setAcIndex(-1);
+      // Inline ghost from the best host-prefix match.
+      let g = '';
+      if (!suppressComplete.current && list.length > 0) {
+        const qBare = q.replace(/^[a-z]+:\/\//i, '').toLowerCase();
+        const best = list.find((s) => s.host.toLowerCase().startsWith(qBare));
+        if (best && qBare && best.host.toLowerCase() !== qBare) {
+          g = best.host.slice(qBare.length);
+        }
+      }
+      setGhost(g);
+    });
   };
 
   // Teach-by-recording (task-01facbf6b0bc): record the human's actions in this
@@ -304,26 +372,130 @@ export function BrowserSurface({
         >
           {recording ? '◼ Rec' : '● Rec'}
         </button>
-        <input
-          className="browser-pane__addr"
-          value={addr}
-          spellCheck={false}
-          onFocus={(e) => {
-            addrFocused.current = true;
-            e.currentTarget.select();
-          }}
-          onBlur={() => {
-            addrFocused.current = false;
-          }}
-          onChange={(e) => setAddr(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              go();
-              e.currentTarget.blur();
+        {/* Address bar + autocomplete. The wrapper is positioned so the ghost
+            overlay and the suggestion dropdown anchor to the input. */}
+        <div className="browser-pane__addrwrap">
+          <input
+            ref={addrRef}
+            className="browser-pane__addr"
+            value={addr}
+            spellCheck={false}
+            autoComplete="off"
+            role="combobox"
+            aria-expanded={acOpen}
+            aria-autocomplete="both"
+            aria-controls="browser-ac-list"
+            aria-activedescendant={
+              acOpen && acIndex >= 0 ? `browser-ac-opt-${acIndex}` : undefined
             }
-          }}
-        />
+            onFocus={(e) => {
+              addrFocused.current = true;
+              e.currentTarget.select();
+            }}
+            onBlur={() => {
+              addrFocused.current = false;
+              // Defer so a click on a suggestion row (mousedown) lands first.
+              setTimeout(() => {
+                if (!addrFocused.current) closeAutocomplete();
+              }, 120);
+            }}
+            onChange={(e) => {
+              setAddr(e.target.value);
+              setGhost('');
+              refreshSuggestions(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              suppressComplete.current = e.key === 'Backspace' || e.key === 'Delete';
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                go();
+                e.currentTarget.blur();
+                return;
+              }
+              if (e.key === 'Escape') {
+                if (acOpen || ghost) {
+                  e.preventDefault();
+                  closeAutocomplete();
+                }
+                return;
+              }
+              if (e.key === 'ArrowDown') {
+                if (suggestions.length === 0) return;
+                e.preventDefault();
+                setAcOpen(true);
+                setGhost('');
+                setAcIndex((i) => {
+                  const next = i + 1 >= suggestions.length ? -1 : i + 1;
+                  if (next >= 0) setAddr(suggestions[next].url);
+                  return next;
+                });
+                return;
+              }
+              if (e.key === 'ArrowUp') {
+                if (suggestions.length === 0) return;
+                e.preventDefault();
+                setAcOpen(true);
+                setGhost('');
+                setAcIndex((i) => {
+                  const next = i - 1 < -1 ? suggestions.length - 1 : i - 1;
+                  if (next >= 0) setAddr(suggestions[next].url);
+                  return next;
+                });
+                return;
+              }
+              // Accept the inline ghost completion with → / Tab when the caret is
+              // at the end and a ghost is showing.
+              if ((e.key === 'ArrowRight' || e.key === 'Tab') && ghost) {
+                const el = e.currentTarget;
+                const atEnd = el.selectionStart === addr.length && el.selectionEnd === addr.length;
+                if (atEnd) {
+                  e.preventDefault();
+                  const completed = addr + ghost;
+                  setAddr(completed);
+                  setGhost('');
+                  refreshSuggestions(completed);
+                }
+              }
+            }}
+          />
+          {/* Inline ghost completion: render the typed text invisibly to push the
+              ghost to the right caret position, then the remaining host in muted
+              ink. Pointer-events off so it never intercepts clicks. */}
+          {ghost && acIndex < 0 && (
+            <div className="browser-pane__ghost" aria-hidden="true">
+              <span className="browser-pane__ghost-typed">{addr}</span>
+              <span className="browser-pane__ghost-rest">{ghost}</span>
+            </div>
+          )}
+          {acOpen && suggestions.length > 0 && (
+            <ul className="browser-ac" id="browser-ac-list" role="listbox">
+              {suggestions.map((s, i) => (
+                <li
+                  key={s.url}
+                  id={`browser-ac-opt-${i}`}
+                  role="option"
+                  aria-selected={i === acIndex}
+                  className={
+                    'browser-ac__row' + (i === acIndex ? ' browser-ac__row--active' : '')
+                  }
+                  // mousedown (not click) so it fires before the input's blur.
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    navigateTo(s.url);
+                    addrRef.current?.blur();
+                  }}
+                  onMouseEnter={() => setAcIndex(i)}
+                >
+                  <span className="browser-ac__kind" aria-hidden="true">
+                    {s.kind === 'history' ? '🕘' : s.kind === 'bookmark' ? '★' : '🌐'}
+                  </span>
+                  <span className="browser-ac__host">{s.host}</span>
+                  {s.title ? <span className="browser-ac__title">{s.title}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         {/* Manual saved-login fill (task-4b786c018d78). Appears only when the
             vault has a login for the current origin; click to open the fill
             confirm. Deliberately NOT auto-popped — matches the operator session

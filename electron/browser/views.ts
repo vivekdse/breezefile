@@ -18,6 +18,7 @@ import { BrowserWindow, WebContentsView } from 'electron';
 import { currentRecording as currentBrowserRecording } from './record.ts';
 import { wireCredentialCapture } from './credential-capture';
 import { resolveStartUrl } from './start-splash';
+import { recordVisit } from './history-store';
 
 // This chunk is bundled into dist-electron/ (same dir as the built preloads),
 // so record-preload.mjs resolves here exactly as it does from ipc.ts/window.ts.
@@ -105,6 +106,13 @@ export function createBrowserView(
   wc.on('did-navigate', emit);
   wc.on('did-navigate-in-page', emit);
   wc.on('page-title-updated', emit);
+  // Address-bar autocomplete (task-ff707aea93d8): record top-level navigations
+  // as visited-URL history. did-navigate fires on real page loads (not every
+  // in-page hash change), so it's the right granularity. NON-PHI — plain URL +
+  // page title only; the store normalizes + drops non-http(s) urls.
+  wc.on('did-navigate', () => {
+    void recordVisit(wc.getURL(), wc.getTitle());
+  });
   // Each full load re-runs the record preload, which starts idle — re-arm it if
   // a recording is live so a navigation mid-session keeps capturing.
   wc.on('did-finish-load', () => {

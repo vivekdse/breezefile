@@ -187,6 +187,9 @@ type Fm = {
   browserForward: (id: number) => void;
   browserReload: (id: number) => void;
   browserSync: (id: number) => void;
+  // Address-bar autocomplete (task-ff707aea93d8): ranked URL suggestions from
+  // visited-URL history + a known-host seed, computed in main. NON-PHI.
+  browserSuggest: (query: string) => Promise<UrlSuggestion[]>;
   // Teach-by-recording (task-01facbf6b0bc).
   browserRecordStart: (id: number) => Promise<{ ok: boolean; error?: string }>;
   browserRecordStop: (opts?: { skillName?: string }) => Promise<{
@@ -521,6 +524,15 @@ type Fm = {
 };
 
 export type TypebuildAuthState = { signedIn: boolean; email?: string };
+
+// One address-bar autocomplete suggestion (task-ff707aea93d8). Ranked in main
+// from visited-URL history + a known-host seed. NON-PHI: plain url/host/title.
+export type UrlSuggestion = {
+  url: string;
+  host: string;
+  title?: string;
+  kind: 'history' | 'bookmark' | 'known';
+};
 
 // One credential-vault entry as it crosses the bridge (NAMES only — never a
 // value). `key` is the "me."-prefixed field; `secret` marks write-only fields
