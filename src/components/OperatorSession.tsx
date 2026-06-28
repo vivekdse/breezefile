@@ -26,7 +26,25 @@ import { Terminal } from './Terminal';
 import { fm } from '../bridge';
 import { useTheme } from '../theme';
 import { BrowserSurface } from './BrowserSurface';
+import { TypebuildSessionBanner } from './TypebuildSessionBanner';
 import './OperatorSession.css';
+
+// task-63fd78520f53 — map a thrown TypeBuild MCP-token mint failure to the
+// three exact in-app messages, for the operator-window relaunch path. This is
+// the operator-window copy of App.tsx's relaunchErrorMessage (which is local
+// to App and not exported); the message text is intentionally identical so the
+// user sees the same wording in the operator window as in the main window.
+const RELAUNCH_MINT_MESSAGES: Record<string, string> = {
+  'signed-out': 'Please sign in again',
+  unreachable: "Can't reach TypeBuild right now",
+  'access-denied': 'Your access has changed, contact your admin',
+};
+function relaunchErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const m = /\[typebuild-mint:([a-z-]+)\]/.exec(raw);
+  if (m && RELAUNCH_MINT_MESSAGES[m[1]]) return RELAUNCH_MINT_MESSAGES[m[1]];
+  return "Couldn't restart the session — try again";
+}
 
 // Persisted geometry. `frac` is the LEFT (browser) pane's fraction of the
 // window width when the Claude pane is OPEN; `collapsed` hides the Claude pane.
@@ -84,6 +102,23 @@ export function OperatorSession({
   const [collapsed, setCollapsed] = useState(initial.current.collapsed);
   const [waiting, setWaiting] = useState(false);
 
+  // task-63fd78520f53 — TypeBuild MCP session-expiry banner, ported from the
+  // main window (App.tsx). Operator sessions no longer open a main-window tab
+  // (the operator terminal ADOPTS the pty directly), so the expiry strip that
+  // App rendered over that tab never showed here. Subscribe to the same
+  // fm.onTypebuildSessionExpiry feed, keyed to THIS session's ptyId, and render
+  // the identical banner over the Claude terminal pane so the operator sees the
+  // warning / one-click relaunch. The expiry-clock auto-relaunch and the global
+  // "Release this task?" confirm still live in main — untouched here.
+  //
+  // PHI-free: state holds only the opaque taskId + phase (ptyId-keyed).
+  const [expiry, setExpiry] = useState<{
+    phase: 'warning' | 'expired';
+    taskId: string;
+  } | null>(null);
+  const [expiryDismissed, setExpiryDismissed] = useState(false);
+  const [relaunch, setRelaunch] = useState<{ error: string | null } | null>(null);
+
   const rootRef = useRef<HTMLDivElement>(null);
   const fracRef = useRef(frac);
   fracRef.current = frac;
@@ -115,6 +150,66 @@ export function OperatorSession({
       off();
     };
   }, [ptyId]);
+
+  // ─── TypeBuild MCP session-expiry banner (task-63fd78520f53) ─────────────
+  // Track expiry phases for THIS session's ptyId only. Main's expiry clock
+  // broadcasts 'warning' (T-15min) then 'expired' (at/after token lapse) per
+  // live session, keyed by ptyId. A fresh 'expired' supersedes a dismissed
+  // 'warning' (it's actionable). Clear when this pty exits / relaunches so a
+  // stale banner never lingers.
+  useEffect(() => {
+    if (ptyId == null) return;
+    const off = fm.onTypebuildSessionExpiry(({ ptyId: id, taskId, phase }) => {
+      if (id !== ptyId) return;
+      setExpiry({ phase, taskId });
+      if (phase === 'expired') setExpiryDismissed(false);
+    });
+    return off;
+  }, [ptyId]);
+
+  useEffect(() => {
+    if (ptyId == null) return;
+    const off = fm.onTermExit((id) => {
+      if (id !== ptyId) return;
+      setExpiry(null);
+      setExpiryDismissed(false);
+      setRelaunch(null);
+    });
+    return off;
+  }, [ptyId]);
+
+  // After a successful relaunch main repoints the session onto a fresh pty.
+  // The operator window is bound to a fixed ptyId for its lifetime, so the
+  // surviving signal here is the OLD pty's exit (handled above, which clears
+  // expiry state); we also clear directly on the relaunched event for the old
+  // pty in case the orderings differ.
+  useEffect(() => {
+    if (ptyId == null) return;
+    const off = fm.onTypebuildSessionRelaunched(({ oldPtyId }) => {
+      if (oldPtyId !== ptyId) return;
+      setExpiry(null);
+      setExpiryDismissed(false);
+      setRelaunch(null);
+    });
+    return off;
+  }, [ptyId]);
+
+  // One-click relaunch: kill the expired pty, mint fresh, resume. A typed mint
+  // failure maps to the same in-app message as the main window and is shown
+  // inline so the operator can retry.
+  const doRelaunch = useCallback(
+    async (taskId: string) => {
+      if (ptyId == null) return;
+      setRelaunch({ error: null });
+      try {
+        await fm.typebuildRelaunchSession({ ptyId, taskId });
+        // Success clears via the term-exit / relaunched effects above.
+      } catch (err) {
+        setRelaunch({ error: relaunchErrorMessage(err) });
+      }
+    },
+    [ptyId],
+  );
 
   // Tell main which theme the splash should use (and re-tell on restyle).
   useEffect(() => {
@@ -241,6 +336,20 @@ export function OperatorSession({
           </button>
         </div>
         <div className="operator__term">
+          {/* task-63fd78520f53 — expiry strip pinned over the terminal pane
+              (matches App.tsx). 'warning' is dismissible; 'expired' offers a
+              one-click relaunch. The operator never sees the raw MCP error
+              underneath — this strip sits over it. PHI-free. */}
+          {expiry &&
+            !(expiry.phase === 'warning' && expiryDismissed) && (
+              <TypebuildSessionBanner
+                phase={expiry.phase}
+                busy={!!relaunch && !relaunch.error}
+                error={relaunch?.error ?? null}
+                onRestart={() => void doRelaunch(expiry.taskId)}
+                onDismiss={() => setExpiryDismissed(true)}
+              />
+            )}
           {ptyId != null ? (
             <Terminal ptyId={ptyId} cwd="" isActive />
           ) : (
