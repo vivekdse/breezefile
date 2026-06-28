@@ -130,6 +130,53 @@ test('run with a missing required param exits 7 (precondition) with JSON', () =>
     const out = JSON.parse(r.stdout);
     assert.equal(out.code, 7);
     assert.equal(out.error.category, 'precondition_not_met');
+    // OUTPUT CONTRACT: every failing result carries a machine-readable cause.
+    assert.equal(out.error.likely_cause, 'precondition');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ─── likely_cause field (Operator Speed — repair tier) ───────────────────────
+
+import {
+  LIKELY_CAUSE,
+  LIKELY_CAUSES,
+  likelyCause,
+  ERROR_CATEGORY,
+} from '../electron/browser/tools/registry.mjs';
+
+test('LIKELY_CAUSE maps every ERROR_CATEGORY to a valid closed-vocab cause', () => {
+  // The map is the deterministic category→likely_cause contract the playbook
+  // branch keys off. Pin the exact expected mapping.
+  const expected = {
+    selector_not_found: 'selector_drift',
+    auth_failed: 'auth',
+    timeout: 'timeout',
+    rate_limited: 'timeout',
+    precondition_not_met: 'precondition',
+    element_disabled: 'precondition',
+    validation_failed: 'param',
+    partial_success: 'param',
+    unexpected_state: 'unknown',
+    navigation_failed: 'unknown',
+  };
+  assert.deepEqual(LIKELY_CAUSE, expected);
+  // Every known error category has a mapping in the closed vocabulary…
+  for (const category of Object.keys(ERROR_CATEGORY)) {
+    assert.ok(LIKELY_CAUSES.includes(LIKELY_CAUSE[category]), `category ${category} → unknown cause`);
+  }
+  // …and the resolver is total: unknown/missing categories fall back to 'unknown'.
+  assert.equal(likelyCause('not_a_real_category'), 'unknown');
+  assert.equal(likelyCause(undefined), 'unknown');
+});
+
+test('a no-such-tool run still stamps likely_cause on the error', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    const r = run(['run', 'does-not-exist'], dir);
+    assert.equal(r.status, 1);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.error.category, 'precondition_not_met');
+    assert.equal(out.error.likely_cause, 'precondition');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

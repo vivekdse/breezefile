@@ -76,6 +76,46 @@ export const ERROR_CATEGORY = {
   validation_failed: EXIT.VALIDATION,
 };
 
+/** Machine-readable repair signal on EVERY failing result (Operator Speed).
+ *  Maps a fine-grained `ERROR_CATEGORY` to the single coarse decision an agent
+ *  (or the playbook's repair tier) keys off — one of:
+ *
+ *    param          → re-run with corrected params (don't touch tool code)
+ *    selector_drift → patch tool.mjs (selectors/structure changed), then re-run
+ *    precondition   → resolve a precondition (login state, enabled element, …);
+ *                     don't touch code
+ *    auth           → resolve credentials / session; don't touch code
+ *    timeout        → retry with backoff (transient network / rate limit)
+ *    unknown        → escalate (novel / unexpected state)
+ *
+ *  The map is DETERMINISTIC and aligned to the *action* the agent should take,
+ *  not just the exit code — several categories share an exit code but call for
+ *  different repairs. Any category not listed (or a missing one) resolves to
+ *  `unknown` via likelyCause() so the field is ALWAYS present and safe. */
+export const LIKELY_CAUSE = {
+  selector_not_found: 'selector_drift', // exit 5 — patch the tool
+  auth_failed: 'auth',                   // exit 4 — fix creds/session
+  timeout: 'timeout',                    // exit 3 — retry/backoff
+  rate_limited: 'timeout',               // exit 3 — back off and retry
+  precondition_not_met: 'precondition',  // exit 7 — resolve preconditions
+  element_disabled: 'precondition',      // exit 1 — a guard/precondition unmet
+  validation_failed: 'param',            // exit 2 — output off; correct inputs
+  partial_success: 'param',              // exit 6 — usually a step input issue
+  unexpected_state: 'unknown',           // exit 1 — escalate
+  navigation_failed: 'unknown',          // exit 1 — escalate (could be net/auth)
+};
+
+/** The allowed likely_cause values — the closed vocabulary the playbook branches
+ *  on. Exported so tests/consumers can assert membership. */
+export const LIKELY_CAUSES = ['param', 'selector_drift', 'precondition', 'auth', 'timeout', 'unknown'];
+
+/** Resolve a category to its likely_cause, defaulting to 'unknown' for any
+ *  unrecognized or missing category. Never throws; always returns a member of
+ *  LIKELY_CAUSES. */
+export function likelyCause(category) {
+  return LIKELY_CAUSE[category] || 'unknown';
+}
+
 /** Error a tool can throw to signal a categorized failure. The runner reads
  *  `category` → exit code; everything else becomes structured output. */
 export class ToolError extends Error {

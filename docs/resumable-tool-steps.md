@@ -109,9 +109,33 @@ time. There is no resume path that re-runs a recorded side effect.
 Additionally, the legacy implicit `run` step is `sideEffect:true`, so the runner
 never auto-resumes it.
 
+## Repair tier (wired)
+
+The playbook (`playbookBody()` in `electron/browser/automation.ts`) now makes the
+**repair tier** the DEFAULT next move on any non-zero tool exit, before falling
+back to the slow full-agent path. The branch keys off the standardized
+`error.likely_cause` field on every failing result (`{ param | selector_drift |
+precondition | auth | timeout | unknown }`, mapped from `category` by the
+`LIKELY_CAUSE` table in `registry.mjs`):
+
+- `param` / `precondition` / `auth` → re-run with corrected params / resolve the
+  precondition or creds — **don't touch tool code**.
+- `selector_drift` (exit 5) → patch `tool.mjs`, `update` the tool, re-run.
+- `timeout` → retry with backoff.
+- `unknown` → escalate to the full-agent path.
+
+On a **partial (exit 6)**, the agent reads `failed_step` + `resume_from`, fixes
+step k (selector/params/code), and re-runs with `--resume-from <failed_step>` so
+steps 1..k-1 — including any completed side-effect/submit — do not re-fire (the
+no-double-submit invariant above). Full-agent is reached only after N failed
+repairs; after a full-agent solve the playbook references a **promotion hook**
+(emit a tool) so the flow graduates back to tier 2.
+
 ## Deferred follow-ups
 
 - Convert the remaining seed tools (`web-form-login`, `extract-table`) to `steps[]`
   (login: locate-fields step [idempotent] + submit step [side-effect]).
-- Wire a **repair tier** in `electron/browser/automation.ts` / the playbook so an
-  exit-6 partial auto-suggests `--resume-from <failed_step>` after a tool patch.
+- **Auto-promotion emit:** the playbook *references* the promotion hook, but the
+  actual auto-emit of a tool after a full-agent solve is a separate task.
+- **API channel (tier 1):** the playbook states the tier order (API → tool →
+  repair → full agent) but a direct API/integration channel is not yet wired.

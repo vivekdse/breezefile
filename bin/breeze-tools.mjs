@@ -19,6 +19,24 @@
 // stdout, a human-readable step log to stderr, and a meaningful exit code
 // (0..8). Each run is appended to the tool's runs.jsonl for health tracking.
 //
+// OUTPUT CONTRACT — failing result shape. EVERY non-success result carries an
+// `error` object with a fine-grained `category` AND a standardized,
+// machine-readable `likely_cause` (registry LIKELY_CAUSE map, always present):
+//
+//   { status, code, tool, ..., error: { category, message, likely_cause }, ... }
+//
+// `likely_cause ∈ { param | selector_drift | precondition | auth | timeout |
+// unknown }` is the single field the agent / playbook repair tier branches on:
+//   param          → re-run with corrected params (don't touch tool code)
+//   selector_drift → patch tool.mjs (page structure changed), then re-run
+//   precondition   → resolve a precondition (login state, enabled element)
+//   auth           → resolve credentials / session
+//   timeout        → retry with backoff (transient network / rate limit)
+//   unknown        → escalate (novel / unexpected state)
+// On a PARTIAL (exit 6) the result also carries `failed_step` + `resume_from`,
+// so the agent patches step k and re-runs with `--resume-from <failed_step>`
+// (see docs/resumable-tool-steps.md) — earlier side-effect steps never re-fire.
+//
 // Tools live in ~/.breezefile/tools/<id>/ (override: $BREEZE_TOOLS_DIR). Each
 // tool.mjs exports `async function run(ctx, params)` where ctx = { page,
 // browser, log, loc, EXIT, ToolError }. Returning a value (or {}) is success;
@@ -30,6 +48,7 @@ import { pathToFileURL } from 'node:url';
 import {
   EXIT,
   ERROR_CATEGORY,
+  likelyCause,
   ToolError,
   toolsDir,
   loadTool,
@@ -96,6 +115,18 @@ function makeLog(verbose) {
 
 function out(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+}
+
+// Stamp the standardized, machine-readable `likely_cause` onto a failing run's
+// error object (OUTPUT CONTRACT: present on EVERY failing result). It is derived
+// deterministically from the error `category` (registry LIKELY_CAUSE map) and
+// tells the agent / playbook repair tier which branch to take:
+//   param → re-run w/ corrected params · selector_drift → patch tool.mjs ·
+//   precondition/auth → resolve preconditions/creds (don't touch code) ·
+//   timeout → retry/backoff · unknown → escalate.
+function withCause(error) {
+  if (!error || typeof error !== 'object') return error;
+  return { ...error, likely_cause: likelyCause(error.category) };
 }
 
 // ─── available <url> ─────────────────────────────────────────────────────────
@@ -165,13 +196,13 @@ async function cmdRun(args) {
 
   const t = loadTool(id);
   if (!t || !t.meta) {
-    out({ status: 'error', code: EXIT.FAILURE, error: { category: 'precondition_not_met', message: `no such tool: ${id}` } });
+    out({ status: 'error', code: EXIT.FAILURE, error: withCause({ category: 'precondition_not_met', message: `no such tool: ${id}` }) });
     return EXIT.FAILURE;
   }
   const v = validateTool(t.meta);
   if (!v.ok) {
     log.fail(`tool.json invalid: ${v.errors.join('; ')}`);
-    out({ status: 'error', code: EXIT.FAILURE, error: { category: 'precondition_not_met', message: 'invalid tool.json', details: v.errors } });
+    out({ status: 'error', code: EXIT.FAILURE, error: withCause({ category: 'precondition_not_met', message: 'invalid tool.json', details: v.errors }) });
     return EXIT.FAILURE;
   }
 
@@ -182,7 +213,7 @@ async function cmdRun(args) {
     if (args[name] !== undefined) params[name] = args[name];
     else if (spec && spec.required) {
       log.fail(`missing required param: ${name}`);
-      out({ status: 'error', code: EXIT.PRECONDITION, error: { category: 'precondition_not_met', message: `missing required param: ${name}` } });
+      out({ status: 'error', code: EXIT.PRECONDITION, error: withCause({ category: 'precondition_not_met', message: `missing required param: ${name}` }) });
       return EXIT.PRECONDITION;
     }
   }
@@ -200,7 +231,7 @@ async function cmdRun(args) {
     mod = await import(pathToFileURL(t.scriptPath).href);
   } catch (e) {
     log.fail(`cannot load tool.mjs: ${e.message}`);
-    out({ status: 'error', code: EXIT.FAILURE, error: { category: 'precondition_not_met', message: `tool.mjs load failed: ${e.message}` } });
+    out({ status: 'error', code: EXIT.FAILURE, error: withCause({ category: 'precondition_not_met', message: `tool.mjs load failed: ${e.message}` }) });
     return EXIT.FAILURE;
   }
 
@@ -208,7 +239,7 @@ async function cmdRun(args) {
   // implicit, non-resumable, side-effect step (see normalizeSteps).
   const norm = normalizeSteps(mod);
   if (!norm.ok) {
-    out({ status: 'error', code: EXIT.FAILURE, error: { category: 'precondition_not_met', message: norm.errors.join('; ') } });
+    out({ status: 'error', code: EXIT.FAILURE, error: withCause({ category: 'precondition_not_met', message: norm.errors.join('; ') }) });
     return EXIT.FAILURE;
   }
   const steps = norm.steps;
@@ -227,7 +258,7 @@ async function cmdRun(args) {
     // A refused resume is a precondition error — NOT a silent re-run. This is the
     // load-bearing side-effect-safety gate.
     log.fail(`resume refused: ${plan.errors.join('; ')}`);
-    out({ status: 'error', code: EXIT.PRECONDITION, error: { category: 'precondition_not_met', message: plan.errors.join('; '), resumable: steps.filter((s) => !s.sideEffect).map((s) => s.name) } });
+    out({ status: 'error', code: EXIT.PRECONDITION, error: withCause({ category: 'precondition_not_met', message: plan.errors.join('; '), resumable: steps.filter((s) => !s.sideEffect).map((s) => s.name) }) });
     return EXIT.PRECONDITION;
   }
 
@@ -261,7 +292,7 @@ async function cmdRun(args) {
     ));
   } catch (e) {
     log.fail(`browser layer unavailable: ${e.message}`);
-    out({ status: 'error', code: EXIT.PRECONDITION, error: { category: 'precondition_not_met', message: `playwright-core not available: ${e.message}` } });
+    out({ status: 'error', code: EXIT.PRECONDITION, error: withCause({ category: 'precondition_not_met', message: `playwright-core not available: ${e.message}` }) });
     return EXIT.PRECONDITION;
   }
 
@@ -278,7 +309,7 @@ async function cmdRun(args) {
   } catch (e) {
     log.fail(e.message);
     const code = /no Breeze browser window/.test(e.message) ? EXIT.PRECONDITION : EXIT.TIMEOUT;
-    out({ status: 'error', code, error: { category: code === EXIT.PRECONDITION ? 'precondition_not_met' : 'timeout', message: e.message } });
+    out({ status: 'error', code, error: withCause({ category: code === EXIT.PRECONDITION ? 'precondition_not_met' : 'timeout', message: e.message }) });
     if (browser) await browser.close().catch(() => {});
     return code;
   }
@@ -361,7 +392,7 @@ async function cmdRun(args) {
       if (madeProgress && steps.length > 1) code = EXIT.PARTIAL;
       log.fail(`${e.category}: ${e.message}`);
       finish(code === EXIT.PARTIAL ? 'partial' : 'failure', code,
-        { error: { category: e.category, message: e.message, ...e.extra }, failed_step, resume_from: nextStep },
+        { error: withCause({ category: e.category, message: e.message, ...e.extra }), failed_step, resume_from: nextStep },
         { failed_step });
       return code;
     }
@@ -369,7 +400,7 @@ async function cmdRun(args) {
     const madeProgress = stepsDone.length > plan.skip.length;
     const code = (madeProgress && steps.length > 1) ? EXIT.PARTIAL : EXIT.FAILURE;
     finish(code === EXIT.PARTIAL ? 'partial' : 'error', code,
-      { error: { category: 'unexpected_state', message: e.message || String(e), stack: verbose ? e.stack : undefined }, failed_step, resume_from: nextStep },
+      { error: withCause({ category: 'unexpected_state', message: e.message || String(e), stack: verbose ? e.stack : undefined }), failed_step, resume_from: nextStep },
       { failed_step });
     return code;
   } finally {
