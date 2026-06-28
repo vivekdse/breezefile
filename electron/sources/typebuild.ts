@@ -1246,6 +1246,31 @@ export class TypeBuildTaskSource implements TaskSource {
       /* server-hosted instructions are additive — never block a launch on them */
     }
 
+    // task-9bd1389e64c6 — pre-fetched task-context bundle. ONE GET pulls the
+    // server-prepared (async-at-create, server-cached) bundle of RELEVANT SITES
+    // for this task + their associated memories + any task-level recall, rendered
+    // as NON-PHI Markdown. We inject it as a system-prompt addendum (same seam as
+    // operator-instructions) so the agent has all standing context in its FIRST
+    // turn and makes ZERO extra recall_site/recall_task discovery round-trips
+    // before acting. Empty when the server has no bundle yet (404), detection is
+    // still running (ready:false), or the fetch failed — the launch always
+    // proceeds; the agent falls back to live discovery. NON-PHI by contract (the
+    // task body is never part of the bundle); body never logged. On a relaunch we
+    // skip it: --continue resumes a conversation that already has this context, so
+    // re-injecting would duplicate it. Disk-cached for offline launches.
+    let contextBundleAddendum = '';
+    if (!opts.resume) {
+      try {
+        const { fetchTaskContextBundle, renderBundleAddendum } = await import(
+          '../typebuild/task-context-bundle'
+        );
+        const bundle = await fetchTaskContextBundle(id);
+        contextBundleAddendum = renderBundleAddendum(bundle);
+      } catch {
+        /* the bundle is additive — never block a launch on it */
+      }
+    }
+
     // task-ab1d7955e23f (item 4) — project-derived launch context. When the
     // task belongs to a TypeBuild project, run it IN the project's folder and
     // inject the project's cascading instructions into the session. Resolved
@@ -1311,6 +1336,13 @@ export class TypeBuildTaskSource implements TaskSource {
         // is unset/empty or the fetch failed (bundled playbook still applies).
         ...(operatorInstructions
           ? ['--append-system-prompt', operatorInstructions]
+          : []),
+        // task-9bd1389e64c6 — the pre-fetched relevant-sites + memories bundle,
+        // layered on as its OWN system-prompt addendum so the agent starts with
+        // all standing context and skips the discovery round-trips. Omitted when
+        // there is no ready bundle (or on a resume).
+        ...(contextBundleAddendum
+          ? ['--append-system-prompt', contextBundleAddendum]
           : []),
       ],
       env: {
