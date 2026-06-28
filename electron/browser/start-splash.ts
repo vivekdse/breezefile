@@ -203,3 +203,31 @@ export function splashDataUrl(theme: string | undefined): string {
   // encodeURIComponent keeps the data URL valid (the HTML has #, quotes, etc.).
   return `data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(resolved))}`;
 }
+
+// The meaningless placeholder the browser surface USED to land on before the
+// agent's first real `goto` (task-3a49fb5adf24 / task-d85d23f3aea4). It must
+// NEVER be loaded on task start — empty/missing or a stale example.com start_url
+// both resolve to the themed splash instead. Matches example.com / .org / .net
+// (optionally www, http(s), trailing slash) since those are the IANA reserved
+// "use in examples" domains that show up as placeholder start_urls.
+const EXAMPLE_PLACEHOLDER_RE = /^https?:\/\/(www\.)?example\.(com|org|net)\/?$/i;
+
+/** True if `url` is the meaningless example.com-style placeholder. These must be
+ *  treated as "no start url" → splash, never actually loaded. */
+export function isPlaceholderStartUrl(url: string | undefined | null): boolean {
+  return !!url && EXAMPLE_PLACEHOLDER_RE.test(url.trim());
+}
+
+/** THE single chokepoint for picking the browser surface's start URL. An empty,
+ *  missing, or example.com-placeholder url yields the themed splash (in `theme`,
+ *  default theme when omitted); any real url passes through (trimmed) unchanged.
+ *  Use this everywhere a start/initial URL is seeded so example.com can never
+ *  load on task start. */
+export function resolveStartUrl(
+  url: string | undefined | null,
+  theme?: string | undefined,
+): string {
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  if (!trimmed || isPlaceholderStartUrl(trimmed)) return splashDataUrl(theme);
+  return trimmed;
+}

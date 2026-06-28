@@ -771,7 +771,11 @@ function Shell() {
           // demand (api-server /app/open-browser). Lets an in-app agent create
           // the tab it drives over CDP without a keypress.
           case 'openBrowser': {
-            const url = (req.url as string) || 'https://example.com';
+            // No url → empty string, NOT example.com: the embedded-browser view
+            // backend resolves an empty/placeholder start url to the themed
+            // splash (electron/browser/views.ts resolveStartUrl,
+            // task-d85d23f3aea4). example.com must never seed a tab.
+            const url = (req.url as string) || '';
             // Reuse + focus an existing browser tab rather than spawning a
             // second view (the agent may call `open` more than once).
             const existing = tabsRef.current.findIndex((t) => t.kind === 'browser');
@@ -1054,9 +1058,11 @@ function Shell() {
         e.preventDefault();
         dispatch({
           type: 'newTab',
+          // Empty start url → the view backend shows the themed splash, not
+          // example.com (task-d85d23f3aea4).
           tab: makeTab('/', {
             kind: 'browser',
-            browserUrl: 'https://example.com',
+            browserUrl: '',
           }),
         });
       }
@@ -1078,9 +1084,11 @@ function Shell() {
       }
       dispatch({
         type: 'newTab',
+        // No url → empty: the view backend resolves it to the themed splash, not
+        // example.com (task-d85d23f3aea4).
         tab: makeTab('/', {
           kind: 'browser',
-          browserUrl: url || 'https://example.com',
+          browserUrl: url || '',
         }),
       });
     });
@@ -1460,7 +1468,7 @@ function Shell() {
             // they survive tab switches; nothing to draw here.
             null
           ) : isBrowserTab ? (
-            <BrowserPane tabId={tab.id} url={tab.browserUrl || 'https://example.com'} />
+            <BrowserPane tabId={tab.id} url={tab.browserUrl || ''} />
           ) : (
             <>
               <FolderHeader />
