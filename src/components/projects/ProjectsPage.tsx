@@ -37,7 +37,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fm } from '../../bridge';
 import { useStore } from '../../store';
-import { useTasks, useTypebuildAuth } from '../../tasks';
+import { useTasks, useTypebuildAuth, signInTypebuildBrowser } from '../../tasks';
 import type { Project, Task } from '../../types';
 import {
   buildProjectTree,
@@ -70,13 +70,12 @@ import './ProjectsPage.css';
 
 const CTX_MARK = '◇ given to agents as context';
 
-// task-81b7ce77a30a — open the TypeBuild sign-in panel. The sidebar's account
-// chip already deep-links here via this event; reuse it so signed-out CTAs lead
-// somewhere real instead of a dead button.
+// task-2c9c2e6a7bca — sign in DIRECTLY: kick off the browser OAuth flow rather
+// than opening Settings first. Signed-out CTAs call this so "Sign in" does the
+// one thing it says, with status-bar feedback (and a Settings fallback only if
+// the server handoff isn't live).
 export function openTypebuildSignIn(): void {
-  window.dispatchEvent(
-    new CustomEvent('fm:openSettings', { detail: { section: 'typebuild' } }),
-  );
+  void signInTypebuildBrowser();
 }
 
 // Q4 — project-less tasks live in a synthetic "Inbox (no project)" block, always

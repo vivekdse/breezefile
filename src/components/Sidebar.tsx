@@ -24,6 +24,7 @@ import {
   useTasks,
   useTypebuildAuth,
   useTypebuildReadiness,
+  signInTypebuildBrowser,
 } from '../tasks';
 import type { Task } from '../types';
 import { primaryActionFor } from './tasks/primaryAction.mjs';
@@ -281,10 +282,6 @@ export function Sidebar() {
   // Active Tasks header below.)
   const tbEnabled = state.typebuildEnabled;
   const { signedIn: tbSignedIn } = useTypebuildAuth();
-  const openTypebuildSettings = () =>
-    window.dispatchEvent(
-      new CustomEvent('fm:openSettings', { detail: { section: 'typebuild' } }),
-    );
 
   return (
     <aside className="sidebar" aria-label="Sidebar">
@@ -292,7 +289,7 @@ export function Sidebar() {
         <button
           type="button"
           className="sidebar__tb-signin"
-          onClick={openTypebuildSettings}
+          onClick={() => void signInTypebuildBrowser()}
           title="You're signed out of TypeBuild — click to sign in"
         >
           <span className="sidebar__tb-signin-dot" aria-hidden="true" />
@@ -681,13 +678,19 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
             className={`sidebar__tb-chip ${
               tbSignedIn ? 'sidebar__tb-chip--on' : 'sidebar__tb-chip--off'
             }`}
-            onClick={() =>
-              window.dispatchEvent(
-                new CustomEvent('fm:openSettings', {
-                  detail: { section: 'typebuild' },
-                }),
-              )
-            }
+            onClick={() => {
+              // Signed out → sign in directly (browser flow); signed in →
+              // open Settings to manage the account. task-2c5448 / task-2c9c2e.
+              if (tbSignedIn) {
+                window.dispatchEvent(
+                  new CustomEvent('fm:openSettings', {
+                    detail: { section: 'typebuild' },
+                  }),
+                );
+              } else {
+                void signInTypebuildBrowser();
+              }
+            }}
             title={
               tbSignedIn
                 ? 'TypeBuild: signed in — click to manage'

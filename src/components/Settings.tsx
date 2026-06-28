@@ -38,6 +38,24 @@ type SectionId =
   | 'bookmarks'
   | 'typebuild';
 
+// task-2c9c2e6a7bca — Settings is a left-nav + right-pane layout (not a stack
+// of accordions): the selected section owns the full right pane and scrolls
+// independently, so no section crowds out another regardless of how many
+// categories exist. This array drives the nav rail and the section order.
+const SECTIONS: { id: SectionId; title: string }[] = [
+  { id: 'keybindings', title: 'Keybindings' },
+  { id: 'editor', title: 'Editor' },
+  { id: 'ai', title: 'AI' },
+  { id: 'task-management', title: 'Task management' },
+  { id: 'task-action-zone', title: 'Task action zone' },
+  { id: 'terminal', title: 'Terminal' },
+  { id: 'chat-agent', title: 'Chat agent' },
+  { id: 'notifications', title: 'Notifications' },
+  { id: 'claude-integration', title: 'Claude integration' },
+  { id: 'bookmarks', title: 'Bookmarks' },
+  { id: 'typebuild', title: 'TypeBuild' },
+];
+
 export function Settings({ onClose, initialSection }: Props) {
   const { state, dispatch } = useStore();
   const [editing, setEditing] = useState<string | null>(null);
@@ -48,9 +66,9 @@ export function Settings({ onClose, initialSection }: Props) {
   const [installedTerminals, setInstalledTerminals] = useState<string[]>([]);
   // fm-9iha — agent launchers for the "Default chat agent" picker.
   const [launchers, setLaunchers] = useState<Launcher[]>([]);
-  // Single-open accordion. Keybindings opens by default since it's the
-  // densest section and the most common reason to open Settings.
-  const [openSection, setOpenSection] = useState<SectionId | null>(
+  // The selected section fills the right pane. Keybindings is the default
+  // since it's the densest section and the most common reason to open Settings.
+  const [openSection, setOpenSection] = useState<SectionId>(
     initialSection ?? 'keybindings',
   );
   // fm-at5 — inline result of the "Reset Claude integration" action.
@@ -228,8 +246,8 @@ export function Settings({ onClose, initialSection }: Props) {
     dispatch({ type: 'setKeybinds', keybinds: { ...DEFAULT_KEYBINDS } });
   }
 
-  function toggle(id: SectionId) {
-    setOpenSection((cur) => (cur === id ? null : id));
+  function select(id: SectionId) {
+    setOpenSection(id);
   }
 
   return (
@@ -252,12 +270,28 @@ export function Settings({ onClose, initialSection }: Props) {
           </button>
         </header>
 
-        <div className="settings__body">
+        <div className="settings__main">
+          <nav className="settings__nav" aria-label="Settings sections">
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`settings__nav-item ${
+                  openSection === s.id ? 'settings__nav-item--active' : ''
+                }`}
+                aria-current={openSection === s.id ? 'true' : undefined}
+                onClick={() => select(s.id)}
+              >
+                {s.title}
+              </button>
+            ))}
+          </nav>
+
+          <div className="settings__body">
           <AccordionSection
             id="keybindings"
             title="Keybindings"
             isOpen={openSection === 'keybindings'}
-            onToggle={() => toggle('keybindings')}
             extra={
               <button
                 className="settings__reset"
@@ -314,7 +348,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="editor"
             title="Editor"
             isOpen={openSection === 'editor'}
-            onToggle={() => toggle('editor')}
             extra={
               <button
                 className="settings__reset"
@@ -383,7 +416,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="ai"
             title="AI"
             isOpen={openSection === 'ai'}
-            onToggle={() => toggle('ai')}
           >
             <div className="settings__row">
               <span className="settings__path settings__hint">
@@ -462,7 +494,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="task-management"
             title="Task management"
             isOpen={openSection === 'task-management'}
-            onToggle={() => toggle('task-management')}
           >
             <div className="settings__row">
               <span className="settings__action">
@@ -493,7 +524,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="task-action-zone"
             title="Task action zone"
             isOpen={openSection === 'task-action-zone'}
-            onToggle={() => toggle('task-action-zone')}
             extra={
               (launcherPrefs.hidden.length > 0 ||
                 launcherPrefs.defaultId !== null) && (
@@ -580,7 +610,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="terminal"
             title="Terminal"
             isOpen={openSection === 'terminal'}
-            onToggle={() => toggle('terminal')}
           >
             <div className="settings__row">
               <span className="settings__action">
@@ -637,7 +666,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="chat-agent"
             title="Chat agent"
             isOpen={openSection === 'chat-agent'}
-            onToggle={() => toggle('chat-agent')}
           >
             <div className="settings__row">
               <span className="settings__action">Default chat agent</span>
@@ -675,7 +703,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="notifications"
             title="Notifications"
             isOpen={openSection === 'notifications'}
-            onToggle={() => toggle('notifications')}
           >
             <div className="settings__row">
               <span className="settings__action">
@@ -765,7 +792,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="claude-integration"
             title="Claude integration"
             isOpen={openSection === 'claude-integration'}
-            onToggle={() => toggle('claude-integration')}
           >
             <div className="settings__row">
               <span className="settings__action">
@@ -792,7 +818,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="bookmarks"
             title="Bookmarks"
             isOpen={openSection === 'bookmarks'}
-            onToggle={() => toggle('bookmarks')}
           >
             <ul className="settings__list">
               {Object.entries(state.bookmarks).length === 0 && (
@@ -816,7 +841,6 @@ export function Settings({ onClose, initialSection }: Props) {
             id="typebuild"
             title="TypeBuild"
             isOpen={openSection === 'typebuild'}
-            onToggle={() => toggle('typebuild')}
           >
             <div className="settings__row">
               <span className="settings__action">
@@ -848,56 +872,44 @@ export function Settings({ onClose, initialSection }: Props) {
               </>
             )}
           </AccordionSection>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+// A settings section in the right pane. Only the SELECTED section renders
+// (the nav rail on the left is the chooser), so its title + body get the full
+// pane and scroll independently — no accordion stacking.
 function AccordionSection({
   id,
   title,
   isOpen,
-  onToggle,
   extra,
   children,
 }: {
   id: string;
   title: string;
   isOpen: boolean;
-  onToggle: () => void;
   extra?: ReactNode;
   children: ReactNode;
 }) {
+  if (!isOpen) return null;
   return (
-    <section
-      className={`settings__section ${isOpen ? 'settings__section--open' : ''}`}
-    >
+    <section className="settings__section settings__section--open">
       <div className="settings__section-head">
-        <button
-          type="button"
-          className="settings__section-toggle"
-          aria-expanded={isOpen}
-          aria-controls={`settings-section-${id}`}
-          onClick={onToggle}
-        >
-          <span className="settings__section-chevron" aria-hidden="true">
-            {isOpen ? '▾' : '▸'}
-          </span>
-          <h3 className="settings__section-title">{title}</h3>
-        </button>
+        <h3 className="settings__section-title">{title}</h3>
         {extra && <span className="settings__section-extra">{extra}</span>}
       </div>
-      {isOpen && (
-        <div
-          id={`settings-section-${id}`}
-          className="settings__section-body"
-          role="region"
-          aria-label={title}
-        >
-          {children}
-        </div>
-      )}
+      <div
+        id={`settings-section-${id}`}
+        className="settings__section-body"
+        role="region"
+        aria-label={title}
+      >
+        {children}
+      </div>
     </section>
   );
 }

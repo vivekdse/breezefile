@@ -317,6 +317,44 @@ export function useTypebuildAuth(): { signedIn: boolean; email: string | null } 
   return { signedIn, email };
 }
 
+// task-2c9c2e6a7bca — Sign in directly, no Settings detour. Kicks off the
+// browser OAuth flow (the same call the Settings panel ultimately makes) and
+// reports progress on the status bar via `fm:setStatus`. Quiet on cancel;
+// friendly copy on the typed `[typebuild-browser:<code>]` failures, with the
+// email/password fallback (which lives in Settings) pointed at when the server
+// handoff isn't deployed yet. Safe to call from anywhere — it owns its own
+// feedback and never throws.
+export async function signInTypebuildBrowser(): Promise<void> {
+  const status = (msg: string) =>
+    window.dispatchEvent(new CustomEvent('fm:setStatus', { detail: { msg } }));
+  status('Opening your browser to sign in to TypeBuild…');
+  try {
+    const next = await fm.typebuild.signInBrowser();
+    status(
+      next.signedIn
+        ? `Signed in to TypeBuild${next.email ? ` as ${next.email}` : ''}`
+        : 'TypeBuild sign-in finished',
+    );
+  } catch (err) {
+    const m = /\[typebuild-browser:([a-z-]+)\]/.exec((err as Error).message);
+    const code = m ? m[1] : 'rejected';
+    if (code === 'cancelled') {
+      status('TypeBuild sign-in cancelled');
+    } else if (code === 'server-pending') {
+      // Browser path not live yet — send the user to the still-working
+      // email/password fallback in Settings.
+      status('TypeBuild update pending — use email & password in Settings.');
+      window.dispatchEvent(
+        new CustomEvent('fm:openSettings', { detail: { section: 'typebuild' } }),
+      );
+    } else if (code === 'unreachable') {
+      status("Couldn't reach TypeBuild. Check your connection and try again.");
+    } else {
+      status('TypeBuild sign-in failed. Please try again.');
+    }
+  }
+}
+
 export function useTypebuildReadiness(): {
   signedIn: boolean;
   claudeOk: boolean;
