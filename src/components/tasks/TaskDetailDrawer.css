@@ -98,6 +98,15 @@
   50%      { box-shadow: 0 0 0 5px transparent; }
 }
 
+/* task-b0e424ef9803 — the working pulse is the drawer leg of the consistent
+   "working" motion (task dot breathes, project ◷ spins, drawer dot pulses), all
+   keyed off the same working/in_progress signal (here liveToneFor → tone
+   'working'). Respect prefers-reduced-motion: the accent dot + "Working" label
+   still carry the state, so only the motion is dropped. */
+@media (prefers-reduced-motion: reduce) {
+  .tdd__pulse--working { animation: none; }
+}
+
 .tdd__badge {
   font-size: 10px;
   text-transform: uppercase;

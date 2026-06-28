@@ -16,6 +16,30 @@
 .task-dot--done        { background: #2aa198; }
 .task-dot--cancelled   { background: var(--muted, #6c757d); opacity: 0.55; }
 
+/* task-b0e424ef9803 — "working" motion. A HEALTHY in_progress dot (no stalled
+   /lapsed health ring) gently breathes an amber glow so live work draws the eye
+   without a noisy spinner. The pulse is keyed off the SAME in_progress status
+   that paints the dot amber, so motion can never disagree with the badge.
+   It is deliberately suppressed when a health ring is present (`:not(--stalled)
+   :not(--lapsed)`) so a STALLED/LAPSED task keeps its static ring and stays
+   visually distinct from a task that is genuinely working. */
+.task-dot--in_progress:not(.task-dot--stalled):not(.task-dot--lapsed) {
+  animation: task-dot-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes task-dot-breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.15) inset,
+      0 0 0 0 rgba(181, 137, 0, 0.55);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.15) inset,
+      0 0 0 3px rgba(181, 137, 0, 0);
+  }
+}
+
 /* task-80be320f06b3 — health accent ring. A stranded (stalled) task gets a red
    ring; a lapsed claim gets an amber ring. Drawn as a box-shadow halo so the
    dot keeps its status color underneath. */
@@ -102,4 +126,16 @@ button.task-run-indicator--clickable:hover {
 button.task-run-indicator--clickable:focus-visible {
   outline: 2px solid var(--accent, #268bd2);
   outline-offset: 1px;
+}
+
+/* task-b0e424ef9803 — honor prefers-reduced-motion: drop the breathing dot and
+   the spinning run glyph back to their static appearance (the color/glyph still
+   carries the state, so nothing is lost — only the motion). */
+@media (prefers-reduced-motion: reduce) {
+  .task-dot--in_progress:not(.task-dot--stalled):not(.task-dot--lapsed) {
+    animation: none;
+  }
+  .task-run-indicator__glyph--running {
+    animation: none;
+  }
 }

@@ -336,6 +336,27 @@
 .pfolder-row__status--need { color: var(--warn); }
 .pfolder-row__status--working { color: var(--accent); }
 
+/* task-b0e424ef9803 — "working" motion. The ◷ glyph of a project with live
+   in_progress work spins slowly so the eye catches active projects in the dense
+   inbox list. Keyed off the SAME 'working' status that picks the ◷ glyph + the
+   accent color (projStatusOf), so motion can't disagree with the icon. Only the
+   `working` state animates: a project with a stalled/blocked/failed task rolls
+   up to the loud `blocked` (⛔) glyph instead, which stays STATIC so "needs a
+   human" never gets softened into a calm spin. */
+.pfolder-row__status--working {
+  display: inline-block;
+  animation: pfolder-status-spin 3s linear infinite;
+}
+
+@keyframes pfolder-status-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pfolder-row__status--working { animation: none; }
+}
+
 .pfolder-row__icon {
   justify-self: center;
   color: var(--fg-dim);
