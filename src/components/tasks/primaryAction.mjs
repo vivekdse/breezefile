@@ -12,6 +12,8 @@
 //                                    else view-run
 //   local auto, idle              → run-now (▸)
 //   typebuild, session running    → open-session  (focus the tab)
+//   typebuild in_progress, no local session → none  (running elsewhere; stop
+//                                    it first — Start would 409)
 //   typebuild done/partial/cancelled → none  (lives in DONE; Reopen is a
 //                                    kebab/detail action via PATCH {open})
 //   typebuild blocked             → reopen
@@ -31,6 +33,15 @@ function isTerminal(task) {
   const raw = task.rawStatus;
   // fm-alfz (S1) — cancelled is a real server terminal status now.
   return raw === 'done' || raw === 'partial' || raw === 'cancelled';
+}
+
+// task-269637c6a076 — a task is "effectively in_progress" when the server (or
+// the normalized status) says a session is running. We key off this, NOT just
+// claimedBy: a claim can be held while idle (legit Resume), but an in_progress
+// row means a session is live somewhere — possibly on another machine — and we
+// must not dangle a second/competing Start.
+function isInProgress(task) {
+  return task.rawStatus === 'in_progress' || task.status === 'in_progress';
 }
 
 // Ported from the old TaskRow (lines 1652-1658): why Start is disabled.
@@ -109,8 +120,22 @@ export function primaryActionFor(task, ctx) {
       // Someone else holds it — no action, the row shows "◆ claimed by X".
       return { kind: 'none', note: `claimed by ${claimedBy}` };
     }
-    // Free, or claimed by me → Start (Start auto-claims; in-session claim is
-    // a no-op when we already hold it).
+    // task-269637c6a076 — the task is in_progress but there is NO focusable
+    // local session (a live `session` would have returned `open-session` at the
+    // top). A session is running somewhere else (another machine, or the claim
+    // is held while a session runs out-of-process). Do NOT offer Start: the
+    // server would reject it 409 `in_progress_elsewhere`. Surface a calm note
+    // that mirrors that 409 wording (src/errorMessages.ts) and tells the user
+    // to stop the running session before starting again.
+    if (isInProgress(task)) {
+      return {
+        kind: 'none',
+        note: 'in progress — stop the running session to start again',
+      };
+    }
+    // Free, or claimed-but-idle by me → Start (Start auto-claims; in-session
+    // claim is a no-op when we already hold it). A held claim with an idle
+    // (open/failed) status is a legit Resume.
     const reason = startBlockedReason(ctx && ctx.tbReady);
     return {
       kind: 'start',

@@ -153,3 +153,62 @@ test('typebuild parent with all children resolved → start', () => {
   );
   assert.equal(a.kind, 'start');
 });
+
+// task-269637c6a076 — an in_progress task with NO focusable local session is
+// running elsewhere (another machine, or out-of-process). Don't dangle Start;
+// the server would 409 `in_progress_elsewhere`. Offer a calm "stop it first"
+// note instead.
+test('typebuild in_progress + no local session → none (not start)', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'in_progress' }),
+    { tbReady: READY },
+  );
+  assert.notEqual(a.kind, 'start');
+  assert.equal(a.kind, 'none');
+  assert.match(a.note, /stop the running session/i);
+});
+
+// Even when I hold the claim, in_progress means a session is live somewhere —
+// Start must still be suppressed (no second/competing session).
+test('typebuild in_progress + claimed by me + no local session → none (not start)', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'in_progress', claimedBy: 'me@x' }),
+    { tbReady: READY, myEmail: 'me@x' },
+  );
+  assert.notEqual(a.kind, 'start');
+  assert.equal(a.kind, 'none');
+  assert.match(a.note, /stop the running session/i);
+});
+
+// The normalized `status` (in_progress) is enough on its own — a row whose
+// server rawStatus didn't propagate but whose status mapped to in_progress is
+// still treated as running.
+test('typebuild status=in_progress (no rawStatus) + no session → none', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', status: 'in_progress' }),
+    { tbReady: READY },
+  );
+  assert.equal(a.kind, 'none');
+  assert.match(a.note, /stop the running session/i);
+});
+
+// A live LOCAL session for an in_progress task still wins → focus the tab.
+test('typebuild in_progress + local session → open-session', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'in_progress', claimedBy: 'me@x' }),
+    { tbReady: READY, myEmail: 'me@x', session: { ptyId: 9, tabIndex: 2 } },
+  );
+  assert.equal(a.kind, 'open-session');
+  assert.equal(a.tabIndex, 2);
+});
+
+// Don't regress the legit Resume path: claimed-by-me but IDLE (open, not
+// in_progress) must still offer Start/Resume.
+test('typebuild claimed by me + idle (open) → start (resume, not suppressed)', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'open', claimedBy: 'me@x' }),
+    { tbReady: READY, myEmail: 'me@x' },
+  );
+  assert.equal(a.kind, 'start');
+  assert.equal(a.enabled, true);
+});
