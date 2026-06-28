@@ -61,18 +61,24 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
   // and on unmount. Never logged or persisted until the user accepts.
   const [pendingCred, setPendingCred] = useState<CapturedCredential | null>(null);
 
-  // Return-visit autofill offer (task-4b786c018d78): a saved login for the
-  // current origin we can fill. Holds NO password (origin+username only); the
-  // password is resolved + injected in main on accept and never reaches here.
-  const [autofillOffer, setAutofillOffer] = useState<{
+  // A saved login available for the CURRENT origin (task-4b786c018d78). Holds NO
+  // password (origin+username+count only); the password is resolved + injected
+  // in main on fill and never reaches here. Set SILENTLY on navigation when the
+  // vault has a match — it drives the toolbar key button, NOT a pop-out. We used
+  // to auto-pop a "Fill saved password?" dialog here, but that pestered on every
+  // visit and diverged from the operator session (which never auto-offers); the
+  // user now triggers the fill explicitly via the key button.
+  const [savedLogin, setSavedLogin] = useState<{
     origin: string;
     username: string;
     count: number;
   } | null>(null);
+  // Whether the manual fill-confirm dialog is open (opened by the key button).
+  const [fillDialogOpen, setFillDialogOpen] = useState(false);
   const [autofilling, setAutofilling] = useState(false);
-  // Origins we've already offered/dismissed this mount, so a re-render or sub-
-  // frame nav doesn't re-pester. (Session-level, per pane.)
-  const offeredOrigins = useRef<Set<string>>(new Set());
+  // The origin we last queried the vault for, so a re-render or in-page nav
+  // doesn't re-query the same origin. (Per pane mount.)
+  const checkedOrigin = useRef<string>('');
 
   // Keyed on tabId, NOT url: the view persists across navigations, so we must
   // not tear it down when the (initial) url prop changes.
@@ -113,31 +119,37 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
       if (s.id !== idRef.current) return;
       if (!addrFocused.current) setAddr(s.url);
       setNav({ canGoBack: s.canGoBack, canGoForward: s.canGoForward });
-      // Return-visit autofill: if this origin has a saved login we haven't
-      // offered yet this mount, offer to fill it (task-4b786c018d78). Origins
-      // only — the password is never fetched here.
+      // Return-visit autofill: SILENTLY note whether this origin has a saved
+      // login so the toolbar key button can appear (task-4b786c018d78). We do
+      // NOT pop a dialog — the user fills explicitly via that button (matches
+      // the operator session, which never auto-offers). Origins only — the
+      // password is never fetched here.
       let origin = '';
       try {
         origin = new URL(s.url).origin;
       } catch {
-        /* non-http(s) url — no autofill */
+        /* non-http(s) url — no saved-login lookup */
       }
-      if (!origin || origin === 'null') return;
-      if (offeredOrigins.current.has(origin)) return;
-      offeredOrigins.current.add(origin);
+      if (!origin || origin === 'null') {
+        setSavedLogin(null);
+        return;
+      }
+      if (origin === checkedOrigin.current) return;
+      checkedOrigin.current = origin;
+      // New origin: drop any stale match + close a left-open dialog.
+      setSavedLogin(null);
+      setFillDialogOpen(false);
       void fm.typebuild.credentials
         .list(origin)
         .then((creds) => {
-          if (idRef.current == null || creds.length === 0) return;
-          // Offer the first saved username for this origin (minimal first cut).
-          setAutofillOffer({
-            origin,
-            username: creds[0].username,
-            count: creds.length,
-          });
+          // Ignore a late reply if the view is gone or we've since moved on.
+          if (idRef.current == null || origin !== checkedOrigin.current) return;
+          if (creds.length === 0) return;
+          // Note the first saved username for this origin (minimal first cut).
+          setSavedLogin({ origin, username: creds[0].username, count: creds.length });
         })
         .catch(() => {
-          /* not signed in / transport — silently skip the offer */
+          /* not signed in / transport — silently skip */
         });
     });
 
@@ -188,7 +200,8 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
       offCred();
       // Drop any pending captured password when the pane unmounts (tab switch).
       setPendingCred(null);
-      setAutofillOffer(null);
+      setSavedLogin(null);
+      setFillDialogOpen(false);
       const id = idRef.current;
       // HIDE, don't destroy — the view survives the tab switch. reapBrowserViews
       // destroys it when the tab is actually closed.
@@ -292,12 +305,29 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
             }
           }}
         />
+        {/* Manual saved-login fill (task-4b786c018d78). Appears only when the
+            vault has a login for the current origin; click to open the fill
+            confirm. Deliberately NOT auto-popped — matches the operator session
+            and stops the per-visit "Fill saved password?" pestering. */}
+        <button
+          className="browser-pane__btn"
+          hidden={!savedLogin}
+          disabled={!savedLogin}
+          onClick={() => savedLogin && setFillDialogOpen(true)}
+          title={
+            savedLogin
+              ? `Fill saved password${savedLogin.username ? ` for ${savedLogin.username}` : ''}`
+              : 'No saved login for this site'
+          }
+        >
+          🔑
+        </button>
       </div>
       {/* Credential banners live BETWEEN the toolbar and the page view, in flow,
           so they take real column space and shrink the view slot (the native
           WebContentsView composites over all DOM, so a floating overlay would be
           hidden behind it). Main re-syncs the view below the banner. task-890b0a7483c5 */}
-      {!pendingCred && autofillOffer && (
+      {!pendingCred && fillDialogOpen && savedLogin && (
         <div className="save-pw" role="dialog" aria-label="Fill saved password">
           <div className="save-pw__head">
             <span className="save-pw__key" aria-hidden="true">
@@ -305,7 +335,7 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
             </span>
             <span className="save-pw__title">
               Fill saved password
-              {autofillOffer.username ? ` for ${autofillOffer.username}` : ''}?
+              {savedLogin.username ? ` for ${savedLogin.username}` : ''}?
             </span>
           </div>
           <div className="save-pw__actions">
@@ -319,10 +349,10 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
                 setAutofilling(true);
                 // Main resolves + injects the password; it never returns here.
                 void fm
-                  .browserAutofill(id, autofillOffer.origin, autofillOffer.username)
+                  .browserAutofill(id, savedLogin.origin, savedLogin.username)
                   .finally(() => {
                     setAutofilling(false);
-                    setAutofillOffer(null);
+                    setFillDialogOpen(false);
                   });
               }}
             >
@@ -332,7 +362,7 @@ export function BrowserPane({ tabId, url }: { tabId: string; url: string }) {
               type="button"
               className="save-pw__btn"
               disabled={autofilling}
-              onClick={() => setAutofillOffer(null)}
+              onClick={() => setFillDialogOpen(false)}
             >
               Not now
             </button>
