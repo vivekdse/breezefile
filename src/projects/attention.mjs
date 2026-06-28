@@ -56,9 +56,10 @@ const STALL_CLAIM_LAPSE_GRACE_MS = CLAIM_TTL_MS; // one extra TTL past lapse
 
 /**
  * Is a list-row in_progress task stranded (no live worker)? We deliberately do
- * NOT use updated_at/created_at for "time in status" here — the TypeBuild list
- * endpoint now()-stamps both for every non-terminal row (see mapListRow), so
- * they're placeholders for exactly the in_progress rows we care about. Instead:
+ * NOT use updated_at/created_at for "time in status" here. Even with Phase 2's
+ * real updated_at (task-b1fe80e2669b), updated_at is "last MUTATED", not "entered
+ * in_progress at" — a claim renewal or field edit bumps it, so it's the wrong
+ * clock for staleness. The claim timestamp is the right signal. Instead:
  *   - no claimedBy at all → a started-then-abandoned row: stranded.
  *   - claimedAt present and lapsed > CLAIM_TTL + grace → the holder is long gone.
  *   - claimedBy set but no claimedAt (list rows may omit it) → NOT flagged here
@@ -172,9 +173,12 @@ function addOwn(into, from) {
 export function computeProjectAttention(roots, tasks, opts = {}) {
   const now = opts.now ?? Date.now();
   const idleAfterDays = opts.idleAfterDays ?? DEFAULT_IDLE_DAYS;
-  // Timestamps at/below the floor are placeholders (the TypeBuild list endpoint
-  // stamps now() for every non-terminal row — see mapListRow). Treat them as
-  // UNKNOWN activity so idle never hides a project on a fake "recent" stamp.
+  // Timestamps at/above the floor are placeholders. Phase 2 (task-b1fe80e2669b):
+  // the TypeBuild list now emits REAL created_at/updated_at, so a row's stamp is
+  // its true last-touch time (below the floor → real activity). The floor now
+  // only screens the FALLBACK case where the server omits a timestamp and
+  // mapListRow uses now(). Treat at/above-floor stamps as UNKNOWN activity so
+  // idle never hides a project on a fake "recent" stamp.
   const floor = opts.activityFloorMs ?? 0;
   const today = todayKey(now);
   const idleCutoff = now - idleAfterDays * DAY_MS;

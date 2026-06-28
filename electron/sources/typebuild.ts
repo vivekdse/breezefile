@@ -28,11 +28,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { breezeHost } from '../core/host';
 import type { TasksChangedDetail } from '../core/host';
 import { classifyTransitions } from './typebuild-transitions.mjs';
-import { diffSkeleton, diffIsEmpty } from './task-skeleton-schema.mjs';
+import { diffSkeleton, deltaSkeleton, diffIsEmpty } from './task-skeleton-schema.mjs';
 import type { SkeletonDiff } from './task-skeleton-schema.mjs';
 import {
   loadLiveSkeleton,
   reconcile as reconcileSkeleton,
+  applyDelta as applyDeltaSkeleton,
+  getSyncCursor,
+  setSyncCursor,
   patchSkeleton,
   loadProjects as loadProjectSkeleton,
   reconcileProjects,
@@ -58,6 +61,14 @@ import type { Task, TaskCreate, TaskFilter, TaskStatus, TaskUpdate } from '../ta
 
 const API_BASE = 'https://general.typebuild.com';
 const POLL_INTERVAL_MS = 30_000;
+
+// task-b1fe80e2669b (Phase 2) — delta-sync safety net. Most polls are cheap
+// delta pulls (?updated_since=<cursor>), but a missed tombstone (e.g. a delta
+// response we failed to persist) would otherwise linger forever. So every
+// FULL_RECONCILE_EVERY-th poll we do a FULL pull instead, converging the
+// skeleton + cache on server truth. At a 30s cadence, 10 polls ≈ a full
+// reconcile every ~5 minutes — cheap insurance against drift.
+const FULL_RECONCILE_EVERY = 10;
 
 // Lazy Electron `BrowserWindow` accessor. The GUI methods (runNow,
 // relaunchSession, onSessionExit, poll) broadcast to windows; the daemon never
@@ -217,6 +228,12 @@ type ListRow = {
   parent_task_id?: string | null;
   // task-ab1d7955e23f — owning project container (opaque, non-PHI).
   project_id?: string | null;
+  // task-b1fe80e2669b (Phase 2) — the list now emits REAL server timestamps
+  // (ISO-'Z', lexically sortable; `updated_at` bumps on every mutation). NON-PHI.
+  // Optional so a server that predates them still maps (mapListRow falls back to
+  // the Date.now() floor). These replace the Phase-1 now()-placeholder.
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 /** Decrypted detail from GET /chromeext/<id>. `task` is the body (PHI). */
@@ -347,14 +364,29 @@ function toIso(v: string | number | null | undefined): string | null {
   return Number.isNaN(Date.parse(v)) ? null : v;
 }
 
+// task-b1fe80e2669b (Phase 2) — parse a server ISO timestamp to epoch ms, or
+// null when absent/garbage. The list now emits real created_at/updated_at, so
+// we no longer have to now()-stamp every row. NON-PHI.
+function isoToMs(v: string | null | undefined): number | null {
+  if (!v) return null;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : t;
+}
+
 function mapListRow(row: ListRow): SourcedTask {
   const raw = rawStatusOf(row);
-  // The list endpoint carries no created/updated timestamps — the local Task
-  // shape requires numeric created_at/updated_at. Use `now` as a benign
-  // placeholder so the renderer's sorts/filters don't choke; remote rows are
-  // grouped by source, not sorted on these. completed_at stays null unless
-  // the row is done.
+  // task-b1fe80e2669b (Phase 2) — the list endpoint now carries REAL server
+  // created_at/updated_at (ISO-'Z'). Use them. When the server omits them (an
+  // older deployment), fall back to `now` as the Phase-1 benign placeholder so
+  // the renderer's sorts/filters don't choke. This swap is STRICTLY BETTER for
+  // the attention floor (src/projects/attention.mjs): a real past `updated_at`
+  // is < the page-mount floor → counts as known activity (sawRealActivity),
+  // whereas the old now()-stamp was AT the floor → treated as unknown. A
+  // non-terminal row therefore no longer looks artificially "fresh" — it reads
+  // its true last-touch time. completed_at is still null unless terminal.
   const now = Date.now();
+  const createdMs = isoToMs(row.created_at);
+  const updatedMs = isoToMs(row.updated_at);
   const status = mapStatus(row.status ?? row.raw_status);
   return {
     id: row.id,
@@ -375,12 +407,19 @@ function mapListRow(row: ListRow): SourcedTask {
     auto_mode: false,
     auto_agent: null,
     auto_prompt: null,
-    created_at: now,
+    created_at: createdMs ?? now,
     // fm-alfz (S1) — terminal rows (done | cancelled) get a completed_at so
     // they sort sensibly in the DONE section (completed_at desc); non-terminal
-    // rows leave it null.
-    updated_at: now,
-    completed_at: status === 'done' || status === 'cancelled' ? now : null,
+    // rows leave it null. Phase 2: prefer the real updated_at for terminal rows
+    // (the moment of completion), falling back to now() only if absent.
+    updated_at: updatedMs ?? now,
+    completed_at:
+      status === 'done' || status === 'cancelled' ? (updatedMs ?? now) : null,
+    // task-b1fe80e2669b (Phase 2) — persist the raw ISO stamps (non-PHI) so a
+    // cold start renders the timeline without a detail round-trip, exactly like
+    // the detail path. createdAtIso/updatedAtIso mirror the numeric epochs.
+    createdAtIso: row.created_at ?? null,
+    updatedAtIso: row.updated_at ?? null,
     // Source-specific fields.
     source: 'typebuild',
     rawStatus: raw,
@@ -438,6 +477,13 @@ export class TypeBuildTaskSource implements TaskSource {
   // transition classifier would otherwise report as a burst of "new task"
   // notifications. We suppress 'new' on that first poll only.
   private firstPoll = true;
+
+  // task-b1fe80e2669b (Phase 2) — delta-sync bookkeeping. `pollCount` counts
+  // completed polls since the last FULL pull so we can periodically force a full
+  // reconcile (the safety net for a missed tombstone). The persisted cursor
+  // (sync_meta.sync_cursor) is the source of truth across restarts; this counter
+  // is in-memory only and resets on each full pull.
+  private pollCount = 0;
 
   // fm-b5at.10 — task ids whose session is mid-relaunch. The relaunch kills the
   // old PTY, whose onExit would otherwise fire the "Release this task?" prompt
@@ -569,6 +615,43 @@ export class TypeBuildTaskSource implements TaskSource {
     }
     // Swap the in-memory cache to the fresh rows (titles in memory only).
     this.cache = fresh;
+    return diff;
+  }
+
+  // task-b1fe80e2669b (Phase 2) — the DELTA analog of reconcileFromRows. Given
+  // ONLY the changed rows + an explicit tombstone id list from a delta pull:
+  // upsert the changed rows into the in-memory cache (titles memory-only),
+  // DELETE the tombstoned ids from the cache (not inference — the server told
+  // us they're gone), persist the same to the NON-PHI skeleton, and return the
+  // added/changed/removed diff. The unchanged majority is left untouched in the
+  // cache (the whole point of delta). PHI: only routing fields hit disk.
+  private reconcileDelta(
+    changedRows: ListRow[],
+    tombstones: string[],
+  ): SkeletonDiff {
+    const changed = changedRows.map((r) => mapListRow(r));
+    let diff: SkeletonDiff;
+    try {
+      diff = applyDeltaSkeleton(
+        changed.map((t) => this.cacheRowToSkeleton(t)),
+        tombstones,
+      );
+    } catch (e) {
+      // Persistence failure must not break the live list. Fall back to a pure
+      // in-memory delta diff so the broadcast still carries an honest diff.
+      console.warn(
+        '[typebuild] skeleton delta failed:',
+        (e as Error).message,
+      );
+      diff = deltaSkeleton(
+        [...this.cache.values()].map((t) => this.cacheRowToSkeleton(t)),
+        changed.map((t) => this.cacheRowToSkeleton(t)),
+        tombstones,
+      );
+    }
+    // Apply to the in-memory cache: upsert changed, delete tombstoned.
+    for (const t of changed) this.cache.set(t.id, t);
+    for (const id of tombstones) this.cache.delete(id);
     return diff;
   }
 
@@ -2087,6 +2170,7 @@ export class TypeBuildTaskSource implements TaskSource {
     this.cache.clear();
     this.lastSignature = '';
     this.firstPoll = true;
+    this.pollCount = 0;
     // task-b3fb2928bb3c (Phase 1) — sign-out drops the source. Wipe the
     // persistent skeleton so a different principal signing in on this machine
     // never sees the prior account's routing skeleton on cold start. PHI-free
@@ -2099,70 +2183,222 @@ export class TypeBuildTaskSource implements TaskSource {
     }
   }
 
+  // task-b1fe80e2669b (Phase 2) — the poll loop is now DELTA-first:
+  //   • No cursor yet (first poll after sign-in / cold start) → FULL pull to
+  //     SEED the cache + skeleton, and capture the server_time as the cursor.
+  //   • Cursor present → DELTA pull (?updated_since=<cursor>): upsert only the
+  //     changed rows, apply tombstones DIRECTLY (delete those ids), advance the
+  //     cursor to the new server_time. Cheap and skew-free.
+  //   • Every FULL_RECONCILE_EVERY-th poll → a FULL pull anyway (safety net:
+  //     converge on server truth in case a tombstone was missed).
+  // Edge cases handled inside: empty delta (no broadcast), a server that omits
+  // the delta envelope (treated as a full response), missing server_time (fall
+  // back to a full pull next time by NOT advancing the cursor), and offline /
+  // failed pulls (keep the last-known cache + cursor, retry next tick).
   private async poll(): Promise<void> {
     // Pause when there's no window to update — saves a token round-trip and
     // server load while the app is closed-but-running (macOS dock).
     if (browserWindows().every((w) => w.isDestroyed())) return;
+
+    // Read the persisted cursor. A read failure → treat as no cursor (full).
+    let cursor: string | null = null;
     try {
-      const res = await this.request('GET', `/chromeext/tasks?titles=1&all=1`);
-      if (!res.ok) return;
-      const data = (await res.json().catch(() => ({}))) as { tasks?: ListRow[] };
+      cursor = getSyncCursor();
+    } catch {
+      cursor = null;
+    }
+    // Force a periodic FULL reconcile (safety net) regardless of the cursor.
+    const forceFull = this.pollCount >= FULL_RECONCILE_EVERY;
+
+    try {
+      if (cursor && !forceFull) {
+        await this.pollDelta(cursor);
+      } else {
+        await this.pollFull();
+      }
+    } catch {
+      // Signed-out / network blip — stay quiet; the next poll retries with the
+      // SAME cursor (we never advanced it on failure) and the last-known cache
+      // is left intact (we never wipe on error). sign-out unregisters anyway.
+    }
+  }
+
+  // Shared remote-transition notification (fm-h8g7). Diffs the freshly-mapped
+  // rows against the CURRENT cache (not a prior snapshot) so any action THIS app
+  // took already patched the cache and produces NO transition — only genuinely
+  // remote changes do. Routing-only inputs (PHI-free). Tombstoned ids are NOT
+  // passed here (a removal isn't a status transition to notify on).
+  private notifyTransitions(freshRows: ListRow[]): void {
+    try {
+      const me = getAuthState().email ?? null;
+      const prev = [...this.cache.values()].map((t) => ({
+        id: t.id,
+        status: t.status,
+        rawStatus: t.rawStatus,
+        claimedBy: t.claimedBy ?? null,
+      }));
+      const fresh = freshRows.map((r) => {
+        const mapped = mapListRow(r);
+        return {
+          id: mapped.id,
+          status: mapped.status,
+          rawStatus: mapped.rawStatus,
+          claimedBy: mapped.claimedBy ?? null,
+        };
+      });
+      const transitions = classifyTransitions(prev, fresh, me, this.firstPoll);
+      if (transitions.length > 0) {
+        breezeHost().onTaskTransitions?.(
+          transitions.map((t) => ({ ...t, source: this.id })),
+        );
+      }
+    } catch {
+      // A classifier/notify failure must never break the poll's cache refresh.
+    }
+  }
+
+  // Broadcast a SkeletonDiff: the structured diff when non-empty, else a
+  // detail-free ping so the renderer re-pulls a memory-only title change.
+  private broadcastDiff(diff: SkeletonDiff): void {
+    if (diffIsEmpty(diff)) breezeHost().onTasksChanged();
+    else breezeHost().onTasksChanged(this.toChangedDetail(diff));
+  }
+
+  // The epoch-0 watermark we use to SEED a full pull that also returns a cursor.
+  // updated_since=1970 → "everything changed since the dawn of time" → the whole
+  // inventory, PLUS the delta envelope (server_time + tombstones). This lets the
+  // FULL/seed pull and the periodic safety-net pull both capture a fresh cursor
+  // while still reconciling against the complete server set (absence-tombstoned).
+  private static readonly EPOCH_ZERO = '1970-01-01T00:00:00Z';
+
+  // FULL pull — reconcile against the COMPLETE server inventory (absence-based
+  // tombstoning) AND capture a fresh cursor. We request updated_since=epoch-0 so
+  // the delta-aware server returns every row plus server_time; an older server
+  // that ignores updated_since still returns {tasks} and we simply don't get a
+  // cursor (staying on full pulls — fully backward compatible). Resets the
+  // safety-net counter.
+  private async pollFull(): Promise<void> {
+    const params = new URLSearchParams({ titles: '1', all: '1' });
+    params.set('updated_since', TypeBuildTaskSource.EPOCH_ZERO);
+    const res = await this.request('GET', `/chromeext/tasks?${params}`);
+    if (!res.ok) return;
+    const data = (await res.json().catch(() => ({}))) as {
+      tasks?: ListRow[];
+      tombstones?: Array<{ id: string; deleted_at?: string }>;
+      server_time?: string;
+    };
+    const rows = Array.isArray(data.tasks) ? data.tasks : [];
+    const sig = this.signatureOf(rows);
+    // A full pull always resets the safety counter and (when present) advances
+    // the cursor so subsequent polls go delta.
+    this.pollCount = 0;
+    this.maybeAdvanceCursor(data.server_time);
+    if (sig === this.lastSignature) {
+      // Nothing moved since the last pull, but mark firstPoll consumed so the
+      // first real change after a quiet cold start still notifies.
+      this.firstPoll = false;
+      return;
+    }
+
+    this.notifyTransitions(rows);
+    // Reconcile fresh rows → cache + skeleton (full absence-based tombstoning).
+    const diff = this.reconcileFromRows(rows);
+    this.lastSignature = sig;
+    this.firstPoll = false;
+    this.broadcastDiff(diff);
+  }
+
+  // DELTA pull — request only rows changed since the cursor + the tombstones.
+  // Applies the changed rows + DELETES the tombstoned ids directly, then
+  // advances the cursor to the new server_time. Defends against a server that
+  // (unexpectedly) answers WITHOUT the delta envelope by treating it as a full
+  // response.
+  private async pollDelta(cursor: string): Promise<void> {
+    const params = new URLSearchParams({ titles: '1', all: '1' });
+    params.set('updated_since', cursor);
+    const res = await this.request('GET', `/chromeext/tasks?${params}`);
+    if (!res.ok) return; // keep cursor + cache; retry next tick
+    const data = (await res.json().catch(() => ({}))) as {
+      tasks?: ListRow[];
+      tombstones?: Array<{ id: string; deleted_at?: string }>;
+      server_time?: string;
+    };
+
+    // Defensive: if the server answered without the delta envelope (no
+    // server_time AND no tombstones key), it behaved like a FULL response — the
+    // `tasks` are the whole inventory, not a delta. Reconcile as full so we
+    // don't mistake "every other row" for unchanged.
+    const isDeltaEnvelope =
+      typeof data.server_time === 'string' || Array.isArray(data.tombstones);
+    if (!isDeltaEnvelope) {
       const rows = Array.isArray(data.tasks) ? data.tasks : [];
       const sig = this.signatureOf(rows);
-      if (sig === this.lastSignature) return; // nothing changed
-
-      // fm-h8g7 — classify remote transitions BEFORE replacing the cache.
-      // We diff the FRESH rows against the CURRENT cache (not the previous
-      // poll snapshot): any action THIS app took (claim/release/reopen/
-      // complete) already patched the cache via patchCacheAndBroadcast, so it
-      // produces NO transition here — only genuinely remote changes do. That
-      // is the self-suppression mechanism. Inputs are routing-only (PHI-free).
-      try {
-        const me = getAuthState().email ?? null;
-        const prev = [...this.cache.values()].map((t) => ({
-          id: t.id,
-          status: t.status,
-          rawStatus: t.rawStatus,
-          claimedBy: t.claimedBy ?? null,
-        }));
-        const fresh = rows.map((r) => {
-          const mapped = mapListRow(r);
-          return {
-            id: mapped.id,
-            status: mapped.status,
-            rawStatus: mapped.rawStatus,
-            claimedBy: mapped.claimedBy ?? null,
-          };
-        });
-        const transitions = classifyTransitions(prev, fresh, me, this.firstPoll);
-        if (transitions.length > 0) {
-          breezeHost().onTaskTransitions?.(
-            transitions.map((t) => ({ ...t, source: this.id })),
-          );
-        }
-      } catch {
-        // A classifier/notify failure must never break the poll's cache
-        // refresh — swallow and continue. Never log task content.
-      }
-
-      // task-b3fb2928bb3c (Phase 1) — reconcile the fresh rows into the
-      // in-memory cache (titles memory-only) AND the persistent NON-PHI
-      // skeleton, computing the added/changed/removed diff. We broadcast ONLY
-      // the diff so the renderer prunes removed rows / re-pulls only on real
-      // adds/changes — instead of treating every poll as "everything changed".
+      this.pollCount = 0;
+      if (sig === this.lastSignature) return;
+      this.notifyTransitions(rows);
       const diff = this.reconcileFromRows(rows);
       this.lastSignature = sig;
       this.firstPoll = false;
-      // Defensive: the signature already proved something moved, but if the
-      // structured diff is empty (e.g. a title-only rename, which the skeleton
-      // doesn't track) still broadcast WITHOUT a detail so the renderer
-      // re-pulls and picks up the new (memory-only) title.
-      if (diffIsEmpty(diff)) breezeHost().onTasksChanged();
-      else breezeHost().onTasksChanged(this.toChangedDetail(diff));
-    } catch {
-      // Signed-out / network blip — stay quiet; the next poll retries, and
-      // sign-out unregisters this source anyway.
+      this.broadcastDiff(diff);
+      return;
     }
+
+    const changedRows = Array.isArray(data.tasks) ? data.tasks : [];
+    const tombstones = Array.isArray(data.tombstones)
+      ? data.tombstones
+          .map((t) => t?.id)
+          .filter((id): id is string => typeof id === 'string')
+      : [];
+
+    this.pollCount += 1;
+
+    // Empty delta — nothing changed and nothing deleted. Advance the cursor
+    // (so we don't re-ask the same window) but skip the broadcast entirely.
+    if (changedRows.length === 0 && tombstones.length === 0) {
+      this.maybeAdvanceCursor(data.server_time);
+      return;
+    }
+
+    // Notify on remote status transitions among the changed rows (PHI-free).
+    this.notifyTransitions(changedRows);
+
+    // Apply the delta to cache + skeleton: upsert changed, delete tombstoned.
+    const diff = this.reconcileDelta(changedRows, tombstones);
+    // Keep the signature fresh so a follow-up FULL pull's no-op short-circuit
+    // still works. Recompute over the current cache's list-shape.
+    this.lastSignature = this.signatureOf(this.cacheAsListRows());
+    this.firstPoll = false;
+    // Advance the cursor LAST (after a successful apply) so a crash mid-apply
+    // re-reads the same window next time rather than skipping it.
+    this.maybeAdvanceCursor(data.server_time);
+
+    this.broadcastDiff(diff);
+  }
+
+  // Advance (persist) the sync cursor to `server_time` when present. A missing
+  // server_time is handled defensively: we DON'T advance, so the next poll
+  // replays the same window (or, if there was never a cursor, stays on full).
+  private maybeAdvanceCursor(serverTime: string | undefined): void {
+    if (typeof serverTime !== 'string' || serverTime === '') return;
+    try {
+      setSyncCursor(serverTime);
+    } catch (e) {
+      console.warn('[typebuild] cursor persist failed:', (e as Error).message);
+    }
+  }
+
+  // Project the in-memory cache back to list-row shape for signature recompute
+  // after a delta apply. Routing fields + title only (title is already in
+  // memory; never persisted). PHI-free on disk — this stays in memory.
+  private cacheAsListRows(): ListRow[] {
+    return [...this.cache.values()].map((t) => ({
+      id: t.id,
+      status: t.status,
+      raw_status: t.rawStatus,
+      claimed_by: t.claimedBy ?? null,
+      attempts: t.attempts,
+      title: t.title,
+    }));
   }
 
   // A cheap change-detection signature over the routing-relevant fields. We

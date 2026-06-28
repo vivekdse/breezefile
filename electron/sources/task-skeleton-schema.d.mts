@@ -8,6 +8,9 @@ export const SKELETON_TABLE_SQL: string;
 export const SKELETON_INDEX_SQL: string;
 export const PROJECT_COLUMNS: string[];
 export const PROJECT_TABLE_SQL: string;
+export const META_COLUMNS: string[];
+export const META_TABLE_SQL: string;
+export const SYNC_CURSOR_KEY: string;
 
 export function parseColumnNames(createTableSql: string): string[];
 export function isPhiColumn(name: string): boolean;
@@ -42,3 +45,9 @@ export function diffSkeleton(
 ): SkeletonDiff;
 
 export function diffIsEmpty(diff: SkeletonDiff): boolean;
+
+export function deltaSkeleton(
+  prev: SkeletonRow[],
+  changedFresh: SkeletonRow[],
+  tombstoneIds: string[],
+): SkeletonDiff;

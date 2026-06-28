@@ -247,11 +247,13 @@ function ProjectsPageInner() {
     [roots, allTasks],
   );
 
-  // task-6255239581b2 — "what needs my attention" reframe. We capture the
-  // page's mount time once and feed it as the activity floor: the TypeBuild
-  // list endpoint stamps now() onto every non-terminal task's created/updated
-  // (it carries no real timestamps — see mapListRow), so any timestamp at/after
-  // mount is a placeholder and must NOT count as "recent activity" (else idle
+  // task-6255239581b2 / task-b1fe80e2669b — "what needs my attention" reframe.
+  // We capture the page's mount time once and feed it as the activity floor.
+  // Phase 2: the TypeBuild list now emits REAL created_at/updated_at, so a
+  // non-terminal task carries its TRUE last-touch time (a real past stamp, below
+  // the floor → counts as activity). The floor now only screens the FALLBACK
+  // case where the server omits a timestamp and mapListRow uses now() — that
+  // at/after-mount placeholder must NOT count as "recent activity" (else idle
   // never fires). Anything below the floor is a real, older stamp.
   const mountMsRef = useRef<number>(Date.now());
   const attention = useMemo(

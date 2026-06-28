@@ -13,15 +13,15 @@
 // tasks.db — the local tasks store; this keeps the remote routing cache from
 // entangling with the local task schema/migration chain). WAL like the rest.
 //
-// Timestamps (load-bearing — see typebuild.ts:340 attention-floor note): the
-// server LIST endpoint carries no created/updated timestamps, so mapListRow
-// uses Date.now() as a benign placeholder floor. We persist whatever the
-// caller hands us (server value when present, else that floor). On RELOAD from
-// disk we return the STORED epoch, which is "the first time we saw this row" —
-// strictly >= the server's true created_at and stable across restarts, so the
-// attention-floor ordering does not regress (a row keeps a stable sort key
-// instead of jumping to now() on every poll). Phase 2 swaps these for real
-// server updated_at once the server emits them.
+// Timestamps (load-bearing — see the attention-floor note in mapListRow): the
+// server LIST endpoint NOW emits real created_at/updated_at (task-b1fe80e2669b
+// / Phase 2). mapListRow uses those; the Date.now() floor only survives as the
+// fallback when the server omits them. We persist whatever the caller hands us
+// (the real server value, or that fallback). On RELOAD from disk we return the
+// stored epoch. The created_at upsert still keeps the EARLIEST value seen (a
+// stable floor) so a row's create-time sort key never jumps; updated_at takes
+// the latest server value so "last touched" is true. This is STRICTLY BETTER
+// for the attention floor than the Phase-1 now()-placeholder.
 
 import Database from 'better-sqlite3';
 import path from 'node:path';
@@ -31,7 +31,10 @@ import {
   SKELETON_TABLE_SQL,
   SKELETON_INDEX_SQL,
   PROJECT_TABLE_SQL,
+  META_TABLE_SQL,
+  SYNC_CURSOR_KEY,
   diffSkeleton,
+  deltaSkeleton,
   type SkeletonDiff,
 } from './task-skeleton-schema.mjs';
 import type { SourcedTask } from '../core/task-source';
@@ -107,6 +110,10 @@ function open(): Database.Database {
   db.exec(SKELETON_TABLE_SQL);
   db.exec(SKELETON_INDEX_SQL);
   db.exec(PROJECT_TABLE_SQL);
+  // task-b1fe80e2669b (Phase 2) — additive: the NON-PHI sync bookkeeping kv
+  // table (holds only `sync_cursor`, a timestamp). CREATE IF NOT EXISTS, so an
+  // existing Phase-1 db gains the table on first open with no migration step.
+  db.exec(META_TABLE_SQL);
   return db;
 }
 
@@ -306,6 +313,168 @@ export function reconcile(fresh: SkeletonTask[]): SkeletonDiff {
   return diff;
 }
 
+// ─── Delta reconcile (task-b1fe80e2669b / Phase 2) ──────────────────────────
+// Apply a DELTA pull: upsert ONLY the rows the server reported changed and
+// DELETE-tombstone the ids the server reported deleted (we do NOT infer removal
+// from absence here — the unchanged majority simply isn't in `changed`). Returns
+// the added/changed/removed diff (computed against the previous live set) so the
+// caller broadcasts only what moved. One transaction, like reconcile().
+//
+// `changed` carries the NON-PHI skeleton projection of the changed rows; the
+// in-memory title/body is NOT passed here and is never persisted. `tombstones`
+// is an explicit id list (server `tombstones[].id`).
+export function applyDelta(
+  changed: SkeletonTask[],
+  tombstones: string[],
+): SkeletonDiff {
+  const d = open();
+  const now = Date.now();
+
+  // Previous LIVE set (for the diff). Same snake projection diffSkeleton/
+  // deltaSkeleton expect.
+  const prevRows = d
+    .prepare('SELECT * FROM task_skeleton WHERE tombstone = 0')
+    .all() as SkelRow[];
+  const prevForDiff = prevRows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    raw_status: r.raw_status,
+    claimed_by: r.claimed_by,
+    assigned_to: r.assigned_to,
+    attempts: r.attempts,
+    max_attempts: r.max_attempts,
+    priority: r.priority,
+    due_at: r.due_at,
+    defer_until: r.defer_until,
+    project_id: r.project_id,
+    parent_task_id: r.parent_task_id,
+  }));
+  const changedForDiff = changed.map((t) => ({
+    id: t.id,
+    status: t.status ?? null,
+    raw_status: t.rawStatus ?? null,
+    claimed_by: t.claimedBy ?? null,
+    assigned_to: t.assignedTo ?? null,
+    attempts: t.attempts ?? null,
+    max_attempts: t.maxAttempts ?? null,
+    priority: t.priority ?? null,
+    due_at: t.due_at ?? null,
+    defer_until: t.deferUntil ?? null,
+    project_id: t.projectId ?? null,
+    parent_task_id: t.parentTaskId ?? null,
+  }));
+
+  const tombIds = Array.isArray(tombstones) ? tombstones : [];
+  const diff = deltaSkeleton(prevForDiff, changedForDiff, tombIds);
+
+  const upsert = d.prepare(`
+    INSERT INTO task_skeleton (
+      id, status, raw_status, claimed_by, assigned_to,
+      attempts, max_attempts, flags, priority,
+      due_at, defer_until, project_id, parent_task_id,
+      created_at, updated_at, completed_at,
+      created_at_iso, updated_at_iso, claimed_at,
+      tombstone, seen_at
+    ) VALUES (
+      @id, @status, @raw_status, @claimed_by, @assigned_to,
+      @attempts, @max_attempts, @flags, @priority,
+      @due_at, @defer_until, @project_id, @parent_task_id,
+      @created_at, @updated_at, @completed_at,
+      @created_at_iso, @updated_at_iso, @claimed_at,
+      0, @seen_at
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      raw_status = excluded.raw_status,
+      claimed_by = excluded.claimed_by,
+      assigned_to = excluded.assigned_to,
+      attempts = excluded.attempts,
+      max_attempts = excluded.max_attempts,
+      flags = excluded.flags,
+      priority = excluded.priority,
+      due_at = excluded.due_at,
+      defer_until = excluded.defer_until,
+      project_id = excluded.project_id,
+      parent_task_id = excluded.parent_task_id,
+      -- created_at floor: keep the earliest value (a re-appearing row keeps its
+      -- original create stamp; matches reconcile()).
+      created_at = MIN(task_skeleton.created_at, excluded.created_at),
+      updated_at = excluded.updated_at,
+      completed_at = excluded.completed_at,
+      created_at_iso = COALESCE(excluded.created_at_iso, task_skeleton.created_at_iso),
+      updated_at_iso = COALESCE(excluded.updated_at_iso, task_skeleton.updated_at_iso),
+      claimed_at = COALESCE(excluded.claimed_at, task_skeleton.claimed_at),
+      tombstone = 0,
+      seen_at = excluded.seen_at
+  `);
+
+  // task-b1fe80e2669b — a server delete is a HARD removal of the routing row, so
+  // we tombstone it (mirrors reconcile's absence-tombstone). Tombstone (not row
+  // delete) keeps the "re-appearing id is an add again" semantics consistent
+  // with the full path and lets seen_at record when we dropped it.
+  const tomb = d.prepare(
+    'UPDATE task_skeleton SET tombstone = 1, seen_at = ? WHERE id = ?',
+  );
+
+  const txn = d.transaction(() => {
+    for (const t of changed) {
+      const prev = existingRow(d, t.id);
+      const incomingCreated = t.created_at ?? now;
+      const created =
+        prev?.created_at != null
+          ? Math.min(prev.created_at, incomingCreated)
+          : incomingCreated;
+      upsert.run({
+        id: t.id,
+        status: t.status ?? null,
+        raw_status: t.rawStatus ?? null,
+        claimed_by: t.claimedBy ?? null,
+        assigned_to: t.assignedTo ?? null,
+        attempts: t.attempts ?? null,
+        max_attempts: t.maxAttempts ?? null,
+        flags: JSON.stringify(Array.isArray(t.flags) ? t.flags : []),
+        priority: t.priority ?? null,
+        due_at: t.due_at ?? null,
+        defer_until: t.deferUntil ?? null,
+        project_id: t.projectId ?? null,
+        parent_task_id: t.parentTaskId ?? null,
+        created_at: created,
+        updated_at: t.updated_at ?? now,
+        completed_at: t.completed_at ?? null,
+        created_at_iso: t.createdAtIso ?? null,
+        updated_at_iso: t.updatedAtIso ?? null,
+        claimed_at: t.claimedAt ?? null,
+        seen_at: now,
+      });
+    }
+    for (const id of tombIds) tomb.run(now, id);
+  });
+  txn();
+  return diff;
+}
+
+// ─── Sync cursor (task-b1fe80e2669b / Phase 2) ──────────────────────────────
+// The cursor is the server's `server_time` from the last delta pull, replayed
+// as the next `?updated_since=`. It is a TIMESTAMP — categorically NON-PHI.
+
+/** Read the persisted sync cursor (last server_time), or null if never set. */
+export function getSyncCursor(): string | null {
+  const d = open();
+  const row = d
+    .prepare('SELECT v FROM sync_meta WHERE k = ?')
+    .get(SYNC_CURSOR_KEY) as { v: string | null } | undefined;
+  return row?.v ?? null;
+}
+
+/** Persist the sync cursor (the next `updated_since` watermark). Non-PHI. */
+export function setSyncCursor(cursor: string): void {
+  const d = open();
+  d.prepare(
+    `INSERT INTO sync_meta (k, v) VALUES (?, ?)
+     ON CONFLICT(k) DO UPDATE SET v = excluded.v`,
+  ).run(SYNC_CURSOR_KEY, cursor);
+}
+
 /** Optimistic single-row patch mirror (fm-kmhq) — when the in-memory cache is
  *  patched after a succeeded mutation, mirror the NON-PHI routing fields to
  *  disk so a restart-before-next-poll keeps the optimistic state. Title/body
@@ -404,7 +573,12 @@ export function reconcileProjects(fresh: Project[]): void {
  *  so a different principal never sees the prior account's routing skeleton. */
 export function clearSkeleton(): void {
   const d = open();
-  d.exec('DELETE FROM task_skeleton; DELETE FROM project_skeleton;');
+  // task-b1fe80e2669b (Phase 2) — also drop the sync cursor so the next sign-in
+  // re-seeds with a FULL pull instead of replaying the prior account's
+  // watermark (which would delta-miss every row that didn't change since).
+  d.exec(
+    'DELETE FROM task_skeleton; DELETE FROM project_skeleton; DELETE FROM sync_meta;',
+  );
 }
 
 // For tests / explicit cleanup. Production never calls this.

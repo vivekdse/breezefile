@@ -18,11 +18,15 @@ import {
   SKELETON_TABLE_SQL,
   PROJECT_TABLE_SQL,
   PROJECT_COLUMNS,
+  META_TABLE_SQL,
+  META_COLUMNS,
+  SYNC_CURSOR_KEY,
   parseColumnNames,
   isPhiColumn,
   routingSignature,
   diffSkeleton,
   diffIsEmpty,
+  deltaSkeleton,
 } from '../electron/sources/task-skeleton-schema.mjs';
 
 // ─── PHI-safety: the schema has NO PHI columns ─────────────────────────────
@@ -205,4 +209,156 @@ test('reconcile model: a re-appearing id is added again (untombstoned)', () => {
   let r2 = applyPoll(live, [row('a')]);
   assert.deepEqual(r2.diff.added, ['a']);
   assert.ok(r2.live.has('a'));
+});
+
+// ─── Phase 2 (task-b1fe80e2669b): sync-meta schema is PHI-free ──────────────
+
+test('sync_meta schema declares ONLY the documented non-PHI columns', () => {
+  const parsed = parseColumnNames(META_TABLE_SQL);
+  assert.deepEqual(
+    [...parsed].sort(),
+    [...META_COLUMNS].sort(),
+    'sync_meta CREATE TABLE columns must equal META_COLUMNS',
+  );
+});
+
+test('NO sync_meta column carries PHI (cursor is a timestamp)', () => {
+  const parsed = parseColumnNames(META_TABLE_SQL);
+  for (const col of parsed) {
+    assert.equal(isPhiColumn(col), false, `meta column "${col}" must be non-PHI`);
+  }
+  // The cursor KEY is a fixed, content-free string (not patient text).
+  assert.equal(SYNC_CURSOR_KEY, 'sync_cursor');
+});
+
+// ─── Phase 2: deltaSkeleton — changed-only + EXPLICIT tombstones, no inference ─
+
+test('deltaSkeleton: a changed row not previously live is added', () => {
+  const prev = [row('a')];
+  const diff = deltaSkeleton(prev, [row('b', { status: 'in_progress' })], []);
+  assert.deepEqual(diff.added, ['b']);
+  assert.deepEqual(diff.changed, []);
+  assert.deepEqual(diff.removed, []);
+});
+
+test('deltaSkeleton: a changed row that was live + moved routing is changed', () => {
+  const prev = [row('a', { status: 'pending' })];
+  const diff = deltaSkeleton(prev, [row('a', { status: 'in_progress' })], []);
+  assert.deepEqual(diff.changed, ['a']);
+  assert.deepEqual(diff.added, []);
+  assert.deepEqual(diff.removed, []);
+});
+
+test('deltaSkeleton: absence does NOT infer removal (unlike the full diff)', () => {
+  // 'b' is live but NOT in the changed set and NOT tombstoned → it stays. This
+  // is the core delta invariant: only explicit tombstones remove.
+  const prev = [row('a'), row('b')];
+  const diff = deltaSkeleton(prev, [row('a', { status: 'done' })], []);
+  assert.deepEqual(diff.removed, [], 'b must NOT be removed by absence');
+  assert.deepEqual(diff.changed, ['a']);
+});
+
+test('deltaSkeleton: an explicit tombstone removes a live id', () => {
+  const prev = [row('a'), row('b')];
+  const diff = deltaSkeleton(prev, [], ['b']);
+  assert.deepEqual(diff.removed, ['b']);
+  assert.deepEqual(diff.added, []);
+  assert.deepEqual(diff.changed, []);
+});
+
+test('deltaSkeleton: a tombstone for an unknown id is a no-op (not a phantom)', () => {
+  const prev = [row('a')];
+  const diff = deltaSkeleton(prev, [], ['zzz-never-seen']);
+  assert.deepEqual(diff.removed, []);
+});
+
+test('deltaSkeleton: a changed row with no routing move is neither add nor change', () => {
+  // e.g. a title-only rename: title is not a routing field, so the signature is
+  // unchanged → no structured add/change (the poll re-broadcasts to refresh the
+  // memory-only title separately).
+  const prev = [row('a')];
+  const diff = deltaSkeleton(prev, [row('a')], []);
+  assert.deepEqual(diff, { added: [], changed: [], removed: [] });
+  assert.equal(diffIsEmpty(diff), true);
+});
+
+// ─── Phase 2: delta-apply convergence model (cache + tombstone) ─────────────
+// Mirror reconcileDelta's effect on the live set: upsert changed rows, DELETE
+// the tombstoned ids (NOT inference). Prove a tombstone removes the id and that
+// the unchanged majority is untouched.
+function applyDeltaModel(liveMap, changedFresh, tombstoneIds) {
+  const diff = deltaSkeleton([...liveMap.values()], changedFresh, tombstoneIds);
+  const next = new Map(liveMap); // start from the FULL live set (delta-preserve)
+  for (const r of changedFresh) next.set(r.id, r); // upsert changed
+  for (const id of tombstoneIds) next.delete(id); // explicit delete
+  return { live: next, diff };
+}
+
+test('delta-apply converges: untouched rows persist, tombstone deletes id', () => {
+  // Seed (full) with three rows.
+  let live = new Map([
+    ['a', row('a')],
+    ['b', row('b')],
+    ['c', row('c')],
+  ]);
+
+  // Delta 1: only 'a' changed; 'b'/'c' not in the payload → they MUST stay.
+  let d1 = applyDeltaModel(live, [row('a', { status: 'in_progress' })], []);
+  live = d1.live;
+  assert.deepEqual(d1.diff.changed, ['a']);
+  assert.ok(live.has('a') && live.has('b') && live.has('c'),
+    'unchanged rows survive a delta that omits them');
+
+  // Delta 2: 'b' deleted server-side (tombstone), 'd' newly created.
+  let d2 = applyDeltaModel(live, [row('d')], ['b']);
+  live = d2.live;
+  assert.deepEqual(d2.diff.added, ['d']);
+  assert.deepEqual(d2.diff.removed, ['b']);
+  assert.equal(live.has('b'), false, 'tombstoned id is deleted, not inferred');
+  assert.ok(live.has('a') && live.has('c') && live.has('d'));
+
+  // Delta 3: empty (no changes, no tombstones) → empty diff, set unchanged.
+  let d3 = applyDeltaModel(live, [], []);
+  assert.equal(diffIsEmpty(d3.diff), true);
+  assert.equal(d3.live.size, live.size);
+});
+
+// ─── Phase 2: full-reconcile safety net converges on a missed tombstone ─────
+// If a delta tombstone was ever missed, the live set carries a stale id. The
+// periodic FULL pull (absence-based) drops it. Prove the full path recovers.
+test('full-reconcile safety net drops an id a delta never tombstoned', () => {
+  // Live set still carries 'ghost' (a delete whose tombstone we missed).
+  let live = new Map([
+    ['a', row('a')],
+    ['ghost', row('ghost')],
+  ]);
+  // A FULL pull returns the true live set (no 'ghost'). Absence → removed.
+  const r = applyPoll(live, [row('a')]);
+  live = r.live;
+  assert.deepEqual(r.diff.removed, ['ghost'], 'full pull converges on server truth');
+  assert.equal(live.has('ghost'), false);
+  assert.ok(live.has('a'));
+});
+
+// ─── Phase 2: cursor round-trip semantics (pure model) ─────────────────────
+// The store persists server_time as the next updated_since. Model the
+// advance-only-on-success rule: a failed/empty delta keeps the OLD cursor; a
+// successful one advances it. (The DB read/write is covered by typecheck +
+// manual QA; this asserts the contract the poll loop relies on.)
+test('cursor advances only when server_time is present and non-empty', () => {
+  // maybeAdvanceCursor's rule, modeled purely.
+  const advance = (cur, serverTime) =>
+    typeof serverTime === 'string' && serverTime !== '' ? serverTime : cur;
+
+  let cursor = '2026-06-28T00:00:00Z';
+  // A delta with a fresh server_time advances.
+  cursor = advance(cursor, '2026-06-28T00:05:00Z');
+  assert.equal(cursor, '2026-06-28T00:05:00Z');
+  // A response missing server_time keeps the old cursor (defensive: next poll
+  // replays the window rather than skipping it).
+  cursor = advance(cursor, undefined);
+  assert.equal(cursor, '2026-06-28T00:05:00Z');
+  // An empty string is treated as missing.
+  cursor = advance(cursor, '');
+  assert.equal(cursor, '2026-06-28T00:05:00Z');
 });

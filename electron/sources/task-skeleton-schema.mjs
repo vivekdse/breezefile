@@ -114,6 +114,25 @@ export const PROJECT_TABLE_SQL = `
   );
 `;
 
+// task-b1fe80e2669b (Phase 2) — a tiny NON-PHI key/value table for sync
+// bookkeeping. Its ONLY use today is `sync_cursor` = the last `server_time` the
+// server handed back from a delta pull, which we replay as the next
+// `?updated_since=`. A cursor is a TIMESTAMP — categorically non-PHI — so this
+// table cannot carry patient text (the values are timestamps/opaque tokens, and
+// the no-PHI test asserts the column NAMES are non-PHI). Kept separate from the
+// task table so the cursor read/write never touches a task row.
+export const META_COLUMNS = ['k', 'v'];
+
+export const META_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS sync_meta (
+    k TEXT PRIMARY KEY,
+    v TEXT
+  );
+`;
+
+// The single meta key we persist (Phase 2). Exported so the store + tests agree.
+export const SYNC_CURSOR_KEY = 'sync_cursor';
+
 // Parse the column names out of a CREATE TABLE statement. Deliberately simple
 // (the DDL above is hand-controlled): take the parenthesized body, split on
 // top-level commas, and read the first token of each definition line, skipping
@@ -229,4 +248,48 @@ export function diffIsEmpty(diff) {
     diff.changed.length === 0 &&
     diff.removed.length === 0
   );
+}
+
+// task-b1fe80e2669b (Phase 2) — DELTA diff. Unlike diffSkeleton (a FULL set
+// comparison that INFERS removal from absence), delta mode receives ONLY the
+// rows the server says changed plus an EXPLICIT tombstone id list, so we must
+// NOT infer removal from absence (the rest of the world is simply unchanged and
+// not in `changed`). Pure (no I/O) so the store and the tests derive the same
+// add/change/remove semantics from one definition.
+//
+//   prev          — the PREVIOUS live skeleton rows (id + ROUTING_FIELDS).
+//   changedFresh  — only the rows whose updated_at > cursor (id + ROUTING_FIELDS).
+//   tombstoneIds  — ids the server reports deleted since the cursor.
+//
+// added   = a changed row whose id was not previously live.
+// changed = a changed row that WAS live and whose routing signature moved.
+// removed = the tombstone ids that were actually live (others are a no-op).
+export function deltaSkeleton(prev, changedFresh, tombstoneIds) {
+  const prevById = new Map();
+  for (const r of prev) prevById.set(r.id, r);
+
+  const added = [];
+  const changed = [];
+  for (const fr of changedFresh) {
+    const pr = prevById.get(fr.id);
+    if (!pr) {
+      added.push(fr.id);
+    } else if (routingSignature(pr) !== routingSignature(fr)) {
+      changed.push(fr.id);
+    }
+    // A row present in `changed` but whose routing signature is unchanged (e.g.
+    // a title-only rename — titles aren't a routing field) yields neither an add
+    // nor a change here; the poll still re-broadcasts so the memory-only title
+    // refreshes (mirrors the FULL path's diffIsEmpty fallback).
+  }
+
+  const removed = [];
+  const ids = Array.isArray(tombstoneIds) ? tombstoneIds : [];
+  for (const id of ids) {
+    // Only count a tombstone that was actually live — a tombstone for an id we
+    // never had (or already dropped) is a no-op, not a phantom removal.
+    if (prevById.has(id)) removed.push(id);
+  }
+
+  return { added, changed, removed };
 }
