@@ -113,13 +113,18 @@ export function OperatorSession({ ptyId }: { ptyId: number | null }) {
   // flush is never missed.
   useEffect(() => {
     if (ptyId == null) return;
-    fm.termMirrorWithReplay(ptyId);
+    // ADOPT (not mirror): make this window the pty's OWNER so the terminal here
+    // is the single, direct surface for the session. Previously this mirrored a
+    // redundant main-window owner tab, leaving two xterms fighting over one
+    // pty's size. The main window no longer opens a tab for operator sessions
+    // (src/App.tsx). Replays recent scrollback so output emitted before this
+    // pane mounted repaints immediately.
+    fm.termAdopt(ptyId);
     const off = fm.onTermFg((id, _busy, _comm, state) => {
       if (id === ptyId) setWaiting(state === 'waiting');
     });
     return () => {
       off();
-      fm.termUnmirror(ptyId);
     };
   }, [ptyId]);
 

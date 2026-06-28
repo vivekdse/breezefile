@@ -138,6 +138,10 @@ type Fm = {
   // late-mounting/re-shown mirror pane repaints immediately.
   termMirrorWithReplay: (id: number) => void;
   termUnmirror: (id: number) => void;
+  // SPIKE (spike/playwright-cdp): adopt a pty as THIS window's own terminal
+  // (retarget owner + replay), so the operator window renders it directly
+  // instead of mirroring a redundant main-window owner tab.
+  termAdopt: (id: number) => void;
   // ─── SPIKE (spike/playwright-cdp): operator session split-pane chrome.
   operatorBrowserBounds: (rect: {
     x: number;
@@ -364,6 +368,7 @@ type Fm = {
       title: string;
       cwd: string;
       source?: string;
+      operator?: boolean;
     }) => void,
   ) => () => void;
   // fm-b5at.5 — a TypeBuild interactive session's PTY exited while the user

@@ -260,6 +260,11 @@ const fm = {
   termMirrorWithReplay: (id: number) =>
     ipcRenderer.send('term:mirror-with-replay', id),
   termUnmirror: (id: number) => ipcRenderer.send('term:unmirror', id),
+  // SPIKE (spike/playwright-cdp): ADOPT a pty — make THIS webContents its owner
+  // (direct renderer), not a mirror, and replay recent scrollback. The operator
+  // terminal uses this so the session runs in ONE place, not a main-window
+  // owner tab + an operator mirror.
+  termAdopt: (id: number) => ipcRenderer.send('term:adopt', id),
   // SPIKE (spike/playwright-cdp): the operator session's split-pane chrome
   // positions the LEFT-pane page view (WebContentsView), drives its navigation,
   // and closes the whole session (window + PTY) as one action. See
@@ -654,6 +659,7 @@ const fm = {
       title: string;
       cwd: string;
       source?: string;
+      operator?: boolean;
     }) => void,
   ) => {
     const handler = (
@@ -665,6 +671,7 @@ const fm = {
         title: string;
         cwd: string;
         source?: string;
+        operator?: boolean;
       },
     ) => cb(payload);
     ipcRenderer.on('tasks:interactiveRun', handler);

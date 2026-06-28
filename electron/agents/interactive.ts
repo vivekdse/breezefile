@@ -86,6 +86,10 @@ export type InteractiveRunPayload = {
   /** Owning source id (omitted when not passed). The renderer uses this to
    *  gate PHI-aware tab behavior (e.g. the TypeBuild OAuth hint). */
   source?: string;
+  /** True when this session is hosted in the operator window (playwright/
+   *  browser tasks). The operator window's terminal ADOPTS the pty directly, so
+   *  the main window must NOT open a redundant owner tab — see src/App.tsx. */
+  operator?: boolean;
 };
 
 /** Launch a task as an interactive embedded-terminal claude session.
@@ -241,6 +245,9 @@ export async function runTaskInteractive(
     title: opts.label?.trim() || task.title,
     cwd,
     ...(opts.source ? { source: opts.source } : {}),
+    // Playwright sessions are hosted in the operator window (opened below); the
+    // terminal there adopts the pty directly, so suppress the main-window tab.
+    ...(playwright ? { operator: true } : {}),
   };
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);

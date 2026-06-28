@@ -2711,6 +2711,23 @@ end tell`;
   ipcMain.on('term:unmirror', (e, id: number) => {
     ptyMirrors.get(id)?.delete(e.sender.id);
   });
+  // SPIKE (spike/playwright-cdp): ADOPT a pty — retarget its OWNER to this
+  // webContents so the operator window's terminal renders it DIRECTLY rather
+  // than as a read-mirror of a main-window owner tab (which left two xterms
+  // fighting over one pty's size). Output routing reads senderId fresh per
+  // chunk (see spawnManagedPty.onData), so the retarget takes effect at once.
+  // We also replay recent scrollback, since the pty was spawned (with a
+  // placeholder owner) before this window mounted and that early output was
+  // buffered, not rendered.
+  ipcMain.on('term:adopt', (e, id: number) => {
+    const rec = ptys.get(id);
+    if (!rec) return;
+    rec.senderId = e.sender.id;
+    const buf = ptyReplay.get(id);
+    if (buf && buf.chunks.length > 0 && !e.sender.isDestroyed()) {
+      e.sender.send('term:data', { id, data: buf.chunks.join('') });
+    }
+  });
 
   // ─── Launchers (fm-g6r) ──────────────────────────────────────────────
   // User-editable JSON in userData/launchers.json. Each entry maps a verb
