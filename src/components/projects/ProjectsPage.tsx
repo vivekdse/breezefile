@@ -22,7 +22,8 @@
 // Keyboard model (mirrors TasksPage's verb-first motion model):
 //   j/k or ↑/↓   move cursor
 //   gg / G       jump to top / bottom of the list
-//   l / Enter    drill in (row → scoped list or project tree; tree row → task)
+//   l / Enter    drill in (header → scoped list / project tree; task row → open
+//                its edit form — the shared TaskComposer, same as double-click)
 //   h / Esc      back up one zoom level
 //   /            open the UNIFIED quick-switcher (projects AND tasks). Picking a
 //                project drills into it; picking a task opens its detail DRAWER
@@ -707,6 +708,18 @@ function ProjectsPageInner() {
     // collapsed row would appear to vanish.
     window.dispatchEvent(new CustomEvent('fm:openTaskDetail', { detail: { task } }));
   }
+  // task-2880817072f4 / task-fe9351954859 — keyboard activation (Enter) and
+  // double-click both open the canonical standalone TaskComposer in edit mode —
+  // the SAME form the "new task" flow uses, with full Enter-to-advance keyboard.
+  // This mirrors useProjectTaskRows.rowActivate (double-click) so the two paths
+  // can't drift. Enter previously fell through activateFlat → the detail drawer
+  // (whose embedded composer drops Enter-to-advance); it now opens the shared
+  // form directly.
+  function openTaskEdit(task: Task) {
+    window.dispatchEvent(
+      new CustomEvent('fm:openTask', { detail: { mode: 'edit', task } }),
+    );
+  }
   // task-223d400ffc1a — project-scoped create now opens the SHARED TaskComposer
   // with the project pre-selected (replacing the retired ProjectTaskProposal
   // flow). The composer's project field handles inherited folders/instructions;
@@ -878,7 +891,7 @@ function ProjectsPageInner() {
       openProjectDetail(row.projectId);
     } else {
       if (row.isParent) toggleExpand(row.task.id);
-      else openTaskDetail(row.task);
+      else openTaskEdit(row.task);
     }
   }
 

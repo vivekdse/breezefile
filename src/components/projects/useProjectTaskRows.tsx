@@ -138,9 +138,6 @@ export function useProjectTaskRows(
   function openEdit(task: Task) {
     window.dispatchEvent(new CustomEvent('fm:openTask', { detail: { mode: 'edit', task } }));
   }
-  function openDetail(task: Task) {
-    window.dispatchEvent(new CustomEvent('fm:openTaskDetail', { detail: { task } }));
-  }
   function openRuns(task: Task) {
     window.dispatchEvent(new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }));
   }
@@ -190,10 +187,18 @@ export function useProjectTaskRows(
     }
   }
 
+  // task-2880817072f4 — activating a task from Home (double-click or Enter)
+  // ALWAYS opens the canonical standalone TaskComposer in edit mode — the SAME
+  // component the "new task" flow uses — so create and edit share one form with
+  // identical keyboard affordances (Enter-to-advance, digit picks). Previously
+  // a non-editable source (TypeBuild's `canEdit:false`) fell back to the detail
+  // DRAWER, whose EMBEDDED composer suppresses the global keydown handler and so
+  // lost Enter-to-advance; that divergence is gone. (The composer's save() still
+  // routes TypeBuild edits through the 'patch' source action, so canEdit:false
+  // doesn't block saving.) The drawer remains reachable via the row kebab /
+  // run-history affordances for Activity/Teach.
   function rowActivate(task: Task) {
-    const caps = capsFor(task);
-    if (caps ? caps.canEdit : true) openEdit(task);
-    else openDetail(task);
+    openEdit(task);
   }
 
   function confirmDelete(task: Task) {
