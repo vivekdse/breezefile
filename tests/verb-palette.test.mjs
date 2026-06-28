@@ -113,3 +113,69 @@ test('multi-word alias prefix surfaces the Files command', () => {
   const f = rankPaletteVerbs(rows, 'f', []).filter((v) => v.available);
   assert.ok(f.some((v) => v.id === 'files'), '"f" still surfaces the Files command');
 });
+
+// task-f8bb12b2bae3 — VERB PARITY between the Home quick-switcher and the file
+// manager's ChipPrompt picker. A multi-word query whose words land in DIFFERENT
+// fields (label vs alias vs description) must still match here — the previous
+// `haystack.includes(q)` (whole-query-as-one-substring) matcher returned NO
+// MATCHES for these, which was the reported "maximize window reports no matches"
+// class of bug. The picker now tokenizes and requires every token to hit, just
+// like ChipPrompt.
+test('multi-word query matches when tokens are scattered across fields', () => {
+  const rows = [
+    {
+      id: 'maximize',
+      label: 'Maximize window',
+      aliases: ['maximize', 'maximise', 'max', 'unmaximize', 'restore', 'window'],
+      description: 'Toggle window maximize (works around WM Alt+Space conflicts)',
+      available: true,
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      aliases: ['settings', 'preferences', 'prefs', 'config', 'options'],
+      description: 'Open the settings dialog (keybinds, terminal, theme)',
+      available: true,
+    },
+    {
+      id: 'fullscreen',
+      label: 'Fullscreen',
+      aliases: ['fullscreen', 'full-screen', 'fs', 'full'],
+      description: 'Toggle fullscreen',
+      available: true,
+    },
+  ];
+  // Words split across label + alias ("max" alias + "window" label).
+  let out = rankPaletteVerbs(rows, 'max window', []).filter((v) => v.available);
+  assert.equal(out[0]?.id, 'maximize', '"max window" resolves to maximize');
+  // Word only in the description ("keybinds") plus the label word ("settings").
+  out = rankPaletteVerbs(rows, 'settings keybinds', []).filter((v) => v.available);
+  assert.equal(out[0]?.id, 'settings', '"settings keybinds" resolves to settings');
+  // Word in the description ("toggle") plus a label word ("maximize").
+  out = rankPaletteVerbs(rows, 'toggle maximize', []).filter((v) => v.available);
+  assert.ok(
+    out.some((v) => v.id === 'maximize'),
+    '"toggle maximize" surfaces maximize',
+  );
+  // Reversed word order still matches (tokens are order-independent).
+  out = rankPaletteVerbs(rows, 'window maximize', []).filter((v) => v.available);
+  assert.equal(out[0]?.id, 'maximize', '"window maximize" resolves to maximize');
+});
+
+test('single-token ranking is unchanged after tokenization', () => {
+  const out = rankPaletteVerbs(VERBS, 'c');
+  const ids = out.map((v) => v.id);
+  // Same expectation as the earlier label-prefix test: label prefixes beat
+  // the alias-only match.
+  assert.ok(ids.indexOf('copy') < ids.indexOf('move'));
+  assert.ok(ids.indexOf('compress') < ids.indexOf('move'));
+});
+
+test('a query token that matches nothing excludes the verb', () => {
+  // "maximize" hits, but "spreadsheet" matches no field → no rows.
+  const rows = [
+    { id: 'maximize', label: 'Maximize window', aliases: ['max', 'window'], available: true },
+  ];
+  const out = rankPaletteVerbs(rows, 'maximize spreadsheet', []);
+  assert.equal(out.length, 0);
+});
