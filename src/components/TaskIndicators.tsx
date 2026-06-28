@@ -27,6 +27,8 @@ export function TaskStatusDot({
   status,
   className = '',
   rawStatus = null,
+  health = null,
+  durationLabel = null,
 }: {
   status: TaskStatus;
   className?: string;
@@ -35,14 +37,34 @@ export function TaskStatusDot({
   // so the colored dot stays the single status signal — no separate text label
   // that could read differently from the dot.
   rawStatus?: string | null;
+  // task-80be320f06b3 — a subtle HEALTH accent (a colored ring) when the task is
+  // stranded ('stalled' — in_progress with no live worker) or its claim has
+  // lapsed ('lapsed'). null = healthy, no ring.
+  health?: 'stalled' | 'lapsed' | null;
+  // task-80be320f06b3 — optional "for 6d" tail folded into the dot tooltip so a
+  // glance reveals how long the task has held its status.
+  durationLabel?: string | null;
 }) {
-  const label =
+  const base =
     rawStatus && rawStatus !== status
       ? `${STATUS_LABEL[status]} · ${rawStatus}`
       : STATUS_LABEL[status];
+  const healthTail =
+    health === 'stalled'
+      ? ' · stalled (no active worker)'
+      : health === 'lapsed'
+        ? ' · claim lapsed'
+        : '';
+  const durTail = durationLabel ? ` for ${durationLabel}` : '';
+  const label = `${base}${durTail}${healthTail}`;
   return (
     <span
-      className={['task-dot', `task-dot--${status}`, className]
+      className={[
+        'task-dot',
+        `task-dot--${status}`,
+        health && `task-dot--${health}`,
+        className,
+      ]
         .filter(Boolean)
         .join(' ')}
       role="img"

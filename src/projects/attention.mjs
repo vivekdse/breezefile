@@ -18,6 +18,7 @@
 /** @typedef {import('./attention.d.mts').ProjectAttention} ProjectAttention */
 
 import { indexTree } from './tree.mjs';
+import { CLAIM_TTL_MS, claimFreshness } from '../components/tasks/lifecycle.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_IDLE_DAYS = 7;
@@ -27,6 +28,7 @@ const DEFAULT_IDLE_DAYS = 7;
 // open items. These are signal weights, not exact priorities.
 const W_BLOCKED = 5;
 const W_FAILED = 5;
+const W_STALLED = 5; // a stranded in_progress task is as loud as blocked/failed
 const W_OVERDUE = 4;
 const W_OPEN = 1;
 
@@ -42,8 +44,40 @@ function isTerminal(task) {
   return task.status === 'done' || task.status === 'cancelled';
 }
 
+// task-80be320f06b3 — a STALLED in_progress task may sit unclaimed/lapsed only
+// briefly before it's worth a human's eye, but we want a small grace so a row
+// that just legitimately lost its claim (renewal in flight) isn't flagged the
+// instant the TTL passes. The richer, audit-sourced staleness math (with the
+// real "entered status at" time) lives in components/tasks/vitals.mjs; this
+// list-level predicate uses only what a list row reliably carries — the claim
+// timestamp (a REAL server stamp, unlike the now()-stamped updated_at) — so the
+// project tally can flag stranded work without the per-task audit fetch.
+const STALL_CLAIM_LAPSE_GRACE_MS = CLAIM_TTL_MS; // one extra TTL past lapse
+
+/**
+ * Is a list-row in_progress task stranded (no live worker)? We deliberately do
+ * NOT use updated_at/created_at for "time in status" here — the TypeBuild list
+ * endpoint now()-stamps both for every non-terminal row (see mapListRow), so
+ * they're placeholders for exactly the in_progress rows we care about. Instead:
+ *   - no claimedBy at all → a started-then-abandoned row: stranded.
+ *   - claimedAt present and lapsed > CLAIM_TTL + grace → the holder is long gone.
+ *   - claimedBy set but no claimedAt (list rows may omit it) → NOT flagged here
+ *     (we can't prove it's lapsed; degrade to not-stranded so a genuinely-held
+ *     task is never false-flagged — the detail pane, which has the audit, is the
+ *     escalation path).
+ * @param {Task} task
+ * @param {number} now
+ */
+function isStalledRow(task, now) {
+  if (task.status !== 'in_progress') return false;
+  if (!task.claimedBy) return true;
+  const fresh = claimFreshness(task.claimedAt ?? null, now);
+  if (!fresh) return false; // claimed, no timestamp → can't disprove liveness
+  return CLAIM_TTL_MS - fresh.ageMs < -STALL_CLAIM_LAPSE_GRACE_MS;
+}
+
 /** Per-task attention classification → which buckets (if any) it lands in. */
-export function classify(task, today = todayKey()) {
+export function classify(task, today = todayKey(), now = Date.now()) {
   const terminal = isTerminal(task);
   const raw = (task.rawStatus ?? task.status ?? '').toLowerCase();
 
@@ -73,7 +107,14 @@ export function classify(task, today = todayKey()) {
     !failed &&
     !task.claimedBy;
 
-  return { open, blocked, overdue, failed };
+  // task-80be320f06b3 — stalled: an in_progress row with no LIVE worker. This is
+  // the gap classify() used to leave open (in_progress never counted), so a
+  // stranded task — crashed/quit worker, claim never released — was invisible to
+  // attention. Now it counts. It's a distinct bucket (not folded into open/
+  // blocked) so the UI can badge it and offer remediation specifically.
+  const stalled = !terminal && isStalledRow(task, now);
+
+  return { open, blocked, overdue, failed, stalled };
 }
 
 // task-18902d433658 — the SINGLE predicate that decides whether a task counts
@@ -82,9 +123,9 @@ export function classify(task, today = todayKey()) {
 // MUST both go through this, so the count and the filtered list can never
 // disagree. A task needs attention iff it lands in any classify() bucket
 // (open/blocked/overdue/failed).
-export function needsAttention(task, today = todayKey()) {
-  const c = classify(task, today);
-  return c.open || c.blocked || c.overdue || c.failed;
+export function needsAttention(task, today = todayKey(), now = Date.now()) {
+  const c = classify(task, today, now);
+  return c.open || c.blocked || c.overdue || c.failed || c.stalled;
 }
 
 /** Max(created_at, updated_at) for one task, ignoring non-finite values. */
@@ -101,6 +142,7 @@ function emptyOwn() {
     blocked: 0,
     overdue: 0,
     failed: 0,
+    stalled: 0,
     // distinct attention rows (any bucket) — drives `total`.
     attention: 0,
     // raw max activity ms seen (0 = none yet); -1 sentinel for "saw a real
@@ -115,6 +157,7 @@ function addOwn(into, from) {
   into.blocked += from.blocked;
   into.overdue += from.overdue;
   into.failed += from.failed;
+  into.stalled += from.stalled;
   into.attention += from.attention;
   into.activityMs = Math.max(into.activityMs, from.activityMs);
   into.sawRealActivity = into.sawRealActivity || from.sawRealActivity;
@@ -148,15 +191,17 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
     if (!pid) continue;
     const bucket = own.get(pid);
     if (!bucket) continue; // task points at a project not in this forest
-    const c = classify(t, today);
+    const c = classify(t, today, now);
     if (c.open) bucket.open += 1;
     if (c.blocked) bucket.blocked += 1;
     if (c.overdue) bucket.overdue += 1;
     if (c.failed) bucket.failed += 1;
+    if (c.stalled) bucket.stalled += 1;
     // Same OR as needsAttention() — kept inline here only because we've already
-    // computed the buckets; needsAttention(t, today) is the exported equivalent
-    // the UI filter uses, so the count and the filtered list stay identical.
-    if (c.open || c.blocked || c.overdue || c.failed) bucket.attention += 1;
+    // computed the buckets; needsAttention(t, today, now) is the exported
+    // equivalent the UI filter uses, so the count and the filtered list stay
+    // identical (stalled included).
+    if (c.open || c.blocked || c.overdue || c.failed || c.stalled) bucket.attention += 1;
     // A timestamp STRICTLY OLDER than the floor (page-mount time) is a real
     // server stamp; anything at/after the floor is the now()-placeholder the
     // TypeBuild list endpoint writes (see mapListRow) → treated as unknown.
@@ -189,6 +234,7 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
     const score =
       r.blocked * W_BLOCKED +
       r.failed * W_FAILED +
+      r.stalled * W_STALLED +
       r.overdue * W_OVERDUE +
       r.open * W_OPEN;
 
@@ -208,6 +254,7 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
       blocked: r.blocked,
       overdue: r.overdue,
       failed: r.failed,
+      stalled: r.stalled,
       total,
       score,
       lastActivityMs,
@@ -223,6 +270,7 @@ export function attentionSummary(a) {
   const parts = [];
   if (a.open > 0) parts.push(`${a.open} open`);
   if (a.blocked > 0) parts.push(`${a.blocked} blocked`);
+  if (a.stalled > 0) parts.push(`${a.stalled} stalled`);
   if (a.overdue > 0) parts.push(`${a.overdue} overdue`);
   if (a.failed > 0) parts.push(`${a.failed} failed`);
   return parts.join(' · ');

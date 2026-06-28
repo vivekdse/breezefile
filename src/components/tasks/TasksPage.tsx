@@ -42,6 +42,7 @@ import type { ConfirmRequest } from '../ConfirmDialog';
 import { formatOpError } from '../../errorMessages';
 import type { RemoteSchedule, Task, TaskStatus } from '../../types';
 import { partitionTasks, resolveBlockedBy } from './sections.mjs';
+import { classify } from '../../projects/attention.mjs';
 import type { AgentRow } from './sections.mjs';
 import { primaryActionFor } from './primaryAction.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
@@ -86,6 +87,11 @@ function TasksPageInner() {
   // claimed_by=me into the list request); local tasks are unaffected.
   const [mineOnly, setMineOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  // task-80be320f06b3 — "Stalled only" filter: narrow both sections to stranded
+  // in_progress rows (classify().stalled) so they bubble up by design. Driven by
+  // the same predicate the count uses, so the chip count and the filtered list
+  // can never disagree.
+  const [stalledOnly, setStalledOnly] = useState(false);
   // fm-jw9m — filters are hidden behind a toggle now (the row was always-on
   // chrome). Open via the Filter button on the header action row. A non-default
   // filter (search / mine / done / source) is reflected on the button so the
@@ -186,12 +192,46 @@ function TasksPageInner() {
 
   const showDoneSection = showDone || doneExpanded;
 
+  // task-80be320f06b3 — count stalled rows across BOTH sections via the SAME
+  // classify().stalled predicate the row badge + project tally use, so the chip
+  // number and the filtered list can never disagree.
+  const stalledCount = useMemo(
+    () =>
+      [...forYou, ...forAgents].filter((t) => classify(t).stalled).length,
+    [forYou, forAgents],
+  );
+  // When the Stalled filter is on, both sections (and nav) narrow to exactly
+  // those rows. A no-op when off.
+  // If the last stalled row is remediated while the filter is on, drop the
+  // filter so the user isn't stranded on an empty view (the chip also vanishes).
+  useEffect(() => {
+    if (stalledOnly && stalledCount === 0) setStalledOnly(false);
+  }, [stalledOnly, stalledCount]);
+  const dForYou = useMemo(
+    () => (stalledOnly ? forYou.filter((t) => classify(t).stalled) : forYou),
+    [forYou, stalledOnly],
+  );
+  const dVisibleForAgents = useMemo(
+    () =>
+      stalledOnly
+        ? visibleForAgents.filter((t) => classify(t).stalled)
+        : visibleForAgents,
+    [visibleForAgents, stalledOnly],
+  );
+  const dVisibleAgentRows = useMemo(
+    () =>
+      stalledOnly
+        ? visibleAgentRows.filter((r) => classify(r.task).stalled)
+        : visibleAgentRows,
+    [visibleAgentRows, stalledOnly],
+  );
+
   // Flat order across the visible sections — drives arrow nav + selection scope.
   const flatOrder = useMemo(() => {
-    const out = [...forYou, ...visibleForAgents];
-    if (showDoneSection) out.push(...done);
+    const out = [...dForYou, ...dVisibleForAgents];
+    if (showDoneSection && !stalledOnly) out.push(...done);
     return out;
-  }, [forYou, visibleForAgents, done, showDoneSection]);
+  }, [dForYou, dVisibleForAgents, done, showDoneSection, stalledOnly]);
 
   // Drop selection ids no longer visible; re-anchor cursor.
   useEffect(() => {
@@ -878,7 +918,27 @@ function TasksPageInner() {
               {digest.dueWeek} due this week
             </span>
           )}
-          {digest.overdue === 0 && digest.dueWeek === 0 && (
+          {/* task-80be320f06b3 — stalled chip: a clickable toggle that filters
+              the list to stranded in_progress rows (no active worker). The count
+              uses classify().stalled — the same predicate as the row badge and
+              the filter — so they can never disagree. */}
+          {stalledCount > 0 && (
+            <button
+              type="button"
+              className={[
+                'tasks__digest-chip tasks__digest-chip--stalled',
+                stalledOnly && 'tasks__digest-chip--on',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              aria-pressed={stalledOnly}
+              onClick={() => setStalledOnly((v) => !v)}
+              title="Tasks in progress with no active worker — click to show only these"
+            >
+              ⚠ {stalledCount} stalled
+            </button>
+          )}
+          {digest.overdue === 0 && digest.dueWeek === 0 && stalledCount === 0 && (
             <span className="tasks__digest-clear">Nothing pressing.</span>
           )}
         </div>
@@ -1068,8 +1128,8 @@ function TasksPageInner() {
                   <Section
                     title="For you"
                     hint="Manual tasks you act on by hand"
-                    tasks={forYou}
-                    emptyNote="Nothing on your plate."
+                    tasks={dForYou}
+                    emptyNote={stalledOnly ? 'No stalled tasks here.' : 'Nothing on your plate.'}
                     today={todayISO()}
                     myEmail={myEmail}
                     primaryFor={primaryFor}
@@ -1091,10 +1151,10 @@ function TasksPageInner() {
                   <Section
                     title="For agents"
                     hint="Tasks an agent runs for you"
-                    tasks={visibleForAgents}
-                    rows={visibleAgentRows}
+                    tasks={dVisibleForAgents}
+                    rows={dVisibleAgentRows}
                     blockedByFor={(t) => resolveBlockedBy(t.blockedBy, rawTasks)}
-                    emptyNote="No agent work queued."
+                    emptyNote={stalledOnly ? 'No stalled agent tasks.' : 'No agent work queued.'}
                     today={todayISO()}
                     myEmail={myEmail}
                     primaryFor={primaryFor}
@@ -1116,7 +1176,7 @@ function TasksPageInner() {
                     onOpenRuns={openRuns}
                   />
 
-                  {doneTotal > 0 && (
+                  {doneTotal > 0 && !stalledOnly && (
                     <div className="tasks__section">
                       <button
                         type="button"

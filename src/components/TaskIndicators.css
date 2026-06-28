@@ -16,6 +16,20 @@
 .task-dot--done        { background: #2aa198; }
 .task-dot--cancelled   { background: var(--muted, #6c757d); opacity: 0.55; }
 
+/* task-80be320f06b3 — health accent ring. A stranded (stalled) task gets a red
+   ring; a lapsed claim gets an amber ring. Drawn as a box-shadow halo so the
+   dot keeps its status color underneath. */
+.task-dot--stalled {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.15) inset,
+    0 0 0 2px var(--danger, #dc322f);
+}
+.task-dot--lapsed {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.15) inset,
+    0 0 0 2px var(--warn, #d9a441);
+}
+
 /* Auto-execute / run state — glyph + optional text pill, used inline
    in row meta lines and headers. */
 .task-run-indicator {

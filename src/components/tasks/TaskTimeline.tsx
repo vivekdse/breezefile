@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getTypebuildAudit } from '../../tasks';
 import { buildTimeline, shortActor } from './lifecycle.mjs';
 import type { TimelineEvent } from './lifecycle.mjs';
+import { lastActivity, lastActivitySummary } from './vitals.mjs';
 import type { Task, TaskAuditEvent } from '../../types';
 
 // Coarse relative time from an ISO timestamp, with the absolute time as a
@@ -43,20 +44,32 @@ function absoluteTime(iso: string | null): string | undefined {
   return Number.isNaN(t) ? iso : new Date(t).toLocaleString();
 }
 
-export function TaskTimeline({ task }: { task: Task }) {
+export function TaskTimeline({
+  task,
+  preloadedEvents,
+}: {
+  task: Task;
+  // task-80be320f06b3 — the detail panel's vitals block already fetched the
+  // audit; pass it in so we don't fetch twice. undefined = not provided (fetch
+  // on expand as before); null/[] = provided-but-empty (don't fetch).
+  preloadedEvents?: TaskAuditEvent[] | null;
+}) {
   const [open, setOpen] = useState(false);
-  const [events, setEvents] = useState<TaskAuditEvent[] | null>(null);
+  const [events, setEvents] = useState<TaskAuditEvent[] | null>(
+    preloadedEvents ?? null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const reqRef = useRef(0);
+  const hasPreload = preloadedEvents !== undefined;
 
   // Collapse-reset on task change so a newly-selected task doesn't show the
   // prior task's trace.
   useEffect(() => {
     setOpen(false);
-    setEvents(null);
+    setEvents(preloadedEvents ?? null);
     setError(false);
-  }, [task.id]);
+  }, [task.id, preloadedEvents]);
 
   const load = useCallback(() => {
     const myReq = ++reqRef.current;
@@ -80,8 +93,21 @@ export function TaskTimeline({ task }: { task: Task }) {
   const toggle = () => {
     const next = !open;
     setOpen(next);
-    if (next && events === null && !loading) load();
+    // Only fetch on expand when nobody preloaded the audit for us.
+    if (next && !hasPreload && events === null && !loading) load();
   };
+
+  // task-80be320f06b3 — an ALWAYS-VISIBLE last-lifecycle line (even collapsed):
+  // "Last: released by vivek · 6d ago". Derived from the same audit; '' when
+  // none. lastActivitySummary already reads "<age> ago — <verb> by <who>"; flip
+  // it to lead with the action for the compact one-liner.
+  const la = lastActivity(events);
+  const lastLine = (() => {
+    const s = lastActivitySummary(la);
+    if (!s) return '';
+    const m = s.match(/^(.*? ago) — (.*)$/);
+    return m ? `Last: ${m[2]} · ${m[1]}` : `Last: ${s}`;
+  })();
 
   // Fold whatever audit we have (possibly empty) + the task's mapped fields
   // into the ordered timeline model. Even with no audit, the synthesized
@@ -103,6 +129,11 @@ export function TaskTimeline({ task }: { task: Task }) {
       >
         {open ? '▾' : '▸'} Timeline
       </button>
+      {/* task-80be320f06b3 — always-visible last-lifecycle line so the most
+          recent event reads even when the timeline is collapsed. */}
+      {!open && lastLine && (
+        <div className="tasks__timeline-last">{lastLine}</div>
+      )}
       {open && (
         <div className="tasks__timeline-wrap">
           {loading && <p className="tasks__detail-muted">Loading…</p>}

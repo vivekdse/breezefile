@@ -8,6 +8,7 @@ import { buildProjectTree } from '../src/projects/tree.mjs';
 import {
   computeProjectAttention,
   attentionSummary,
+  classify,
   todayKey,
   needsAttention,
 } from '../src/projects/attention.mjs';
@@ -50,6 +51,7 @@ function task(over = {}) {
     completed_at: null,
     rawStatus: over.rawStatus,
     claimedBy: over.claimedBy ?? null,
+    claimedAt: over.claimedAt ?? null,
     attempts: over.attempts,
     maxAttempts: over.maxAttempts,
     projectId: over.projectId,
@@ -65,7 +67,7 @@ test('classifies open / blocked / overdue / failed and counts each once-per-buck
     task({ projectId: 'p', status: 'pending', rawStatus: 'blocked' }), // blocked
     task({ projectId: 'p', status: 'pending', due_at: yesterday }), // overdue (also open-ish, but blocked? no)
     task({ projectId: 'p', status: 'pending', attempts: 3, maxAttempts: 3 }), // failed (exhausted)
-    task({ projectId: 'p', status: 'in_progress' }), // working → no attention
+    task({ projectId: 'p', status: 'in_progress' }), // stalled (no live worker)
     task({ projectId: 'p', status: 'done' }), // terminal → none
     task({ projectId: 'p', status: 'pending', claimedBy: 'agent@x' }), // claimed → not open
   ];
@@ -74,11 +76,13 @@ test('classifies open / blocked / overdue / failed and counts each once-per-buck
   assert.equal(a.blocked, 1);
   assert.equal(a.overdue, 1);
   assert.equal(a.failed, 1);
+  // task-80be320f06b3 — the bare in_progress row (no live claim) is now stalled.
+  assert.equal(a.stalled, 1);
   // open = pending, not blocked, not in_progress, unclaimed. The overdue one is
   // also open; the claimed one is not; blocked/failed excluded from "open".
   assert.equal(a.open, 2);
-  // total = distinct attention rows (open, blocked, overdue, failed) = 4.
-  assert.equal(a.total, 4);
+  // total = distinct attention rows (open, blocked, overdue, failed, stalled) = 5.
+  assert.equal(a.total, 5);
   assert.ok(a.score > 0);
 });
 
@@ -163,13 +167,77 @@ test('needsAttention matches each classify bucket (open/blocked/overdue/failed)'
     needsAttention(task({ status: 'pending', attempts: 3, maxAttempts: 3 }), today),
     true,
   ); // failed (exhausted)
-  // does NOT count: in_progress, done, claimed-by-an-agent.
-  assert.equal(needsAttention(task({ status: 'in_progress' }), today), false);
+  // task-80be320f06b3 — an in_progress row with NO live worker is now STALLED
+  // and DOES count (this was the gap: a stranded task was invisible before).
+  assert.equal(needsAttention(task({ status: 'in_progress' }), today), true);
+  // does NOT count: done, claimed-by-an-agent (pending), and an in_progress row
+  // whose claim is still LIVE (a worker is on it).
   assert.equal(needsAttention(task({ status: 'done' }), today), false);
   assert.equal(
     needsAttention(task({ status: 'pending', claimedBy: 'agent@x' }), today),
     false,
   );
+  assert.equal(
+    needsAttention(
+      task({
+        status: 'in_progress',
+        claimedBy: 'agent@x',
+        claimedAt: new Date(NOW - 5 * 60_000).toISOString(),
+      }),
+      today,
+      NOW,
+    ),
+    false,
+  );
+});
+
+// task-80be320f06b3 — STALLED: an in_progress row with no live worker. classify
+// must surface it (the old classify never flagged in_progress, so a crashed/quit
+// worker's task was invisible to attention). Count + filter both route through
+// needsAttention/classify so they can never disagree.
+test('classify: stalled in_progress (no live claim) counts; live-claimed does not', () => {
+  const today = todayKey(NOW);
+  const liveAt = new Date(NOW - 5 * 60_000).toISOString();
+  const lapsedAt = new Date(NOW - 9 * 24 * 60 * 60 * 1000).toISOString();
+
+  // unclaimed in_progress → stalled
+  const c1 = classify(task({ status: 'in_progress', claimedBy: null }), today, NOW);
+  assert.equal(c1.stalled, true);
+
+  // in_progress with a LIVE claim → not stalled
+  const c2 = classify(
+    task({ status: 'in_progress', claimedBy: 'a@x', claimedAt: liveAt }),
+    today,
+    NOW,
+  );
+  assert.equal(c2.stalled, false);
+
+  // in_progress with a long-LAPSED claim → stalled
+  const c3 = classify(
+    task({ status: 'in_progress', claimedBy: 'a@x', claimedAt: lapsedAt }),
+    today,
+    NOW,
+  );
+  assert.equal(c3.stalled, true);
+
+  // pending is never stalled
+  assert.equal(classify(task({ status: 'pending' }), today, NOW).stalled, false);
+  // terminal is never stalled
+  assert.equal(classify(task({ status: 'done' }), today, NOW).stalled, false);
+});
+
+test('computeProjectAttention tallies stalled into total + score + summary', () => {
+  const roots = buildProjectTree([proj({ id: 'p' })]);
+  const tasks = [
+    task({ projectId: 'p', status: 'in_progress', claimedBy: null }), // stalled
+    task({ projectId: 'p', status: 'pending' }), // open
+  ];
+  const a = computeProjectAttention(roots, tasks, { now: NOW }).get('p');
+  assert.equal(a.stalled, 1);
+  assert.equal(a.open, 1);
+  assert.equal(a.total, 2);
+  assert.ok(a.score >= 6); // stalled(5) + open(1)
+  assert.match(attentionSummary(a), /1 stalled/);
 });
 
 test('needsAttention filter cardinality equals the project attention total', () => {

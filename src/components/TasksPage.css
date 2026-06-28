@@ -1638,3 +1638,90 @@
 .tasks__row-claimed--expiring {
   color: var(--warn, #d9a441);
 }
+
+/* task-80be320f06b3 — task vitals: time-in-status, last activity, and the
+   stranded-task (stalled) banner + remediation. */
+.tasks__vitals {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--sp-2) 0 var(--sp-3);
+}
+.tasks__vital {
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  font-variant-numeric: tabular-nums;
+}
+.tasks__vital-label {
+  font-weight: 600;
+}
+.tasks__vital-since,
+.tasks__vital--muted {
+  color: var(--muted-on-panel);
+}
+.tasks__vital-key {
+  font-weight: 600;
+  color: var(--muted-on-panel);
+}
+/* overstay severity: amber when past grace, red well past it. */
+.tasks__vital--warn .tasks__vital-label {
+  color: var(--warn, #d9a441);
+}
+.tasks__vital--over .tasks__vital-label {
+  color: var(--danger, #dc322f);
+}
+
+/* The stranded-task banner. Loud (danger-tinted) with inline remediation. */
+.tasks__stalled-banner {
+  margin-top: var(--sp-1);
+  padding: var(--sp-3);
+  border-radius: 8px;
+  border: 1px solid var(--danger, #dc322f);
+  background: color-mix(in srgb, var(--danger, #dc322f) 10%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tasks__stalled-head {
+  font-weight: 700;
+  color: var(--danger, #dc322f);
+  font-size: var(--fs-sm);
+}
+.tasks__stalled-body {
+  font-size: var(--fs-xs);
+  color: var(--text-on-panel);
+}
+.tasks__stalled-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* Row badge for a stranded in_progress task. */
+.tasks__row-stalled {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--danger, #dc322f);
+  white-space: nowrap;
+}
+
+/* Always-visible last-lifecycle line under the collapsed Timeline toggle. */
+.tasks__timeline-last {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stalled digest chip (clickable filter toggle). */
+.tasks__digest-chip--stalled {
+  color: var(--danger, #dc322f);
+  border-color: var(--danger, #dc322f);
+}
+.tasks__digest-chip--on {
+  background: var(--danger, #dc322f);
+  color: #fff;
+}
+.tasks__digest-chip--on:hover {
+  background: var(--danger, #dc322f);
+}

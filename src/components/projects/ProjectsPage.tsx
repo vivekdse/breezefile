@@ -110,7 +110,10 @@ function projStatusOf(
   rolled: TaskStats | undefined,
 ): ProjStatus {
   if (att) {
-    if (att.blocked > 0 || att.failed > 0) return 'blocked';
+    // task-80be320f06b3 — a stranded in_progress task (stalled) is as urgent as
+    // a blocked/failed one; surface it with the loud "blocked" treatment so the
+    // project reads as needing a human, not quietly "working".
+    if (att.blocked > 0 || att.failed > 0 || att.stalled > 0) return 'blocked';
     if (att.total > 0) return 'need';
   }
   if ((rolled?.inProgress ?? 0) > 0) return 'working';
@@ -447,6 +450,10 @@ function ProjectsPageInner() {
       blocked: r?.blocked ?? 0,
       overdue: 0,
       failed: 0,
+      // task-80be320f06b3 — the inbox rollup (TaskStats) doesn't track stalled
+      // separately; 0 here keeps the shape valid (the real per-project tally
+      // from computeProjectAttention carries the true stalled count).
+      stalled: 0,
       total: r?.needsYou ?? 0,
       score: r?.needsYou ?? 0,
       lastActivityMs: null,

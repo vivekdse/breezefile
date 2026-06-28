@@ -8,6 +8,7 @@ import type { PrimaryAction } from './primaryAction.mjs';
 import { PrimaryActionButton } from './PrimaryActionButton';
 import { homeRel, shortDate } from './helpers';
 import { claimSummary, claimFreshness } from './lifecycle.mjs';
+import { classify } from '../../projects/attention.mjs';
 import { TaskStatusDot } from '../TaskIndicators';
 import type { RemoteSchedule, Task } from '../../types';
 
@@ -87,6 +88,10 @@ export function TaskRow({
     task.rawStatus && task.rawStatus !== task.status ? task.rawStatus : null;
   const claimedBy = task.claimedBy ?? null;
   const claimedByMe = !!claimedBy && claimedBy === myEmail;
+  // task-80be320f06b3 — stalled badge: an in_progress row with no live worker.
+  // Mirrors classify().stalled (attention.mjs) so the row badge, the "N need
+  // you" count, and the Stalled filter all agree on exactly the same rows.
+  const stalled = classify(task).stalled;
   // fm-lji6 (S2) — a deferred TypeBuild task (defer_until in the future) isn't
   // claimable by claim-next until then; show a snooze pill so it reads as
   // "asleep" rather than just idle. deferUntil is a full ISO timestamp.
@@ -176,7 +181,11 @@ export function TaskRow({
           {/* fm-mhtz — status is the colored dot alone; the source-native raw
               status (failed/partial/…) rides in its tooltip instead of a
               separate text badge that read differently from the dot. */}
-          <TaskStatusDot status={task.status} rawStatus={rawBadge} />
+          <TaskStatusDot
+            status={task.status}
+            rawStatus={rawBadge}
+            health={stalled ? 'stalled' : null}
+          />
           {task.pinned && (
             <span className="tasks__row-pin-mark" aria-label="Pinned" title="Pinned">
               ★
@@ -193,6 +202,17 @@ export function TaskRow({
           )}
         </div>
         <div className="tasks__row-sub">
+          {/* task-80be320f06b3 — stalled badge: a stranded in_progress row with
+              no active worker. Reads loud so it bubbles up by eye even before
+              the Stalled filter is used. */}
+          {stalled && (
+            <span
+              className="tasks__row-stalled"
+              title="In progress but no active worker — looks stranded. Open it to reset."
+            >
+              ⚠ stalled
+            </span>
+          )}
           {!hideFolder && task.folder && (
             <span className="tasks__row-folder" title={task.folder}>
               {homeRel(task.folder)}

@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getTask,
+  getTypebuildAudit,
   listTypebuildUsers,
   taskSourceAction,
   todayISO,
@@ -29,10 +30,19 @@ import { TaskRunIndicator, TaskStatusDot } from '../TaskIndicators';
 import { PrimaryActionButton } from './PrimaryActionButton';
 import { STATUS_LABEL, homeRel, shortDate } from './helpers';
 import { claimSummary } from './lifecycle.mjs';
+import {
+  enteredCurrentStatusAt,
+  lastActivity,
+  lastActivitySummary,
+  timeInStatus,
+  isStalled,
+  statusDotHealth,
+} from './vitals.mjs';
 import { TaskTimeline } from './TaskTimeline';
 import type { PrimaryAction } from './primaryAction.mjs';
 import type {
   Task,
+  TaskAuditEvent,
   TaskSourceCapabilities,
   TaskStatus,
   TaskUser,
@@ -420,6 +430,26 @@ function AgentDetail({
   const [bodyLoading, setBodyLoading] = useState(false);
   const reqIdRef = useRef(0);
 
+  // task-80be320f06b3 — vitals: the audit trail (NON-PHI actor/action/time) is
+  // the ONLY honest source of "entered current status at" + "last activity"
+  // (the list endpoint now()-stamps updated_at/created_at for non-terminal rows,
+  // so those are placeholders for exactly the in_progress rows we care about).
+  // Fetched here once per task and shared down to the Timeline so it needn't
+  // re-fetch. Memory-only — cleared on task change.
+  const [audit, setAudit] = useState<TaskAuditEvent[] | null>(null);
+  const auditReqRef = useRef(0);
+  useEffect(() => {
+    const myReq = ++auditReqRef.current;
+    setAudit(null);
+    void getTypebuildAudit(task.id, 30)
+      .then((rows) => {
+        if (auditReqRef.current === myReq) setAudit(rows);
+      })
+      .catch(() => {
+        if (auditReqRef.current === myReq) setAudit([]);
+      });
+  }, [task.id]);
+
   // fm-j7w0 (S4) — write a whitelisted field edit (assigned_to/priority/...)
   // via the generic 'patch' source action. The typebuild source patches its
   // cache + broadcasts on success, so the row re-pulls; a rejection comes back
@@ -491,19 +521,46 @@ function AgentDetail({
     raw === 'done' || raw === 'partial' || raw === 'cancelled';
   const canCancel = !isTerminalRaw;
 
+  // task-80be320f06b3 — derive vitals from the audit trail (re-derived each 60s
+  // tick via VitalsTick below so relative ages stay honest while open).
+  const entered = enteredCurrentStatusAt(audit, { createdAtIso: task.createdAtIso ?? null });
+  const enteredMs = entered?.ms ?? null;
+  const tis = timeInStatus(task, enteredMs);
+  const la = lastActivity(audit);
+  const dotHealth = statusDotHealth(task, enteredMs);
+  const stalled = isStalled(task, enteredMs);
+
   return (
     <aside className="tasks__detail">
       <header className="tasks__detail-head">
         <div className="tasks__detail-status">
           {/* fm-mhtz — status dot carries the raw TypeBuild status in its
               tooltip; the "Status" meta row below is dropped (it was the text
-              duplicate that conflicted with the dot). */}
-          <TaskStatusDot status={task.status} rawStatus={task.rawStatus ?? null} />
+              duplicate that conflicted with the dot). task-80be320f06b3 — the
+              dot now carries a health accent + "for 6d" duration in its tooltip. */}
+          <TaskStatusDot
+            status={task.status}
+            rawStatus={task.rawStatus ?? null}
+            health={dotHealth}
+            durationLabel={tis.ms != null ? tis.since.replace(/ ago$/, '') : null}
+          />
           <span className="tasks__detail-source-badge">TypeBuild</span>
         </div>
       </header>
 
       <h2 className="tasks__detail-title">{task.title}</h2>
+
+      {/* task-80be320f06b3 — vitals: time-in-status, last-activity, and (when
+          stranded) a remediation banner. Re-renders on a 60s tick. */}
+      <TaskVitals
+        tis={tis}
+        entered={entered}
+        lastActivitySummaryText={lastActivitySummary(la)}
+        stalled={stalled}
+        canClaim={canClaim}
+        claimedByMe={claimedByMe}
+        onSourceAction={onSourceAction}
+      />
 
       {primary && primary.kind !== 'none' && (
         <div className="tasks__detail-primary">
@@ -644,8 +701,10 @@ function AgentDetail({
 
       {/* task-b8306d2b85c2 — lifecycle timeline (Created → Claimed → status
           transitions), folded from the per-task audit trail. Supersedes the
-          old flat "History" list. */}
-      <TaskTimeline task={task} />
+          old flat "History" list. task-80be320f06b3 — the vitals block already
+          fetched the audit, so we hand it down (no second fetch) and the
+          always-visible last-lifecycle line shows even while it's collapsed. */}
+      <TaskTimeline task={task} preloadedEvents={audit} />
 
       {/* fm-iwlc (S6) — Delete (creator-only server-side; a 403 not_owner /
           409 in_progress_elsewhere surfaces a distinct status-line reason).
@@ -757,6 +816,108 @@ function PriorityStepper({
         +
       </button>
     </span>
+  );
+}
+
+// ── task vitals (task-80be320f06b3) ─────────────────────────────────────────
+// Time-in-current-status (first-class), a "Last update" line, and — when the
+// task is stranded — a remediation banner with one-click Reset/Reopen/Release.
+// All derivations are PURE (vitals.mjs) over the NON-PHI audit trail; this
+// component only renders + re-ticks every 60s so relative ages stay honest.
+//
+// Why "entered status at" comes from the audit and NOT task.updated_at: the
+// TypeBuild list endpoint now()-stamps updated_at/created_at for every
+// non-terminal row, so those are placeholders for exactly the in_progress rows
+// we care about. The audit's newest status-lane event is the real entry time.
+function TaskVitals({
+  tis,
+  entered,
+  lastActivitySummaryText,
+  stalled,
+  canClaim,
+  claimedByMe,
+  onSourceAction,
+}: {
+  tis: import('./vitals.mjs').TimeInStatus;
+  entered: import('./vitals.mjs').EnteredStatus | null;
+  lastActivitySummaryText: string;
+  stalled: boolean;
+  canClaim: boolean;
+  claimedByMe: boolean;
+  onSourceAction: (action: 'release' | 'reopen' | 'complete' | 'cancel') => void;
+}) {
+  // 60s tick so "6d" / "12m ago" stay live while the panel is open (mirrors
+  // ClaimFreshnessLine). The parent recomputes tis/lastActivity from props, so
+  // we only need to force a re-render — the parent passes fresh derived values
+  // on its own renders; here we additionally nudge for time-only drift.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const h = setInterval(() => tick((n) => n + 1), 60_000);
+    return () => clearInterval(h);
+  }, []);
+
+  const sevClass =
+    tis.severity === 'over'
+      ? 'tasks__vital--over'
+      : tis.severity === 'warn'
+        ? 'tasks__vital--warn'
+        : '';
+
+  return (
+    <div className="tasks__vitals">
+      {/* Time-in-current-status, first-class. "In progress · 6d (since Jun 22)" */}
+      <div className={['tasks__vital', sevClass].filter(Boolean).join(' ')}>
+        <span className="tasks__vital-label">{tis.label}</span>
+        {tis.sinceDay && (
+          <span className="tasks__vital-since"> (since {tis.sinceDay})</span>
+        )}
+        {tis.ms == null && (
+          <span className="tasks__vital-since"> · time unknown</span>
+        )}
+      </div>
+
+      {/* Last activity — always visible, from the newest audit event. */}
+      {lastActivitySummaryText && (
+        <div className="tasks__vital tasks__vital--muted">
+          <span className="tasks__vital-key">Last update</span>{' '}
+          {lastActivitySummaryText}
+        </div>
+      )}
+
+      {/* Stalled banner + inline remediation. */}
+      {stalled && (
+        <div className="tasks__stalled-banner" role="alert">
+          <div className="tasks__stalled-head">
+            <span aria-hidden="true">⚠</span> No active worker — looks stranded
+          </div>
+          <div className="tasks__stalled-body">
+            This task is in progress but nothing is working on it
+            {entered ? ` (${tis.since.replace(/ ago$/, '')} in this status)` : ''}.
+            Reset it so it can be picked up again.
+          </div>
+          <div className="tasks__stalled-actions">
+            <button
+              type="button"
+              className="tasks__btn"
+              onClick={() => onSourceAction('reopen')}
+              title="Move it back to open so it can be claimed again"
+            >
+              Reset to open
+            </button>
+            {canClaim && claimedByMe && (
+              <button
+                type="button"
+                className="tasks__btn"
+                onClick={() => onSourceAction('release')}
+                title="Release your stale claim"
+              >
+                Release claim
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

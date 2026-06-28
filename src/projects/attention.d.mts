@@ -19,6 +19,8 @@ export interface ProjectAttention {
   blocked: number;
   overdue: number;
   failed: number;
+  /** task-80be320f06b3 — in_progress rows with no live worker (stranded). */
+  stalled: number;
   total: number;
   score: number;
   /** Max(created_at, updated_at) over rolled-up tasks; null when unknown. */
@@ -30,11 +32,20 @@ export interface ProjectAttention {
 /** Today as a 'YYYY-MM-DD' string (local). Exported for callers/tests. */
 export function todayKey(now?: number): string;
 
-/** Which attention buckets a single task lands in (open/blocked/overdue/failed). */
+/** Which attention buckets a single task lands in. `stalled` = a stranded
+ *  in_progress row (no live worker). `now` is injectable for deterministic
+ *  tests and to share the page-mount clock with the count/list. */
 export function classify(
   task: Task,
   today?: string,
-): { open: boolean; blocked: boolean; overdue: boolean; failed: boolean };
+  now?: number,
+): {
+  open: boolean;
+  blocked: boolean;
+  overdue: boolean;
+  failed: boolean;
+  stalled: boolean;
+};
 
 /**
  * task-18902d433658 — the single predicate behind a project's "N need you"
@@ -42,7 +53,11 @@ export function classify(
  * re-implemented OR) to FILTER a task list to exactly the tasks the count
  * counts, so the count and the filtered list can never disagree.
  */
-export function needsAttention(task: Task, today?: string): boolean;
+export function needsAttention(
+  task: Task,
+  today?: string,
+  now?: number,
+): boolean;
 
 /**
  * Compute per-project attention from the already-loaded task list, rolling
