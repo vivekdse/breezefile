@@ -1127,6 +1127,14 @@ function ProjectsPageInner() {
               setReloadTick((t) => t + 1);
               dispatch({ type: 'setStatus', msg: `project created · ${p.name}` });
             }}
+            onUpdated={(p) => {
+              // task-0ab7bbc30a11 — splice the patched project back into state so
+              // the header/dek refresh immediately, then re-fetch to stay in
+              // sync with the server.
+              setProjects((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+              setReloadTick((t) => t + 1);
+              dispatch({ type: 'setStatus', msg: `project updated · ${p.name}` });
+            }}
             allProjects={projects}
           />
         ) : (
@@ -1681,6 +1689,7 @@ function ProjectDetail({
   onShowCreate,
   onCancelCreate,
   onCreated,
+  onUpdated,
   allProjects,
 }: {
   node: ProjectNode;
@@ -1704,8 +1713,14 @@ function ProjectDetail({
   onShowCreate: () => void;
   onCancelCreate: () => void;
   onCreated: (p: Project) => void;
+  /** task-0ab7bbc30a11 — a name/description patch landed; splice it back. */
+  onUpdated: (p: Project) => void;
   allProjects: Project[];
 }) {
+  // task-0ab7bbc30a11 — inline edit for THIS project's name + description, shown
+  // in place of the folder header. Opened by the L2 "✎ Edit" button OR by the
+  // header's "＋ Add description" affordance (which previously only drilled in).
+  const [showEdit, setShowEdit] = useState(false);
   return (
     <>
       <div className="projects__l2bar">
@@ -1730,6 +1745,16 @@ function ProjectDetail({
         >
           ＋ New sub-project
         </button>
+        {/* task-0ab7bbc30a11 — edit THIS project's name + description. */}
+        <button
+          type="button"
+          className="projects__newtask"
+          onClick={() => setShowEdit((v) => !v)}
+          title="Edit name and description"
+          aria-pressed={showEdit}
+        >
+          ✎ Edit
+        </button>
         {/* task-2c5448be520a — archive/unarchive this project. */}
         <button
           type="button"
@@ -1751,6 +1776,17 @@ function ProjectDetail({
         />
       )}
 
+      {showEdit && (
+        <EditProjectForm
+          project={project}
+          onCancel={() => setShowEdit(false)}
+          onUpdated={(p) => {
+            setShowEdit(false);
+            onUpdated(p);
+          }}
+        />
+      )}
+
       <ProjectFolderBlock
         node={node}
         attention={attention}
@@ -1763,6 +1799,7 @@ function ProjectDetail({
         onOpenProject={onOpenProject}
         onOpenFolder={onOpenFolder}
         onNewTask={onNewTask}
+        onEditDescription={() => setShowEdit(true)}
         cursorKey={cursorKey}
       />
     </>
@@ -1891,6 +1928,134 @@ function CreateForm({
           disabled={busy}
         >
           {busy ? 'Creating…' : 'Create project'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── inline edit form for an existing project (task-0ab7bbc30a11) ─────────────────
+// Mirrors CreateForm's textarea/idiom so it reads native, but PATCHes an
+// existing project's NAME + DESCRIPTION via the already-wired
+// fm.typebuild.projects.patch(id, {name, description}). The mutation pipeline
+// (IPC → updateProject → PATCH /chromeext/projects/{id}) existed and was only
+// ever called for `instructions`; this is the missing UI. Structured failures
+// are surfaced, not swallowed: 403 not_owner → "only the owner can edit"; 422
+// phi_rejected → a clear PHI message; 404 not_visible → "project not found".
+// NON-PHI: name/description are teaching context, never patient data.
+function editReason(reason: string): string {
+  switch (reason) {
+    case 'not_owner':
+      return 'Only the project owner can edit its name or description.';
+    case 'phi_rejected':
+      return 'That looks like it contains PHI — keep the name and description PHI-free.';
+    case 'not_visible':
+      return 'Project not found.';
+    case 'empty':
+      return 'Name is required.';
+    default:
+      return 'Couldn’t save your changes.';
+  }
+}
+
+function EditProjectForm({
+  project,
+  onCancel,
+  onUpdated,
+}: {
+  project: Project;
+  onCancel: () => void;
+  onUpdated: (p: Project) => void;
+}) {
+  const [name, setName] = useState(project.name ?? '');
+  const [description, setDescription] = useState(project.description ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const nameRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
+
+  async function submit() {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setErr('Name is required.');
+      return;
+    }
+    // Only send fields that actually changed (the backend accepts a partial
+    // patch and a name-only or description-only edit is common).
+    const patch: { name?: string; description?: string } = {};
+    if (trimmedName !== (project.name ?? '')) patch.name = trimmedName;
+    const trimmedDesc = description.trim();
+    if (trimmedDesc !== (project.description ?? '')) patch.description = trimmedDesc;
+    if (patch.name === undefined && patch.description === undefined) {
+      onCancel();
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fm.typebuild.projects.patch(project.id, patch);
+      if (res.ok) {
+        onUpdated(res.project);
+        return;
+      }
+      setErr(editReason(res.reason));
+      setBusy(false);
+    } catch {
+      setErr('Couldn’t reach TypeBuild to save.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="pcreate"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          onCancel();
+        } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          void submit();
+        }
+      }}
+    >
+      <div className="pcreate__title">✎ Edit project</div>
+      <div className="pcreate__field">
+        <label htmlFor="pedit-name">Name</label>
+        <input
+          id="pedit-name"
+          ref={nameRef}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Insurance Authorization"
+          spellCheck={false}
+        />
+      </div>
+      <div className="pcreate__field">
+        <label htmlFor="pedit-desc">Description</label>
+        <textarea
+          id="pedit-desc"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="One sentence on what this project is for — given to agents as context."
+        />
+        <div className="pcreate__hint">{CTX_MARK}</div>
+      </div>
+      <div className="pcreate__row">
+        {err && <span className="pcreate__err">{err}</span>}
+        <button type="button" className="projects__btn" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="projects__btn projects__btn--primary"
+          onClick={() => void submit()}
+          disabled={busy}
+        >
+          {busy ? 'Saving…' : 'Save changes'}
         </button>
       </div>
     </div>
