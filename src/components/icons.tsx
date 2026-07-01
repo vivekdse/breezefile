@@ -32,7 +32,12 @@ export type IconName =
   | 'file'
   | 'bulb'
   | 'bolt'
-  | 'circle';
+  | 'circle'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'refresh'
+  | 'record'
+  | 'stop';
 
 export const ICON_NAMES: readonly IconName[] = [
   'search',
@@ -62,6 +67,11 @@ export const ICON_NAMES: readonly IconName[] = [
   'bulb',
   'bolt',
   'circle',
+  'chevron-left',
+  'chevron-right',
+  'refresh',
+  'record',
+  'stop',
 ] as const;
 
 export function IconSprite() {
@@ -355,6 +365,42 @@ export function IconSprite() {
         </g>
         <g id="i-circle">
           <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.5" fill="none" />
+        </g>
+        <g id="i-chevron-left">
+          <path
+            d="M15 5 8 12l7 7"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+        <g id="i-chevron-right">
+          <path
+            d="M9 5l7 7-7 7"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+        <g id="i-refresh">
+          <path
+            d="M23 4v6h-6M1 20v-6h6M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            fill="none"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+        <g id="i-record">
+          <circle cx="12" cy="12" r="6" fill="currentColor" stroke="none" />
+        </g>
+        <g id="i-stop">
+          <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none" />
         </g>
       </defs>
     </svg>

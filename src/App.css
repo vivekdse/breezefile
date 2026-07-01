@@ -245,13 +245,15 @@
   border-bottom: 1px solid var(--rule, var(--border-1));
 }
 .browser-pane__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   height: 28px;
   border: none;
   border-radius: 6px;
   background: transparent;
   color: var(--ink, var(--fg-1));
-  font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
@@ -262,22 +264,22 @@
   opacity: 0.35;
   cursor: default;
 }
-/* Teach-by-recording (task-01facbf6b0bc): the Record toggle carries a text
-   label, so let it size to content; turn it red while a session is live. */
-.browser-pane__btn--recording,
-.browser-pane__btn[title^='Stop recording'],
-.browser-pane__btn[title^='Record actions'] {
-  width: auto;
-  padding: 0 8px;
-  font-size: 12px;
-  font-weight: 600;
-}
+/* Teach-by-recording (task-01facbf6b0bc): turn the toggle red while a
+   recording session is live — an icon-only button, sized like its siblings. */
 .browser-pane__btn--recording {
   color: #fff;
   background: var(--danger, #d9483b);
 }
 .browser-pane__btn--recording:hover:not(:disabled) {
   background: var(--danger, #c23e32);
+}
+/* Full-page screenshot → PDF: pulse the download icon while capturing. */
+.browser-pane__btn-icon--busy {
+  animation: browser-pane__btn-icon-pulse 1s ease-in-out infinite;
+}
+@keyframes browser-pane__btn-icon-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 .browser-pane__addr {
   flex: 1;

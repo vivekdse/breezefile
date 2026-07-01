@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { fm, type UrlSuggestion } from '../bridge';
 import { SavePasswordPrompt, type CapturedCredential } from './SavePasswordPrompt';
+import { Icon } from './Icon';
 
 // The ONE embedded-browser surface (browser/operator unification). Drives a
 // main-process WebContentsView (created by electron/browser/views.ts) over the
@@ -403,7 +404,7 @@ export function BrowserSurface({
           onClick={() => idRef.current != null && fm.browserBack(idRef.current)}
           title="Back"
         >
-          ‹
+          <Icon name="chevron-left" size={16} />
         </button>
         <button
           className="browser-pane__btn"
@@ -411,14 +412,14 @@ export function BrowserSurface({
           onClick={() => idRef.current != null && fm.browserForward(idRef.current)}
           title="Forward"
         >
-          ›
+          <Icon name="chevron-right" size={16} />
         </button>
         <button
           className="browser-pane__btn"
           onClick={() => idRef.current != null && fm.browserReload(idRef.current)}
           title="Reload"
         >
-          ⟳
+          <Icon name="refresh" size={15} />
         </button>
         <button
           className={
@@ -431,15 +432,19 @@ export function BrowserSurface({
               : 'Record actions to teach a stable selector skill'
           }
         >
-          {recording ? '◼ Rec' : '● Rec'}
+          <Icon name={recording ? 'stop' : 'record'} size={15} />
         </button>
         <button
           className="browser-pane__btn"
           onClick={() => void takeScreenshotPdf()}
           disabled={capturingPdf}
-          title="Save a full-page screenshot as a PDF"
+          title={
+            capturingPdf
+              ? 'Capturing full-page screenshot…'
+              : 'Save a full-page screenshot as a PDF'
+          }
         >
-          {capturingPdf ? '…' : '⇩ PDF'}
+          <Icon name="download" size={16} className={capturingPdf ? 'browser-pane__btn-icon--busy' : undefined} />
         </button>
         {/* Address bar + autocomplete. The wrapper is positioned so the ghost
             overlay and the suggestion dropdown anchor to the input. */}
