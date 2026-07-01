@@ -69,6 +69,7 @@ export function BrowserSurface({
   const [addr, setAddr] = useState(url ?? '');
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false });
   const [recording, setRecording] = useState(false);
+  const [capturingPdf, setCapturingPdf] = useState(false);
   const addrFocused = useRef(false);
 
   // ─── Address-bar autocomplete (task-ff707aea93d8) ─────────────────────────
@@ -356,6 +357,27 @@ export function BrowserSurface({
     }
   };
 
+  // Full-page screenshot → PDF: auto-scroll the view, screenshot each
+  // viewport, and save one PDF (electron/browser/screenshot-pdf.ts). Reveals
+  // the saved file in the OS file manager on success, same as other silent
+  // saves in this app (e.g. `fm.reveal`).
+  const takeScreenshotPdf = async () => {
+    const id = idRef.current;
+    if (id == null || capturingPdf) return;
+    setCapturingPdf(true);
+    try {
+      const r = await fm.browserScreenshotPdf(id);
+      if (r.ok && r.path) {
+        console.info(`[browser:screenshot-pdf] saved ${r.pages} page(s) to ${r.path}`);
+        void fm.reveal(r.path);
+      } else {
+        console.warn('[browser:screenshot-pdf] failed:', r.error);
+      }
+    } finally {
+      setCapturingPdf(false);
+    }
+  };
+
   // Resolve + inject the saved password for one chosen username (task-4b786c018d78
   // + ef6d465816b3). Main resolves the value from the vault and injects it into
   // the page; it NEVER returns here — only a value-free FillResult. Used by both
@@ -410,6 +432,14 @@ export function BrowserSurface({
           }
         >
           {recording ? '◼ Rec' : '● Rec'}
+        </button>
+        <button
+          className="browser-pane__btn"
+          onClick={() => void takeScreenshotPdf()}
+          disabled={capturingPdf}
+          title="Save a full-page screenshot as a PDF"
+        >
+          {capturingPdf ? '…' : '⇩ PDF'}
         </button>
         {/* Address bar + autocomplete. The wrapper is positioned so the ghost
             overlay and the suggestion dropdown anchor to the input. */}

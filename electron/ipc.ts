@@ -10,6 +10,8 @@ import {
   stopRecording as stopBrowserRecording,
   currentRecording as currentBrowserRecording,
 } from './browser/record.ts';
+// Full-page screenshot → PDF (task: PDF button next to Record).
+import { capturePagePdf } from './browser/screenshot-pdf.ts';
 
 import { spawn, execFile } from 'node:child_process';
 import { existsSync, watch as fsWatch, type FSWatcher } from 'node:fs';
@@ -2539,6 +2541,17 @@ end tell`;
     stopBrowserRecording(opts || {}),
   );
   ipcMain.handle('browser:record:state', () => currentBrowserRecording());
+
+  // Full-page screenshot → PDF: auto-scroll the view, screenshot each
+  // viewport, assemble into one PDF (electron/browser/screenshot-pdf.ts).
+  ipcMain.handle(
+    'browser:screenshot-pdf',
+    (_e, id: number, opts?: { outPath?: string }) => {
+      const view = getBrowserView(id);
+      if (!view) return { ok: false, error: 'no such browser view' };
+      return capturePagePdf(view, opts || {});
+    },
+  );
 
   // Return-visit autofill (task-4b786c018d78). Resolve the SAVED password for
   // (origin, username) in MAIN and type it into the page's login form over the

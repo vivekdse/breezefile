@@ -359,6 +359,15 @@ const fm = {
       count: number;
       webContentsId: number | null;
     }>,
+  // Full-page screenshot → PDF: auto-scroll + capture each viewport, save as
+  // one PDF (electron/browser/screenshot-pdf.ts).
+  browserScreenshotPdf: (id: number, opts?: { outPath?: string }) =>
+    ipcRenderer.invoke('browser:screenshot-pdf', id, opts) as Promise<{
+      ok: boolean;
+      error?: string;
+      path?: string;
+      pages?: number;
+    }>,
   onBrowserState: (
     cb: (s: {
       id: number;

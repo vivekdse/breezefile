@@ -204,6 +204,12 @@ type Fm = {
     count: number;
     webContentsId: number | null;
   }>;
+  // Full-page screenshot → PDF: auto-scroll + capture each viewport, save as
+  // one PDF (electron/browser/screenshot-pdf.ts).
+  browserScreenshotPdf: (
+    id: number,
+    opts?: { outPath?: string },
+  ) => Promise<{ ok: boolean; error?: string; path?: string; pages?: number }>;
   // Return-visit autofill (task-4b786c018d78): resolve the saved password for
   // (origin, username) in MAIN and type it into the page's login form. The
   // password never crosses back to the renderer — returns only a value-free

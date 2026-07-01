@@ -70,6 +70,14 @@ export function getBrowserWindow(): BrowserWindow | null {
   return browserWin && !browserWin.isDestroyed() ? browserWin : null;
 }
 
+/** The id of the browser view living in the operator window's left pane —
+ *  the page an external agent (Claude Code, curl) drives over CDP. Lets
+ *  `/app/browser/*` HTTP routes default to "the agent's own browser" when no
+ *  explicit view id is given. Null if no operator window is open. */
+export function getOperatorViewId(): number | null {
+  return operatorViewId;
+}
+
 /** Open (or focus) the operator session window: browser LEFT, Claude Code
  *  terminal RIGHT, one resizer. When `ptyId` is given the right pane mirrors
  *  that PTY's terminal; without it the window is just the browser pane (the

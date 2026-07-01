@@ -19,7 +19,13 @@ import { writeFileSync, unlinkSync, chmodSync, mkdirSync, existsSync } from 'nod
 import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { dispatchTerminalFg } from './ipc';
-import { openBrowserWindow } from './browser/window';
+import { openBrowserWindow, getOperatorViewId } from './browser/window';
+import { getBrowserView } from './browser/views';
+import { capturePagePdf } from './browser/screenshot-pdf.ts';
+import {
+  startRecording as startBrowserRecording,
+  stopRecording as stopBrowserRecording,
+} from './browser/record.ts';
 import { clearSessionTokens } from './session-tokens';
 import { createTaskApi, sendJson, send, readJson } from './core/task-http';
 import { getTaskSource } from './sources/registry';
@@ -254,6 +260,43 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       const body = await readJson<{ url?: string }>(req).catch(() => ({}) as { url?: string });
       openBrowserWindow(body.url);
       return sendJson(res, 200, { ok: true });
+    }
+
+    // Full-page screenshot → PDF, callable by an external agent (Claude Code,
+    // curl) driving the operator browser pane over CDP — not just the
+    // renderer's PDF button (electron/browser/screenshot-pdf.ts). `id`
+    // defaults to the operator pane's view (the agent's own browser).
+    if (p === '/app/browser/screenshot-pdf' && m === 'POST') {
+      const body = await readJson<{ id?: number; outPath?: string }>(req).catch(
+        () => ({}) as { id?: number; outPath?: string },
+      );
+      const id = body.id ?? getOperatorViewId();
+      if (id == null) throw Object.assign(new Error('no browser view open'), { status: 400 });
+      const view = getBrowserView(id);
+      if (!view) throw Object.assign(new Error('no such browser view'), { status: 404 });
+      const out = await capturePagePdf(view, { outPath: body.outPath });
+      return sendJson(res, out.ok ? 200 : 500, out);
+    }
+
+    // Teach-by-recording over HTTP — the same start/stop record.ts drives for
+    // the in-app "Rec" button (electron/ipc.ts `browser:record:*`), exposed so
+    // an external agent can start it, ask the human to demonstrate a flow in
+    // chat, then stop it and read back the captured skill.
+    if (p === '/app/browser/record/start' && m === 'POST') {
+      const body = await readJson<{ id?: number }>(req).catch(() => ({}) as { id?: number });
+      const id = body.id ?? getOperatorViewId();
+      if (id == null) throw Object.assign(new Error('no browser view open'), { status: 400 });
+      const view = getBrowserView(id);
+      if (!view) throw Object.assign(new Error('no such browser view'), { status: 404 });
+      const out = startBrowserRecording(view.webContents);
+      return sendJson(res, out.ok ? 200 : 500, out);
+    }
+    if (p === '/app/browser/record/stop' && m === 'POST') {
+      const body = await readJson<{ skillName?: string }>(req).catch(
+        () => ({}) as { skillName?: string },
+      );
+      const out = await stopBrowserRecording(body);
+      return sendJson(res, out.ok ? 200 : 500, out);
     }
     // Cooperative-boundary PII/data injection (docs/pii-data-injection-design.md).
     // Resolve ONE placeholder ref (a TypeBuild task `data` key) to its decrypted
