@@ -57,6 +57,15 @@ export type Task = {
    *  optional across the source seam. rowToTask always populates it for local
    *  rows. */
   last_notified_for_date?: string | null;
+  // task-19ba9f7f43f1 — a STRUCTURED, type-dispatched task result (bespoke
+  // rendering; a `table` first). Populated by a remote source (TypeBuild) when
+  // the server carries one; local rows omit it. OPTIONAL across the seam so
+  // nothing breaks for tasks without it, and the client falls back to the plain
+  // notes view for a missing/unknown/malformed result (NON-REGRESSION). PHI:
+  // `payload` is task OUTPUT — carried in memory with the task (like notes),
+  // NEVER persisted to the skeleton store (which has no result column), logged,
+  // or written to notes/files.
+  result?: { type: string; payload: unknown } | null;
 };
 
 export type TaskCreate = {

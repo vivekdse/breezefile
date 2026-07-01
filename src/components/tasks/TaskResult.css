@@ -1,0 +1,55 @@
+/* task-19ba9f7f43f1 — bespoke task-result rendering. Styles for the structured
+   result surfaces (table first). Uses the same panel tokens as the surrounding
+   detail panel (TasksPage.css) so a result reads as part of the detail view. */
+
+.tasks__result {
+  /* Sits ABOVE the plain notes in the detail panel; give it the same top rule
+     the .tasks__detail-notes block uses so the sections read consistently. */
+  border-top: 1px solid var(--rule-on-panel);
+  padding-top: var(--sp-3);
+}
+
+.tasks__result--table {
+  /* A wide table can overflow the narrow detail column; let it scroll
+     horizontally rather than blow out the panel width. */
+  overflow-x: auto;
+}
+
+.tasks__result-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-sm, var(--fs-md));
+  color: var(--text-on-panel);
+}
+
+.tasks__result-table th,
+.tasks__result-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--rule-on-panel);
+  vertical-align: top;
+  /* Preserve author whitespace/newlines within a cell but keep it wrapping. */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tasks__result-table thead th {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-on-panel);
+  border-bottom: 1px solid var(--rule-on-panel);
+  position: sticky;
+  top: 0;
+  background: var(--panel, var(--panel-2));
+}
+
+.tasks__result-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.tasks__result-table tbody tr:nth-child(even) td {
+  /* Subtle zebra so wide rows stay readable. */
+  background: color-mix(in srgb, var(--panel-2) 40%, transparent);
+}

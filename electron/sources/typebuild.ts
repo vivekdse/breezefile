@@ -254,6 +254,13 @@ type DetailRow = ListRow & {
   depends_on?: string[] | null;
   deps_satisfied?: boolean | null;
   blocked_by?: string[] | null;
+  // task-19ba9f7f43f1 — a STRUCTURED, type-dispatched task result the client
+  // renders bespoke (a `table` first). Present only once the server half ships
+  // (submit_task_result); typed OPTIONAL so a server that predates it still maps
+  // and the client falls back to notes. PHI: `payload` is task OUTPUT — carried
+  // in memory only (never persisted to the skeleton store, which has no such
+  // column), same rule as the decrypted body.
+  result?: { type?: unknown; payload?: unknown } | null;
 };
 
 // ─── Projects (task-ab1d7955e23f) ─────────────────────────────────────────
@@ -371,6 +378,20 @@ function isoToMs(v: string | null | undefined): number | null {
   if (!v) return null;
   const t = Date.parse(v);
   return Number.isNaN(t) ? null : t;
+}
+
+// task-19ba9f7f43f1 — normalize a wire `result` into the client's structured
+// { type: string; payload: unknown } shape, or undefined when it's absent or
+// malformed (so the client falls back to the plain notes view). We keep the
+// dispatch OPEN — any string `type` is passed through; the renderer registry
+// decides whether it knows how to render it (unknown types fall back too). The
+// payload is task OUTPUT (potentially PHI) and rides in memory only.
+function mapResult(
+  r: { type?: unknown; payload?: unknown } | null | undefined,
+): { type: string; payload: unknown } | undefined {
+  if (!r || typeof r !== 'object') return undefined;
+  if (typeof r.type !== 'string' || !r.type) return undefined;
+  return { type: r.type, payload: r.payload ?? null };
 }
 
 function mapListRow(row: ListRow): SourcedTask {
@@ -849,6 +870,13 @@ export class TypeBuildTaskSource implements TaskSource {
           ? detail.deps_satisfied
           : undefined,
       blockedBy: Array.isArray(detail.blocked_by) ? detail.blocked_by : undefined,
+      // task-19ba9f7f43f1 — structured result (bespoke rendering). Pass it
+      // through ONLY when it's a well-shaped { type: string, payload } object;
+      // anything else is dropped so the client cleanly falls back to notes. The
+      // payload is task OUTPUT (potentially PHI) and, like `notes`, lives in the
+      // returned SourcedTask in MEMORY only — the skeleton store has no result
+      // column, so it can never reach disk through the poll cache.
+      result: mapResult(detail.result),
     };
   }
 

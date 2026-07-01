@@ -247,6 +247,15 @@ export type Task = {
   // task-ab1d7955e23f — owning TypeBuild project container (opaque id,
   // non-PHI). Carried from the server `project_id`; absent on local rows.
   projectId?: string | null;
+  // task-19ba9f7f43f1 — a STRUCTURED, type-dispatched task result (bespoke
+  // rendering: a `table` first). The client renders it via the TaskResult
+  // registry keyed on `type`; an unknown/missing/malformed result falls back to
+  // the plain notes view (NON-REGRESSION). OPTIONAL so nothing breaks for tasks
+  // that don't opt in — threaded through defensively (pass through if present),
+  // like created_at/updated_at were. PHI: `payload` is TASK OUTPUT and could
+  // contain PHI — carried in memory with the task (like title/notes), NEVER
+  // persisted to the skeleton DB, logged, or written to notes/files.
+  result?: { type: string; payload: unknown } | null;
 };
 
 // fm-b5at.1 — per-source capability flags. The UI gates row affordances

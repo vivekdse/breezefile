@@ -39,6 +39,8 @@ import {
   statusDotHealth,
 } from './vitals.mjs';
 import { TaskTimeline } from './TaskTimeline';
+import { TaskResultView } from './TaskResult';
+import { resultRendererKind } from './taskResult.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
 import type {
   Task,
@@ -298,6 +300,17 @@ function ManualDetail({
           </>
         )}
       </dl>
+
+      {/* task-19ba9f7f43f1 — a bespoke, type-dispatched RESULT (a `table`
+          first) renders ABOVE the plain notes when the task carries one with a
+          known type. An unknown/missing/malformed result renders nothing here
+          and the notes below are shown exactly as today (NON-REGRESSION). */}
+      {resultRendererKind(task.result) && (
+        <div className="tasks__detail-notes">
+          <div className="tasks__detail-section">Result</div>
+          <TaskResultView result={task.result} />
+        </div>
+      )}
 
       {task.notes && <CollapsibleNotes notes={task.notes} />}
 
@@ -626,6 +639,16 @@ function AgentDetail({
           </div>
         )}
       </dl>
+
+      {/* task-19ba9f7f43f1 — bespoke structured RESULT above the free-text
+          Details/body. Falls back to nothing (and the Details block below is
+          unchanged) for an unknown/missing/malformed result. */}
+      {resultRendererKind(task.result) && (
+        <div className="tasks__detail-notes">
+          <div className="tasks__detail-section">Result</div>
+          <TaskResultView result={task.result} />
+        </div>
+      )}
 
       <div className="tasks__detail-notes">
         <div className="tasks__detail-section">Details</div>
