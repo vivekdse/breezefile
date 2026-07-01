@@ -247,6 +247,23 @@ export type Task = {
   // task-ab1d7955e23f — owning TypeBuild project container (opaque id,
   // non-PHI). Carried from the server `project_id`; absent on local rows.
   projectId?: string | null;
+  // task-896f3f7f5e75 — the AGENT assigned to this task (scalar: one agent per
+  // task). `agentId` is the opaque, NON-PHI registry id carried from the server
+  // `agent_id`; absent on local rows and on unassigned tasks. `agent` is the
+  // RESOLVED agent block inlined by get_task (name + launch_mode + advisory
+  // tools) — present only on the detail path, absent on list rows and tasks
+  // with no agent. Both OPTIONAL across the seam so a task with no agent renders
+  // exactly as today (NON-REGRESSION). NON-PHI (an agent identity, not patient
+  // data) — safe to render; the server rejects a PHI agent name (422) so a name
+  // can never carry patient data.
+  agentId?: string | null;
+  agent?: {
+    id: string;
+    name: string;
+    group: string | null;
+    tools: string[];
+    launchMode: string;
+  } | null;
   // task-19ba9f7f43f1 — a STRUCTURED, type-dispatched task result (bespoke
   // rendering: a `table` first). The client renders it via the TaskResult
   // registry keyed on `type`; an unknown/missing/malformed result falls back to
@@ -355,6 +372,10 @@ export type TaskCreate = {
   // task-ab1d7955e23f — optional TypeBuild project container (opaque id,
   // non-PHI). The local source ignores it; TypeBuild maps it to `project_id`.
   projectId?: string;
+  // task-896f3f7f5e75 — optional TypeBuild agent assignment (opaque id, NON-PHI;
+  // one agent per task). The local source ignores it; TypeBuild maps it to the
+  // server's `agent_id` on create. Omitted / '' = no agent.
+  agentId?: string;
 };
 
 // task-ab1d7955e23f — a TypeBuild Project as the renderer sees it (camelCase,
@@ -374,6 +395,21 @@ export type Project = {
   effectiveInstructions?: string;
   /** task-2c5448be520a — archived projects are hidden from the default list. */
   archived?: boolean;
+};
+
+// task-896f3f7f5e75 — a TypeBuild Agent as the renderer sees it (camelCase,
+// mirrors electron/sources/typebuild.ts `Agent` and src/components/tasks/
+// agent.mjs `ClientAgent`). NON-PHI: name/tools/launch_mode are not patient data
+// (the server rejects a PHI agent name with 422). `group` is optional — private
+// agents (no group) are allowed. `tools` is free-form/advisory (display only).
+// `launchMode` is one of chrome/auto/resume/manual (or any string the server
+// sends).
+export type Agent = {
+  id: string;
+  name: string;
+  group: string | null;
+  tools: string[];
+  launchMode: string;
 };
 
 export type TaskUpdate = Partial<{

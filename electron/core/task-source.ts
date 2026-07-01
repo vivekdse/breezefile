@@ -78,6 +78,21 @@ export type SourcedTask = Omit<Task, 'folder'> & {
   // task-ab1d7955e23f — owning project container (opaque, non-PHI). Optional;
   // present when a task was created into / belongs to a TypeBuild Project.
   projectId?: string | null;
+  // task-896f3f7f5e75 — the AGENT assigned to this task (scalar; one per task).
+  // `agentId` is the opaque, NON-PHI registry id (server `agent_id`); null/absent
+  // when unassigned. `agent` is the RESOLVED agent block inlined by get_task
+  // (id + name + group + advisory tools + launch_mode) — present only on the
+  // DETAIL path (mapDetail), absent on list rows. Both threaded defensively
+  // (pass through when well-shaped) so a task with no agent maps exactly as
+  // today (NON-REGRESSION). NON-PHI (an agent identity, not patient data).
+  agentId?: string | null;
+  agent?: {
+    id: string;
+    name: string;
+    group: string | null;
+    tools: string[];
+    launchMode: string;
+  } | null;
   dependsOn?: string[];
   depsSatisfied?: boolean;
   blockedBy?: string[];

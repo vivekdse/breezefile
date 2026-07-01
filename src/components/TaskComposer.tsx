@@ -41,7 +41,10 @@ import {
   buildCronFromForm,
   defaultRecurrenceForm,
 } from '../recurrence';
-import type { Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
+import type { Agent, Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
+// task-896f3f7f5e75 — pure agent display helpers (launch-mode caption for the
+// picker option hint). Shared with the detail panel + unit-tested in isolation.
+import { agentOptionHint } from './tasks/agent.mjs';
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
@@ -76,6 +79,7 @@ type QuestionId =
   | 'status'
   | 'start'
   | 'priority'
+  | 'agent'
   | 'pin'
   | 'notes';
 // Order is the keyboard ↓ flow. Name, folder, and notes come first — they
@@ -99,7 +103,7 @@ const QUESTIONS_LOCAL: QuestionId[] = [
 // user can still override or pick "None".
 const QUESTIONS_TYPEBUILD: QuestionId[] = [
   'title', 'project', 'who', 'notes',
-  'start', 'when', 'priority',
+  'start', 'when', 'priority', 'agent',
   'status', 'pin',
 ];
 function composerQuestions(target: string): QuestionId[] {
@@ -433,6 +437,14 @@ export function TaskComposer(props: Props) {
   const [priority, setPriority] = useState<string>(
     initial?.priority != null ? String(initial.priority) : '',
   );
+  // task-896f3f7f5e75 — TypeBuild AGENT assignment (scalar; one agent per task).
+  // `agents` is the signed-in user's agent registry (NON-PHI: names/tools/
+  // launch_mode). `agentId` is the chosen agent ('' = None). Edits start pinned
+  // to the task's own agent (from the resolved block OR the scalar id).
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentId, setAgentId] = useState<string>(
+    initial?.agent?.id ?? initial?.agentId ?? '',
+  );
   // task-ab1d7955e23f — TypeBuild project association. `projects` is the
   // signed-in user's project list (non-PHI: names/folders/instructions are
   // teaching context, safe to display). `projectId` is the chosen container
@@ -588,6 +600,7 @@ export function TaskComposer(props: Props) {
     const v = initial?.priority;
     return v != null ? PRIORITY_VALUES.indexOf(v) + 1 : 0;
   });
+  const [agentHighlight, setAgentHighlight] = useState(0);
   const [pinHighlight, setPinHighlight] = useState(() => (pinned ? 1 : 0));
 
   // fm-m2s4 (S5) — priority is a flat option list ("Unset" + 0..10) so it
@@ -603,6 +616,32 @@ export function TaskComposer(props: Props) {
     ],
     [],
   );
+
+  // task-896f3f7f5e75 — the AGENT option list: "None" first (clears the
+  // assignment), then one row per agent. Each option shows the agent's name +
+  // its launch_mode caption as the hint (chrome/auto/resume/manual). Agents are
+  // sorted by name (case-insensitive); group-OPTIONAL — an agent with no group
+  // still lists (the group is not surfaced in the compact picker, only the
+  // launch mode is). When no agents exist the list is just "None", so the
+  // picker looks like today (NON-REGRESSION).
+  const AGENT_OPTIONS = useMemo(() => {
+    const sorted = [...agents].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+    );
+    const out: { value: string; label: string; hint?: string }[] = [
+      { value: '', label: 'None', hint: 'no agent' },
+    ];
+    for (const a of sorted) {
+      out.push({ value: a.id, label: a.name, hint: agentOptionHint(a) || undefined });
+    }
+    return out;
+  }, [agents]);
+  // Keep the agent highlight aligned with the chosen agent as the list loads /
+  // the selection changes (mirrors the priority/status highlight alignment).
+  useEffect(() => {
+    const i = AGENT_OPTIONS.findIndex((o) => o.value === agentId);
+    setAgentHighlight(i >= 0 ? i : 0);
+  }, [AGENT_OPTIONS, agentId]);
 
   // task-201f5e3cde57 — the project a task started with (edit: its own project;
   // create: a pre-selected project). Used to pin it as option 1 + focused so
@@ -687,6 +726,25 @@ export function TaskComposer(props: Props) {
       })
       .catch(() => {
         /* projects stay empty → only the "None" option is offered */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isTypebuild, tbSignedIn]);
+
+  // task-896f3f7f5e75 — load the signed-in user's agent registry once TypeBuild
+  // is the target. NON-PHI, safe to hold in renderer state. On any failure the
+  // list stays empty → only the "None" option is offered (NON-REGRESSION).
+  useEffect(() => {
+    if (!isTypebuild || !tbSignedIn) return;
+    let alive = true;
+    fm.typebuild.agents
+      .list()
+      .then((list) => {
+        if (alive) setAgents(list);
+      })
+      .catch(() => {
+        /* agents stay empty → only the "None" option is offered */
       });
     return () => {
       alive = false;
@@ -904,6 +962,18 @@ export function TaskComposer(props: Props) {
     if (!o) return;
     setPriority(o.value);
     setPriorityHighlight(i);
+    // task-896f3f7f5e75 — the question after Priority is Agent (TypeBuild).
+    setAgentHighlight(Math.max(0, AGENT_OPTIONS.findIndex((opt) => opt.value === agentId)));
+    goNext();
+  }
+
+  // task-896f3f7f5e75 — TypeBuild agent pick. Index 0 is "None" (clears the
+  // assignment). Sets the agent and advances like the other option questions.
+  function chooseAgent(i: number) {
+    const o = AGENT_OPTIONS[i];
+    if (!o) return;
+    setAgentId(o.value);
+    setAgentHighlight(i);
     setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
     goNext();
   }
@@ -1016,10 +1086,20 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'priority') {
+      // task-896f3f7f5e75 — Priority → Agent (TypeBuild; the agent question
+      // sits right after priority in QUESTIONS_TYPEBUILD).
       if (priorityHighlight >= PRIORITY_OPTIONS.length - 1) {
-        setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+        setAgentHighlight(Math.max(0, AGENT_OPTIONS.findIndex((o) => o.value === agentId)));
         goNext();
       } else setPriorityHighlight((i) => i + 1);
+      return;
+    }
+    if (active === 'agent') {
+      // task-896f3f7f5e75 — Agent → Status.
+      if (agentHighlight >= AGENT_OPTIONS.length - 1) {
+        setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
+        goNext();
+      } else setAgentHighlight((i) => i + 1);
       return;
     }
     if (active === 'status') {
@@ -1081,10 +1161,19 @@ export function TaskComposer(props: Props) {
       } else setPriorityHighlight((i) => i - 1);
       return;
     }
+    if (active === 'agent') {
+      // task-896f3f7f5e75 — Agent ↑ → back to Priority.
+      if (agentHighlight === 0) {
+        setPriorityHighlight(priorityHighlight);
+        goBack();
+      } else setAgentHighlight((i) => i - 1);
+      return;
+    }
     if (active === 'status') {
       if (statusHighlight === 0) {
-        // fm-m2s4 (S5) — Status ↑ → Priority (TypeBuild) or → When (local).
-        if (isTypebuild) setPriorityHighlight(priorityHighlight);
+        // fm-m2s4 (S5) — Status ↑ → Agent (TypeBuild) or → When (local).
+        // task-896f3f7f5e75 — the question before Status is Agent in TB mode.
+        if (isTypebuild) setAgentHighlight(Math.max(0, AGENT_OPTIONS.findIndex((o) => o.value === agentId)));
         else setWhenHighlight(visibleWhenOptions.length - 1);
         goBack();
       } else setStatusHighlight((i) => i - 1);
@@ -1242,6 +1331,11 @@ export function TaskComposer(props: Props) {
               deferUntil: resolvedStart,
               ...(parsedPriority !== undefined ? { priority: parsedPriority } : {}),
               ...(projectId ? { projectId } : {}),
+              // task-896f3f7f5e75 — the chosen agent rides the create as
+              // `agentId` (TaskCreate models it; the TypeBuild source maps it to
+              // `agent_id`). '' (None) → omit the key so a create that doesn't
+              // care leaves the server default (no agent). Non-PHI.
+              ...(agentId ? { agentId } : {}),
             }
           : isTypebuild
             ? { ...basePayload, folder: '' }
@@ -1283,6 +1377,12 @@ export function TaskComposer(props: Props) {
         }
         if (projectId !== (initial?.projectId ?? '')) {
           patch.project_id = projectId;
+        }
+        // task-896f3f7f5e75 — agent assignment (scalar). '' clears it
+        // server-side. The initial value comes from the resolved block's id or
+        // the scalar agentId; only send a real change.
+        if (agentId !== (initial?.agent?.id ?? initial?.agentId ?? '')) {
+          patch.agent_id = agentId;
         }
         // status — the PATCH verb accepts it; only send a real change.
         if (status !== (initial?.status ?? 'pending')) {
@@ -1481,6 +1581,23 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
+    if (active === 'agent') {
+      // task-896f3f7f5e75 — Enter picks the highlight; digits 1..N pick the
+      // corresponding option (None is 1, then one per agent — unambiguous, so
+      // digit shortcuts are safe here unlike priority's 0–10 labels).
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        chooseAgent(agentHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= AGENT_OPTIONS.length) {
+        e.preventDefault();
+        chooseAgent(n - 1);
+        return;
+      }
+      return;
+    }
     if (active === 'status') {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -1572,6 +1689,11 @@ export function TaskComposer(props: Props) {
   function prioritySummary(): string {
     return priority === '' ? 'Unset' : `Priority ${priority}`;
   }
+  function agentSummary(): string {
+    if (!agentId) return 'None';
+    const a = agents.find((x) => x.id === agentId);
+    return a?.name ?? 'Agent';
+  }
   function projectSummary(): string {
     if (!projectId) return 'None';
     return attachedProject?.name ?? 'Project';
@@ -1595,6 +1717,7 @@ export function TaskComposer(props: Props) {
     if (q === 'status') return statusSummary();
     if (q === 'start') return startSummary();
     if (q === 'priority') return prioritySummary();
+    if (q === 'agent') return agentSummary();
     if (q === 'pin') return pinSummary();
     if (q === 'notes') return notesSummary();
     return '';
@@ -1613,6 +1736,7 @@ export function TaskComposer(props: Props) {
     if (q === 'when') return 'end';
     if (q === 'status') return 'status';
     if (q === 'priority') return 'priority';
+    if (q === 'agent') return 'agent';
     if (q === 'pin') return 'pin';
     if (q === 'notes') return 'notes';
     return null;
@@ -1628,6 +1752,7 @@ export function TaskComposer(props: Props) {
     // fm-m2s4 (S5) — TypeBuild reframes "start" as "defer until".
     if (q === 'start') return isTypebuild ? 'Defer until?' : 'When can it start?';
     if (q === 'priority') return 'Priority?';
+    if (q === 'agent') return 'Which agent?';
     if (q === 'pin') return 'Pin this task?';
     if (q === 'notes') {
       return executor === 'claude'
@@ -2297,6 +2422,54 @@ export function TaskComposer(props: Props) {
                 </div>
               ) : (
                 renderInert('priority')
+              )}
+            </section>
+          )}
+
+          {/* Agent — task-896f3f7f5e75. TypeBuild only; a flat option list
+              ("None" + one row per agent, each showing its launch_mode caption
+              as the hint). Sits between Priority and Status, mirroring the
+              QUESTIONS_TYPEBUILD order. Enter picks the highlight; digits 1..N
+              pick (unambiguous names, unlike priority's 0–10). "None" clears the
+              assignment; group-optional agents still list. */}
+          {isTypebuild && (
+            <section
+              ref={sectionRefFor('agent')}
+              className={sectionClasses('agent')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('agent'))}
+            >
+              {isActiveSection('agent') ? (
+                <div className="composer__q-active-body">
+                  <FieldLabel id="agent" />
+                  <div className="composer__q-prompt">{promptFor('agent')}</div>
+                  <ul className="composer__options composer__options--wrap" role="listbox">
+                    {AGENT_OPTIONS.map((o, i) => (
+                      <li key={o.value || 'none'}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === agentHighlight}
+                          className={
+                            'composer__option composer__option--compact' +
+                            (i === agentHighlight ? ' composer__option--active' : '')
+                          }
+                          onMouseEnter={() => setAgentHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            chooseAgent(i);
+                          }}
+                        >
+                          <span className="composer__option-label">{o.label}</span>
+                          {o.hint && (
+                            <span className="composer__option-hint">{o.hint}</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                renderInert('agent')
               )}
             </section>
           )}

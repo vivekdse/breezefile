@@ -17,6 +17,19 @@ type Project = {
   effectiveInstructions?: string;
 };
 
+// task-896f3f7f5e75 — TypeBuild Agent as it crosses the bridge (camelCase;
+// mirrors src/types.ts `Agent`). Inlined like Project (preload carries no
+// shared-type imports). NON-PHI: name/tools/launch_mode are not patient data.
+// `group` is null for a private agent; `tools` is advisory; `launchMode` is one
+// of chrome/auto/resume/manual.
+type Agent = {
+  id: string;
+  name: string;
+  group: string | null;
+  tools: string[];
+  launchMode: string;
+};
+
 // One credential-vault entry as it crosses the bridge (NAMES only — never a
 // value). `key` is the "me."-prefixed field; `secret` marks write-only fields
 // (ssn/dob/bank_account) the server's resolver refuses to reveal. Inlined here
@@ -858,6 +871,13 @@ const fm = {
         ipcRenderer.invoke('typebuild:projects:archive', id) as Promise<Project>,
       unarchive: (id: string) =>
         ipcRenderer.invoke('typebuild:projects:unarchive', id) as Promise<Project>,
+    },
+    // task-896f3f7f5e75 — TypeBuild Agents: the registry the composer's agent
+    // picker lists. NON-PHI; server-backed via the TypeBuild source. Mirrors
+    // projects.list — [] on a parse miss so the picker degrades to None-only.
+    agents: {
+      list: () =>
+        ipcRenderer.invoke('typebuild:agents:list') as Promise<Agent[]>,
     },
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
     // structured-result contract as projects.patch.

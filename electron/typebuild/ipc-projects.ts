@@ -27,7 +27,7 @@
 
 import { ipcMain } from 'electron';
 import { getTaskSource } from '../sources/registry';
-import type { Project, TypeBuildTaskSource } from '../sources/typebuild';
+import type { Agent, Project, TypeBuildTaskSource } from '../sources/typebuild';
 
 let registered = false;
 
@@ -47,6 +47,14 @@ export function registerTypebuildProjectsIpc(): void {
     'typebuild:projects:list',
     (_e, includeArchived?: boolean): Promise<Project[]> =>
       source().listProjects({ includeArchived: !!includeArchived }),
+  );
+  // task-896f3f7f5e75 — the AGENT registry for the composer's agent picker.
+  // NON-PHI (agent names/tools/launch_mode). Mirrors projects:list; the source
+  // returns [] on a parse miss and drops malformed rows, so the picker degrades
+  // to a None-only list rather than crashing.
+  ipcMain.handle(
+    'typebuild:agents:list',
+    (_e): Promise<Agent[]> => source().listAgents(),
   );
   ipcMain.handle(
     'typebuild:projects:get',

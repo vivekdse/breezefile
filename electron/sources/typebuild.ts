@@ -228,6 +228,11 @@ type ListRow = {
   parent_task_id?: string | null;
   // task-ab1d7955e23f — owning project container (opaque, non-PHI).
   project_id?: string | null;
+  // task-896f3f7f5e75 — assigned AGENT (scalar; server `agent_id`). Opaque,
+  // NON-PHI id; null/absent when unassigned. Typed on ListRow so IF the list
+  // endpoint carries it, it flows to LIST rows too; the detail endpoint also
+  // carries a resolved `agent` block (typed on DetailRow below).
+  agent_id?: string | null;
   // task-b1fe80e2669b (Phase 2) — the list now emits REAL server timestamps
   // (ISO-'Z', lexically sortable; `updated_at` bumps on every mutation). NON-PHI.
   // Optional so a server that predates them still maps (mapListRow falls back to
@@ -281,6 +286,13 @@ type DetailRow = ListRow & {
   // to the skeleton store, which has no such column), same rule as `task`/
   // `result`. `by`+`at` are NON-PHI (email principal + ISO timestamp).
   messages?: unknown;
+  // task-896f3f7f5e75 — the RESOLVED agent block get_task inlines alongside the
+  // scalar `agent_id` (the agent's details: id + name + optional group +
+  // advisory tools + launch_mode). NON-PHI (an agent identity, not patient
+  // data). Typed loose/optional (a server that predates it simply omits it);
+  // mapped defensively via mapResolvedAgent so a malformed block is dropped and
+  // the detail line is simply omitted (NON-REGRESSION).
+  agent?: unknown;
 };
 
 // ─── Projects (task-ab1d7955e23f) ─────────────────────────────────────────
@@ -321,6 +333,59 @@ export type Project = {
    *  (the server omits them unless asked). NON-PHI routing flag. */
   archived?: boolean;
 };
+
+// ─── Agents (task-896f3f7f5e75) ───────────────────────────────────────────
+// A TypeBuild AGENT registry entry: id, name, optional `group` (group-OPTIONAL
+// — private agents are allowed → `group` may be absent), a free-form advisory
+// `tools` list (deduped server-side; display only, no validation), and a
+// `launch_mode` (chrome/auto/resume/manual). NON-PHI: the server rejects a PHI
+// agent name (422), so a name can never carry patient data — but we still never
+// log request/response bodies. Snake_case-ish server JSON below; the
+// client-facing `Agent` is camelCase (mapped via mapAgentRow).
+type AgentRow = {
+  id?: string;
+  name?: string;
+  group?: string | null;
+  tools?: unknown;
+  launch_mode?: string | null;
+};
+
+/** A TypeBuild Agent as the renderer sees it (camelCase). NON-PHI. `group` is
+ *  null for a private agent; `tools` is advisory/display-only; `launchMode` is
+ *  one of chrome/auto/resume/manual (or any string the server sends). */
+export type Agent = {
+  id: string;
+  name: string;
+  group: string | null;
+  tools: string[];
+  launchMode: string;
+};
+
+// Map a raw server agent row → the camelCase client `Agent`. Defensive (mirrors
+// mapResult/mapMessages' "pass through ONLY when well-shaped" rule): a
+// non-object or a row missing an id/name yields null, so a malformed entry is
+// dropped rather than reaching the picker. `group` optional → null; `tools`
+// coerced to string[] (non-array → []); `launchMode` passes through verbatim.
+function mapAgentRow(raw: AgentRow | null | undefined): Agent | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = typeof raw.id === 'string' ? raw.id : '';
+  const name = typeof raw.name === 'string' ? raw.name : '';
+  if (!id || !name) return null;
+  const group =
+    typeof raw.group === 'string' && raw.group !== '' ? raw.group : null;
+  const tools = Array.isArray(raw.tools)
+    ? raw.tools.filter((t): t is string => typeof t === 'string')
+    : [];
+  const launchMode = typeof raw.launch_mode === 'string' ? raw.launch_mode : '';
+  return { id, name, group, tools, launchMode };
+}
+
+// The RESOLVED agent block inlined on get_task (detail.agent). Same shape + the
+// same defensive mapping as a listed agent; null (dropped) when absent/malformed
+// so a task with no/malformed agent maps exactly as today (NON-REGRESSION).
+function mapResolvedAgent(raw: unknown): Agent | null {
+  return mapAgentRow(raw as AgentRow | null | undefined);
+}
 
 // ─── Status mapping ──────────────────────────────────────────────────────
 // Map the server's status into the local TaskStatus enum. `rawStatus` ALWAYS
@@ -539,6 +604,11 @@ function mapListRow(row: ListRow): SourcedTask {
     parentTaskId: row.parent_task_id ?? null,
     // task-ab1d7955e23f — owning project container (opaque, non-PHI).
     projectId: row.project_id ?? null,
+    // task-896f3f7f5e75 — assigned AGENT (scalar; opaque, non-PHI id). Passed
+    // through when the row carries it (the list MAY, the detail DOES); absent →
+    // null so an unassigned task maps exactly as today (NON-REGRESSION). The
+    // RESOLVED agent block rides on the detail path only (added in mapDetail).
+    agentId: row.agent_id ?? null,
     // task-91d13f9d5469 — a PENDING QUESTION the task waits on (get_task
     // surfaces it; the list MAY too). Passed through ONLY when it's a well-shaped
     // { text, ... } object; absent/null/malformed → undefined so a question-less
@@ -977,6 +1047,13 @@ export class TypeBuildTaskSource implements TaskSource {
       // null/malformed → undefined so a question-less task renders as today
       // (NON-REGRESSION). `text` is decrypted PHI, memory-only (no skeleton col).
       pending_question: mapPendingQuestion(detail.pending_question),
+      // task-896f3f7f5e75 — the RESOLVED agent block get_task inlines alongside
+      // the scalar agent_id. Passed through ONLY when well-shaped (an object
+      // with id + name); absent/malformed → null so a task with no agent renders
+      // exactly as today (the detail line is simply omitted — NON-REGRESSION).
+      // NON-PHI (an agent identity). The scalar agentId already came through
+      // mapListRow (via base) above.
+      agent: mapResolvedAgent(detail.agent),
     };
   }
 
@@ -1003,6 +1080,10 @@ export class TypeBuildTaskSource implements TaskSource {
     if (typeof input.priority === 'number') payload.priority = input.priority;
     // task-ab1d7955e23f — optional project container. Opaque id (non-PHI).
     if (input.projectId) payload.project_id = input.projectId;
+    // task-896f3f7f5e75 — optional assigned AGENT (scalar; opaque id, non-PHI).
+    // Omit when unset so a create that doesn't care leaves the server default
+    // (no agent). An unknown agent_id → the server 400s (surfaced below).
+    if (input.agentId) payload.agent_id = input.agentId;
 
     const res = await this.request('POST', '/chromeext/tasks', payload);
     if (!res.ok) {
@@ -1037,6 +1118,10 @@ export class TypeBuildTaskSource implements TaskSource {
       due_at: input.due_at ?? null,
       defer_until: input.deferUntil ?? null,
       project_id: input.projectId ?? null,
+      // task-896f3f7f5e75 — seed the scalar agent_id so the just-created row
+      // shows its assignment immediately; the resolved `agent` block arrives on
+      // the next detail fetch. Non-PHI.
+      agent_id: input.agentId ?? null,
     });
     // notes (the body) is PHI-in-memory; attach it for the immediate return so
     // the composer can show the just-created task without a re-fetch.
@@ -1178,6 +1263,33 @@ export class TypeBuildTaskSource implements TaskSource {
       console.warn('[typebuild] project skeleton persist failed:', (e as Error).message);
     }
     return projects;
+  }
+
+  // ─── agents (task-896f3f7f5e75) ──────────────────────────────────────────
+  // GET /chromeext/agents → { agents: [...] }. MIRRORS listProjects' fetch: the
+  // agent registry the composer picker lists. Agents are NON-PHI (name/tools/
+  // launch_mode) — but we still never log request/response bodies. Returns [] on
+  // a parse miss (same contract as listProjects' `Array.isArray(...) ? ... : []`)
+  // so a malformed response degrades to "only the None option" rather than a
+  // crash. Malformed individual rows are dropped by mapAgentRow. Unlike projects
+  // there is no skeleton cache (agents aren't needed cold; the picker fetches on
+  // open), so a transient failure surfaces as a throw the caller catches → empty
+  // list → None-only picker.
+  async listAgents(): Promise<Agent[]> {
+    const res = await this.request('GET', '/chromeext/agents');
+    if (!res.ok) {
+      throw new Error(`typebuild: list agents failed (${res.status})`);
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      agents?: AgentRow[];
+    };
+    const rows = Array.isArray(data.agents) ? data.agents : [];
+    const out: Agent[] = [];
+    for (const r of rows) {
+      const a = mapAgentRow(r);
+      if (a) out.push(a);
+    }
+    return out;
   }
 
   // GET /chromeext/projects/{id}(?effective=1). 404 (not found / not visible)
@@ -2231,6 +2343,17 @@ export class TypeBuildTaskSource implements TaskSource {
       const s = typeof v === 'string' ? v : '';
       body.project_id = s;
       cachePatch.projectId = s === '' ? null : s;
+    }
+    // task-896f3f7f5e75 — assigned AGENT (scalar). '' clears the assignment (the
+    // composer's "None" option), an opaque id attaches it. Non-PHI. An unknown
+    // agent_id → the server 400s (surfaced via patchTask's throw). The cache
+    // reflects the scalar id; the resolved `agent` block refreshes on the next
+    // detail fetch.
+    if ('agent_id' in input) {
+      const v = input.agent_id;
+      const s = typeof v === 'string' ? v : '';
+      body.agent_id = s;
+      cachePatch.agentId = s === '' ? null : s;
     }
 
     // Nothing recognized — a no-op rather than a wasted round-trip.

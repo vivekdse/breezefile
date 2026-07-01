@@ -42,6 +42,9 @@ import {
 import { TaskTimeline } from './TaskTimeline';
 import { TaskResultView } from './TaskResult';
 import { resultRendererKind } from './taskResult.mjs';
+// task-896f3f7f5e75 — pure agent display helper (name + launch_mode caption for
+// the assigned-agent detail line). Shared with the composer + unit-tested.
+import { agentDetailSummary } from './agent.mjs';
 import {
   normalizeTaskMessages,
   relativeMessageTime,
@@ -774,6 +777,17 @@ function AgentDetail({
             />
           </dd>
         </div>
+        {/* task-896f3f7f5e75 — the ASSIGNED AGENT, from the resolved `agent`
+            block get_task inlines (name + launch_mode caption). Rendered ONLY
+            when present; absent → the row is omitted entirely so a task with no
+            agent looks exactly as today (NON-REGRESSION). NON-PHI (an agent
+            identity). Read-only here — assignment is set from the composer. */}
+        {task.agent && (
+          <div>
+            <dt>Agent</dt>
+            <dd>{agentDetailSummary(task.agent)}</dd>
+          </div>
+        )}
         {/* fm-j7w0 (S4) — editable priority via a compact stepper. */}
         <div>
           <dt>Priority</dt>

@@ -121,6 +121,10 @@ export type TaskCreate = {
   // non-PHI). The local store ignores it; the TypeBuild source maps it to the
   // server's `project_id` on create.
   projectId?: string;
+  // task-896f3f7f5e75 — optional TypeBuild agent assignment (opaque id, NON-PHI;
+  // one agent per task). The local store ignores it; the TypeBuild source maps
+  // it to the server's `agent_id` on create. Omitted / '' = no agent.
+  agentId?: string;
 };
 
 export type TaskUpdate = Partial<{

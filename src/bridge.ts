@@ -1,4 +1,4 @@
-import type { Entry, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Agent, Entry, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
 export type Capabilities = {
@@ -480,6 +480,12 @@ type Fm = {
       // task-2c5448be520a — archive/unarchive (hide from the default list).
       archive: (id: string) => Promise<Project>;
       unarchive: (id: string) => Promise<Project>;
+    };
+    // task-896f3f7f5e75 — TypeBuild Agents: the registry the composer's agent
+    // picker lists. NON-PHI (name/tools/launch_mode). `list` mirrors
+    // projects.list — [] on a parse miss so the picker degrades to None-only.
+    agents: {
+      list: () => Promise<Agent[]>;
     };
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (
