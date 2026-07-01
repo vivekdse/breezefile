@@ -83,6 +83,12 @@ import {
   actionsFromRecording,
   promotionDecision,
 } from '../electron/browser/tools/promote.mjs';
+import {
+  recallApiSpecs,
+  recordApiSpec,
+  apiSpecFromRequest,
+  validateApiSpec,
+} from '../electron/browser/tools/api-spec.mjs';
 // NOTE: connect.mjs is imported LAZILY inside cmdRun() only. It pulls in
 // playwright-core; discovery (available/help/list) must work without a browser
 // library present, since the agent runs `available <url>` first on every task.
@@ -143,7 +149,14 @@ function withCause(error) {
 }
 
 // ─── available <url> ─────────────────────────────────────────────────────────
-function cmdAvailable(args) {
+// AUTO-RECALL (Operator Speed, task-8ba139c23d18): the agent runs `available
+// <url>` FIRST on every browser task, so this is where we surface the site's
+// KNOWN API automatically — no separate `memory get --site` call to remember.
+// We recall the domain's api-spec notes (NON-PHI, keys-only) and PREFER them:
+// they ride at the top of the result as `api_specs`, so a known endpoint is
+// `curl`/net-replayed before the browser is opened at all. A DB/network miss is
+// non-fatal — discovery must never break because recall was offline.
+async function cmdAvailable(args) {
   const url = args._[1];
   if (!url) { process.stderr.write('usage: available <url>\n'); return EXIT.USAGE; }
   const matches = toolsForUrl(url).map((t) => ({
@@ -163,7 +176,24 @@ function cmdAvailable(args) {
     // runs.jsonl. See docs/resumable-tool-steps.md.
     step_plan: stepPlanSummary(t.meta, t.runsPath),
   }));
-  out({ url, count: matches.length, tools: matches });
+  // Surface the domain's recorded API (keys-only, NON-PHI) so the agent PREFERS
+  // the http/net-replay path over the DOM when a spec exists. Best-effort.
+  let apiSpecs = [];
+  let apiOnline;
+  try {
+    const recalled = await recallApiSpecs(url);
+    apiSpecs = recalled.specs;
+    apiOnline = recalled.online;
+  } catch { /* recall is advisory — a miss must not fail discovery */ }
+  out({
+    url,
+    // PREFER the API: a known spec means "net-replay/curl this, skip the DOM".
+    prefer_api: apiSpecs.length > 0,
+    api_specs: apiSpecs,
+    api_specs_online: apiOnline,
+    count: matches.length,
+    tools: matches,
+  });
   return EXIT.SUCCESS;
 }
 
@@ -573,7 +603,7 @@ function cmdWrite(args, { overwrite }) {
 // ref, NEVER a value (scaffoldTool rejects a literal value — PHI guard). The
 // emitted tool is written via writeTool as status:candidate. It syncs as a
 // NON-PHI code artifact through the same channel the tool repo uses.
-function cmdPromoteFrom(args) {
+async function cmdPromoteFrom(args) {
   const id = args._[1];
   if (!id) {
     process.stderr.write(
@@ -601,6 +631,11 @@ function cmdPromoteFrom(args) {
     return EXIT.USAGE;
   }
 
+  // The resolved captured actions — explicit --actions, else derived from the
+  // recording. We keep the resolved list so the api-spec auto-record below can
+  // read the net-replay endpoints out of it (same input scaffoldTool consumed).
+  const resolvedActions = actions ?? (recording ? actionsFromRecording(recording) : undefined);
+
   let scaffold;
   try {
     scaffold = scaffoldTool({
@@ -608,8 +643,7 @@ function cmdPromoteFrom(args) {
       name: args.name && args.name !== true ? args.name : undefined,
       description: args.description && args.description !== true ? args.description : undefined,
       match: args.match,
-      // Prefer explicit actions; otherwise derive from the recording.
-      actions: actions ?? (recording ? actionsFromRecording(recording) : undefined),
+      actions: resolvedActions,
     });
   } catch (e) {
     // A PHI-leak (literal value in a captured fill) or an unknown verb lands here.
@@ -625,17 +659,86 @@ function cmdPromoteFrom(args) {
     return EXIT.FAILURE;
   }
   if (!r.ok) { out({ status: 'error', errors: r.errors }); return EXIT.FAILURE; }
+
+  // AUTO-RECORD the api-spec (Operator Speed, task-8ba139c23d18): when the solve
+  // was an intercepted API call (an `http`-channel tool), persist the domain-
+  // keyed api-spec note WITHOUT the agent driving raw memory add — so the NEXT
+  // task on this domain recalls the endpoint and net-replays it. KEYS ONLY:
+  // apiSpecFromRequest carries header NAMES + the me.* auth ref; recordApiSpec
+  // runs validateApiSpec and THROWS on any value-shaped token (never a silent
+  // write). Best-effort: a leak throws and is reported; other failures (offline)
+  // never fail the promotion that just succeeded.
+  const channel = toolChannel(scaffold.meta);
+  let recordedSpecs = [];
+  try {
+    recordedSpecs = await recordApiSpecsFromActions(resolvedActions, channel);
+  } catch (e) {
+    // A value-bearing spec (validateApiSpec threw) must be LOUD — the tool was
+    // written, but the leak-shaped api-spec was refused, not silently dropped.
+    out({
+      status: 'error',
+      action: r.action,
+      id: r.id,
+      path: r.path,
+      channel,
+      error: `tool written, but api-spec auto-record REFUSED: ${e.message}`,
+    });
+    return EXIT.FAILURE;
+  }
+
   out({
     status: 'success',
     action: r.action,
     id: r.id,
     path: r.path,
     tool_status: scaffold.meta.status, // 'candidate'
-    channel: toolChannel(scaffold.meta), // 'http' when the solve was an API call
+    channel, // 'http' when the solve was an API call
     steps: scaffold.meta.steps.map((s) => ({ name: s.name, sideEffect: s.sideEffect })),
+    api_specs_recorded: recordedSpecs,
     note: 'emitted as a CANDIDATE — promoted to active after it passes a run or two (toolHealth).',
   });
   return EXIT.SUCCESS;
+}
+
+/** Auto-record the api-spec(s) implied by a solve's captured actions. Only fires
+ *  when the tool is on the `http` channel (the operative work WAS the intercepted
+ *  request). For each captured `net-replay` action we build a keys-only spec from
+ *  its NON-PHI request meta (method + url → domain/path; header NAMES if the
+ *  capture carried them) and recordApiSpec() it — which runs validateApiSpec and
+ *  THROWS on any value-shaped token, so a leak can never be persisted. Returns a
+ *  NON-PHI summary [{ domain, method, path, id }]. A value-shaped spec rethrows
+ *  (surfaced to the caller); an offline/transient write failure is swallowed. */
+async function recordApiSpecsFromActions(actions, channel) {
+  if (channel !== 'http') return [];
+  const recorded = [];
+  for (const a of Array.isArray(actions) ? actions : []) {
+    if (!a || a.verb !== 'net-replay' || !a.url) continue;
+    const spec = apiSpecFromRequest(
+      // NON-PHI request meta the capture carried: method + url (+ header NAMES if
+      // present). NO body, NO header values.
+      { method: a.method || 'GET', url: a.url, header_names: a.header_names },
+      // params/auth are KEYS/refs only: a data-ref key (dataRef) and a me.* auth
+      // ref if the capture recorded them. Never a value — validateApiSpec gates.
+      { params: a.params, auth: a.auth },
+    );
+    // Validate up front so a value-shaped token throws HERE (never a silent
+    // persist), mirroring the bindings/promote PHI discipline. This runs BEFORE
+    // any network write, so a leak is refused even offline.
+    const v = validateApiSpec(spec);
+    if (!v.ok) throw new Error(`refusing to record api-spec from net-replay: ${v.error}`);
+    // recordApiSpec re-validates (belt + suspenders) then writes. A transient/
+    // offline write failure is non-fatal (the recall path has an offline cache);
+    // only the validation guard above is load-bearing for the PHI invariant.
+    try {
+      const res = await recordApiSpec(spec);
+      recorded.push({ domain: v.spec.domain, method: v.spec.method, path: v.spec.path, id: res?.id ?? null });
+    } catch (e) {
+      // Re-throw a validation refusal (should not happen — we validated), but
+      // swallow a network/offline failure so promotion still succeeds.
+      if (/refusing to record/i.test(e.message)) throw e;
+    }
+  }
+  return recorded;
 }
 
 function cmdDelete(args) {
@@ -784,6 +887,89 @@ async function cmdBindings(args) {
   }
 }
 
+// ─── api-spec — the site's known API, recorded/recalled as a first-class verb ──
+// (task-8ba139c23d18, Operator Speed). A first-class verb so the playbook points
+// at a REAL command instead of raw `memory get --site` + hand-parsing. The note
+// is a NON-PHI, KEYS-ONLY api-spec on the SAME shared `site` memory bucket
+// api-spec.mjs writes, keyed by DOMAIN — so the next task on that domain recalls
+// the endpoint and net-replays/curls it instead of re-driving the browser.
+//
+//   api-spec recall <url> [--method M] [--path p]
+//                                  print the domain's recorded API specs
+//   api-spec record --url <req-url> [--method M] [--header n]... [--param k]...
+//                   [--auth me.key]
+//                                  record ONE discovered endpoint (keys only)
+//
+// KEYS ONLY — validateApiSpec rejects any value-shaped token (a header must be a
+// NAME not "Name: value", a param a placeholder KEY, auth a me.* ref), so a leak
+// throws before the write, never persists.
+async function cmdApiSpec(args) {
+  const sub = args._[1];
+  if (sub !== 'record' && sub !== 'recall') {
+    process.stderr.write(
+      'usage: api-spec recall <url> [--method M] [--path p]\n' +
+        '       api-spec record --url <req-url> [--method M] [--header n]... [--param k]... [--auth me.key]\n',
+    );
+    return EXIT.USAGE;
+  }
+  try {
+    if (sub === 'recall') {
+      // recall <url> — surface the domain's stored specs (keys-only), optionally
+      // filtered to a method/path. This is the RECALL the agent runs before
+      // opening the browser: a hit means "net-replay this, skip the DOM".
+      const url = args._[2] || (args.url && args.url !== true ? args.url : null);
+      if (!url) {
+        process.stderr.write('usage: api-spec recall <url> [--method M] [--path p]\n');
+        return EXIT.USAGE;
+      }
+      const recalled = await recallApiSpecs(url, {
+        method: args.method && args.method !== true ? args.method : undefined,
+        path: args.path && args.path !== true ? args.path : undefined,
+      });
+      out({
+        domain: recalled.domain,
+        online: recalled.online,
+        prefer_api: recalled.specs.length > 0,
+        count: recalled.specs.length,
+        api_specs: recalled.specs,
+      });
+      return EXIT.SUCCESS;
+    }
+    // record — write ONE discovered endpoint as a keys-only api-spec note. The
+    // request url carries BOTH the domain (bucket key) and the path.
+    const url = args.url && args.url !== true ? args.url : args._[2];
+    if (!url || url === true) {
+      process.stderr.write('api-spec record needs --url <request-url>\n');
+      return EXIT.USAGE;
+    }
+    // header NAMES / param KEYS / me.* auth ref ONLY — never a value. Accept one
+    // or many of each (--header a --header b …). validateApiSpec is the gate.
+    const headers = [].concat(args.header ?? []).filter((h) => h !== true).map(String);
+    const params = [].concat(args.param ?? []).filter((p) => p !== true).map(String);
+    const spec = apiSpecFromRequest(
+      { method: args.method && args.method !== true ? String(args.method) : 'GET', url, header_names: headers },
+      { params, auth: args.auth && args.auth !== true ? String(args.auth) : undefined },
+    );
+    // Validate BEFORE any write — a value-shaped token is refused here, never
+    // reaching the shared store (first line of the PHI defense).
+    const v = validateApiSpec(spec);
+    if (!v.ok) { out({ status: 'error', error: v.error }); return EXIT.FAILURE; }
+    const r = await recordApiSpec(spec);
+    out({
+      status: 'success',
+      domain: v.spec.domain,
+      method: v.spec.method,
+      path: v.spec.path,
+      mutating: v.spec.mutating,
+      id: r?.id ?? null,
+    });
+    return EXIT.SUCCESS;
+  } catch (e) {
+    out({ status: 'error', error: e.message });
+    return EXIT.FAILURE;
+  }
+}
+
 function usage() {
   process.stderr.write(
     [
@@ -822,6 +1008,12 @@ function usage() {
       '  bindings recall --task <tag> [--domain <url>] [--tool <id>]',
       '  bindings record --task <tag> --domain <url> --tool <id> --param <p> --data <key>',
       '',
+      'API spec (the site\'s known API, keyed by domain; KEYS ONLY — recall before',
+      'opening the browser so a known endpoint is net-replayed instead of re-driven.',
+      '`available <url>` auto-recalls these; promote-from an http solve auto-records):',
+      '  api-spec recall <url> [--method M] [--path p]',
+      '  api-spec record --url <req-url> [--method M] [--header n]... [--param k]... [--auth me.key]',
+      '',
       `tools dir:  ${toolsDir()}`,
       `memory dir: ${memoryDir()}`,
     ].join('\n') + '\n',
@@ -832,16 +1024,17 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cmd = args._[0];
   switch (cmd) {
-    case 'available': return cmdAvailable(args);
+    case 'available': return await cmdAvailable(args);
     case 'help': return cmdHelp(args);
     case 'list': return cmdList(args);
     case 'run': return await cmdRun(args);
     case 'create': return cmdWrite(args, { overwrite: false });
     case 'update': return cmdWrite(args, { overwrite: true });
-    case 'promote-from': return cmdPromoteFrom(args);
+    case 'promote-from': return await cmdPromoteFrom(args);
     case 'delete': return cmdDelete(args);
     case 'memory': return await cmdMemory(args);
     case 'bindings': return await cmdBindings(args);
+    case 'api-spec': return await cmdApiSpec(args);
     case undefined:
     case 'help-cli':
       usage();

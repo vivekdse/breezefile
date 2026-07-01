@@ -69,6 +69,7 @@ import {
 } from './connect.mjs';
 import { scrubError } from './scrub.mjs';
 import { observeNetwork, replayRequest } from './net.mjs';
+import { apiSpecFromRequest, recordApiSpec, validateApiSpec } from './tools/api-spec.mjs';
 
 function fail(msg) {
   process.stderr.write(String(msg) + '\n');
@@ -289,6 +290,22 @@ async function main() {
             { method, url, headers: Object.keys(headers).length ? headers : undefined, data },
             { allowMutation: !!flags['allow-mutation'] },
           );
+          // AUTO-RECORD the discovered API (Operator Speed, task-8ba139c23d18):
+          // a SUCCESSFUL replay just proved this endpoint works, so persist the
+          // domain-keyed api-spec note WITHOUT the agent driving raw `memory add`.
+          // KEYS ONLY: method + url (→ domain/path) and header NAMES only (never
+          // the --data payload, never header VALUES). validateApiSpec is the gate
+          // — a value-shaped token is refused before any write. Best-effort: a
+          // record miss (offline) must never fail the replay that just succeeded.
+          if (result && result.ok) {
+            try {
+              const spec = apiSpecFromRequest(
+                { method, url, header_names: Object.keys(headers) },
+                { auth: flags.auth && flags.auth !== true ? String(flags.auth) : undefined },
+              );
+              if (validateApiSpec(spec).ok) await recordApiSpec(spec);
+            } catch { /* advisory — never fail a successful replay over recall memory */ }
+          }
           process.stdout.write(JSON.stringify(result, null, 2) + '\n');
         } catch (e) {
           fail(e.message || String(e));
