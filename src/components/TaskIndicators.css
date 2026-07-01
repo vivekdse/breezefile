@@ -11,10 +11,32 @@
   vertical-align: middle;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset;
 }
-.task-dot--pending     { background: #dc322f; }
-.task-dot--in_progress { background: #b58900; }
-.task-dot--done        { background: #2aa198; }
-.task-dot--cancelled   { background: var(--muted, #6c757d); opacity: 0.55; }
+.task-dot--pending     { background: var(--err); }
+.task-dot--in_progress { background: var(--warn); }
+.task-dot--done        { background: var(--ok); }
+.task-dot--cancelled   { background: var(--muted); opacity: 0.55; }
+
+/* Attention icon — the single loudest classify() bucket a task is in
+   (blocked/failed > overdue > open-unclaimed), same tokens as the
+   project-level "N need you" rollup so the two never read as different
+   signals for the same underlying state. Icon-only; the bucket name rides
+   in the tooltip/aria-label, matching the status dot's pattern. */
+.task-attn {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.task-attn--blocked,
+.task-attn--failed {
+  color: var(--err);
+}
+.task-attn--overdue {
+  color: var(--warn);
+}
+.task-attn--open {
+  color: var(--accent);
+}
 
 /* task-b0e424ef9803 — "working" motion. A HEALTHY in_progress dot (no stalled
    /lapsed health ring) gently breathes an amber glow so live work draws the eye
@@ -72,25 +94,25 @@
   font-size: 10px;
   font-weight: 700;
   background: var(--hi, rgba(0,0,0,0.06));
-  color: var(--muted, #6c757d);
+  color: var(--muted);
   line-height: 1;
 }
 .task-run-indicator__glyph--running {
-  background: #b58900;
-  color: #fff;
+  background: var(--warn);
+  color: var(--text-on-accent);
   animation: task-run-spin 1.4s linear infinite;
 }
 .task-run-indicator__glyph--failed {
-  background: #dc322f;
-  color: #fff;
+  background: var(--err);
+  color: var(--text-on-accent);
 }
 .task-run-indicator__glyph--succeeded {
-  background: #2aa19833;
-  color: #2aa198;
+  background: var(--ok-soft, color-mix(in srgb, var(--ok) 20%, transparent));
+  color: var(--ok);
 }
 .task-run-indicator__glyph--queued {
-  background: #b5890033;
-  color: #b58900;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 @keyframes task-run-spin {
@@ -101,11 +123,11 @@
 .task-run-indicator__pill {
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
-  color: var(--muted, #6c757d);
+  color: var(--muted);
 }
-.task-run-indicator--running   .task-run-indicator__pill { color: #b58900; font-weight: 600; }
-.task-run-indicator--failed    .task-run-indicator__pill { color: #dc322f; font-weight: 600; }
-.task-run-indicator--queued    .task-run-indicator__pill { color: #b58900; }
+.task-run-indicator--running   .task-run-indicator__pill { color: var(--warn); font-weight: 600; }
+.task-run-indicator--failed    .task-run-indicator__pill { color: var(--err); font-weight: 600; }
+.task-run-indicator--queued    .task-run-indicator__pill { color: var(--warn); }
 
 /* Clickable variant — used in TasksPage rows + detail header so the
    indicator doubles as the entry point to the run-history dialog. */

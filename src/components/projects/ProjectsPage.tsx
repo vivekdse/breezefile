@@ -48,6 +48,7 @@ import {
   rollUpTaskStats,
   computeProjectAttention,
   needsAttention,
+  classify,
   resolveEffectiveDescription,
   resolveEffectiveInstructions,
 } from '../../projects/index.mjs';
@@ -488,6 +489,17 @@ function ProjectsPageInner() {
             parents.push(t);
           }
         }
+        // task-attention-per-row — surface the tasks that need you first within
+        // the list itself, not just via the project-level "N need you" count.
+        // Same severity order as the attention rollup (blocked/failed loudest).
+        const attentionRank = (t: Task): number => {
+          const c = classify(t);
+          if (c.blocked || c.failed) return 3;
+          if (c.overdue) return 2;
+          if (c.open) return 1;
+          return 0;
+        };
+        parents.sort((a, b) => attentionRank(b) - attentionRank(a));
         const out: ProjectFolderRow[] = [];
         for (const parent of parents) {
           const kids = childrenOf.get(parent.id) ?? [];

@@ -13,6 +13,7 @@
 //     queued/idle). Renders nothing when task.auto_mode is false.
 
 import { useLastRun } from '../tasks';
+import { classify } from '../projects/index.mjs';
 import type { Task, TaskRun, TaskStatus } from '../types';
 import './TaskIndicators.css';
 
@@ -71,6 +72,49 @@ export function TaskStatusDot({
       aria-label={label}
       title={label}
     />
+  );
+}
+
+// task-attention-per-row — the SAME classify() buckets that drive a project's
+// "N need you" rollup (attention.mjs), surfaced per task row so a user can see
+// WHY a task counts toward that number, not just that it does. One badge shows
+// the loudest bucket a task is in (blocked/failed > overdue > open); a task in
+// no bucket (in_progress, claimed, or terminal) renders nothing.
+const ATTENTION_GLYPH: Record<'blocked' | 'failed' | 'overdue' | 'open', string> = {
+  blocked: '⛔',
+  failed: '✕',
+  overdue: '⏰',
+  open: '⚑',
+};
+const ATTENTION_LABEL: Record<'blocked' | 'failed' | 'overdue' | 'open', string> = {
+  blocked: 'Blocked',
+  failed: 'Failed',
+  overdue: 'Overdue',
+  open: 'Needs pickup',
+};
+
+export function TaskAttentionBadge({ task }: { task: Task }) {
+  const c = classify(task);
+  const kind = c.blocked
+    ? 'blocked'
+    : c.failed
+      ? 'failed'
+      : c.overdue
+        ? 'overdue'
+        : c.open
+          ? 'open'
+          : null;
+  if (!kind) return null;
+  const label = ATTENTION_LABEL[kind];
+  return (
+    <span
+      className={`task-attn task-attn--${kind}`}
+      role="img"
+      aria-label={`Needs you — ${label}`}
+      title={`Needs you — ${label}`}
+    >
+      {ATTENTION_GLYPH[kind]}
+    </span>
   );
 }
 

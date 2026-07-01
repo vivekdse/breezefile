@@ -19,6 +19,7 @@ import type { ReactNode } from 'react';
 import type { Project, Task } from '../../types';
 import type { ProjectNode, ProjectAttention, TaskStats } from '../../projects/index.mjs';
 import { attentionSummary } from '../../projects/index.mjs';
+import { TaskRowHeader } from '../tasks/TaskRow';
 import './ProjectFolderBlock.css';
 
 const CTX_MARK = '◇ given to agents as context';
@@ -555,9 +556,12 @@ export function ProjectFolderBlock({
             : 'No tasks in this project yet.'}
         </div>
       ) : (
-        <ul className="folder-list__list pfolder__list" role="list">
-          {rows.map((row) => tasks.renderTaskRow(row))}
-        </ul>
+        <>
+          <TaskRowHeader />
+          <ul className="folder-list__list pfolder__list" role="list">
+            {rows.map((row) => tasks.renderTaskRow(row))}
+          </ul>
+        </>
       )}
 
       {/* Sub-projects: one collapsed folder row each (name + counts). Opening a

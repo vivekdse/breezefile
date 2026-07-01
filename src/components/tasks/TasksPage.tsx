@@ -48,7 +48,7 @@ import { primaryActionFor } from './primaryAction.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
 import { useTaskActions } from './useTaskActions';
 import { useRunningSessions } from './useRunningSessions';
-import { TaskRow } from './TaskRow';
+import { TaskRow, TaskRowHeader } from './TaskRow';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { RowKebabMenu, type KebabAction } from './RowKebabMenu';
 import { ScheduleModal } from './ScheduleModal';
@@ -1125,6 +1125,7 @@ function TasksPageInner() {
 
               {!empty && !(loading && total === 0) && (
                 <>
+                  <TaskRowHeader />
                   <Section
                     title="For you"
                     hint="Manual tasks you act on by hand"

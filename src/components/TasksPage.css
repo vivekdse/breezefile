@@ -323,7 +323,8 @@
    each section to a readable width and centre it within the list column. The
    header / filter bar / detail panel stay full-bleed; only the row content is
    bounded. */
-.tasks__list > .tasks__section {
+.tasks__list > .tasks__section,
+.tasks__list > .tasks__row-header {
   max-width: 880px;
   margin-inline: auto;
 }
@@ -540,11 +541,18 @@
    moved into the kebab. */
 .tasks__row {
   display: grid;
-  /* fm-8yky — leading disclosure column (parent expand toggle / empty spacer)
-     before the checkbox; then main / primary / kebab. */
-  grid-template-columns: 16px 24px 1fr auto auto;
+  /* task-attention-stats — one FIXED template, identical on every row AND
+     the header (TaskRowHeader): disclosure, checkbox, owner(assignee),
+     title (which carries the primary action inline, not its own column),
+     status, attn, pin, claim, attempts, due, waits, updated, run, actions.
+     Every column but the title is a fixed px width (no `auto`) so nothing
+     can size differently row to row — a real table. */
+  grid-template-columns:
+    16px 24px 32px minmax(0, 1fr)
+    36px 32px 26px 34px 56px 40px 44px 54px 52px
+    32px;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 6px;
   /* fm-8yky — tighter rows (was --sp-2 block padding). Denser, email-inbox feel. */
   padding: 4px var(--sp-5);
   border-bottom: 1px solid var(--rule-on-panel);
@@ -892,26 +900,66 @@
   max-width: 360px;
 }
 
-.tasks__date {
-  background: var(--panel-2);
-  border: 1px solid var(--rule-on-panel);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-.tasks__date--overdue {
-  color: var(--danger, #c0392b);
-  border-color: var(--danger, #c0392b);
-  background: transparent;
-}
-/* fm-lji6 (S2) — deferred (snoozed) TypeBuild task: muted, asleep look. */
-.tasks__date--deferred {
-  color: var(--muted, #8a8f98);
-  background: transparent;
-  font-style: italic;
-}
-
 /* fm-mhtz — the source-native status text badge (.tasks__raw-status) was
    removed from rows; the raw status now rides in the status dot's tooltip. */
+
+/* task-attention-stats — the shared cell for every right-side (and the one
+   left-side, Owner) stat column: fixed width comes from .tasks__row's grid
+   track, this just centers content and clips anything that doesn't fit
+   rather than overflowing into the neighboring column. */
+.tasks__col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tasks__col--assignee {
+  font-size: 12px;
+}
+.tasks__col--due-overdue {
+  color: var(--err);
+}
+.tasks__col--due-deferred {
+  color: var(--muted, #8a8f98);
+  font-style: italic;
+}
+.tasks__col--attempts-exhausted {
+  color: var(--err);
+  font-weight: 600;
+}
+.tasks__row-schedule-dot {
+  font-size: 11px;
+  margin-right: 2px;
+}
+
+/* Column header row — same grid as .tasks__row, so labels sit directly above
+   their cells. Sticky so it stays visible while a long task list scrolls. */
+.tasks__row-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+  cursor: default;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.tasks__row-header-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted-on-panel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tasks__row-header-label--task {
+  padding-left: 2px;
+}
 
 .tasks__tag {
   font-size: 10px;
@@ -1086,18 +1134,9 @@
   margin: 4px 2px;
 }
 
-/* fm-b5at.8 — remote-task local-schedule overlay: the ⏰ pill on a row and the
-   minimal cron picker modal. The pill mirrors the claimed pill's styling. */
-.tasks__row-schedule {
-  font-size: 11px;
-  border-radius: 4px;
-  padding: 1px 6px;
-  border: 1px solid var(--rule-on-panel);
-  background: var(--panel-2);
-  color: var(--muted-on-panel);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
+/* fm-b5at.8 — remote-task local-schedule overlay: the minimal cron picker
+   modal. The ⏰ row indicator is now `.tasks__row-schedule-dot` (icon-only,
+   in the Run column) rather than a text pill. */
 
 .tasks__modal-backdrop {
   position: fixed;
@@ -1256,16 +1295,17 @@
 }
 
 /* ---- one primary action per row ---- */
+/* task-attention-stats — the primary action now sits inline beside the
+   title (not a right-side column): a compact, flex-shrink:0 icon button so
+   it never competes with the title for the ellipsis. */
 .tasks__row-primary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
-  min-width: 0;
+  flex-shrink: 0;
 }
-.tasks__row-pin-mark {
+.tasks__col--pin {
   color: var(--accent);
   font-size: 12px;
-  flex: 0 0 auto;
 }
 .tasks__primary {
   white-space: nowrap;
@@ -1439,17 +1479,6 @@
   padding: 1px 6px;
   border: 1px solid var(--rule-on-panel);
   background: var(--panel-2);
-  color: var(--muted-on-panel);
-  white-space: nowrap;
-}
-
-/* Passive "waits on N" dependency pill (deps not satisfied). */
-.tasks__waits-on {
-  font-size: 11px;
-  border-radius: 4px;
-  padding: 1px 6px;
-  border: 1px solid var(--rule-on-panel);
-  background: transparent;
   color: var(--muted-on-panel);
   white-space: nowrap;
 }
@@ -1698,13 +1727,6 @@
 }
 
 /* Row badge for a stranded in_progress task. */
-.tasks__row-stalled {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--danger, #dc322f);
-  white-space: nowrap;
-}
-
 /* Always-visible last-lifecycle line under the collapsed Timeline toggle. */
 .tasks__timeline-last {
   font-size: var(--fs-xs);
