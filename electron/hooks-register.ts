@@ -52,10 +52,20 @@ function hookScriptPath(): string {
 
 export const HOOK_SCRIPT = `#!/bin/sh
 # fm-z7v — Claude Code hook → file_manager bridge.
-# Argv: $1 = busy|idle|waiting.
+# Argv: $1 = busy|idle|waiting|stopped.
 #   busy    — UserPromptSubmit (turn started)
 #   idle    — Stop / StopFailure (turn ended cleanly or with an error)
 #   waiting — Notification (mid-turn permission prompt or 60s idle warning)
+#   stopped — Stop (session end) BACKSTOP for unlogged questions
+#             (task-c926bbe959f6). Fires alongside 'idle' on Stop; unlike
+#             'idle' (which is pty-tinting only) it forwards the task
+#             binding + Claude Code's transcript_path so the app can
+#             detect a session that stopped on a still-in_progress task
+#             without formally advancing it — i.e. probably asked a
+#             plain-text question and just ended, which the structured
+#             ask_user attention path would otherwise never see. This is
+#             the Claude-Code lifecycle ADAPTER onto the provider-agnostic
+#             ask_user protocol; a different runtime supplies its own hook.
 # 'waiting' is distinct from 'idle' so the renderer can banner mid-turn
 # attention requests even when the user is staring at the Claude tab —
 # end-of-turn Stop signals get the polite "you're already looking at it"
@@ -69,8 +79,16 @@ log="$HOME/.breezefile/claude-hook.log"
 ts=$(date '+%H:%M:%S')
 state="\${1:-}"
 echo "[$ts] argv=$state pty=\${BREEZE_PTY_ID:-<unset>} ppid=$PPID" >>"$log"
-[ "$state" = "busy" ] || [ "$state" = "idle" ] || [ "$state" = "waiting" ] || { echo "  bad state, exit" >>"$log"; exit 0; }
-[ -n "\${BREEZE_PTY_ID:-}" ] || { echo "  pty unset, exit" >>"$log"; exit 0; }
+[ "$state" = "busy" ] || [ "$state" = "idle" ] || [ "$state" = "waiting" ] || [ "$state" = "stopped" ] || { echo "  bad state, exit" >>"$log"; exit 0; }
+# The 'stopped' backstop needs a task binding to be useful. It is set on
+# task-bound interactive sessions (BREEZE_TASK_ID) — a plain 'claude' in a
+# shell tab has neither, so the backstop no-ops there. pty tinting states
+# still require BREEZE_PTY_ID.
+if [ "$state" = "stopped" ]; then
+  [ -n "\${BREEZE_TASK_ID:-}" ] || { echo "  stopped: no task binding, exit" >>"$log"; exit 0; }
+else
+  [ -n "\${BREEZE_PTY_ID:-}" ] || { echo "  pty unset, exit" >>"$log"; exit 0; }
+fi
 api="$HOME/.breezefile/api.json"
 # Env vars win over api.json — the remote-hook path injects them via ssh
 # and has no api.json. Locally, env is unset and we fall through to the
@@ -84,6 +102,27 @@ if [ -z "$port" ] || [ -z "$tok" ]; then
   tok=$(sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$api" | head -n1)
 fi
 [ -n "$port" ] && [ -n "$tok" ] || { echo "  port/tok parse failed, exit" >>"$log"; exit 0; }
+if [ "$state" = "stopped" ]; then
+  # Stop hooks receive a JSON payload on STDIN carrying session_id and
+  # transcript_path. We read it best-effort and extract those two fields
+  # with sed (no jq dependency, same convention as the api.json parse
+  # above). transcript_path is a FILESYSTEM POINTER, not content — the app
+  # reads (and never persists) the transcript; we never echo transcript
+  # BODY here, so no PHI touches this log or argv. task_id rides from the
+  # BREEZE_TASK_ID env the interactive spawn injected, and source_id from
+  # BREEZE_SOURCE_ID so the app routes to the right TaskSource.
+  payload=$(cat 2>/dev/null || echo '')
+  sid=$(printf '%s' "$payload" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' | head -n1)
+  tpath=$(printf '%s' "$payload" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' | head -n1)
+  echo "  STOPPED task=$BREEZE_TASK_ID src=\${BREEZE_SOURCE_ID:-<unset>} sid=$sid host=$host port=$port" >>"$log"
+  http=$(curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST \\
+    -H "Authorization: Bearer $tok" \\
+    -H "Content-Type: application/json" \\
+    --data "{\\"task_id\\":\\"$BREEZE_TASK_ID\\",\\"source_id\\":\\"\${BREEZE_SOURCE_ID:-}\\",\\"session_id\\":\\"$sid\\",\\"transcript_path\\":\\"$tpath\\"}" \\
+    "http://$host:$port/claude-stopped" 2>>"$log" || echo "curl-fail")
+  echo "  http=$http" >>"$log"
+  exit 0
+fi
 echo "  POST pty=$BREEZE_PTY_ID state=$state host=$host port=$port" >>"$log"
 http=$(curl -s -m 1 -o /dev/null -w '%{http_code}' -X POST \\
   -H "Authorization: Bearer $tok" \\
@@ -136,6 +175,13 @@ const SCRIPT = hookScriptPath();
 const BUSY_CMD = `sh "${SCRIPT}" busy`;
 const IDLE_CMD = `sh "${SCRIPT}" idle`;
 const WAITING_CMD = `sh "${SCRIPT}" waiting`;
+// task-c926bbe959f6 — the Stop backstop for unlogged questions. Runs on the
+// SAME Stop event as IDLE_CMD, but forwards the task binding + transcript_path
+// to /claude-stopped. Claude Code pipes the Stop payload JSON to every hook
+// command's stdin, so this command gets session_id/transcript_path without any
+// extra wiring. Kept as a SEPARATE entry from IDLE_CMD so the pty-tint path and
+// the backstop path evolve independently.
+const STOPPED_CMD = `sh "${SCRIPT}" stopped`;
 
 // We own any hook entry whose command runs claude-hook.sh — re-register
 // replaces them rather than appending so idempotency holds even when we
@@ -189,8 +235,14 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' | 'skip
   nextHooks.UserPromptSubmit.push({
     hooks: [{ type: 'command', command: BUSY_CMD }],
   });
+  // Two commands on Stop: IDLE_CMD flips the pty tint; STOPPED_CMD is the
+  // unlogged-question backstop (task-c926bbe959f6). Both receive the Stop
+  // payload on stdin; only STOPPED_CMD reads it.
   nextHooks.Stop.push({
-    hooks: [{ type: 'command', command: IDLE_CMD }],
+    hooks: [
+      { type: 'command', command: IDLE_CMD },
+      { type: 'command', command: STOPPED_CMD },
+    ],
   });
   nextHooks.StopFailure.push({
     hooks: [{ type: 'command', command: IDLE_CMD }],

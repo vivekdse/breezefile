@@ -204,6 +204,11 @@ export async function runTaskInteractive(
     senderId: win.webContents.id,
     env: {
       BREEZE_TASK_ID: task.id,
+      // task-c926bbe959f6 — the Stop backstop forwards this so the app can
+      // route the stopped-session check to the owning TaskSource. Defaults to
+      // 'typebuild' (the only phiSensitive/ask_user-capable source today) when
+      // the caller didn't tag a source.
+      BREEZE_SOURCE_ID: opts.source ?? 'typebuild',
       ...(run ? { BREEZE_RUN_ID: run.id } : {}),
       // SPIKE (spike/playwright-cdp): point the helper CLIs at Breeze's CDP.
       // BREEZE_TOOLS_CLI is the tool-repository CLI the agent consults first.
