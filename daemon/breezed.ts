@@ -45,6 +45,11 @@ import { initHeadlessAuth } from '../electron/typebuild/auth';
 import { TypeBuildTaskSource } from '../electron/sources/typebuild';
 import type { SourcedTask } from '../electron/core/task-source';
 import type { Task } from '../electron/tasks';
+// task-c5cae3255a96 — OPTIONAL push-based wake-up: when a headless run parks on
+// a pending question and it is later ANSWERED, resume the local session promptly
+// instead of waiting for the agent's own poll. NON-LOAD-BEARING — the poll path
+// is the real wake-up; this only shaves latency when breezed holds the session.
+import { ResumeOnAnswer } from '../electron/agents/resume-on-answer';
 
 const DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(DIR, 'api.json');
@@ -73,6 +78,12 @@ const MAX_CONCURRENT = 1;
 let tbSource: TypeBuildTaskSource | null = null;
 let inFlightRuns = 0;
 let loopStop = false;
+
+// task-c5cae3255a96 — tracker for the OPTIONAL resume-on-answer wake-up tier.
+// Holds (taskId → live session) for headless runs that PARKED on a question, so
+// a later sweep can resume them the moment the question clears. Absent/failing
+// → the poll path still wakes them; nothing here is load-bearing.
+const resumeOnAnswer = new ResumeOnAnswer();
 
 // A short, PHI-free fragment of an opaque task id for logs.
 function shortId(id: string): string {
@@ -126,6 +137,17 @@ async function runClaimed(source: TypeBuildTaskSource, claimed: SourcedTask) {
       // No local task row exists for a remote id — suppress run-row writes.
       recordRun: false,
     });
+
+    // task-c5cae3255a96 — OPTIONAL resume-on-answer tracking. If this headless
+    // run left the task parked on a pending question (the agent asked something
+    // and stopped) AND we captured its session id, remember it so a later sweep
+    // can resume it PROMPTLY when the question is answered. This is a pure
+    // latency optimization on top of the poll path: fully guarded, never alters
+    // the complete/release decision below, and no-ops silently on any failure.
+    // PHI-free: we read only the PRESENCE of a question (a boolean), never its
+    // text, and log opaque short ids only.
+    await maybeTrackForResume(source, id, synthetic.folder, result.conversationId);
+
     if (result.ok) {
       console.log(`[breezed] task ${shortId(id)} run succeeded; marking done`);
       try {
@@ -169,6 +191,41 @@ async function runClaimed(source: TypeBuildTaskSource, claimed: SourcedTask) {
   }
 }
 
+// task-c5cae3255a96 — after a headless run, check (PHI-free) whether the task is
+// now PARKED on a pending question and, if so, register its session for the
+// resume-on-answer tier. Fully guarded: a lookup failure, a missing session id,
+// or an un-parked task simply means the tier doesn't apply here (poll still
+// works). We read only the boolean PRESENCE of pending_question — never the
+// text — and pass an opaque short id to logs.
+async function maybeTrackForResume(
+  source: TypeBuildTaskSource,
+  taskId: string,
+  cwd: string | undefined,
+  sessionId: string | null | undefined,
+): Promise<void> {
+  if (!sessionId) return; // no live session captured → nothing to resume into.
+  let hadPendingQuestion = false;
+  try {
+    const fresh = await source.getTask(taskId);
+    const pq = fresh?.pending_question;
+    hadPendingQuestion =
+      !!pq && typeof pq === 'object' && typeof pq.text === 'string' && pq.text.trim().length > 0;
+  } catch {
+    // Can't confirm it's parked — don't track (the poll path covers it anyway).
+    return;
+  }
+  if (!hadPendingQuestion) return; // not waiting on an answer → nothing to wake.
+  try {
+    resumeOnAnswer.track({ taskId, sessionId, cwd, hadPendingQuestion });
+  } catch (err) {
+    // Tracking is best-effort; a failure just means no push-wake for this task.
+    console.error(
+      `[breezed] resume-on-answer track failed for task ${shortId(taskId)}:`,
+      (err as Error).message,
+    );
+  }
+}
+
 // The poll-claim-execute loop. Runs forever (until shutdown). Claims one task
 // per iteration; browser tasks are released for a GUI session; headless tasks
 // run end to end. Honors MAX_CONCURRENT and never lets a single error kill the
@@ -177,6 +234,13 @@ async function typeBuildLoop(source: TypeBuildTaskSource) {
   console.log('[breezed] TypeBuild poll-claim-execute loop started');
   while (!loopStop) {
     try {
+      // task-c5cae3255a96 — OPTIONAL resume-on-answer sweep, on the EXISTING
+      // poll cadence. Re-checks tracked (parked) sessions and resumes any whose
+      // question just cleared. Guarded internally (never throws); a no-op when
+      // nothing is tracked. This is the low-latency wake-up layered on top of
+      // the agent's own poll — if it does nothing, the poll path still delivers.
+      await resumeOnAnswer.sweep(source);
+
       if (inFlightRuns >= MAX_CONCURRENT) {
         await delay(POLL_IDLE_MS);
         continue;
