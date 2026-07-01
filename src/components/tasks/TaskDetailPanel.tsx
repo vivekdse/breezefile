@@ -20,6 +20,7 @@ import {
   getTask,
   getTypebuildAudit,
   listTypebuildUsers,
+  postTaskMessage,
   taskSourceAction,
   todayISO,
   useTaskRuns,
@@ -41,6 +42,10 @@ import {
 import { TaskTimeline } from './TaskTimeline';
 import { TaskResultView } from './TaskResult';
 import { resultRendererKind } from './taskResult.mjs';
+import {
+  normalizeTaskMessages,
+  relativeMessageTime,
+} from './taskMessages.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
 import type {
   Task,
@@ -186,6 +191,123 @@ function CollapsibleNotes({ notes }: { notes: string }) {
   );
 }
 
+// ── task messages: the USER-facing status channel (task-da23979fd907) ────────
+// Append-only, newest-last feed of { text, by, at }, VISUALLY DISTINCT from the
+// notes/Details block: notes are AGENT progress (claim-holder-only); messages
+// are a shared status channel anyone who can see the task may post to. The feed
+// renders NOTHING when there are no well-shaped messages AND posting is
+// unavailable (canPost=false) — so a message-less local/manual task looks
+// exactly like today (NON-REGRESSION). On a TypeBuild task the compose box is
+// always shown (posting is NOT claim-gated) so a first message can be added.
+//
+// PHI: `text` is patient-visible; it is held in React state only (never
+// persisted/logged) and the draft is cleared on task change / after a post.
+function TaskMessages({
+  taskId,
+  messages,
+  canPost,
+  onPosted,
+}: {
+  taskId: string;
+  messages: Task['messages'];
+  canPost: boolean;
+  onPosted: () => void;
+}) {
+  const { dispatch } = useStore();
+  const [draft, setDraft] = useState('');
+  const [posting, setPosting] = useState(false);
+  const feed = normalizeTaskMessages(messages);
+
+  // Drop any in-progress draft the instant we switch tasks (PHI hygiene + no
+  // cross-task bleed).
+  useEffect(() => {
+    setDraft('');
+    setPosting(false);
+  }, [taskId]);
+
+  // Nothing to show AND nowhere to post → render nothing (fallback), exactly
+  // like notes/result do for absent content.
+  if (feed.length === 0 && !canPost) return null;
+
+  const submit = async () => {
+    const text = draft.trim();
+    if (!text || posting) return;
+    setPosting(true);
+    try {
+      const res = await postTaskMessage(taskId, text);
+      if (res.ok) {
+        setDraft('');
+        dispatch({ type: 'setStatus', msg: 'message posted' });
+        // Reuse the EXISTING detail refresh so the new message appears — no
+        // bespoke store/poller.
+        onPosted();
+      } else {
+        const why =
+          res.reason === 'empty'
+            ? 'message can’t be empty'
+            : res.reason === 'not_visible'
+              ? 'you can’t post to this task'
+              : formatSourceReason(res.reason);
+        dispatch({ type: 'setStatus', msg: `couldn’t post · ${why}` });
+      }
+    } catch (e) {
+      dispatch({ type: 'setStatus', msg: formatOpError('post message', e) });
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <div className="tasks__detail-notes tasks__detail-messages">
+      <div className="tasks__detail-section">Messages</div>
+      {feed.length > 0 && (
+        <ul className="tasks__messages-feed">
+          {feed.map((m, i) => (
+            <li key={`${m.at}:${i}`} className="tasks__message">
+              <div className="tasks__message-meta">
+                <span className="tasks__message-by">{m.by || 'someone'}</span>
+                {relativeMessageTime(m.at) && (
+                  <span className="tasks__message-at">
+                    {relativeMessageTime(m.at)}
+                  </span>
+                )}
+              </div>
+              <p className="tasks__message-text">{m.text}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {canPost && (
+        <div className="tasks__message-compose">
+          <textarea
+            className="tasks__message-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // ⌘/Ctrl+Enter submits (Enter alone keeps newlines for a message).
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder="Add a message…"
+            rows={2}
+            disabled={posting}
+          />
+          <button
+            type="button"
+            className="tasks__btn tasks__message-send"
+            onClick={() => void submit()}
+            disabled={posting || draft.trim().length === 0}
+          >
+            {posting ? 'Posting…' : 'Post'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── manual (and local-auto) detail ──────────────────────────────────────────
 function ManualDetail({
   task,
@@ -313,6 +435,18 @@ function ManualDetail({
       )}
 
       {task.notes && <CollapsibleNotes notes={task.notes} />}
+
+      {/* task-da23979fd907 — the USER-facing message feed. Local/manual rows
+          carry no `messages` and have no post endpoint (canPost=false), so this
+          renders NOTHING for them — a message-less manual task looks exactly as
+          today (NON-REGRESSION). Rendered here for parity with where notes show;
+          posting lives on the TypeBuild (Agent) surface. */}
+      <TaskMessages
+        taskId={task.id}
+        messages={task.messages}
+        canPost={false}
+        onPosted={() => {}}
+      />
 
       {task.auto_mode && task.auto_prompt && (
         <div className="tasks__detail-notes">
@@ -443,6 +577,11 @@ function AgentDetail({
   const [bodyLoading, setBodyLoading] = useState(false);
   const reqIdRef = useRef(0);
 
+  // task-da23979fd907 — the USER-facing message feed rides home on the SAME
+  // getTask detail fetch as the body (mapDetail surfaces `messages`). Held in
+  // state ONLY (like body) — `text` is PHI. Cleared on task change / unmount.
+  const [messages, setMessages] = useState<Task['messages']>(undefined);
+
   // task-80be320f06b3 — vitals: the audit trail (NON-PHI actor/action/time) is
   // the ONLY honest source of "entered current status at" + "last activity"
   // (the list endpoint now()-stamps updated_at/created_at for non-terminal rows,
@@ -488,29 +627,45 @@ function AgentDetail({
     [task.id, say],
   );
 
+  // Lazy detail fetch: the decrypted body AND the message feed ride home on one
+  // getTask (mapDetail surfaces both). `showLoading` is true on task-change
+  // (blank → "Loading…") and false on a post-refresh (keep the current body
+  // visible while the feed updates in place). Guarded by reqIdRef so a stale
+  // fetch never clobbers a newer one.
+  const loadDetail = useCallback(
+    (showLoading: boolean) => {
+      const myReq = ++reqIdRef.current;
+      if (showLoading) {
+        setBody(null);
+        setMessages(undefined);
+        setBodyLoading(true);
+      }
+      void getTask(task.id, 'typebuild')
+        .then((full) => {
+          if (reqIdRef.current !== myReq) return;
+          // Body + messages are the only PHI-bearing fields; ignore the rest.
+          setBody(full?.notes ?? null);
+          setMessages(full?.messages);
+        })
+        .catch(() => {
+          if (reqIdRef.current === myReq && showLoading) setBody(null);
+        })
+        .finally(() => {
+          if (reqIdRef.current === myReq) setBodyLoading(false);
+        });
+    },
+    [task.id],
+  );
+
   useEffect(() => {
-    const myReq = ++reqIdRef.current;
-    setBody(null);
-    setBodyLoading(true);
-    let cancelled = false;
-    void getTask(task.id, 'typebuild')
-      .then((full) => {
-        if (cancelled || reqIdRef.current !== myReq) return;
-        // Only the notes/body field carries PHI; ignore everything else here.
-        setBody(full?.notes ?? null);
-      })
-      .catch(() => {
-        if (!cancelled && reqIdRef.current === myReq) setBody(null);
-      })
-      .finally(() => {
-        if (!cancelled && reqIdRef.current === myReq) setBodyLoading(false);
-      });
+    loadDetail(true);
     return () => {
-      cancelled = true;
-      // Drop the decrypted body the instant we leave this task.
+      // Drop the decrypted body + messages the instant we leave this task.
+      ++reqIdRef.current;
       setBody(null);
+      setMessages(undefined);
     };
-  }, [task.id]);
+  }, [task.id, loadDetail]);
 
   const claimedBy = task.claimedBy ?? null;
   const claimedByMe = !!claimedBy && claimedBy === myEmail;
@@ -660,6 +815,18 @@ function AgentDetail({
           <p className="tasks__detail-notes-body tasks__detail-muted">No details.</p>
         )}
       </div>
+
+      {/* task-da23979fd907 — the USER-facing message feed + compose box. On a
+          TypeBuild task posting is always available (NOT claim-gated), so the
+          compose box shows even before the first message. After a post we
+          re-fetch the detail (loadDetail) — reusing the SAME getTask refresh, no
+          bespoke poller — so the new message appears. */}
+      <TaskMessages
+        taskId={task.id}
+        messages={messages}
+        canPost
+        onPosted={() => loadDetail(false)}
+      />
 
       <div className="tasks__detail-actions">
         <button

@@ -66,6 +66,17 @@ export type Task = {
   // NEVER persisted to the skeleton store (which has no result column), logged,
   // or written to notes/files.
   result?: { type: string; payload: unknown } | null;
+  // task-da23979fd907 — the USER-facing status channel: an append-only,
+  // newest-last feed of { text, by, at }. DISTINCT from `notes` (which is the
+  // claim-holder-only AGENT progress body): anyone who can see the task may
+  // append a message. Populated by a remote source (TypeBuild) from the detail
+  // endpoint; local rows omit it, so it's OPTIONAL across the seam (a task
+  // without messages renders exactly as today — NON-REGRESSION). PHI: `text` is
+  // patient-visible content (encrypted at rest server-side) — carried in memory
+  // with the task (like notes/body), NEVER persisted to the skeleton store
+  // (which has no messages column), logged, or written to notes/files. `by`+`at`
+  // are NON-PHI (an email principal + an ISO timestamp).
+  messages?: { text: string; by: string; at: string }[];
 };
 
 export type TaskCreate = {

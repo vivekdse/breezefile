@@ -856,6 +856,13 @@ const fm = {
       ipcRenderer.invoke('typebuild:tasks:note', taskId, note) as Promise<
         { ok: true } | { ok: false; reason: string; status: number }
       >,
+    // task-da23979fd907 — append to the USER-facing task message feed. NOT
+    // claim-gated. PHI: `text` is sent to the server but never logged. Same
+    // structured-result contract as taskNote (400 empty / 404 not_visible).
+    taskMessage: (taskId: string, text: string) =>
+      ipcRenderer.invoke('typebuild:tasks:message', taskId, text) as Promise<
+        { ok: true } | { ok: false; reason: string; status: number }
+      >,
     // fm-j7w0 (S4) — user registry for the assignee picker (NON-PHI identities).
     listUsers: () =>
       ipcRenderer.invoke('typebuild:listUsers') as Promise<

@@ -88,6 +88,14 @@ export function registerTypebuildProjectsIpc(): void {
     'typebuild:tasks:note',
     (_e, taskId: string, note: string) => source().addTaskNote(taskId, note),
   );
+  // task-da23979fd907 — append to the USER-facing task message feed. NOT
+  // claim-gated (unlike tasks:note): anyone who can see the task may post. Same
+  // STRUCTURED { ok:false, reason } contract so the compose box surfaces 400
+  // (empty) / 404 (not_visible) without crashing.
+  ipcMain.handle(
+    'typebuild:tasks:message',
+    (_e, taskId: string, text: string) => source().postTaskMessage(taskId, text),
+  );
   // task-2c5448be520a — archive/unarchive. Distinct verbs (NOT a generic
   // update PATCH, which a sibling task owns) so the two write paths don't clash.
   ipcMain.handle(

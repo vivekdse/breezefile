@@ -1407,6 +1407,73 @@
 .tasks__notes-toggle:hover {
   text-decoration: underline;
 }
+
+/* task-da23979fd907 — the USER-facing message feed. Deliberately DISTINCT from
+   the notes/Details block (which is a plain wrapped paragraph): each message is
+   a card with a left accent rail + a by/time meta line, so the reader can tell
+   "someone said this" apart from agent progress notes at a glance. */
+.tasks__messages-feed {
+  list-style: none;
+  margin: 0 0 var(--sp-2);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tasks__message {
+  border-left: 3px solid var(--accent, #2d7ff9);
+  background: var(--panel-2);
+  border-radius: 0 6px 6px 0;
+  padding: 6px 10px;
+}
+.tasks__message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.tasks__message-by {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-on-panel);
+}
+.tasks__message-at {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.tasks__message-text {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tasks__message-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tasks__message-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  background: var(--panel-2);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 6px;
+  padding: 6px 8px;
+  line-height: 1.4;
+}
+.tasks__message-input:focus {
+  outline: none;
+  border-color: var(--accent, #2d7ff9);
+}
+.tasks__message-send {
+  align-self: flex-end;
+}
 .tasks__detail-runs {
   list-style: none;
   margin: 0 0 6px;

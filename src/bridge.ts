@@ -482,6 +482,14 @@ type Fm = {
     ) => Promise<
       { ok: true } | { ok: false; reason: string; status: number }
     >;
+    // task-da23979fd907 — append to the USER-facing task message feed. NOT
+    // claim-gated. `text` is PHI (sent to the server, never logged locally).
+    taskMessage: (
+      taskId: string,
+      text: string,
+    ) => Promise<
+      { ok: true } | { ok: false; reason: string; status: number }
+    >;
   };
   // fm-b5at.6 — TypeBuild side-by-side layout. Chrome left / our window
   // right while a session runs. Self-contained namespaced block; the OS work

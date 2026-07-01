@@ -225,6 +225,19 @@ export async function listTypebuildUsers(): Promise<TaskUser[]> {
   return fm.typebuild.listUsers();
 }
 
+// task-da23979fd907 — append to a task's USER-facing message feed. NOT
+// claim-gated (anyone who can see the task may post). `text` is PHI: it is sent
+// to the server (encrypted at rest) but the caller must never persist/log it.
+// Returns the source's STRUCTURED result so the compose box can surface a 400
+// (empty) / 404 (not_visible) without crashing. After { ok:true } the caller
+// re-fetches the task detail (getTask) so the new message appears.
+export async function postTaskMessage(
+  taskId: string,
+  text: string,
+): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+  return fm.typebuild.taskMessage(taskId, text);
+}
+
 // fm-k6wz (S7) — per-task audit history for the detail History section. Memory
 // only — callers hold the rows in component state and never persist them.
 export async function getTypebuildAudit(

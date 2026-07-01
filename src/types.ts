@@ -256,6 +256,16 @@ export type Task = {
   // contain PHI — carried in memory with the task (like title/notes), NEVER
   // persisted to the skeleton DB, logged, or written to notes/files.
   result?: { type: string; payload: unknown } | null;
+  // task-da23979fd907 — the USER-facing status channel: an append-only feed of
+  // { text, by, at } (newest-last). DISTINCT from `notes` (claim-holder-only
+  // AGENT progress): ANYONE who can see the task may append a message, and
+  // appending does NOT require a claim. Threaded through defensively (pass
+  // through if present), OPTIONAL so nothing breaks for tasks that don't carry
+  // any — a message-less task renders exactly as today (NON-REGRESSION). PHI:
+  // `text` is patient-visible content, carried in memory with the task (like
+  // title/notes), NEVER persisted to the skeleton DB, logged, or written to
+  // notes/files. `by`+`at` (email principal + ISO timestamp) are NON-PHI.
+  messages?: { text: string; by: string; at: string }[];
 };
 
 // fm-b5at.1 — per-source capability flags. The UI gates row affordances

@@ -261,6 +261,13 @@ type DetailRow = ListRow & {
   // in memory only (never persisted to the skeleton store, which has no such
   // column), same rule as the decrypted body.
   result?: { type?: unknown; payload?: unknown } | null;
+  // task-da23979fd907 — the USER-facing status channel: an append-only feed the
+  // getTask path now surfaces ([{ text, by, at }], decrypted, in order). Typed
+  // OPTIONAL/loose (a server that predates it simply omits it). PHI: `text` is
+  // decrypted patient-visible content, carried in memory only (never persisted
+  // to the skeleton store, which has no such column), same rule as `task`/
+  // `result`. `by`+`at` are NON-PHI (email principal + ISO timestamp).
+  messages?: unknown;
 };
 
 // ─── Projects (task-ab1d7955e23f) ─────────────────────────────────────────
@@ -392,6 +399,30 @@ function mapResult(
   if (!r || typeof r !== 'object') return undefined;
   if (typeof r.type !== 'string' || !r.type) return undefined;
   return { type: r.type, payload: r.payload ?? null };
+}
+
+// task-da23979fd907 — normalize the wire `messages` value into the client's
+// { text, by, at }[] shape, or undefined when it's absent/empty/malformed (so
+// the client renders NOTHING and a message-less task looks exactly like today).
+// Defensive + ORDER-PRESERVING (the server returns newest-last; we don't
+// re-sort). Entries without usable `text` are dropped; `by`/`at` degrade to ''.
+// `text` is DECRYPTED PHI and, like `notes`/`result`, rides in memory only — the
+// skeleton store has no messages column, so it can never reach disk here.
+function mapMessages(
+  messages: unknown,
+): { text: string; by: string; at: string }[] | undefined {
+  if (!Array.isArray(messages)) return undefined;
+  const out: { text: string; by: string; at: string }[] = [];
+  for (const m of messages) {
+    if (!m || typeof m !== 'object') continue;
+    const rec = m as { text?: unknown; by?: unknown; at?: unknown };
+    const text = typeof rec.text === 'string' ? rec.text : '';
+    if (!text) continue;
+    const by = typeof rec.by === 'string' ? rec.by : '';
+    const at = typeof rec.at === 'string' ? rec.at : '';
+    out.push({ text, by, at });
+  }
+  return out.length ? out : undefined;
 }
 
 function mapListRow(row: ListRow): SourcedTask {
@@ -877,6 +908,13 @@ export class TypeBuildTaskSource implements TaskSource {
       // returned SourcedTask in MEMORY only — the skeleton store has no result
       // column, so it can never reach disk through the poll cache.
       result: mapResult(detail.result),
+      // task-da23979fd907 — the USER-facing message feed. Pass it through ONLY
+      // when the wire carries a well-shaped array with at least one text-bearing
+      // entry; absent/empty/malformed → undefined so a message-less task renders
+      // exactly as today (NON-REGRESSION). `text` is decrypted PHI and, like
+      // `notes`, lives in the returned SourcedTask in MEMORY only — the skeleton
+      // store has no messages column, so it never reaches disk through the cache.
+      messages: mapMessages(detail.messages),
     };
   }
 
@@ -1263,6 +1301,47 @@ export class TypeBuildTaskSource implements TaskSource {
       return { ok: false, reason, status: res.status };
     }
     throw new Error(`typebuild: add task note failed (${res.status})`);
+  }
+
+  // ─── task message (task-da23979fd907 — USER-facing status channel) ─────────
+  // POST /chromeext/{id}/messages — append to the append-only, USER-facing
+  // message feed (field `text`). DISTINCT from addTaskNote: this is NOT
+  // claim-gated (anyone who can see the task may append; posting does NOT
+  // require in_progress and does NOT renew a claim). The server returns the
+  // appended message + a { count }; we don't need the echo (the caller re-fetches
+  // the detail to render the feed), so we discard the body on success.
+  //
+  // PHI: `text` IS patient-visible content — sent to the server (which encrypts
+  // it at rest) but NEVER logged locally (the request helper never logs bodies).
+  //
+  // Server contract (verified): empty text → 400; a non-viewer → 404. We mirror
+  // addTaskNote's STRUCTURED { ok:false, reason } so the compose box surfaces a
+  // clear message and keeps its draft rather than crashing.
+  async postTaskMessage(
+    taskId: string,
+    text: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const res = await this.request(
+      'POST',
+      `/chromeext/${encodeURIComponent(taskId)}/messages`,
+      { text },
+    );
+    if (res.status === 200 || res.status === 201) {
+      await res.json().catch(() => ({}));
+      return { ok: true };
+    }
+    if (res.status === 400 || res.status === 404 || res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 400
+          ? 'empty'
+          : res.status === 409
+            ? 'conflict'
+            : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    throw new Error(`typebuild: post task message failed (${res.status})`);
   }
 
   // POST /chromeext/projects/{id}/archive | /unarchive (task-2c5448be520a).
