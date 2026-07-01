@@ -137,6 +137,15 @@ export const TOOL_SCHEMA = {
                     //   proven; promoted to 'active' after a run or two passes
                     //   (electron/browser/tools/promote.mjs promotionDecision).
     'version',      // semver-ish string; default '1.0'
+    'channel',      // 'browser' (default) | 'http' — NON-PHI LABEL, not a router.
+                    //   Tells the agent HOW the tool's steps get work done: 'browser'
+                    //   drives Playwright/DOM; 'http' means the steps ARE the site's
+                    //   own API call (ctx.replay/curl), so the browser can be skipped.
+                    //   Absent ⇒ 'browser' (every existing tool unchanged). The agent
+                    //   READS it to prefer the fast API path; nothing dispatches on it.
+                    //   Set by the promotion hook when a solve was an intercepted API
+                    //   call (electron/browser/tools/promote.mjs). See
+                    //   docs/execution-channel-architecture.md.
     'params',       // { name: { required, type, description } }
     'output',       // { field: description } — shape of result on success
     'dependencies', // free-form notes
@@ -149,6 +158,18 @@ export const TOOL_SCHEMA = {
                     //   docs/resumable-tool-steps.md.
   ],
 };
+
+/** The allowed `channel` values. NON-PHI label; default is 'browser'. */
+export const CHANNELS = ['browser', 'http'];
+
+/** A tool's execution channel — the NON-PHI label the agent reads to know the
+ *  steps are HTTP (so the browser can be skipped). Defaults to 'browser' when a
+ *  tool.json omits `channel`, so every existing tool is unchanged. NOT a router:
+ *  this function only reads/normalizes the label. */
+export function toolChannel(meta) {
+  const c = meta && typeof meta.channel === 'string' ? meta.channel.toLowerCase() : '';
+  return CHANNELS.includes(c) ? c : 'browser';
+}
 
 // ─── Resumable steps (Operator Speed) ────────────────────────────────────────
 // A tool.mjs may export `const steps = [{ name, sideEffect, run, pre?, post? }]`
@@ -340,6 +361,9 @@ export function stepPlanSummary(meta, runsPath) {
     resume_from = next ? next.name : null;
   }
   return {
+    // NON-PHI label the agent reads: 'http' ⇒ the steps ARE the site's own API
+    // call, so the browser can be skipped. Default 'browser'. Not a router.
+    channel: toolChannel(meta),
     steps,
     side_effecting,
     cursor: {
@@ -371,6 +395,9 @@ export function validateTool(meta) {
   }
   if (meta.status && !['active', 'candidate', 'deprecated', 'maintenance'].includes(meta.status)) {
     errors.push(`invalid status: ${meta.status}`);
+  }
+  if (meta.channel !== undefined && !CHANNELS.includes(String(meta.channel).toLowerCase())) {
+    errors.push(`invalid channel: ${meta.channel} (use ${CHANNELS.join('|')})`);
   }
   return { ok: errors.length === 0, errors };
 }

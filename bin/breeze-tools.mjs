@@ -63,6 +63,7 @@ import {
   planResume,
   lastCursor,
   stepPlanSummary,
+  toolChannel,
 } from '../electron/browser/tools/registry.mjs';
 import {
   getMemoryOnline,
@@ -151,6 +152,9 @@ function cmdAvailable(args) {
     description: t.meta.description,
     version: t.meta.version || '1.0',
     status: t.meta.status || 'active',
+    // NON-PHI label the agent reads: 'http' ⇒ the steps ARE the site's own API
+    // call, so the browser can be skipped; 'browser' (default) drives the DOM.
+    channel: toolChannel(t.meta),
     params: t.meta.params || {},
     health: toolHealth(t.runsPath),
     // Step plan + last-known resume cursor (NON-PHI: names/statuses/indices only)
@@ -181,6 +185,9 @@ function cmdHelp(args) {
     ...t.meta,
     _valid: v.ok,
     _errors: v.errors,
+    // NON-PHI channel label (default 'browser' when tool.json omits it): 'http'
+    // ⇒ the steps ARE the site's own API call, so the browser can be skipped.
+    _channel: toolChannel(t.meta),
     _health: toolHealth(t.runsPath),
     _step_plan: stepPlanSummary(t.meta, t.runsPath),
   });
@@ -624,6 +631,7 @@ function cmdPromoteFrom(args) {
     id: r.id,
     path: r.path,
     tool_status: scaffold.meta.status, // 'candidate'
+    channel: toolChannel(scaffold.meta), // 'http' when the solve was an API call
     steps: scaffold.meta.steps.map((s) => ({ name: s.name, sideEffect: s.sideEffect })),
     note: 'emitted as a CANDIDATE — promoted to active after it passes a run or two (toolHealth).',
   });

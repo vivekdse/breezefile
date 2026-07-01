@@ -134,6 +134,27 @@ function emitAction(action) {
   }
 }
 
+// Verbs that do no operative DOM work — pure scaffolding around an API call. If
+// the ONLY non-`net-replay` actions in a solve are these, the solve was really an
+// intercepted API call and the tool belongs on the `http` channel.
+const INERT_VERBS = new Set(['goto', 'wait']);
+
+/** Decide a tool's `channel` label from its captured actions. Returns 'http' when
+ *  the OPERATIVE work was the intercepted API request(s): there is at least one
+ *  `net-replay` action AND every other action is inert scaffolding (goto/wait).
+ *  Any real DOM verb (click/fill/type/press) means the browser did the work →
+ *  'browser'. A solve with no net-replay is always 'browser'. Pure + NON-PHI: it
+ *  reads only action verbs, never values. */
+export function channelForActions(actions) {
+  const list = Array.isArray(actions) ? actions : [];
+  const hasReplay = list.some((a) => a && a.verb === 'net-replay');
+  if (!hasReplay) return 'browser';
+  const allApiOrInert = list.every(
+    (a) => a && (a.verb === 'net-replay' || INERT_VERBS.has(a.verb)),
+  );
+  return allApiOrInert ? 'http' : 'browser';
+}
+
 /** Convert a recorded flow (electron/browser/record.ts RecordedAction[]) into the
  *  captured-action vocab emitAction understands. A recorded `input` carries a
  *  placeholder KEY (record.ts persists KEYS, never values), so it maps to a
@@ -213,6 +234,13 @@ export function scaffoldTool(spec = {}) {
     stepFns.push({ sName, code, sideEffect: !!sideEffect, verb: action.verb });
   });
 
+  // Channel = NON-PHI label the agent reads (registry.mjs). When the OPERATIVE
+  // work of the solve was the intercepted API request(s) — i.e. every value-
+  // bearing action is a `net-replay` (goto/wait are inert scaffolding) — the tool
+  // is an HTTP tool: its steps ARE the site's own request, so the browser can be
+  // skipped. Otherwise it stays 'browser' (default). This is a label, NOT a router.
+  const channel = channelForActions(actions);
+
   const meta = {
     id,
     name: name || id,
@@ -222,6 +250,7 @@ export function scaffoldTool(spec = {}) {
     match,
     version: '0.1',
     status: 'candidate',
+    ...(channel === 'http' ? { channel } : {}), // omit when default (browser)
     params: mergedParams,
     steps: declaredSteps,
   };
