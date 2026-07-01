@@ -863,6 +863,14 @@ const fm = {
       ipcRenderer.invoke('typebuild:tasks:message', taskId, text) as Promise<
         { ok: true } | { ok: false; reason: string; status: number }
       >,
+    // task-a763ca5be676 — answer a task's PENDING QUESTION (ask_user). Clears
+    // pending_question + records the reply on the feed. PHI: `answer` is sent to
+    // the server but never logged. Structured result (409 no_pending_question /
+    // 404 not_visible / 400 empty) so the inline reply box degrades gracefully.
+    taskAnswer: (taskId: string, answer: string) =>
+      ipcRenderer.invoke('typebuild:tasks:answer', taskId, answer) as Promise<
+        { ok: true } | { ok: false; reason: string; status: number }
+      >,
     // fm-j7w0 (S4) — user registry for the assignee picker (NON-PHI identities).
     listUsers: () =>
       ipcRenderer.invoke('typebuild:listUsers') as Promise<

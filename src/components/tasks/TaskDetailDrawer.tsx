@@ -54,6 +54,7 @@ import type {
   ResolvedInstructions,
 } from '../../projects/index.mjs';
 import { TaskComposer } from '../TaskComposer';
+import { TaskAnswerBox } from './TaskAnswerBox';
 import type { Project, Task, TaskRun } from '../../types';
 import './TaskDetailDrawer.css';
 
@@ -76,6 +77,14 @@ function normalizeTab(t: InitialTab | undefined): DrawerTab | undefined {
   if (t === 'config') return 'details';
   if (t === 'trace' || t === 'session') return 'activity';
   return t;
+}
+
+// task-a763ca5be676 — humanize an ISO "asked_at" for the pinned-question card's
+// attribution line. Falls back to the raw string if it doesn't parse. NON-PHI.
+function formatAskedAt(asked_at: string): string {
+  const ms = Date.parse(asked_at);
+  if (Number.isNaN(ms)) return asked_at;
+  return `asked ${new Date(ms).toLocaleString()}`;
 }
 
 // A live-status descriptor: the ONE colored signal per the design language
@@ -396,6 +405,15 @@ export function TaskDetailDrawer({
     [task.id, task.projectId, project, loadProject],
   );
 
+  // task-a763ca5be676 — the PENDING QUESTION (ask_user), pinned at the top of the
+  // drawer body as its OWN card (not buried in notes). Only a NON-terminal
+  // question counts (a done/cancelled task's stale question is moot — mirrors
+  // classify().asked + the row). PHI: `text` is rendered from memory only.
+  const isTerminalStatus =
+    task.status === 'done' || task.status === 'cancelled';
+  const pendingQuestion =
+    !isTerminalStatus && task.pending_question ? task.pending_question : null;
+
   // ── controls ──────────────────────────────────────────────────────────────
   const claimedBy = task.claimedBy ?? null;
   const claimedByMe = !!claimedBy && claimedBy === myEmail;
@@ -648,6 +666,39 @@ export function TaskDetailDrawer({
         </nav>
 
         <div className="tdd__body">
+          {/* task-a763ca5be676 — PINNED pending-question card. Sits at the TOP
+              of the body, above the tab content + embedded composer, so the ONE
+              thing blocking the task (a human answer) is impossible to miss.
+              Renders NOTHING when there's no pending question (NON-REGRESSION).
+              PHI: the question text is shown from memory only. */}
+          {pendingQuestion && (
+            <section className="tdd__ask" aria-label="Pending question">
+              <div className="tdd__ask-head">
+                <span className="tdd__ask-badge" aria-hidden="true">
+                  ?
+                </span>
+                <span className="tdd__ask-title">Waiting on your answer</span>
+              </div>
+              <p className="tdd__ask-text">{pendingQuestion.text}</p>
+              {(pendingQuestion.asked_by || pendingQuestion.asked_at) && (
+                <div className="tdd__ask-meta">
+                  {pendingQuestion.asked_by && (
+                    <span>Asked by {pendingQuestion.asked_by}</span>
+                  )}
+                  {pendingQuestion.asked_at && (
+                    <span title={pendingQuestion.asked_at}>
+                      {formatAskedAt(pendingQuestion.asked_at)}
+                    </span>
+                  )}
+                </div>
+              )}
+              <TaskAnswerBox
+                taskId={task.id}
+                pendingQuestion={pendingQuestion}
+                onAnswered={refreshBody}
+              />
+            </section>
+          )}
           {tab === 'activity' && (
             <ActivityTab
               runs={runs}

@@ -587,3 +587,51 @@
 .tdd__btn:hover { background: var(--bg-3); border-color: var(--accent); }
 .tdd__btn--ghost { background: transparent; color: var(--fg-2); }
 .tdd__btn--ghost:hover { color: var(--fg-1); }
+
+/* task-a763ca5be676 — the PINNED pending-question card at the top of the body.
+   A `needs-you` (warn) accent so it reads as the ONE blocking thing, above the
+   tab content + composer. Renders only when task.pending_question is set. */
+.tdd__ask {
+  margin: 0 0 var(--sp-4, 12px);
+  padding: 12px;
+  border: 1px solid var(--warn);
+  border-left: 3px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-bg, color-mix(in srgb, var(--warn) 8%, transparent));
+}
+.tdd__ask-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.tdd__ask-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--warn);
+  color: var(--on-accent, #fff);
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.tdd__ask-title {
+  font-weight: 650;
+  color: var(--fg-1);
+}
+.tdd__ask-text {
+  margin: 0 0 6px;
+  color: var(--fg-1);
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.tdd__ask-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--fg-2);
+}

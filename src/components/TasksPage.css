@@ -919,6 +919,102 @@
   font-weight: 700;
   flex-shrink: 0;
 }
+/* task-a763ca5be676 — the question subtitle is now a BUTTON (click to open the
+   inline reply box). Strip the native button chrome so it still reads as the
+   accent prompt line, add a hover cue + a pointer. */
+.tasks__row-question--clickable {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tasks__row-question--clickable:hover {
+  text-decoration: underline;
+}
+
+/* task-a763ca5be676 — the shared INLINE answer box: a text input + Send + an
+   optional row of quick-reply option chips, expanded under a row's title or
+   pinned in the detail drawer's question card. One rule set, both surfaces. */
+.task-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+.task-answer__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.task-answer__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text-on-panel);
+  font: inherit;
+}
+.task-answer__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.task-answer__send {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.task-answer__send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.task-answer__cancel {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-on-panel, var(--muted));
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.task-answer__cancel:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.task-answer__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.task-answer__chip {
+  padding: 3px 10px;
+  border: 1px solid var(--rule-on-panel);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-on-panel);
+  font: inherit;
+  cursor: pointer;
+}
+.task-answer__chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.task-answer__chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.task-answer__error {
+  color: var(--err, #c0392b);
+  font-size: 12px;
+}
 
 /* fm-mhtz — the source-native status text badge (.tasks__raw-status) was
    removed from rows; the raw status now rides in the status dot's tooltip. */

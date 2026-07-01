@@ -135,7 +135,14 @@ export function formatSourceReason(
     case 'bad_status':
       return 'Unknown status';
     case 'not visible':
+    case 'not_visible':
       return "This task isn't visible to you anymore";
+    // task-a763ca5be676 — answering a pending question. 409 → the question was
+    // already answered/withdrawn; 400 → the reply was empty.
+    case 'no_pending_question':
+      return 'This question was already answered';
+    case 'empty':
+      return "The answer can't be empty";
     case 'already claimed': {
       const who = ctx?.claimedBy ? ` by ${ctx.claimedBy}` : '';
       return `Already claimed${who}`;

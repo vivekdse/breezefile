@@ -1406,6 +1406,47 @@ export class TypeBuildTaskSource implements TaskSource {
     throw new Error(`typebuild: post task message failed (${res.status})`);
   }
 
+  // ─── answer a pending question (task-a763ca5be676 — INLINE reply) ──────────
+  // POST /chromeext/{id}/answer — the REST equivalent of the `answer_question`
+  // MCP tool. Clears the task's `pending_question` AND records the reply on the
+  // task's message feed in one server-side step. Task-scoped verb, exactly like
+  // /messages, /notes, /claim, /release. Field name is `answer`.
+  //
+  // Server contract (VERIFIED — 16 smoke checks): nothing pending → 409
+  // { ok:false, reason:'no_pending_question' }; a non-viewer → 404; empty answer
+  // → 400. We mirror postTaskMessage's STRUCTURED { ok:false, reason } so the
+  // inline reply box surfaces a clear message and keeps the draft rather than
+  // crashing.
+  //
+  // PHI: `answer` is patient-visible content — sent to the server (encrypted at
+  // rest) but NEVER logged locally (the request helper never logs bodies).
+  async answerQuestion(
+    taskId: string,
+    answer: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const res = await this.request(
+      'POST',
+      `/chromeext/${encodeURIComponent(taskId)}/answer`,
+      { answer },
+    );
+    if (res.status === 200 || res.status === 201) {
+      await res.json().catch(() => ({}));
+      return { ok: true };
+    }
+    if (res.status === 400 || res.status === 404 || res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 409
+          ? 'no_pending_question'
+          : res.status === 400
+            ? 'empty'
+            : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    throw new Error(`typebuild: answer question failed (${res.status})`);
+  }
+
   // POST /chromeext/projects/{id}/archive | /unarchive (task-2c5448be520a).
   // Distinct, single-purpose verbs (NOT a generic update PATCH — that path is
   // owned by a sibling task) so the two write paths don't collide. Returns the

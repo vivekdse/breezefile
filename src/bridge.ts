@@ -490,6 +490,15 @@ type Fm = {
     ) => Promise<
       { ok: true } | { ok: false; reason: string; status: number }
     >;
+    // task-a763ca5be676 — answer a task's PENDING QUESTION (ask_user). Clears
+    // pending_question + records the reply on the feed. `answer` is PHI (sent to
+    // the server, never logged locally).
+    taskAnswer: (
+      taskId: string,
+      answer: string,
+    ) => Promise<
+      { ok: true } | { ok: false; reason: string; status: number }
+    >;
   };
   // fm-b5at.6 — TypeBuild side-by-side layout. Chrome left / our window
   // right while a session runs. Self-contained namespaced block; the OS work

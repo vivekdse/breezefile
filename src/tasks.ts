@@ -238,6 +238,32 @@ export async function postTaskMessage(
   return fm.typebuild.taskMessage(taskId, text);
 }
 
+// task-a763ca5be676 — answer a task's PENDING QUESTION (ask_user). Clears the
+// server-side `pending_question` AND records the reply on the task's message
+// feed in one step. `answer` is PHI: sent to the server (encrypted at rest) but
+// the caller must never persist/log it. Returns the source's STRUCTURED result
+// so the inline reply box can surface 409 (no_pending_question) / 404
+// (not_visible) / 400 (empty) without crashing. After { ok:true } the caller
+// refreshes the task list (useTasks / refresh) so the answered task drops out of
+// the `asked` bucket + hero.
+export async function answerTaskQuestion(
+  taskId: string,
+  answer: string,
+): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+  return fm.typebuild.taskAnswer(taskId, answer);
+}
+
+// task-a763ca5be676 — after a successful answer, clear the row's pending_question
+// OPTIMISTICALLY across every live useTasks hook so the answered task drops out
+// of the `asked` bucket + hero IMMEDIATELY, without waiting for the TypeBuild 30s
+// poll to carry the cleared question. Reuses the SAME pending-patch overlay that
+// smooths every other lagging mutation (no new store/poller). The entry drops
+// itself once the poll agrees (or after the 10s TTL). Always TypeBuild-sourced —
+// only TypeBuild tasks carry a pending_question. NON-PHI: opaque id + a null.
+export function markQuestionAnswered(taskId: string): void {
+  recordPendingPatch('typebuild', taskId, { pending_question: null });
+}
+
 // fm-k6wz (S7) — per-task audit history for the detail History section. Memory
 // only — callers hold the rows in component state and never persist them.
 export async function getTypebuildAudit(

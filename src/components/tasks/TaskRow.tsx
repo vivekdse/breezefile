@@ -9,8 +9,10 @@
 // cursor (selection); Enter / double-click opens edit (manual) or focuses the
 // detail panel (agent — edit is unsupported there).
 
+import { useState } from 'react';
 import type { PrimaryAction } from './primaryAction.mjs';
 import { PrimaryActionButton } from './PrimaryActionButton';
+import { TaskAnswerBox } from './TaskAnswerBox';
 import { homeRel, shortDate } from './helpers';
 import { claimSummary, claimFreshness } from './lifecycle.mjs';
 import { classify } from '../../projects/attention.mjs';
@@ -109,12 +111,20 @@ export function TaskRow({
   // NON-terminal question counts (a done/cancelled task's stale question is
   // moot — mirrors classify().asked). PHI: rendered from React state only,
   // never logged/persisted. Truncated for the single-line subtitle.
-  const pendingQuestionRaw = !isClosed ? (task.pending_question?.text ?? '') : '';
+  const pendingQuestion = !isClosed ? (task.pending_question ?? null) : null;
+  const pendingQuestionRaw = pendingQuestion?.text ?? '';
   const pendingQuestionText = pendingQuestionRaw
     ? pendingQuestionRaw.length > 160
       ? `${pendingQuestionRaw.slice(0, 157)}…`
       : pendingQuestionRaw
     : '';
+  // task-a763ca5be676 — inline reply: the `?` badge (or the question subtitle)
+  // expands a reply box RIGHT IN THE ROW so the user answers without opening the
+  // detail panel. State lives here so EVERY call site (TasksPage, ProjectsPage's
+  // cross-project asked list, ProjectFolderBlock, Sidebar) gets it for free — no
+  // prop threading. Auto-collapses if the question clears (answered elsewhere).
+  const [answering, setAnswering] = useState(false);
+  const showAnswerBox = answering && !!pendingQuestion;
   // fm-lji6 (S2) — a deferred TypeBuild task (defer_until in the future) isn't
   // claimable by claim-next until then; folded into the Due column below as a
   // snooze icon (still non-claimable info, just not its own column).
@@ -251,16 +261,24 @@ export function TaskRow({
             folder subtitle when there is no pending question. */}
         {pendingQuestionText ? (
           <div className="tasks__row-sub">
-            <span
-              className="tasks__row-question"
+            {/* task-a763ca5be676 — the question subtitle is now a BUTTON: click
+                it (like the ? badge) to expand the inline reply box below. */}
+            <button
+              type="button"
+              className="tasks__row-question tasks__row-question--clickable"
               title={pendingQuestionText}
-              aria-label={`Waiting on your answer: ${pendingQuestionText}`}
+              aria-label={`Answer: ${pendingQuestionText}`}
+              aria-expanded={showAnswerBox}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAnswering((v) => !v);
+              }}
             >
               <span className="tasks__row-question-glyph" aria-hidden="true">
                 ⁇
               </span>
               {pendingQuestionText}
-            </span>
+            </button>
           </div>
         ) : (
           !hideFolder &&
@@ -271,6 +289,19 @@ export function TaskRow({
               </span>
             </div>
           )
+        )}
+        {/* task-a763ca5be676 — the expanded inline reply box (text + Enter,
+            option chips). Lives inside the main column so it lines up under the
+            title; on success it optimistically clears the question (the row
+            drops out of the asked bucket) and collapses. */}
+        {showAnswerBox && pendingQuestion && (
+          <TaskAnswerBox
+            taskId={task.id}
+            pendingQuestion={pendingQuestion}
+            autoFocus
+            onAnswered={() => setAnswering(false)}
+            onCancel={() => setAnswering(false)}
+          />
         )}
       </div>
 
@@ -295,7 +326,15 @@ export function TaskRow({
           so the header + rows stay column-aligned; renders empty (same width)
           when there is no question, so a question-less row is unchanged. */}
       <span className="tasks__col tasks__col--ask">
-        <TaskAskBadge task={task} />
+        {/* task-a763ca5be676 — clicking the ? badge toggles the inline reply box
+            below (it stopPropagations, so it never moves the row cursor). Only
+            wire onClick when there's actually a question to answer. */}
+        <TaskAskBadge
+          task={task}
+          onClick={
+            pendingQuestion ? () => setAnswering((v) => !v) : undefined
+          }
+        />
       </span>
       <span className="tasks__col tasks__col--pin">
         {task.pinned && (

@@ -96,6 +96,15 @@ export function registerTypebuildProjectsIpc(): void {
     'typebuild:tasks:message',
     (_e, taskId: string, text: string) => source().postTaskMessage(taskId, text),
   );
+  // task-a763ca5be676 — answer a task's PENDING QUESTION (ask_user). Clears
+  // pending_question + records the reply on the message feed server-side. Same
+  // STRUCTURED { ok:false, reason } contract so the inline reply box surfaces 409
+  // (no_pending_question) / 404 (not_visible) / 400 (empty) without crashing.
+  // PHI: `answer` is sent to the server but never logged.
+  ipcMain.handle(
+    'typebuild:tasks:answer',
+    (_e, taskId: string, answer: string) => source().answerQuestion(taskId, answer),
+  );
   // task-2c5448be520a — archive/unarchive. Distinct verbs (NOT a generic
   // update PATCH, which a sibling task owns) so the two write paths don't clash.
   ipcMain.handle(
