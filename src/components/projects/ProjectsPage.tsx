@@ -288,8 +288,6 @@ function ProjectsPageInner() {
   // the character that opened it (empty when opened via '/').
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [switcherSeed, setSwitcherSeed] = useState('');
-  // gg/G motion: remember a pending 'g' so the next 'g' jumps to the top.
-  const gPendingRef = useRef(false);
 
   const gridRef = useRef<HTMLDivElement | null>(null);
 
@@ -928,7 +926,6 @@ function ProjectsPageInner() {
       // projects AND tasks). The overlay owns its keys once open.
       if (e.key === '/') {
         e.preventDefault();
-        gPendingRef.current = false;
         setSwitcherSeed('');
         setShowSwitcher(true);
         return;
@@ -936,12 +933,16 @@ function ProjectsPageInner() {
       if (e.key === ':') {
         // ':' opens the command palette to act on the current task selection.
         e.preventDefault();
-        gPendingRef.current = false;
         dispatch({ type: 'setMode', mode: 'command', buffer: '' });
         return;
       }
-      if (e.key === 'Escape' || e.key === 'h' || e.key === 'ArrowLeft') {
-        gPendingRef.current = false;
+      // task-49b7b37c8a02 — Home is arrows-only for navigation; every printable
+      // letter/digit type-to-commands (opens the switcher seeded with it) so a
+      // non-technical user can type ANY word (groceries, logs, help, kanban).
+      // The vim single-key motions (j/k/l/h/g/G) were dropped: they shadowed the
+      // verbs and broke typing words that start with them. Back = Escape/←; jump
+      // top/bottom = Home/End (standard, non-vim).
+      if (e.key === 'Escape' || e.key === 'ArrowLeft') {
         if (showCreate) {
           setShowCreate(false);
           e.preventDefault();
@@ -953,36 +954,23 @@ function ProjectsPageInner() {
         }
         return;
       }
-      // task-49b7b37c8a02 — 'n'/'a' no longer create a task directly. Single
-      // letters belong to type-to-command now: "new task" is reachable by just
-      // typing it (the switcher ranks the verb), via the '＋ New task' button, or
-      // via ':'/Cmd-K. Hard-binding 'n'/'a' shadowed the verbs and broke typing
-      // any word that starts with them.
-      // gg → top, G → bottom (flat motion across the whole visible order).
-      if (e.key === 'g') {
+      if (e.key === 'Home') {
         e.preventDefault();
-        if (gPendingRef.current) {
-          gPendingRef.current = false;
-          setIdx(0);
-        } else {
-          gPendingRef.current = true;
-        }
+        setIdx(0);
         return;
       }
-      if (e.key === 'G') {
+      if (e.key === 'End') {
         e.preventDefault();
-        gPendingRef.current = false;
         setIdx(flatRows.length - 1);
         return;
       }
-      gPendingRef.current = false;
-      if (e.key === 'ArrowDown' || e.key === 'j') {
+      if (e.key === 'ArrowDown') {
         e.preventDefault();
         setIdx((idx < 0 ? -1 : idx) + 1);
-      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+      } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setIdx((idx < 0 ? 1 : idx) - 1);
-      } else if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
+      } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
         e.preventDefault();
         activateFlat(idx >= 0 ? flatRows[idx] : undefined);
       } else if (e.key === ' ') {
@@ -998,11 +986,11 @@ function ProjectsPageInner() {
           });
         }
       } else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) {
-        // task-49b7b37c8a02 — type-to-command: any other printable alphanumeric
-        // key opens the unified switcher seeded with that character (verbs +
-        // project/task search), mirroring the file manager. Reserved vim motions
-        // (j/k/l/h/g/G) are handled above and never reach here; everything else —
-        // 'd', 'n', 'documents'… — starts a search.
+        // task-49b7b37c8a02 — type-to-command: EVERY printable alphanumeric key
+        // opens the unified switcher seeded with that character (verbs +
+        // project/task search), mirroring the file manager. Nothing above
+        // intercepts a bare letter/digit — nav is arrows/Home/End only — so
+        // 'g'roceries, 'l'ogs, 'h'elp, 'k'anban all start a search.
         e.preventDefault();
         setSwitcherSeed(e.key);
         setShowSwitcher(true);
