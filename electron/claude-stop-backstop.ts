@@ -34,72 +34,16 @@
 // extract, on purpose.
 
 import type { SourcedTask } from './core/task-source';
+// The pure, side-effect-free decision core lives in the paired .mjs so the
+// node test runner imports it without a transpile step (same convention as
+// task-reminders.ts ← core/task-reminders.mjs). This .ts is only the async
+// runner + api-server glue on top; it re-exports the pure surface so callers
+// have a single import site.
+import { decideStopBackstop, GENERIC_STOP_QUESTION } from './claude-stop-backstop.mjs';
+import type { StopSignal, StopDecision } from './claude-stop-backstop.d.mts';
 
-/** The wire shape the /claude-stopped endpoint receives from claude-hook.sh. */
-export type StopSignal = {
-  /** BREEZE_TASK_ID from the interactive spawn env — the task this session was
-   *  bound to. Empty/absent when the session had no task binding (plain
-   *  `claude` in a shell tab), in which case the backstop no-ops. */
-  task_id?: string;
-  /** BREEZE_SOURCE_ID — the owning TaskSource id (defaults to 'typebuild'). */
-  source_id?: string;
-  /** Claude Code session id from the Stop payload (diagnostic only). */
-  session_id?: string;
-  /** Claude Code transcript path — a POINTER we deliberately do NOT read. */
-  transcript_path?: string;
-};
-
-/** What the decision function tells the caller to do. */
-export type StopDecision =
-  | { action: 'noop'; reason: string }
-  | { action: 'flag'; taskId: string; sourceId: string; text: string };
-
-/** The generic, PHI-free flag text. Intentionally not derived from any
- *  transcript content — see the PHI note at the top of the file. */
-export const GENERIC_STOP_QUESTION =
-  'This session stopped without completing the task — did it need input? ' +
-  '(auto-flagged: the session ended while still in progress.)';
-
-/** Pure, testable decision: given the stop signal and the task's current state
- *  (as read back from the source), decide whether to flag via ask_user.
- *
- *  Flag ONLY when the task is still genuinely mid-flight and unadvanced:
- *    - status is still 'in_progress' (a submit/release/complete would have
- *      moved it to done/pending/cancelled), AND
- *    - there is no pending_question already (don't stomp a question the model
- *      DID log via ask_user, and don't double-flag on repeated stops).
- *
- *  No task binding, task not found, or task already advanced → noop. This is
- *  the non-regression guard: a normal completed session is never flagged. */
-export function decideStopBackstop(
-  signal: StopSignal,
-  task: SourcedTask | null,
-): StopDecision {
-  const taskId = (signal.task_id ?? '').trim();
-  if (!taskId) return { action: 'noop', reason: 'no task binding' };
-  const sourceId = (signal.source_id ?? '').trim() || 'typebuild';
-
-  if (!task) return { action: 'noop', reason: 'task not found / not visible' };
-
-  // Advanced normally → the happy path. Anything that isn't in_progress means
-  // the session (or a human) already moved it on; nothing to backstop.
-  if (task.status !== 'in_progress') {
-    return { action: 'noop', reason: `task advanced (status=${task.status})` };
-  }
-
-  // A structured question is already on the task — the model DID log one (or a
-  // prior stop already flagged). Leave it; the attention path already sees it.
-  if (task.pending_question && task.pending_question.text) {
-    return { action: 'noop', reason: 'pending_question already present' };
-  }
-
-  return {
-    action: 'flag',
-    taskId,
-    sourceId,
-    text: GENERIC_STOP_QUESTION,
-  };
-}
+export { decideStopBackstop, GENERIC_STOP_QUESTION };
+export type { StopSignal, StopDecision };
 
 /** The minimal source surface the backstop needs. Kept structural (not the full
  *  TaskSource) so a test can supply a stub, and so the dependency on the source

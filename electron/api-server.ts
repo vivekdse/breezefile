@@ -23,7 +23,7 @@ import { openBrowserWindow } from './browser/window';
 import { clearSessionTokens } from './session-tokens';
 import { createTaskApi, sendJson, send, readJson } from './core/task-http';
 import { getTaskSource } from './sources/registry';
-import { runStopBackstop, type StopSignal, type BackstopSource } from './claude-stop-backstop';
+import { runStopBackstop, type StopSignal, type BackstopSource } from './claude-stop-backstop.ts';
 
 const API_FILE_DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(API_FILE_DIR, 'api.json');
