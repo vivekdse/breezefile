@@ -55,6 +55,8 @@ function task(over = {}) {
     attempts: over.attempts,
     maxAttempts: over.maxAttempts,
     projectId: over.projectId,
+    // task-91d13f9d5469 — a pending question drives the `asked` bucket.
+    pending_question: over.pending_question ?? null,
   };
 }
 
@@ -265,4 +267,121 @@ test('attentionSummary lists only non-zero buckets in order', () => {
   );
   assert.equal(attentionSummary({ open: 0, blocked: 0, overdue: 0, failed: 0 }), '');
   assert.equal(attentionSummary({ open: 0, blocked: 0, overdue: 0, failed: 2 }), '2 failed');
+});
+
+// task-91d13f9d5469 — ASKED: a non-terminal task carrying a pending_question
+// (ask_user) is a HUMAN-ONLY unblock. classify must surface it; needsAttention
+// must count it; a terminal task's stale question must NOT count.
+test('classify: a non-terminal task with a pending_question is asked; terminal is not', () => {
+  const today = todayKey(NOW);
+  const q = { text: 'Which patient?', options: ['A', 'B'] };
+
+  const c1 = classify(task({ status: 'pending', pending_question: q }), today, NOW);
+  assert.equal(c1.asked, true);
+
+  // in_progress + a live claim would normally NOT be stalled, but a pending
+  // question still makes it asked (the worker is blocked on the human).
+  const c2 = classify(
+    task({
+      status: 'in_progress',
+      claimedBy: 'a@x',
+      claimedAt: new Date(NOW - 5 * 60_000).toISOString(),
+      pending_question: q,
+    }),
+    today,
+    NOW,
+  );
+  assert.equal(c2.asked, true);
+
+  // no question → not asked
+  assert.equal(classify(task({ status: 'pending' }), today, NOW).asked, false);
+  // terminal task with a (stale) question → not asked
+  assert.equal(
+    classify(task({ status: 'done', pending_question: q }), today, NOW).asked,
+    false,
+  );
+  assert.equal(
+    classify(task({ status: 'cancelled', pending_question: q }), today, NOW).asked,
+    false,
+  );
+});
+
+test('needsAttention counts an asked task; a question-less task is unchanged', () => {
+  const today = todayKey(NOW);
+  assert.equal(
+    needsAttention(
+      task({ status: 'pending', pending_question: { text: '?' } }),
+      today,
+      NOW,
+    ),
+    true,
+  );
+  // NON-REGRESSION: a task with no pending_question is exactly as before.
+  assert.equal(needsAttention(task({ status: 'pending', claimedBy: 'a@x' }), today, NOW), false);
+});
+
+test('asked outranks blocked: one asked task scores louder than one blocked', () => {
+  const roots = buildProjectTree([proj({ id: 'asked' }), proj({ id: 'blocked' })]);
+  const tasks = [
+    // claimed so the pending-question task is asked-ONLY (a claimed pending row
+    // is not also "open") — isolates W_ASKED from W_OPEN for the score compare.
+    task({
+      projectId: 'asked',
+      status: 'pending',
+      claimedBy: 'a@x',
+      pending_question: { text: '?' },
+    }),
+    task({ projectId: 'blocked', status: 'pending', rawStatus: 'blocked' }),
+  ];
+  const m = computeProjectAttention(roots, tasks, { now: NOW });
+  const asked = m.get('asked');
+  const blocked = m.get('blocked');
+  assert.equal(asked.asked, 1);
+  assert.equal(blocked.blocked, 1);
+  // W_ASKED (6) > W_BLOCKED (5): the asked project must rank strictly higher.
+  assert.ok(asked.score > blocked.score);
+  assert.equal(asked.score, 6);
+  assert.equal(blocked.score, 5);
+});
+
+test('computeProjectAttention tallies asked into total + score + summary + rollup', () => {
+  const roots = buildProjectTree([
+    proj({ id: 'parent' }),
+    proj({ id: 'child', parentProjectId: 'parent' }),
+  ]);
+  const tasks = [
+    // claimed → asked-ONLY (not also open), so the two rows land in distinct
+    // buckets and total is an unambiguous 2 (1 asked + 1 open).
+    task({
+      projectId: 'child',
+      status: 'pending',
+      claimedBy: 'a@x',
+      pending_question: { text: '?' },
+    }),
+    task({ projectId: 'child', status: 'pending' }), // open
+  ];
+  const child = computeProjectAttention(roots, tasks, { now: NOW }).get('child');
+  assert.equal(child.asked, 1);
+  assert.equal(child.open, 1);
+  assert.equal(child.total, 2);
+  assert.ok(child.score >= 7); // asked(6) + open(1)
+  assert.match(attentionSummary(child), /1 asked/);
+  // rolls UP into the parent exactly like the other buckets.
+  const parent = computeProjectAttention(roots, tasks, { now: NOW }).get('parent');
+  assert.equal(parent.asked, 1);
+  assert.equal(parent.total, 2);
+});
+
+test('asked filter cardinality equals the counted asked total (count/list in sync)', () => {
+  const roots = buildProjectTree([proj({ id: 'p' })]);
+  const tasks = [
+    task({ projectId: 'p', status: 'pending', pending_question: { text: 'q1' } }),
+    task({ projectId: 'p', status: 'in_progress', pending_question: { text: 'q2' } }),
+    task({ projectId: 'p', status: 'done', pending_question: { text: 'moot' } }), // terminal → not asked
+    task({ projectId: 'p', status: 'pending' }), // no question
+  ];
+  const askedTotal = computeProjectAttention(roots, tasks, { now: NOW }).get('p').asked;
+  const filtered = tasks.filter((t) => classify(t, undefined, NOW).asked).length;
+  assert.equal(filtered, askedTotal);
+  assert.equal(askedTotal, 2);
 });

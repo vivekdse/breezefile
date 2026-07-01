@@ -26,6 +26,12 @@ const DEFAULT_IDLE_DAYS = 7;
 // Ranking weights — blocked/failed/overdue are louder than a plain open task,
 // so a project with one blocked item outranks one with a couple of fresh
 // open items. These are signal weights, not exact priorities.
+// task-91d13f9d5469 — a PENDING QUESTION (ask_user) is a HUMAN-ONLY unblock:
+// nothing else can clear it (no agent, no retry, no schedule — only a person
+// answering). So it ranks LOUDER than blocked/failed/stalled (the 5s): a
+// project with a task literally waiting on the user's answer outranks one that's
+// merely blocked on a dependency. Weight it 6, above the 5s.
+const W_ASKED = 6;
 const W_BLOCKED = 5;
 const W_FAILED = 5;
 const W_STALLED = 5; // a stranded in_progress task is as loud as blocked/failed
@@ -115,7 +121,15 @@ export function classify(task, today = todayKey(), now = Date.now()) {
   // blocked) so the UI can badge it and offer remediation specifically.
   const stalled = !terminal && isStalledRow(task, now);
 
-  return { open, blocked, overdue, failed, stalled };
+  // task-91d13f9d5469 — asked: a non-terminal task with a PENDING QUESTION
+  // (ask_user set `pending_question`, and only a human answering clears it). A
+  // distinct, LOUDEST bucket (W_ASKED) so the UI can surface "waiting on you"
+  // specifically. A terminal task never counts (a done/cancelled task's stale
+  // question is moot). The field is PHI (its `text`) but we read only its
+  // presence here — never the text — so this stays a routing-only predicate.
+  const asked = !terminal && task.pending_question != null;
+
+  return { open, blocked, overdue, failed, stalled, asked };
 }
 
 // task-18902d433658 — the SINGLE predicate that decides whether a task counts
@@ -126,7 +140,7 @@ export function classify(task, today = todayKey(), now = Date.now()) {
 // (open/blocked/overdue/failed).
 export function needsAttention(task, today = todayKey(), now = Date.now()) {
   const c = classify(task, today, now);
-  return c.open || c.blocked || c.overdue || c.failed || c.stalled;
+  return c.open || c.blocked || c.overdue || c.failed || c.stalled || c.asked;
 }
 
 /** Max(created_at, updated_at) for one task, ignoring non-finite values. */
@@ -144,6 +158,7 @@ function emptyOwn() {
     overdue: 0,
     failed: 0,
     stalled: 0,
+    asked: 0,
     // distinct attention rows (any bucket) — drives `total`.
     attention: 0,
     // raw max activity ms seen (0 = none yet); -1 sentinel for "saw a real
@@ -159,6 +174,7 @@ function addOwn(into, from) {
   into.overdue += from.overdue;
   into.failed += from.failed;
   into.stalled += from.stalled;
+  into.asked += from.asked;
   into.attention += from.attention;
   into.activityMs = Math.max(into.activityMs, from.activityMs);
   into.sawRealActivity = into.sawRealActivity || from.sawRealActivity;
@@ -201,11 +217,13 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
     if (c.overdue) bucket.overdue += 1;
     if (c.failed) bucket.failed += 1;
     if (c.stalled) bucket.stalled += 1;
+    if (c.asked) bucket.asked += 1;
     // Same OR as needsAttention() — kept inline here only because we've already
     // computed the buckets; needsAttention(t, today, now) is the exported
     // equivalent the UI filter uses, so the count and the filtered list stay
-    // identical (stalled included).
-    if (c.open || c.blocked || c.overdue || c.failed || c.stalled) bucket.attention += 1;
+    // identical (stalled + asked included).
+    if (c.open || c.blocked || c.overdue || c.failed || c.stalled || c.asked)
+      bucket.attention += 1;
     // A timestamp STRICTLY OLDER than the floor (page-mount time) is a real
     // server stamp; anything at/after the floor is the now()-placeholder the
     // TypeBuild list endpoint writes (see mapListRow) → treated as unknown.
@@ -236,6 +254,7 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
   for (const [id, r] of rolled) {
     const total = r.attention;
     const score =
+      r.asked * W_ASKED +
       r.blocked * W_BLOCKED +
       r.failed * W_FAILED +
       r.stalled * W_STALLED +
@@ -259,6 +278,7 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
       overdue: r.overdue,
       failed: r.failed,
       stalled: r.stalled,
+      asked: r.asked,
       total,
       score,
       lastActivityMs,
@@ -272,6 +292,9 @@ export function computeProjectAttention(roots, tasks, opts = {}) {
 export function attentionSummary(a) {
   if (!a) return '';
   const parts = [];
+  // task-91d13f9d5469 — asked leads (loudest bucket): a pending question is a
+  // human-only unblock. "N asked" = N tasks waiting on the user's answer.
+  if (a.asked > 0) parts.push(`${a.asked} asked`);
   if (a.open > 0) parts.push(`${a.open} open`);
   if (a.blocked > 0) parts.push(`${a.blocked} blocked`);
   if (a.stalled > 0) parts.push(`${a.stalled} stalled`);

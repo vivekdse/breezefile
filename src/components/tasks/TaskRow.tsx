@@ -17,6 +17,7 @@ import { classify } from '../../projects/attention.mjs';
 import {
   TaskStatusDot,
   TaskAttentionBadge,
+  TaskAskBadge,
   TaskRunIndicator,
   relTime,
 } from '../TaskIndicators';
@@ -104,6 +105,16 @@ export function TaskRow({
   // Folded into the status dot's health ring (below) rather than its own
   // column — it's a qualifier on status, not an independent stat.
   const stalled = classify(task).stalled;
+  // task-91d13f9d5469 — the pending-question TEXT for the subtitle swap. Only a
+  // NON-terminal question counts (a done/cancelled task's stale question is
+  // moot — mirrors classify().asked). PHI: rendered from React state only,
+  // never logged/persisted. Truncated for the single-line subtitle.
+  const pendingQuestionRaw = !isClosed ? (task.pending_question?.text ?? '') : '';
+  const pendingQuestionText = pendingQuestionRaw
+    ? pendingQuestionRaw.length > 160
+      ? `${pendingQuestionRaw.slice(0, 157)}…`
+      : pendingQuestionRaw
+    : '';
   // fm-lji6 (S2) — a deferred TypeBuild task (defer_until in the future) isn't
   // claimable by claim-next until then; folded into the Due column below as a
   // snooze icon (still non-claimable info, just not its own column).
@@ -232,12 +243,34 @@ export function TaskRow({
             </span>
           )}
         </div>
-        {!hideFolder && task.folder && (
+        {/* task-91d13f9d5469 — subtitle swap: when a NON-terminal task has a
+            pending question, show the question TEXT (truncated) under the title
+            in place of the folder line, so the user can read what's being asked
+            without opening the row. This renders PHI (the question text) in the
+            list — in-memory only, same rule as the title. Falls back to the
+            folder subtitle when there is no pending question. */}
+        {pendingQuestionText ? (
           <div className="tasks__row-sub">
-            <span className="tasks__row-folder" title={task.folder}>
-              {homeRel(task.folder)}
+            <span
+              className="tasks__row-question"
+              title={pendingQuestionText}
+              aria-label={`Waiting on your answer: ${pendingQuestionText}`}
+            >
+              <span className="tasks__row-question-glyph" aria-hidden="true">
+                ⁇
+              </span>
+              {pendingQuestionText}
             </span>
           </div>
+        ) : (
+          !hideFolder &&
+          task.folder && (
+            <div className="tasks__row-sub">
+              <span className="tasks__row-folder" title={task.folder}>
+                {homeRel(task.folder)}
+              </span>
+            </div>
+          )
         )}
       </div>
 
@@ -256,6 +289,13 @@ export function TaskRow({
       </span>
       <span className="tasks__col tasks__col--attn">
         <TaskAttentionBadge task={task} />
+      </span>
+      {/* task-91d13f9d5469 — the ASK (?) column: shows when a task carries a
+          pending question (ask_user). Fixed-width like every other stat column
+          so the header + rows stay column-aligned; renders empty (same width)
+          when there is no question, so a question-less row is unchanged. */}
+      <span className="tasks__col tasks__col--ask">
+        <TaskAskBadge task={task} />
       </span>
       <span className="tasks__col tasks__col--pin">
         {task.pinned && (
@@ -402,6 +442,8 @@ export function TaskRowHeader() {
       <span className="tasks__row-header-label tasks__row-header-label--task">Task</span>
       <span className="tasks__col tasks__row-header-label">Status</span>
       <span className="tasks__col tasks__row-header-label">Attn</span>
+      {/* task-91d13f9d5469 — Ask column header (the ? glyph column). */}
+      <span className="tasks__col tasks__row-header-label">Ask</span>
       <span className="tasks__col tasks__row-header-label">Pin</span>
       <span className="tasks__col tasks__row-header-label">Claim</span>
       <span className="tasks__col tasks__row-header-label">Attempts</span>

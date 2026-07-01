@@ -266,6 +266,21 @@ export type Task = {
   // title/notes), NEVER persisted to the skeleton DB, logged, or written to
   // notes/files. `by`+`at` (email principal + ISO timestamp) are NON-PHI.
   messages?: { text: string; by: string; at: string }[];
+  // task-91d13f9d5469 — a PENDING QUESTION the task is BLOCKED on: `ask_user`
+  // set it, `answer_question` clears it (server-side). Carried from the
+  // TypeBuild get_task/list endpoint; absent on local rows and on tasks with no
+  // open question. OPTIONAL so a question-less task renders exactly as today
+  // (NON-REGRESSION). It drives the LOUDEST attention bucket (`asked`) — a
+  // HUMAN-ONLY unblock, nothing else can clear it. PHI: `text` is patient-visible
+  // question content, carried in memory with the task (like title/notes), NEVER
+  // persisted to the skeleton DB, logged, or written to notes/files.
+  // `options`/`asked_by`/`asked_at` are NON-PHI (choices + email + ISO stamp).
+  pending_question?: {
+    text: string;
+    options?: string[];
+    asked_by?: string;
+    asked_at?: string;
+  } | null;
 };
 
 // fm-b5at.1 — per-source capability flags. The UI gates row affordances

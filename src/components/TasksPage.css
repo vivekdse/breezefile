@@ -544,12 +544,14 @@
   /* task-attention-stats — one FIXED template, identical on every row AND
      the header (TaskRowHeader): disclosure, checkbox, owner(assignee),
      title (which carries the primary action inline, not its own column),
-     status, attn, pin, claim, attempts, due, waits, updated, run, actions.
+     status, attn, ASK, pin, claim, attempts, due, waits, updated, run, actions.
      Every column but the title is a fixed px width (no `auto`) so nothing
-     can size differently row to row — a real table. */
+     can size differently row to row — a real table.
+     task-91d13f9d5469 — the `ask` (?) column sits right after `attn` (a pending
+     question is a peer attention signal); 28px, matching the attn column feel. */
   grid-template-columns:
     16px 24px 32px minmax(0, 1fr)
-    36px 32px 26px 34px 56px 40px 44px 54px 52px
+    36px 32px 28px 26px 34px 56px 40px 44px 54px 52px
     32px;
   align-items: center;
   gap: 6px;
@@ -898,6 +900,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 360px;
+}
+
+/* task-91d13f9d5469 — the pending-question subtitle (replaces the folder line
+   when a task is waiting on the user's answer). Uses the accent color + the ⁇
+   glyph so it reads as a live prompt, not a path; clips to a single line. */
+.tasks__row-question {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 520px;
+  color: var(--accent);
+}
+.tasks__row-question-glyph {
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 /* fm-mhtz — the source-native status text badge (.tasks__raw-status) was

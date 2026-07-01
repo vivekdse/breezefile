@@ -234,6 +234,19 @@ type ListRow = {
   // the Date.now() floor). These replace the Phase-1 now()-placeholder.
   created_at?: string | null;
   updated_at?: string | null;
+  // task-91d13f9d5469 — a PENDING QUESTION the task is blocked on (set by
+  // `ask_user`, cleared by `answer_question`). VERIFIED on the detail endpoint
+  // (get_task); typed here on ListRow too so that IF the list endpoint carries
+  // it, it flows to LIST rows (attention classification runs over the list). A
+  // server that omits it on the list simply leaves it undefined → the row has no
+  // `asked` bucket until its detail is fetched. `text` is PHI (encrypted at
+  // rest); memory-only client-side. `options`/`asked_by`/`asked_at` are non-PHI.
+  pending_question?: {
+    text?: unknown;
+    options?: unknown;
+    asked_by?: unknown;
+    asked_at?: unknown;
+  } | null;
 };
 
 /** Decrypted detail from GET /chromeext/<id>. `task` is the body (PHI). */
@@ -425,6 +438,41 @@ function mapMessages(
   return out.length ? out : undefined;
 }
 
+// task-91d13f9d5469 — normalize the wire `pending_question` into the client's
+// { text, options?, asked_by?, asked_at? } shape, or undefined when it's
+// absent/null/malformed (so a task with no open question renders exactly as
+// today — NON-REGRESSION). Defensive: a question with no usable `text` is
+// dropped (nothing to show/answer). `options` is kept only when it's a
+// non-empty array of strings; `asked_by`/`asked_at` degrade to omitted. `text`
+// is DECRYPTED PHI and, like `notes`/`messages`, rides in memory only — the
+// skeleton store has no pending_question column, so it can never reach disk.
+function mapPendingQuestion(
+  q: unknown,
+): { text: string; options?: string[]; asked_by?: string; asked_at?: string } | undefined {
+  if (!q || typeof q !== 'object') return undefined;
+  const rec = q as {
+    text?: unknown;
+    options?: unknown;
+    asked_by?: unknown;
+    asked_at?: unknown;
+  };
+  const text = typeof rec.text === 'string' ? rec.text : '';
+  if (!text) return undefined;
+  const out: {
+    text: string;
+    options?: string[];
+    asked_by?: string;
+    asked_at?: string;
+  } = { text };
+  if (Array.isArray(rec.options)) {
+    const opts = rec.options.filter((o): o is string => typeof o === 'string');
+    if (opts.length) out.options = opts;
+  }
+  if (typeof rec.asked_by === 'string' && rec.asked_by) out.asked_by = rec.asked_by;
+  if (typeof rec.asked_at === 'string' && rec.asked_at) out.asked_at = rec.asked_at;
+  return out;
+}
+
 function mapListRow(row: ListRow): SourcedTask {
   const raw = rawStatusOf(row);
   // task-b1fe80e2669b (Phase 2) — the list endpoint now carries REAL server
@@ -491,6 +539,13 @@ function mapListRow(row: ListRow): SourcedTask {
     parentTaskId: row.parent_task_id ?? null,
     // task-ab1d7955e23f — owning project container (opaque, non-PHI).
     projectId: row.project_id ?? null,
+    // task-91d13f9d5469 — a PENDING QUESTION the task waits on (get_task
+    // surfaces it; the list MAY too). Passed through ONLY when it's a well-shaped
+    // { text, ... } object; absent/null/malformed → undefined so a question-less
+    // row renders exactly as today (NON-REGRESSION) and the `asked` attention
+    // bucket stays empty. `text` is DECRYPTED PHI carried in memory only — the
+    // skeleton store has no pending_question column, so it never reaches disk.
+    pending_question: mapPendingQuestion(row.pending_question),
   };
 }
 
@@ -915,6 +970,13 @@ export class TypeBuildTaskSource implements TaskSource {
       // `notes`, lives in the returned SourcedTask in MEMORY only — the skeleton
       // store has no messages column, so it never reaches disk through the cache.
       messages: mapMessages(detail.messages),
+      // task-91d13f9d5469 — the VERIFIED-on-detail pending question. mapListRow
+      // (via base) already normalized detail.pending_question, but we re-map it
+      // here explicitly so the detail value is authoritative and this mirrors
+      // result/messages. Pass-through ONLY when well-shaped ({ text }); absent/
+      // null/malformed → undefined so a question-less task renders as today
+      // (NON-REGRESSION). `text` is decrypted PHI, memory-only (no skeleton col).
+      pending_question: mapPendingQuestion(detail.pending_question),
     };
   }
 

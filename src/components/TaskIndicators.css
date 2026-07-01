@@ -38,6 +38,36 @@
   color: var(--accent);
 }
 
+/* task-91d13f9d5469 — the ASK glyph: a `?` shown when a task has a pending
+   question (ask_user). It's the LOUDEST attention signal (a human-only unblock),
+   so it uses the accent color at a slightly heavier weight than the attn badge,
+   reading as "you specifically are needed here". Icon-only; the (truncated,
+   PHI) question preview rides in the tooltip/aria-label. The clickable variant
+   (the sibling inline-answer UI hooks onClick) gets a button reset + a hover
+   affordance so it reads as actionable. */
+.task-ask {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.task-ask--clickable {
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.task-ask--clickable:hover {
+  background: var(--panel-2);
+}
+
 /* task-b0e424ef9803 — "working" motion. A HEALTHY in_progress dot (no stalled
    /lapsed health ring) gently breathes an amber glow so live work draws the eye
    without a noisy spinner. The pulse is keyed off the SAME in_progress status

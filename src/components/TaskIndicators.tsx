@@ -118,6 +118,55 @@ export function TaskAttentionBadge({ task }: { task: Task }) {
   );
 }
 
+// task-91d13f9d5469 — the ASK glyph: a `?` badge shown when a task carries a
+// PENDING QUESTION (ask_user set task.pending_question). It's a HUMAN-ONLY
+// unblock — the task is literally waiting on the user's answer — so it reads as
+// its OWN signal beside the attention badge (attention.mjs classify().asked
+// drives the same rows). Renders NOTHING when there is no pending question, so a
+// question-less row is byte-for-byte unchanged (NON-REGRESSION). The question
+// TEXT is PHI; we surface only a SHORT truncated preview in the hover tooltip
+// (rendered in-memory from React state, same rule as titles) — never logged or
+// persisted. `onClick` (optional) lets a caller hook the answer flow (the
+// sibling inline-answer UI, task-a763ca5be676, wires it); without it the badge
+// is a passive marker.
+export function TaskAskBadge({
+  task,
+  onClick,
+}: {
+  task: Task;
+  onClick?: () => void;
+}) {
+  const q = task.pending_question;
+  const isClosed = task.status === 'done' || task.status === 'cancelled';
+  // Mirror classify().asked: a terminal task's stale question is moot.
+  if (!q || isClosed) return null;
+  // Short, single-line preview for the tooltip (PHI, in-memory only).
+  const preview = q.text.length > 120 ? `${q.text.slice(0, 117)}…` : q.text;
+  const label = `Waiting on your answer — ${preview}`;
+  const className = `task-ask${onClick ? ' task-ask--clickable' : ''}`;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={className}
+        aria-label={label}
+        title={label}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+      >
+        ?
+      </button>
+    );
+  }
+  return (
+    <span className={className} role="img" aria-label={label} title={label}>
+      ?
+    </span>
+  );
+}
+
 /** Inline run-state for an auto-executable task. Returns null when
  *  task.auto_mode is false so callers can drop it next to other meta
  *  with no surrounding conditionals. When `onClick` is set, renders as

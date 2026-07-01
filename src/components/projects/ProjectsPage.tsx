@@ -277,6 +277,11 @@ function ProjectsPageInner() {
   // failed) — the same predicate that drives the count, so the two can't drift.
   // null = show every task (the default folder view).
   const [needsYouFilter, setNeedsYouFilter] = useState<string | null>(null);
+  // task-91d13f9d5469 — CROSS-PROJECT "questions waiting on you" drill-in. Unlike
+  // needsYouFilter (scoped to one drilled-in project), this flattens EVERY
+  // project's pending-question tasks into one list so the user sees every
+  // ask_user without opening each project. Boolean: true = show the asked list.
+  const [askedFilter, setAskedFilter] = useState(false);
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showCreate, setShowCreate] = useState(false);
@@ -455,6 +460,10 @@ function ProjectsPageInner() {
       // separately; 0 here keeps the shape valid (the real per-project tally
       // from computeProjectAttention carries the true stalled count).
       stalled: 0,
+      // task-91d13f9d5469 — likewise the TaskStats rollup doesn't track asked;
+      // 0 keeps the shape valid. The cross-project asked hero derives its count
+      // from classify() over allTasks, not this synthetic inbox attention.
+      asked: 0,
       total: r?.needsYou ?? 0,
       score: r?.needsYou ?? 0,
       lastActivityMs: null,
@@ -494,6 +503,9 @@ function ProjectsPageInner() {
         // Same severity order as the attention rollup (blocked/failed loudest).
         const attentionRank = (t: Task): number => {
           const c = classify(t);
+          // task-91d13f9d5469 — asked (a pending question) is the loudest: a
+          // human-only unblock ranks above blocked/failed so it sorts first.
+          if (c.asked) return 4;
           if (c.blocked || c.failed) return 3;
           if (c.overdue) return 2;
           if (c.open) return 1;
@@ -605,6 +617,27 @@ function ProjectsPageInner() {
     }
     return out;
   }, [flatPartition, expanded, flatDoneOpen]);
+
+  // task-91d13f9d5469 — CROSS-PROJECT asked list: every task with a pending
+  // question, across all projects, as flat ProjectFolderRow[] rendered by the
+  // SAME renderTaskRow engine. The predicate is classify().asked — the exact
+  // bucket the `heroAsked` count is derived from — so the drilled-in list and
+  // the hero count can never disagree (same discipline as the needsYou filter).
+  const askedTasks = useMemo(
+    () => allTasks.filter((t) => classify(t).asked),
+    [allTasks],
+  );
+  const heroAsked = askedTasks.length;
+  const askedRows = useMemo<ProjectFolderRow[]>(
+    () =>
+      askedTasks.map((t) => ({
+        task: t,
+        depth: 0,
+        childCount: 0,
+        doneChildCount: 0,
+      })),
+    [askedTasks],
+  );
 
   // ── flat keyboard order (task-1bf3a297c9f9, Phase 4) ────────────────────────
   // The visible cursor sequence, walked flat by j/k exactly like FolderList
@@ -1129,6 +1162,11 @@ function ProjectsPageInner() {
             heroNeed={heroNeed}
             heroBlocked={heroBlocked}
             heroTarget={heroTarget}
+            heroAsked={heroAsked}
+            askedActive={askedFilter}
+            askedRows={askedRows}
+            renderTaskRow={renderTaskRow}
+            onToggleAsked={() => setAskedFilter((v) => !v)}
             loaded={loaded}
             loadErr={loadErr}
             signedIn={tbSignedIn}
@@ -1389,6 +1427,11 @@ function HomeRoot({
   heroNeed,
   heroBlocked,
   heroTarget,
+  heroAsked,
+  askedActive,
+  askedRows,
+  renderTaskRow,
+  onToggleAsked,
   loaded,
   loadErr,
   signedIn,
@@ -1434,6 +1477,17 @@ function HomeRoot({
   heroNeed: number;
   heroBlocked: number;
   heroTarget: ProjectNode | null;
+  // task-91d13f9d5469 — cross-project pending-question drill-in.
+  /** Count of tasks (across all projects) with a pending question. */
+  heroAsked: number;
+  /** Whether the asked cross-project list is currently shown. */
+  askedActive: boolean;
+  /** The asked tasks as flat rows for the shared row renderer. */
+  askedRows: ProjectFolderRow[];
+  /** The shared task-row renderer (same one the flat/folder views use). */
+  renderTaskRow: (row: ProjectFolderRow) => React.ReactNode;
+  /** Toggle the cross-project asked list open/closed. */
+  onToggleAsked: () => void;
   loaded: boolean;
   loadErr: string | null;
   signedIn: boolean;
@@ -1572,6 +1626,52 @@ function HomeRoot({
             </>
           )}
         </div>
+      )}
+
+      {/* task-91d13f9d5469 — DEDICATED "questions waiting on you" hero, ABOVE the
+          "N need you" hero. Only shown when N > 0 (NON-REGRESSION: with no
+          pending questions this renders nothing and Home looks exactly as
+          before). Clicking it drills into a CROSS-PROJECT list of every asked
+          task (same click-to-filter pattern as the "N need you" count), so the
+          user sees every ask_user without opening each project. */}
+      {!empty && !loadErr && heroAsked > 0 && (
+        <div className="projects__hero projects__hero--asked" role="status">
+          <button
+            type="button"
+            className="projects__hero-need projects__hero-need--asked"
+            onClick={onToggleAsked}
+            aria-expanded={askedActive}
+            title={
+              askedActive
+                ? 'Hide the questions waiting on you'
+                : `Show the ${heroAsked} question${heroAsked === 1 ? '' : 's'} waiting on your answer`
+            }
+          >
+            <span className="projects__hero-asked-glyph" aria-hidden="true">
+              ⁇
+            </span>{' '}
+            <b>
+              {heroAsked} question{heroAsked === 1 ? '' : 's'} waiting on you
+            </b>{' '}
+            <span aria-hidden="true">{askedActive ? '▾' : '→'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* The cross-project asked list, rendered inline when the hero is toggled
+          open. Reuses the SAME renderTaskRow engine as the flat/folder views. */}
+      {!empty && !loadErr && askedActive && heroAsked > 0 && (
+        <section className="pfolder home-flat__section home-asked__section">
+          <header className="pfolder-header pfolder-header--inline">
+            <h1 className="folder-header__title pfolder-header__title">
+              Questions waiting on you
+              <span className="home-flat__count"> · {heroAsked}</span>
+            </h1>
+          </header>
+          <ul className="folder-list__list pfolder__list" role="list">
+            {askedRows.map((row) => renderTaskRow(row))}
+          </ul>
+        </section>
       )}
 
       {!empty && !loadErr && totalScoped > 0 && (

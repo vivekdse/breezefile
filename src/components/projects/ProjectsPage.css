@@ -183,6 +183,29 @@
   outline-offset: 2px;
 }
 
+/* task-91d13f9d5469 — the dedicated "questions waiting on you" hero. It's the
+   LOUDEST attention signal (a human-only unblock), so it accents on --accent
+   rather than the --warn used by the "N need you" hero, and sits ABOVE it. The
+   inner <b> takes the accent color; the ⁇ glyph leads. */
+.projects__hero--asked {
+  border-left-color: var(--accent);
+  margin-bottom: var(--sp-3);
+}
+.projects__hero--asked b {
+  color: var(--accent);
+}
+.projects__hero-need--asked {
+  color: var(--accent);
+}
+.projects__hero-asked-glyph {
+  font-weight: 700;
+  color: var(--accent);
+}
+/* The inline cross-project asked list sits directly under its hero. */
+.home-asked__section {
+  margin-bottom: var(--sp-5);
+}
+
 /* ── L1 inbox (task-4b0168979921) ─────────────────────────────────────────────
    A dense, email-inbox list aligned with the folder/file aesthetic (epic
    task-3ff338f80de5): one project per LINE — a status glyph, the NAME, a short

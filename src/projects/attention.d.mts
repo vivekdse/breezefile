@@ -21,6 +21,9 @@ export interface ProjectAttention {
   failed: number;
   /** task-80be320f06b3 — in_progress rows with no live worker (stranded). */
   stalled: number;
+  /** task-91d13f9d5469 — non-terminal tasks with a PENDING QUESTION (ask_user);
+   *  a HUMAN-ONLY unblock, ranked LOUDEST (W_ASKED, above the blocked/failed 5s). */
+  asked: number;
   total: number;
   score: number;
   /** Max(created_at, updated_at) over rolled-up tasks; null when unknown. */
@@ -45,6 +48,8 @@ export function classify(
   overdue: boolean;
   failed: boolean;
   stalled: boolean;
+  /** task-91d13f9d5469 — a non-terminal task with a pending question (ask_user). */
+  asked: boolean;
 };
 
 /**

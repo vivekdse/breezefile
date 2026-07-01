@@ -77,6 +77,24 @@ export type Task = {
   // (which has no messages column), logged, or written to notes/files. `by`+`at`
   // are NON-PHI (an email principal + an ISO timestamp).
   messages?: { text: string; by: string; at: string }[];
+  // task-91d13f9d5469 — a PENDING QUESTION the task is BLOCKED on: an agent (or
+  // a person) called `ask_user`, and the task now waits on a HUMAN answer.
+  // Populated by a remote source (TypeBuild) from the get_task/list endpoint;
+  // cleared server-side by `answer_question`. Local rows omit it, so it's
+  // OPTIONAL across the seam (a task without a pending question renders exactly
+  // as today — NON-REGRESSION). It drives the LOUDEST attention bucket (`asked`,
+  // W_ASKED) because only a human can clear it. PHI: `text` is patient-visible
+  // question content (encrypted at rest server-side) — carried in memory with
+  // the task (like notes/messages), NEVER persisted to the skeleton store (which
+  // has no pending_question column), logged, or written to notes/files.
+  // `options`/`asked_by`/`asked_at` are NON-PHI (choices + email principal + ISO
+  // timestamp). `null` (or absent) means "no pending question".
+  pending_question?: {
+    text: string;
+    options?: string[];
+    asked_by?: string;
+    asked_at?: string;
+  } | null;
 };
 
 export type TaskCreate = {
