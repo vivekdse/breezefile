@@ -22,6 +22,8 @@ import { dispatchTerminalFg } from './ipc';
 import { openBrowserWindow } from './browser/window';
 import { clearSessionTokens } from './session-tokens';
 import { createTaskApi, sendJson, send, readJson } from './core/task-http';
+import { getTaskSource } from './sources/registry';
+import { runStopBackstop, type StopSignal, type BackstopSource } from './claude-stop-backstop.ts';
 
 const API_FILE_DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(API_FILE_DIR, 'api.json');
@@ -201,6 +203,41 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       // 'waiting' is a mid-turn attention request — separate from 'idle'
       // so the renderer can force a banner even on the active tab.
       dispatchTerminalFg(ptyId, state as 'busy' | 'idle' | 'waiting');
+      return sendJson(res, 200, { ok: true });
+    }
+    // task-c926bbe959f6 — Stop-hook BACKSTOP for unlogged questions. The Claude
+    // Code Stop hook posts here on session end with the task binding
+    // (task_id/source_id from the interactive spawn env), the session_id, and a
+    // transcript_path POINTER (never the transcript content). If the session
+    // stopped with its task still in_progress and unadvanced — i.e. it likely
+    // asked a plain-text question and just ended — we flag it via the source's
+    // ask_user so the possibly-unlogged question surfaces in the asked inbox.
+    // Deterministic + conservative: a normally-completed session already moved
+    // the task out of in_progress and is NOT flagged. This is the Claude-Code
+    // ADAPTER onto the provider-agnostic ask/answer protocol
+    // (see electron/claude-stop-backstop.ts). Always 200s (never blocks a hook).
+    if (p === '/claude-stopped' && m === 'POST') {
+      const body = await readJson<StopSignal>(req).catch(() => ({}) as StopSignal);
+      const sourceId = (body.source_id ?? '').trim() || 'typebuild';
+      // The TaskSource already talks to the server — reuse it, don't invent a
+      // new client. We narrow to the two calls the backstop needs; a source
+      // without askUser (e.g. a non-PHI local store) is treated as unavailable.
+      const src = getTaskSource(sourceId) as unknown as
+        | (BackstopSource & { askUser?: unknown })
+        | undefined;
+      const usable =
+        src && typeof (src as { askUser?: unknown }).askUser === 'function'
+          ? (src as BackstopSource)
+          : undefined;
+      // Fire-and-forget: never make the hook wait on a network round-trip.
+      void runStopBackstop(body, usable).then((out) => {
+        // NON-PHI log line (fixed reason strings + opaque task id only).
+        if (out.flagged) {
+          console.log('[claude-stopped] flagged unlogged question on', out.taskId);
+        } else {
+          console.log('[claude-stopped] no-op:', out.reason);
+        }
+      });
       return sendJson(res, 200, { ok: true });
     }
 

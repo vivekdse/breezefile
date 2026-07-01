@@ -77,11 +77,16 @@ hooks = s.setdefault("hooks", {})
 BUSY = 'sh "' + str(hook) + '" busy'
 IDLE = 'sh "' + str(hook) + '" idle'
 WAITING = 'sh "' + str(hook) + '" waiting'
+# task-c926bbe959f6 — unlogged-question backstop, same shape as the local
+# hooks-register.ts STOPPED_CMD. Registered as a SECOND command on Stop.
+STOPPED = 'sh "' + str(hook) + '" stopped'
 
 def is_breeze(h):
     return isinstance(h, dict) and "claude-hook.sh" in str(h.get("command",""))
 
-def reset(event, cmd):
+def reset(event, cmds):
+    if not isinstance(cmds, list):
+        cmds = [cmds]
     blocks = hooks.get(event, []) or []
     cleaned = []
     for b in blocks:
@@ -89,11 +94,11 @@ def reset(event, cmd):
         kept = [h for h in (b.get("hooks") or []) if not is_breeze(h)]
         if kept:
             nb = dict(b); nb["hooks"] = kept; cleaned.append(nb)
-    cleaned.append({"hooks":[{"type":"command","command":cmd}]})
+    cleaned.append({"hooks":[{"type":"command","command":c} for c in cmds]})
     hooks[event] = cleaned
 
 reset("UserPromptSubmit", BUSY)
-reset("Stop", IDLE)
+reset("Stop", [IDLE, STOPPED])
 reset("StopFailure", IDLE)
 reset("Notification", WAITING)
 

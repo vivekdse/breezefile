@@ -1447,6 +1447,72 @@ export class TypeBuildTaskSource implements TaskSource {
     throw new Error(`typebuild: answer question failed (${res.status})`);
   }
 
+  // ─── ask_user (task-c926bbe959f6 — the ask/answer protocol client leg) ─────
+  // POST /chromeext/{id}/ask — set the task's `pending_question` (the field
+  // mapPendingQuestion() reads on the detail/list rows), the REST analog of the
+  // MCP `ask_user` verb. Cleared server-side by `answer_question`. This is the
+  // provider-AGNOSTIC protocol call; the Stop-hook backstop (a Claude-Code
+  // adapter) is one caller, but nothing here is Claude-specific.
+  //
+  // PHI: `text` is the (possibly patient-visible) question — sent to the server,
+  // which encrypts pending_question at rest (verified). NEVER logged locally
+  // (the request helper never logs bodies). Callers that can't safely extract a
+  // PHI-free question pass a generic string instead (see the backstop).
+  //
+  // We surface non-2xx as a STRUCTURED { ok:false, reason } (never throw on the
+  // expected 400/404/409) so a best-effort backstop degrades quietly rather
+  // than crashing a hook-driven POST.
+  async askUser(
+    taskId: string,
+    text: string,
+    options?: string[],
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const body: Record<string, unknown> = { text };
+    if (options && options.length) body.options = options;
+    const res = await this.request(
+      'POST',
+      `/chromeext/${encodeURIComponent(taskId)}/ask`,
+      body,
+    );
+    if (res.status === 200 || res.status === 201) {
+      await res.json().catch(() => ({}));
+      // Reflect optimistically so the "asked" attention bucket lights up before
+      // the next poll. PHI-safe fields only reach the persisted skeleton; the
+      // question text stays in the in-memory cache row.
+      const row = this.cache.get(taskId);
+      if (row) {
+        this.cache.set(taskId, {
+          ...row,
+          pending_question: {
+            text,
+            ...(options && options.length ? { options } : {}),
+          },
+        });
+        breezeHost().onTasksChanged();
+      }
+      return { ok: true };
+    }
+    if (
+      res.status === 400 ||
+      res.status === 404 ||
+      res.status === 409 ||
+      res.status === 422
+    ) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 422
+          ? 'phi_rejected'
+          : res.status === 409
+            ? 'claim_conflict'
+            : res.status === 400
+              ? 'empty'
+              : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    throw new Error(`typebuild: ask_user failed (${res.status})`);
+  }
+
   // POST /chromeext/projects/{id}/archive | /unarchive (task-2c5448be520a).
   // Distinct, single-purpose verbs (NOT a generic update PATCH — that path is
   // owned by a sibling task) so the two write paths don't collide. Returns the
