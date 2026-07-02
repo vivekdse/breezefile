@@ -17,6 +17,7 @@ import { CopilotKit, CopilotSidebar, useAgentContext } from '@copilotkit/react-c
 import '@copilotkit/react-core/v2/styles.css';
 import './copilot-theme.css';
 import { useStore } from '../store';
+import { useTheme, isDarkTheme } from '../theme';
 import { useCopilotInfo } from './useCopilotInfo';
 import { CopilotActions } from './actions';
 import { TaskActions } from './taskActions';
@@ -80,13 +81,21 @@ function SetupHintToggle() {
  *  the app isn't blocked on the copilot-availability probe. */
 export function CopilotDock({ children }: { children: ReactNode }) {
   const info = useCopilotInfo();
+  // Subscribe to the active palette. Our copilot-theme.css remaps CopilotKit
+  // v2's [data-copilotkit] semantic tokens onto the app tokens, so the sidebar
+  // already tracks every theme. The `.dark` class here is belt-and-suspenders:
+  // it flips v2's own `cpk:dark:*` utility variants (which gate on a `.dark`
+  // ancestor, a class the app never sets) on dark palettes like dusk/plum.
+  const [theme] = useTheme();
+  const dockClass = isDarkTheme(theme) ? 'copilot-dock dark' : 'copilot-dock';
+
   if (!info) return <>{children}</>;
 
   if (!info.enabled || !info.port) {
     return (
       <>
         {children}
-        <div className="copilot-dock copilot-dock--disabled">
+        <div className={`${dockClass} copilot-dock--disabled`}>
           <SetupHintToggle />
         </div>
       </>
@@ -98,7 +107,7 @@ export function CopilotDock({ children }: { children: ReactNode }) {
   return (
     <CopilotKit runtimeUrl={runtimeUrl} useSingleEndpoint>
       {children}
-      <div className="copilot-dock">
+      <div className={dockClass}>
         <CopilotGrounding />
       </div>
     </CopilotKit>

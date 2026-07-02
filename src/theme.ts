@@ -72,6 +72,21 @@ const LEGACY_THEME_ALIASES: Record<string, Theme> = {
 
 export const DEFAULT_THEME: Theme = 'dusk';
 
+/**
+ * Themes whose canvas/panel are dark (light text on dark surfaces). Used to
+ * decide whether a `.dark` ancestor class should be set for third-party UI
+ * that gates its own dark styling on `.dark` (e.g. CopilotKit v2's
+ * `cpk:dark:*` utilities). The app itself never needs a `.dark` class — its
+ * tokens key off data-theme — but embedded libraries sometimes do.
+ */
+const DARK_THEMES = new Set<Theme>(['dusk', 'plum']);
+
+/** Whether the given theme (default: the one on <html>) is a dark palette. */
+export function isDarkTheme(theme?: Theme): boolean {
+  const t = theme ?? (document.documentElement.dataset.theme as Theme | undefined);
+  return t != null && DARK_THEMES.has(t);
+}
+
 const STORAGE_KEY = 'fm.theme';
 // Presence of this key means the user explicitly picked a theme. Without
 // it, any value in STORAGE_KEY is a stale artifact from an older build

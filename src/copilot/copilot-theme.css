@@ -1,28 +1,246 @@
-/* task-8676ddafadf0 / task-24ea35660cd0 — CopilotKit sidebar theming.
+/* task-c47e6f60bb2d — CopilotKit v2 sidebar theming parity.
  *
- * We're on CopilotKit's v2 UI (@copilotkit/react-core/v2), which is built
- * with Tailwind's atomic utility classes and `--cpk-*` custom properties —
- * NOT the stable `.copilotKitChat`/`.copilotKitSidebar`/`.copilotKitButton`
- * class names v1's @copilotkit/react-ui shipped. Those v1 selectors are gone
- * (nothing in the DOM matches them anymore); full dark-theme/token parity
- * with v2's Tailwind variables is a follow-up (task-52bb167f32fb's sibling).
- * For now we hook the few stable attributes v2 does expose
- * (data-testid="copilot-chat" / "copilot-chat-textarea") for the one thing
- * that actually breaks UX if left alone: text selection.
+ * We're on CopilotKit's v2 UI (@copilotkit/react-core/v2). v2 scopes its
+ * semantic color tokens under the [data-copilotkit] attribute (which sits on
+ * the sidebar/toggle inside .copilot-dock) with LIGHT defaults
+ * (--background: oklch(100% 0 0) = white). Dark mode only activates under a
+ * `.dark` ancestor class (`.dark [data-copilotkit]`). The app themes <html>
+ * with data-theme="dusk" (and light/paper/pastel/… variants) and has NO
+ * `.dark` class — so v2 stays on its white light defaults regardless of the
+ * app theme. That's the "plain white sidebar" bug.
+ *
+ * Fix: remap v2's [data-copilotkit] semantic tokens onto the app design-system
+ * tokens (src/styles/tokens.css). No hardcoded hex/oklch here — every value
+ * flows from an app token, so the sidebar tracks EVERY theme automatically,
+ * light and dark, the moment data-theme changes on <html>.
+ *
+ * Design language borrowed from guruandai's CopilotKit surface: an
+ * "accent-as-light" launcher (the brand color reads as a light source through
+ * a dusk panel, not a flat candy disc), a glassmorphic frosted panel with an
+ * accent-tinted paper shadow, and spring-ish motion. All expressed in this
+ * app's own accent/panel tokens so it inherits the active theme's hue.
  */
+
+/* ------------------------------------------------------------------ *
+ * 1. Semantic token bridge: v2 [data-copilotkit] vars -> app tokens.  *
+ *    This alone fixes the white-sidebar bug across all themes.        *
+ *                                                                      *
+ *    Specificity note: v2 ships two rules — `[data-copilotkit]` (0,1,0 *
+ *    light defaults) AND `.dark [data-copilotkit], [data-copilotkit]   *
+ *    .dark` (0,2,0 dark oklch). On dusk/plum we set `.dark` on the      *
+ *    ancestor .copilot-dock, so v2's `.dark [data-copilotkit]` (0,2,0)  *
+ *    would OUTRANK a bare `[data-copilotkit]` override and re-apply     *
+ *    v2's dark grays. We therefore match at >= that specificity with    *
+ *    the .copilot-dock-scoped selectors below (both the .dark-ancestor  *
+ *    and no-.dark cases), so our app-token mapping always wins.         *
+ * ------------------------------------------------------------------ */
+/* Unscoped fallback (0,1,0): catches any [data-copilotkit] surface that
+   portals out of .copilot-dock to document.body (e.g. v2's fixed full-screen
+   overlay) and would otherwise fall back to v2's white defaults. The
+   .copilot-dock-scoped rule that follows re-declares the same mapping at
+   higher specificity to win the .dark contest for in-tree surfaces. */
+[data-copilotkit] {
+  --background: var(--panel, var(--bg-1));
+  --card: var(--panel, var(--bg-1));
+  --popover: var(--panel, var(--bg-1));
+  --secondary: var(--panel-2, var(--bg-2));
+  --muted: var(--chip, var(--panel-2, var(--bg-2)));
+  --accent: var(--chip, var(--panel-2, var(--bg-2)));
+  --foreground: var(--text-on-panel);
+  --card-foreground: var(--text-on-panel);
+  --popover-foreground: var(--text-on-panel);
+  --secondary-foreground: var(--text-on-panel);
+  --accent-foreground: var(--text-on-panel);
+  --muted-foreground: var(--muted-on-panel);
+  --primary: var(--accent);
+  --primary-foreground: var(--text-on-accent);
+  --border: var(--rule-on-panel);
+  --input: var(--rule-on-panel);
+  --ring: var(--accent);
+  --sidebar: var(--panel, var(--bg-1));
+  --sidebar-foreground: var(--text-on-panel);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--text-on-accent);
+  --sidebar-accent: var(--chip, var(--panel-2, var(--bg-2)));
+  --sidebar-accent-foreground: var(--text-on-panel);
+  --sidebar-border: var(--rule-on-panel);
+  --sidebar-ring: var(--accent);
+  --radius: var(--r-lg, 10px);
+}
+
+.copilot-dock [data-copilotkit],
+.copilot-dock.dark [data-copilotkit],
+.copilot-dock [data-copilotkit].dark {
+  /* Surfaces */
+  --background: var(--panel, var(--bg-1));
+  --card: var(--panel, var(--bg-1));
+  --popover: var(--panel, var(--bg-1));
+  --secondary: var(--panel-2, var(--bg-2));
+  --muted: var(--chip, var(--panel-2, var(--bg-2)));
+  --accent: var(--chip, var(--panel-2, var(--bg-2)));
+
+  /* Text on those surfaces */
+  --foreground: var(--text-on-panel);
+  --card-foreground: var(--text-on-panel);
+  --popover-foreground: var(--text-on-panel);
+  --secondary-foreground: var(--text-on-panel);
+  --accent-foreground: var(--text-on-panel);
+  --muted-foreground: var(--muted-on-panel);
+
+  /* Brand / primary — the app accent, with theme-tuned ink on top */
+  --primary: var(--accent);
+  --primary-foreground: var(--text-on-accent);
+
+  /* Lines & focus */
+  --border: var(--rule-on-panel);
+  --input: var(--rule-on-panel);
+  --ring: var(--accent);
+
+  /* The sidebar drawer paints ITSELF from the --sidebar* family, NOT
+     --background — v2's light default is --sidebar: oklch(98.5% 0 0)
+     (near-white), which is the actual white-panel we're fixing. Map the
+     whole family to app tokens too, or the panel stays white even after
+     --background is remapped. */
+  --sidebar: var(--panel, var(--bg-1));
+  --sidebar-foreground: var(--text-on-panel);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: var(--text-on-accent);
+  --sidebar-accent: var(--chip, var(--panel-2, var(--bg-2)));
+  --sidebar-accent-foreground: var(--text-on-panel);
+  --sidebar-border: var(--rule-on-panel);
+  --sidebar-ring: var(--accent);
+
+  /* Match the app's radius scale so bubbles/inputs feel native */
+  --radius: var(--r-lg, 10px);
+}
+
+/* ------------------------------------------------------------------ *
+ * 2. Inner surfaces v2 hardcodes and gates on `.dark` (which we never *
+ *    set). v2 still emits the stable legacy class names alongside its *
+ *    cpk:* utilities, so we can retarget them with app tokens for      *
+ *    full per-theme fidelity (task option (a)).                        *
+ * ------------------------------------------------------------------ */
+
+/* The chat input box (cpk:bg-white cpk:dark:bg-[#303030]) — pin to a panel
+   surface so it reads correctly on paper/pastel/dusk, not just white/#303030. */
+.copilot-dock .copilotKitInput,
+.copilot-dock .copilotKitInput textarea,
+.copilot-dock [data-testid='copilot-chat-textarea'] {
+  background: var(--panel-2, var(--bg-2)) !important;
+  color: var(--text-on-panel) !important;
+  border-color: var(--rule-on-panel) !important;
+}
+
+/* Placeholder — hardcoded gray in v2; use the theme's muted-on-panel. */
+.copilot-dock .copilotKitInput textarea::placeholder,
+.copilot-dock [data-testid='copilot-chat-textarea']::placeholder {
+  color: var(--muted-on-panel) !important;
+  opacity: 1;
+}
+
+/* Chat + header + message stream surfaces. Belt-and-suspenders alongside the
+   --sidebar* token bridge above: pin the concrete surfaces by their stable
+   class / data-testid too, so no inner white panel slips through. */
+.copilot-dock .copilotKitChat,
+.copilot-dock .copilotKitMessages,
+.copilot-dock .copilotKitHeader,
+.copilot-dock .copilotKitSidebar,
+.copilot-dock [data-testid='copilot-sidebar'],
+.copilot-dock [data-testid='copilot-message-list'] {
+  background: var(--panel, var(--bg-1)) !important;
+  color: var(--text-on-panel) !important;
+}
+
+.copilot-dock .copilotKitHeader {
+  border-bottom: 1px solid var(--rule-on-panel) !important;
+}
+
+/* Suggestion pills — outlined idle, accent-filled on hover (guruandai's pill
+   recipe, in this app's accent). v2 tags these data-testid="copilot-suggestion"
+   (the v1 .copilotKitResponseButton class is gone). */
+.copilot-dock [data-testid='copilot-suggestion'] {
+  background: var(--panel, var(--bg-1)) !important;
+  color: var(--text-on-panel) !important;
+  border: 1.5px solid var(--accent) !important;
+  border-radius: 999px !important;
+  transition: background var(--motion-hover), color var(--motion-hover),
+    transform var(--motion-press);
+}
+
+.copilot-dock [data-testid='copilot-suggestion']:hover {
+  background: var(--accent) !important;
+  color: var(--text-on-accent) !important;
+  transform: scale(1.03);
+}
+
+/* ------------------------------------------------------------------ *
+ * 3. The panel itself: glassmorphic frost + accent-tinted lift.        *
+ *    v2 renders the sidebar as [data-copilotkit] with role structure;  *
+ *    give the drawer a frosted, elevated feel that matches the app.    *
+ * ------------------------------------------------------------------ */
+.copilot-dock [data-copilotkit] {
+  /* Slight saturated frost over the panel; falls back gracefully where
+     backdrop-filter is unsupported because --panel is already opaque. */
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow:
+    var(--shadow-2),
+    -4px 0 24px var(--accent-soft);
+  border-left: 1px solid var(--rule-on-panel);
+}
 
 /* The app body sets `user-select: none` (file-manager chrome convention,
    src/styles/base.css) — re-enable selection for chat replies and error
    details (e.g. a "Failed to fetch" stack) so they can be copied. */
 .copilot-dock [data-testid='copilot-chat'],
-.copilot-dock [data-testid='copilot-chat-textarea'] {
+.copilot-dock [data-testid='copilot-chat-textarea'],
+.copilot-dock .copilotKitMessages {
   user-select: text;
   -webkit-user-select: text;
 }
 
-/* Disabled state — no API key configured. A quiet corner launcher matching
-   the other bottom-right chips (UpdateChip, TipsChip) that reveals a one-line
-   setup hint on click, without ever mounting the CopilotKit provider. */
+/* ------------------------------------------------------------------ *
+ * 4. The launcher / toggle button — "accent as light".                *
+ *    A deep panel disc where the accent shows as the icon color and    *
+ *    as a soft halo ring + outer glow + inner light, so the brand hue  *
+ *    reads as a light source through the panel rather than a flat      *
+ *    candy button. Borrowed from guruandai's .chat-sidebar-toggle;     *
+ *    reimplemented here on the app's accent/panel tokens.              *
+ * ------------------------------------------------------------------ */
+
+/* v2's own floating toggle button (when the sidebar is closed). v2 tags it
+   data-testid="copilot-chat-toggle" (and emits .copilotKitButton); retheme
+   it into the lit-window recipe. */
+.copilot-dock .copilotKitButton,
+.copilot-dock [data-testid='copilot-chat-toggle'] {
+  background: var(--panel, var(--bg-2)) !important;
+  color: var(--accent) !important;
+  border: 1px solid
+    color-mix(in srgb, var(--accent) 35%, transparent) !important;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 8px 28px color-mix(in srgb, var(--accent) 22%, transparent),
+    inset 0 0 24px color-mix(in srgb, var(--accent) 8%, transparent) !important;
+  transition: transform var(--motion-hover), box-shadow var(--motion-hover),
+    border-color var(--motion-hover) !important;
+}
+
+.copilot-dock .copilotKitButton:hover,
+.copilot-dock [data-testid='copilot-chat-toggle']:hover {
+  transform: scale(1.08);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent) !important;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--accent) 15%, transparent),
+    0 10px 32px color-mix(in srgb, var(--accent) 32%, transparent),
+    inset 0 0 28px color-mix(in srgb, var(--accent) 14%, transparent) !important;
+}
+
+/* ------------------------------------------------------------------ *
+ * 5. Disabled state — no API key configured. A quiet corner launcher   *
+ *    matching the other bottom-right chips, upgraded to the same        *
+ *    lit-window recipe with a gentle breathing glow so it reads as an   *
+ *    inviting "turn me on" affordance rather than dead chrome.          *
+ * ------------------------------------------------------------------ */
 .copilot-dock--disabled {
   position: fixed;
   right: var(--sp-4);
@@ -30,31 +248,66 @@
   z-index: var(--z-chrome);
 }
 
+.copilot-dock__standalone {
+  position: relative;
+}
+
 .copilot-dock__launcher {
-  width: 36px;
-  height: 36px;
+  width: 52px;
+  height: 52px;
   border-radius: 999px;
-  border: 1px solid var(--rule-on-panel);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   background: var(--panel, var(--bg-2));
-  color: var(--muted-on-panel);
-  font-size: var(--fs-lg);
+  color: var(--accent);
+  font-size: var(--fs-xl);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition: color var(--motion-hover), background var(--motion-hover);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent),
+    0 8px 28px color-mix(in srgb, var(--accent) 18%, transparent),
+    inset 0 0 24px color-mix(in srgb, var(--accent) 6%, transparent);
+  transition: transform var(--motion-hover), box-shadow var(--motion-hover),
+    border-color var(--motion-hover);
+  animation: copilot-launcher-breathe 4.2s var(--ease-in-out) infinite;
 }
 
 .copilot-dock__launcher:hover {
-  color: var(--text-on-panel);
-  background: var(--panel-2, var(--bg-3));
+  transform: scale(1.08);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 10px 32px color-mix(in srgb, var(--accent) 28%, transparent),
+    inset 0 0 28px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+@keyframes copilot-launcher-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent),
+      0 8px 28px color-mix(in srgb, var(--accent) 18%, transparent),
+      inset 0 0 24px color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent),
+      0 10px 34px color-mix(in srgb, var(--accent) 28%, transparent),
+      inset 0 0 28px color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilot-dock__launcher {
+    animation: none;
+  }
 }
 
 .copilot-dock__setup-hint {
   position: absolute;
   right: 0;
-  bottom: 44px;
+  bottom: 60px;
   width: 240px;
   padding: var(--sp-3);
   font: var(--fs-sm) var(--font-sans);
@@ -64,6 +317,18 @@
   border: 1px solid var(--rule-on-panel);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
+  animation: copilot-hint-in var(--motion-reveal);
+}
+
+@keyframes copilot-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .copilot-dock__setup-hint code {
