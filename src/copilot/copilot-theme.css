@@ -8,6 +8,21 @@
  * of CopilotKit's default light theme.
  */
 
+/* The app body sets `user-select: none` (file-manager chrome convention,
+   src/styles/base.css) — re-enable selection for everything Copilot renders
+   so chat replies and error details (e.g. a "Failed to fetch" stack) can be
+   copied. Covers the sidebar AND CopilotKit's portalled popups/toasts, which
+   mount outside .copilot-dock. */
+.copilot-dock,
+.copilotKitChat,
+.copilotKitWindow,
+.copilotKitSidebar,
+.copilotKitPopup,
+[class*='copilotKit'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .copilot-dock :where(.copilotKitChat, .copilotKitWindow, .copilotKitSidebar) {
   --copilot-kit-primary-color: var(--accent);
   --copilot-kit-contrast-color: var(--text-on-accent);
