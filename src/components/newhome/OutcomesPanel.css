@@ -1,21 +1,65 @@
-/* task-b9cdad64ab9c — STUB styling. */
+/* task-83a30b3c8804 — OutcomesPanel: finished-work rollup, grouped Done vs
+   Failed, collapsible per group. All colors route through app/--nh-* tokens
+   (see NewHomePage.css) — no hardcoded hex so both themes stay correct. */
 .nh-outcomes {
   background: var(--bg-1);
   border: 1px solid var(--border-1);
   border-radius: var(--r-lg);
   padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
 
 .nh-outcomes__title {
   font-weight: 600;
   font-size: var(--fs-sm);
   color: var(--text-on-panel);
-  margin-bottom: var(--sp-2);
 }
 
-.nh-outcomes__empty {
+.nh-outcomes__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.nh-outcomes__group-head {
+  appearance: none;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 2px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-on-panel);
+  width: 100%;
+  text-align: left;
+}
+
+.nh-outcomes__chevron {
+  display: inline-block;
+  transition: transform 0.12s ease;
   color: var(--muted-on-panel);
+}
+.nh-outcomes__chevron--open {
+  transform: rotate(90deg);
+}
+
+.nh-outcomes__group-title {
+  font-weight: 600;
   font-size: var(--fs-sm);
+}
+.nh-outcomes__group-title--done { color: var(--nh-done); }
+.nh-outcomes__group-title--failed { color: var(--nh-failed); }
+
+.nh-outcomes__group-count {
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xs);
+  background: var(--bg-2);
+  border-radius: 999px;
+  padding: 0 8px;
 }
 
 .nh-outcomes__list {
@@ -27,14 +71,14 @@
   gap: var(--sp-1);
 }
 
-.nh-outcomes__list button {
+.nh-outcomes__row {
   appearance: none;
   background: transparent;
   border: none;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 6px 4px;
+  padding: 6px 8px;
   width: 100%;
   text-align: left;
   cursor: pointer;
@@ -43,17 +87,46 @@
   font-size: var(--fs-sm);
   border-radius: var(--r-sm);
 }
-.nh-outcomes__list button:hover {
+.nh-outcomes__row:hover {
   background: var(--bg-2);
 }
 
-.nh-outcomes__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.nh-outcomes__pill {
   flex-shrink: 0;
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
 }
-.nh-outcomes__dot--done { background: var(--nh-done); }
-.nh-outcomes__dot--progress { background: var(--nh-progress); }
-.nh-outcomes__dot--needs { background: var(--nh-needs); }
-.nh-outcomes__dot--failed { background: var(--nh-failed); }
+.nh-outcomes__pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
+.nh-outcomes__pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
+
+.nh-outcomes__row-title {
+  flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.nh-outcomes__summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xs);
+}
+
+.nh-outcomes__who {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+}
+
+.nh-outcomes__empty {
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm);
+}

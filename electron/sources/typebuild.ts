@@ -1084,6 +1084,10 @@ export class TypeBuildTaskSource implements TaskSource {
     // Omit when unset so a create that doesn't care leaves the server default
     // (no agent). An unknown agent_id → the server 400s (surfaced below).
     if (input.agentId) payload.agent_id = input.agentId;
+    // task-83a30b3c8804 — optional structural chain linking (opaque ids,
+    // non-PHI). See TaskCreate.parentTaskId/dependsOn (src/types.ts).
+    if (input.parentTaskId) payload.parent_task_id = input.parentTaskId;
+    if (input.dependsOn && input.dependsOn.length > 0) payload.depends_on = input.dependsOn;
 
     const res = await this.request('POST', '/chromeext/tasks', payload);
     if (!res.ok) {
@@ -1122,6 +1126,11 @@ export class TypeBuildTaskSource implements TaskSource {
       // shows its assignment immediately; the resolved `agent` block arrives on
       // the next detail fetch. Non-PHI.
       agent_id: input.agentId ?? null,
+      // task-83a30b3c8804 — seed parent_task_id so the just-created row
+      // reflects chain-container membership immediately, without waiting on a
+      // detail re-fetch. `depends_on` is a DetailRow-only field (ListRow has
+      // no slot for it) — the next detail fetch picks it up instead.
+      parent_task_id: input.parentTaskId ?? null,
     });
     // notes (the body) is PHI-in-memory; attach it for the immediate return so
     // the composer can show the just-created task without a re-fetch.

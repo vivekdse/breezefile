@@ -9,7 +9,7 @@
 // already there — chains are carried via the local `TemplateConfigExt`
 // extension defined in newHomePrefs.ts, not by widening the shared
 // `TemplateConfig` (owned elsewhere).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { TemplateConfig, TemplateField } from './types';
 import type { ChainDef, ChainStepTemplate } from './newHomePrefs';
 import { getTemplateConfig } from './newHomePrefs';
@@ -170,6 +170,16 @@ export function TemplateEditor({
   function moveStep(index: number, dir: -1 | 1) {
     setDraft((d) => ({ ...d, steps: moveItem(d.steps, index, dir) }));
   }
+
+  // Escape closes/discards, matching NewTaskModal/TaskDetailDialog so
+  // Escape-to-close reads as one convention across every New Home overlay.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const chains = draft.chains ?? [];
   const activeChain = chains.find((c) => c.id === activeChainId) ?? null;

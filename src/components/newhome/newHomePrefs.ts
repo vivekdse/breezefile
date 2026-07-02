@@ -154,20 +154,13 @@ export function setTemplateConfig(
 // Turns a ChainDef into real tasks: one "container" task representing the
 // chain run, then one task per entry, in order.
 //
-// BRIDGE LIMITATIONS (read before touching this): the server's
-// /chromeext/tasks create endpoint reportedly accepts `parent_task_id` and
-// `depends_on` (see electron/sources/typebuild.ts createTask() comment,
-// "v2 adds priority, due_at, defer_until, parent_task_id, depends_on"), but
-// neither the client-side `TaskCreate` type (src/types.ts) nor
-// TypebuildSource.createTask()'s payload builder actually surface those two
-// fields today — createTask() only forwards title/task/due_at/defer_until/
-// priority/project_id/agent_id. Since this file may not edit types.ts or
-// electron/sources/typebuild.ts, real parent/dependency linking can't be
-// wired from here yet. Until that lands, this function encodes the
-// relationship as human-readable text in each task's `notes` (container id +
-// predecessor id + step position) so the chain is still legible on the
-// task, and leaves TODOs at the exact two spots that should switch to
-// structured fields.
+// task-83a30b3c8804 — BRIDGE LANDED: `TaskCreate.parentTaskId`/`dependsOn`
+// (src/types.ts) now forward to the server's `parent_task_id`/`depends_on`
+// via TypebuildSource.createTask() (electron/sources/typebuild.ts). This
+// function passes them structurally below; the human-readable `notes` text
+// is kept too (container id / predecessor id / step position) as a
+// belt-and-suspenders legibility aid for surfaces that don't yet render the
+// structural links, not as the source of truth.
 export function instantiateChain(
   chain: ChainDef,
   projectId: string | null | undefined,
@@ -191,9 +184,6 @@ async function instantiateChainImpl(
 
   const projectFields = projectId ? { projectId } : {};
 
-  // TODO(bridge): once TaskCreate exposes `parentTaskId`, create the
-  // container first and pass `{ parentTaskId: container.id }` to every step
-  // create below instead of only mentioning it in `notes`.
   const container = await createFn({
     title: `${chain.name} (chain)`,
     folder: '',
@@ -208,9 +198,6 @@ async function instantiateChainImpl(
     const title = renderChainTitle(entry.titleTemplate, { index: i + 1, chainName: chain.name });
     const noteParts = [`Step ${i + 1} of ${chain.entries.length} in chain "${chain.name}".`];
     noteParts.push(`Chain container: ${container.id}.`);
-    // TODO(bridge): once TaskCreate exposes `dependsOn`, pass
-    // `dependsOn: predecessor ? [predecessor.id] : []` instead of noting the
-    // predecessor id in text.
     if (predecessor) noteParts.push(`Depends on: ${predecessor.id} ("${predecessor.title}").`);
     if (entry.description) noteParts.push(entry.description);
     if (entry.humanGate) noteParts.push('Requires human approval before proceeding.');
@@ -219,6 +206,8 @@ async function instantiateChainImpl(
       title,
       folder: '',
       notes: noteParts.join(' '),
+      parentTaskId: container.id,
+      dependsOn: predecessor ? [predecessor.id] : undefined,
       ...projectFields,
     });
     created.push(task);

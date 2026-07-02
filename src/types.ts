@@ -376,6 +376,13 @@ export type TaskCreate = {
   // one agent per task). The local source ignores it; TypeBuild maps it to the
   // server's `agent_id` on create. Omitted / '' = no agent.
   agentId?: string;
+  // task-83a30b3c8804 — optional TypeBuild chain/linking fields (opaque ids,
+  // NON-PHI). The local source ignores both; TypeBuild maps parentTaskId →
+  // `parent_task_id` and dependsOn → `depends_on` on create, giving New Home's
+  // chain instantiation (newHomePrefs.ts instantiateChain) structural linking
+  // instead of encoding relationships in free-text notes.
+  parentTaskId?: string | null;
+  dependsOn?: string[] | null;
 };
 
 // task-ab1d7955e23f — a TypeBuild Project as the renderer sees it (camelCase,

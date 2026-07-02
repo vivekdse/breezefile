@@ -48,6 +48,25 @@ export function NewHomePage() {
   const { tasks, counts, approvals, projects, loading, refresh } =
     useNewHomeData(selectedProjectId);
 
+  // Only one overlay (detail dialog / new-task modal / template editor) may
+  // be open at a time — opening one closes the others, so backdrop/Escape
+  // handling never has to reason about a stack.
+  function openTaskDetail(id: string) {
+    setShowNewTask(false);
+    setShowTemplateEditor(false);
+    setOpenTaskId(id);
+  }
+  function openNewTask() {
+    setOpenTaskId(null);
+    setShowTemplateEditor(false);
+    setShowNewTask(true);
+  }
+  function openTemplateEditor() {
+    setOpenTaskId(null);
+    setShowNewTask(false);
+    setShowTemplateEditor(true);
+  }
+
   const template = useMemo(
     () => getTemplateConfig(selectedProjectId),
     // Re-read whenever the project changes OR the editor just saved (the
@@ -88,14 +107,14 @@ export function NewHomePage() {
           <button
             type="button"
             className="nh__btn"
-            onClick={() => setShowTemplateEditor(true)}
+            onClick={openTemplateEditor}
           >
             Customize
           </button>
           <button
             type="button"
             className="nh__btn nh__btn--primary"
-            onClick={() => setShowNewTask(true)}
+            onClick={openNewTask}
           >
             + New Task
           </button>
@@ -118,7 +137,7 @@ export function NewHomePage() {
 
         <ApprovalBar
           approvals={approvals}
-          onOpenTask={(id) => setOpenTaskId(id)}
+          onOpenTask={openTaskDetail}
           onResolved={() => void refresh()}
         />
 
@@ -128,13 +147,15 @@ export function NewHomePage() {
           tasks={filteredTasks}
           filter={filter}
           template={template}
-          onOpenTask={(id) => setOpenTaskId(id)}
+          loading={loading}
+          onOpenTask={openTaskDetail}
+          onFilter={setFilter}
           onRetry={() => void refresh()}
         />
 
         <OutcomesPanel
           tasks={tasks.filter((t) => t.status === 'done' || t.status === 'failed')}
-          onOpenTask={(id) => setOpenTaskId(id)}
+          onOpenTask={openTaskDetail}
         />
       </div>
 
@@ -145,6 +166,10 @@ export function NewHomePage() {
           template={template}
           onClose={() => setOpenTaskId(null)}
           onResolved={() => {
+            // Resolve/cancel/retry all flow through here so stats, the
+            // roster row, and the approval bar update in place from the same
+            // refreshed useNewHomeData snapshot, rather than each surface
+            // tracking its own optimistic patch.
             void refresh();
             setOpenTaskId(null);
           }}

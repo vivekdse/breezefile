@@ -450,6 +450,7 @@ const SLIDES: Slide[] = [
       { name: 'compress / extract', what: 'zip a selection · expand an archive' },
       { name: 'maximize / fullscreen', chord: 'Ctrl+Shift+M / F11', what: 'toggle window maximize or fullscreen from inside TypeBuild — bypasses WM shortcuts (e.g. Alt+Space) that may collide with TypeBuild\'s own bindings on Linux' },
       { name: ':secrets', what: 'a searchable, file-manager-style secrets surface with TWO sections — aliases vault/credentials · YOUR IDENTITY: your own identifiers (NPI, Tax ID, login IDs, the me.* fields the agent fills into forms); write-only secret fields (SSN, DOB, bank account) are shown but cannot be revealed (the server refuses to read them back) · SAVED LOGINS: website logins captured when you sign in (or added here), grouped by site, with username rows and reveal-on-demand passwords · type in the search box to filter both; rows are keyboard-navigable and Enter reveals the focused row · masked by default, reveal one value at a time on click/Enter, re-masked on blur/close · create + delete in either section · server-backed, encrypted, no plaintext stored on this machine' },
+      { name: 'new-home', chord: ':new-home / :nh', what: 'agent work monitor for a project — an amber Approval Bar surfaces every task blocked on you first, Hero Stats (Done / In Progress / Needs You / Failed) double as filter toggles, the Roster table lists every task with per-project custom columns, who acted last (🤖 / 👤 / 🤖+👤), and one-click Answer/Retry, and an Outcomes rollup below groups finished work (Done vs Failed) with a one-line result per task · click any row to open the detail dialog: full evidence log, structured outcome, cancel/retry, and a talk-back box to message the agent · Customize opens the per-project Template Editor (custom fields, roster columns, approval rules, steps, and reusable multi-step Chains) · + New Task opens a conversational composer that turns chat answers into a structured task' },
       { name: 'settings', chord: '?', what: 'view & rebind keys · per-launcher settings · notification channels · Reset to defaults' },
       { name: 'permissions', what: 'see which protected folders TypeBuild can read; grant any still missing' },
       { name: 'upgrade', what: ':upgrade runs brew upgrade --cask breezefile and relaunches · the help dialog also surfaces an "Update available" banner when a newer release is out' },
@@ -467,7 +468,7 @@ const SLIDES: Slide[] = [
         // Tools
         'term', 'openTerminal', 'settings', 'permissions', 'upgrade',
         'secrets', 'chat', 'remote-attach', 'disconnect', 'run',
-        'task', 'tasks', 'projects', 'new-task', 'new-project',
+        'task', 'tasks', 'projects', 'new-task', 'new-project', 'new-home',
       ],
     },
   },
