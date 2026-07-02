@@ -36,13 +36,14 @@ import {
 } from 'node:fs';
 import { setBreezeHost } from '../electron/core/host';
 import type { BreezeHost } from '../electron/core/host';
-import { createTaskApi, sendJson, send } from '../electron/core/task-http';
+import { createTaskApi, sendJson, send, readJson } from '../electron/core/task-http';
 // Side-effect: registers the Claude agent runner so /tasks/:id/run and the
 // TypeBuild poll-claim-execute loop can resolve it on the server.
 import '../electron/agents';
 import { executeTaskRun } from '../electron/agents/execute';
 import { initHeadlessAuth } from '../electron/typebuild/auth';
 import { TypeBuildTaskSource } from '../electron/sources/typebuild';
+import { armClaimHeartbeat, CLAIM_HEARTBEAT_MS } from '../electron/core/task-source';
 import type { SourcedTask } from '../electron/core/task-source';
 import type { Task } from '../electron/tasks';
 // task-c5cae3255a96 — OPTIONAL push-based wake-up: when a headless run parks on
@@ -50,6 +51,15 @@ import type { Task } from '../electron/tasks';
 // instead of waiting for the agent's own poll. NON-LOAD-BEARING — the poll path
 // is the real wake-up; this only shaves latency when breezed holds the session.
 import { ResumeOnAnswer } from '../electron/agents/resume-on-answer';
+// task-6c62e6f0905e — install the SAME Claude Code hook bridge the Electron
+// app installs (electron/hooks-register.ts is Electron-free: node:fs/path/os
+// only) so a headless claude session spawned by THIS daemon can reach the
+// Stop-hook backstop below. We only IMPORT the existing mechanism here, never
+// modify it — headless gets the identical hook script + settings.json merge
+// a desktop install gets.
+import { registerBreezeHooks } from '../electron/hooks-register';
+import { runStopBackstop } from '../electron/claude-stop-backstop';
+import type { StopSignal } from '../electron/claude-stop-backstop';
 
 const DIR = path.join(os.homedir(), '.breezefile');
 const API_FILE = path.join(DIR, 'api.json');
@@ -129,6 +139,24 @@ function syntheticTaskFrom(claimed: SourcedTask): Task {
 async function runClaimed(source: TypeBuildTaskSource, claimed: SourcedTask) {
   const id = claimed.id;
   inFlightRuns += 1;
+  // task-6c62e6f0905e — renew the server-side claim while this headless run is
+  // in flight so claim freshness (the liveness signal of record; see
+  // src/projects/attention.mjs isStalledRow) never lapses on a long unattended
+  // run — a claimant is elsewhere (this daemon), so the GUI's own keep-alive
+  // (typebuild.ts, fm-cveh/S8) never arms for it. Reuses the SAME idempotent
+  // claim endpoint (sourceAction 'claim' → POST /chromeext/<id>/claim) rather
+  // than inventing a new verb. Disarmed unconditionally below so a finished
+  // run (success, failure, or a thrown error) never keeps renewing a claim it
+  // no longer holds.
+  const disarmHeartbeat = armClaimHeartbeat(async () => {
+    try {
+      await source.sourceAction?.(id, 'claim');
+    } catch {
+      // Best-effort — a failed renew just means the next tick retries; if the
+      // claim is genuinely gone, the run's own complete/release below simply
+      // no-ops against server state that's already moved on.
+    }
+  }, CLAIM_HEARTBEAT_MS);
   try {
     const synthetic = syntheticTaskFrom(claimed);
     const { result } = await executeTaskRun(synthetic, {
@@ -187,6 +215,7 @@ async function runClaimed(source: TypeBuildTaskSource, claimed: SourcedTask) {
       /* best-effort */
     }
   } finally {
+    disarmHeartbeat();
     inFlightRuns -= 1;
   }
 }
@@ -376,6 +405,29 @@ function handleChanges(req: IncomingMessage, res: ServerResponse) {
   });
 }
 
+// task-6c62e6f0905e — headless analog of api-server.ts's /claude-stopped: the
+// Stop-hook BACKSTOP for unlogged questions (task-c926bbe959f6), now reachable
+// from a claude session THIS daemon spawned (registerBreezeHooks() below
+// installs the same hook script on this machine). Only `tbSource` can ever be
+// the target here — breezed has exactly one live source — so we skip the
+// getTaskSource(sourceId) lookup the Electron app needs. Always 200s (never
+// blocks a hook) and bumps the change feed so an attached laptop refreshes
+// promptly instead of waiting for its next poll.
+async function handleClaudeStopped(req: IncomingMessage, res: ServerResponse) {
+  const body = await readJson<StopSignal>(req).catch(() => ({}) as StopSignal);
+  const usable = tbSource ?? undefined;
+  void runStopBackstop(body, usable).then((out) => {
+    // NON-PHI log line (fixed reason strings + opaque task id only).
+    if (out.flagged) {
+      console.log('[breezed] claude-stopped: flagged unlogged question on', shortId(out.taskId));
+    } else {
+      console.log('[breezed] claude-stopped: no-op:', out.reason);
+    }
+    bump();
+  });
+  return sendJson(res, 200, { ok: true });
+}
+
 async function route(req: IncomingMessage, res: ServerResponse) {
   if (taskApi.tryHealthz(req, res)) return;
   if (!taskApi.authorized(req)) return send(res, 401, 'unauthorized');
@@ -383,6 +435,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (url.pathname === '/tasks/changes' && (req.method ?? 'GET') === 'GET') {
     return handleChanges(req, res);
+  }
+  if (url.pathname === '/claude-stopped' && (req.method ?? 'GET') === 'POST') {
+    return handleClaudeStopped(req, res);
   }
 
   if (await taskApi.route(req, res)) return;
@@ -424,6 +479,18 @@ server.listen(0, '127.0.0.1', () => {
   const port = typeof addr === 'object' && addr ? addr.port : 0;
   writeApiFile(port);
   console.log(`[breezed] listening on 127.0.0.1:${port} (pid ${process.pid})`);
+  // task-6c62e6f0905e — install the SAME Claude Code hook bridge the Electron
+  // app installs, so a headless claude session THIS daemon spawns can reach
+  // /claude-stopped above (the unlogged-question backstop) instead of
+  // silently ending with no signal at all. Best-effort + idempotent (skips on
+  // Windows, no-ops if unchanged); a failure here degrades to "poll only"
+  // liveness, never blocks the server or the TypeBuild loop.
+  try {
+    const hookOutcome = registerBreezeHooks();
+    console.log(`[breezed] claude hooks: ${hookOutcome}`);
+  } catch (e) {
+    console.warn('[breezed] claude hook registration failed:', (e as Error).message);
+  }
   // Start the TypeBuild loop after the server is up so run-history/overlay
   // routes are served immediately even before sign-in completes.
   void startTypeBuildLoop();

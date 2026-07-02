@@ -219,6 +219,13 @@
   font-size: var(--fs-2xs);
 }
 
+/* task-7dbad56cd47c — transient "Sent — the agent will see this" confirmation
+   after a card's answer lands (bar-level; the resolved card is gone). */
+.nh-approval-bar__sent-note {
+  color: var(--ok);
+  font-size: var(--fs-2xs);
+}
+
 /* [data-theme="light"] needs no overrides — every value above routes through
    theme-safe composite tokens (--nh-needs*, --text-on-*, --bg-*, --border-*,
    --ok/--err) that already resolve correctly per theme (see tokens.css). */

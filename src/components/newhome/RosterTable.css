@@ -141,6 +141,32 @@
   font-weight: 600;
   white-space: nowrap;
 }
+/* task-6c62e6f0905e — "agent active" pulse. A subtle breathing dot ahead of
+   the status pill on a live 'progress' row, so the roster reads "someone's on
+   this right now" at a glance without a noisy badge. Token color (matches the
+   progress pill), reduced-motion-safe (static dot, no animation, when the
+   user's OS says so). */
+.nh-roster__live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--nh-progress);
+  vertical-align: middle;
+  animation: nh-roster-pulse 1.8s ease-in-out infinite;
+}
+@keyframes nh-roster-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nh-roster__live-dot {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
 .nh-roster__pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-roster__pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
 .nh-roster__pill--queued { background: var(--nh-queued-soft); color: var(--nh-queued); }

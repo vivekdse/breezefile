@@ -9,6 +9,7 @@
 // docs/typebuild-data-field-contract.md).
 import { useMemo } from 'react';
 import type { NewHomeStatus, NewHomeTask, TemplateConfig, TemplateField } from './types';
+import { claimFreshness } from '../tasks/lifecycle.mjs';
 import './RosterTable.css';
 
 const FILTER_PILLS: { id: 'all' | NewHomeStatus; label: string }[] = [
@@ -35,6 +36,17 @@ const STATUS_LABEL: Record<NewHomeStatus, string> = {
 };
 
 const UPCOMING_WINDOW_DAYS = 7;
+
+/** task-6c62e6f0905e — tooltip for the live pulse: "Agent active · claim
+ *  renewed 12m ago" when we have a claim timestamp to describe (the common
+ *  case for a 'progress' row); a generic fallback when we don't (e.g. a
+ *  locally-open session whose row hasn't picked up claimedAt yet). Reuses the
+ *  SAME claim-freshness math the task-detail claim badge already uses
+ *  (src/components/tasks/lifecycle.mjs) rather than re-deriving relative time. */
+function liveTooltip(task: NewHomeTask): string {
+  const fresh = claimFreshness(task.raw.claimedAt ?? null);
+  return fresh ? `Agent active · claim renewed ${fresh.relative}` : 'Agent active';
+}
 
 /** Best-effort date parse for a template field value — accepts anything
  *  `Date` can parse (ISO, "Aug 2027", "2026-07-09", ...). Returns null when
@@ -289,6 +301,13 @@ export function RosterTable({
                     )}
                   </td>
                   <td>
+                    {t.live && (
+                      <span
+                        className="nh-roster__live-dot"
+                        aria-hidden="true"
+                        title={liveTooltip(t)}
+                      />
+                    )}
                     <span className={`nh-roster__pill nh-roster__pill--${t.status}`}>
                       {STATUS_LABEL[t.status]}
                     </span>

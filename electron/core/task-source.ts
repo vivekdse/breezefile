@@ -163,3 +163,40 @@ export function describeSource(s: TaskSource): TaskSourceInfo {
 export function unsupported(action: string): Error {
   return new Error(`unsupported: ${action}`);
 }
+
+// ─── claim heartbeat (task-6c62e6f0905e) ──────────────────────────────────
+// "An agent is actively working on task X" is only trustworthy when the
+// server-side claim stays FRESH for as long as the run is actually alive —
+// claim freshness is the liveness signal of record (src/projects/attention.mjs
+// isStalledRow / classify()), so a long-running executor must keep RENEWING
+// it, not just claim once at the start. Re-claiming by the current holder is
+// an idempotent renew (it only refreshes the TTL server-side) — this mirrors
+// the GUI-side keep-alive already armed for interactive sessions
+// (electron/sources/typebuild.ts, fm-cveh/S8, ~90min cadence against a 2h
+// TTL). This helper is the source-agnostic HEADLESS analog: any long-running
+// executor (daemon/breezed.ts today) arms a heartbeat for the duration of a
+// run via `source.sourceAction(id, 'claim')` — the SAME endpoint, no new
+// verb — and disarms it the instant the run ends (success, failure, or
+// error) so staleness never lingers past the run's own lifetime.
+export const CLAIM_HEARTBEAT_MS = 90 * 60_000; // matches typebuild.ts's KEEPALIVE_MS
+
+/** Arm a periodic call to `renew` every `ms` (default CLAIM_HEARTBEAT_MS).
+ *  Returns a disarm function — callers MUST call it exactly once when the run
+ *  ends so a finished run never keeps renewing a claim nobody holds anymore.
+ *  `renew` is expected to swallow its own errors (a transient network blip
+ *  should not crash the heartbeat, and this helper does not retry/backoff —
+ *  it only schedules). Idempotent to disarm twice. */
+export function armClaimHeartbeat(
+  renew: () => void | Promise<void>,
+  ms: number = CLAIM_HEARTBEAT_MS,
+): () => void {
+  const timer = setInterval(() => {
+    void renew();
+  }, ms);
+  let disarmed = false;
+  return () => {
+    if (disarmed) return;
+    disarmed = true;
+    clearInterval(timer);
+  };
+}

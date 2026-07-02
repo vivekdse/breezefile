@@ -1,0 +1,99 @@
+/* task-8676ddafadf0 — CopilotKit sidebar theming.
+ *
+ * CopilotKit's own stylesheet (@copilotkit/react-ui/styles.css) ships a
+ * light-mode palette via CSS custom properties scoped under
+ * `.copilotKitChat` / `[data-copilot-kit-theme]`. We override those variables
+ * with this app's design tokens (src/styles/tokens.css) so the sidebar reads
+ * as native chrome in every theme (dark-first, plus the paper family) instead
+ * of CopilotKit's default light theme.
+ */
+
+.copilot-dock :where(.copilotKitChat, .copilotKitWindow, .copilotKitSidebar) {
+  --copilot-kit-primary-color: var(--accent);
+  --copilot-kit-contrast-color: var(--text-on-accent);
+  --copilot-kit-background-color: var(--panel, var(--bg-1));
+  --copilot-kit-secondary-color: var(--panel-2, var(--bg-2));
+  --copilot-kit-secondary-contrast-color: var(--text-on-panel);
+  --copilot-kit-separator-color: var(--rule-on-panel);
+  --copilot-kit-muted-color: var(--muted-on-panel);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+}
+
+/* The floating launcher button — keep it visually quiet until hovered, in
+   line with the app's other bottom-corner chips (UpdateChip, TipsChip). */
+.copilot-dock .copilotKitButton {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow: var(--shadow-2);
+}
+
+.copilot-dock .copilotKitHeader {
+  background: var(--panel-2, var(--bg-2));
+  color: var(--text-on-panel);
+  border-bottom: 1px solid var(--rule-on-panel);
+}
+
+.copilot-dock .copilotKitMessages {
+  background: var(--panel, var(--bg-1));
+}
+
+.copilot-dock .copilotKitInput {
+  background: var(--panel-2, var(--bg-2));
+  border-top: 1px solid var(--rule-on-panel);
+  color: var(--text-on-panel);
+}
+
+/* Disabled state — no API key configured. A quiet corner launcher matching
+   the other bottom-right chips (UpdateChip, TipsChip) that reveals a one-line
+   setup hint on click, without ever mounting the CopilotKit provider. */
+.copilot-dock--disabled {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: var(--z-chrome);
+}
+
+.copilot-dock__launcher {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-on-panel);
+  background: var(--panel, var(--bg-2));
+  color: var(--muted-on-panel);
+  font-size: var(--fs-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: color var(--motion-hover), background var(--motion-hover);
+}
+
+.copilot-dock__launcher:hover {
+  color: var(--text-on-panel);
+  background: var(--panel-2, var(--bg-3));
+}
+
+.copilot-dock__setup-hint {
+  position: absolute;
+  right: 0;
+  bottom: 44px;
+  width: 240px;
+  padding: var(--sp-3);
+  font: var(--fs-sm) var(--font-sans);
+  color: var(--muted-on-panel);
+  line-height: var(--lh-normal);
+  background: var(--panel, var(--bg-2));
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+
+.copilot-dock__setup-hint code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  background: var(--chip, var(--bg-3));
+  padding: 1px 4px;
+  border-radius: var(--r-sm);
+}

@@ -39,13 +39,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTasks } from '../../tasks';
 import { fm } from '../../bridge';
 import { classify, todayKey } from '../../projects/index.mjs';
+import { useRunningSessions } from '../tasks/useRunningSessions';
 import type { Agent, Project, Task } from '../../types';
 import type { NewHomeStatus, NewHomeTask } from './types';
 
-function deriveStatus(t: Task, today: string, now: number): NewHomeStatus {
+// task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
+// "is this task an active agent" is never computed two different ways. classify()
+// is the SAME pure predicate the Projects attention rollup uses (src/projects/
+// attention.mjs), which keys liveness off CLAIM FRESHNESS — the signal of
+// record — not a parallel heuristic invented here.
+function deriveStatus(t: Task, c: ReturnType<typeof classify>): NewHomeStatus {
   if (t.status === 'done') return 'done';
   if (t.status === 'cancelled') return 'failed';
-  const c = classify(t, today, now);
   if (c.failed) return 'failed';
   if (c.asked || c.blocked || c.stalled) return 'needs';
   // "In Progress" means an agent is actively on it — a live in_progress
@@ -140,12 +145,26 @@ function deriveRisk(t: Task): string | undefined {
   return undefined;
 }
 
-function toNewHomeTask(t: Task, today: string, now: number): NewHomeTask {
+function toNewHomeTask(
+  t: Task,
+  today: string,
+  now: number,
+  runningSessions: Map<string, unknown>,
+): NewHomeTask {
   const lastActionAt = deriveLastActionAt(t);
+  const c = classify(t, today, now);
+  const status = deriveStatus(t, c);
+  // task-6c62e6f0905e — `live`: an agent is actively working right now. The
+  // 'progress' bucket already IS "in_progress and not stalled" (claim
+  // freshness, the signal of record); OR in a locally-open session for this
+  // task id (useRunningSessions) as a zero-latency corroborating signal for
+  // THIS machine — never a replacement for the server-side claim check, which
+  // is what makes the signal trustworthy for OTHER clients/machines too.
+  const live = status === 'progress' || runningSessions.has(t.id);
   return {
     id: t.id,
     title: t.title,
-    status: deriveStatus(t, today, now),
+    status,
     projectId: t.projectId ?? null,
     lastAction: lastActionAt === null ? '—' : compactAgo(lastActionAt, now),
     lastActionAt,
@@ -159,6 +178,7 @@ function toNewHomeTask(t: Task, today: string, now: number): NewHomeTask {
     // crashing.
     customValues: {},
     risk: deriveRisk(t),
+    live,
     raw: t,
   };
 }
@@ -176,6 +196,8 @@ export function useNewHomeData(projectId?: string | null): {
   const { tasks: rawTasks, loading, error, refresh } = useTasks({ includeDone: true });
   const [projects, setProjects] = useState<Project[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  // task-6c62e6f0905e — locally-open sessions for the `live` derivation below.
+  const runningSessions = useRunningSessions();
 
   useEffect(() => {
     let cancelled = false;
@@ -206,8 +228,8 @@ export function useNewHomeData(projectId?: string | null): {
       : rawTasks;
     const now = Date.now();
     const today = todayKey(now);
-    return scoped.map((t) => toNewHomeTask(t, today, now));
-  }, [rawTasks, projectId]);
+    return scoped.map((t) => toNewHomeTask(t, today, now, runningSessions));
+  }, [rawTasks, projectId, runningSessions]);
 
   const counts = useMemo(() => {
     const c: Record<NewHomeStatus, number> = { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 };

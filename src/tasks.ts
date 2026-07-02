@@ -786,3 +786,37 @@ export function formatDueLabel(due: string, today: string = todayISO()): string 
     day: 'numeric',
   });
 }
+
+// ─── task-7dbad56cd47c — talk-back helpers (message send UX) ─────────────────
+// Additive helpers for the New Home detail dialog / ApprovalBar send paths.
+
+/** Humanize a { ok:false, reason } from postTaskMessage/answerTaskQuestion for
+ *  the compose-box error line. Extends formatSourceReason's vocabulary with the
+ *  message-specific reasons so a raw server token never reaches the user. */
+export function formatMessageSendReason(reason: string | undefined): string {
+  switch (reason) {
+    case 'not_found':
+    case 'not visible':
+    case 'not_visible':
+      return "You don't have access to this task";
+    case 'empty':
+      return "The message can't be empty";
+    case 'conflict':
+      return 'The task changed while you were typing — reopen it and try again';
+    case 'no_pending_question':
+      return 'This question was already answered';
+    default:
+      return reason ?? 'The server rejected the message';
+  }
+}
+
+/** Write a user message INTO a live session tab's pty (the same channel
+ *  openResumeInTab uses to type the resume command). The running agent sees it
+ *  as an input line, clearly prefixed as a relayed user message. Newlines are
+ *  collapsed so a multi-line draft doesn't submit mid-message; the trailing CR
+ *  submits the line. PHI: `text` goes only to the local pty — never logged. */
+export function injectMessageIntoSession(ptyId: number, text: string): void {
+  const oneLine = text.replace(/\s*\r?\n\s*/g, ' ').trim();
+  if (!oneLine) return;
+  fm.termWrite(ptyId, `[user message via TypeBuild] ${oneLine}\r`);
+}

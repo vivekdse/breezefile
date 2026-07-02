@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { registerIpc } from './ipc';
+import { startCopilotRuntime } from './copilot/runtime';
+import { registerCopilotIpc } from './copilot/ipc';
 import { startApiServer } from './api-server';
 import { startScheduler } from './scheduler';
 import { startTaskReminders, setTaskReminderMode } from './task-reminders';
@@ -302,6 +304,14 @@ app.whenReady().then(() => {
   });
 
   timeSync('boot:registerIpc', () => registerIpc());
+  // task-8676ddafadf0 — CopilotKit sidebar foundation. registerCopilotIpc is
+  // cheap (just wires ipcMain.handle); startCopilotRuntime is async and
+  // fire-and-forget — it no-ops when no Anthropic key is configured, so it
+  // never blocks boot or throws into the whenReady chain.
+  timeSync('boot:registerCopilotIpc', () => registerCopilotIpc());
+  void startCopilotRuntime().catch((err) => {
+    console.error('[copilot] failed to start runtime:', (err as Error).message);
+  });
   // Inject the Electron host before any task subsystem runs so
   // tasks.ts/scheduler.ts broadcast to windows + raise notifications
   // exactly as before the P1 core extraction (breezed injects a

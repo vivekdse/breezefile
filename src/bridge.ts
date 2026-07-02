@@ -561,6 +561,12 @@ type Fm = {
   };
   // fm-ued6 — cold-start profiling: report the first committed frame to main.
   reportFirstPaint?: () => void;
+  // task-8676ddafadf0 — CopilotKit sidebar foundation. `enabled` is false
+  // when no Anthropic key is configured; the renderer degrades to a setup
+  // hint rather than mounting the CopilotKit provider.
+  copilot: {
+    info: () => Promise<{ enabled: boolean; port?: number; endpoint?: string }>;
+  };
 };
 
 export type TypebuildAuthState = { signedIn: boolean; email?: string };

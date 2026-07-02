@@ -17,8 +17,12 @@
 
 import { useState } from 'react';
 import type { NewHomeTask } from './types';
-import { answerTaskQuestion, markQuestionAnswered } from '../../tasks';
-import { formatSourceReason, formatOpError } from '../../errorMessages';
+import {
+  answerTaskQuestion,
+  markQuestionAnswered,
+  formatMessageSendReason,
+} from '../../tasks';
+import { formatOpError } from '../../errorMessages';
 import { answerOptions, canSubmitAnswer, normalizeAnswer } from '../tasks/taskAnswer.mjs';
 import './ApprovalBar.css';
 
@@ -82,6 +86,10 @@ export function ApprovalBar({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const [bulkNote, setBulkNote] = useState<string | null>(null);
+  // Transient confirmation after a card's answer lands. Bar-level (not on the
+  // card) because a resolved card is removed from `approvals` immediately —
+  // there is nowhere left on it to show "sent".
+  const [sentNote, setSentNote] = useState<string | null>(null);
 
   if (approvals.length === 0) return null;
 
@@ -112,6 +120,7 @@ export function ApprovalBar({
     if (!answer || submittingIds.has(taskId)) return;
     setSubmitting(taskId, true);
     clearError(taskId);
+    setSentNote(null);
     try {
       const res = await answerTaskQuestion(taskId, answer);
       if (res.ok) {
@@ -122,9 +131,10 @@ export function ApprovalBar({
           next.delete(taskId);
           return next;
         });
+        setSentNote('Sent — the agent will see this');
         onResolved(taskId);
       } else {
-        setErrors((prev) => ({ ...prev, [taskId]: formatSourceReason(res.reason) }));
+        setErrors((prev) => ({ ...prev, [taskId]: formatMessageSendReason(res.reason) }));
       }
     } catch (e) {
       setErrors((prev) => ({ ...prev, [taskId]: formatOpError('send answer', e) }));
@@ -229,6 +239,11 @@ export function ApprovalBar({
               Select all
             </label>
             <div className="nh-approval-bar__bulk-actions">
+              {sentNote && (
+                <span className="nh-approval-bar__sent-note" role="status">
+                  ✓ {sentNote}
+                </span>
+              )}
               {bulkNote && <span className="nh-approval-bar__bulk-note">{bulkNote}</span>}
               <button
                 type="button"

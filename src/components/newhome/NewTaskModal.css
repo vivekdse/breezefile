@@ -75,6 +75,29 @@
   min-width: 0;
 }
 
+/* ── Agent-conducted interview (task-ce125a047c70): CopilotChat filling the
+   same left-pane slot as the deterministic chat above. Re-theme its CSS vars
+   the same way CopilotDock's copilot-theme.css does for the sidebar, scoped
+   to this modal, so both chat surfaces read as one system. */
+.nh-newtask__left :where(.copilotKitChat) {
+  --copilot-kit-primary-color: var(--accent);
+  --copilot-kit-contrast-color: var(--text-on-accent);
+  --copilot-kit-background-color: var(--bg-0);
+  --copilot-kit-secondary-color: var(--bg-1);
+  --copilot-kit-secondary-contrast-color: var(--text-on-panel);
+  --copilot-kit-separator-color: var(--border-1);
+  --copilot-kit-muted-color: var(--muted-on-panel);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  height: 100%;
+}
+
+.nh-newtask__copilot-chat {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
 .nh-chat {
   flex: 1;
   overflow-y: auto;

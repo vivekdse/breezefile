@@ -17,6 +17,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createTask } from '../../tasks';
 import type { TemplateConfig, TemplateField } from './types';
+import { useCopilotInfo } from '../../copilot/useCopilotInfo';
+import { NewTaskCopilotChat } from '../../copilot/NewTaskCopilotChat';
 import './NewTaskModal.css';
 
 // ─── Conversation driver types (local to this file; not part of the shared
@@ -404,12 +406,26 @@ export function NewTaskModal({
   const [succeeded, setSucceeded] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
-  // Kick off the conversation once on mount.
+  // Agent-conducted interview (task-ce125a047c70): when the CopilotKit
+  // runtime is configured, the left pane is a real LLM interview
+  // (NewTaskCopilotChat) instead of the deterministic ConversationEngine
+  // below. The FORM remains the single source of truth either way — the
+  // copilot path can only affect it through the fill_field action, mirrored
+  // here as plain component state since there's no ConversationEngine
+  // driving it.
+  const copilotInfo = useCopilotInfo();
+  const copilotEnabled = !!(copilotInfo?.enabled && copilotInfo.port);
+  const [cpTitle, setCpTitle] = useState('');
+  const [cpValues, setCpValues] = useState<Record<string, string>>({});
+
+  // Kick off the conversation once on mount (deterministic driver only —
+  // the copilot path starts itself via NewTaskCopilotChat's initial label).
   useEffect(() => {
+    if (copilotEnabled) return;
     engineRef.current.start();
     rerender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [copilotEnabled]);
 
   // Auto-follow a "thinking" (agent-fetch) turn after a short simulated
   // delay, then advance the driver for real.
@@ -440,8 +456,13 @@ export function NewTaskModal({
 
   const engine = engineRef.current;
   const req = requiredFields(template);
-  const allRequiredFilled = req.every((f) => f.key in engine.state.values);
-  const canSubmit = engine.state.title.trim().length > 0 && allRequiredFilled;
+  // Effective form state: the copilot path's own state when enabled,
+  // otherwise the deterministic engine's — the two never mix within a
+  // single modal instance (copilotEnabled is stable for the modal's life).
+  const title = copilotEnabled ? cpTitle : engine.state.title;
+  const values = copilotEnabled ? cpValues : engine.state.values;
+  const allRequiredFilled = req.every((f) => f.key in values);
+  const canSubmit = title.trim().length > 0 && allRequiredFilled;
 
   function send() {
     const text = draft;
@@ -460,16 +481,18 @@ export function NewTaskModal({
     setBusy(true);
     setErr(null);
     try {
-      const title = engine.state.title.trim();
-      const body = summarizeBody(title, template, engine.state.values) + buildStructuredBlock(template, engine.state.values);
+      const finalTitle = title.trim();
+      const body = summarizeBody(finalTitle, template, values) + buildStructuredBlock(template, values);
       const t = await createTask({
-        title,
+        title: finalTitle,
         folder: '',
         notes: body,
         ...(projectId ? { projectId } : {}),
       });
-      engine.messages.push({ id: nextId(), who: 'agent', text: `Task created — starting "${title}".` });
-      rerender();
+      if (!copilotEnabled) {
+        engine.messages.push({ id: nextId(), who: 'agent', text: `Task created — starting "${finalTitle}".` });
+        rerender();
+      }
       setSucceeded(true);
       setTimeout(() => onCreated(t.id), 700);
     } catch (e) {
@@ -495,61 +518,72 @@ export function NewTaskModal({
 
         <div className="nh-newtask__body">
           <div className="nh-newtask__left">
-            <div className="nh-chat" ref={logRef}>
-              {engine.messages.map((m) => (
-                <div
-                  key={m.id}
-                  className={`nh-chat__msg nh-chat__msg--${m.who}${m.thinking ? ' nh-chat__msg--thinking' : ''}`}
-                >
-                  {m.thinking && <span className="nh-chat__spinner" aria-hidden="true" />}
-                  {m.text}
-                </div>
-              ))}
-              {activeChips && activeChips.length > 0 && !succeeded && (
-                <div className="nh-chat__chips">
-                  {activeChips.map((c) => (
-                    <button
-                      key={c.value}
-                      type="button"
-                      className="nh-chat__chip"
-                      onClick={() => sendChip(c)}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="nh-chat__input-row">
-              <input
-                className="nh-chat__input"
-                autoFocus
-                placeholder={succeeded ? '' : 'Type your answer…'}
-                value={draft}
-                disabled={succeeded || busy}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') send();
-                }}
+            {copilotEnabled ? (
+              <NewTaskCopilotChat
+                runtimeUrl={`http://127.0.0.1:${copilotInfo!.port}${copilotInfo!.endpoint ?? '/copilotkit'}`}
+                template={template}
+                onSetTitle={setCpTitle}
+                onSetValue={(key, value) => setCpValues((prev) => ({ ...prev, [key]: value }))}
               />
-              <button type="button" className="nh-chat__send" disabled={succeeded || busy || !draft.trim()} onClick={send}>
-                Send
-              </button>
-            </div>
+            ) : (
+              <>
+                <div className="nh-chat" ref={logRef}>
+                  {engine.messages.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`nh-chat__msg nh-chat__msg--${m.who}${m.thinking ? ' nh-chat__msg--thinking' : ''}`}
+                    >
+                      {m.thinking && <span className="nh-chat__spinner" aria-hidden="true" />}
+                      {m.text}
+                    </div>
+                  ))}
+                  {activeChips && activeChips.length > 0 && !succeeded && (
+                    <div className="nh-chat__chips">
+                      {activeChips.map((c) => (
+                        <button
+                          key={c.value}
+                          type="button"
+                          className="nh-chat__chip"
+                          onClick={() => sendChip(c)}
+                        >
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="nh-chat__input-row">
+                  <input
+                    className="nh-chat__input"
+                    autoFocus
+                    placeholder={succeeded ? '' : 'Type your answer…'}
+                    value={draft}
+                    disabled={succeeded || busy}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') send();
+                    }}
+                  />
+                  <button type="button" className="nh-chat__send" disabled={succeeded || busy || !draft.trim()} onClick={send}>
+                    Send
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="nh-newtask__right">
             <div className="nh-form-panel__head">Task details (auto-filled from conversation)</div>
             <div className="nh-form-panel__body">
-              <div className={`nh-form-field ${engine.state.title.trim() ? 'nh-form-field--filled' : 'nh-form-field--pending'}`}>
+              <div className={`nh-form-field ${title.trim() ? 'nh-form-field--filled' : 'nh-form-field--pending'}`}>
                 <div className="nh-form-field__k">Title</div>
                 <div className="nh-form-field__v">
-                  {engine.state.title.trim() || 'pending…'}
-                  {engine.state.title.trim() && <span className="nh-form-field__check">✓</span>}
+                  {title.trim() || 'pending…'}
+                  {title.trim() && <span className="nh-form-field__check">✓</span>}
                 </div>
               </div>
               {template.fields.map((f) => {
-                const value = engine.state.values[f.key];
+                const value = values[f.key];
                 const filled = value !== undefined;
                 return (
                   <div

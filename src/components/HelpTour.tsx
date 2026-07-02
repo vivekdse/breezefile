@@ -454,6 +454,7 @@ const SLIDES: Slide[] = [
       { name: 'settings', chord: '?', what: 'view & rebind keys · per-launcher settings · notification channels · Reset to defaults' },
       { name: 'permissions', what: 'see which protected folders TypeBuild can read; grant any still missing' },
       { name: 'upgrade', what: ':upgrade runs brew upgrade --cask breezefile and relaunches · the help dialog also surfaces an "Update available" banner when a newer release is out' },
+      { name: 'copilot', chord: '⌘/ or Ctrl+/', what: 'a persistent AI chat sidebar available on every surface — ask it to navigate the app (e.g. open New Home), create tasks or projects, customize a project\'s New Home columns/fields, filter the roster, or open a specific task · click the ✨ launcher bottom-right, or use the shortcut · in New Home\'s + New Task modal, the same agent conducts the interview one question at a time and fills the form live · needs an Anthropic API key configured (ANTHROPIC_API_KEY or the same key store the tag-assist NL box uses); shows a quiet setup hint instead when none is set · chat text is not persisted to disk' },
     ],
     // Registry-backed Navigate + Tools verbs. Most are curated above (and on the
     // Tasks slides for the task/project/remote verbs); rows NOT in `covers`

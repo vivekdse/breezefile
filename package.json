@@ -32,6 +32,10 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.57.0",
+    "@copilotkit/react-core": "^1.62.1",
+    "@copilotkit/react-ui": "^1.62.1",
+    "@copilotkit/runtime": "^1.62.1",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@milkdown/core": "^7.21.1",
     "@milkdown/crepe": "^7.21.1",
@@ -84,7 +88,10 @@
         {
           "from": "electron/browser",
           "to": "automation/electron/browser",
-          "filter": ["**/*.mjs", "**/*.json"]
+          "filter": [
+            "**/*.mjs",
+            "**/*.json"
+          ]
         },
         {
           "from": "node_modules/playwright-core",
@@ -138,7 +145,10 @@
         {
           "from": "electron/browser",
           "to": "automation/electron/browser",
-          "filter": ["**/*.mjs", "**/*.json"]
+          "filter": [
+            "**/*.mjs",
+            "**/*.json"
+          ]
         },
         {
           "from": "node_modules/playwright-core",
@@ -167,7 +177,10 @@
         {
           "from": "electron/browser",
           "to": "automation/electron/browser",
-          "filter": ["**/*.mjs", "**/*.json"]
+          "filter": [
+            "**/*.mjs",
+            "**/*.json"
+          ]
         },
         {
           "from": "node_modules/playwright-core",

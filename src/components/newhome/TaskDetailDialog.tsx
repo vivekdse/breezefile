@@ -29,11 +29,14 @@ import {
   answerTaskQuestion,
   markQuestionAnswered,
   postTaskMessage,
+  formatMessageSendReason,
+  injectMessageIntoSession,
 } from '../../tasks';
 import { fm } from '../../bridge';
 import { useStore } from '../../store';
 import { useTaskActions } from '../tasks/useTaskActions';
 import { useRunningSessions } from '../tasks/useRunningSessions';
+import { useOpenResumeInTab } from '../../openResumeInTab';
 import {
   answerOptions,
   canSubmitAnswer,
@@ -196,11 +199,15 @@ export function TaskDetailDialog({
   const [answerError, setAnswerError] = useState<string | null>(null);
 
   // ── talk-back (message) ───────────────────────────────────────────────────
+  // `messageSent` is the confirmation line shown after a successful send —
+  // null = nothing to confirm; otherwise the exact human-facing text (differs
+  // when the message was ALSO piped into an open session tab).
   const [messageDraft, setMessageDraft] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageError, setMessageError] = useState<string | null>(null);
-  const [messageSent, setMessageSent] = useState(false);
+  const [messageSent, setMessageSent] = useState<string | null>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
+  const openResumeInTab = useOpenResumeInTab();
 
   // Reset per-task local state when the open task changes.
   useEffect(() => {
@@ -211,7 +218,7 @@ export function TaskDetailDialog({
     setMessageDraft('');
     setSendingMessage(false);
     setMessageError(null);
-    setMessageSent(false);
+    setMessageSent(null);
   }, [taskId]);
 
   // Escape closes; backdrop click closes (via onClick below).
@@ -251,7 +258,12 @@ export function TaskDetailDialog({
     }
   }
 
-  async function sendMessage() {
+  // Works on a task in ANY status (open/in_progress/blocked/failed/done/
+  // cancelled) — the server's /messages append is visibility-gated only. When
+  // `alsoOpenSession` is set (the "Send & open session" button) a successful
+  // API append is followed by an openResumeInTab resume of the task's last
+  // recorded conversation, so the agent picks the message up promptly.
+  async function sendMessage(alsoOpenSession = false) {
     const text = messageDraft.trim();
     if (!text || sendingMessage) {
       messageRef.current?.focus();
@@ -259,13 +271,28 @@ export function TaskDetailDialog({
     }
     setSendingMessage(true);
     setMessageError(null);
+    setMessageSent(null);
     try {
       const res = await postTaskMessage(taskId, text);
       if (res.ok) {
         setMessageDraft('');
-        setMessageSent(true);
+        if (session) {
+          // A live session tab exists in THIS window: also type the message
+          // into its pty (same channel openResumeInTab uses for the resume
+          // command) so the running agent sees it immediately, not on its next
+          // task poll.
+          injectMessageIntoSession(session.ptyId, text);
+          setMessageSent('Sent — delivered to the open session');
+        } else if (alsoOpenSession && raw?.folder && lastRun?.conversation_id) {
+          setMessageSent('Sent — opening the session…');
+          await openResumeInTab(raw.folder, lastRun.conversation_id, raw.title);
+          onClose();
+          return;
+        } else {
+          setMessageSent('Sent — the agent will see this');
+        }
       } else {
-        setMessageError(formatSourceReason(res.reason));
+        setMessageError(formatMessageSendReason(res.reason));
       }
     } catch (e) {
       setMessageError(formatOpError('send message', e));
@@ -593,7 +620,7 @@ export function TaskDetailDialog({
                 disabled={sendingMessage}
                 onChange={(e) => {
                   setMessageDraft(e.target.value);
-                  setMessageSent(false);
+                  setMessageSent(null);
                 }}
               />
               <div className="nh-dialog__talkback-row">
@@ -605,7 +632,21 @@ export function TaskDetailDialog({
                 >
                   {sendingMessage ? 'Sending…' : 'Send message'}
                 </button>
-                {messageSent && <span className="nh-dialog__sent">Sent</span>}
+                {!session && raw?.folder && lastRun?.conversation_id && (
+                  // No live tab, but the last run recorded a resumable
+                  // conversation: offer send + resume in one step. Plain
+                  // "Send message" stays the default (API append only —
+                  // headless resume-on-answer plumbing wakes daemons).
+                  <button
+                    type="button"
+                    className="nh-dialog__btn"
+                    disabled={sendingMessage || !messageDraft.trim()}
+                    onClick={() => void sendMessage(true)}
+                  >
+                    Send &amp; open session
+                  </button>
+                )}
+                {messageSent && <span className="nh-dialog__sent">{messageSent}</span>}
               </div>
               {messageError && (
                 <div className="nh-dialog__error" role="alert">

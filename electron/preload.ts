@@ -985,6 +985,16 @@ const fm = {
   // first committed frame so the main process can close out the startup
   // timeline at the "first interactive frame" boundary. NON-PHI, fire-and-forget.
   reportFirstPaint: () => ipcRenderer.send('app:firstPaint'),
+  // task-8676ddafadf0 — CopilotKit sidebar foundation. Connection metadata
+  // only (no key, no chat content crosses this hop).
+  copilot: {
+    info: () =>
+      ipcRenderer.invoke('copilot:info') as Promise<{
+        enabled: boolean;
+        port?: number;
+        endpoint?: string;
+      }>,
+  },
 };
 
 contextBridge.exposeInMainWorld('fm', fm);

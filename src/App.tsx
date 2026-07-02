@@ -62,6 +62,7 @@ import { isTextEntryTarget } from './textFocus';
 import { isEditablePath } from './fileTypes.ts';
 import { celebratePaths } from './motion-utils';
 import { useOverlayExit } from './useOverlayExit';
+import { CopilotDock } from './copilot/CopilotDock';
 import type { CustomTagCriterion, Entry, Task } from './types';
 import { TAG_PALETTE, assignTagKey, newTagId } from './tags';
 import './App.css';
@@ -2263,6 +2264,11 @@ export function App() {
     <PlatformProvider>
       <StoreProvider>
         <Shell />
+        {/* task-8676ddafadf0 — persistent, toggleable AI copilot sidebar,
+            available on every surface. Mounted once at the app root (inside
+            StoreProvider so it can read the active tab kind); degrades to a
+            quiet setup-hint launcher when no Anthropic key is configured. */}
+        <CopilotDock />
       </StoreProvider>
     </PlatformProvider>
   );

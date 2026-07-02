@@ -23,7 +23,7 @@
 // PHI: task titles/custom-field values render in-app only; never persisted
 // to disk/logs (see docs/typebuild-data-field-contract.md).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNewHomeData } from './useNewHomeData';
 import { getTemplateConfig, setTemplateConfig } from './newHomePrefs';
 import type { NewHomeStatus } from './types';
@@ -34,9 +34,15 @@ import { TaskDetailDialog } from './TaskDetailDialog';
 import { NewTaskModal } from './NewTaskModal';
 import { TemplateEditor } from './TemplateEditor';
 import { OutcomesPanel } from './OutcomesPanel';
+import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import './NewHomePage.css';
 
 type FilterState = 'all' | NewHomeStatus;
+
+const FILTER_STATES: FilterState[] = ['all', 'done', 'progress', 'queued', 'needs', 'failed'];
+function isFilterState(v: unknown): v is FilterState {
+  return typeof v === 'string' && (FILTER_STATES as string[]).includes(v);
+}
 
 export function NewHomePage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -44,6 +50,12 @@ export function NewHomePage() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  // Bumped by the 'fm:newhome:templateChanged' listener below (fired by the
+  // Copilot customize_columns/add_template_field actions — see
+  // src/copilot/actions.tsx) so the `template` useMemo re-reads
+  // newHomePrefs after an out-of-band edit, the same way it already does
+  // after TemplateEditor's own onSave.
+  const [templateVersion, setTemplateVersion] = useState(0);
 
   const { tasks, counts, approvals, projects, loading, refresh } =
     useNewHomeData(selectedProjectId);
@@ -69,11 +81,43 @@ export function NewHomePage() {
 
   const template = useMemo(
     () => getTemplateConfig(selectedProjectId),
-    // Re-read whenever the project changes OR the editor just saved (the
+    // Re-read whenever the project changes, the editor just saved (the
     // editor's onSave below bumps a local version via setShowTemplateEditor,
-    // which already re-renders this component).
-    [selectedProjectId, showTemplateEditor],
+    // which already re-renders this component), or a Copilot action edited
+    // the template out-of-band (templateVersion, bumped by the
+    // 'fm:newhome:templateChanged' listener below).
+    [selectedProjectId, showTemplateEditor, templateVersion],
   );
+
+  // Copilot action bridge (task-ce125a047c70): set_roster_filter and
+  // open_task (src/copilot/actions.tsx) can't reach this component's state
+  // directly since the copilot is mounted at the app root, so they dispatch
+  // window CustomEvents instead. customize_columns/add_template_field write
+  // straight to newHomePrefs (the same storage TemplateEditor uses) and
+  // announce the change the same way, since this component owns no
+  // in-memory copy of the template beyond the memo above.
+  useEffect(() => {
+    function onFilter(e: Event) {
+      const detail = (e as CustomEvent<{ filter?: string }>).detail;
+      if (detail && isFilterState(detail.filter)) setFilter(detail.filter);
+    }
+    function onOpenTask(e: Event) {
+      const detail = (e as CustomEvent<{ taskId?: string }>).detail;
+      if (detail?.taskId) openTaskDetail(detail.taskId);
+    }
+    function onTemplateChanged() {
+      setTemplateVersion((v) => v + 1);
+    }
+    window.addEventListener('fm:newhome:filter', onFilter);
+    window.addEventListener('fm:newhome:openTask', onOpenTask);
+    window.addEventListener('fm:newhome:templateChanged', onTemplateChanged);
+    return () => {
+      window.removeEventListener('fm:newhome:filter', onFilter);
+      window.removeEventListener('fm:newhome:openTask', onOpenTask);
+      window.removeEventListener('fm:newhome:templateChanged', onTemplateChanged);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredTasks = useMemo(
     () => (filter === 'all' ? tasks : tasks.filter((t) => t.status === filter)),
@@ -85,6 +129,24 @@ export function NewHomePage() {
     : null;
 
   const openTask = openTaskId ? tasks.find((t) => t.id === openTaskId) : undefined;
+
+  // Publish grounding for the globally-mounted Copilot (src/copilot/
+  // actions.tsx's useCopilotReadable) — titles + ids + counts only, never
+  // task notes/custom field values (see newHomeContext.ts's PHI contract).
+  // Cleared on unmount so the copilot doesn't keep grounding on a stale New
+  // Home snapshot once the user navigates away.
+  useEffect(() => {
+    setNewHomeContext({
+      surface: 'new-home',
+      project: selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null,
+      counts,
+      needsYou: tasks
+        .filter((t) => t.status === 'needs')
+        .map((t) => ({ id: t.id, title: t.title })),
+    });
+  }, [selectedProject, counts, tasks]);
+
+  useEffect(() => clearNewHomeContext, []);
 
   return (
     <div className="nh">

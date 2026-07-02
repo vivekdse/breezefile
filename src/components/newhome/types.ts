@@ -53,6 +53,15 @@ export type NewHomeTask = {
   /** Optional short risk/flag annotation (e.g. "3rd retry", "low confidence").
    *  Free text, best-effort — absent when nothing stands out. */
   risk?: string;
+  /** task-6c62e6f0905e — "an agent is actively working on this task right
+   *  now", trustworthy both locally and remotely. Derived in useNewHomeData
+   *  from the SAME liveness signal of record the rest of the app already uses
+   *  — claim freshness (src/projects/attention.mjs classify/isStalledRow) —
+   *  OR-ed with a locally-open session for this task id (useRunningSessions),
+   *  never a separate ad-hoc heuristic. True only for the 'progress' bucket
+   *  (a stalled in_progress row already routes to 'needs', not 'progress').
+   *  Optional/additive so existing consumers of NewHomeTask are unaffected. */
+  live?: boolean;
   /** The full underlying task, for stubs that need a field not yet
    *  promoted into the view-model above. */
   raw: Task;
