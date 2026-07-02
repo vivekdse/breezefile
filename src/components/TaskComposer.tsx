@@ -21,6 +21,10 @@
 // doesn't advance").
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAgentContext } from '@copilotkit/react-core/v2';
+import { z } from 'zod';
+import { useCopilotInfo } from '../copilot/useCopilotInfo';
+import { immediateAction } from '../copilot/actionKit';
 import { useOverlayExit } from '../useOverlayExit';
 import { usePlatform } from '../platform';
 import { fm } from '../bridge';
@@ -53,7 +57,16 @@ export type TaskComposerRequest =
   // task"). It pins the TypeBuild target and the project field so the create
   // lands in that project; the user can still re-pick (or choose None). This is
   // the seam that retired the separate ProjectTaskProposal flow.
-  | { mode: 'create'; defaultFolder: string; projectId?: string }
+  | {
+      mode: 'create';
+      defaultFolder: string;
+      projectId?: string;
+      /** Prefill from a caller that already gathered title/notes elsewhere
+       *  (e.g. the copilot create_task action) — seeds the fields, the human
+       *  still reviews/edits/submits through this same form. */
+      initialTitle?: string;
+      initialNotes?: string;
+    }
   | { mode: 'edit'; task: Task };
 
 // task-b30e546672db — `embedded` renders the composer INSIDE another surface
@@ -311,6 +324,181 @@ function prettyFolder(p: string, home: string = cachedHome): string {
   return p;
 }
 
+type ComposerOption = { value: string; label: string; hint?: string };
+
+// task-24ea35660cd0 — exposes the form's LIVE field values AND its available
+// options (projects, agents, statuses, priorities — by id AND name) to the
+// copilot chat, and gives it actions to set every field plus submit/cancel
+// the form. A separate component (not bare hook calls in TaskComposer)
+// because useCopilotReadable/useFrontendTool throw without a <CopilotKit>
+// ancestor — TaskComposer renders with or without copilot enabled, so this is
+// only ever MOUNTED when it's known to be safe (see copilotEnabled below).
+function FormCopilotBridge({
+  fields,
+  options,
+  setters,
+  submit,
+  cancel,
+}: {
+  fields: {
+    mode: 'create' | 'edit';
+    title: string;
+    notes?: string;
+    projectId?: string;
+    projectName?: string;
+    status: TaskStatus;
+    priority?: string;
+    agentId?: string;
+    agentName?: string;
+    folder?: string;
+  };
+  options: {
+    isTypebuild: boolean;
+    projects: ComposerOption[];
+    agents: ComposerOption[];
+    statuses: ComposerOption[];
+    priorities: ComposerOption[];
+  };
+  setters: {
+    setTitle: (v: string) => void;
+    setNotes: (v: string) => void;
+    setProjectId: (v: string) => void;
+    setStatus: (v: TaskStatus) => void;
+    setPriority: (v: string) => void;
+    setAgentId: (v: string) => void;
+  };
+  submit: () => Promise<{ ok: boolean; taskId?: string; error?: string }>;
+  cancel: () => void;
+}) {
+  useAgentContext({
+    description:
+      "The New Task form's current field values, live as the human edits them (create mode) or the task being edited (edit mode). projectName/agentName are resolved from the current projectId/agentId for readability.",
+    value: fields,
+  });
+  useAgentContext({
+    description:
+      'The New Task form\'s available options for its pickers — every project/agent the human could assign (id + name), and the valid status/priority values. Use these ids with set_task_form_project / set_task_form_agent / etc.',
+    value: options,
+  });
+
+  immediateAction({
+    name: 'set_task_form_title',
+    description: 'Set the New Task form\'s title field.',
+    parameters: z.object({ title: z.string().describe('The new title.') }),
+    perform: ({ title }) => {
+      setters.setTitle(title ?? '');
+      return `Set the title to "${title ?? ''}".`;
+    },
+  });
+
+  immediateAction({
+    name: 'set_task_form_notes',
+    description: 'Set the New Task form\'s notes field.',
+    parameters: z.object({ notes: z.string().describe('The new notes text.') }),
+    perform: ({ notes }) => {
+      setters.setNotes(notes ?? '');
+      return 'Updated the notes.';
+    },
+  });
+
+  // NOTE: these three are gated via `available` (not a conditional hook call)
+  // because `options.isTypebuild` can change while the form stays open (the
+  // human can switch the save-target picker) — conditionally CALLING a hook
+  // would break React's hook-order invariant.
+  const tbAvailable = options.isTypebuild;
+
+  immediateAction({
+    name: 'set_task_form_project',
+    description:
+      "Set the New Task form's project by id (use the ids from the form's available-options context — resolve a project NAME to its id there first).",
+    available: tbAvailable,
+    parameters: z.object({ projectId: z.string().describe('The project id, or "" for None.') }),
+    perform: ({ projectId }) => {
+      const id = projectId ?? '';
+      if (id && !options.projects.some((p) => p.value === id)) {
+        return `Failed: "${id}" isn't one of this form's available projects.`;
+      }
+      setters.setProjectId(id);
+      const name = options.projects.find((p) => p.value === id)?.label;
+      return id ? `Set the project to "${name ?? id}".` : 'Cleared the project (None).';
+    },
+  });
+
+  immediateAction({
+    name: 'set_task_form_agent',
+    description: "Set the New Task form's assigned agent by id (from the available-options context).",
+    available: tbAvailable,
+    parameters: z.object({ agentId: z.string().describe('The agent id, or "" for None.') }),
+    perform: ({ agentId }) => {
+      const id = agentId ?? '';
+      if (id && !options.agents.some((a) => a.value === id)) {
+        return `Failed: "${id}" isn't one of this form's available agents.`;
+      }
+      setters.setAgentId(id);
+      const name = options.agents.find((a) => a.value === id)?.label;
+      return id ? `Set the agent to "${name ?? id}".` : 'Cleared the agent assignment (None).';
+    },
+  });
+
+  immediateAction({
+    name: 'set_task_form_priority',
+    description: "Set the New Task form's priority (from the available-options context).",
+    available: tbAvailable,
+    parameters: z.object({ priority: z.string().describe('The priority value, or "" to unset.') }),
+    perform: ({ priority }) => {
+      const v = priority ?? '';
+      if (!options.priorities.some((p) => p.value === v)) {
+        return `Failed: "${v}" isn't a valid priority.`;
+      }
+      setters.setPriority(v);
+      return v ? `Set priority to ${v}.` : 'Unset the priority.';
+    },
+  });
+
+  immediateAction({
+    name: 'set_task_form_status',
+    description: "Set the New Task form's status (from the available-options context).",
+    parameters: z.object({
+      status: z.string().describe('One of: pending, in_progress, done, cancelled.'),
+    }),
+    perform: ({ status }) => {
+      if (!options.statuses.some((s) => s.value === status)) {
+        return `Failed: "${status}" isn't a valid status.`;
+      }
+      setters.setStatus(status as TaskStatus);
+      return `Set status to "${status}".`;
+    },
+  });
+
+  immediateAction({
+    name: 'submit_task_form',
+    description:
+      fields.mode === 'edit'
+        ? 'Save the currently-open task edit form — the same as clicking Save.'
+        : 'Submit the currently-open New Task form — the same as clicking Create.',
+    perform: async () => {
+      const result = await submit();
+      if (result.ok) {
+        return fields.mode === 'edit'
+          ? 'Saved the task.'
+          : `Created task "${fields.title}"${result.taskId ? ` (id: ${result.taskId})` : ''}.`;
+      }
+      return `Failed: ${result.error ?? 'could not save — check the form for a validation error.'}`;
+    },
+  });
+
+  immediateAction({
+    name: 'cancel_task_form',
+    description: 'Close the currently-open New Task / edit form WITHOUT saving.',
+    perform: () => {
+      cancel();
+      return 'Closed the form without saving.';
+    },
+  });
+
+  return null;
+}
+
 function formatDateNice(iso: string): string {
   if (!iso) return '';
   const d = new Date(iso + 'T00:00:00');
@@ -329,6 +517,11 @@ export function TaskComposer(props: Props) {
   // don't see a ⌘ they don't have.
   const submitKbd = caps.id === 'mac' ? '⌘↵' : 'Ctrl+↵';
   const initial: Task | null = props.mode === 'edit' ? props.task : null;
+  // Gate FormCopilotBridge's mount on this (not a bare hook call) — copilot
+  // may be disabled entirely, in which case there's no <CopilotKit> ancestor
+  // and useCopilotReadable would throw.
+  const copilotInfo = useCopilotInfo();
+  const copilotEnabled = !!(copilotInfo?.enabled && copilotInfo.port);
 
   // Resolve the current user's home dir once (async via the bridge) so folder
   // hints shorten to `~` for the ACTUAL user on both macOS and Linux. Seeded
@@ -396,7 +589,9 @@ export function TaskComposer(props: Props) {
   // the end and strand the keyboard cursor.
   const active = QUESTIONS[Math.min(activeIdx, QUESTIONS.length - 1)];
 
-  const [title, setTitle] = useState(initial?.title ?? '');
+  const [title, setTitle] = useState(
+    initial?.title ?? (props.mode === 'create' ? props.initialTitle : undefined) ?? '',
+  );
   const [folder, setFolder] = useState(
     initial?.folder ?? (props.mode === 'create' ? props.defaultFolder : ''),
   );
@@ -497,7 +692,7 @@ export function TaskComposer(props: Props) {
   const [notes, setNotes] = useState<string>(
     initial?.notes && initial.notes.length > 0
       ? initial.notes
-      : initial?.auto_prompt ?? '',
+      : (initial?.auto_prompt ?? (props.mode === 'create' ? props.initialNotes : undefined) ?? ''),
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1194,40 +1389,45 @@ export function TaskComposer(props: Props) {
     }
   }
 
-  async function save(overrideWhenId?: string) {
-    if (busy) return;
+  async function save(overrideWhenId?: string): Promise<{ ok: boolean; taskId?: string; error?: string }> {
+    if (busy) return { ok: false, error: 'Already saving.' };
     if (noTarget) {
-      setError('Sign in to TypeBuild to create a task.');
-      return;
+      const msg = 'Sign in to TypeBuild to create a task.';
+      setError(msg);
+      return { ok: false, error: msg };
     }
     if (!title.trim()) {
-      setError('Add a title.');
+      const msg = 'Add a title.';
+      setError(msg);
       setActiveIdx(0);
       setTimeout(() => titleRef.current?.focus(), 0);
-      return;
+      return { ok: false, error: msg };
     }
     const effectiveWhenId = overrideWhenId ?? whenId;
     if (effectiveWhenId === 'pick-date' && !pickedDate) {
-      setError('Pick a date.');
+      const msg = 'Pick a date.';
+      setError(msg);
       setActiveIdx(QUESTIONS.indexOf('when'));
       setTimeout(() => dateInputRef.current?.focus(), 0);
-      return;
+      return { ok: false, error: msg };
     }
     if (effectiveWhenId === 'custom-cron') {
       const trimmed = customCron.trim();
       if (!trimmed || trimmed.split(/\s+/).length !== 5) {
-        setError('Cron must have 5 space-separated fields.');
+        const msg = 'Cron must have 5 space-separated fields.';
+        setError(msg);
         setActiveIdx(QUESTIONS.indexOf('when'));
         setTimeout(() => cronInputRef.current?.focus(), 0);
-        return;
+        return { ok: false, error: msg };
       }
     }
     if (startId === 'pick-start' && !pickedStart) {
       // fm-m2s4 (S5) — the start step is "Defer until" in TypeBuild mode.
-      setError(isTypebuild ? 'Pick a defer date.' : 'Pick a start date.');
+      const msg = isTypebuild ? 'Pick a defer date.' : 'Pick a start date.';
+      setError(msg);
       setActiveIdx(QUESTIONS.indexOf('start'));
       setTimeout(() => startDateRef.current?.focus(), 0);
-      return;
+      return { ok: false, error: msg };
     }
     setBusy(true);
     setError(null);
@@ -1435,9 +1635,12 @@ export function TaskComposer(props: Props) {
       } else {
         setTimeout(() => exit(), 900);
       }
+      return { ok: true, taskId: savedId };
     } catch (e) {
-      setError(humanizeError(e).message);
+      const msg = humanizeError(e).message;
+      setError(msg);
       setBusy(false);
+      return { ok: false, error: msg };
     }
   }
 
@@ -1822,11 +2025,56 @@ export function TaskComposer(props: Props) {
     );
   }
 
+  // task-24ea35660cd0 — in CREATE mode, renderInert only shows a question's
+  // ANSWER once activeIdx has stepped past it (see isPast above); a question
+  // not yet reached always shows its generic prompt, no matter what the
+  // underlying state is. So a copilot-driven field set is invisible until the
+  // human manually walks the wizard there. Advance the pointer (never back it
+  // up) whenever copilot sets a field, so the change is visible immediately —
+  // the same effect confirming that field via keyboard would have. No-op in
+  // edit mode's rendering (which always shows answers), but harmless there.
+  function advanceTo(q: QuestionId) {
+    setActiveIdx((i) => Math.max(i, QUESTIONS.indexOf(q) + 1));
+  }
+
   return (
     <div
       className={'composer-pane' + (props.embedded ? ' composer-pane--embedded' : '')}
       data-state={state}
     >
+      {copilotEnabled && (
+        <FormCopilotBridge
+          fields={{
+            mode: props.mode,
+            title,
+            notes: notes || undefined,
+            projectId: projectId || undefined,
+            projectName: attachedProject?.name,
+            status,
+            priority: priority || undefined,
+            agentId: agentId || undefined,
+            agentName: agents.find((a) => a.id === agentId)?.name,
+            folder: isTypebuild ? undefined : folder || undefined,
+          }}
+          options={{
+            isTypebuild,
+            projects: projects.map((p) => ({ value: p.id, label: p.name, hint: p.description ?? undefined })),
+            agents: AGENT_OPTIONS,
+            statuses: STATUS_OPTIONS.map((s) => ({ value: s.id, label: s.label, hint: s.hint })),
+            priorities: PRIORITY_OPTIONS,
+          }}
+          setters={{
+            setTitle: (v) => { setTitle(v); advanceTo('title'); },
+            setNotes: (v) => { setNotes(v); advanceTo('notes'); },
+            setProjectId: (v) => { setProjectId(v); setProjectTouched(true); advanceTo('project'); },
+            setStatus: (v) => { setStatus(v); advanceTo('status'); },
+            setPriority: (v) => { setPriority(v); advanceTo('priority'); },
+            setAgentId: (v) => { setAgentId(v); advanceTo('agent'); },
+          }}
+          submit={save}
+          cancel={() => void exit()}
+        />
+      )}
       <div
         className="composer"
         role="region"

@@ -23,7 +23,9 @@ export function unregisterTaskSource(id: string): void {
 }
 
 export function getTaskSource(id?: string): TaskSource | undefined {
-  return id ? registry.get(id) : undefined;
+  if (id) return registry.get(id);
+  if (registry.size === 1) return registry.values().next().value;
+  return undefined;
 }
 
 export function listTaskSources(): TaskSource[] {

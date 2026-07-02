@@ -888,13 +888,31 @@ function ProjectsPageInner() {
       const target = level === 2 && detailId ? detailId : scopeId ?? '';
       newProjectTask(target === INBOX_ID ? '' : target);
     }
+    // task-24ea35660cd0 — CopilotKit's open_project_folder/open_project_needs_you
+    // actions have no reusable global event to dispatch (both were component-local
+    // click handlers), so add the missing deep-links here rather than mirroring
+    // the logic in navActions.tsx.
+    function onOpenFolder(e: Event) {
+      const id = (e as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      const node = id ? nodeById.get(id) : undefined;
+      const folder = node?.project.folders?.[0];
+      if (folder) openProjectFolder(folder);
+    }
+    function onNeedsYou(e: Event) {
+      const id = (e as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (id) openProjectNeedsYou(id);
+    }
     window.addEventListener('fm:projects:focus', onFocus);
     window.addEventListener('fm:projects:new', onNew);
     window.addEventListener('fm:projects:newtask', onNewTaskEvt);
+    window.addEventListener('fm:projects:openFolder', onOpenFolder);
+    window.addEventListener('fm:projects:needsYou', onNeedsYou);
     return () => {
       window.removeEventListener('fm:projects:focus', onFocus);
       window.removeEventListener('fm:projects:new', onNew);
       window.removeEventListener('fm:projects:newtask', onNewTaskEvt);
+      window.removeEventListener('fm:projects:openFolder', onOpenFolder);
+      window.removeEventListener('fm:projects:needsYou', onNeedsYou);
     };
   }, [nodeById, level, detailId, scopeId]);
 

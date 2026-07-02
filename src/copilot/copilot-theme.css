@@ -1,62 +1,23 @@
-/* task-8676ddafadf0 — CopilotKit sidebar theming.
+/* task-8676ddafadf0 / task-24ea35660cd0 — CopilotKit sidebar theming.
  *
- * CopilotKit's own stylesheet (@copilotkit/react-ui/styles.css) ships a
- * light-mode palette via CSS custom properties scoped under
- * `.copilotKitChat` / `[data-copilot-kit-theme]`. We override those variables
- * with this app's design tokens (src/styles/tokens.css) so the sidebar reads
- * as native chrome in every theme (dark-first, plus the paper family) instead
- * of CopilotKit's default light theme.
+ * We're on CopilotKit's v2 UI (@copilotkit/react-core/v2), which is built
+ * with Tailwind's atomic utility classes and `--cpk-*` custom properties —
+ * NOT the stable `.copilotKitChat`/`.copilotKitSidebar`/`.copilotKitButton`
+ * class names v1's @copilotkit/react-ui shipped. Those v1 selectors are gone
+ * (nothing in the DOM matches them anymore); full dark-theme/token parity
+ * with v2's Tailwind variables is a follow-up (task-52bb167f32fb's sibling).
+ * For now we hook the few stable attributes v2 does expose
+ * (data-testid="copilot-chat" / "copilot-chat-textarea") for the one thing
+ * that actually breaks UX if left alone: text selection.
  */
 
 /* The app body sets `user-select: none` (file-manager chrome convention,
-   src/styles/base.css) — re-enable selection for everything Copilot renders
-   so chat replies and error details (e.g. a "Failed to fetch" stack) can be
-   copied. Covers the sidebar AND CopilotKit's portalled popups/toasts, which
-   mount outside .copilot-dock. */
-.copilot-dock,
-.copilotKitChat,
-.copilotKitWindow,
-.copilotKitSidebar,
-.copilotKitPopup,
-[class*='copilotKit'] {
+   src/styles/base.css) — re-enable selection for chat replies and error
+   details (e.g. a "Failed to fetch" stack) so they can be copied. */
+.copilot-dock [data-testid='copilot-chat'],
+.copilot-dock [data-testid='copilot-chat-textarea'] {
   user-select: text;
   -webkit-user-select: text;
-}
-
-.copilot-dock :where(.copilotKitChat, .copilotKitWindow, .copilotKitSidebar) {
-  --copilot-kit-primary-color: var(--accent);
-  --copilot-kit-contrast-color: var(--text-on-accent);
-  --copilot-kit-background-color: var(--panel, var(--bg-1));
-  --copilot-kit-secondary-color: var(--panel-2, var(--bg-2));
-  --copilot-kit-secondary-contrast-color: var(--text-on-panel);
-  --copilot-kit-separator-color: var(--rule-on-panel);
-  --copilot-kit-muted-color: var(--muted-on-panel);
-  font-family: var(--font-sans);
-  font-size: var(--fs-sm);
-}
-
-/* The floating launcher button — keep it visually quiet until hovered, in
-   line with the app's other bottom-corner chips (UpdateChip, TipsChip). */
-.copilot-dock .copilotKitButton {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  box-shadow: var(--shadow-2);
-}
-
-.copilot-dock .copilotKitHeader {
-  background: var(--panel-2, var(--bg-2));
-  color: var(--text-on-panel);
-  border-bottom: 1px solid var(--rule-on-panel);
-}
-
-.copilot-dock .copilotKitMessages {
-  background: var(--panel, var(--bg-1));
-}
-
-.copilot-dock .copilotKitInput {
-  background: var(--panel-2, var(--bg-2));
-  border-top: 1px solid var(--rule-on-panel);
-  color: var(--text-on-panel);
 }
 
 /* Disabled state — no API key configured. A quiet corner launcher matching

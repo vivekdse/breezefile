@@ -1,48 +1,49 @@
 // task-8676ddafadf0 — CopilotKit foundation: a persistent, toggleable
 // right-side AI chat sidebar available on every surface of the app.
 //
-// Mounted once at the App root (inside StoreProvider so it can read the
-// current tab kind for useCopilotReadable). When the main-process runtime
-// has no Anthropic key configured, we skip mounting the CopilotKit provider
-// entirely and render a tiny toggle that just shows a one-line setup hint —
-// no network endpoint, no wasted GraphQL client.
-import { useState } from 'react';
-import { CopilotKit, useCopilotAction, useCopilotReadable } from '@copilotkit/react-core';
-import { CopilotSidebar } from '@copilotkit/react-ui';
-import '@copilotkit/react-ui/styles.css';
+// Mounted once at the App root, WRAPPING the whole app shell (not just the
+// sidebar panel) — task-24ea35660cd0. Any component anywhere in the app can
+// then use useAgentContext/useFrontendTool/useHumanInTheLoop and share the
+// SAME copilot instance the sidebar chat talks to (e.g. TaskComposer exposing
+// its live field values as the human types, so the chat can see what's
+// already filled in). Built on CopilotKit's v2 API
+// (@copilotkit/react-core/v2) throughout — NOT the legacy v1
+// useCopilotAction/useCopilotReadable/react-ui compatibility surface. When
+// the main-process runtime has no Anthropic key configured, we skip mounting
+// the CopilotKit provider entirely and just render children + a tiny
+// setup-hint toggle — no network endpoint, no wasted client.
+import { useState, type ReactNode } from 'react';
+import { CopilotKit, CopilotSidebar, useAgentContext } from '@copilotkit/react-core/v2';
+import '@copilotkit/react-core/v2/styles.css';
 import './copilot-theme.css';
 import { useStore } from '../store';
 import { useCopilotInfo } from './useCopilotInfo';
 import { CopilotActions } from './actions';
+import { TaskActions } from './taskActions';
+import { NavActions } from './navActions';
 
 const APP_NAME = 'TypeBuild';
 
-function CopilotSidebarPanel() {
+function CopilotGrounding() {
   const { state } = useStore();
   const tabKind = state.tabs[state.activeTab]?.kind ?? 'folder';
 
-  useCopilotReadable({
+  useAgentContext({
     description: 'The name of the app the user is working in, and the kind of tab currently focused.',
     value: { appName: APP_NAME, activeTabKind: tabKind },
-  });
-
-  useCopilotAction({
-    name: 'open_new_home',
-    description: 'Open the New Home page — the app launch surface with recent tasks and projects.',
-    handler: async () => {
-      window.dispatchEvent(new CustomEvent('fm:openNewHome'));
-    },
   });
 
   return (
     <>
       <CopilotActions />
+      <TaskActions />
+      <NavActions />
       <CopilotSidebar
         defaultOpen={false}
-        clickOutsideToClose={false}
+        position="right"
         labels={{
-          title: `${APP_NAME} Copilot`,
-          initial: "Hi! I'm your TypeBuild copilot. Ask me to help you get around, or try opening New Home.",
+          modalHeaderTitle: `${APP_NAME} Copilot`,
+          welcomeMessageText: "Hi! I'm your TypeBuild copilot. Ask me to help you get around, or try opening New Home.",
         }}
       />
     </>
@@ -73,26 +74,33 @@ function SetupHintToggle() {
   );
 }
 
-/** Mount once near the app root. Renders nothing while status is loading. */
-export function CopilotDock() {
+/** Mount once near the app root, WRAPPING the app shell as `children` (see
+ *  file header — this is what lets e.g. TaskComposer share copilot context
+ *  with the sidebar). Renders only `children` while status is loading, so
+ *  the app isn't blocked on the copilot-availability probe. */
+export function CopilotDock({ children }: { children: ReactNode }) {
   const info = useCopilotInfo();
-  if (!info) return null;
+  if (!info) return <>{children}</>;
 
   if (!info.enabled || !info.port) {
     return (
-      <div className="copilot-dock copilot-dock--disabled">
-        <SetupHintToggle />
-      </div>
+      <>
+        {children}
+        <div className="copilot-dock copilot-dock--disabled">
+          <SetupHintToggle />
+        </div>
+      </>
     );
   }
 
   const runtimeUrl = `http://127.0.0.1:${info.port}${info.endpoint ?? '/copilotkit'}`;
 
   return (
-    <div className="copilot-dock">
-      <CopilotKit runtimeUrl={runtimeUrl} useSingleEndpoint>
-        <CopilotSidebarPanel />
-      </CopilotKit>
-    </div>
+    <CopilotKit runtimeUrl={runtimeUrl} useSingleEndpoint>
+      {children}
+      <div className="copilot-dock">
+        <CopilotGrounding />
+      </div>
+    </CopilotKit>
   );
 }

@@ -4,8 +4,9 @@
 // deterministic driver in NewTaskModal.tsx stays as the fallback when it
 // isn't (see the copilotEnabled branch there).
 //
-// APPROACH CHOSEN: a scoped <CopilotChat> component (@copilotkit/react-ui),
-// not a from-scratch UI driven by headless useCopilotChat. Rationale: the
+// APPROACH CHOSEN: a scoped <CopilotChat> component (CopilotKit v2,
+// @copilotkit/react-core/v2), not a from-scratch UI driven by headless
+// useCopilotChat. Rationale: the
 // existing left pane's bubble/chip chrome is deterministic-driver-specific
 // (chips are driver-emitted suggestions, "thinking" beats are a fake-fetch
 // affordance) and reproducing that around headless useCopilotChat would mean
@@ -22,9 +23,9 @@
 // interview can affect it, so what's on the form is always exactly what the
 // agent (or the user, by typing into the chat and getting confirmed by the
 // agent) explicitly recorded.
-import { CopilotKit, useCopilotAction, useCopilotAdditionalInstructions } from '@copilotkit/react-core';
-import { CopilotChat } from '@copilotkit/react-ui';
-import '@copilotkit/react-ui/styles.css';
+import { CopilotKit, CopilotChat, useAgentContext } from '@copilotkit/react-core/v2';
+import { z } from 'zod';
+import { immediateAction } from './actionKit';
 import type { TemplateConfig, TemplateField } from '../components/newhome/types';
 
 function fieldSpec(f: TemplateField): string {
@@ -67,20 +68,23 @@ function FillFieldAction({
   onSetTitle: (title: string) => void;
   onSetValue: (key: string, value: string) => void;
 }) {
-  useCopilotAdditionalInstructions({ instructions: buildInstructions(template) });
+  // v2 has no useCopilotAdditionalInstructions equivalent; context items
+  // (useAgentContext) are serialized into the model's system prompt the same
+  // way instructions were, so this is the direct replacement.
+  useAgentContext({
+    description: 'Instructions for conducting this New Task interview.',
+    value: buildInstructions(template),
+  });
 
-  useCopilotAction({
+  immediateAction({
     name: 'fill_field',
     description:
       "Record the user's answer for the new task form. Use key \"title\" for the task title, or a template field's key for everything else. Call this immediately after the user answers, before asking the next question.",
-    parameters: [
-      { name: 'key', type: 'string', description: 'Either "title", or one of the template field keys.', required: true },
-      { name: 'value', type: 'string', description: "The value the user gave for this field.", required: true },
-    ],
-    // Modal-scoped: only registered/enabled while NewTaskCopilotChat is
-    // mounted (i.e. while the New Task modal is open), per task instructions.
-    available: 'enabled',
-    handler: async ({ key, value }) => {
+    parameters: z.object({
+      key: z.string().describe('Either "title", or one of the template field keys.'),
+      value: z.string().describe('The value the user gave for this field.'),
+    }),
+    perform: ({ key, value }) => {
       const v = (value ?? '').trim();
       if (!v) return `Ignored empty value for ${key}.`;
       if (key === 'title') {
@@ -119,8 +123,7 @@ export function NewTaskCopilotChat({
       <CopilotChat
         className="nh-newtask__copilot-chat"
         labels={{
-          title: 'New Task',
-          initial: "What's this task about? Give me a short title.",
+          welcomeMessageText: "What's this task about? Give me a short title.",
         }}
       />
     </CopilotKit>

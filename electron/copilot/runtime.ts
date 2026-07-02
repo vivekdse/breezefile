@@ -24,9 +24,8 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { app } from 'electron';
 import { promises as fs } from 'node:fs';
-import { CopilotRuntime, AnthropicAdapter, copilotRuntimeNodeHttpEndpoint } from '@copilotkit/runtime';
-import { BuiltInAgent } from '@copilotkit/runtime/v2';
-import Anthropic from '@anthropic-ai/sdk';
+import { CopilotRuntime, BuiltInAgent } from '@copilotkit/runtime/v2';
+import { createCopilotNodeListener } from '@copilotkit/runtime/v2/node';
 
 const COPILOT_MODEL = 'claude-haiku-4-5-20251001';
 const ENDPOINT = '/copilotkit';
@@ -68,54 +67,43 @@ export async function startCopilotRuntime(): Promise<CopilotInfo> {
   // No anonymous usage telemetry from a PHI-adjacent desktop app.
   process.env.COPILOTKIT_TELEMETRY_DISABLED = 'true';
 
-  // Configure the default agent EXPLICITLY (v2 style). Without this, the
-  // node-http endpoint bridges the legacy serviceAdapter into a BuiltInAgent
-  // via adapter.getLanguageModel(), which forwards the Anthropic SDK's
-  // baseURL (https://api.anthropic.com — no /v1) into the Vercel AI SDK,
-  // whose default includes /v1 — every completion then 404s ("Not Found").
-  // An explicit agents map makes that bridge dead code; the model string is
-  // resolved provider/model with the key passed directly.
+  // Configure the default agent EXPLICITLY. Without this, the runtime bridges
+  // a legacy serviceAdapter into a BuiltInAgent via adapter.getLanguageModel(),
+  // which forwards the Anthropic SDK's baseURL (https://api.anthropic.com —
+  // no /v1) into the Vercel AI SDK, whose default includes /v1 — every
+  // completion then 404s ("Not Found"). An explicit agents map makes that
+  // bridge dead code; the model string is resolved provider/model with the
+  // key passed directly.
   const runtime = new CopilotRuntime({
     agents: {
       default: new BuiltInAgent({ model: `anthropic/${COPILOT_MODEL}`, apiKey: key }),
     },
   });
-  const serviceAdapter = new AnthropicAdapter({
-    anthropic: new Anthropic({ apiKey: key }),
-    model: COPILOT_MODEL,
-  });
-  const handler = copilotRuntimeNodeHttpEndpoint({
-    endpoint: ENDPOINT,
+  // task-24ea35660cd0 — the renderer's CopilotKit client is now v2
+  // (@copilotkit/react-core/v2) and speaks the v2 runtime protocol, not the
+  // legacy GraphQL one `copilotRuntimeNodeHttpEndpoint` served. `mode:
+  // 'single-route'` matches the client's `useSingleEndpoint` — one POST
+  // endpoint with a JSON envelope, still just one dynamic port/path, same
+  // shape our Electron-hosted server has always needed.
+  //
+  // CORS reflects ONLY local origins (localhost/127.0.0.1/`null` for
+  // file://-derived origins in packaged builds) — this server holds an LLM
+  // key, and a permissive `*` would let any webpage in the user's browser
+  // drive it via 127.0.0.1.
+  const handler = createCopilotNodeListener({
     runtime,
-    serviceAdapter,
+    basePath: ENDPOINT,
+    mode: 'single-route',
+    cors: {
+      origin: (origin) =>
+        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === 'null' ? origin : null,
+    },
   });
 
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
-      // CORS: the renderer is a different origin (http://localhost:5173 in
-      // dev, file://-derived `null` when packaged), so the CopilotKit
-      // client's JSON POST preflights. Reflect ONLY local origins — this
-      // server holds an LLM key, and a permissive `*` would let any webpage
-      // in the user's browser drive it via 127.0.0.1.
-      const origin = req.headers.origin;
-      const localOrigin =
-        !!origin && (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === 'null');
-      if (localOrigin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Vary', 'Origin');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader(
-          'Access-Control-Allow-Headers',
-          req.headers['access-control-request-headers'] || 'Content-Type',
-        );
-      }
-      if (req.method === 'OPTIONS') {
-        res.statusCode = localOrigin ? 204 : 403;
-        res.end();
-        return;
-      }
-      // Fire-and-forget: the handler streams the GraphQL response itself.
-      // Never log req bodies (chat content) here.
+      // Fire-and-forget: the handler streams the response itself. Never log
+      // req bodies (chat content) here.
       void handler(req, res);
     });
     srv.on('error', (err) => {
