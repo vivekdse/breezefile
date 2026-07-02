@@ -39,12 +39,26 @@
    overlay) and would otherwise fall back to v2's white defaults. The
    .copilot-dock-scoped rule that follows re-declares the same mapping at
    higher specificity to win the .dark contest for in-tree surfaces. */
+/* Capture the app accent on the DOCK wrapper (which does NOT carry
+   data-copilotkit, so its --accent is the real brand color). We cannot capture
+   it on [data-copilotkit] itself: within one rule, `--_cpk-accent: var(--accent)`
+   resolves against that element's FINAL --accent — and we remap --accent to the
+   chip surface in the same block — so the capture would read back the chip, not
+   the accent (source order doesn't snapshot custom props). Capturing on the
+   ancestor sidesteps that: --accent there is untouched, and it inherits down
+   into [data-copilotkit] where we reference --_cpk-accent for every brand hue. */
+.copilot-dock {
+  --_cpk-accent: var(--accent);
+}
+
 [data-copilotkit] {
   --background: var(--panel, var(--bg-1));
   --card: var(--panel, var(--bg-1));
   --popover: var(--panel, var(--bg-1));
   --secondary: var(--panel-2, var(--bg-2));
   --muted: var(--chip, var(--panel-2, var(--bg-2)));
+  /* CopilotKit's --accent is a MUTED surface token (hover rows, chips),
+     NOT the brand color — map it to a panel tint, not the app accent. */
   --accent: var(--chip, var(--panel-2, var(--bg-2)));
   --foreground: var(--text-on-panel);
   --card-foreground: var(--text-on-panel);
@@ -52,25 +66,29 @@
   --secondary-foreground: var(--text-on-panel);
   --accent-foreground: var(--text-on-panel);
   --muted-foreground: var(--muted-on-panel);
-  --primary: var(--accent);
+  --primary: var(--_cpk-accent);
   --primary-foreground: var(--text-on-accent);
   --border: var(--rule-on-panel);
   --input: var(--rule-on-panel);
-  --ring: var(--accent);
+  --ring: var(--_cpk-accent);
   --sidebar: var(--panel, var(--bg-1));
   --sidebar-foreground: var(--text-on-panel);
-  --sidebar-primary: var(--accent);
+  --sidebar-primary: var(--_cpk-accent);
   --sidebar-primary-foreground: var(--text-on-accent);
   --sidebar-accent: var(--chip, var(--panel-2, var(--bg-2)));
   --sidebar-accent-foreground: var(--text-on-panel);
   --sidebar-border: var(--rule-on-panel);
-  --sidebar-ring: var(--accent);
+  --sidebar-ring: var(--_cpk-accent);
   --radius: var(--r-lg, 10px);
 }
 
 .copilot-dock [data-copilotkit],
 .copilot-dock.dark [data-copilotkit],
 .copilot-dock [data-copilotkit].dark {
+  /* --_cpk-accent is inherited from the .copilot-dock wrapper (captured there
+     from the untouched --accent); do NOT re-capture here or it self-references
+     the remapped chip surface. */
+
   /* Surfaces */
   --background: var(--panel, var(--bg-1));
   --card: var(--panel, var(--bg-1));
@@ -87,14 +105,14 @@
   --accent-foreground: var(--text-on-panel);
   --muted-foreground: var(--muted-on-panel);
 
-  /* Brand / primary — the app accent, with theme-tuned ink on top */
-  --primary: var(--accent);
+  /* Brand / primary — the app accent (captured), with theme-tuned ink */
+  --primary: var(--_cpk-accent);
   --primary-foreground: var(--text-on-accent);
 
   /* Lines & focus */
   --border: var(--rule-on-panel);
   --input: var(--rule-on-panel);
-  --ring: var(--accent);
+  --ring: var(--_cpk-accent);
 
   /* The sidebar drawer paints ITSELF from the --sidebar* family, NOT
      --background — v2's light default is --sidebar: oklch(98.5% 0 0)
@@ -103,12 +121,12 @@
      --background is remapped. */
   --sidebar: var(--panel, var(--bg-1));
   --sidebar-foreground: var(--text-on-panel);
-  --sidebar-primary: var(--accent);
+  --sidebar-primary: var(--_cpk-accent);
   --sidebar-primary-foreground: var(--text-on-accent);
   --sidebar-accent: var(--chip, var(--panel-2, var(--bg-2)));
   --sidebar-accent-foreground: var(--text-on-panel);
   --sidebar-border: var(--rule-on-panel);
-  --sidebar-ring: var(--accent);
+  --sidebar-ring: var(--_cpk-accent);
 
   /* Match the app's radius scale so bubbles/inputs feel native */
   --radius: var(--r-lg, 10px);
@@ -213,26 +231,43 @@
    it into the lit-window recipe. */
 .copilot-dock .copilotKitButton,
 .copilot-dock [data-testid='copilot-chat-toggle'] {
+  /* NOTE: the button carries data-copilotkit itself, so plain var(--accent)
+     here resolves to our remapped CHIP surface (faint 8% overlay), not the
+     brand color — that is what made the icon nearly invisible. Use the
+     captured --_cpk-accent (real app accent) for every accent reference. */
   background: var(--panel, var(--bg-2)) !important;
-  color: var(--accent) !important;
+  color: var(--_cpk-accent) !important;
   border: 1px solid
-    color-mix(in srgb, var(--accent) 35%, transparent) !important;
+    color-mix(in srgb, var(--_cpk-accent) 35%, transparent) !important;
+  /* box-shadow is left WITHOUT !important on purpose: an !important shadow
+     would outrank the breathe keyframe and freeze it. The (0,2,0) selector
+     still beats v2's single-class cpk:shadow-sm, so this base shadow wins
+     until the animation drives it. */
   box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent),
-    0 8px 28px color-mix(in srgb, var(--accent) 22%, transparent),
-    inset 0 0 24px color-mix(in srgb, var(--accent) 8%, transparent) !important;
+    0 0 0 4px color-mix(in srgb, var(--_cpk-accent) 10%, transparent),
+    0 8px 28px color-mix(in srgb, var(--_cpk-accent) 22%, transparent),
+    inset 0 0 24px color-mix(in srgb, var(--_cpk-accent) 8%, transparent);
   transition: transform var(--motion-hover), box-shadow var(--motion-hover),
     border-color var(--motion-hover) !important;
+  /* Same ambient breathe as the disabled chip, on the app's 1.8s rhythm. */
+  animation: copilot-launcher-breathe 1.8s var(--ease-in-out) infinite !important;
+}
+
+/* Icon inherits currentColor; force it accent too in case v2 pins a fill. */
+.copilot-dock .copilotKitButton svg,
+.copilot-dock [data-testid='copilot-chat-toggle'] svg {
+  color: var(--_cpk-accent) !important;
+  stroke: currentColor;
 }
 
 .copilot-dock .copilotKitButton:hover,
 .copilot-dock [data-testid='copilot-chat-toggle']:hover {
   transform: scale(1.08);
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent) !important;
+  border-color: color-mix(in srgb, var(--_cpk-accent) 60%, transparent) !important;
   box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--accent) 15%, transparent),
-    0 10px 32px color-mix(in srgb, var(--accent) 32%, transparent),
-    inset 0 0 28px color-mix(in srgb, var(--accent) 14%, transparent) !important;
+    0 0 0 5px color-mix(in srgb, var(--_cpk-accent) 15%, transparent),
+    0 10px 32px color-mix(in srgb, var(--_cpk-accent) 32%, transparent),
+    inset 0 0 28px color-mix(in srgb, var(--_cpk-accent) 14%, transparent) !important;
 }
 
 /* task-24ea35660cd0 — the toggle was a big 56px disc. Trim it to a calmer
@@ -291,6 +326,10 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
 }
 
 .copilot-dock__launcher {
+  /* This chip is NOT inside [data-copilotkit], so --accent is already the real
+     app accent. Mirror it into --_cpk-accent so the shared breathe keyframe
+     (which references --_cpk-accent) resolves here too. */
+  --_cpk-accent: var(--accent);
   width: 52px;
   height: 52px;
   border-radius: 999px;
@@ -325,19 +364,22 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
     inset 0 0 28px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+/* Uses --_cpk-accent (the captured app accent) so the glow is the brand hue on
+   BOTH the enabled toggle (where plain --accent is a chip surface) and the
+   disabled chip. Both elements define --_cpk-accent; see their rules. */
 @keyframes copilot-launcher-breathe {
   0%,
   100% {
     box-shadow:
-      0 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent),
-      0 8px 28px color-mix(in srgb, var(--accent) 18%, transparent),
-      inset 0 0 24px color-mix(in srgb, var(--accent) 6%, transparent);
+      0 0 0 4px color-mix(in srgb, var(--_cpk-accent) 8%, transparent),
+      0 8px 28px color-mix(in srgb, var(--_cpk-accent) 18%, transparent),
+      inset 0 0 24px color-mix(in srgb, var(--_cpk-accent) 6%, transparent);
   }
   50% {
     box-shadow:
-      0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent),
-      0 10px 34px color-mix(in srgb, var(--accent) 28%, transparent),
-      inset 0 0 28px color-mix(in srgb, var(--accent) 10%, transparent);
+      0 0 0 6px color-mix(in srgb, var(--_cpk-accent) 14%, transparent),
+      0 10px 34px color-mix(in srgb, var(--_cpk-accent) 28%, transparent),
+      inset 0 0 28px color-mix(in srgb, var(--_cpk-accent) 10%, transparent);
   }
 }
 
