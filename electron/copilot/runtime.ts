@@ -77,6 +77,28 @@ export async function startCopilotRuntime(): Promise<CopilotInfo> {
 
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
+      // CORS: the renderer is a different origin (http://localhost:5173 in
+      // dev, file://-derived `null` when packaged), so the CopilotKit
+      // client's JSON POST preflights. Reflect ONLY local origins — this
+      // server holds an LLM key, and a permissive `*` would let any webpage
+      // in the user's browser drive it via 127.0.0.1.
+      const origin = req.headers.origin;
+      const localOrigin =
+        !!origin && (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === 'null');
+      if (localOrigin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader(
+          'Access-Control-Allow-Headers',
+          req.headers['access-control-request-headers'] || 'Content-Type',
+        );
+      }
+      if (req.method === 'OPTIONS') {
+        res.statusCode = localOrigin ? 204 : 403;
+        res.end();
+        return;
+      }
       // Fire-and-forget: the handler streams the GraphQL response itself.
       // Never log req bodies (chat content) here.
       void handler(req, res);
