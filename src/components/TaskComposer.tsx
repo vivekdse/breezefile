@@ -326,13 +326,71 @@ function prettyFolder(p: string, home: string = cachedHome): string {
 
 type ComposerOption = { value: string; label: string; hint?: string };
 
+type FormBridgeFields = {
+  mode: 'create' | 'edit';
+  title: string;
+  notes?: string;
+  projectId?: string;
+  projectName?: string;
+  status: TaskStatus;
+  priority?: string;
+  agentId?: string;
+  agentName?: string;
+  folder?: string;
+};
+type FormBridgeOptions = {
+  isTypebuild: boolean;
+  projects: ComposerOption[];
+  agents: ComposerOption[];
+  statuses: ComposerOption[];
+  priorities: ComposerOption[];
+};
+type FormBridgeSetters = {
+  setTitle: (v: string) => void;
+  setNotes: (v: string) => void;
+  setProjectId: (v: string) => void;
+  setStatus: (v: TaskStatus) => void;
+  setPriority: (v: string) => void;
+  setAgentId: (v: string) => void;
+};
+
+// Resolve what the model passed (an id, an exact name, or a partial name the
+// user typed) against the full option list — the SAME latitude the form's
+// "Other… → type to autocomplete" picker gives a human. Empty → clear.
+type ResolveResult =
+  | { kind: 'clear' }
+  | { kind: 'ok'; value: string; label: string }
+  | { kind: 'notfound' }
+  | { kind: 'ambiguous'; matches: ComposerOption[] };
+function resolveOption(list: ComposerOption[], raw: string): ResolveResult {
+  const q = (raw ?? '').trim();
+  if (!q) return { kind: 'clear' };
+  const byId = list.find((o) => o.value === q);
+  if (byId) return { kind: 'ok', value: byId.value, label: byId.label };
+  const ql = q.toLowerCase();
+  const byName = list.find((o) => o.label.toLowerCase() === ql);
+  if (byName) return { kind: 'ok', value: byName.value, label: byName.label };
+  const subs = list.filter((o) => o.label.toLowerCase().includes(ql));
+  if (subs.length === 1) return { kind: 'ok', value: subs[0].value, label: subs[0].label };
+  if (subs.length > 1) return { kind: 'ambiguous', matches: subs };
+  return { kind: 'notfound' };
+}
+
 // task-24ea35660cd0 — exposes the form's LIVE field values AND its available
 // options (projects, agents, statuses, priorities — by id AND name) to the
 // copilot chat, and gives it actions to set every field plus submit/cancel
 // the form. A separate component (not bare hook calls in TaskComposer)
-// because useCopilotReadable/useFrontendTool throw without a <CopilotKit>
+// because useAgentContext/useFrontendTool throw without a <CopilotKit>
 // ancestor — TaskComposer renders with or without copilot enabled, so this is
 // only ever MOUNTED when it's known to be safe (see copilotEnabled below).
+//
+// STALE-CLOSURE NOTE: immediateAction (useFrontendTool) registers each tool's
+// handler ONCE (its effect deps are name/available only), so a handler that
+// closed over props directly would capture the FIRST render's values — e.g.
+// an empty project list, since projects load async after the form opens. So
+// every handler reads through `live` (a ref refreshed each render) instead of
+// closing over props. useAgentContext, by contrast, re-registers whenever its
+// value changes, so the chat's READ view stays fresh on props alone.
 function FormCopilotBridge({
   fields,
   options,
@@ -340,36 +398,17 @@ function FormCopilotBridge({
   submit,
   cancel,
 }: {
-  fields: {
-    mode: 'create' | 'edit';
-    title: string;
-    notes?: string;
-    projectId?: string;
-    projectName?: string;
-    status: TaskStatus;
-    priority?: string;
-    agentId?: string;
-    agentName?: string;
-    folder?: string;
-  };
-  options: {
-    isTypebuild: boolean;
-    projects: ComposerOption[];
-    agents: ComposerOption[];
-    statuses: ComposerOption[];
-    priorities: ComposerOption[];
-  };
-  setters: {
-    setTitle: (v: string) => void;
-    setNotes: (v: string) => void;
-    setProjectId: (v: string) => void;
-    setStatus: (v: TaskStatus) => void;
-    setPriority: (v: string) => void;
-    setAgentId: (v: string) => void;
-  };
+  fields: FormBridgeFields;
+  options: FormBridgeOptions;
+  setters: FormBridgeSetters;
   submit: () => Promise<{ ok: boolean; taskId?: string; error?: string }>;
   cancel: () => void;
 }) {
+  // Always-latest snapshot the (register-once) action handlers read from.
+  // Assigned during render so it reflects the current committed props.
+  const live = useRef({ fields, options, setters, submit, cancel });
+  live.current = { fields, options, setters, submit, cancel };
+
   useAgentContext({
     description:
       "The New Task form's current field values, live as the human edits them (create mode) or the task being edited (edit mode). projectName/agentName are resolved from the current projectId/agentId for readability.",
@@ -377,66 +416,86 @@ function FormCopilotBridge({
   });
   useAgentContext({
     description:
-      'The New Task form\'s available options for its pickers — every project/agent the human could assign (id + name), and the valid status/priority values. Use these ids with set_task_form_project / set_task_form_agent / etc.',
+      "The New Task form's available options for its pickers — every project/agent the human could assign (id + name), and the valid status/priority values. When setting a project/agent you may pass either the id or the name; it's resolved for you.",
     value: options,
   });
 
   immediateAction({
     name: 'set_task_form_title',
-    description: 'Set the New Task form\'s title field.',
+    description: "Set the New Task form's title field.",
     parameters: z.object({ title: z.string().describe('The new title.') }),
     perform: ({ title }) => {
-      setters.setTitle(title ?? '');
+      live.current.setters.setTitle(title ?? '');
       return `Set the title to "${title ?? ''}".`;
     },
   });
 
   immediateAction({
     name: 'set_task_form_notes',
-    description: 'Set the New Task form\'s notes field.',
+    description: "Set the New Task form's notes field.",
     parameters: z.object({ notes: z.string().describe('The new notes text.') }),
     perform: ({ notes }) => {
-      setters.setNotes(notes ?? '');
+      live.current.setters.setNotes(notes ?? '');
       return 'Updated the notes.';
     },
   });
 
-  // NOTE: these three are gated via `available` (not a conditional hook call)
+  // These three are gated via `available` (not a conditional hook call)
   // because `options.isTypebuild` can change while the form stays open (the
   // human can switch the save-target picker) — conditionally CALLING a hook
-  // would break React's hook-order invariant.
+  // would break React's hook-order invariant. `available` is read at render
+  // and useFrontendTool re-registers when it flips.
   const tbAvailable = options.isTypebuild;
 
   immediateAction({
     name: 'set_task_form_project',
     description:
-      "Set the New Task form's project by id (use the ids from the form's available-options context — resolve a project NAME to its id there first).",
+      "Set the New Task form's project. Pass the project's NAME (what the user said) or its id — it's resolved against the full project list the same way the form's type-to-search picker does. Pass \"\" to clear the project (None).",
     available: tbAvailable,
-    parameters: z.object({ projectId: z.string().describe('The project id, or "" for None.') }),
-    perform: ({ projectId }) => {
-      const id = projectId ?? '';
-      if (id && !options.projects.some((p) => p.value === id)) {
-        return `Failed: "${id}" isn't one of this form's available projects.`;
+    parameters: z.object({
+      project: z.string().describe('The project name (or id), or "" for None.'),
+    }),
+    perform: ({ project }) => {
+      const { options: o, setters: s } = live.current;
+      const r = resolveOption(o.projects, project ?? '');
+      if (r.kind === 'clear') {
+        s.setProjectId('');
+        return 'Cleared the project (None).';
       }
-      setters.setProjectId(id);
-      const name = options.projects.find((p) => p.value === id)?.label;
-      return id ? `Set the project to "${name ?? id}".` : 'Cleared the project (None).';
+      if (r.kind === 'notfound') {
+        return `Failed: no project matches "${project}". Available: ${o.projects.map((p) => p.label).join(', ') || '(none loaded yet)'}.`;
+      }
+      if (r.kind === 'ambiguous') {
+        return `"${project}" is ambiguous — matches ${r.matches.map((m) => m.label).join(', ')}. Please be more specific.`;
+      }
+      s.setProjectId(r.value);
+      return `Set the project to "${r.label}".`;
     },
   });
 
   immediateAction({
     name: 'set_task_form_agent',
-    description: "Set the New Task form's assigned agent by id (from the available-options context).",
+    description:
+      "Set the New Task form's assigned agent. Pass the agent's NAME or id (resolved against the available agents). Pass \"\" to clear the assignment (None).",
     available: tbAvailable,
-    parameters: z.object({ agentId: z.string().describe('The agent id, or "" for None.') }),
-    perform: ({ agentId }) => {
-      const id = agentId ?? '';
-      if (id && !options.agents.some((a) => a.value === id)) {
-        return `Failed: "${id}" isn't one of this form's available agents.`;
+    parameters: z.object({
+      agent: z.string().describe('The agent name (or id), or "" for None.'),
+    }),
+    perform: ({ agent }) => {
+      const { options: o, setters: s } = live.current;
+      const r = resolveOption(o.agents, agent ?? '');
+      if (r.kind === 'clear') {
+        s.setAgentId('');
+        return 'Cleared the agent assignment (None).';
       }
-      setters.setAgentId(id);
-      const name = options.agents.find((a) => a.value === id)?.label;
-      return id ? `Set the agent to "${name ?? id}".` : 'Cleared the agent assignment (None).';
+      if (r.kind === 'notfound') {
+        return `Failed: no agent matches "${agent}". Available: ${o.agents.filter((a) => a.value).map((a) => a.label).join(', ') || '(none)'}.`;
+      }
+      if (r.kind === 'ambiguous') {
+        return `"${agent}" is ambiguous — matches ${r.matches.map((m) => m.label).join(', ')}. Please be more specific.`;
+      }
+      s.setAgentId(r.value);
+      return `Set the agent to "${r.label}".`;
     },
   });
 
@@ -446,11 +505,12 @@ function FormCopilotBridge({
     available: tbAvailable,
     parameters: z.object({ priority: z.string().describe('The priority value, or "" to unset.') }),
     perform: ({ priority }) => {
+      const { options: o, setters: s } = live.current;
       const v = priority ?? '';
-      if (!options.priorities.some((p) => p.value === v)) {
+      if (!o.priorities.some((p) => p.value === v)) {
         return `Failed: "${v}" isn't a valid priority.`;
       }
-      setters.setPriority(v);
+      s.setPriority(v);
       return v ? `Set priority to ${v}.` : 'Unset the priority.';
     },
   });
@@ -462,10 +522,11 @@ function FormCopilotBridge({
       status: z.string().describe('One of: pending, in_progress, done, cancelled.'),
     }),
     perform: ({ status }) => {
-      if (!options.statuses.some((s) => s.value === status)) {
+      const { options: o, setters: s } = live.current;
+      if (!o.statuses.some((st) => st.value === status)) {
         return `Failed: "${status}" isn't a valid status.`;
       }
-      setters.setStatus(status as TaskStatus);
+      s.setStatus(status as TaskStatus);
       return `Set status to "${status}".`;
     },
   });
@@ -477,11 +538,12 @@ function FormCopilotBridge({
         ? 'Save the currently-open task edit form — the same as clicking Save.'
         : 'Submit the currently-open New Task form — the same as clicking Create.',
     perform: async () => {
-      const result = await submit();
+      const { submit: doSubmit, fields: f } = live.current;
+      const result = await doSubmit();
       if (result.ok) {
-        return fields.mode === 'edit'
+        return f.mode === 'edit'
           ? 'Saved the task.'
-          : `Created task "${fields.title}"${result.taskId ? ` (id: ${result.taskId})` : ''}.`;
+          : `Created task "${f.title}"${result.taskId ? ` (id: ${result.taskId})` : ''}.`;
       }
       return `Failed: ${result.error ?? 'could not save — check the form for a validation error.'}`;
     },
@@ -491,7 +553,7 @@ function FormCopilotBridge({
     name: 'cancel_task_form',
     description: 'Close the currently-open New Task / edit form WITHOUT saving.',
     perform: () => {
-      cancel();
+      live.current.cancel();
       return 'Closed the form without saving.';
     },
   });
@@ -870,8 +932,13 @@ export function TaskComposer(props: Props) {
   //   3. "None",
   //   4. "Other…" — opens a type-ahead over every project.
   // When there's no current project we just show the top 3 + None + Other.
+  // "Current" tracks the LIVE selection (projectId), falling back to the
+  // initial project — so whenever a project OUTSIDE the top 3 gets chosen
+  // (a human via "Other…" search, or the copilot's set_task_form_project),
+  // it surfaces here as the focused option instead of silently vanishing.
   const PROJECT_OPTIONS = useMemo(() => {
-    const current = rankedProjects.find((p) => p.id === initialProjectId) ?? null;
+    const currentId = projectId || initialProjectId;
+    const current = rankedProjects.find((p) => p.id === currentId) ?? null;
     const others = rankedProjects.filter((p) => p.id !== current?.id);
     const top3 = others.slice(0, 3);
     const out: { value: string; label: string; hint?: string }[] = [];
@@ -883,7 +950,7 @@ export function TaskComposer(props: Props) {
       out.push({ value: PROJECT_OTHER, label: 'Other…', hint: 'search all projects' });
     }
     return out;
-  }, [rankedProjects, initialProjectId]);
+  }, [rankedProjects, initialProjectId, projectId]);
 
   // task-201f5e3cde57 — type-ahead over the full ranked list (revealed by
   // "Other…"). Filters by name, keeping the active-count ranking.
