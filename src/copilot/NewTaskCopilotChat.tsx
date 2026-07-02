@@ -114,7 +114,7 @@ export function NewTaskCopilotChat({
   onSetValue: (key: string, value: string) => void;
 }) {
   return (
-    <CopilotKit runtimeUrl={runtimeUrl}>
+    <CopilotKit runtimeUrl={runtimeUrl} useSingleEndpoint>
       <FillFieldAction template={template} onSetTitle={onSetTitle} onSetValue={onSetValue} />
       <CopilotChat
         className="nh-newtask__copilot-chat"

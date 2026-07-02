@@ -90,7 +90,7 @@ export function CopilotDock() {
 
   return (
     <div className="copilot-dock">
-      <CopilotKit runtimeUrl={runtimeUrl}>
+      <CopilotKit runtimeUrl={runtimeUrl} useSingleEndpoint>
         <CopilotSidebarPanel />
       </CopilotKit>
     </div>
