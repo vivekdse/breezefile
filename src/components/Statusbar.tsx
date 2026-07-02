@@ -33,11 +33,16 @@ export function Statusbar() {
   // task-97c0800ff55d — Home now rides kind:'home' (was relabeled 'projects').
   // Both render the same surface with no folder listing.
   const isProjects = activeTab.kind === 'projects' || activeTab.kind === 'home';
+  // task-b9cdad64ab9c — New Home (kind:'newhome') is likewise a no-folder-
+  // listing surface; describe it instead of reporting "0 items".
+  const isNewHome = activeTab.kind === 'newhome';
   const summary = isProjects
     ? 'Home · your tasks, projects as folders · drill into any one'
-    : markedCount > 0
-      ? `${markedCount} of ${entries.length} selected · ${formatSize(selectedSize)}`
-      : `${entries.length} items · ${formatSize(totalSize)}`;
+    : isNewHome
+      ? 'New Home · agent work monitor'
+      : markedCount > 0
+        ? `${markedCount} of ${entries.length} selected · ${formatSize(selectedSize)}`
+        : `${entries.length} items · ${formatSize(totalSize)}`;
 
   // Keyboard hints — only the two affordances that are still real after the
   // shift to the verb-first model: Space marks the cursor item, `:` opens
@@ -51,10 +56,12 @@ export function Statusbar() {
         { keys: ['h'], label: 'back' },
         { keys: [':'], label: 'actions' },
       ]
-    : [
-        { keys: ['space'], label: 'mark' },
-        { keys: [':'], label: 'actions' },
-      ];
+    : isNewHome
+      ? [{ keys: [':'], label: 'actions' }]
+      : [
+          { keys: ['space'], label: 'mark' },
+          { keys: [':'], label: 'actions' },
+        ];
 
   return (
     <div className="statusbar">

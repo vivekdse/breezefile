@@ -30,6 +30,7 @@ import { RunTaskModal } from './components/RunTaskModal';
 import { RunProgressBanner } from './components/RunProgressBanner';
 import { TasksPage } from './components/TasksPage';
 import { ProjectsPage } from './components/projects/ProjectsPage';
+import { NewHomePage } from './components/newhome/NewHomePage';
 import { TaskShell } from './components/TaskShell';
 import { EditSplit, getEditorSelection } from './components/EditShell';
 import { BrowserPane, reapBrowserViews } from './components/BrowserPane'; // SPIKE (spike/playwright-cdp)
@@ -1243,6 +1244,12 @@ function Shell() {
         );
       }
     }
+    function onOpenNewHome() {
+      // task-b9cdad64ab9c — open (or focus) the singleton New Home tab. No
+      // deep-link/project-scoping yet — the page owns its own project picker
+      // state internally (see NewHomePage.tsx).
+      dispatch({ type: 'openNewHomeTab' });
+    }
     function onOpenSettings(e: Event) {
       const section = (e as CustomEvent).detail?.section as string | undefined;
       setSettingsSection(section);
@@ -1282,6 +1289,7 @@ function Shell() {
     window.addEventListener('fm:openTask', onOpenTask);
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
     window.addEventListener('fm:openProjects', onOpenProjects);
+    window.addEventListener('fm:openNewHome', onOpenNewHome);
     window.addEventListener('fm:openSettings', onOpenSettings);
     window.addEventListener('fm:openRunHistory', onOpenRunHistory);
     window.addEventListener('fm:openTaskDetail', onOpenTaskDetail);
@@ -1310,6 +1318,7 @@ function Shell() {
       window.removeEventListener('fm:openTask', onOpenTask);
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
       window.removeEventListener('fm:openProjects', onOpenProjects);
+      window.removeEventListener('fm:openNewHome', onOpenNewHome);
       window.removeEventListener('fm:openSettings', onOpenSettings);
       window.removeEventListener('fm:openRunHistory', onOpenRunHistory);
       window.removeEventListener('fm:openTaskDetail', onOpenTaskDetail);
@@ -1368,6 +1377,11 @@ function Shell() {
   // ProjectsPage surface and shares all of 'projects'' chrome-hiding (no
   // pathbar, no sidebar). Treat both kinds the same here.
   const isProjectsTab = tab.kind === 'projects' || tab.kind === 'home';
+  // task-b9cdad64ab9c — New Home is a distinct full-screen surface (its own
+  // kind:'newhome'), kept separate from isProjectsTab so the existing Home
+  // stays completely untouched. Shares the same chrome-hiding treatment
+  // (no pathbar/sidebar/preview) as the other full-screen tabs below.
+  const isNewHomeTab = tab.kind === 'newhome';
   const isEditTab = tab.kind === 'edit';
   const isBrowserTab = tab.kind === 'browser'; // SPIKE (spike/playwright-cdp)
   const isFilterTab = !!tab.boundSelector; // fm-mp1 — smart folder (folder kind)
@@ -1392,7 +1406,7 @@ function Shell() {
           into the titlebar row; this row now carries just the Pathbar for
           folder tabs (and collapses to nothing on task/projects/edit/browser
           tabs, where the Pathbar would lie about what the tab is "at"). */}
-      {!isTaskTab && !isTasksTab && !isProjectsTab && !isEditTab && !isBrowserTab && (
+      {!isTaskTab && !isTasksTab && !isProjectsTab && !isNewHomeTab && !isEditTab && !isBrowserTab && (
         <div className="shell__chrome">
           {isFilterTab ? (
             // fm-mp1 — a filter-tab has no real cwd to navigate; show the bound
@@ -1420,7 +1434,7 @@ function Shell() {
           all-tasks page (isTasksTab): that page is its own inbox (list +
           detail), so the global Sidebar was redundant clutter; skipping the
           render also avoids mounting its location/source-polling effects. */}
-      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && !isTasksTab && !isProjectsTab && <Sidebar />}
+      {tab.viewMode !== 'preview' && !tab.terminal && !isEditTab && !isBrowserTab && !isTasksTab && !isProjectsTab && !isNewHomeTab && <Sidebar />}
       {/* main slot — folder tabs render the recessed file plate; task
           tabs render TaskShell (header / actions / folder context).
           TerminalSplit wraps both so embedded terminals work in either
@@ -1463,6 +1477,8 @@ function Shell() {
             <TasksPage />
           ) : isProjectsTab ? (
             <ProjectsPage />
+          ) : isNewHomeTab ? (
+            <NewHomePage />
           ) : isEditTab ? (
             // Edit tabs render in the persistent EditSplit layer below so
             // they survive tab switches; nothing to draw here.
@@ -1487,7 +1503,7 @@ function Shell() {
           user can browse, toggle, and combine tags without leaving the file
           list. Hidden in terminal mode (fm-jtu) and in task mode (no
           file selected = nothing to preview). */}
-      {!tab.terminal && !isTaskTab && !isTasksTab && !isProjectsTab && !isEditTab && !isBrowserTab && (
+      {!tab.terminal && !isTaskTab && !isTasksTab && !isProjectsTab && !isNewHomeTab && !isEditTab && !isBrowserTab && (
         tab.viewMode === 'tag' ? <TagInspector /> : <Preview />
       )}
       {/* chat slot — fm-dly3 agent chat panel, docked right. Renders for the

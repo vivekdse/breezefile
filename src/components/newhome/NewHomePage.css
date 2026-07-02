@@ -1,0 +1,124 @@
+/* task-b9cdad64ab9c — New Home shell. Layout skeleton adapted from the V11
+   unified-prototype design reference (topbar / hero / stats grid / filter
+   pills / table card / centered dialog+backdrop / split modal), reworked
+   onto app design tokens (src/styles/tokens.css) instead of the reference's
+   hardcoded light-mode hex values. Dark-first; light overrides via
+   [data-theme="light"] below.
+
+   Shared status colors — every New Home stub CSS file reuses these four
+   custom properties instead of hardcoding its own status palette, so a
+   retune here propagates everywhere (ApprovalBar, HeroStats, RosterTable,
+   TaskDetailDialog, OutcomesPanel all read them). */
+.nh {
+  --nh-done: var(--ok);
+  --nh-done-soft: color-mix(in srgb, var(--ok) 16%, transparent);
+  --nh-progress: var(--accent);
+  --nh-progress-soft: var(--accent-soft);
+  --nh-needs: var(--warn);
+  --nh-needs-soft: var(--warn-soft);
+  --nh-failed: var(--err);
+  --nh-failed-soft: var(--err-soft);
+
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  color: var(--text-on-canvas);
+  overflow: hidden;
+  font-family: var(--font-sans);
+}
+
+.nh__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-6);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.nh__topbar-left,
+.nh__topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.nh__project-picker {
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.nh__btn {
+  appearance: none;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--motion-hover), border-color var(--motion-hover);
+}
+.nh__btn:hover {
+  background: var(--bg-3);
+}
+.nh__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.nh__btn--primary:hover {
+  filter: brightness(1.06);
+}
+
+.nh__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-6) var(--sp-6) var(--sp-8);
+  min-width: 0;
+}
+
+.nh__hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: var(--sp-5);
+}
+
+.nh__hero-title {
+  font-family: var(--font-serif, var(--font-sans));
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-on-canvas);
+}
+
+.nh__hero-sub {
+  color: var(--muted-on-canvas);
+  font-size: var(--fs-sm);
+  margin-top: 4px;
+}
+
+/* Shared "this is a stub" affordance — every placeholder component (until a
+   follow-up task fills it in) renders this small caption so it's obvious in
+   the running app which pieces are real vs. scaffolded. */
+.nh-stub__label {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--muted-on-canvas);
+  margin-bottom: var(--sp-2);
+}
+
+/* [data-theme="light"] needs no overrides here — every value above routes
+   through theme-safe composite tokens (--text-on-canvas, --bg-*, --border-*)
+   that already resolve correctly per theme (see tokens.css). */

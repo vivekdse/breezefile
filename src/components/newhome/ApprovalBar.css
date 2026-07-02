@@ -1,0 +1,44 @@
+/* task-b9cdad64ab9c — STUB styling. Reuses the --nh-needs* status tokens
+   defined in NewHomePage.css (this file's host is always inside .nh). */
+.nh-approval-bar {
+  background: var(--nh-needs-soft);
+  border: 1px solid var(--nh-needs);
+  border-left: 4px solid var(--nh-needs);
+  border-radius: var(--r-lg);
+  margin-bottom: var(--sp-5);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.nh-approval-bar__summary {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-on-canvas);
+  margin-bottom: var(--sp-2);
+}
+
+.nh-approval-bar__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.nh-approval-bar__list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.nh-approval-bar__list button {
+  appearance: none;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+}

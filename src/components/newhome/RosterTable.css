@@ -1,0 +1,65 @@
+/* task-b9cdad64ab9c — STUB styling. */
+.nh-roster {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  margin-bottom: var(--sp-5);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.nh-roster__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.nh-roster__table thead {
+  background: var(--bg-2);
+}
+
+.nh-roster__table th {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  font-weight: 600;
+  color: var(--muted-on-panel);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.nh-roster__table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  color: var(--text-on-panel);
+}
+
+.nh-roster__table tbody tr {
+  cursor: pointer;
+  transition: background var(--motion-hover);
+}
+.nh-roster__table tbody tr:hover {
+  background: var(--bg-2);
+}
+.nh-roster__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.nh-roster__empty {
+  text-align: center;
+  color: var(--muted-on-panel);
+  padding: var(--sp-5) 0 !important;
+}
+
+.nh-roster__pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+.nh-roster__pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
+.nh-roster__pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
+.nh-roster__pill--needs { background: var(--nh-needs-soft); color: var(--nh-needs); }
+.nh-roster__pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }

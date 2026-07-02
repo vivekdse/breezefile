@@ -1,0 +1,106 @@
+/* task-b9cdad64ab9c — STUB styling. Split-modal shell (single-pane for now —
+   the left chat / right form-preview split lands in the follow-up task). */
+.nh-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-8);
+}
+
+.nh-modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-xl);
+  width: 100%;
+  max-width: 640px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-2);
+}
+
+.nh-modal__head {
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border-1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nh-modal__close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--muted-on-panel);
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+}
+.nh-modal__close:hover {
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+}
+
+.nh-modal__body {
+  padding: var(--sp-4) var(--sp-5);
+  overflow-y: auto;
+  flex: 1;
+  color: var(--text-on-panel);
+  font-size: var(--fs-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.nh-modal__input {
+  padding: 8px 12px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+  font: inherit;
+}
+.nh-modal__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.nh-modal__error {
+  color: var(--err);
+}
+
+.nh-modal__footer {
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-2);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.nh-modal__footer button {
+  appearance: none;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+  border-radius: var(--r-md);
+  padding: 6px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+.nh-modal__footer button:last-child {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+.nh-modal__footer button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

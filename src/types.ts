@@ -42,7 +42,7 @@ export type TagFilter = { mode: TagFilterMode; ids: string[] };
 // same ProjectsPage component; like 'projects'/'tasks' it ignores `trail` for
 // rendering and gates its own scoped verbs. The bare file-manager folder tab
 // stays 'folder'; the flat all-tasks page stays 'tasks'.
-export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home';
+export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home' | 'newhome';
 
 export type Tab = {
   id: string;

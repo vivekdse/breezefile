@@ -246,6 +246,7 @@ type Action =
   | { type: 'openTasksTab'; focus?: boolean }
   | { type: 'openProjectsTab'; focus?: boolean }
   | { type: 'openHomeTab'; focus?: boolean }
+  | { type: 'openNewHomeTab'; focus?: boolean }
   | { type: 'openEditTab'; path: string; focus?: boolean }
   | { type: 'setTabDirty'; index: number; dirty: boolean }
   | { type: 'openOrFocusFolderTab'; path: string; focus?: boolean }
@@ -334,7 +335,7 @@ type Action =
 function makeTab(
   path: string,
   opts?: {
-    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home';
+    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home' | 'newhome';
     taskId?: string | null;
     editPath?: string | null;
     browserUrl?: string;
@@ -520,6 +521,25 @@ function reducer(s: State, a: Action): State {
       const seedCwd =
         s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
       const tab = makeTab(seedCwd, { kind: 'home' });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'openNewHomeTab': {
+      // task-b9cdad64ab9c — singleton "New Home" surface (the V11-prototype-
+      // style agent-work monitor). Same focus-or-spawn lifecycle as
+      // openHomeTab/openProjectsTab; a distinct kind:'newhome' keeps it fully
+      // separate from the existing Home (kind:'home'/'projects') so that
+      // surface stays untouched while this one is built out incrementally.
+      const existing = s.tabs.findIndex((t) => t.kind === 'newhome');
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const seedCwd =
+        s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
+      const tab = makeTab(seedCwd, { kind: 'newhome' });
       return {
         ...s,
         tabs: [...s.tabs, tab],

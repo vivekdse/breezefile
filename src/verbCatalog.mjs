@@ -124,6 +124,7 @@ export const VERB_CATALOG = [
   { id: 'task', label: 'New task', category: 'Tools', menuLabel: 'New Task', help: 'open the inline task composer' },
   { id: 'tasks', label: 'All tasks', category: 'Tools', menuLabel: 'Tasks View', help: 'open the flat task list (every task, one inbox)' },
   { id: 'projects', label: 'Home', category: 'Tools', inMenu: false, help: 'open Home — your tasks ranked by what needs you, projects as folders' },
+  { id: 'new-home', label: 'New Home', category: 'Tools', inMenu: false, help: 'agent work monitor — approvals, roster, outcomes' },
   { id: 'new-task', label: 'New task', category: 'Tools', inMenu: false, keybinding: 'n', help: 'create a task scoped to the project in view on Home (or unscoped)' },
   { id: 'new-project', label: 'New project', category: 'Tools', inMenu: false, help: 'create a project / sub-project via TypeBuild' },
   { id: 'settings', label: 'Settings', category: 'Tools', help: 'view & rebind keys · per-launcher settings · notifications' },

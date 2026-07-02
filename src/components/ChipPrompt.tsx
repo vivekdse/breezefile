@@ -181,6 +181,7 @@ type Verb =
   | 'task'
   | 'tasks'
   | 'projects'
+  | 'new-home'
   | 'files'
   | 'new-task'
   | 'new-project'
@@ -1884,6 +1885,25 @@ export const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openProjects'));
+    },
+  },
+  {
+    // task-b9cdad64ab9c — New Home: a from-scratch agent-work monitor
+    // (approval bar → hero stats → filters → roster table → task dialog →
+    // conversational new-task modal), scaffolded alongside the existing Home
+    // (kind:'home'/'projects') without touching it. Slotless, singleton tab
+    // (kind:'newhome') — see openNewHomeTab in store.tsx.
+    id: 'new-home',
+    label: 'New Home',
+    aliases: ['new-home', 'newhome', 'nh'],
+    icon: '◎',
+    describe: () =>
+      'Open New Home — agent work monitor: approvals, roster, outcomes',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openNewHome'));
     },
   },
   {

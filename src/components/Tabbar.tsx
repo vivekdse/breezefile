@@ -161,6 +161,9 @@ export function Tabbar() {
     // task-97c0800ff55d — both the Home surface (kind:'home') and the legacy
     // 'projects' kind label as "Home".
     const isProjects = t.kind === 'projects' || t.kind === 'home';
+    // task-b9cdad64ab9c — New Home is a distinct singleton surface; label it
+    // apart from the legacy Home/Projects tab.
+    const isNewHome = t.kind === 'newhome';
     const isEdit = t.kind === 'edit';
     const isBrowser = t.kind === 'browser'; // SPIKE (spike/playwright-cdp)
     // Defensive: a task tab without a resolvable id/title falls back to
@@ -170,6 +173,8 @@ export function Tabbar() {
     const editName = isEdit && t.editPath ? basename(t.editPath) : '';
     const label = isProjects
       ? 'Home'
+      : isNewHome
+      ? 'New Home'
       : isTasksOverview
       ? 'All tasks'
       : isBrowser
