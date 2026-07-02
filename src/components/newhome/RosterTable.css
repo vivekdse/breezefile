@@ -1,11 +1,55 @@
-/* task-b9cdad64ab9c — STUB styling. */
+/* task-cc9a4ef6f38a — RosterTable: Project View table + escalation layer.
+   Colors route through the --nh-* status vars defined on .nh in
+   NewHomePage.css so this file never hardcodes a status hue directly. */
 .nh-roster {
   background: var(--bg-1);
   border: 1px solid var(--border-1);
   border-radius: var(--r-lg);
   overflow: hidden;
   margin-bottom: var(--sp-5);
-  padding: var(--sp-2) var(--sp-3);
+}
+
+.nh-roster__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+
+.nh-roster__pills {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  padding: 4px;
+}
+
+.nh-roster__pill-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted-on-panel);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.nh-roster__pill-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-on-panel);
+}
+.nh-roster__pill-btn--active {
+  background: var(--text-on-panel);
+  color: var(--bg-1);
+}
+
+.nh-roster__table-wrap {
+  overflow-x: auto;
+  padding: var(--sp-3);
 }
 
 .nh-roster__table {
@@ -27,12 +71,17 @@
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   border-bottom: 1px solid var(--border-1);
+  white-space: nowrap;
+}
+.nh-roster__th-action {
+  width: 1%;
 }
 
 .nh-roster__table td {
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border-1);
   color: var(--text-on-panel);
+  vertical-align: top;
 }
 
 .nh-roster__table tbody tr {
@@ -42,14 +91,46 @@
 .nh-roster__table tbody tr:hover {
   background: var(--bg-2);
 }
+.nh-roster__table tbody tr:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .nh-roster__table tbody tr:last-child td {
   border-bottom: none;
+}
+
+/* Escalation row tints — soft washes so status is legible at a glance in
+   both themes without fighting the hover/focus states above. */
+.nh-roster__row--needs {
+  background: var(--nh-needs-soft);
+}
+.nh-roster__row--needs:hover {
+  background: color-mix(in srgb, var(--nh-needs-soft) 70%, var(--bg-2));
+}
+.nh-roster__row--failed {
+  background: var(--nh-failed-soft);
+}
+.nh-roster__row--failed:hover {
+  background: color-mix(in srgb, var(--nh-failed-soft) 70%, var(--bg-2));
 }
 
 .nh-roster__empty {
   text-align: center;
   color: var(--muted-on-panel);
   padding: var(--sp-5) 0 !important;
+  cursor: default;
+}
+
+.nh-roster__clear-filter {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
 }
 
 .nh-roster__pill {
@@ -58,8 +139,130 @@
   border-radius: 999px;
   font-size: var(--fs-2xs);
   font-weight: 600;
+  white-space: nowrap;
 }
 .nh-roster__pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-roster__pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
 .nh-roster__pill--needs { background: var(--nh-needs-soft); color: var(--nh-needs); }
 .nh-roster__pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
+
+.nh-roster__title-cell {
+  min-width: 160px;
+}
+.nh-roster__title {
+  font-weight: 600;
+  color: var(--text-on-panel);
+}
+.nh-roster__risk {
+  margin-top: 2px;
+  font-size: var(--fs-2xs);
+  color: var(--nh-failed);
+}
+
+.nh-roster__cell {
+  white-space: nowrap;
+}
+
+.nh-roster__badge {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--nh-needs);
+  font-size: var(--fs-xs);
+  cursor: default;
+}
+
+.nh-roster__last-action {
+  color: var(--muted-on-panel);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nh-roster__who {
+  text-align: center;
+  font-size: var(--fs-md);
+  cursor: default;
+}
+
+.nh-roster__action-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.nh-roster__action {
+  appearance: none;
+  border: none;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  padding: 5px 12px;
+  cursor: pointer;
+  color: var(--text-on-accent);
+  transition: filter var(--motion-hover);
+}
+.nh-roster__action:hover {
+  filter: brightness(1.08);
+}
+.nh-roster__action--answer {
+  background: var(--nh-needs);
+}
+.nh-roster__action--retry {
+  background: var(--nh-failed);
+}
+.nh-roster__action-empty {
+  color: var(--muted-on-panel);
+}
+
+.nh-roster__row--skeleton td {
+  padding: var(--sp-2) var(--sp-3);
+}
+.nh-roster__skeleton-bar {
+  height: 14px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(
+    90deg,
+    var(--bg-2) 25%,
+    var(--bg-3) 37%,
+    var(--bg-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: nh-roster-shimmer 1.4s ease infinite;
+}
+@keyframes nh-roster-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+.nh-roster__footnote {
+  border-top: 1px solid var(--border-1);
+  padding: var(--sp-2) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-2);
+}
+.nh-roster__footnote-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.nh-roster__footnote-title {
+  color: var(--text-on-panel);
+  font-weight: 500;
+}
+.nh-roster__footnote-field {
+  color: var(--muted-on-panel);
+}
+.nh-roster__footnote-days {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--nh-needs);
+}
+
+/* [data-theme="light"] needs no overrides — every value above routes through
+   theme-safe composite tokens / the shared --nh-* status vars, which already
+   resolve correctly per theme (see NewHomePage.css). */

@@ -48,24 +48,50 @@ function deriveStatus(t: Task, today: string, now: number): NewHomeStatus {
   return 'progress';
 }
 
+// TODO(New Home follow-up) — `messages[].by` is documented only as "an email
+// principal" (see src/types.ts) with no agent-vs-human tag, and there's no
+// `runs`/audit trail embedded on Task (the real per-task audit feed is a
+// separate fetch — fm.typebuild.audit — not cross-referenced here yet). Until
+// that's threaded through, we approximate authorship by comparing `by`
+// against the human identities we DO know (`assignedTo`, `pending_question
+// .asked_by`) — a message from a known-human address is a human action,
+// anything else (an agent's own identity, a system string) is treated as an
+// agent action. This is still best-effort, not authoritative.
+function isHumanPrincipal(by: string | undefined | null, t: Task): boolean {
+  if (!by) return false;
+  if (t.assignedTo && by === t.assignedTo) return true;
+  if (t.createdBy && by === t.createdBy) return true;
+  if (t.pending_question?.asked_by && by === t.pending_question.asked_by) return true;
+  return false;
+}
+
 function deriveWho(t: Task): NewHomeTask['who'] {
-  // TODO(New Home follow-up) — this is a placeholder heuristic. Once the
-  // roster needs a trustworthy "who's turn is it" signal, thread it through
-  // messages[].by / audit events instead of guessing from claim + question
-  // state.
+  // A live pending question means the ball is with a human right now,
+  // regardless of who acted before it.
   if (t.pending_question) return 'human';
-  if (t.messages && t.messages.length > 0) return 'both';
+  const msgs = t.messages ?? [];
+  if (msgs.length > 0) {
+    const sawHuman = msgs.some((m) => isHumanPrincipal(m.by, t));
+    const sawAgent = msgs.some((m) => !isHumanPrincipal(m.by, t));
+    if (sawHuman && sawAgent) return 'both';
+    if (sawHuman) return 'human';
+    return 'agent';
+  }
   if (t.claimedBy || t.status === 'in_progress') return 'agent';
   return 'agent';
 }
 
 function deriveLastAction(t: Task): string {
   // TODO(New Home follow-up) — swap for a real audit-trail line once
-  // available; this is a best-effort summary from whatever's already on the
-  // task object.
+  // fm.typebuild.audit is threaded through here; this is a best-effort
+  // summary from whatever's already on the task object, newest-first
+  // preference: open question > latest message > claim notes > raw status.
   if (t.pending_question) return `Asked: ${t.pending_question.text}`;
   const lastMsg = t.messages?.at(-1);
-  if (lastMsg) return lastMsg.text;
+  if (lastMsg) {
+    const actor = isHumanPrincipal(lastMsg.by, t) ? 'Reply' : 'Update';
+    return `${actor}: ${lastMsg.text}`;
+  }
   if (t.notes && t.notes.trim()) return t.notes.trim().split('\n')[0];
   if (t.rawStatus) return `status: ${t.rawStatus}`;
   return t.status;

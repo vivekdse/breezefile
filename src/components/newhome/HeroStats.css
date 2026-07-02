@@ -1,4 +1,5 @@
-/* task-b9cdad64ab9c — STUB styling. */
+/* task-cc9a4ef6f38a — HeroStats: 4-up stat-card grid, left-border status
+   color (V11 reference), active card = current roster filter. */
 .nh-hero-stats {
   margin-bottom: var(--sp-5);
 }
@@ -27,12 +28,19 @@
 }
 .nh-hero-stats__stat--active {
   background: var(--bg-2);
+  border-color: var(--border-2);
+  box-shadow: inset 0 0 0 1px var(--border-2);
 }
 
 .nh-hero-stats__stat--done { border-left-color: var(--nh-done); }
 .nh-hero-stats__stat--progress { border-left-color: var(--nh-progress); }
 .nh-hero-stats__stat--needs { border-left-color: var(--nh-needs); }
 .nh-hero-stats__stat--failed { border-left-color: var(--nh-failed); }
+
+.nh-hero-stats__stat--done.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-done); }
+.nh-hero-stats__stat--progress.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-progress); }
+.nh-hero-stats__stat--needs.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-needs); }
+.nh-hero-stats__stat--failed.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-failed); }
 
 .nh-hero-stats__label {
   color: var(--muted-on-panel);
