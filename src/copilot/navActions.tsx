@@ -27,6 +27,7 @@
 // PHI: action params/results are chat content the user authored — never
 // additionally logged here. Return short, unambiguous strings so the chat
 // transcript is a clear audit trail of what actually happened.
+import { useRef } from 'react';
 import { z } from 'zod';
 import { useStore } from '../store';
 import { useTasks } from '../tasks';
@@ -37,11 +38,16 @@ import { immediateAction } from './actionKit';
  *  <CopilotActions/>. Registers the app-navigation actions. */
 export function NavActions() {
   const { dispatch } = useStore();
-  // Full, unfiltered task inventory so any task id the LLM references resolves
+  // Full task inventory (incl. done) so any task id the LLM references resolves
   // to its folder (openTaskTab needs the task's folder to root the tab).
-  const { tasks } = useTasks();
+  // Read through a ref because immediateAction registers the handler once —
+  // closing over `tasks` directly would capture the empty first-render list
+  // (see FormCopilotBridge / TaskActions stale-closure notes).
+  const { tasks } = useTasks({ includeDone: true });
+  const live = useRef({ tasks });
+  live.current = { tasks };
   const findTask = (taskId: string): Task | undefined =>
-    tasks.find((t) => t.id === taskId);
+    live.current.tasks.find((t) => t.id === taskId);
 
   // ─── Top-level surfaces (no params) ─────────────────────────────────────
 

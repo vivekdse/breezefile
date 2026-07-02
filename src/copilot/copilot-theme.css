@@ -235,6 +235,44 @@
     inset 0 0 28px color-mix(in srgb, var(--accent) 14%, transparent) !important;
 }
 
+/* task-24ea35660cd0 — the toggle was a big 56px disc. Trim it to a calmer
+   size when the chat is CLOSED... */
+.copilot-dock [data-testid='copilot-chat-toggle'] {
+  width: 40px !important;
+  height: 40px !important;
+}
+.copilot-dock [data-testid='copilot-chat-toggle'] svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+/* ...and when the chat is OPEN, stop floating the toggle over the transcript
+   (where it overlapped the header close button). Shrink it further and inlay
+   it just LEFT of the close button, top-right, as a quiet glyph rather than a
+   glowing disc. The sidebar can portal to <body>, so gate on body:has(open
+   sidebar); v2 marks the open panel with the cpk translate-x-0 utility. */
+body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
+  .copilot-dock [data-testid='copilot-chat-toggle'] {
+  width: 30px !important;
+  height: 30px !important;
+  top: 13px !important;
+  bottom: auto !important;
+  right: 52px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
+  .copilot-dock [data-testid='copilot-chat-toggle']:hover {
+  transform: none;
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  box-shadow: none !important;
+}
+body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
+  .copilot-dock [data-testid='copilot-chat-toggle'] svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
 /* ------------------------------------------------------------------ *
  * 5. Disabled state — no API key configured. A quiet corner launcher   *
  *    matching the other bottom-right chips, upgraded to the same        *

@@ -12,8 +12,14 @@
 // the main-process runtime has no Anthropic key configured, we skip mounting
 // the CopilotKit provider entirely and just render children + a tiny
 // setup-hint toggle — no network endpoint, no wasted client.
-import { useState, type ReactNode } from 'react';
-import { CopilotKit, CopilotSidebar, useAgentContext } from '@copilotkit/react-core/v2';
+import { useEffect, useState, type ReactNode } from 'react';
+import {
+  CopilotKit,
+  CopilotSidebar,
+  CopilotChatConfigurationProvider,
+  useAgentContext,
+  useCopilotChatConfiguration,
+} from '@copilotkit/react-core/v2';
 import '@copilotkit/react-core/v2/styles.css';
 import './copilot-theme.css';
 import { useStore } from '../store';
@@ -25,6 +31,36 @@ import { NavActions } from './navActions';
 
 const APP_NAME = 'TypeBuild';
 
+// task-24ea35660cd0 — "/" opens the copilot chat from anywhere (unless the
+// user is typing into a field, so it never hijacks text entry — including the
+// chat's own input, where "/" types normally). Mounted INSIDE the shared
+// CopilotChatConfigurationProvider so setModalOpen drives the same open-state
+// the sidebar reads. The listener is capture-phase so it beats useKeyboard's
+// window (bubble-phase) handler, and stopPropagation suppresses that handler's
+// "/"→find binding when we take the key.
+function ChatHotkey() {
+  const config = useCopilotChatConfiguration();
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      const typing =
+        !!el &&
+        (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+      if (typing) return;
+      e.preventDefault();
+      e.stopPropagation();
+      config?.setModalOpen(true);
+      requestAnimationFrame(() => {
+        (document.querySelector('[data-testid=copilot-chat-textarea]') as HTMLTextAreaElement | null)?.focus();
+      });
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [config]);
+  return null;
+}
+
 function CopilotGrounding() {
   const { state } = useStore();
   const tabKind = state.tabs[state.activeTab]?.kind ?? 'folder';
@@ -34,20 +70,28 @@ function CopilotGrounding() {
     value: { appName: APP_NAME, activeTabKind: tabKind },
   });
 
+  // A shared configuration provider wraps BOTH the sidebar and ChatHotkey so
+  // they share one isModalOpen state — CopilotSidebar creates its own inner
+  // config provider, but with no explicit defaultOpen it defers open-state to
+  // this parent, so ChatHotkey's setModalOpen(true) actually opens it.
+  // input={{ autoFocus: true }} keeps the textarea focused across sends/tool
+  // calls; autoScroll pins the transcript to the bottom as output streams.
   return (
-    <>
+    <CopilotChatConfigurationProvider isModalDefaultOpen={false}>
       <CopilotActions />
       <TaskActions />
       <NavActions />
+      <ChatHotkey />
       <CopilotSidebar
-        defaultOpen={false}
         position="right"
+        input={{ autoFocus: true }}
+        autoScroll="pin-to-bottom"
         labels={{
           modalHeaderTitle: `${APP_NAME} Copilot`,
           welcomeMessageText: "Hi! I'm your TypeBuild copilot. Ask me to help you get around, or try opening New Home.",
         }}
       />
-    </>
+    </CopilotChatConfigurationProvider>
   );
 }
 

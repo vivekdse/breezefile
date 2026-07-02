@@ -13,6 +13,7 @@
 // PHI: action params/results are chat content the user authored — never
 // additionally logged here. Return short, unambiguous strings so the transcript
 // is a clear audit trail of what actually happened.
+import { useRef } from 'react';
 import { z } from 'zod';
 import { useTasks } from '../tasks';
 import { useTaskActions } from '../components/tasks/useTaskActions';
@@ -22,12 +23,62 @@ import { immediateAction, confirmedAction } from './actionKit';
 /** Mount once inside the CopilotKit provider (CopilotDock.tsx), alongside
  *  <CopilotActions/>. Registers the task-management actions. */
 export function TaskActions() {
-  // Full, unfiltered task inventory so any task id the LLM references resolves.
-  const { tasks } = useTasks();
+  // The FULL task inventory across every project + source, INCLUDING done —
+  // so the copilot can retrieve/act on ANY task, not just the ones rendered on
+  // the current page (task-24ea35660cd0). Not scoped to the active project.
+  const { tasks } = useTasks({ includeDone: true });
   const { setStatus, togglePin, setDue, bulkDelete } = useTaskActions();
 
+  // STALE-CLOSURE NOTE (see FormCopilotBridge): immediateAction/confirmedAction
+  // register each handler ONCE, so a handler closing over `tasks`/actions
+  // directly would capture the FIRST render's values — an EMPTY task list,
+  // since tasks load async. That's exactly why "retrieve any task" failed.
+  // Read through `live` (a ref refreshed each render) so handlers always see
+  // the current task inventory + mutation fns.
+  const live = useRef({ tasks, setStatus, togglePin, setDue, bulkDelete });
+  live.current = { tasks, setStatus, togglePin, setDue, bulkDelete };
+
   const find = (taskId: string): Task | undefined =>
-    tasks.find((t) => t.id === taskId);
+    live.current.tasks.find((t) => t.id === taskId);
+
+  // ─── Discovery ─────────────────────────────────────────────────────────
+  // The one action that lets the copilot reach a task the page ISN'T showing.
+  // The grounding context only lists what's on screen (the current project's
+  // open tasks); this searches the whole inventory so the model can find a
+  // task by name, get its id, then act on it.
+  immediateAction({
+    name: 'find_tasks',
+    description:
+      "Search ALL tasks — every project and status, not just the ones visible on the current page — by title text and/or status. Returns matches with their id, title, status, and project id so you can then open or update them. Use this whenever the user names a task that isn't already in view.",
+    parameters: z.object({
+      query: z
+        .string()
+        .describe('Case-insensitive text to match against task titles. Omit or pass "" to list recent tasks.')
+        .optional(),
+      status: z
+        .enum(['pending', 'in_progress', 'done', 'cancelled'])
+        .describe('Optional status filter.')
+        .optional(),
+      limit: z.number().describe('Max results to return (default 15).').optional(),
+    }),
+    perform: ({ query, status, limit }) => {
+      const q = (query ?? '').trim().toLowerCase();
+      let matches = live.current.tasks;
+      if (q) matches = matches.filter((t) => t.title.toLowerCase().includes(q));
+      if (status) matches = matches.filter((t) => t.status === status);
+      const cap = Math.max(1, Math.min(limit ?? 15, 50));
+      const shown = matches.slice(0, cap);
+      if (!shown.length) {
+        return q ? `No tasks match "${query}"${status ? ` with status ${status}` : ''}.` : 'No tasks found.';
+      }
+      const lines = shown.map(
+        (t) =>
+          `- "${t.title}" [${t.status}] id=${t.id}${t.projectId ? ` project=${t.projectId}` : ''}`,
+      );
+      const more = matches.length > shown.length ? `\n(+${matches.length - shown.length} more — narrow the query)` : '';
+      return `Found ${matches.length} task(s):\n${lines.join('\n')}${more}`;
+    },
+  });
 
   // ─── Reversible ────────────────────────────────────────────────────────
 
@@ -47,7 +98,7 @@ export function TaskActions() {
       if (!['done', 'pending', 'in_progress'].includes(status)) {
         return `Failed: status must be one of done, pending, in_progress (got "${status}").`;
       }
-      await setStatus(task, status as 'done' | 'pending' | 'in_progress');
+      await live.current.setStatus(task, status as 'done' | 'pending' | 'in_progress');
       return `Set status of "${task.title}" to ${status}.`;
     },
   });
@@ -62,7 +113,7 @@ export function TaskActions() {
       const task = find(taskId);
       if (!task) return `No task found with id "${taskId}".`;
       if (task.pinned) return `"${task.title}" is already pinned.`;
-      await togglePin(task);
+      await live.current.togglePin(task);
       return `Pinned "${task.title}".`;
     },
   });
@@ -77,7 +128,7 @@ export function TaskActions() {
       const task = find(taskId);
       if (!task) return `No task found with id "${taskId}".`;
       if (!task.pinned) return `"${task.title}" is not pinned.`;
-      await togglePin(task);
+      await live.current.togglePin(task);
       return `Unpinned "${task.title}".`;
     },
   });
@@ -96,7 +147,7 @@ export function TaskActions() {
       const task = find(taskId);
       if (!task) return `No task found with id "${taskId}".`;
       const v = (value ?? '').trim();
-      await setDue(task, v || null);
+      await live.current.setDue(task, v || null);
       return v
         ? `Set due date of "${task.title}" to ${v}.`
         : `Cleared the due date of "${task.title}".`;
@@ -155,7 +206,7 @@ export function TaskActions() {
     perform: async ({ taskId }) => {
       const task = find(taskId);
       if (!task) return `No task found with id "${taskId}".`;
-      await setStatus(task, 'cancelled');
+      await live.current.setStatus(task, 'cancelled');
       return `Cancelled "${task.title}".`;
     },
   });
@@ -183,7 +234,7 @@ export function TaskActions() {
     perform: async ({ taskId }) => {
       const task = find(taskId);
       if (!task) return `No task found with id "${taskId}".`;
-      await bulkDelete([task]);
+      await live.current.bulkDelete([task]);
       return `Deleted "${task.title}".`;
     },
   });
