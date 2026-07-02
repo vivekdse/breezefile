@@ -3553,6 +3553,23 @@ export function ChipPrompt({
   const [verb, setVerb] = useState<VerbDef | null>(
     () => VERBS.find((v) => v.id === initialVerbId) ?? null,
   );
+  // task-f8bb12b2bae3 follow-up — callers (Home quick-switcher, Cmd-K palette)
+  // dispatch setMode{verb: id} to open ChipPrompt with the verb PRE-selected,
+  // skipping pickOption()'s own zero-slot auto-execute branch. Without this,
+  // a slotless verb (maximize, fullscreen, settings…) opens with activeSlot
+  // null → allOptions [] → renders as "No matches" and never runs. Mirror
+  // pickOption's behavior here for the initial preset verb.
+  const autoExecutedRef = useRef(false);
+  useEffect(() => {
+    // React 18 StrictMode double-invokes mount effects in dev; guard with a
+    // ref (not just `[]` deps) so a slotless verb doesn't execute twice —
+    // e.g. "maximize" would toggle on then immediately back off, looking
+    // like it did nothing.
+    if (autoExecutedRef.current) return;
+    autoExecutedRef.current = true;
+    if (verb && verb.slots.length === 0) void executeWith(verb, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [picks, setPicks] = useState<string[]>([]); // slot values
   // fm-7d86 — multi-select staging: ids the user has toggled on for the
   // current multi slot. Cleared on slot advance / verb change. Committed
