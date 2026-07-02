@@ -1,0 +1,170 @@
+# Saved Queries: external data sources for forms and dynamic tasks
+
+**Status:** design approved in conversation (2026-07-02); v1 slice filed in TypeBuild.
+**Related:** [`typebuild-data-field-contract.md`](typebuild-data-field-contract.md),
+[`pii-data-injection-design.md`](pii-data-injection-design.md).
+
+## Problem
+
+Two product scenarios need the task system to talk to external APIs (EHRs first,
+anything REST later):
+
+1. **Selectors in task-creation forms.** A template field like "Patient" should be
+   a typeahead/dropdown backed by a live API query, and selecting a row should give
+   the task (and agents working it) durable access to the underlying resource — not
+   just a display string.
+2. **Data-driven task generation.** When external data changes (e.g. a patient is
+   flagged for surgery in the EHR), the system should automatically instantiate a
+   task chain for the relevant project (insurance authorization → surgery-center
+   coordination → PCP notification), with each task bound to the right resource.
+
+Both must ride ONE underlying mechanism, available identically to every client
+(Electron today, web/headless later), scalable across use cases, and customizable
+per project.
+
+## Decisions
+
+- **REST-only transport.** All sources are accessed over HTTPS/REST. FHIR is
+  already REST (Epic, Cerner, athenahealth expose FHIR R4 + OAuth); legacy HL7v2
+  systems get a REST adapter (Redox-style) outside this system. Implication:
+  push is polling-with-diff (minutes-level latency — acceptable for scheduling
+  workflows); bulk reads are bounded by protocol limits that force server-side
+  filtering.
+- **LLM authors, engine executes.** Instead of a hand-built query DSL, CopilotKit
+  (already integrated) writes the query code at **design time**, with the
+  DataSource's API spec as context. The artifact is saved, versioned, and
+  human-approved; a deterministic sandboxed executor runs it at runtime. The LLM
+  is never in the execution loop for recurring paths (determinism, cost, PHI
+  auditability). Conversational agent work may still query live via scoped tools.
+- **Executor lives behind the task API** (canonical home), so every client gets
+  identical behavior via `POST /queries/:id/execute`. The Electron client calls
+  it; it does not embed its own copy. This also lets triggers run continuously
+  server-side rather than only while a client is open.
+- **One execution language for v1:** sandboxed JS with an injected, scoped
+  `fetch`. JS-over-REST expresses queries against any HTTP API; no SQL/multi-
+  language runtime unless a real need appears.
+
+## Concepts
+
+### DataSource
+
+A registered external API: `{ id, name, baseUrl, auth, entityTypes }`. Auth
+credentials live server-side only — never in query code, never in LLM context.
+Per-project bindings (`TemplateConfig.dataSources`) declare which sources a
+project may use and any field mappings.
+
+### SavedQuery
+
+```jsonc
+{
+  "id": "sq_7f3a...",
+  "name": "patients-pending-surgery",
+  "version": 3,                       // immutable versions; consumers pin one
+  "sourceId": "ds_epic_fhir",
+  "status": "approved",               // draft | approved | disabled — only approved executes
+  "approvedBy": "user@practice.com",  // design-time human gate
+
+  "inputs": { /* JSON Schema for bound parameters, e.g. searchTerm */ },
+
+  "code": "export default async function run(ctx) { ... }",
+
+  "outputSchema": {
+    "ref":     { "entityType": "patient" },  // every row MUST carry a resource ref
+    "display": ["name", "dob"],              // safe-to-render fields
+    "fields":  { "name": "string", "dob": "date", "surgeryFlag": "boolean" }
+  },
+
+  "limits": { "timeoutMs": 10000, "maxFetches": 20, "maxRows": 200 }
+}
+```
+
+### Code contract
+
+A single default-exported async function:
+
+```js
+// ctx.fetch  — ONLY I/O. Scoped to the DataSource baseUrl; creds injected by the
+//              executor; read-only (GET) by default.
+// ctx.inputs — validated against the inputs schema.
+// Returns { rows: [{ ref: {sourceId, entityType, externalId}, ...fields }] }
+export default async function run(ctx) {
+  const res = await ctx.fetch(`/Patient?name=${enc(ctx.inputs.searchTerm)}&_count=50`);
+  const bundle = await res.json();
+  return { rows: bundle.entry.map(e => ({
+    ref: { entityType: "patient", externalId: e.resource.id },
+    name: fmtName(e.resource.name), dob: e.resource.birthDate
+  })) };
+}
+```
+
+Protocol rules and why:
+
+- **`ctx.fetch` is the only I/O.** No ambient network/fs/timers. This one line is
+  the security model: LLM-authored code can do anything *within* a read-only,
+  base-URL-scoped, credential-injected fetch.
+- **Read-only.** Mutating the source is a different artifact class (`SavedAction`,
+  future) with its own approval gate. Queries never POST.
+- **Every row carries a `ref`** (`{sourceId, entityType, externalId}`). Selections
+  store the ref; triggers bind the ref into task `data` as placeholder keys (per
+  the data-field contract); agents re-fetch live via the ref. Display fields are
+  ephemeral snapshots.
+- **`outputSchema` is declared, not inferred.** Forms know columns and triggers
+  know condition fields without executing. Executor validates rows against it and
+  fails loudly on drift (catches upstream API changes).
+- **Immutable versions + approval.** Consumers pin `sq_x@vN`; an LLM-proposed vN+1
+  changes nothing until approved. Audit answer: "exactly this code, version N,
+  approved by X on date D, ran K times."
+- **Limits enforced by the executor** (timeout, fetch count, row cap) bound bad
+  code and structurally force server-side filtering.
+
+### Executor
+
+Sandboxed JS runtime (V8 isolate / worker): no fs, no ambient network, only the
+injected `ctx`. Two modes over the same artifact:
+
+- `execute(sq, inputs) → rows` — selectors, on-demand.
+- `poll(sq, inputs) → { added, removed, changed }` — triggers. Executor keeps a
+  hash of last-run `ref`s per (query, trigger) and diffs; dedup/idempotency lives
+  in the platform, not per-query code.
+
+### Consumers
+
+1. **Form selectors.** `TemplateField.source` gains `{ savedQueryId, version }`
+   (replacing the bare `agentFetchable` boolean / `tryAgentFetch()` stub in
+   `NewTaskModal.tsx`). Field renders as a typeahead calling
+   `execute` with the typed term; selection stores the `ref` + display snapshot.
+   The modal-scoped Copilot action path (`fill_field` in `NewTaskCopilotChat.tsx`)
+   gains a sibling `lookup_record` action that runs the same query — one lookup,
+   two UIs.
+2. **Trigger rules.** Per-project `TriggerRule`:
+   `{ savedQueryId, version, condition, chainId, schedule }`. On `poll` diff,
+   rows matching `condition` that have no existing instantiation marker fire the
+   chain (`ChainDef` from templates+chains), binding the row's `ref` into each
+   generated task's `data` field. Instantiation marker recorded to guarantee
+   idempotency across polling cycles.
+
+### Authoring flow (CopilotKit)
+
+Admin describes the need in chat ("dropdown of patients with upcoming
+surgeries"). Copilot, grounded with the DataSource API spec, drafts the
+SavedQuery (code + outputSchema), runs it against a sandbox for sample results
+shown inline, iterates, then the human approves → status `approved`, version
+frozen.
+
+## PHI boundary
+
+Query results transit memory only. Persisted artifacts: the SavedQuery record
+(code + schema — no patient data), refs/placeholder keys in task `data`, and
+diff hashes. Display snapshots follow the same rules as task bodies
+(`phiSensitive`: never to disk/logs/notifications).
+
+## v1 slice
+
+1. Server (task API): SavedQuery CRUD + versioning/approval, JS sandbox executor
+   with `execute` mode, one DataSource registered (test FHIR sandbox).
+2. Client: `TemplateField.source → savedQueryId`, typeahead in NewTaskModal via
+   `POST /queries/:id/execute`, `lookup_record` Copilot action.
+3. Then: `poll` mode + `TriggerRule` + chain instantiation with `data` binding.
+
+Deferred: webhooks/subscriptions, `SavedAction` (write-back), SQL/native-FHIR
+executors, no-code admin UI for sources/triggers (config-first for v1).
