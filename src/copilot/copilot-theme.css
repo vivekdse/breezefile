@@ -270,7 +270,12 @@
     inset 0 0 24px color-mix(in srgb, var(--accent) 6%, transparent);
   transition: transform var(--motion-hover), box-shadow var(--motion-hover),
     border-color var(--motion-hover);
-  animation: copilot-launcher-breathe 4.2s var(--ease-in-out) infinite;
+  /* 1.8s matches the app's ambient-loop rhythm (task-dot-breathe 1.8s,
+     tddPulse 1.6s) rather than guruandai's slower 4.2s, so the copilot chip
+     breathes in step with the rest of the app's "alive" affordances. There's
+     no shared duration token for multi-second ambient loops — every loop in
+     the codebase hardcodes its seconds — so we follow that convention. */
+  animation: copilot-launcher-breathe 1.8s var(--ease-in-out) infinite;
 }
 
 .copilot-dock__launcher:hover {
