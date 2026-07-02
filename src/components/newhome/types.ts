@@ -20,7 +20,7 @@ export type { PendingQuestion };
 /** Coarse status bucket New Home renders/filters on. Derived from the
  *  underlying Task in useNewHomeData — see that file for the derivation
  *  rules (marked TODO where the mapping is approximate today). */
-export type NewHomeStatus = 'done' | 'progress' | 'needs' | 'failed';
+export type NewHomeStatus = 'done' | 'progress' | 'queued' | 'needs' | 'failed';
 
 /** New Home's view-model for one task row. `raw` carries the full
  *  underlying Task so a stub needing a field not yet promoted to the
@@ -30,10 +30,16 @@ export type NewHomeTask = {
   title: string;
   status: NewHomeStatus;
   projectId: string | null;
+  /** Compact age of the most recent activity ("10m", "2h", "5d"), from
+   *  lastActionAt. '—' when no timestamp is derivable. */
+  lastAction: string;
+  /** Epoch ms of the most recent activity, or null when unknown. */
+  lastActionAt: number | null;
   /** Short human-readable description of the most recent activity (agent
    *  step, human reply, ...). Best-effort — derived from whatever the
-   *  underlying source exposes (messages/notes/audit), never guaranteed. */
-  lastAction: string;
+   *  underlying source exposes (messages/notes/audit), never guaranteed.
+   *  Rendered as the Last Action tooltip. */
+  lastActionDetail: string;
   /** Who acted last / who the ball is with. 'both' covers a task with
    *  interleaved agent+human activity where a single owner isn't clear. */
   who: 'agent' | 'human' | 'both';

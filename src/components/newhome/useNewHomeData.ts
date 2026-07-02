@@ -16,9 +16,12 @@
 //   needs    — classify().asked (a pending question — human-only unblock),
 //              OR classify().blocked (rawStatus 'blocked'/'failed'), OR
 //              classify().stalled (an in_progress row with no live worker).
-//   progress — everything else still open (classify().open, or in_progress
-//              with a live worker). classify().overdue is folded into
-//              'progress' here — New Home doesn't have a due-date lane yet;
+//   progress — ONLY a task an agent is actively on: status 'in_progress'
+//              with a live worker (a stalled in_progress row lands in
+//              'needs' via classify().stalled above).
+//   queued   — everything else still open (status 'pending' — created but
+//              not claimed/being worked). classify().overdue is folded into
+//              'queued' here — New Home doesn't have a due-date lane yet;
 //              TODO(New Home follow-up) surface overdue separately if the
 //              roster needs it.
 //
@@ -45,7 +48,38 @@ function deriveStatus(t: Task, today: string, now: number): NewHomeStatus {
   const c = classify(t, today, now);
   if (c.failed) return 'failed';
   if (c.asked || c.blocked || c.stalled) return 'needs';
-  return 'progress';
+  // "In Progress" means an agent is actively on it — a live in_progress
+  // claim (stalled claims were already routed to 'needs' above). A pending,
+  // unclaimed task is merely queued.
+  return t.status === 'in_progress' ? 'progress' : 'queued';
+}
+
+/** Compact relative age for the roster's Last Action column: "10m", "2h",
+ *  "5d" (task feedback: a time, not a status). "now" under a minute. */
+function compactAgo(ms: number, now: number): string {
+  const abs = Math.max(0, now - ms);
+  if (abs < 60_000) return 'now';
+  if (abs < 3600_000) return `${Math.round(abs / 60_000)}m`;
+  if (abs < 86_400_000) return `${Math.round(abs / 3600_000)}h`;
+  return `${Math.round(abs / 86_400_000)}d`;
+}
+
+/** Epoch ms of the newest activity signal on the task, or null. */
+function deriveLastActionAt(t: Task): number | null {
+  const stamps: (string | null | undefined)[] = [
+    t.messages?.at(-1)?.at,
+    t.pending_question?.asked_at,
+    t.updatedAtIso,
+    t.claimedAt,
+    t.createdAtIso,
+  ];
+  let best: number | null = null;
+  for (const s of stamps) {
+    if (!s) continue;
+    const ms = Date.parse(s);
+    if (!Number.isNaN(ms) && (best === null || ms > best)) best = ms;
+  }
+  return best;
 }
 
 // TODO(New Home follow-up) — `messages[].by` is documented only as "an email
@@ -107,12 +141,15 @@ function deriveRisk(t: Task): string | undefined {
 }
 
 function toNewHomeTask(t: Task, today: string, now: number): NewHomeTask {
+  const lastActionAt = deriveLastActionAt(t);
   return {
     id: t.id,
     title: t.title,
     status: deriveStatus(t, today, now),
     projectId: t.projectId ?? null,
-    lastAction: deriveLastAction(t),
+    lastAction: lastActionAt === null ? '—' : compactAgo(lastActionAt, now),
+    lastActionAt,
+    lastActionDetail: deriveLastAction(t),
     who: deriveWho(t),
     pendingQuestion: t.pending_question ?? null,
     // TODO(New Home follow-up) — real custom-field values come from the
@@ -173,7 +210,7 @@ export function useNewHomeData(projectId?: string | null): {
   }, [rawTasks, projectId]);
 
   const counts = useMemo(() => {
-    const c: Record<NewHomeStatus, number> = { done: 0, progress: 0, needs: 0, failed: 0 };
+    const c: Record<NewHomeStatus, number> = { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 };
     for (const t of tasks) c[t.status] += 1;
     return c;
   }, [tasks]);

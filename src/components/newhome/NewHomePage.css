@@ -14,6 +14,8 @@
   --nh-done-soft: color-mix(in srgb, var(--ok) 16%, transparent);
   --nh-progress: var(--accent);
   --nh-progress-soft: var(--accent-soft);
+  --nh-queued: var(--muted-on-panel);
+  --nh-queued-soft: color-mix(in srgb, var(--muted-on-panel) 14%, transparent);
   --nh-needs: var(--warn);
   --nh-needs-soft: var(--warn-soft);
   --nh-failed: var(--err);

@@ -15,6 +15,7 @@ const FILTER_PILLS: { id: 'all' | NewHomeStatus; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'needs', label: 'Needs Me' },
   { id: 'progress', label: 'In Progress' },
+  { id: 'queued', label: 'Queued' },
   { id: 'done', label: 'Done' },
   { id: 'failed', label: 'Failed' },
 ];
@@ -28,6 +29,7 @@ const WHO_GLYPH: Record<NewHomeTask['who'], string> = {
 const STATUS_LABEL: Record<NewHomeStatus, string> = {
   done: 'Done',
   progress: 'In Progress',
+  queued: 'Queued',
   needs: 'Needs You',
   failed: 'Failed',
 };
@@ -294,7 +296,9 @@ export function RosterTable({
                   {customColumns.map((f) => (
                     <CustomCell key={f.key} task={t} field={f} now={now} />
                   ))}
-                  <td className="nh-roster__last-action">{t.lastAction}</td>
+                  <td className="nh-roster__last-action" title={t.lastActionDetail}>
+                    {t.lastAction}
+                  </td>
                   <td className="nh-roster__who" title={t.who}>
                     {WHO_GLYPH[t.who]}
                   </td>

@@ -143,6 +143,7 @@
 }
 .nh-roster__pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-roster__pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
+.nh-roster__pill--queued { background: var(--nh-queued-soft); color: var(--nh-queued); }
 .nh-roster__pill--needs { background: var(--nh-needs-soft); color: var(--nh-needs); }
 .nh-roster__pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
 

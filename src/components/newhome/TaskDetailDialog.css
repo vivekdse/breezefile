@@ -83,6 +83,7 @@
 }
 .nh-dialog__pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-dialog__pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
+.nh-dialog__pill--queued { background: var(--nh-queued-soft); color: var(--nh-queued); }
 .nh-dialog__pill--needs { background: var(--nh-needs-soft); color: var(--nh-needs); }
 .nh-dialog__pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
 

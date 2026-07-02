@@ -7,10 +7,11 @@
 import type { NewHomeStatus } from './types';
 import './HeroStats.css';
 
-const ORDER: NewHomeStatus[] = ['done', 'progress', 'needs', 'failed'];
+const ORDER: NewHomeStatus[] = ['done', 'progress', 'queued', 'needs', 'failed'];
 const LABELS: Record<NewHomeStatus, string> = {
   done: 'Done',
   progress: 'In Progress',
+  queued: 'Queued',
   needs: 'Needs You',
   failed: 'Failed',
 };

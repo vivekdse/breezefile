@@ -6,7 +6,7 @@
 
 .nh-hero-stats__grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--sp-3);
 }
 
@@ -34,11 +34,13 @@
 
 .nh-hero-stats__stat--done { border-left-color: var(--nh-done); }
 .nh-hero-stats__stat--progress { border-left-color: var(--nh-progress); }
+.nh-hero-stats__stat--queued { border-left-color: var(--nh-queued); }
 .nh-hero-stats__stat--needs { border-left-color: var(--nh-needs); }
 .nh-hero-stats__stat--failed { border-left-color: var(--nh-failed); }
 
 .nh-hero-stats__stat--done.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-done); }
 .nh-hero-stats__stat--progress.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-progress); }
+.nh-hero-stats__stat--queued.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-queued); }
 .nh-hero-stats__stat--needs.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-needs); }
 .nh-hero-stats__stat--failed.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-failed); }
 
