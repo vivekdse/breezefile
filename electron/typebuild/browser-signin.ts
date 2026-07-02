@@ -6,8 +6,10 @@
 // (general.typebuild.com): /register (Dynamic Client Registration), /authorize
 // (→ the hosted /mcp-login page, which offers "Sign in with Google" AND
 // email/password), and /token (PKCE). The user signs in on the familiar
-// TypeBuild page in their system browser; we capture the authorization code on
-// a one-shot loopback listener and exchange it.
+// TypeBuild page rendered in a small in-app window (NOT the system browser —
+// login is required to use the app, so it has to happen inside it); we
+// capture the authorization code on a one-shot loopback listener and
+// exchange it.
 //
 //   1. Register (once, cached) a public client via DCR: grant_types
 //      [authorization_code, refresh_token], token_endpoint_auth_method none,
@@ -16,9 +18,11 @@
 //      scope (verified against the live server).
 //   2. Start a single-use http server on 127.0.0.1:<random ephemeral port>,
 //      path /callback. 5-minute timeout; first hit wins, then it closes.
-//   3. shell.openExternal → /authorize with PKCE (S256) + a `state` nonce and
-//      redirect_uri = http://127.0.0.1:<port>/callback. 302 → /mcp-login.
-//   4. The browser redirects back to the loopback with ?code=…; we verify
+//   3. openLoginWindow → /authorize with PKCE (S256) + a `state` nonce and
+//      redirect_uri = http://127.0.0.1:<port>/callback, shown in a small
+//      modal BrowserWindow. 302 → /mcp-login. Closing the window manually
+//      cancels the flow.
+//   4. The window redirects back to the loopback with ?code=…; we verify
 //      `state` and POST /token (authorization_code + code_verifier +
 //      redirect_uri + client_id; no secret — public client).
 //   5. The /token response — for the Breezefile client, once the pending
@@ -42,7 +46,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { AddressInfo } from 'node:net';
-import { app, shell } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
 import { adoptSession, type AuthState } from './auth';
 
@@ -162,6 +166,45 @@ export function cancelBrowserSignIn(): void {
   activeFlow?.abort();
 }
 
+// The small modal window that shows the hosted TypeBuild sign-in page. Kept
+// separate from the heavyweight operator/automation window (electron/browser/) —
+// this is just a plain browser view with no split-pane chrome, record, or
+// credential-capture machinery attached.
+let loginWin: BrowserWindow | null = null;
+
+function closeLoginWindow(): void {
+  if (loginWin && !loginWin.isDestroyed()) loginWin.close();
+  loginWin = null;
+}
+
+/** Show the hosted sign-in page (authUrl) in a small in-app window instead of
+ * the system browser. Resolves once the window is showing; the caller's
+ * loopback listener (already bound) catches the redirect regardless of which
+ * window navigated there. If the user closes the window before completing
+ * sign-in, `onClosed` fires so the flow can be cancelled. */
+function openLoginWindow(authUrl: string, onClosed: () => void): void {
+  closeLoginWindow();
+  const win = new BrowserWindow({
+    width: 480,
+    height: 640,
+    title: 'Sign in to TypeBuild',
+    autoHideMenuBar: true,
+    parent: BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()),
+    modal: true,
+    webPreferences: {
+      // No preload — this is a plain hosted web page, not app chrome.
+      sandbox: true,
+      contextIsolation: true,
+    },
+  });
+  loginWin = win;
+  win.on('closed', () => {
+    if (loginWin === win) loginWin = null;
+    onClosed();
+  });
+  void win.loadURL(authUrl);
+}
+
 /** Minimal, asset-free HTML shown in the user's browser after the redirect. */
 function resultPage(ok: boolean): string {
   const title = ok ? "You're signed in" : 'Sign-in failed';
@@ -225,6 +268,7 @@ export function signInViaBrowser(): Promise<AuthState> {
       } catch {
         // already closing
       }
+      closeLoginWindow();
       if (activeFlow && activeFlow.abort === abort) activeFlow = null;
     };
 
@@ -359,14 +403,19 @@ export function signInViaBrowser(): Promise<AuthState> {
           state,
         }).toString();
 
-        shell.openExternal(authUrl.toString()).catch(() => {
+        try {
+          openLoginWindow(authUrl.toString(), () => {
+            // The user closed the sign-in window before completing the flow.
+            abort();
+          });
+        } catch {
           fail(
             new BrowserAuthError(
               'unreachable',
-              'Could not open your browser for sign-in.',
+              'Could not open the sign-in window.',
             ),
           );
-        });
+        }
       })();
     });
   });

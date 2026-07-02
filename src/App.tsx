@@ -55,7 +55,8 @@ import { formatOpError, humanizeError } from './errorMessages';
 import { loadSideBySidePrefs, splitFraction } from './sideBySidePrefs';
 import { useKeyboard } from './useKeyboard';
 import { fm } from './bridge';
-import { taskSourceAction } from './tasks';
+import { taskSourceAction, useTypebuildAuth } from './tasks';
+import { LoginGate } from './components/typebuild/LoginGate';
 import { basename, currentEntry, dirname, lastCol, pathJoin, visibleEntries } from './actions';
 import { isTextEntryTarget } from './textFocus';
 import { isEditablePath } from './fileTypes.ts';
@@ -200,6 +201,24 @@ function Shell() {
   const [chatWidth, setChatWidth] = useState<number>(() => readChatWidth());
   const chatWidthRef = useRef(chatWidth);
   chatWidthRef.current = chatWidth;
+
+  // Login is required to use the app (task: make login mandatory). Gated
+  // AFTER all hooks above run (React rule), but before the main shell
+  // renders below — LoginGate replaces the whole UI while signed out.
+  // useTypebuildAuth() starts as signedIn:false until the first authState()
+  // round-trip resolves; track that separately so an already-signed-in user
+  // doesn't see a login-gate flash on launch.
+  const { signedIn } = useTypebuildAuth();
+  const [authChecked, setAuthChecked] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void fm.typebuild.authState().finally(() => {
+      if (!cancelled) setAuthChecked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useKeyboard(
     (entry, mode) => setRenaming({ entry, mode }),
@@ -1385,6 +1404,9 @@ function Shell() {
   const isEditTab = tab.kind === 'edit';
   const isBrowserTab = tab.kind === 'browser'; // SPIKE (spike/playwright-cdp)
   const isFilterTab = !!tab.boundSelector; // fm-mp1 — smart folder (folder kind)
+
+  if (authChecked && !signedIn) return <LoginGate />;
+  if (!authChecked) return null;
 
   return (
     <OverlayCtx.Provider value={overlayApi}><div
