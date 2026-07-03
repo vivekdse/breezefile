@@ -38,6 +38,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fm } from '../../bridge';
 import { useStore } from '../../store';
+import { useIsMac } from '../../platform';
 import { useTasks, useTypebuildAuth, signInTypebuildBrowser } from '../../tasks';
 import type { Project, Task } from '../../types';
 import {
@@ -976,6 +977,16 @@ function ProjectsPageInner() {
       if (inField) return;
       // While the quick-switcher overlay is open it owns the keyboard.
       if (showSwitcher) return;
+      // ⌘F / Ctrl+F — open the unified quick-switcher (search projects &
+      // tasks). This used to be '/', but '/' now opens the copilot chat
+      // globally (see ChatHotkey in CopilotDock), so search moved to the
+      // standard find shortcut. preventDefault stops Electron's find-in-page.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        setSwitcherSeed('');
+        setShowSwitcher(true);
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       const idx = flatIndexOf(cursorKey);
@@ -985,14 +996,8 @@ function ProjectsPageInner() {
         if (row) setCursorKey(row.key);
       };
 
-      // '/' — open the unified quick-switcher (the surface's search/filter over
-      // projects AND tasks). The overlay owns its keys once open.
-      if (e.key === '/') {
-        e.preventDefault();
-        setSwitcherSeed('');
-        setShowSwitcher(true);
-        return;
-      }
+      // ('/' formerly opened the quick-switcher here; it now opens the copilot
+      // chat globally — search is ⌘F/Ctrl+F above, or just start typing.)
       if (e.key === ':') {
         // ':' opens the command palette to act on the current task selection.
         e.preventDefault();
@@ -1344,6 +1349,7 @@ function FlatView({
   onSetHomeView: (v: 'projects' | 'flat') => void;
   onNewTask: () => void;
 }) {
+  const isMac = useIsMac();
   return (
     <>
       <div className="projects__head">
@@ -1352,7 +1358,7 @@ function FlatView({
               subtitle carries the useful context on its own. */}
           <div className="projects__sub">
             {totalOpen} open task{totalOpen === 1 ? '' : 's'} · flat view ·{' '}
-            <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
+            <kbd className="projects__kbd">{isMac ? '⌘F' : 'Ctrl+F'}</kbd> search projects &amp; tasks
           </div>
         </div>
         <div className="projects__head-actions">
@@ -1524,6 +1530,7 @@ function HomeRoot({
   allProjects: Project[];
   scopeId: string | null;
 }) {
+  const isMac = useIsMac();
   const totalScoped = attentionNodes.length + recentNodes.length + idleNodes.length;
   const empty = loaded && !loadErr && totalScoped === 0;
   const hiddenCount = idleNodes.length;
@@ -1579,7 +1586,7 @@ function HomeRoot({
             {scopeProject
               ? `${totalScoped} sub-project${totalScoped === 1 ? '' : 's'} · scoped · ranked by what needs you · `
               : `${totalProjects} project${totalProjects === 1 ? '' : 's'} · your tasks, ranked by what needs you · `}
-            <kbd className="projects__kbd">/</kbd> search projects &amp; tasks
+            <kbd className="projects__kbd">{isMac ? '⌘F' : 'Ctrl+F'}</kbd> search projects &amp; tasks
           </div>
         </div>
         <div className="projects__head-actions">
@@ -2291,7 +2298,7 @@ function QuickSwitcher({
   /** task-49b7b37c8a02 — verbs available on Home (project/task + top-level). */
   verbs: PaletteVerb[];
   /** task-49b7b37c8a02 — the key that opened the switcher when triggered by
-   *  typing (empty when opened via '/'), used to seed the search box. */
+   *  typing (empty when opened via ⌘F/Ctrl+F), used to seed the search box. */
   initialQuery: string;
   onPickVerb: (id: string) => void;
   onClose: () => void;
