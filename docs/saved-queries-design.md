@@ -304,3 +304,23 @@ inline, so all I/O stays on the one audited, credential-injected path.
 value, is already testable against the dummy `/people` API
 (`task-6fcced694f19`), and de-risks the sandbox. Add FormExtension `logic` as a
 fast-follow once the executor is hardened.
+
+**Implemented (server, task_manager_api).** `app/utils/form_extensions_db.py`
+mirrors the SavedQuery registry: `fx-<12hex>` ids, immutable `family_id`/`version`
+cloning, `draft→approved→disabled` where approval is the sharing gate
+(`can_see_form_extension`: draft author-only, approved→group-visible),
+`project_id`+`group_id` scoping. No crypto (a FormExtension has no secret;
+`fields`/`logic`/`applies_to` are non-PHI author config in clear). `logic` runs in
+the SAME vm isolate as SavedQuery via a `mode:'logic'` branch in
+`_query_harness.cjs` (shared empty-global setup — no drift), injecting
+`{values, changed}` with **no fetch** (pure; live data binds a SavedQuery).
+`app/utils/form_logic_executor.py` allowlist-strips the returned effects to
+`setValue`/`setVisible`/`setOptions`/`validate` (Python side; the client never
+eval's) and enforces `timeoutMs` (200ms default) via the same subprocess kill.
+Router `app/routers/form_extensions.py` under `/chromeext/form-extensions*`;
+`run-logic` is visibility-gated (authors preview own drafts for the CopilotKit
+loop; the group runs approved versions) — differing from query `execute`'s
+approved-only 409 because pure logic carries no I/O/PHI risk. Verified: in logic
+mode `fetch`/`process`/`require` are all `undefined`; 55 tests + query/executor/poll
+suites regression-clean. **Remaining:** the client interpreter — render `fields[]`
+with the trusted widgets and apply the declarative effects — is the next slice.
