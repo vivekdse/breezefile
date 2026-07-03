@@ -127,6 +127,34 @@ injected `ctx`. Two modes over the same artifact:
   hash of last-run `ref`s per (query, trigger) and diffs; dedup/idempotency lives
   in the platform, not per-query code.
 
+#### Executor implementation (2026-07-02)
+
+The v1 executor lives in the task API: `app/utils/query_executor.py` (Python) +
+`app/utils/_query_harness.cjs` (the JS runtime), reached via
+`POST /chromeext/queries/{id}/execute`.
+
+**Sandbox choice: a Node subprocess running a `vm`-context harness.** Deno (the
+design's preferred option — its `--allow-net` allowlist would scope network to the
+DataSource host directly) is **not installed** on the deployment host; only Node
+(v22.12) is. So each execution spawns one Node subprocess that runs the query
+`code` in a `vm` context whose global object is **empty** (`Object.create(null)`):
+no `require`, no `process`, no ambient `fetch`, no `Buffer`, no timers, and dynamic
+`import()` is structurally dead (no `importModuleDynamically` callback →
+`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`). The constructor-constructor escape stays
+*inside* that context (`process` is still `undefined` there). The **only** capability
+the code reaches is the injected `ctx` — so `ctx.fetch` is the single I/O path:
+GET-only, scoped to `base_url` by origin **and** path prefix (an absolute URL,
+`//other`, or `../` climb is refused), credentials injected server-side and never
+visible to the code, and counted against `maxFetches`. Node is launched under
+`--experimental-permission --allow-fs-read=<harness>` so fs-write / child-process /
+worker are denied by the OS permission model as defense-in-depth (Node 22 has no
+`--allow-net`, so network is bounded by the vm boundary, not a flag). `timeoutMs`
+is a hard wall-clock subprocess kill; `maxRows` and output_schema/ref validation
+(with `ref.sourceId` stamped by the executor) run on the Python side and fail
+loudly on drift. If Deno is later installed, the harness can move to Option A for a
+kernel-enforced net allowlist; the Python contract (validate → run → validate/stamp)
+is unchanged.
+
 ### Consumers
 
 1. **Form selectors.** `TemplateField.source` gains `{ savedQueryId, version }`
