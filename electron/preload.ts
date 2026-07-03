@@ -938,6 +938,63 @@ const fm = {
         ipcRenderer.invoke('typebuild:queries:list', status) as Promise<
           Array<{ id: string; name: string; version: number; status: string; entityType?: string }>
         >,
+      // task-d8a0b081eb93 — SavedQuery AUTHORING (design-time CopilotKit flow).
+      // `create` files a DRAFT; `get` reads it back (code+schema for the approve
+      // card); `approve` is the MANDATORY human gate (draft→approved == publish);
+      // `version` clones→draft for iterate-in-chat. Query code/schema NON-PHI.
+      create: (input: {
+        name: string;
+        sourceId: string;
+        code: string;
+        outputSchema: unknown;
+        inputs?: unknown;
+        limits?: unknown;
+        projectId?: string;
+        groupId?: string;
+      }) =>
+        ipcRenderer.invoke('typebuild:queries:create', input) as Promise<{
+          id: string;
+          name: string;
+          version: number;
+          status: string;
+        }>,
+      get: (savedQueryId: string) =>
+        ipcRenderer.invoke('typebuild:queries:get', savedQueryId) as Promise<{
+          id: string;
+          name: string;
+          version: number;
+          status: string;
+          sourceId: string;
+          code: string;
+          outputSchema: unknown;
+        }>,
+      approve: (savedQueryId: string) =>
+        ipcRenderer.invoke('typebuild:queries:approve', savedQueryId) as Promise<{
+          id: string;
+          name: string;
+          version: number;
+          status: string;
+          approvedBy?: string;
+        }>,
+      version: (
+        savedQueryId: string,
+        patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
+      ) =>
+        ipcRenderer.invoke('typebuild:queries:version', savedQueryId, patch) as Promise<{
+          id: string;
+          name: string;
+          version: number;
+          status: string;
+        }>,
+    },
+    // task-d8a0b081eb93 — DataSource registry (the "API spec" grounding context
+    // for the authoring LLM: name + base_url + entity_types; NO creds — stripped
+    // server-side). Read-only from the client.
+    datasources: {
+      list: () =>
+        ipcRenderer.invoke('typebuild:datasources:list') as Promise<
+          Array<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>
+        >,
     },
   },
   // ─── TypeBuild side-by-side layout (fm-b5at.6) ────────────────────────

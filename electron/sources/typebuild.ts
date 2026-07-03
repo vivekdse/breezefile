@@ -1823,6 +1823,224 @@ export class TypeBuildTaskSource implements TaskSource {
       }));
   }
 
+  // ─── SavedQuery authoring (task-d8a0b081eb93) ────────────────────────────
+  // Design-time CopilotKit authoring flow (docs/saved-queries-design.md,
+  // "Authoring flow (CopilotKit)" + Addendum §1). The admin describes a need in
+  // chat; Copilot — grounded with the DataSource spec (listDataSources below) —
+  // drafts the query code + outputSchema, the draft is created (createQuery),
+  // and a MANDATORY human approve gate (approveQuery) flips it draft→approved,
+  // which ALSO publishes it org-wide (approval == publish). These mirror the
+  // execute/list pair above: same Firebase-authed /chromeext path, same request().
+  //
+  // Server response keys are snake_case (app/utils/saved_queries_db.py
+  // `_sq_public` / `_ds_public`): output_schema, source_id, base_url,
+  // entity_types, approved_by, group_id, project_id. We accept snake_case first
+  // and keep camelCase aliases as a defensive fallback. Query CODE + SCHEMA are
+  // NON-PHI author config (safe to hold/return); DataSource carries NO creds.
+
+  // GET /chromeext/datasources → { datasources: [{ id, name, base_url,
+  //   entity_types }] }. The "API spec" grounding context for the LLM — name +
+  //   base_url + entity_types, never auth (stripped server-side by _ds_public).
+  async listDataSources(): Promise<
+    Array<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>
+  > {
+    const res = await this.request('GET', '/chromeext/datasources');
+    if (!res.ok) throw new Error(`typebuild: datasource list failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as {
+      // The server envelope is snake_case `data_sources` (app/routers/
+      // saved_queries.py); keep `datasources` as a defensive fallback.
+      data_sources?: Array<Record<string, unknown>>;
+      datasources?: Array<{
+        id?: string;
+        name?: string;
+        base_url?: string;
+        baseUrl?: string;
+        entity_types?: string[];
+        entityTypes?: string[];
+      }>;
+    };
+    const list = (Array.isArray(data.data_sources) ? data.data_sources : data.datasources) as
+      | Array<{
+          id?: string;
+          name?: string;
+          base_url?: string;
+          baseUrl?: string;
+          entity_types?: string[];
+          entityTypes?: string[];
+        }>
+      | undefined;
+    return (Array.isArray(list) ? list : [])
+      .filter((d) => typeof d.id === 'string')
+      .map((d) => ({
+        id: d.id!,
+        name: d.name ?? d.id!,
+        baseUrl: d.base_url ?? d.baseUrl ?? '',
+        entityTypes: Array.isArray(d.entity_types)
+          ? d.entity_types
+          : Array.isArray(d.entityTypes)
+            ? d.entityTypes
+            : [],
+      }));
+  }
+
+  // POST /chromeext/queries { name, source_id, inputs, code, output_schema,
+  //   limits, project_id?, group_id? } → the new DRAFT query dict (v1). Returns
+  //   the id + version so Copilot can chain test/approve.
+  async createQuery(input: {
+    name: string;
+    sourceId: string;
+    code: string;
+    outputSchema: unknown;
+    inputs?: unknown;
+    limits?: unknown;
+    projectId?: string;
+    groupId?: string;
+  }): Promise<{ id: string; name: string; version: number; status: string }> {
+    const body: Record<string, unknown> = {
+      name: input.name,
+      source_id: input.sourceId,
+      inputs: input.inputs ?? {},
+      code: input.code,
+      output_schema: input.outputSchema,
+      limits: input.limits ?? {},
+    };
+    if (input.projectId) body.project_id = input.projectId;
+    if (input.groupId) body.group_id = input.groupId;
+    const res = await this.request('POST', '/chromeext/queries', body);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`typebuild: query create failed (${res.status})${detail ? `: ${detail}` : ''}`);
+    }
+    // The server wraps the record as { ok, id, query: {...} } (POST /queries);
+    // unwrap `.query`, falling back to the top level for resilience.
+    const payload = (await res.json().catch(() => ({}))) as { query?: unknown } & Record<string, unknown>;
+    const q = ((payload.query as Record<string, unknown> | undefined) ?? payload) as {
+      id?: string;
+      name?: string;
+      version?: number;
+      status?: string;
+    };
+    if (!q.id) throw new Error('typebuild: query create returned no id');
+    return {
+      id: q.id,
+      name: q.name ?? q.id,
+      version: typeof q.version === 'number' ? q.version : 1,
+      status: q.status ?? 'draft',
+    };
+  }
+
+  // GET /chromeext/queries/:id → the query dict (public projection: code +
+  //   output_schema + status, no auth). Used to show the code/schema in the
+  //   approve card so the human sees exactly what they are approving.
+  async getQuery(savedQueryId: string): Promise<{
+    id: string;
+    name: string;
+    version: number;
+    status: string;
+    sourceId: string;
+    code: string;
+    outputSchema: unknown;
+  }> {
+    const res = await this.request(
+      'GET',
+      `/chromeext/queries/${encodeURIComponent(savedQueryId)}`,
+    );
+    if (!res.ok) throw new Error(`typebuild: query get failed (${res.status})`);
+    // Server returns { query: {...} } (GET /queries/:id); unwrap with fallback.
+    const payload = (await res.json().catch(() => ({}))) as { query?: unknown } & Record<string, unknown>;
+    const q = ((payload.query as Record<string, unknown> | undefined) ?? payload) as {
+      id?: string;
+      name?: string;
+      version?: number;
+      status?: string;
+      source_id?: string;
+      sourceId?: string;
+      code?: string;
+      output_schema?: unknown;
+      outputSchema?: unknown;
+    };
+    if (!q.id) throw new Error('typebuild: query get returned no id');
+    return {
+      id: q.id,
+      name: q.name ?? q.id,
+      version: typeof q.version === 'number' ? q.version : 1,
+      status: q.status ?? 'unknown',
+      sourceId: q.source_id ?? q.sourceId ?? '',
+      code: q.code ?? '',
+      outputSchema: q.output_schema ?? q.outputSchema ?? {},
+    };
+  }
+
+  // POST /chromeext/queries/:id/approve → draft→approved, approved_by=caller.
+  //   THE human gate; also the publish step (approval makes the version
+  //   org-visible per Addendum §1). Returns the updated query dict.
+  async approveQuery(
+    savedQueryId: string,
+  ): Promise<{ id: string; name: string; version: number; status: string; approvedBy?: string }> {
+    const res = await this.request(
+      'POST',
+      `/chromeext/queries/${encodeURIComponent(savedQueryId)}/approve`,
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`typebuild: query approve failed (${res.status})${detail ? `: ${detail}` : ''}`);
+    }
+    // Server returns { ok, query: {...} } (POST /approve); unwrap with fallback.
+    const payload = (await res.json().catch(() => ({}))) as { query?: unknown } & Record<string, unknown>;
+    const q = ((payload.query as Record<string, unknown> | undefined) ?? payload) as {
+      id?: string;
+      name?: string;
+      version?: number;
+      status?: string;
+      approved_by?: string;
+      approvedBy?: string;
+    };
+    return {
+      id: q.id ?? savedQueryId,
+      name: q.name ?? (q.id ?? savedQueryId),
+      version: typeof q.version === 'number' ? q.version : 1,
+      status: q.status ?? 'approved',
+      approvedBy: q.approved_by ?? q.approvedBy,
+    };
+  }
+
+  // POST /chromeext/queries/:id/version → clone the current version to a NEW
+  //   draft (v+1) for iterate-in-chat. Body may carry the edited fields; server
+  //   defaults to a clone when omitted. Returns the new draft's id/version.
+  async newQueryVersion(
+    savedQueryId: string,
+    patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
+  ): Promise<{ id: string; name: string; version: number; status: string }> {
+    const body: Record<string, unknown> = {};
+    if (patch?.code !== undefined) body.code = patch.code;
+    if (patch?.outputSchema !== undefined) body.output_schema = patch.outputSchema;
+    if (patch?.inputs !== undefined) body.inputs = patch.inputs;
+    if (patch?.limits !== undefined) body.limits = patch.limits;
+    const res = await this.request(
+      'POST',
+      `/chromeext/queries/${encodeURIComponent(savedQueryId)}/version`,
+      body,
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`typebuild: query version failed (${res.status})${detail ? `: ${detail}` : ''}`);
+    }
+    // Server returns { ok, id, query: {...} } (POST /version); unwrap with fallback.
+    const payload = (await res.json().catch(() => ({}))) as { query?: unknown } & Record<string, unknown>;
+    const q = ((payload.query as Record<string, unknown> | undefined) ?? payload) as {
+      id?: string;
+      name?: string;
+      version?: number;
+      status?: string;
+    };
+    return {
+      id: q.id ?? savedQueryId,
+      name: q.name ?? (q.id ?? savedQueryId),
+      version: typeof q.version === 'number' ? q.version : 1,
+      status: q.status ?? 'draft',
+    };
+  }
+
   // ─── runNow / Start (fm-b5at.5, MCP auth handoff fm-b5at.9) ──────────────
   // "Start" launches an INTERACTIVE embedded-terminal claude session, pre-
   // wired to this task AND pre-authenticated. The user never types a command

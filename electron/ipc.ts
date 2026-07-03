@@ -3019,6 +3019,61 @@ end tell`;
     const src = typebuildSource();
     return src ? src.listQueries(status) : [];
   });
+  // task-d8a0b081eb93 — SavedQuery AUTHORING (design-time CopilotKit flow):
+  // ground the LLM with the DataSource spec (datasources:list — NO creds),
+  // create a DRAFT (queries:create), inspect it (queries:get), clone→draft a
+  // new version (queries:version), and the MANDATORY human approve gate
+  // (queries:approve — draft→approved == publish org-wide). Query code/schema
+  // are NON-PHI author config; sample rows from a test run cross the execute
+  // hop (already handled above) and are memory-only in the renderer. Signed
+  // out → these reject; the actions surface the error string to the chat.
+  ipcMain.handle('typebuild:datasources:list', (_e) => {
+    const src = typebuildSource();
+    if (!src) throw new Error('typebuild: signed out');
+    return src.listDataSources();
+  });
+  ipcMain.handle(
+    'typebuild:queries:create',
+    (
+      _e,
+      input: {
+        name: string;
+        sourceId: string;
+        code: string;
+        outputSchema: unknown;
+        inputs?: unknown;
+        limits?: unknown;
+        projectId?: string;
+        groupId?: string;
+      },
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.createQuery(input);
+    },
+  );
+  ipcMain.handle('typebuild:queries:get', (_e, savedQueryId: string) => {
+    const src = typebuildSource();
+    if (!src) throw new Error('typebuild: signed out');
+    return src.getQuery(savedQueryId);
+  });
+  ipcMain.handle('typebuild:queries:approve', (_e, savedQueryId: string) => {
+    const src = typebuildSource();
+    if (!src) throw new Error('typebuild: signed out');
+    return src.approveQuery(savedQueryId);
+  });
+  ipcMain.handle(
+    'typebuild:queries:version',
+    (
+      _e,
+      savedQueryId: string,
+      patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.newQueryVersion(savedQueryId, patch);
+    },
+  );
   // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. Lets a
   // time-gated remote (TypeBuild) task fire on the local cron. Rows carry
   // ONLY opaque ids + a cron string — never titles/bodies. setSchedule

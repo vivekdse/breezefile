@@ -449,6 +449,47 @@ type Fm = {
       ) => Promise<
         Array<{ id: string; name: string; version: number; status: string; entityType?: string }>
       >;
+      // task-d8a0b081eb93 — SavedQuery AUTHORING (design-time CopilotKit flow).
+      // `create` files a DRAFT; `get` reads code+schema for the approve card;
+      // `approve` is the MANDATORY human gate (draft→approved == publish);
+      // `version` clones→draft for iterate-in-chat. Query code/schema NON-PHI.
+      create: (input: {
+        name: string;
+        sourceId: string;
+        code: string;
+        outputSchema: unknown;
+        inputs?: unknown;
+        limits?: unknown;
+        projectId?: string;
+        groupId?: string;
+      }) => Promise<{ id: string; name: string; version: number; status: string }>;
+      get: (savedQueryId: string) => Promise<{
+        id: string;
+        name: string;
+        version: number;
+        status: string;
+        sourceId: string;
+        code: string;
+        outputSchema: unknown;
+      }>;
+      approve: (savedQueryId: string) => Promise<{
+        id: string;
+        name: string;
+        version: number;
+        status: string;
+        approvedBy?: string;
+      }>;
+      version: (
+        savedQueryId: string,
+        patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
+      ) => Promise<{ id: string; name: string; version: number; status: string }>;
+    };
+    // task-d8a0b081eb93 — DataSource registry (the "API spec" grounding context
+    // for the authoring LLM: name + base_url + entity_types; NO creds). Read-only.
+    datasources: {
+      list: () => Promise<
+        Array<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>
+      >;
     };
     // Credential vault — the user's OWN identifiers (NPI, Tax ID, login IDs),
     // NOT patient PHI. Values are encrypted on TypeBuild, scoped to the user,

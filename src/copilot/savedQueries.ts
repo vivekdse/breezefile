@@ -64,6 +64,72 @@ export async function listApprovedQueries(): Promise<SavedQuerySummary[]> {
   return fm.typebuild.queries.list('approved');
 }
 
+/** A registered DataSource as the client sees it (public projection — NO
+ *  creds). This is the "API spec" grounding context the authoring LLM writes
+ *  query code against: name + base_url + entity_types. (task-d8a0b081eb93) */
+export type DataSourceSummary = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  entityTypes: string[];
+};
+
+/** List the DataSources visible to the signed-in principal, to ground the
+ *  authoring copilot. NON-PHI (no patient data, no creds). Throws on transport
+ *  / signed-out errors — the authoring component surfaces the message. */
+export async function listDataSources(): Promise<DataSourceSummary[]> {
+  return fm.typebuild.datasources.list();
+}
+
+/** Create a DRAFT SavedQuery (v1) authored by the copilot. Returns the new
+ *  draft's id + version. Draft is author-only until approved. NON-PHI. */
+export async function createDraftQuery(input: {
+  name: string;
+  sourceId: string;
+  code: string;
+  outputSchema: unknown;
+  inputs?: unknown;
+  limits?: unknown;
+  projectId?: string;
+}): Promise<{ id: string; name: string; version: number; status: string }> {
+  return fm.typebuild.queries.create(input);
+}
+
+/** Read a SavedQuery back (code + outputSchema + status) — used to show the
+ *  human exactly what they are approving in the approve card. NON-PHI. */
+export async function getQuery(savedQueryId: string): Promise<{
+  id: string;
+  name: string;
+  version: number;
+  status: string;
+  sourceId: string;
+  code: string;
+  outputSchema: unknown;
+}> {
+  return fm.typebuild.queries.get(savedQueryId);
+}
+
+/** Approve a draft (draft→approved). THE design-time human gate; approval also
+ *  publishes the version org-wide (Addendum §1). Called only from the mandatory
+ *  confirmedAction card, never auto. */
+export async function approveQuery(savedQueryId: string): Promise<{
+  id: string;
+  name: string;
+  version: number;
+  status: string;
+  approvedBy?: string;
+}> {
+  return fm.typebuild.queries.approve(savedQueryId);
+}
+
+/** Clone the current version to a new DRAFT (v+1) for iterate-in-chat. */
+export async function newQueryVersion(
+  savedQueryId: string,
+  patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
+): Promise<{ id: string; name: string; version: number; status: string }> {
+  return fm.typebuild.queries.version(savedQueryId, patch);
+}
+
 /** Pick the best human-readable label for a row: prefer the SavedQuery's
  *  declared `display` field order when known, else the first string field, else
  *  the externalId. Kept here so the typeahead and the `lookup_record` copilot
