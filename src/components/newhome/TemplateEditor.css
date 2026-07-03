@@ -298,6 +298,25 @@
   gap: var(--sp-2);
 }
 
+/* A chain step that references a Repeatable Task (task-7bdb94445321). */
+.nh-te__chain-task {
+  flex: 2 1 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-on-panel);
+  font-size: var(--fs-sm);
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  padding: 6px 10px;
+}
+
+.nh-te__chain-add {
+  border-top: 1px dashed var(--border-1);
+  padding-top: var(--sp-2);
+}
+
 .nh-te__chain-preview {
   margin-top: var(--sp-2);
   border-top: 1px dashed var(--border-1);

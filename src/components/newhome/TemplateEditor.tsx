@@ -57,6 +57,7 @@ export function TemplateEditor({
   tab,
   onTabChange,
   onRunRepeatable,
+  onRunChain,
 }: {
   projectId: string;
   /** The persisted config (already the extended shape, chains included). This
@@ -73,6 +74,8 @@ export function TemplateEditor({
   /** Spawn a real task from a repeatable-task definition ("Run now"). The
    *  parent owns task creation (createTask + refresh); this panel only asks. */
   onRunRepeatable: (id: string) => void;
+  /** Instantiate a chain into linked tasks ("Run chain"). Parent owns creation. */
+  onRunChain: (chainId: string) => void;
 }) {
   const [activeChainId, setActiveChainId] = useState<string | null>(
     config.chains && config.chains.length ? config.chains[0].id : null,
@@ -120,22 +123,21 @@ export function TemplateEditor({
   // task that adopts ChainStrip in the roster/dialog.
   const chainPreviewSteps: ChainStripStep[] = useMemo(() => {
     if (!activeChain) return [];
+    const reps = config.repeatables ?? [];
     return activeChain.entries.map((entry, i) => {
       let status: ChainStripStep['status'] = 'pending';
       if (i === 0) status = 'done';
       else if (i === 1) status = 'progress';
       if (entry.humanGate && i > 1) status = 'needs';
-      return {
-        id: entry.id,
-        name:
-          entry.titleTemplate
+      const rep = entry.repeatableId ? reps.find((r) => r.id === entry.repeatableId) : undefined;
+      const name = rep
+        ? rep.title
+        : entry.titleTemplate
             .replace(/\{\{\s*n\s*\}\}/gi, String(i + 1))
-            .replace(/\{\{\s*chain\s*\}\}/gi, activeChain.name) || `Step ${i + 1}`,
-        status,
-        humanGate: !!entry.humanGate,
-      };
+            .replace(/\{\{\s*chain\s*\}\}/gi, activeChain.name) || `Step ${i + 1}`;
+      return { id: entry.id, name, status, humanGate: !!entry.humanGate };
     });
-  }, [activeChain]);
+  }, [activeChain, config.repeatables]);
 
   function addChainAndSelect() {
     const { cfg, chainId } = ops.addChain(config);
@@ -481,6 +483,15 @@ export function TemplateEditor({
                   />
                   <button
                     type="button"
+                    className="nh-te__run-btn"
+                    onClick={() => onRunChain(activeChain.id)}
+                    disabled={activeChain.entries.length === 0}
+                    title="Create linked tasks for every step in this chain"
+                  >
+                    ▶ Run chain
+                  </button>
+                  <button
+                    type="button"
                     className="nh-te__icon-btn"
                     onClick={() => onChange(ops.removeChain(config, activeChain.id))}
                     title="Remove chain"
@@ -489,59 +500,109 @@ export function TemplateEditor({
                   </button>
                 </div>
 
-                {activeChain.entries.map((entry, i) => (
-                  <div className="nh-te__row" key={entry.id}>
-                    <div className="nh-te__step-order">
+                {activeChain.entries.length === 0 && (
+                  <p className="nh-te__empty">
+                    No tasks in this chain yet — add a repeatable task from the dropdown below, or a
+                    free-form step.
+                  </p>
+                )}
+                {activeChain.entries.map((entry, i) => {
+                  const rep = entry.repeatableId
+                    ? (config.repeatables ?? []).find((r) => r.id === entry.repeatableId)
+                    : undefined;
+                  return (
+                    <div className="nh-te__row" key={entry.id}>
+                      <div className="nh-te__step-order">
+                        <button
+                          type="button"
+                          className="nh-te__icon-btn"
+                          onClick={() => onChange(ops.moveChainEntry(config, activeChain.id, entry.id, -1))}
+                          disabled={i === 0}
+                          title="Move up"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="nh-te__icon-btn"
+                          onClick={() => onChange(ops.moveChainEntry(config, activeChain.id, entry.id, 1))}
+                          disabled={i === activeChain.entries.length - 1}
+                          title="Move down"
+                        >
+                          ↓
+                        </button>
+                      </div>
+                      {entry.repeatableId ? (
+                        <span className="nh-te__chain-task">
+                          <span className="nh-te__badge">task</span>
+                          {rep ? rep.title : entry.titleTemplate || '(deleted repeatable task)'}
+                        </span>
+                      ) : (
+                        <input
+                          className="nh-te__input nh-te__input--wide"
+                          placeholder="Title template, e.g. Draft outreach #{{n}}"
+                          value={entry.titleTemplate}
+                          onChange={(e) => onChange(ops.updateChainEntry(config, activeChain.id, entry.id, { titleTemplate: e.target.value }))}
+                        />
+                      )}
                       <button
                         type="button"
-                        className="nh-te__icon-btn"
-                        onClick={() => onChange(ops.moveChainEntry(config, activeChain.id, entry.id, -1))}
-                        disabled={i === 0}
-                        title="Move up"
+                        className={'nh-te__gate-btn' + (entry.humanGate ? ' nh-te__gate-btn--on' : '')}
+                        onClick={() => onChange(ops.updateChainEntry(config, activeChain.id, entry.id, { humanGate: !entry.humanGate }))}
+                        title="Toggle human gate"
                       >
-                        ↑
+                        {entry.humanGate ? '🔒' : '🔓'}
                       </button>
                       <button
                         type="button"
                         className="nh-te__icon-btn"
-                        onClick={() => onChange(ops.moveChainEntry(config, activeChain.id, entry.id, 1))}
-                        disabled={i === activeChain.entries.length - 1}
-                        title="Move down"
+                        onClick={() => onChange(ops.removeChainEntry(config, activeChain.id, entry.id))}
+                        title="Remove step"
                       >
-                        ↓
+                        ✕
                       </button>
                     </div>
-                    <input
-                      className="nh-te__input nh-te__input--wide"
-                      placeholder="Title template, e.g. Draft outreach #{{n}}"
-                      value={entry.titleTemplate}
-                      onChange={(e) => onChange(ops.updateChainEntry(config, activeChain.id, entry.id, { titleTemplate: e.target.value }))}
-                    />
-                    <button
-                      type="button"
-                      className={'nh-te__gate-btn' + (entry.humanGate ? ' nh-te__gate-btn--on' : '')}
-                      onClick={() => onChange(ops.updateChainEntry(config, activeChain.id, entry.id, { humanGate: !entry.humanGate }))}
-                      title="Toggle human gate"
-                    >
-                      {entry.humanGate ? '🔒' : '🔓'}
-                    </button>
-                    <button
-                      type="button"
-                      className="nh-te__icon-btn"
-                      onClick={() => onChange(ops.removeChainEntry(config, activeChain.id, entry.id))}
-                      title="Remove step"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  className="nh-te__add-btn"
-                  onClick={() => onChange(ops.addChainEntry(config, activeChain.id))}
-                >
-                  + Add step to chain
-                </button>
+                  );
+                })}
+
+                <div className="nh-te__row nh-te__chain-add">
+                  {/* Pick an existing Repeatable Task to append as a chain step. */}
+                  <select
+                    className="nh-te__select"
+                    value=""
+                    onChange={(e) => {
+                      const rep = (config.repeatables ?? []).find((r) => r.id === e.target.value);
+                      if (rep) {
+                        onChange(
+                          ops.addChainEntry(config, activeChain.id, {
+                            repeatableId: rep.id,
+                            titleTemplate: rep.title,
+                          }),
+                        );
+                      }
+                      e.target.value = '';
+                    }}
+                  >
+                    <option value="">+ Add task…</option>
+                    {(config.repeatables ?? []).length === 0 && (
+                      <option value="" disabled>
+                        (no repeatable tasks — add some on the Repeatable Tasks tab)
+                      </option>
+                    )}
+                    {(config.repeatables ?? []).map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.title}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="nh-te__add-btn"
+                    onClick={() => onChange(ops.addChainEntry(config, activeChain.id))}
+                  >
+                    + Free-form step
+                  </button>
+                </div>
 
                 <div className="nh-te__chain-preview">
                   <p className="nh-te__hint">Preview (statuses are illustrative — no live task data here):</p>

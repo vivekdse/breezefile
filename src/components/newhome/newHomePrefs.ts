@@ -32,6 +32,12 @@ export type ChainStepTemplate = {
   /** Rendered as a gate icon in ChainStrip; also copied into the created
    *  task's notes today since TaskCreate has no human-gate concept yet. */
   humanGate?: boolean;
+  /** task-7bdb94445321 — when set, this entry IS a Repeatable Task (picked
+   *  from the "Add task" dropdown) rather than a free-form title. On
+   *  instantiation the entry's title/notes/recurrence come from the referenced
+   *  RepeatableTaskDef; `titleTemplate` is kept as a display fallback for when
+   *  the repeatable has since been deleted. */
+  repeatableId?: string;
 };
 
 /** A reusable, named, ordered sequence of step templates. */
@@ -97,11 +103,23 @@ function isChainStepTemplate(v: unknown): v is ChainStepTemplate {
   return typeof s.id === 'string' && typeof s.titleTemplate === 'string';
 }
 
+function sanitizeChainEntry(v: unknown): ChainStepTemplate | null {
+  if (!isChainStepTemplate(v)) return null;
+  const s = v as Record<string, unknown>;
+  const out: ChainStepTemplate = { id: s.id as string, titleTemplate: s.titleTemplate as string };
+  if (typeof s.description === 'string') out.description = s.description;
+  if (typeof s.humanGate === 'boolean') out.humanGate = s.humanGate;
+  if (typeof s.repeatableId === 'string') out.repeatableId = s.repeatableId;
+  return out;
+}
+
 function sanitizeChain(v: unknown): ChainDef | null {
   if (!v || typeof v !== 'object') return null;
   const c = v as Record<string, unknown>;
   if (typeof c.id !== 'string' || typeof c.name !== 'string') return null;
-  const entries = Array.isArray(c.entries) ? c.entries.filter(isChainStepTemplate) : [];
+  const entries = Array.isArray(c.entries)
+    ? (c.entries.map(sanitizeChainEntry).filter(Boolean) as ChainStepTemplate[])
+    : [];
   return { id: c.id, name: c.name, entries };
 }
 
@@ -195,8 +213,12 @@ export function instantiateChain(
   chain: ChainDef,
   projectId: string | null | undefined,
   createFn: (input: TaskCreate) => Promise<Task>,
+  /** task-7bdb94445321 — repeatable-task defs used to resolve entries that
+   *  reference one (repeatableId). A chain step is a single instance, so the
+   *  repeatable's title/notes are used but its recurrence is NOT carried in. */
+  repeatables: RepeatableTaskDef[] = [],
 ): Promise<Task[]> {
-  return instantiateChainImpl(chain, projectId, createFn);
+  return instantiateChainImpl(chain, projectId, createFn, repeatables);
 }
 
 // task-7bdb94445321 — spawn one real task from a RepeatableTaskDef. Shared by
@@ -229,6 +251,7 @@ async function instantiateChainImpl(
   chain: ChainDef,
   projectId: string | null | undefined,
   createFn: (input: TaskCreate) => Promise<Task>,
+  repeatables: RepeatableTaskDef[],
 ): Promise<Task[]> {
   if (!chain.entries.length) return [];
 
@@ -245,11 +268,18 @@ async function instantiateChainImpl(
   let predecessor: Task | null = null;
   for (let i = 0; i < chain.entries.length; i++) {
     const entry = chain.entries[i];
-    const title = renderChainTitle(entry.titleTemplate, { index: i + 1, chainName: chain.name });
+    // An entry that references a Repeatable Task takes its title/notes from
+    // that definition (falling back to the stored template if it was since
+    // deleted); a free-form entry renders {{n}}/{{chain}} in its template.
+    const ref = entry.repeatableId ? repeatables.find((r) => r.id === entry.repeatableId) : undefined;
+    const title = ref
+      ? ref.title
+      : renderChainTitle(entry.titleTemplate, { index: i + 1, chainName: chain.name });
     const noteParts = [`Step ${i + 1} of ${chain.entries.length} in chain "${chain.name}".`];
     noteParts.push(`Chain container: ${container.id}.`);
     if (predecessor) noteParts.push(`Depends on: ${predecessor.id} ("${predecessor.title}").`);
-    if (entry.description) noteParts.push(entry.description);
+    if (ref?.notes) noteParts.push(ref.notes);
+    else if (entry.description) noteParts.push(entry.description);
     if (entry.humanGate) noteParts.push('Requires human approval before proceeding.');
 
     const task = await createFn({

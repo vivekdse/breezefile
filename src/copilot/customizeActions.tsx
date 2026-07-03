@@ -26,6 +26,7 @@ import {
   getTemplateConfig,
   setTemplateConfig,
   runRepeatable,
+  instantiateChain,
 } from '../components/newhome/newHomePrefs';
 import * as ops from '../components/newhome/newHomeTemplateOps';
 import { createTask } from '../tasks';
@@ -501,6 +502,74 @@ export function CustomizeActions() {
       return `Created task "${created.title}" from "${found.title}"${
         found.recurrence ? ` (repeats ${ops.scheduleLabel(found.recurrence)})` : ''
       }.`;
+    },
+  });
+
+  // ─── Chain: add a repeatable task + run the whole chain ─────────────────
+
+  immediateAction({
+    name: 'add_chain_task',
+    description:
+      'Append an existing Repeatable Task to a chain as its next step (the "Add task" dropdown). The step takes its title/notes from that repeatable when the chain runs.',
+    parameters: z.object({
+      chain: z.string().describe('The chain, by name or id.'),
+      task: z.string().describe('The repeatable task to append, by title or id.'),
+      humanGate: z.boolean().optional().describe('Require human approval before this step.'),
+      projectId: z.string().optional(),
+    }),
+    perform: ({ chain, task, humanGate, projectId }) => {
+      const scopedId = scopeOf(projectId);
+      const cfg = getTemplateConfig(scopedId);
+      const foundChain = findChain(cfg, chain);
+      if (!foundChain) return `Failed: no chain matches "${chain}".`;
+      const rep = findRepeatable(cfg, task);
+      if (!rep) return `Failed: no repeatable task matches "${task}". Add it on the Repeatable Tasks tab first.`;
+      const next = ops.addChainEntry(cfg, foundChain.id, {
+        repeatableId: rep.id,
+        titleTemplate: rep.title,
+        humanGate: !!humanGate,
+      });
+      const where = commit(scopedId, next, 'chains');
+      return `Added task "${rep.title}" to chain "${foundChain.name}" in ${where}.`;
+    },
+  });
+
+  confirmedAction({
+    name: 'run_chain',
+    description:
+      'Run a chain NOW — create a container task plus one linked task per step (wired parent/depends-on, in order). Repeatable-task steps take their title/notes from the referenced definition.',
+    parameters: z.object({
+      chain: z.string().describe('The chain to run, by name or id.'),
+      projectId: z.string().optional(),
+    }),
+    title: 'Run chain?',
+    summary: ({ chain, projectId }) => {
+      const found = findChain(getTemplateConfig(scopeOf(projectId)), chain);
+      return found ? (
+        <>
+          Create {found.entries.length} linked task{found.entries.length === 1 ? '' : 's'} for chain{' '}
+          <strong>{found.name}</strong>?
+        </>
+      ) : (
+        <>Run chain "{chain}"?</>
+      );
+    },
+    confirmLabel: 'Run chain',
+    rejectedMessage: 'Cancelled — no tasks were created.',
+    validate: ({ chain, projectId }) => {
+      const found = findChain(getTemplateConfig(scopeOf(projectId)), chain);
+      if (!found) return `Failed: no chain matches "${chain}".`;
+      if (found.entries.length === 0) return `Failed: chain "${found.name}" has no steps.`;
+      return null;
+    },
+    perform: async ({ chain, projectId }) => {
+      const scopedId = scopeOf(projectId);
+      const cfg = getTemplateConfig(scopedId);
+      const found = findChain(cfg, chain);
+      if (!found) return `Failed: no chain matches "${chain}".`;
+      const created = await instantiateChain(found, scopedId, createTask, cfg.repeatables ?? []);
+      // created[0] is the container; the rest are the steps.
+      return `Ran chain "${found.name}" — created ${created.length} task${created.length === 1 ? '' : 's'} (1 container + ${Math.max(0, created.length - 1)} steps).`;
     },
   });
 

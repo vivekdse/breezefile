@@ -25,7 +25,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNewHomeData } from './useNewHomeData';
-import { getTemplateConfig, setTemplateConfig, runRepeatable } from './newHomePrefs';
+import { getTemplateConfig, setTemplateConfig, runRepeatable, instantiateChain } from './newHomePrefs';
 import { scheduleLabel } from './newHomeTemplateOps';
 import { createTask } from '../../tasks';
 import type { NewHomeStatus } from './types';
@@ -110,6 +110,19 @@ export function NewHomePage() {
     const def = (template.repeatables ?? []).find((r) => r.id === id);
     if (!def) return;
     void runRepeatable(def, selectedProjectId, createTask)
+      .then(() => refresh())
+      .catch(() => {
+        /* surfaced by the app's task-error channel; nothing to do here */
+      });
+  }
+
+  // "Run chain": instantiate the chain into linked tasks (container + one task
+  // per step, wired parent/depends), resolving any repeatable-task references,
+  // through the same createTask path, then refresh.
+  function runChainById(chainId: string) {
+    const chain = (template.chains ?? []).find((c) => c.id === chainId);
+    if (!chain) return;
+    void instantiateChain(chain, selectedProjectId, createTask, template.repeatables ?? [])
       .then(() => refresh())
       .catch(() => {
         /* surfaced by the app's task-error channel; nothing to do here */
@@ -275,6 +288,7 @@ export function NewHomePage() {
             onTabChange={setCustomizeTab}
             onChange={applyTemplateChange}
             onRunRepeatable={runRepeatableById}
+            onRunChain={runChainById}
             onClose={() => setShowCustomize(false)}
           />
         )}
