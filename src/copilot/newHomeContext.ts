@@ -14,6 +14,26 @@ import { useSyncExternalStore } from 'react';
 
 export type NeedsYouTaskSummary = { id: string; title: string };
 
+/** task-7bdb94445321 — what the copilot can SEE about the inline Customize
+ *  panel, so it's obvious the copilot is "looking at" the same surface the
+ *  human is editing, and so it can decide whether to open/navigate it. All
+ *  NON-PHI (field labels, step/chain names, rule/entry counts — configuration,
+ *  never task/patient values). */
+export type CustomizeContext = {
+  /** Whether the inline Customize panel is currently open. */
+  open: boolean;
+  /** The tab shown when open (fields/columns/approvals/steps/chains/preview). */
+  tab: string | null;
+  /** Field labels + keys the template declares. */
+  fields: { key: string; label: string }[];
+  /** Step names (in order). */
+  steps: string[];
+  /** Approval-rule descriptions. */
+  approvalRules: string[];
+  /** Chain names + how many entries each has (in order). */
+  chains: { id: string; name: string; entryCount: number }[];
+};
+
 export type NewHomeContext = {
   /** Which app surface is focused; 'other' when Home isn't mounted. */
   surface: 'new-home' | 'other';
@@ -25,6 +45,17 @@ export type NewHomeContext = {
   counts: Record<'done' | 'progress' | 'queued' | 'needs' | 'failed', number>;
   /** Titles + ids only (NOT bodies) of tasks in the 'needs' bucket. */
   needsYou: NeedsYouTaskSummary[];
+  /** The Customize panel's live state (see CustomizeContext). */
+  customize: CustomizeContext;
+};
+
+const EMPTY_CUSTOMIZE: CustomizeContext = {
+  open: false,
+  tab: null,
+  fields: [],
+  steps: [],
+  approvalRules: [],
+  chains: [],
 };
 
 const EMPTY: NewHomeContext = {
@@ -33,6 +64,7 @@ const EMPTY: NewHomeContext = {
   availableProjects: [],
   counts: { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 },
   needsYou: [],
+  customize: EMPTY_CUSTOMIZE,
 };
 
 let current: NewHomeContext = EMPTY;

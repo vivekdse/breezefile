@@ -36,6 +36,13 @@ const TEMPLATE_CHANGED_EVENT = 'fm:newhome:templateChanged';
 const FILTER_EVENT = 'fm:newhome:filter';
 const OPEN_TASK_EVENT = 'fm:newhome:openTask';
 const SELECT_PROJECT_EVENT = 'fm:newhome:selectProject';
+const OPEN_CUSTOMIZE_EVENT = 'fm:newhome:openCustomize';
+
+const CUSTOMIZE_TABS = ['fields', 'columns', 'approvals', 'steps', 'chains', 'preview'] as const;
+type CustomizeTabValue = (typeof CUSTOMIZE_TABS)[number];
+function isCustomizeTab(v: string): v is CustomizeTabValue {
+  return (CUSTOMIZE_TABS as readonly string[]).includes(v);
+}
 // create_task hands off to the real, canonical TaskComposer (the "New Task"
 // form mounted globally in App.tsx and opened via 'fm:openTask' — the same
 // form the task verb / Sidebar / Projects "+ New Task" open) instead of
@@ -90,7 +97,10 @@ export function CopilotActions() {
     description:
       "Home grounding: which surface is focused, the currently selected Home project (if any), " +
       "the FULL list of projects the picker offers (availableProjects: id+name — use these with select_home_project), " +
-      "roster status counts, and the titles+ids of tasks that need a human right now (NOT full task bodies).",
+      "roster status counts, the titles+ids of tasks that need a human right now (NOT full task bodies), " +
+      "and `customize` — the live state of the inline Customize panel (whether it's open, which tab, and the " +
+      "template's fields/steps/approval rules/chains). When customize.open is true you are looking at the SAME " +
+      "panel the human sees; open it with open_customize before editing the template if it is closed.",
     value: nh,
   });
 
@@ -339,6 +349,43 @@ export function CopilotActions() {
       }
       window.dispatchEvent(new CustomEvent(OPEN_TASK_EVENT, { detail: { taskId } }));
       return `Opened task ${taskId}.`;
+    },
+  });
+
+  immediateAction({
+    name: 'open_customize',
+    description:
+      "Open the inline Customize panel on Home (where the task template's fields, columns, approval rules, steps and chains are edited), optionally on a specific tab. Do this before editing the template if `customize.open` is false in the grounding. Only takes effect when Home is the focused surface.",
+    parameters: z.object({
+      tab: z
+        .string()
+        .optional()
+        .describe('Optional tab to open: one of fields, columns, approvals, steps, chains, preview.'),
+    }),
+    perform: async ({ tab }) => {
+      if (nhRef.current.surface !== 'new-home') {
+        return 'Home is not currently open, so there is no Customize panel to open. Open Home first.';
+      }
+      const wanted = (tab ?? '').trim();
+      if (wanted && !isCustomizeTab(wanted)) {
+        return `Failed: tab must be one of ${CUSTOMIZE_TABS.join(', ')} (got "${tab}").`;
+      }
+      window.dispatchEvent(
+        new CustomEvent(OPEN_CUSTOMIZE_EVENT, { detail: wanted ? { tab: wanted } : {} }),
+      );
+      return wanted ? `Opened the Customize panel on the ${wanted} tab.` : 'Opened the Customize panel.';
+    },
+  });
+
+  immediateAction({
+    name: 'close_customize',
+    description: 'Close the inline Customize panel on Home.',
+    perform: async () => {
+      if (nhRef.current.surface !== 'new-home') {
+        return 'Home is not currently open.';
+      }
+      window.dispatchEvent(new CustomEvent(OPEN_CUSTOMIZE_EVENT, { detail: { open: false } }));
+      return 'Closed the Customize panel.';
     },
   });
 
