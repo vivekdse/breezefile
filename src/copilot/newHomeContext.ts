@@ -1,4 +1,4 @@
-// task-ce125a047c70 — grounding bridge between New Home (NewHomePage.tsx,
+// task-ce125a047c70 — grounding bridge between Home (NewHomePage.tsx,
 // which owns the surface's live state) and the globally-mounted Copilot
 // actions (actions.tsx), which need read access to that state for
 // useCopilotReadable without NewHomePage importing anything from
@@ -15,9 +15,9 @@ import { useSyncExternalStore } from 'react';
 export type NeedsYouTaskSummary = { id: string; title: string };
 
 export type NewHomeContext = {
-  /** Which app surface is focused; 'other' when New Home isn't mounted. */
+  /** Which app surface is focused; 'other' when Home isn't mounted. */
   surface: 'new-home' | 'other';
-  /** The project the New Home picker is currently scoped to (null = All). */
+  /** The project the Home picker is currently scoped to (null = All). */
   project: { id: string; name: string } | null;
   /** Every project the picker offers (id + name), so the copilot can SEE the
    *  options and pick one via the select_home_project action. NON-PHI. */
@@ -46,7 +46,7 @@ export function setNewHomeContext(ctx: NewHomeContext): void {
   for (const l of listeners) l();
 }
 
-/** Called when New Home unmounts, so grounding reverts to "not on this
+/** Called when Home unmounts, so grounding reverts to "not on this
  *  surface" rather than showing stale data forever. */
 export function clearNewHomeContext(): void {
   setNewHomeContext(EMPTY);

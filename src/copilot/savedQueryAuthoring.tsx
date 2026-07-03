@@ -1,4 +1,4 @@
-// task-d8a0b081eb93 — SavedQuery AUTHORING actions for the persistent New Home
+// task-d8a0b081eb93 — SavedQuery AUTHORING actions for the persistent Home
 // sidebar Copilot (docs/saved-queries-design.md, "Authoring flow (CopilotKit)"
 // + Addendum §1). An admin describes a data-source query in chat; Copilot —
 // grounded here with the DataSource spec and the executor's code-contract —
@@ -65,7 +65,7 @@ const CODE_CONTRACT = [
  *  <CopilotActions/>. Registers the SavedQuery authoring actions + grounds the
  *  LLM with the DataSource registry and the executor code-contract.
  *
- *  These are ADMIN / design-time actions: available only on the New Home
+ *  These are ADMIN / design-time actions: available only on the Home
  *  surface (where the admin configures projects), matching how the other
  *  New-Home-scoped actions gate. */
 export function SavedQueryAuthoringActions() {
@@ -115,7 +115,7 @@ export function SavedQueryAuthoringActions() {
       })),
       codeContract: CODE_CONTRACT,
       note: !onNewHome
-        ? 'Open New Home to author SavedQueries.'
+        ? 'Open Home to author SavedQueries.'
         : dsError
           ? `Could not load DataSources (${dsError}); ask the user to check sign-in, or call list_data_sources to retry.`
           : 'Authoring actions are available on this surface.',

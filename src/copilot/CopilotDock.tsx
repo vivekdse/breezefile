@@ -90,7 +90,7 @@ function CopilotGrounding() {
         autoScroll="pin-to-bottom"
         labels={{
           modalHeaderTitle: `${APP_NAME} Copilot`,
-          welcomeMessageText: "Hi! I'm your TypeBuild copilot. Ask me to help you get around, or try opening New Home.",
+          welcomeMessageText: "Hi! I'm your TypeBuild copilot. Ask me to find what needs you, create and manage tasks, or switch projects.",
         }}
       />
     </CopilotChatConfigurationProvider>

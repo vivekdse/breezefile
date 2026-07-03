@@ -3,17 +3,17 @@
 // chat, wherever it's opened). Mount <CopilotActions /> inside the same
 // <CopilotKit> that wraps CopilotSidebarPanel (see CopilotDock.tsx).
 //
-// Every action here talks to the SAME window.fm bridge / New Home prefs
+// Every action here talks to the SAME window.fm bridge / Home prefs
 // helpers the UI itself uses (src/bridge.ts, src/tasks.ts,
 // src/components/newhome/newHomePrefs.ts) — no parallel copy of the
-// create-task/create-project/template-edit logic. Mutations that New Home's
+// create-task/create-project/template-edit logic. Mutations that Home's
 // own UI needs to react to (template edits, filter changes, "open this
 // task") go out as `window` CustomEvents; NewHomePage.tsx listens for them
 // (see the listeners added there) rather than this file reaching into New
 // Home's React state directly. create_task is the one exception: it opens
 // the canonical, globally-mounted TaskComposer (App.tsx, 'fm:openTask') —
 // the same "New Task" form the task verb / Sidebar / Projects page open —
-// rather than New Home's own NewTaskModal.
+// rather than Home's own NewTaskModal.
 //
 // PHI: action parameters/results are chat content already (the user typed
 // them to the copilot) — never additionally logged here. Return short,
@@ -81,14 +81,14 @@ export function CopilotActions() {
   const nh = useNewHomeContext();
   // immediateAction/confirmedAction register each handler ONCE, so a perform
   // closing over `nh` directly would capture the FIRST render's grounding —
-  // e.g. availableProjects still empty before New Home's data loads. Read the
+  // e.g. availableProjects still empty before Home's data loads. Read the
   // live grounding through this ref instead (see FormCopilotBridge note).
   const nhRef = useRef(nh);
   nhRef.current = nh;
 
   useAgentContext({
     description:
-      "New Home grounding: which surface is focused, the currently selected New Home project (if any), " +
+      "Home grounding: which surface is focused, the currently selected Home project (if any), " +
       "the FULL list of projects the picker offers (availableProjects: id+name — use these with select_home_project), " +
       "roster status counts, and the titles+ids of tasks that need a human right now (NOT full task bodies).",
     value: nh,
@@ -97,7 +97,7 @@ export function CopilotActions() {
   confirmedAction({
     name: 'create_task',
     description:
-      'Create a new task. On approval this opens the New Task form pre-filled with the title/notes so the human can review and start it. Project-scoped when projectId is given (or omitted to use the currently selected New Home project from context).',
+      'Create a new task. On approval this opens the New Task form pre-filled with the title/notes so the human can review and start it. Project-scoped when projectId is given (or omitted to use the currently selected Home project from context).',
     parameters: z.object({
       title: z.string().describe('Short task title.'),
       notes: z.string().optional().describe('Optional task notes/body.'),
@@ -105,7 +105,7 @@ export function CopilotActions() {
         .string()
         .optional()
         .describe(
-          'Optional project id to scope the task to. Defaults to the currently selected New Home project, if any.',
+          'Optional project id to scope the task to. Defaults to the currently selected Home project, if any.',
         ),
     }),
     title: 'Create task?',
@@ -168,13 +168,13 @@ export function CopilotActions() {
   immediateAction({
     name: 'customize_columns',
     description:
-      "Set which columns show in a project's New Home roster table, and their order. Replaces the full column list.",
+      "Set which columns show in a project's Home roster table, and their order. Replaces the full column list.",
     parameters: z.object({
       projectId: z
         .string()
         .optional()
         .describe(
-          'Project id to customize. Defaults to the currently selected New Home project, or the unscoped default when none is selected.',
+          'Project id to customize. Defaults to the currently selected Home project, or the unscoped default when none is selected.',
         ),
       columns: z
         .array(z.string())
@@ -208,7 +208,7 @@ export function CopilotActions() {
         .string()
         .optional()
         .describe(
-          'Project id to add the field to. Defaults to the currently selected New Home project, or the unscoped default when none is selected.',
+          'Project id to add the field to. Defaults to the currently selected Home project, or the unscoped default when none is selected.',
         ),
       key: z.string().describe('Machine-readable field key (e.g. "due_date").'),
       label: z.string().describe('Human-readable field label (e.g. "Due date").'),
@@ -275,7 +275,7 @@ export function CopilotActions() {
   immediateAction({
     name: 'set_roster_filter',
     description:
-      'Filter the New Home roster table by status. Only takes effect when New Home is the focused surface.',
+      'Filter the Home roster table by status. Only takes effect when Home is the focused surface.',
     parameters: z.object({
       filter: z.string().describe('One of: all, done, progress, queued, needs, failed.'),
     }),
@@ -284,7 +284,7 @@ export function CopilotActions() {
         return `Failed: filter must be one of ${FILTER_VALUES.join(', ')} (got "${filter}").`;
       }
       if (nhRef.current.surface !== 'new-home') {
-        return 'New Home is not currently open, so there is no roster to filter. Open New Home first.';
+        return 'Home is not currently open, so there is no roster to filter. Open Home first.';
       }
       window.dispatchEvent(new CustomEvent(FILTER_EVENT, { detail: { filter } }));
       return `Filtered the roster to "${filter}".`;
@@ -294,20 +294,20 @@ export function CopilotActions() {
   immediateAction({
     name: 'select_home_project',
     description:
-      "Scope New Home to a project — this drives the project picker at the top of the page. Pass the project's NAME or id (resolved against availableProjects in the grounding), or \"all\" / \"\" to show All projects. Only takes effect when New Home is the focused surface.",
+      "Scope Home to a project — this drives the project picker at the top of the page. Pass the project's NAME or id (resolved against availableProjects in the grounding), or \"all\" / \"\" to show All projects. Only takes effect when Home is the focused surface.",
     parameters: z.object({
       project: z.string().describe('Project name or id, or "all"/"" for All projects.'),
     }),
     perform: async ({ project }) => {
       const ctx = nhRef.current;
       if (ctx.surface !== 'new-home') {
-        return 'New Home is not currently open. Open New Home first, then pick a project.';
+        return 'Home is not currently open. Open Home first, then pick a project.';
       }
       const raw = (project ?? '').trim();
       const ql = raw.toLowerCase();
       if (!raw || ql === 'all' || ql === 'all projects') {
         window.dispatchEvent(new CustomEvent(SELECT_PROJECT_EVENT, { detail: { projectId: null } }));
-        return 'Scoped New Home to All projects.';
+        return 'Scoped Home to All projects.';
       }
       const list = ctx.availableProjects;
       const subs = list.filter((p) => p.name.toLowerCase().includes(ql));
@@ -322,20 +322,20 @@ export function CopilotActions() {
         return `Failed: no project matches "${project}". Available: ${list.map((p) => p.name).join(', ') || '(none loaded)'}.`;
       }
       window.dispatchEvent(new CustomEvent(SELECT_PROJECT_EVENT, { detail: { projectId: match.id } }));
-      return `Scoped New Home to "${match.name}".`;
+      return `Scoped Home to "${match.name}".`;
     },
   });
 
   immediateAction({
     name: 'open_task',
-    description: 'Open a task\'s detail dialog in New Home by task id.',
+    description: 'Open a task\'s detail dialog in Home by task id.',
     parameters: z.object({
       taskId: z.string().describe('The task id to open.'),
     }),
     perform: async ({ taskId }) => {
       if (!taskId?.trim()) return 'Failed: a task id is required.';
       if (nhRef.current.surface !== 'new-home') {
-        return 'New Home is not currently open, so there is no task list to open a task in. Open New Home first.';
+        return 'Home is not currently open, so there is no task list to open a task in. Open Home first.';
       }
       window.dispatchEvent(new CustomEvent(OPEN_TASK_EVENT, { detail: { taskId } }));
       return `Opened task ${taskId}.`;

@@ -61,7 +61,7 @@ interface ImmediateActionConfig<S extends ParamsSchema> {
    *  without unregistering it — e.g. project/agent fields only for TypeBuild. */
   available?: boolean;
   /** Do the (reversible) thing and return a short confirmation string. May
-   *  return a controlled failure string (e.g. "New Home isn't open …") too;
+   *  return a controlled failure string (e.g. "Home isn't open …") too;
    *  unexpected throws are caught and formatted for you. */
   perform: (args: InferParams<S>) => string | Promise<string>;
 }
