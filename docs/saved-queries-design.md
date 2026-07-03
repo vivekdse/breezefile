@@ -204,6 +204,17 @@ The four Copilot authoring actions (`register_data_source`, `author_query`,
 design-time gate, and the moment a private draft becomes an org-shared,
 immutable version.
 
+**Implemented (server, task_manager_api `app/utils/saved_queries_db.py`).** Both
+registries carry `project_id` + optional `group_id`. Sharing is expressed through
+`group_id` — the SAME mechanism `chromeext` tasks already use — so "project
+membership" maps to group membership (`can_see_data_source`/`can_see_query` gate
+on `db.groups_for(principal)`). `project_id` is a scope tag/filter, leaving room
+for a future org-wide tier (`project_id IS NULL` / an explicit `scope` column). A
+`draft` SavedQuery is author-only regardless of `group_id`; `approve_query` flips
+it to `approved`, at which point group members see it — approval IS publication.
+`DataSource.auth` is encrypted at rest and stripped by `_ds_public`; only the
+server-only `resolve_data_source_auth` decrypts it for the executor.
+
 ### 2. FormExtension — "custom form behavior" WITHOUT arbitrary DOM code
 
 "CopilotKit creates custom JavaScript to add things to a form" must NOT become
