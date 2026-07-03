@@ -28,6 +28,7 @@ import { useCopilotInfo } from './useCopilotInfo';
 import { CopilotActions } from './actions';
 import { CustomizeActions } from './customizeActions';
 import { TaskActions } from './taskActions';
+import { AgentActions } from './agentActions';
 import { NavActions } from './navActions';
 import { SavedQueryAuthoringActions } from './savedQueryAuthoring';
 import { FormExtensionAuthoringActions } from './formExtensionAuthoring';
@@ -84,6 +85,7 @@ function CopilotGrounding() {
       <CopilotActions />
       <CustomizeActions />
       <TaskActions />
+      <AgentActions />
       <NavActions />
       <SavedQueryAuthoringActions />
       <FormExtensionAuthoringActions />
