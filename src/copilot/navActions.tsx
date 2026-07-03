@@ -63,6 +63,7 @@ export function NavActions() {
 
   immediateAction({
     name: 'goto_projects',
+    available: false, // task-f83e66dc8fed — surface suppressed; copilot is scoped to New Home
     description:
       'Open the Projects home (Project Atlas) — the projects-as-folders overview.',
     perform: () => {
@@ -73,6 +74,7 @@ export function NavActions() {
 
   immediateAction({
     name: 'goto_tasks',
+    available: false, // task-f83e66dc8fed — surface suppressed; copilot is scoped to New Home
     description:
       "Open the Tasks page — the flat, all-tasks list. Optionally filter it to a single folder.",
     parameters: z.object({
@@ -94,6 +96,7 @@ export function NavActions() {
 
   immediateAction({
     name: 'open_task_tab',
+    available: false, // task-f83e66dc8fed — surface suppressed; copilot is scoped to New Home
     description:
       "Open a task in a file-manager-style task tab (the same tab a double-click on a task row opens), rooted at the task's folder.",
     parameters: z.object({
@@ -116,6 +119,7 @@ export function NavActions() {
 
   immediateAction({
     name: 'open_project',
+    available: false, // task-f83e66dc8fed — surface suppressed; copilot is scoped to New Home
     description:
       'Open (drill into) a project by id in the Projects home — the same detail view a click on a project card opens.',
     parameters: z.object({
@@ -136,6 +140,7 @@ export function NavActions() {
 
   immediateAction({
     name: 'open_project_folder',
+    available: false, // task-f83e66dc8fed — surface suppressed; copilot is scoped to New Home
     description:
       "Open a project's bound folder in a file-manager tab — the same folder the project header's folder link opens.",
     parameters: z.object({
@@ -151,6 +156,7 @@ export function NavActions() {
 
   immediateAction({
     name: 'open_project_needs_you',
+    available: false, // task-f83e66dc8fed — surface suppressed; copilot is scoped to New Home
     description:
       "Drill into a project and filter its task list to exactly the tasks that need human attention — the same view the project's \"needs you\" count opens when clicked.",
     parameters: z.object({

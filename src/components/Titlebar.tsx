@@ -8,9 +8,9 @@ export function Titlebar() {
   // lights. Windows/Linux use a native window frame, so the gutter is dead
   // space there — drop it (and tag the bar platform-mac for CSS).
   const isMac = useIsMac();
-  // task-6d0fd232d6c2 — the permanent Home button open-or-focuses the Home
-  // (kind:'home') tab via the same fm:openProjects event App.tsx listens for.
-  const goHome = () => window.dispatchEvent(new CustomEvent('fm:openProjects'));
+  // task-f83e66dc8fed — the permanent Home button open-or-focuses New Home,
+  // now the single/default home surface (fm:openProjects also lands there).
+  const goHome = () => window.dispatchEvent(new CustomEvent('fm:openNewHome'));
   return (
     <div className={`titlebar drag${isMac ? ' platform-mac' : ''}`}>
       {isMac && <div className="titlebar__traffic" aria-hidden />}

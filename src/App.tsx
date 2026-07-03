@@ -561,7 +561,9 @@ function Shell() {
   // focus that row via the existing fm:tasks:focus mechanism.
   useEffect(() => {
     const off = fm.onTasksNotificationClicked(({ taskId }) => {
-      dispatch({ type: 'openTasksTab' });
+      // task-f83e66dc8fed — land on New Home (the single home surface) rather
+      // than the suppressed all-tasks page.
+      dispatch({ type: 'openNewHomeTab' });
       if (taskId) {
         window.dispatchEvent(
           new CustomEvent('fm:tasks:focus', { detail: { taskId } }),
@@ -574,7 +576,7 @@ function Shell() {
   // fm-h8g7 — clear the unseen-task badge once the user is looking at the
   // Tasks page (opened or activated).
   useEffect(() => {
-    if (state.tabs[state.activeTab]?.kind === 'tasks') {
+    if (state.tabs[state.activeTab]?.kind === 'newhome') {
       dispatch({ type: 'clearTasksBadge' });
     }
   }, [state.activeTab, state.tabs]);
@@ -1233,36 +1235,18 @@ function Shell() {
       const detail = (e as CustomEvent).detail as { msg?: string } | undefined;
       if (detail?.msg) dispatch({ type: 'setStatus', msg: detail.msg });
     }
-    function onOpenTasksPage(e: Event) {
-      // fm-39969baf — optional folder filter deep-link. Stash it on window so
-      // a freshly-mounted TasksPage can pick it up as its initial filter, and
-      // also re-broadcast so an already-mounted page applies it immediately.
-      const folder = (e as CustomEvent).detail?.folder as string | undefined;
-      const w = window as unknown as { __fmTasksFolderFilter?: string };
-      if (folder !== undefined) w.__fmTasksFolderFilter = folder;
-      dispatch({ type: 'openTasksTab' });
-      if (folder !== undefined) {
-        window.dispatchEvent(
-          new CustomEvent('fm:tasks:folder-filter', { detail: { folder } }),
-        );
-      }
+    // task-f83e66dc8fed — New Home is now the single/default home surface. The
+    // all-tasks page (fm:openTasksPage) and the projects atlas (fm:openProjects)
+    // are SUPPRESSED (not deleted — TasksPage/ProjectsPage code stays, just no
+    // longer reachable): every home/tasks/projects entry point (the Home
+    // button, the :home/:projects/:tasks verbs, native menu, task
+    // notifications) now funnels into New Home. To restore the old pages,
+    // point these handlers back at openTasksTab / openHomeTab.
+    function onOpenTasksPage() {
+      dispatch({ type: 'openNewHomeTab' });
     }
-    function onOpenProjects(e: Event) {
-      // task-83048f692491 — open (or focus) the singleton Projects-home tab.
-      // Optional `projectId` deep-link drills straight into a project; stash it
-      // on window so a freshly-mounted ProjectsPage applies it, and re-broadcast
-      // so an already-mounted page reacts immediately.
-      const projectId = (e as CustomEvent).detail?.projectId as string | undefined;
-      const w = window as unknown as { __fmProjectsDeepLink?: string };
-      if (projectId !== undefined) w.__fmProjectsDeepLink = projectId;
-      // task-97c0800ff55d — Home now rides its own kind:'home'. :home / :projects
-      // both land here via fm:openProjects → the Home singleton.
-      dispatch({ type: 'openHomeTab' });
-      if (projectId !== undefined) {
-        window.dispatchEvent(
-          new CustomEvent('fm:projects:focus', { detail: { projectId } }),
-        );
-      }
+    function onOpenProjects() {
+      dispatch({ type: 'openNewHomeTab' });
     }
     function onOpenNewHome() {
       // task-b9cdad64ab9c — open (or focus) the singleton New Home tab. No

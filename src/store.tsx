@@ -1087,15 +1087,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // somehow restored more, leave the user's tabs alone (defensive — tabs
     // aren't persisted today).
     if (state.tabs.length !== 1 || state.tabs[0].kind !== 'folder') {
-      // Fall back to focus-or-spawn so Home is still reachable/foregrounded.
-      dispatch({ type: 'openHomeTab' });
+      // Fall back to focus-or-spawn so the home surface is still foregrounded.
+      // task-f83e66dc8fed — New Home is now the single/default home surface
+      // (the all-tasks 'tasks' and projects-atlas 'home' pages are suppressed,
+      // not deleted — see App.tsx nav handlers).
+      dispatch({ type: 'openNewHomeTab' });
       return;
     }
-    // Replace the sole startup folder tab with the Home singleton (kind='home')
-    // so Home is the ONLY tab on launch. The folder tab is gone — the file
+    // Replace the sole startup folder tab with the New Home singleton so New
+    // Home is the ONLY tab on launch. The folder tab is gone — the file
     // manager is summoned on demand via :files / Go to folder.
     const seed = state.tabs[0].trail.at(-1) ?? '/';
-    const home = makeTab(seed, { kind: 'home' });
+    const home = makeTab(seed, { kind: 'newhome' });
     dispatch({ type: 'replaceTab', index: 0, tab: home });
     dispatch({ type: 'selectTab', index: 0 });
   }, [hydrated, state.tabs, state.taskManagementEnabled, dispatch]);
