@@ -377,3 +377,45 @@
   color: var(--err);
   opacity: 1;
 }
+
+/* task-ae0ec0348930 — FormExtension interpreter surface. Renders below the
+   template fields; reuses the .nh-form-field frame for each extension field. */
+.nh-formext {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+}
+.nh-formext__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nh-formext__logic-err {
+  margin: 0;
+  color: var(--text-2, var(--text-1));
+  font-size: var(--fs-sm);
+  opacity: 0.8;
+}
+.nh-formext__select,
+.nh-formext__input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  background: var(--bg-1, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.nh-form-field--error .nh-formext__input,
+.nh-form-field--error .nh-formext__select {
+  border-color: var(--err);
+}
+.nh-formext__field-err {
+  margin-top: 4px;
+  color: var(--err);
+  font-size: var(--fs-sm);
+}

@@ -16,6 +16,25 @@ export type Capabilities = {
   windowArrange: boolean;
 };
 
+// task-ae0ec0348930 — a FormExtension record as it crosses the bridge (public
+// projection; top level snake_case-mapped to camelCase by the source). The
+// renderer's canonical `FormExtension` type (src/copilot/formExtensions.ts) is a
+// stricter view of this same shape. NON-PHI config.
+export type FormExtensionRecord = {
+  id: string;
+  familyId: string | null;
+  name: string;
+  version: number;
+  status: string;
+  approvedBy: string | null;
+  appliesTo: Record<string, unknown>;
+  fields: Array<Record<string, unknown>>;
+  logic: string;
+  limits: Record<string, unknown>;
+  projectId: string | null;
+  groupId: string | null;
+};
+
 type Fm = {
   platform: NodeJS.Platform;
   versions: NodeJS.ProcessVersions;
@@ -483,6 +502,42 @@ type Fm = {
         savedQueryId: string,
         patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
       ) => Promise<{ id: string; name: string; version: number; status: string }>;
+    };
+    // task-ae0ec0348930 — FormExtensions: the client interpreter (renders an
+    // approved extension's fields[] + applies its logic's allowlisted effects)
+    // and the design-time authoring lifecycle. `list` enumerates extensions
+    // ([] signed-out); `create`/`get`/`version` author drafts; `approve` is the
+    // MANDATORY human gate; `runLogic` runs the PURE server logic and returns the
+    // allowlisted `effects` (setValue/setVisible/setOptions/validate) the
+    // interpreter applies — the client NEVER eval's. Field VALUES cross runLogic
+    // (may be PHI, memory-only); config is NON-PHI. See src/copilot/formExtensions.ts.
+    formext: {
+      list: (status?: string) => Promise<FormExtensionRecord[]>;
+      create: (input: {
+        name: string;
+        appliesTo: Record<string, unknown>;
+        fields: Array<Record<string, unknown>>;
+        logic: string;
+        limits?: Record<string, unknown>;
+        projectId?: string;
+        groupId?: string;
+      }) => Promise<FormExtensionRecord>;
+      get: (id: string) => Promise<FormExtensionRecord>;
+      approve: (id: string) => Promise<FormExtensionRecord>;
+      version: (
+        id: string,
+        patch?: {
+          fields?: Array<Record<string, unknown>>;
+          logic?: string;
+          appliesTo?: Record<string, unknown>;
+          limits?: Record<string, unknown>;
+        },
+      ) => Promise<FormExtensionRecord>;
+      runLogic: (
+        id: string,
+        values: Record<string, unknown>,
+        changed: string | null,
+      ) => Promise<{ effects: Record<string, unknown>; version: number }>;
     };
     // task-d8a0b081eb93 — DataSource registry (the "API spec" grounding context
     // for the authoring LLM: name + base_url + entity_types; NO creds). Read-only.

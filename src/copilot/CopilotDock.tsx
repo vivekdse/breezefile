@@ -29,6 +29,7 @@ import { CopilotActions } from './actions';
 import { TaskActions } from './taskActions';
 import { NavActions } from './navActions';
 import { SavedQueryAuthoringActions } from './savedQueryAuthoring';
+import { FormExtensionAuthoringActions } from './formExtensionAuthoring';
 
 const APP_NAME = 'TypeBuild';
 
@@ -83,6 +84,7 @@ function CopilotGrounding() {
       <TaskActions />
       <NavActions />
       <SavedQueryAuthoringActions />
+      <FormExtensionAuthoringActions />
       <ChatHotkey />
       <CopilotSidebar
         position="right"

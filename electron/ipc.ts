@@ -3074,6 +3074,71 @@ end tell`;
       return src.newQueryVersion(savedQueryId, patch);
     },
   );
+  // task-ae0ec0348930 — FormExtensions (the CLIENT half of the primitive): the
+  // interpreter renders an approved extension's fields[] + applies its logic's
+  // allowlisted effects, and the design-time copilot authors/approves them.
+  // `list` enumerates extensions (returns [] signed-out so the interpreter
+  // degrades to "no extension"); every MUTATING verb throws signed-out (the
+  // action surfaces the message). Field VALUES cross run-logic (may be PHI) —
+  // never logged on this hop. Config (fields/logic/applies_to) is NON-PHI.
+  ipcMain.handle('typebuild:formext:list', (_e, status?: string) => {
+    const src = typebuildSource();
+    return src ? src.listFormExtensions(status) : [];
+  });
+  ipcMain.handle(
+    'typebuild:formext:create',
+    (
+      _e,
+      input: {
+        name: string;
+        appliesTo: Record<string, unknown>;
+        fields: Array<Record<string, unknown>>;
+        logic: string;
+        limits?: Record<string, unknown>;
+        projectId?: string;
+        groupId?: string;
+      },
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.createFormExtension(input);
+    },
+  );
+  ipcMain.handle('typebuild:formext:get', (_e, id: string) => {
+    const src = typebuildSource();
+    if (!src) throw new Error('typebuild: signed out');
+    return src.getFormExtension(id);
+  });
+  ipcMain.handle('typebuild:formext:approve', (_e, id: string) => {
+    const src = typebuildSource();
+    if (!src) throw new Error('typebuild: signed out');
+    return src.approveFormExtension(id);
+  });
+  ipcMain.handle(
+    'typebuild:formext:version',
+    (
+      _e,
+      id: string,
+      patch?: {
+        fields?: Array<Record<string, unknown>>;
+        logic?: string;
+        appliesTo?: Record<string, unknown>;
+        limits?: Record<string, unknown>;
+      },
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.newFormExtensionVersion(id, patch);
+    },
+  );
+  ipcMain.handle(
+    'typebuild:formext:run-logic',
+    (_e, id: string, values: Record<string, unknown>, changed: string | null) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.runFormLogic(id, values ?? {}, changed ?? null);
+    },
+  );
   // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. Lets a
   // time-gated remote (TypeBuild) task fire on the local cron. Rows carry
   // ONLY opaque ids + a cron string — never titles/bodies. setSchedule

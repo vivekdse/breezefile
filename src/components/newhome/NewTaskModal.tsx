@@ -20,7 +20,13 @@ import type { TemplateConfig, TemplateField } from './types';
 import { useCopilotInfo } from '../../copilot/useCopilotInfo';
 import { NewTaskCopilotChat } from '../../copilot/NewTaskCopilotChat';
 import { SourceTypeahead } from './SourceTypeahead';
+import { FormExtensionFields } from './FormExtensionFields';
 import type { QueryRef } from '../../copilot/savedQueries';
+import {
+  listApprovedFormExtensions,
+  resolveApplicableExtension,
+  type FormExtension,
+} from '../../copilot/formExtensions';
 import './NewTaskModal.css';
 
 // ─── Conversation driver types (local to this file; not part of the shared
@@ -421,11 +427,22 @@ export function NewTaskModal({
   template,
   onClose,
   onCreated,
+  // task-ae0ec0348930 — an explicitly-passed FormExtension to render, bypassing
+  // applies_to resolution. When absent, the modal resolves an applicable
+  // approved extension itself (see the resolution effect below). ADDITIVE: a
+  // form with no applicable extension behaves exactly as before.
+  templateKey,
 }: {
   projectId: string;
   template: TemplateConfig;
   onClose: () => void;
   onCreated: (id: string) => void;
+  /** Optional key the extension's `applies_to.template` is matched against.
+   *  TODO(applies_to): NewHome doesn't yet carry a stable template identity for
+   *  a project's form; until it does we resolve against this key when provided,
+   *  else fall back to the projectId. Keep it simple — one approved extension
+   *  per (template) wins. */
+  templateKey?: string;
 }) {
   const engineRef = useRef<ConversationEngine>(new ConversationEngine(template));
   const [, forceRender] = useState(0);
@@ -455,6 +472,38 @@ export function NewTaskModal({
   // snapshot }. Threaded onto the created task's `data` (via buildStructuredBlock)
   // as placeholder keys per docs/typebuild-data-field-contract.md.
   const [refs, setRefs] = useState<Record<string, FieldRef>>({});
+
+  // task-ae0ec0348930 — the FormExtension INTERPRETER surface. On mount we fetch
+  // approved extensions and resolve the one applicable to this form (by
+  // applies_to.template — see templateKey's TODO), then render its extra fields
+  // + run its logic below the template fields. ADDITIVE: when no extension
+  // applies, `extension` stays null and the panel renders exactly as before.
+  const [extension, setExtension] = useState<FormExtension | null>(null);
+  // Interpreter field values live in the SAME shared value store the rest of the
+  // form uses, so submit sees them; kept in a dedicated slice so they don't
+  // collide with the deterministic engine's own values map.
+  const [extValues, setExtValues] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    listApprovedFormExtensions()
+      .then((list) => {
+        if (cancelled) return;
+        // Prefer the explicit templateKey; fall back to the projectId so a
+        // project-scoped extension still resolves without a template identity.
+        const resolved =
+          resolveApplicableExtension(list, templateKey ?? null, projectId || null) ??
+          resolveApplicableExtension(list, projectId || null, projectId || null);
+        setExtension(resolved);
+      })
+      .catch(() => {
+        // Signed out / transport error → no extension (form unchanged).
+        if (!cancelled) setExtension(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, templateKey]);
 
   // Kick off the conversation once on mount (deterministic driver only —
   // the copilot path starts itself via NewTaskCopilotChat's initial label).
@@ -535,7 +584,24 @@ export function NewTaskModal({
     setErr(null);
     try {
       const finalTitle = title.trim();
-      const body = summarizeBody(finalTitle, template, values) + buildStructuredBlock(template, values, refs);
+      // task-ae0ec0348930 — fold the FormExtension's interpreter values into the
+      // created task body as their own labeled block (kept separate from the
+      // template's structured block so a no-extension form is byte-for-byte
+      // unchanged). Values may carry PHI — they ride the task body only.
+      const extBlock =
+        extension && Object.keys(extValues).length > 0
+          ? '\n\n```form-extension\n' +
+            `extension: ${extension.name} (v${extension.version})\n` +
+            extension.fields
+              .filter((f) => extValues[f.key])
+              .map((f) => `${f.key}: ${extValues[f.key]}`)
+              .join('\n') +
+            '\n```'
+          : '';
+      const body =
+        summarizeBody(finalTitle, template, values) +
+        buildStructuredBlock(template, values, refs) +
+        extBlock;
       const t = await createTask({
         title: finalTitle,
         folder: '',
@@ -681,6 +747,21 @@ export function NewTaskModal({
                   </div>
                 );
               })}
+              {/* task-ae0ec0348930 — the FormExtension interpreter renders its
+                  approved fields[] + runs its logic here, below the template
+                  fields. Selecting a typeahead row records its ref via the
+                  SHARED selectFieldRef, exactly like a template source field. */}
+              {extension && (
+                <FormExtensionFields
+                  extension={extension}
+                  values={extValues}
+                  onSetValue={(k, v) => setExtValues((prev) => ({ ...prev, [k]: v }))}
+                  refDisplays={Object.fromEntries(
+                    Object.entries(refs).map(([k, fr]) => [k, fr.display]),
+                  )}
+                  onSelectRef={(fieldKey, label, ref) => selectFieldRef(fieldKey, label, ref)}
+                />
+              )}
             </div>
             <div className="nh-form-panel__foot">
               {err && <p className="nh-modal__error">{err}</p>}

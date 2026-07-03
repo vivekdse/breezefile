@@ -76,6 +76,26 @@ type DslTagUpdate = {
   snapshot?: string[] | null;
 };
 
+// task-ae0ec0348930 — a FormExtension record as it crosses the bridge (public
+// projection). Inlined like Project/VaultEntry (preload carries no shared-type
+// imports). NON-PHI config (fields/logic/applies_to); `fields[]` are widget
+// descriptors the interpreter renders. See src/copilot/formExtensions.ts for the
+// canonical renderer-side type this must stay structurally compatible with.
+type FormExtension = {
+  id: string;
+  familyId: string | null;
+  name: string;
+  version: number;
+  status: string;
+  approvedBy: string | null;
+  appliesTo: Record<string, unknown>;
+  fields: Array<Record<string, unknown>>;
+  logic: string;
+  limits: Record<string, unknown>;
+  projectId: string | null;
+  groupId: string | null;
+};
+
 const fm = {
   platform: process.platform,
   versions: process.versions,
@@ -985,6 +1005,44 @@ const fm = {
           name: string;
           version: number;
           status: string;
+        }>,
+    },
+    // task-ae0ec0348930 — FormExtensions (client interpreter + design-time
+    // authoring). `list` enumerates extensions ([] signed-out); `create`/`get`/
+    // `approve`/`version` are the authoring lifecycle (approve == the mandatory
+    // human gate); `runLogic` runs the PURE server-side logic and returns the
+    // allowlisted `effects` the interpreter applies (setValue/setVisible/
+    // setOptions/validate). Field VALUES cross runLogic (may be PHI, memory-only);
+    // config (fields/logic/applies_to) is NON-PHI. See docs/saved-queries-design.md.
+    formext: {
+      list: (status?: string) =>
+        ipcRenderer.invoke('typebuild:formext:list', status) as Promise<FormExtension[]>,
+      create: (input: {
+        name: string;
+        appliesTo: Record<string, unknown>;
+        fields: Array<Record<string, unknown>>;
+        logic: string;
+        limits?: Record<string, unknown>;
+        projectId?: string;
+        groupId?: string;
+      }) => ipcRenderer.invoke('typebuild:formext:create', input) as Promise<FormExtension>,
+      get: (id: string) =>
+        ipcRenderer.invoke('typebuild:formext:get', id) as Promise<FormExtension>,
+      approve: (id: string) =>
+        ipcRenderer.invoke('typebuild:formext:approve', id) as Promise<FormExtension>,
+      version: (
+        id: string,
+        patch?: {
+          fields?: Array<Record<string, unknown>>;
+          logic?: string;
+          appliesTo?: Record<string, unknown>;
+          limits?: Record<string, unknown>;
+        },
+      ) => ipcRenderer.invoke('typebuild:formext:version', id, patch) as Promise<FormExtension>,
+      runLogic: (id: string, values: Record<string, unknown>, changed: string | null) =>
+        ipcRenderer.invoke('typebuild:formext:run-logic', id, values, changed) as Promise<{
+          effects: Record<string, unknown>;
+          version: number;
         }>,
     },
     // task-d8a0b081eb93 — DataSource registry (the "API spec" grounding context

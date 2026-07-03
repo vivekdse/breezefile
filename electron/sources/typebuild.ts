@@ -2041,6 +2041,230 @@ export class TypeBuildTaskSource implements TaskSource {
     };
   }
 
+  // ─── FormExtensions (task-ae0ec0348930) ──────────────────────────────────
+  // The CLIENT half of the FormExtension primitive (docs/saved-queries-design.md
+  // family). A FormExtension is an approved, versioned bundle of extra form
+  // FIELDS (widget descriptors the client renders with its OWN trusted widgets)
+  // + a PURE server-side LOGIC function that, on any field change, returns a
+  // small allowlisted `effects` object the client APPLIES declaratively. The
+  // client never eval's the logic and never injects markup — the security point
+  // of the whole primitive is that logic runs server-side and the client only
+  // switches on a fixed set of effect keys.
+  //
+  // Endpoints (all /chromeext/, Firebase-authed, snake_case envelopes — the
+  // record nests under `form_extension`, lists under `form_extensions`; mirrors
+  // the corrected queries unwrap pattern above):
+  //   GET  /chromeext/form-extensions?status=  → { form_extensions: [...] }
+  //   POST /chromeext/form-extensions          → { ok, id, form_extension }
+  //   GET  /chromeext/form-extensions/:id       → { form_extension }
+  //   POST /chromeext/form-extensions/:id/version → { ok, id, form_extension }
+  //   POST /chromeext/form-extensions/:id/approve → { ok, form_extension }
+  //   POST /chromeext/form-extensions/:id/disable → { ok, form_extension }
+  //   POST /chromeext/form-extensions/:id/run-logic { values, changed }
+  //       → { ok, effects, version }
+  //
+  // PHI: form field VALUES the human/agent fills may carry PHI. They cross the
+  // run-logic hop (server needs them to compute effects) but are held in
+  // renderer memory only — never logged here. The FormExtension config itself
+  // (fields/logic/applies_to) is NON-PHI author config.
+
+  // Normalize a raw server form-extension record → the client-facing shape. The
+  // top level is snake_case (id/family_id/applies_to/project_id/group_id/…);
+  // `fields[]` elements use camelCase INSIDE `source` (savedQueryId) mirroring
+  // TemplateField.source. Defensive: a non-object or a row missing an id yields
+  // null so a malformed entry is dropped rather than reaching the renderer.
+  private mapFormExtensionRow(raw: unknown): {
+    id: string;
+    familyId: string | null;
+    name: string;
+    version: number;
+    status: string;
+    approvedBy: string | null;
+    appliesTo: Record<string, unknown>;
+    fields: Array<Record<string, unknown>>;
+    logic: string;
+    limits: Record<string, unknown>;
+    projectId: string | null;
+    groupId: string | null;
+  } | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    const id = typeof r.id === 'string' ? r.id : '';
+    if (!id) return null;
+    return {
+      id,
+      familyId: typeof r.family_id === 'string' ? r.family_id : null,
+      name: typeof r.name === 'string' ? r.name : id,
+      version: typeof r.version === 'number' ? r.version : 1,
+      status: typeof r.status === 'string' ? r.status : 'draft',
+      approvedBy: typeof r.approved_by === 'string' ? r.approved_by : null,
+      appliesTo:
+        r.applies_to && typeof r.applies_to === 'object'
+          ? (r.applies_to as Record<string, unknown>)
+          : {},
+      fields: Array.isArray(r.fields)
+        ? (r.fields.filter((f) => f && typeof f === 'object') as Array<Record<string, unknown>>)
+        : [],
+      logic: typeof r.logic === 'string' ? r.logic : '',
+      limits:
+        r.limits && typeof r.limits === 'object' ? (r.limits as Record<string, unknown>) : {},
+      projectId: typeof r.project_id === 'string' ? r.project_id : null,
+      groupId: typeof r.group_id === 'string' ? r.group_id : null,
+    };
+  }
+
+  // Unwrap a mutating endpoint's { ok, [id], form_extension: {...} } envelope,
+  // falling back to the top level for resilience (same pattern as the queries
+  // `.query` unwrap). Throws when no usable record is present.
+  private unwrapFormExtension(payload: unknown, verb: string) {
+    const p = (payload ?? {}) as { form_extension?: unknown } & Record<string, unknown>;
+    const mapped = this.mapFormExtensionRow(p.form_extension ?? p);
+    if (!mapped) throw new Error(`typebuild: form-extension ${verb} returned no record`);
+    return mapped;
+  }
+
+  // GET /chromeext/form-extensions?status= → { form_extensions: [...] }. Public
+  // projection. Returns [] on a parse miss so the caller degrades to "none".
+  async listFormExtensions(status?: string) {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await this.request('GET', `/chromeext/form-extensions${qs}`);
+    if (!res.ok) throw new Error(`typebuild: form-extension list failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as { form_extensions?: unknown[] };
+    const list = Array.isArray(data.form_extensions) ? data.form_extensions : [];
+    return list
+      .map((r) => this.mapFormExtensionRow(r))
+      .filter((r): r is NonNullable<ReturnType<typeof this.mapFormExtensionRow>> => r !== null);
+  }
+
+  // POST /chromeext/form-extensions { name, applies_to, fields, logic, limits?,
+  //   project_id?, group_id? } → { ok, id, form_extension }. Creates a DRAFT.
+  async createFormExtension(input: {
+    name: string;
+    appliesTo: Record<string, unknown>;
+    fields: Array<Record<string, unknown>>;
+    logic: string;
+    limits?: Record<string, unknown>;
+    projectId?: string;
+    groupId?: string;
+  }) {
+    const body: Record<string, unknown> = {
+      name: input.name,
+      applies_to: input.appliesTo ?? {},
+      fields: input.fields ?? [],
+      logic: input.logic ?? '',
+    };
+    if (input.limits) body.limits = input.limits;
+    if (input.projectId) body.project_id = input.projectId;
+    if (input.groupId) body.group_id = input.groupId;
+    const res = await this.request('POST', '/chromeext/form-extensions', body);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `typebuild: form-extension create failed (${res.status})${detail ? `: ${detail}` : ''}`,
+      );
+    }
+    const payload = (await res.json().catch(() => ({}))) as unknown;
+    return this.unwrapFormExtension(payload, 'create');
+  }
+
+  // GET /chromeext/form-extensions/:id → { form_extension }. Used to show the
+  // fields + logic in the approve card so the human sees what they approve.
+  async getFormExtension(id: string) {
+    const res = await this.request(
+      'GET',
+      `/chromeext/form-extensions/${encodeURIComponent(id)}`,
+    );
+    if (!res.ok) throw new Error(`typebuild: form-extension get failed (${res.status})`);
+    const payload = (await res.json().catch(() => ({}))) as unknown;
+    return this.unwrapFormExtension(payload, 'get');
+  }
+
+  // POST /chromeext/form-extensions/:id/approve → { ok, form_extension }. THE
+  // human design-time gate (draft→approved). Called only from the mandatory
+  // confirmedAction card, never auto.
+  async approveFormExtension(id: string) {
+    const res = await this.request(
+      'POST',
+      `/chromeext/form-extensions/${encodeURIComponent(id)}/approve`,
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `typebuild: form-extension approve failed (${res.status})${detail ? `: ${detail}` : ''}`,
+      );
+    }
+    const payload = (await res.json().catch(() => ({}))) as unknown;
+    return this.unwrapFormExtension(payload, 'approve');
+  }
+
+  // POST /chromeext/form-extensions/:id/version → { ok, id, form_extension }.
+  // Clones the current version to a NEW draft (v+1) for iterate-in-chat. Body
+  // may carry edited fields; server defaults to a clone when omitted.
+  async newFormExtensionVersion(
+    id: string,
+    patch?: {
+      fields?: Array<Record<string, unknown>>;
+      logic?: string;
+      appliesTo?: Record<string, unknown>;
+      limits?: Record<string, unknown>;
+    },
+  ) {
+    const body: Record<string, unknown> = {};
+    if (patch?.fields !== undefined) body.fields = patch.fields;
+    if (patch?.logic !== undefined) body.logic = patch.logic;
+    if (patch?.appliesTo !== undefined) body.applies_to = patch.appliesTo;
+    if (patch?.limits !== undefined) body.limits = patch.limits;
+    const res = await this.request(
+      'POST',
+      `/chromeext/form-extensions/${encodeURIComponent(id)}/version`,
+      body,
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `typebuild: form-extension version failed (${res.status})${detail ? `: ${detail}` : ''}`,
+      );
+    }
+    const payload = (await res.json().catch(() => ({}))) as unknown;
+    return this.unwrapFormExtension(payload, 'version');
+  }
+
+  // POST /chromeext/form-extensions/:id/run-logic { values, changed } →
+  //   { ok, effects: {...}, version }. Runs the PURE server-side logic function
+  //   and returns the allowlisted effects the client applies. `values` is the
+  //   full current field-value map (may carry PHI — memory-only, never logged);
+  //   `changed` is the key that just changed (or null on an initial pass). The
+  //   server already allowlist-strips effects to the four keys; we pass `effects`
+  //   through as an opaque object and let the client's reducer double-guard.
+  async runFormLogic(
+    id: string,
+    values: Record<string, unknown>,
+    changed: string | null,
+  ): Promise<{ effects: Record<string, unknown>; version: number }> {
+    const res = await this.request(
+      'POST',
+      `/chromeext/form-extensions/${encodeURIComponent(id)}/run-logic`,
+      { values: values ?? {}, changed: changed ?? null },
+    );
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `typebuild: form-extension run-logic failed (${res.status})${detail ? `: ${detail}` : ''}`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      effects?: unknown;
+      version?: unknown;
+    };
+    return {
+      effects:
+        data.effects && typeof data.effects === 'object'
+          ? (data.effects as Record<string, unknown>)
+          : {},
+      version: typeof data.version === 'number' ? data.version : 0,
+    };
+  }
+
   // ─── runNow / Start (fm-b5at.5, MCP auth handoff fm-b5at.9) ──────────────
   // "Start" launches an INTERACTIVE embedded-terminal claude session, pre-
   // wired to this task AND pre-authenticated. The user never types a command
