@@ -82,6 +82,50 @@ export type TaskActions = {
   start: (task: Task) => Promise<void>;
 };
 
+// Apply a management patch to ONE task using the RIGHT transport for its
+// source. Editable sources (local) take the updateTask path. Sources like
+// TypeBuild reject updateTask (canEdit=false) — but their fields ARE editable
+// through dedicated /chromeext sourceAction verbs, so route each field there:
+//   status  → complete | cancel | reopen | claim   (the server has no generic
+//             status patch — see electron/sources/typebuild.ts)
+//   due_at  → the generic 'patch' verb ({due_at}; '' clears)
+//   pinned  → unsupported (TypeBuild has no pin) → throw so the caller reports it
+// Throws on failure so callers can report accurately instead of the old silent
+// no-op that made the copilot think it succeeded (task-a54900e44182 report).
+async function applyTaskPatch(
+  task: Task,
+  caps: TaskSourceCapabilities | undefined,
+  p: TaskUpdate,
+): Promise<void> {
+  if (!caps || caps.canEdit) {
+    await updateTask(task.id, p, task.source);
+    return;
+  }
+  // Non-editable source: caps came from byId[task.source], so source is set.
+  const source = task.source;
+  if (!source) throw new Error(`can’t edit ${sourceLabel(task)} tasks`);
+  if (p.status !== undefined) {
+    const verb =
+      p.status === 'done'
+        ? 'complete'
+        : p.status === 'cancelled'
+          ? 'cancel'
+          : p.status === 'pending'
+            ? 'reopen'
+            : p.status === 'in_progress'
+              ? 'claim'
+              : null;
+    if (!verb) throw new Error(`can’t set status “${p.status}” on ${sourceLabel(task)} tasks`);
+    await taskSourceAction(source, task.id, verb);
+  }
+  if (p.due_at !== undefined) {
+    await taskSourceAction(source, task.id, 'patch', { due_at: p.due_at ?? '' });
+  }
+  if (p.pinned !== undefined) {
+    throw new Error(`pinning isn’t supported for ${sourceLabel(task)} tasks`);
+  }
+}
+
 export function useTaskActions(): TaskActions {
   const { dispatch } = useStore();
   const { byId } = useTaskSources();
@@ -99,13 +143,8 @@ export function useTaskActions(): TaskActions {
 
   const patch = useCallback(
     async (task: Task, p: TaskUpdate, label?: string) => {
-      const caps = capsFor(task);
-      if (caps && !caps.canEdit) {
-        say(`can’t edit · ${sourceLabel(task)} tasks are read-only here`);
-        return;
-      }
       try {
-        await updateTask(task.id, p, task.source);
+        await applyTaskPatch(task, capsFor(task), p);
         if (label) say(`${label} · ${task.title}`);
       } catch (e) {
         say(formatOpError('update', e));
@@ -116,13 +155,8 @@ export function useTaskActions(): TaskActions {
 
   const setStatus = useCallback(
     async (task: Task, status: TaskStatus) => {
-      const caps = capsFor(task);
-      if (caps && !caps.canEdit) {
-        say(`can’t change status · ${sourceLabel(task)} tasks are read-only here`);
-        return;
-      }
       try {
-        await updateTask(task.id, { status }, task.source);
+        await applyTaskPatch(task, capsFor(task), { status });
         say(`${STATUS_VERBED[status]} · ${task.title}`);
       } catch (e) {
         say(formatOpError('update', e));
@@ -133,13 +167,8 @@ export function useTaskActions(): TaskActions {
 
   const togglePin = useCallback(
     async (task: Task) => {
-      const caps = capsFor(task);
-      if (caps && !caps.canEdit) {
-        say(`can’t pin · ${sourceLabel(task)} tasks are read-only here`);
-        return;
-      }
       try {
-        await updateTask(task.id, { pinned: !task.pinned }, task.source);
+        await applyTaskPatch(task, capsFor(task), { pinned: !task.pinned });
       } catch (e) {
         say(formatOpError('update', e));
       }
@@ -149,13 +178,8 @@ export function useTaskActions(): TaskActions {
 
   const setDue = useCallback(
     async (task: Task, value: string | null) => {
-      const caps = capsFor(task);
-      if (caps && !caps.canEdit) {
-        say(`can’t set due · ${sourceLabel(task)} tasks are read-only here`);
-        return;
-      }
       try {
-        await updateTask(task.id, { due_at: value }, task.source);
+        await applyTaskPatch(task, capsFor(task), { due_at: value });
         say(value === null ? 'cleared due' : `due ${value} · ${task.title}`);
       } catch (e) {
         say(formatOpError('update', e));
@@ -195,24 +219,25 @@ export function useTaskActions(): TaskActions {
         say('no task targeted');
         return;
       }
-      const doable: Task[] = [];
-      let skipped = 0;
-      for (const t of tasks) {
-        const caps = capsFor(t);
-        if (caps && !caps.canEdit) skipped++;
-        else doable.push(t);
-      }
+      // Apply to EVERY task via applyTaskPatch — which uses the right transport
+      // per source (updateTask for local; sourceAction verbs for TypeBuild), so
+      // TypeBuild tasks are no longer silently skipped as "read-only".
+      let ok = 0;
+      let failed = 0;
       await Promise.all(
-        doable.map((t) =>
-          updateTask(t.id, p, t.source).catch(() => {
-            /* a single failure shouldn't sink the batch; counted as done
-               optimistically — the poll reconciles. */
-          }),
+        tasks.map((t) =>
+          applyTaskPatch(t, capsFor(t), p).then(
+            () => {
+              ok += 1;
+            },
+            () => {
+              failed += 1;
+            },
+          ),
         ),
       );
-      const n = doable.length;
-      let msg = `${verb} · ${n} task${n === 1 ? '' : 's'}`;
-      if (skipped > 0) msg += ` · ${skipped} skipped (read-only)`;
+      let msg = `${verb} · ${ok} task${ok === 1 ? '' : 's'}`;
+      if (failed > 0) msg += ` · ${failed} failed`;
       say(msg);
     },
     [capsFor, say],
