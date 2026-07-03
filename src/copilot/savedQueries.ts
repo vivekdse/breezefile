@@ -36,7 +36,7 @@ export type QueryRow = {
 };
 
 /** A SavedQuery as the client sees it (public projection — no code/auth). Used
- *  by the TemplateEditor's source picker. */
+ *  by SavedQuery-selector consumers (e.g. the FormExtension authoring flow). */
 export type SavedQuerySummary = {
   id: string;
   name: string;
@@ -58,7 +58,7 @@ export async function executeQuery(
 }
 
 /** List approved SavedQueries visible to the signed-in principal, for the
- *  TemplateEditor source picker. Returns [] when signed out / on parse miss so
+ *  SavedQuery-selector consumers. Returns [] when signed out / on parse miss so
  *  the picker degrades to "none". */
 export async function listApprovedQueries(): Promise<SavedQuerySummary[]> {
   return fm.typebuild.queries.list('approved');

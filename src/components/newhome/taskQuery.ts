@@ -22,7 +22,15 @@
 // (same rule the roster already follows).
 
 import { parse, evaluate, type Ast, type FieldCatalogue } from '../../tagDsl.mjs';
-import type { NewHomeTask, TemplateField } from './types';
+import type { NewHomeTask } from './types';
+
+// task-b1fa5098da3e (R3) — projects no longer declare custom fields
+// (TemplateField/TemplateConfig removed, docs/task-templates-design.md
+// "Removed/superseded"). `buildTaskQuerySchema`/`compileTaskQuery` keep their
+// extra-fields parameter — a minimal local shape, decoupled from the deleted
+// TemplateField type — for forward compat / callers that may want to widen
+// the query surface later; every current caller passes `[]`.
+type QueryableField = { key: string; type: 'text' | 'date' | 'select' | 'number' };
 
 /** Base task fields always queryable, independent of the project template. */
 const BASE_FIELDS: FieldCatalogue = {
@@ -52,7 +60,7 @@ export const TASK_QUERY_FIELDS: { name: string; kind: string; note: string }[] =
   { name: 'due', kind: 'time', note: 'due date' },
 ];
 
-function kindForField(f: TemplateField): 'string' | 'number' | 'time' {
+function kindForField(f: QueryableField): 'string' | 'number' | 'time' {
   if (f.type === 'date') return 'time';
   if (f.type === 'number') return 'number';
   return 'string';
@@ -62,7 +70,7 @@ function kindForField(f: TemplateField): 'string' | 'number' | 'time' {
  *  fields are addressable by their (lowercased) key — the DSL lowercases field
  *  tokens, so keys must resolve case-insensitively. Base fields win on any
  *  collision. */
-export function buildTaskQuerySchema(templateFields: TemplateField[]): {
+export function buildTaskQuerySchema(templateFields: QueryableField[]): {
   fields: FieldCatalogue;
   fieldValue: (field: string, row: unknown) => unknown;
 } {
@@ -135,7 +143,7 @@ export type CompiledTaskQuery = {
  *  e.g. "unknown field 'foo'"). Never throws. */
 export function compileTaskQuery(
   query: string,
-  templateFields: TemplateField[],
+  templateFields: QueryableField[],
 ): { ok: true; compiled: CompiledTaskQuery } | { ok: false; error: string } {
   const q = query.trim();
   if (!q) return { ok: false, error: 'empty query' };

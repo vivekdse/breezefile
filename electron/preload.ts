@@ -1016,17 +1016,6 @@ const fm = {
           status: string;
         }>,
     },
-    // task-a067636e599b — Project template (New Home TemplateConfig),
-    // server-backed. `get` returns the stored blob or null (no server
-    // template yet); `set` upserts the full config. Signed out → both
-    // reject; the renderer catches and falls back to its localStorage cache.
-    // Config is NON-PHI.
-    projectTemplate: {
-      get: (projectId: string) =>
-        ipcRenderer.invoke('typebuild:project-template:get', projectId) as Promise<unknown | null>,
-      set: (projectId: string, config: unknown) =>
-        ipcRenderer.invoke('typebuild:project-template:set', projectId, config) as Promise<void>,
-    },
     // task-ae0ec0348930 — FormExtensions (client interpreter + design-time
     // authoring). `list` enumerates extensions ([] signed-out); `create`/`get`/
     // `approve`/`version` are the authoring lifecycle (approve == the mandatory

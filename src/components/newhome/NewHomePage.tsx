@@ -4,43 +4,37 @@
 // existing Home (ProjectsPage, kind:'home'/'projects') — this file must never
 // import from src/components/projects/ or otherwise couple to that surface.
 //
-// Layout (adapted from the V11 unified-prototype design reference — see
-// task body for the source path — with app tokens standing in for its
-// hardcoded colors):
-//   topbar (project picker · Customize · + New Task)
+// task-b1fa5098da3e (R3) — the inline Customize dialog (per-project stored
+// TemplateConfig: fields/columns/approval rules/steps/chains/repeatables) and
+// the amber ApprovalBar strip are REMOVED — see docs/task-templates-design.md
+// "Removed/superseded". A project carries no editable configuration anymore;
+// a chain is defined inline in the canonical Task composer ("New Chained
+// Task") or copied from an existing chained task, never edited via a project
+// panel. Pending-question tasks still surface via the roster's "needs" bucket
+// + RowAction "Answer" and the TaskDetailDialog's answer form.
+//
+// Layout:
+//   topbar (project picker · + New Task)
 //   project hero (name + subtitle)
-//   ApprovalBar
 //   HeroStats
 //   filter pills (state owned here, passed down)
 //   RosterTable
 //   OutcomesPanel
-//   conditional: TaskDetailDialog / NewTaskModal / TemplateEditor
+//   conditional: TaskDetailDialog
 //
 // This component owns ALL cross-child state (selectedProjectId, filter,
-// openTaskId, showNewTask, showTemplateEditor) and passes it down as props —
-// children stay presentational stubs until follow-up tasks fill them in.
+// openTaskId) and passes it down as props.
 //
 // PHI: task titles/custom-field values render in-app only; never persisted
 // to disk/logs (see docs/typebuild-data-field-contract.md).
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNewHomeData } from './useNewHomeData';
-import {
-  getTemplateConfig,
-  setTemplateConfig,
-  syncTemplateConfigFromServer,
-  runRepeatable,
-  instantiateChain,
-} from './newHomePrefs';
-import { scheduleLabel } from './newHomeTemplateOps';
 import { compileTaskQuery, runTaskQuery } from './taskQuery';
-import { createTask } from '../../tasks';
 import type { NewHomeStatus } from './types';
-import { ApprovalBar } from './ApprovalBar';
 import { HeroStats } from './HeroStats';
 import { RosterTable } from './RosterTable';
 import { TaskDetailDialog } from './TaskDetailDialog';
-import { TemplateEditor, type CustomizeTab } from './TemplateEditor';
 import { OutcomesPanel } from './OutcomesPanel';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import './NewHomePage.css';
@@ -50,11 +44,6 @@ type FilterState = 'all' | NewHomeStatus;
 const FILTER_STATES: FilterState[] = ['all', 'done', 'progress', 'queued', 'needs', 'failed'];
 function isFilterState(v: unknown): v is FilterState {
   return typeof v === 'string' && (FILTER_STATES as string[]).includes(v);
-}
-
-const CUSTOMIZE_TABS: CustomizeTab[] = ['tasks', 'fields', 'columns', 'approvals', 'steps', 'chains', 'repeatable', 'preview'];
-function isCustomizeTab(v: unknown): v is CustomizeTab {
-  return typeof v === 'string' && (CUSTOMIZE_TABS as string[]).includes(v);
 }
 
 // Heuristic: does this input look like a STRUCTURED query (vs. plain words)?
@@ -97,26 +86,19 @@ export function NewHomePage() {
   // task-7bdb94445321 follow-up — free-text roster search, ANDed with the
   // status filter. Empty string = no text filter (status filter still applies).
   const [search, setSearch] = useState('');
-  const [showCustomize, setShowCustomize] = useState(false);
-  const [customizeTab, setCustomizeTab] = useState<CustomizeTab>('fields');
-  // Bumped by the 'fm:newhome:templateChanged' listener below (fired by the
-  // Copilot customize_columns/add_template_field actions — see
-  // src/copilot/actions.tsx) so the `template` useMemo re-reads
-  // newHomePrefs after an out-of-band edit, the same way it already does
-  // after TemplateEditor's own onSave.
-  const [templateVersion, setTemplateVersion] = useState(0);
 
-  const { tasks, counts, approvals, projects, loading, refresh } =
+  const { tasks, counts, projects, loading, refresh } =
     useNewHomeData(selectedProjectId);
 
   function openTaskDetail(id: string) {
     setOpenTaskId(id);
   }
-  // task-ef961d60dc1b — "+ New Task" now opens the CANONICAL Task form (the
+  // task-ef961d60dc1b — "+ New Task" opens the CANONICAL Task form (the
   // globally-mounted TaskComposer, via fm:openTask — the same form the task
   // verb / Sidebar / copilot create_task open) AND pops the copilot chat, so
-  // the human can fill it by hand or drive it conversationally. New Home's own
-  // NewTaskModal is deprecated and no longer mounted here.
+  // the human can fill it by hand or drive it conversationally — including
+  // "New Chained Task" (docs/task-templates-design.md), which defines a chain
+  // inline, right there, rather than through a project-level template.
   function openNewTask() {
     setOpenTaskId(null);
     window.dispatchEvent(
@@ -126,77 +108,11 @@ export function NewHomePage() {
     );
     window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
   }
-  function openCustomize(tab?: CustomizeTab) {
-    if (tab) setCustomizeTab(tab);
-    setShowCustomize(true);
-  }
-
-  // task-a067636e599b — hydrate the localStorage template cache from the
-  // server once per project (per app session; see syncTemplateConfigFromServer's
-  // own dedup). Silently no-ops when signed out / offline. Bumping
-  // templateVersion on a real update re-runs the `template` useMemo below
-  // through the same change signal the inline editor + copilot actions use.
-  useEffect(() => {
-    let cancelled = false;
-    void syncTemplateConfigFromServer(selectedProjectId).then((updated) => {
-      if (updated && !cancelled) setTemplateVersion((v) => v + 1);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedProjectId]);
-
-  const template = useMemo(
-    () => getTemplateConfig(selectedProjectId),
-    // Re-read whenever the project changes or the persisted template changes.
-    // templateVersion is bumped both by the inline editor's own onChange
-    // (live-apply) and by the 'fm:newhome:templateChanged' listener below
-    // (Copilot actions editing the same store out-of-band) — one source of
-    // truth, no private draft.
-    [selectedProjectId, templateVersion],
-  );
-
-  // Persist an inline edit and re-read so the panel + copilot grounding stay
-  // in lockstep. Same store (newHomePrefs) + same change signal the copilot
-  // uses, so there is exactly one implementation of "the template changed".
-  function applyTemplateChange(cfg: Parameters<typeof setTemplateConfig>[1]) {
-    setTemplateConfig(selectedProjectId, cfg);
-    setTemplateVersion((v) => v + 1);
-  }
-
-  // "Run now" for a repeatable task: spawn a real task through the SAME
-  // createTask path the New Task form uses (recurrence rides along when the
-  // def is scheduled), then refresh so the roster shows it.
-  function runRepeatableById(id: string) {
-    const def = (template.repeatables ?? []).find((r) => r.id === id);
-    if (!def) return;
-    void runRepeatable(def, selectedProjectId, createTask)
-      .then(() => refresh())
-      .catch(() => {
-        /* surfaced by the app's task-error channel; nothing to do here */
-      });
-  }
-
-  // "Run chain": instantiate the chain into linked tasks (container + one task
-  // per step, wired parent/depends), resolving any repeatable-task references,
-  // through the same createTask path, then refresh.
-  function runChainById(chainId: string) {
-    const chain = (template.chains ?? []).find((c) => c.id === chainId);
-    if (!chain) return;
-    void instantiateChain(chain, selectedProjectId, createTask, template.repeatables ?? [])
-      .then(() => refresh())
-      .catch(() => {
-        /* surfaced by the app's task-error channel; nothing to do here */
-      });
-  }
 
   // Copilot action bridge (task-ce125a047c70): set_roster_filter and
   // open_task (src/copilot/actions.tsx) can't reach this component's state
   // directly since the copilot is mounted at the app root, so they dispatch
-  // window CustomEvents instead. customize_columns/add_template_field write
-  // straight to newHomePrefs (the same storage TemplateEditor uses) and
-  // announce the change the same way, since this component owns no
-  // in-memory copy of the template beyond the memo above.
+  // window CustomEvents instead.
   useEffect(() => {
     function onFilter(e: Event) {
       const detail = (e as CustomEvent<{ filter?: string; search?: string }>).detail;
@@ -209,37 +125,19 @@ export function NewHomePage() {
       const detail = (e as CustomEvent<{ taskId?: string }>).detail;
       if (detail?.taskId) openTaskDetail(detail.taskId);
     }
-    function onTemplateChanged() {
-      setTemplateVersion((v) => v + 1);
-    }
     // Copilot select_home_project drives the project picker (detail.projectId,
     // or null/'' for "All projects"). Same setter the <select> onChange calls.
     function onSelectProject(e: Event) {
       const id = (e as CustomEvent<{ projectId?: string | null }>).detail?.projectId;
       setSelectedProjectId(id ? id : null);
     }
-    // Copilot open_customize / close_customize drive the inline Customize
-    // panel — the same setters the Customize button + Done button call.
-    function onOpenCustomize(e: Event) {
-      const detail = (e as CustomEvent<{ tab?: string; open?: boolean }>).detail;
-      if (detail && detail.open === false) {
-        setShowCustomize(false);
-        return;
-      }
-      if (detail && isCustomizeTab(detail.tab)) setCustomizeTab(detail.tab);
-      setShowCustomize(true);
-    }
     window.addEventListener('fm:newhome:filter', onFilter);
     window.addEventListener('fm:newhome:openTask', onOpenTask);
-    window.addEventListener('fm:newhome:templateChanged', onTemplateChanged);
     window.addEventListener('fm:newhome:selectProject', onSelectProject);
-    window.addEventListener('fm:newhome:openCustomize', onOpenCustomize);
     return () => {
       window.removeEventListener('fm:newhome:filter', onFilter);
       window.removeEventListener('fm:newhome:openTask', onOpenTask);
-      window.removeEventListener('fm:newhome:templateChanged', onTemplateChanged);
       window.removeEventListener('fm:newhome:selectProject', onSelectProject);
-      window.removeEventListener('fm:newhome:openCustomize', onOpenCustomize);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -247,15 +145,17 @@ export function NewHomePage() {
   // The search box is dual-mode: if the text compiles as a structured query
   // (SQL-like DSL over task fields — see taskQuery.ts) we run that; otherwise
   // it's free-text. A query-shaped-but-invalid input surfaces its parse error
-  // (kind 'invalid') instead of silently matching nothing.
+  // (kind 'invalid') instead of silently matching nothing. Projects declare no
+  // extra queryable fields anymore (task-b1fa5098da3e) — just the base
+  // task-field catalogue.
   const queryState = useMemo(() => {
     const q = search.trim();
     if (!q) return { kind: 'none' as const };
-    const c = compileTaskQuery(q, template.fields);
+    const c = compileTaskQuery(q, []);
     if (c.ok) return { kind: 'query' as const, compiled: c.compiled };
     if (looksLikeQuery(q)) return { kind: 'invalid' as const, error: c.error };
     return { kind: 'text' as const };
-  }, [search, template.fields]);
+  }, [search]);
 
   const filteredTasks = useMemo(() => {
     const byStatus = filter === 'all' ? tasks : tasks.filter((t) => t.status === filter);
@@ -285,29 +185,9 @@ export function NewHomePage() {
       needsYou: tasks
         .filter((t) => t.status === 'needs')
         .map((t) => ({ id: t.id, title: t.title })),
-      // task-7bdb94445321 — publish the Customize panel's live state (NON-PHI
-      // config only) so the copilot can SEE what the human is editing and
-      // decide whether to open/navigate it.
-      customize: {
-        open: showCustomize,
-        tab: showCustomize ? customizeTab : null,
-        fields: template.fields.map((f) => ({ key: f.key, label: f.label })),
-        steps: template.steps.map((s) => s.name),
-        approvalRules: template.approvalRules.map((r) => r.description),
-        chains: (template.chains ?? []).map((c) => ({
-          id: c.id,
-          name: c.name,
-          entryCount: c.entries.length,
-        })),
-        repeatables: (template.repeatables ?? []).map((r) => ({
-          id: r.id,
-          title: r.title,
-          schedule: scheduleLabel(r.recurrence),
-        })),
-      },
       rosterFilter: { status: filter, search },
     });
-  }, [selectedProject, projects, counts, tasks, showCustomize, customizeTab, template, filter, search]);
+  }, [selectedProject, projects, counts, tasks, filter, search]);
 
   useEffect(() => clearNewHomeContext, []);
 
@@ -329,14 +209,6 @@ export function NewHomePage() {
           </select>
         </div>
         <div className="nh__topbar-right">
-          <button
-            type="button"
-            className={'nh__btn' + (showCustomize ? ' nh__btn--active' : '')}
-            aria-pressed={showCustomize}
-            onClick={() => (showCustomize ? setShowCustomize(false) : openCustomize())}
-          >
-            Customize
-          </button>
           <button
             type="button"
             className="nh__btn nh__btn--primary"
@@ -361,25 +233,6 @@ export function NewHomePage() {
           </div>
         </div>
 
-        {showCustomize && (
-          <TemplateEditor
-            projectId={selectedProjectId ?? ''}
-            config={template}
-            tab={customizeTab}
-            onTabChange={setCustomizeTab}
-            onChange={applyTemplateChange}
-            onRunRepeatable={runRepeatableById}
-            onRunChain={runChainById}
-            onClose={() => setShowCustomize(false)}
-          />
-        )}
-
-        <ApprovalBar
-          approvals={approvals}
-          onOpenTask={openTaskDetail}
-          onResolved={() => void refresh()}
-        />
-
         <HeroStats counts={counts} activeFilter={filter} onFilter={setFilter} />
 
         <RosterTable
@@ -388,7 +241,6 @@ export function NewHomePage() {
           search={search}
           queryMode={queryState.kind}
           queryError={queryState.kind === 'invalid' ? queryState.error : undefined}
-          template={template}
           loading={loading}
           onOpenTask={openTaskDetail}
           onFilter={setFilter}
@@ -406,15 +258,14 @@ export function NewHomePage() {
         <TaskDetailDialog
           taskId={openTaskId}
           task={openTask}
-          template={template}
           tasks={tasks}
           onOpenTask={openTaskDetail}
           onClose={() => setOpenTaskId(null)}
           onResolved={() => {
-            // Resolve/cancel/retry all flow through here so stats, the
-            // roster row, and the approval bar update in place from the same
-            // refreshed useNewHomeData snapshot, rather than each surface
-            // tracking its own optimistic patch.
+            // Resolve/cancel/retry all flow through here so stats and the
+            // roster row update in place from the same refreshed
+            // useNewHomeData snapshot, rather than each surface tracking its
+            // own optimistic patch.
             void refresh();
             setOpenTaskId(null);
           }}

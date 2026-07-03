@@ -60,7 +60,7 @@ export function FormExtensionAuthoringActions() {
   const onNewHome = nh.surface === 'new-home';
 
   // The available SavedQueries the LLM can bind a typeahead field to (reuse the
-  // selector list — same grounding the TemplateEditor source picker uses). Held
+  // selector list). Held
   // in a ref too so once-registered handlers read the latest list.
   const [queries, setQueries] = useState<SavedQuerySummary[]>([]);
   const [qErr, setQErr] = useState<string | null>(null);

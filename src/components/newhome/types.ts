@@ -1,9 +1,16 @@
 // task-b9cdad64ab9c — New Home: shared view-model + config contracts for the
-// agent-work-monitor surface (ApprovalBar → HeroStats → filters → RosterTable
-// → TaskDetailDialog → NewTaskModal → TemplateEditor). These types are the
-// FINAL prop contract other stubs are built against — changing a shape here
-// ripples through every consumer, so keep additions additive/optional where
-// possible.
+// agent-work-monitor surface (HeroStats → filters → RosterTable →
+// TaskDetailDialog). These types are the FINAL prop contract other stubs are
+// built against — changing a shape here ripples through every consumer, so
+// keep additions additive/optional where possible.
+//
+// task-b1fa5098da3e (R3) — a project no longer carries stored customization
+// (TemplateConfig/TemplateField, the per-project fields/columns/approval
+// rules/steps that used to live in newHomePrefs.ts). A chain is now fully
+// self-describing on its own parent task's v2 `task-template` block (see
+// TaskDef below + docs/task-templates-design.md); "project" is just a
+// category + a derived view over chained/plain tasks that carry that
+// projectId.
 //
 // PHI note: `title`, `lastAction`, and `customValues` VALUES may originate
 // from task text and must never be persisted to disk/logs — render in memory
@@ -46,7 +53,7 @@ export type NewHomeTask = {
   /** Set when the task is blocked on a human answer (drives the Approval
    *  bar + the "needs" bucket). */
   pendingQuestion: PendingQuestion | null;
-  /** Per-template custom field values, keyed by TemplateField.key. Values
+  /** Placeholder-keyed custom field values (data-bag-backed), if any. Values
    *  are placeholder-injected strings and may carry PHI — render as-is,
    *  never log/persist. */
   customValues: Record<string, string>;
@@ -65,49 +72,6 @@ export type NewHomeTask = {
   /** The full underlying task, for stubs that need a field not yet
    *  promoted into the view-model above. */
   raw: Task;
-};
-
-/** One custom field a project's task template can declare. */
-export type TemplateField = {
-  key: string;
-  label: string;
-  type: 'text' | 'date' | 'select' | 'number';
-  required: boolean;
-  /** True when an agent can look this value up itself (vs. requiring the
-   *  human to supply it in the New Task modal). Kept for back-compat; a field
-   *  with `source` set (below) SUPERSEDES this — it becomes a live typeahead. */
-  agentFetchable: boolean;
-  /** Choices when type === 'select'. */
-  options?: string[];
-  /** task-e713f307c422 — data-source-backed field. When set, the New Task
-   *  modal renders this field as a live TYPEAHEAD driven by a SavedQuery
-   *  (docs/saved-queries-design.md, "Consumers → Form selectors") instead of a
-   *  plain value/question: as the user types, the client calls
-   *  `POST /chromeext/queries/{savedQueryId}/execute` and shows the returned
-   *  rows. Selecting a row stores its opaque resource `ref` (threaded onto the
-   *  created task's `data` as placeholder keys — NON-PHI) plus a display
-   *  snapshot for the form preview. Supersedes `agentFetchable` when present.
-   *  `entityType` is the declared resource type (outputSchema.ref) carried for
-   *  display/validation; the authoritative ref comes from each executed row. */
-  source?: { savedQueryId: string; version?: number; entityType?: string };
-};
-
-/** Per-project New Home configuration: which custom fields exist, which of
- *  them show as roster columns, and the project's approval/step vocabulary. */
-export type TemplateConfig = {
-  fields: TemplateField[];
-  /** Field keys (or built-in column ids) shown as RosterTable columns, in
-   *  order. */
-  columns: string[];
-  approvalRules: { id: string; description: string }[];
-  steps: { id: string; name: string; description: string; humanGate: boolean }[];
-  /** task-8b694714b13c / docs/task-templates-design.md — a template is a
-   *  domain-neutral chain of TaskDefs; the template itself holds no fields of
-   *  its own (forms/columns are built by aggregating every task-def's fields,
-   *  see taskSchema.mjs `aggregateInputs`). Optional/additive: a template
-   *  without `taskDefs` behaves exactly as today (chains/steps/repeatables),
-   *  and existing consumers that only know `TemplateConfig` keep compiling. */
-  taskDefs?: TaskDef[];
 };
 
 /** task-8b694714b13c — one input or output field on a TaskDef. Definitions

@@ -54,8 +54,8 @@ import { fm } from '../../bridge';
 import { classify, todayKey } from '../../projects/index.mjs';
 import { useRunningSessions } from '../tasks/useRunningSessions';
 import type { Agent, Project, Task, TaskAuditEvent } from '../../types';
-import type { NewHomeStatus, NewHomeTask, TemplateField } from './types';
-import { parseTaskFieldsBlock } from './taskSchema.mjs';
+import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
+import { parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
 import { buildJobValuesByRef, partitionJobs, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
 
 // task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
@@ -345,20 +345,9 @@ function toNewHomeTask(
     // the server side is outstanding" is still true), so there is no way to
     // know WHICH keys a task has without probing, and no bulk-read endpoint —
     // only GET .../data?ref=<key>, one value per call, by design (never the
-    // whole bag). Eagerly probing every TemplateField.key for every roster row
-    // would mean (tasks × fields) uncached network round-trips on every
-    // render, which this codebase avoids for detail-only data (see
-    // useLastRun/useTaskRuns below — per-task detail data is fetched lazily,
-    // on demand, only for the OPEN task, never eagerly across a list).
-    // customValues therefore stays {} here (list-scope, matches today's
-    // behavior exactly — NON-REGRESSION); useTaskCustomValues (below) does
-    // the real resolution, scoped to the single open task, and
-    // TaskDetailDialog merges its result over this empty base for the
-    // "Details" grid. RosterTable's custom COLUMNS (which need values across
-    // the whole visible roster to render per-row) stay blank until the server
-    // ships `data_keys` + a batch-friendly read — the one-ref-per-call
-    // contract makes a correct eager roster-wide fill a server-side decision,
-    // not a client workaround.
+    // whole bag), and (task-b1fa5098da3e) projects no longer declare custom
+    // fields to eagerly probe for in the first place. customValues stays {}
+    // here (list-scope).
     customValues: {},
     risk: deriveRisk(t),
     live,
@@ -433,72 +422,27 @@ export function useNewHomeData(projectId?: string | null): {
   return { tasks, counts, approvals, projects, agents, loading, error, refresh };
 }
 
-// ─── per-task custom-field values (task-1af4f59428eb, Item 1) ──────────────
+// ─── chained roster: lazy per-job own-body + child resolution ──────────────
+// (task-a4397184def4 T5, reworked task-b1fa5098da3e R3)
 //
-// On-demand resolver for ONE task's `data`-backed TemplateField values —
-// mirrors the useLastRun/useTaskRuns pattern above (per-task detail data,
-// fetched lazily only while a detail view is open, never eagerly across the
-// roster). Tries fm.typebuild.taskData.resolve(taskId, field.key) for every
-// declared template field key; a field with no matching data entry (the
-// common case until the server ships data_keys) resolves to null and is
-// simply omitted, so the caller's existing `customValues[key] ?? '—'`
-// rendering is unaffected (NON-REGRESSION with the always-empty {} today).
+// task-b1fa5098da3e (R3) — a "chained task" is no longer a project-level
+// concept (there is no more project TemplateConfig.taskDefs to gate on): a
+// top-level task with children is a JOB exactly when ITS OWN body parses a v2
+// ```task-template block (docs/task-templates-design.md, "Removed/superseded"
+// — the chain rides the parent task, not a project pref). Since a job's own
+// body is `notes: null` at LIST scope too (see below), this hook fetches BOTH
+// a candidate job's own detail (to learn whether/what it's chained) AND, once
+// known chained, its children's details — the same lazy, cached-by-
+// updated_at pattern throughout this file.
 //
-// PHI: resolved values are held in this hook's React state (memory only) and
-// never logged — same discipline as resolveTaskDataRef/task-data.ts. Cleared
-// whenever taskId/fields change or the component unmounts.
-export function useTaskCustomValues(
-  taskId: string | null,
-  fields: TemplateField[],
-): Record<string, string> {
-  const [values, setValues] = useState<Record<string, string>>({});
-  // Stable key so the effect only re-runs when the SET of field keys changes,
-  // not on every parent re-render (template.fields is often a fresh array).
-  const fieldKeys = useMemo(() => fields.map((f) => f.key).join(' '), [fields]);
-
-  useEffect(() => {
-    setValues({});
-    if (!taskId || !fieldKeys) return;
-    let cancelled = false;
-    const keys = fieldKeys.split(' ');
-    void Promise.all(
-      keys.map(async (key) => {
-        try {
-          const value = await fm.typebuild.taskData.resolve(taskId, key);
-          return [key, value] as const;
-        } catch {
-          // Never let one bad ref break the others; degrade to "no value".
-          return [key, null] as const;
-        }
-      }),
-    ).then((pairs) => {
-      if (cancelled) return;
-      const next: Record<string, string> = {};
-      for (const [key, value] of pairs) {
-        if (typeof value === 'string' && value !== '') next[key] = value;
-      }
-      setValues(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [taskId, fieldKeys]);
-
-  return values;
-}
-
-// ─── pipeline roster: lazy per-job child resolution (task-a4397184def4, T5) ──
-//
-// The New Home roster renders one row per JOB (meta-parent) when a project's
-// template has task-defs. Each job's pipeline cells need the INPUT values
-// (child body ```task-fields block) and OUTPUT values (child `{type:'fields'}`
-// result) of its children — but BOTH are absent at LIST scope: the TypeBuild
-// source's mapListRow sets `notes: null` and carries no `result` (they only
-// arrive via getTask / a detail fetch — see electron/sources/typebuild.ts). So,
-// exactly like useTaskCustomValues above, this hook fetches child DETAILS
-// lazily and on demand — but scoped to the currently-VISIBLE jobs' children,
-// not the whole roster — caches them in memory, and derives each job's
-// `valuesByRef` from the cache.
+// Each job's pipeline cells need the INPUT values (child body ```task-fields
+// block) and OUTPUT values (child `{type:'fields'}` result) of its children —
+// but BOTH are absent at LIST scope: the TypeBuild source's mapListRow sets
+// `notes: null` and carries no `result` (they only arrive via getTask / a
+// detail fetch — see electron/sources/typebuild.ts). So this hook fetches
+// DETAILS lazily and on demand — scoped to the currently-VISIBLE candidate
+// jobs (and, once resolved chained, their children) — caches them in memory,
+// and derives each job's `defs`/`valuesByRef` from the cache.
 //
 // It reads the FULL task list itself (useTasks, not the parent's already
 // status/search-FILTERED `tasks` prop) so a job's DONE children (which a
@@ -508,44 +452,59 @@ export function useTaskCustomValues(
 // PHI (docs/typebuild-data-field-contract.md): fetched bodies/results and the
 // derived values are DECRYPTED task content — held in this hook's React state
 // (memory only), never logged or persisted, and cleared when the component
-// unmounts. Same discipline as useTaskCustomValues / useLatestAuditByTask.
+// unmounts. Same discipline as useLatestAuditByTask.
 const PIPELINE_FETCH_CONCURRENCY = 4;
 
-/** One job's resolved pipeline data. `loading` stays true until every child's
- *  detail has been fetched (cells show an em-dash placeholder until then). */
-export type PipelineJobResolution = {
-  valuesByRef: Record<string, string | number>;
-  childIdByDefId: Record<string, string>;
-  loading: boolean;
-};
+/** One candidate job's resolved chain data.
+ *  - `status: 'loading'` — the job's OWN body hasn't been fetched yet, so we
+ *    don't yet know whether it's chained. Callers should render it as a
+ *    plain row until this resolves (no flash of an empty subtable).
+ *  - `status: 'plain'` — the job's own body carries no v2 task-template block
+ *    (or a v1-legacy one, or none) — not a chained task; render a plain row.
+ *  - `status: 'chained'` — `defs`/`groups` are non-empty; render a subtable.
+ *  `childrenLoading` stays true until every child's detail has been fetched
+ *  (cells show an em-dash placeholder until then). */
+export type ChainedJobResolution =
+  | { status: 'loading' }
+  | { status: 'plain' }
+  | {
+      status: 'chained';
+      name: string;
+      defs: TaskDef[];
+      valuesByRef: Record<string, string | number>;
+      childIdByDefId: Record<string, string>;
+      childrenLoading: boolean;
+    };
 
-type ChildDetail = { notes: string | null; result: unknown };
+type TaskDetail = { notes: string | null; result: unknown };
 
-export function usePipelineRoster(opts: { enabled: boolean; jobIds: string[] }): {
-  resolveJob: (jobId: string) => PipelineJobResolution;
+export function useChainedRoster(opts: { jobIds: string[] }): {
+  resolveJob: (jobId: string) => ChainedJobResolution;
   saveInput: (childId: string, key: string, value: string) => Promise<{ ok: boolean; error?: string }>;
 } {
-  const { enabled, jobIds } = opts;
+  const { jobIds } = opts;
   // Full, UNFILTERED roster — independent of the parent's filtered `tasks`
   // prop, so a job's children in any status resolve (see header note).
   const { tasks: fullTasks } = useTasks({ includeDone: true });
 
-  // Fetched child bodies/results, keyed by child id (memory only, PHI).
-  const [details, setDetails] = useState<Map<string, ChildDetail>>(new Map());
-  // updated_at we last fetched a child at — the refetch key (ref, not state).
+  // Fetched task bodies/results, keyed by task id — holds BOTH candidate
+  // jobs' own details and (once known chained) their children's details;
+  // one cache, one fetch pattern (memory only, PHI).
+  const [details, setDetails] = useState<Map<string, TaskDetail>>(new Map());
+  // updated_at we last fetched a task at — the refetch key (ref, not state).
   const fetchedAtRef = useRef<Map<string, number>>(new Map());
 
   // Stable job-id set (the array identity changes every parent render).
   const jobIdKey = useMemo(() => [...jobIds].sort().join(','), [jobIds]);
 
+  const byIdTask = useMemo(() => new Map(fullTasks.map((t) => [t.id, t])), [fullTasks]);
+
   // parentId → child Task[], over the FULL roster.
   const childrenByParent = useMemo(() => {
     const map = new Map<string, Task[]>();
-    if (!enabled) return map;
     const { childrenByParent: byId } = partitionJobs(
       fullTasks.map((t) => ({ id: t.id, parentTaskId: t.parentTaskId ?? null })),
     );
-    const byIdTask = new Map(fullTasks.map((t) => [t.id, t]));
     for (const [parent, ids] of Object.entries(byId)) {
       map.set(
         parent,
@@ -553,27 +512,88 @@ export function usePipelineRoster(opts: { enabled: boolean; jobIds: string[] }):
       );
     }
     return map;
-  }, [enabled, fullTasks]);
+  }, [fullTasks, byIdTask]);
 
-  // The children of the currently-visible jobs — the only rows we detail-fetch.
+  const visibleJobs = useMemo(
+    () => (jobIdKey ? jobIdKey.split(',') : []).map((id) => byIdTask.get(id)).filter((t): t is Task => !!t),
+    [jobIdKey, byIdTask],
+  );
+
+  // Stage 1 — fetch each candidate job's OWN detail (to parse its v2 block).
+  const jobKey = useMemo(
+    () => visibleJobs.map((t) => `${t.id}:${t.updated_at}`).join(','),
+    [visibleJobs],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const due = visibleJobs.filter((t) => fetchedAtRef.current.get(t.id) !== t.updated_at);
+    if (due.length === 0) return;
+
+    void (async () => {
+      let idx = 0;
+      const results: Array<[string, TaskDetail | null]> = [];
+      async function worker() {
+        while (idx < due.length) {
+          const t = due[idx++];
+          fetchedAtRef.current.set(t.id, t.updated_at);
+          try {
+            const full = await getTask(t.id, t.source);
+            results.push([t.id, full ? { notes: full.notes, result: full.result ?? null } : null]);
+          } catch {
+            fetchedAtRef.current.delete(t.id);
+            results.push([t.id, null]);
+          }
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(PIPELINE_FETCH_CONCURRENCY, due.length) }, () => worker()),
+      );
+      if (cancelled) return;
+      setDetails((prev) => {
+        const next = new Map(prev);
+        for (const [id, detail] of results) {
+          if (detail) next.set(id, detail);
+        }
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jobKey, visibleJobs]);
+
+  // Which visible jobs are known-chained (v2 block, defs present) once their
+  // own detail has landed.
+  const chainedJobIds = useMemo(() => {
+    const out: string[] = [];
+    for (const t of visibleJobs) {
+      const detail = details.get(t.id);
+      if (!detail) continue;
+      const parsed = parseTaskTemplateBlock(detail.notes ?? null);
+      if (parsed?.defs && parsed.defs.length > 0) out.push(t.id);
+    }
+    return out;
+  }, [visibleJobs, details]);
+  const chainedJobIdKey = useMemo(() => [...chainedJobIds].sort().join(','), [chainedJobIds]);
+
+  // Stage 2 — the children of chained jobs only — the rows we detail-fetch
+  // to resolve their pipeline cells.
   const visibleChildren = useMemo(() => {
-    if (!enabled) return [] as Task[];
     const out: Task[] = [];
-    for (const jobId of jobIdKey ? jobIdKey.split(',') : []) {
+    for (const jobId of chainedJobIdKey ? chainedJobIdKey.split(',') : []) {
       for (const c of childrenByParent.get(jobId) ?? []) out.push(c);
     }
     return out;
-  }, [enabled, jobIdKey, childrenByParent]);
+  }, [chainedJobIdKey, childrenByParent]);
 
-  // Stable dep: (id, updated_at) pairs, so the fetch effect only re-runs when
-  // the visible children — or their activity timestamps — actually change.
   const childKey = useMemo(
     () => visibleChildren.map((c) => `${c.id}:${c.updated_at}`).join(','),
     [visibleChildren],
   );
 
   useEffect(() => {
-    if (!enabled) return;
     let cancelled = false;
     const due = visibleChildren.filter(
       (c) => fetchedAtRef.current.get(c.id) !== c.updated_at,
@@ -582,7 +602,7 @@ export function usePipelineRoster(opts: { enabled: boolean; jobIds: string[] }):
 
     void (async () => {
       let idx = 0;
-      const results: Array<[string, ChildDetail | null]> = [];
+      const results: Array<[string, TaskDetail | null]> = [];
       async function worker() {
         while (idx < due.length) {
           const c = due[idx++];
@@ -614,10 +634,15 @@ export function usePipelineRoster(opts: { enabled: boolean; jobIds: string[] }):
     return () => {
       cancelled = true;
     };
-  }, [enabled, childKey, visibleChildren]);
+  }, [childKey, visibleChildren]);
 
   const resolveJob = useCallback(
-    (jobId: string): PipelineJobResolution => {
+    (jobId: string): ChainedJobResolution => {
+      const jobDetail = details.get(jobId);
+      if (!jobDetail) return { status: 'loading' };
+      const parsed = parseTaskTemplateBlock(jobDetail.notes ?? null);
+      if (!parsed?.defs || parsed.defs.length === 0) return { status: 'plain' };
+
       const children = childrenByParent.get(jobId) ?? [];
       // Prefer the fetched detail (real notes/result); fall back to whatever
       // the list row carries (today always null) so an unfetched child simply
@@ -627,8 +652,15 @@ export function usePipelineRoster(opts: { enabled: boolean; jobIds: string[] }):
         return { id: c.id, notes: d?.notes ?? c.notes ?? null, result: d?.result ?? c.result ?? null };
       });
       const { valuesByRef, childIdByDefId } = buildJobValuesByRef(merged);
-      const loading = children.some((c) => !details.has(c.id));
-      return { valuesByRef, childIdByDefId, loading };
+      const childrenLoading = children.some((c) => !details.has(c.id));
+      return {
+        status: 'chained',
+        name: parsed.name ?? jobId,
+        defs: parsed.defs,
+        valuesByRef,
+        childIdByDefId,
+        childrenLoading,
+      };
     },
     [childrenByParent, details],
   );

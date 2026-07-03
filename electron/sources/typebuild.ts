@@ -1827,39 +1827,6 @@ export class TypeBuildTaskSource implements TaskSource {
       }));
   }
 
-  // ─── Project template (task-a067636e599b) ────────────────────────────────
-  // Server-backed home for the New Home per-project TemplateConfig blob
-  // (fields/columns/approvalRules/steps/chains/repeatables), previously
-  // localStorage-only (src/components/newhome/newHomePrefs.ts). The reserved
-  // id "_default" is the unscoped/no-project default. Template config is
-  // NON-PHI (field keys/labels/types are configuration, not patient data).
-
-  // GET /chromeext/project-templates/:project_id → { template: <TemplateConfigExt
-  //   JSON> | null }. `null` means "no server template stored yet" — the
-  //   caller falls back to its localStorage cache / DEFAULT_TEMPLATE.
-  async getProjectTemplate(projectId: string): Promise<unknown | null> {
-    const res = await this.request(
-      'GET',
-      `/chromeext/project-templates/${encodeURIComponent(projectId)}`,
-    );
-    if (!res.ok) throw new Error(`typebuild: project template get failed (${res.status})`);
-    const data = (await res.json().catch(() => ({}))) as { template?: unknown };
-    return data.template ?? null;
-  }
-
-  // PUT /chromeext/project-templates/:project_id, body = the full
-  //   TemplateConfigExt object → upsert. Server returns { ok, template }; we
-  //   only need to confirm success, the caller already holds the config it
-  //   just wrote to its local cache.
-  async setProjectTemplate(projectId: string, config: unknown): Promise<void> {
-    const res = await this.request(
-      'PUT',
-      `/chromeext/project-templates/${encodeURIComponent(projectId)}`,
-      config,
-    );
-    if (!res.ok) throw new Error(`typebuild: project template set failed (${res.status})`);
-  }
-
   // ─── SavedQuery authoring (task-d8a0b081eb93) ────────────────────────────
   // Design-time CopilotKit authoring flow (docs/saved-queries-design.md,
   // "Authoring flow (CopilotKit)" + Addendum §1). The admin describes a need in

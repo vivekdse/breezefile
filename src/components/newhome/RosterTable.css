@@ -336,10 +336,35 @@
   color: var(--nh-needs);
 }
 
-/* ── Pipeline table (task-a4397184def4, T5) ───────────────────────────────
+/* ── Chained-job subtable row (task-b1fa5098da3e, R3) ─────────────────────
+   A chained task's summary row (Title/Status/Last Action/Who/Action, same
+   fixed columns every row gets) is immediately followed by this subrow: a
+   nested subtable with grouped per-task-def IN/OUT columns, built from that
+   job's OWN v2 task-template block. Not a clickable row itself — clicks are
+   handled by the subtable's own cells (open child) / the summary row above
+   (open the job/parent). */
+.nh-roster__subrow {
+  cursor: default;
+}
+.nh-roster__subrow:hover {
+  background: transparent;
+}
+.nh-roster__subrow-cell {
+  padding: 0 var(--sp-3) var(--sp-3) var(--sp-3) !important;
+  border-bottom: 1px solid var(--border-1);
+}
+.nh-pipe__subtable {
+  width: auto;
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+/* ── Pipeline table (task-a4397184def4, T5, reworked task-b1fa5098da3e) ───
    Grouped, per-task-def columns aggregating INPUT (editable) + OUTPUT
-   (read-only) fields. Only rendered when the project's template has task-defs;
-   the classic table above is byte-for-byte unchanged for every other project. */
+   (read-only) fields, derived from a chained job's OWN body — never a
+   project pref. Only rendered for rows that resolve as chained; every other
+   row renders the classic fixed columns unchanged. */
 .nh-pipe__table th {
   vertical-align: bottom;
 }

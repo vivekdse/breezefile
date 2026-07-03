@@ -503,15 +503,6 @@ type Fm = {
         patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
       ) => Promise<{ id: string; name: string; version: number; status: string }>;
     };
-    // task-a067636e599b — Project template (New Home TemplateConfig),
-    // server-backed. `get` returns the stored blob or null (no server
-    // template yet); `set` upserts the full config. Signed out → both
-    // reject; the renderer catches and falls back to its localStorage cache.
-    // Config is NON-PHI. See src/components/newhome/newHomePrefs.ts.
-    projectTemplate: {
-      get: (projectId: string) => Promise<unknown | null>;
-      set: (projectId: string, config: unknown) => Promise<void>;
-    };
     // task-ae0ec0348930 — FormExtensions: the client interpreter (renders an
     // approved extension's fields[] + applies its logic's allowlisted effects)
     // and the design-time authoring lifecycle. `list` enumerates extensions

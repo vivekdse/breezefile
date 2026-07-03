@@ -1,7 +1,7 @@
 // task-a4397184def4 (T5) — pure helpers for the New Home PIPELINE roster
 // (docs/task-templates-design.md "Roster" UX invariants). Plain `.mjs` (mirrors
 // taskSchema.mjs) so it runs under `node --test` with no transpile step; the
-// .d.mts sibling types it for TS consumers (RosterTable.tsx / usePipelineRoster).
+// .d.mts sibling types it for TS consumers (RosterTable.tsx / useChainedRoster).
 //
 // This module owns the three pure, testable algorithms the pipeline table needs
 // but that don't belong in taskSchema.mjs (which is the shared block/parse/status

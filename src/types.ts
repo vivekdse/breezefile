@@ -379,7 +379,7 @@ export type TaskCreate = {
   // task-83a30b3c8804 — optional TypeBuild chain/linking fields (opaque ids,
   // NON-PHI). The local source ignores both; TypeBuild maps parentTaskId →
   // `parent_task_id` and dependsOn → `depends_on` on create, giving New Home's
-  // chain instantiation (newHomePrefs.ts instantiateChain) structural linking
+  // chain instantiation (newHomePrefs.ts instantiateTemplate) structural linking
   // instead of encoding relationships in free-text notes.
   parentTaskId?: string | null;
   dependsOn?: string[] | null;

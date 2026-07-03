@@ -14,27 +14,13 @@ import { useSyncExternalStore } from 'react';
 
 export type NeedsYouTaskSummary = { id: string; title: string };
 
-/** task-7bdb94445321 — what the copilot can SEE about the inline Customize
- *  panel, so it's obvious the copilot is "looking at" the same surface the
- *  human is editing, and so it can decide whether to open/navigate it. All
- *  NON-PHI (field labels, step/chain names, rule/entry counts — configuration,
- *  never task/patient values). */
-export type CustomizeContext = {
-  /** Whether the inline Customize panel is currently open. */
-  open: boolean;
-  /** The tab shown when open (fields/columns/approvals/steps/chains/preview). */
-  tab: string | null;
-  /** Field labels + keys the template declares. */
-  fields: { key: string; label: string }[];
-  /** Step names (in order). */
-  steps: string[];
-  /** Approval-rule descriptions. */
-  approvalRules: string[];
-  /** Chain names + how many entries each has (in order). */
-  chains: { id: string; name: string; entryCount: number }[];
-  /** Repeatable-task templates: title + human-readable schedule (in order). */
-  repeatables: { id: string; title: string; schedule: string }[];
-};
+// task-b1fa5098da3e (R3) — the inline Customize panel (per-project stored
+// fields/columns/approval rules/steps/chains/repeatables) is removed
+// (docs/task-templates-design.md "Removed/superseded"): a project no longer
+// carries any editable configuration, so there is nothing left for the
+// copilot to "see" here. CustomizeContext/`customize` are gone; a chain is
+// now defined inline in the composer or copied from an existing chained task
+// (TaskComposer.tsx "New Chained Task"), not edited via a project panel.
 
 export type NewHomeContext = {
   /** Which app surface is focused; 'other' when Home isn't mounted. */
@@ -47,21 +33,9 @@ export type NewHomeContext = {
   counts: Record<'done' | 'progress' | 'queued' | 'needs' | 'failed', number>;
   /** Titles + ids only (NOT bodies) of tasks in the 'needs' bucket. */
   needsYou: NeedsYouTaskSummary[];
-  /** The Customize panel's live state (see CustomizeContext). */
-  customize: CustomizeContext;
   /** The roster's live filter: status bucket + free-text search. NON-PHI on
    *  its own (the search STRING was typed by the user into the copilot/box). */
   rosterFilter: { status: string; search: string };
-};
-
-const EMPTY_CUSTOMIZE: CustomizeContext = {
-  open: false,
-  tab: null,
-  fields: [],
-  steps: [],
-  approvalRules: [],
-  chains: [],
-  repeatables: [],
 };
 
 const EMPTY: NewHomeContext = {
@@ -70,7 +44,6 @@ const EMPTY: NewHomeContext = {
   availableProjects: [],
   counts: { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 },
   needsYou: [],
-  customize: EMPTY_CUSTOMIZE,
   rosterFilter: { status: 'all', search: '' },
 };
 

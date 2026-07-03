@@ -1,14 +1,14 @@
 // CopilotKit actions for AGENT INTERACTION — parity with the New Home agent-work
-// affordances (ApprovalBar / TaskDetailDialog / roster). Every action resolves
+// affordances (TaskDetailDialog / roster). Every action resolves
 // its target from the FULL, unfiltered task list (useTasks({ includeDone:true }))
 // by id (the SAME resolution taskActions.tsx uses) and then calls the SAME real
 // functions the human UI calls — no reimplemented server calls:
 //
 //   • answer_task        → answerTaskQuestion + markQuestionAnswered
-//                          (ApprovalBar.submitAnswer / TaskDetailDialog.submitAnswer:
-//                           the quick-reply / free-text / reject buttons + dialog Submit)
+//                          (TaskDetailDialog.submitAnswer: the quick-reply /
+//                           free-text / reject buttons + dialog Submit)
 //   • bulk_answer_tasks  → the SAME answerTaskQuestion, applied to many pending
-//                          questions at once (ApprovalBar "Approve selected")
+//                          questions at once
 //   • retry_task         → useTaskActions().start (roster "Retry" / dialog "Retry")
 //   • message_agent      → postTaskMessage (TaskDetailDialog "Send message")
 //
@@ -18,8 +18,7 @@
 //     on; it warrants the same human approve card a "reject" gets. bulk matches
 //     the bulk_update_tasks confirm precedent (preview which tasks change).
 //   • retry_task — confirmedAction. It KICKS OFF agent work (claim-then-launch /
-//     run-now), exactly like run_repeatable_task ("Run now") and run_chain
-//     ("Run chain") in customizeActions.tsx, which are both confirmed.
+//     run-now).
 //   • message_agent — confirmedAction. An outbound message the agent acts on.
 //
 // PHI: answer/message text are chat content the user authored — NEVER logged

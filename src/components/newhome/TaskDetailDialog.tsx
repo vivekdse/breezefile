@@ -21,9 +21,8 @@
 // logged or persisted (docs/typebuild-data-field-contract.md).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { NewHomeTask, TemplateConfig, EvidenceEntry, TaskDef } from './types';
+import type { NewHomeTask, EvidenceEntry, TaskDef } from './types';
 import type { Task, TaskRun } from '../../types';
-import { useTaskCustomValues } from './useNewHomeData';
 import {
   useTaskRuns,
   useLastRun,
@@ -176,7 +175,6 @@ function StandardMeta({ task }: { task: Task }) {
 export function TaskDetailDialog({
   taskId,
   task,
-  template,
   tasks,
   onClose,
   onResolved,
@@ -184,7 +182,6 @@ export function TaskDetailDialog({
 }: {
   taskId: string;
   task?: NewHomeTask;
-  template: TemplateConfig;
   /** task-d83c6ada2d18 — the full (unfiltered) roster snapshot, used ONLY to
    *  resolve a meta-parent's children for the Pipeline rollup (matched via
    *  `raw.parentTaskId === taskId`). Optional/additive: omitted or empty ⇒
@@ -207,15 +204,6 @@ export function TaskDetailDialog({
   // ── evidence sources ──────────────────────────────────────────────────────
   const runs = useTaskRuns(taskId, 50);
   const lastRun = useLastRun(taskId);
-
-  // task-1af4f59428eb (Item 1) — resolve this task's real `data`-backed
-  // custom-field values on demand (one ref per template field key, via
-  // fm.typebuild.taskData.resolve), the same lazy-on-open pattern as
-  // runs/lastRun above. Merged over task.customValues (today always {}, see
-  // useNewHomeData) below so a field resolves from the server when present
-  // and simply falls back to the existing (currently empty) view-model value
-  // otherwise — additive, never regresses the no-data case.
-  const resolvedCustomValues = useTaskCustomValues(taskId, template.fields);
 
   // ── project name (best-effort; NewHomePage's prop contract doesn't carry
   //    the projects list down to this dialog, so we resolve it ourselves —
@@ -446,17 +434,12 @@ export function TaskDetailDialog({
     }
     return out;
   }, [childTasks]);
-  const pipelineDefs = useMemo<TaskDef[]>(() => {
-    if (!templateBlock) return [];
-    // task-2fd63b922beb — v2 blocks are self-describing (full TaskDefs on
-    // the parent itself); v1 legacy blocks only carried id refs, resolved
-    // against the project's (now-superseded) TemplateConfig.taskDefs.
-    if (templateBlock.defs) return templateBlock.defs;
-    const byId = new Map((template.taskDefs ?? []).map((d) => [d.id, d]));
-    return (templateBlock.legacy?.taskDefIds ?? [])
-      .map((id) => byId.get(id))
-      .filter((d): d is TaskDef => !!d);
-  }, [templateBlock, template.taskDefs]);
+  // task-2fd63b922beb / task-b1fa5098da3e (R3) — v2 blocks are self-describing
+  // (full TaskDefs on the parent itself, docs/task-templates-design.md); a v1
+  // legacy block only carried id refs into a project-level TemplateConfig
+  // that no longer exists (removed R3) — it degrades to no pipeline section
+  // rather than trying to resolve anything.
+  const pipelineDefs = useMemo<TaskDef[]>(() => templateBlock?.defs ?? [], [templateBlock]);
 
   // ── evidence log: merge runs + messages + pending question + notes/flags ──
   const evidence = useMemo<EvidenceEntry[]>(() => {
@@ -577,7 +560,6 @@ export function TaskDetailDialog({
 
   const failureRun = status === 'failed' ? runs.find((r) => r.status === 'failed') ?? lastRun : null;
 
-  const hasCustomFields = template.fields.length > 0 && task;
   const hasStandardMeta =
     !!raw &&
     (!!raw.agent?.name ||
@@ -683,28 +665,10 @@ export function TaskDetailDialog({
             </div>
           )}
 
-          {(hasCustomFields || hasStandardMeta) && (
+          {hasStandardMeta && (
             <div className="nh-dialog__section">
               <div className="nh-dialog__section-title">Details</div>
-              <div className="nh-dialog__meta-grid">
-                {template.fields.map((f) => {
-                  // task-1af4f59428eb (Item 1) — prefer the LIVE resolved
-                  // value (fetched from the task's `data` bag on open) and
-                  // fall back to the view-model's customValues (today always
-                  // empty, see useNewHomeData) so a field with no server-side
-                  // data entry — or a signed-out/offline resolve — degrades to
-                  // exactly today's "omit the row" behavior (NON-REGRESSION).
-                  const v = resolvedCustomValues[f.key] ?? task?.customValues[f.key];
-                  if (!v) return null;
-                  return (
-                    <div className="nh-dialog__meta-item" key={f.key}>
-                      <div className="nh-dialog__meta-k">{f.label}</div>
-                      <div className="nh-dialog__meta-v">{v}</div>
-                    </div>
-                  );
-                })}
-                {raw && <StandardMeta task={raw} />}
-              </div>
+              <div className="nh-dialog__meta-grid">{raw && <StandardMeta task={raw} />}</div>
             </div>
           )}
 
