@@ -34,7 +34,6 @@ import { ApprovalBar } from './ApprovalBar';
 import { HeroStats } from './HeroStats';
 import { RosterTable } from './RosterTable';
 import { TaskDetailDialog } from './TaskDetailDialog';
-import { NewTaskModal } from './NewTaskModal';
 import { TemplateEditor, type CustomizeTab } from './TemplateEditor';
 import { OutcomesPanel } from './OutcomesPanel';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
@@ -92,7 +91,6 @@ export function NewHomePage() {
   // task-7bdb94445321 follow-up — free-text roster search, ANDed with the
   // status filter. Empty string = no text filter (status filter still applies).
   const [search, setSearch] = useState('');
-  const [showNewTask, setShowNewTask] = useState(false);
   const [showCustomize, setShowCustomize] = useState(false);
   const [customizeTab, setCustomizeTab] = useState<CustomizeTab>('fields');
   // Bumped by the 'fm:newhome:templateChanged' listener below (fired by the
@@ -105,17 +103,22 @@ export function NewHomePage() {
   const { tasks, counts, approvals, projects, loading, refresh } =
     useNewHomeData(selectedProjectId);
 
-  // The two true overlays (detail dialog / new-task modal) stay mutually
-  // exclusive so backdrop/Escape never has to reason about a stack. Customize
-  // is now an INLINE panel in the page flow (task-7bdb94445321), not an
-  // overlay, so it can coexist with them and isn't forced closed here.
   function openTaskDetail(id: string) {
-    setShowNewTask(false);
     setOpenTaskId(id);
   }
+  // task-ef961d60dc1b — "+ New Task" now opens the CANONICAL Task form (the
+  // globally-mounted TaskComposer, via fm:openTask — the same form the task
+  // verb / Sidebar / copilot create_task open) AND pops the copilot chat, so
+  // the human can fill it by hand or drive it conversationally. New Home's own
+  // NewTaskModal is deprecated and no longer mounted here.
   function openNewTask() {
     setOpenTaskId(null);
-    setShowNewTask(true);
+    window.dispatchEvent(
+      new CustomEvent('fm:openTask', {
+        detail: { mode: 'create', defaultFolder: '', projectId: selectedProjectId ?? undefined },
+      }),
+    );
+    window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
   }
   function openCustomize(tab?: CustomizeTab) {
     if (tab) setCustomizeTab(tab);
@@ -395,17 +398,6 @@ export function NewHomePage() {
         />
       )}
 
-      {showNewTask && (
-        <NewTaskModal
-          projectId={selectedProjectId ?? ''}
-          template={template}
-          onClose={() => setShowNewTask(false)}
-          onCreated={() => {
-            void refresh();
-            setShowNewTask(false);
-          }}
-        />
-      )}
     </div>
   );
 }

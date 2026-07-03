@@ -65,6 +65,23 @@ function ChatHotkey() {
   return null;
 }
 
+// task-ef961d60dc1b — let any surface OPEN the copilot chat programmatically
+// (e.g. New Home's "+ New Task" button, which now opens the canonical Task form
+// AND pops the chat so the human can drive it conversationally). Mounted INSIDE
+// the shared CopilotChatConfigurationProvider so it drives the same open-state
+// the sidebar + ChatHotkey read. No-op when the provider isn't mounted (no key).
+function ChatOpenBridge() {
+  const config = useCopilotChatConfiguration();
+  useEffect(() => {
+    function onOpen() {
+      config?.setModalOpen(true);
+    }
+    window.addEventListener('fm:openCopilotChat', onOpen);
+    return () => window.removeEventListener('fm:openCopilotChat', onOpen);
+  }, [config]);
+  return null;
+}
+
 function CopilotGrounding() {
   const { state } = useStore();
   const tabKind = state.tabs[state.activeTab]?.kind ?? 'folder';
@@ -90,6 +107,7 @@ function CopilotGrounding() {
       <SavedQueryAuthoringActions />
       <FormExtensionAuthoringActions />
       <ChatHotkey />
+      <ChatOpenBridge />
       <CopilotSidebar
         position="right"
         input={{ autoFocus: true }}
