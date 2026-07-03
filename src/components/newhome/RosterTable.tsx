@@ -7,10 +7,15 @@
 // PHI: `title`, `lastAction`, `customValues` values, and `risk` may carry
 // task text — render in memory only, never persist/log (see
 // docs/typebuild-data-field-contract.md).
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { NewHomeStatus, NewHomeTask, TemplateConfig, TemplateField } from './types';
 import { claimFreshness } from '../tasks/lifecycle.mjs';
+import { evalCondition, fieldRef, metaStatus } from './taskSchema.mjs';
+import { pipelineColumns } from './pipelineRoster.mjs';
+import type { PipelineColumn, PipelineGroup } from './pipelineRoster.mjs';
+import { usePipelineRoster } from './useNewHomeData';
+import type { PipelineJobResolution } from './useNewHomeData';
 import './RosterTable.css';
 
 const FILTER_PILLS: { id: 'all' | NewHomeStatus; label: string }[] = [
@@ -154,6 +159,273 @@ function RowAction({
   return <span className="nh-roster__action-empty">{'—'}</span>;
 }
 
+// ─── pipeline table (task-a4397184def4, T5) ────────────────────────────────
+// When a project's template has task-defs the roster becomes a PIPELINE table:
+// one row per JOB (meta-parent), with a grouped column section per task-def
+// aggregating that def's INPUT (editable) + OUTPUT (read-only) fields. See
+// docs/task-templates-design.md "Roster" UX invariants. Everything below is
+// dormant when template.taskDefs is empty — the roster renders exactly as
+// today (NON-REGRESSION).
+
+/** metaStatus ('done'|'active'|'pending') → the roster pill class + label the
+ *  built-in status column already ships. Mirrors how TaskDetailDialog derives a
+ *  step/job rollup from the SAME taskSchema helper. */
+const META_PILL: Record<ReturnType<typeof metaStatus>, { cls: NewHomeStatus; label: string }> = {
+  done: { cls: 'done', label: 'Done' },
+  active: { cls: 'progress', label: 'In Progress' },
+  pending: { cls: 'queued', label: 'Pending' },
+};
+
+function hasCellValue(v: string | number | undefined): boolean {
+  return v !== undefined && v !== null && v !== '';
+}
+
+/** Inline INPUT editor — the approved-prototype dashed-input pattern. Commits
+ *  on blur (text/number/date) or on change (select/bool). Stops click/keydown
+ *  from bubbling so focusing/typing never opens the child or triggers row
+ *  keyboard-nav. PHI: the value lives in local state only, never logged. */
+function PipelineInput({
+  col,
+  value,
+  disabled,
+  onCommit,
+}: {
+  col: PipelineColumn;
+  value: string;
+  disabled: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  // Keep the draft in sync when the resolved value changes underneath us
+  // (e.g. a lazy detail fetch lands, or another client edits the child).
+  useEffect(() => setDraft(value), [value]);
+
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  const commit = () => {
+    if (draft !== value) onCommit(draft);
+  };
+
+  if (col.type === 'select' && col.options && col.options.length > 0) {
+    return (
+      <select
+        className="nh-pipe__input nh-pipe__input--select"
+        value={draft}
+        disabled={disabled}
+        onClick={stop}
+        onKeyDown={stop}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onCommit(e.target.value);
+        }}
+      >
+        <option value="">—</option>
+        {col.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  if (col.type === 'bool') {
+    return (
+      <select
+        className="nh-pipe__input nh-pipe__input--select"
+        value={draft}
+        disabled={disabled}
+        onClick={stop}
+        onKeyDown={stop}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onCommit(e.target.value);
+        }}
+      >
+        <option value="">—</option>
+        <option value="Yes">Yes</option>
+        <option value="No">No</option>
+      </select>
+    );
+  }
+  const inputType = col.type === 'number' ? 'number' : col.type === 'date' ? 'date' : 'text';
+  return (
+    <input
+      className="nh-pipe__input"
+      type={inputType}
+      value={draft}
+      disabled={disabled}
+      placeholder="—"
+      onClick={stop}
+      onKeyDown={(e) => {
+        stop(e);
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+    />
+  );
+}
+
+/** One pipeline cell. INPUT cells are editable (dashed input); OUTPUT cells are
+ *  read-only. A conditional-skipped def's cells render hatched `n/a`. Clicking
+ *  the cell (outside the input) opens THAT def's child task. */
+function PipelineCell({
+  col,
+  valuesByRef,
+  childId,
+  skipped,
+  loading,
+  onOpenChild,
+  onSaveInput,
+}: {
+  col: PipelineColumn;
+  valuesByRef: Record<string, string | number>;
+  childId: string | undefined;
+  skipped: boolean;
+  loading: boolean;
+  onOpenChild: (id: string) => void;
+  onSaveInput: (childId: string, key: string, value: string) => void;
+}) {
+  const openChild = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    if (childId) onOpenChild(childId);
+  };
+
+  if (skipped) {
+    return (
+      <td
+        className="nh-pipe__cell nh-pipe__cell--na"
+        title="Not needed for this job"
+        onClick={openChild}
+      >
+        <span className="nh-pipe__na">n/a</span>
+      </td>
+    );
+  }
+
+  const value = valuesByRef[fieldRef(col.taskDefId, col.key)];
+  const has = hasCellValue(value);
+
+  if (col.io === 'out') {
+    const missing = col.required && !has;
+    return (
+      <td
+        className={`nh-pipe__cell nh-pipe__cell--out${missing ? ' nh-pipe__cell--missing' : ''}`}
+        onClick={openChild}
+        title={col.label}
+      >
+        {has ? (
+          <span className="nh-pipe__val">{String(value)}</span>
+        ) : (
+          <span className="nh-pipe__empty">
+            {loading ? '·' : '—'}
+            {missing && (
+              <sup className="nh-pipe__missing-mark" title="required output not yet submitted">
+                *
+              </sup>
+            )}
+          </span>
+        )}
+      </td>
+    );
+  }
+
+  // INPUT cell — editable.
+  return (
+    <td className="nh-pipe__cell nh-pipe__cell--in" onClick={openChild} title={col.label}>
+      <PipelineInput
+        col={col}
+        value={has ? String(value) : ''}
+        disabled={!childId || loading}
+        onCommit={(v) => {
+          if (childId) onSaveInput(childId, col.key, v);
+        }}
+      />
+    </td>
+  );
+}
+
+/** One job row's pipeline cells + built-in Title/Status/LastAction/Who/Action,
+ *  resolved lazily via `resolveJob`. Kept as a component so the resolution
+ *  (per-job valuesByRef) recomputes only for the row it belongs to. */
+function PipelineRow({
+  task,
+  groups,
+  taskDefs,
+  resolution,
+  rowRef,
+  onOpenTask,
+  onRetry,
+  onSaveInput,
+}: {
+  task: NewHomeTask;
+  groups: PipelineGroup[];
+  taskDefs: NonNullable<TemplateConfig['taskDefs']>;
+  resolution: PipelineJobResolution;
+  rowRef: (el: HTMLTableRowElement | null) => void;
+  onOpenTask: (id: string) => void;
+  onRetry: (id: string) => void;
+  onSaveInput: (childId: string, key: string, value: string) => void;
+}) {
+  const { valuesByRef, childIdByDefId, loading } = resolution;
+  const meta = META_PILL[metaStatus(taskDefs, valuesByRef)];
+  const rowTint =
+    task.status === 'needs'
+      ? 'nh-roster__row--needs'
+      : task.status === 'failed'
+        ? 'nh-roster__row--failed'
+        : '';
+  return (
+    <tr
+      ref={rowRef}
+      data-roster-row={task.id}
+      className={rowTint}
+      tabIndex={0}
+      onClick={() => onOpenTask(task.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onOpenTask(task.id);
+      }}
+    >
+      <td className="nh-roster__title-cell">
+        <div className="nh-roster__title">{task.title}</div>
+        {task.risk && (task.status === 'needs' || task.status === 'failed') && (
+          <div className="nh-roster__risk">{task.risk}</div>
+        )}
+      </td>
+      <td>
+        {task.live && (
+          <span className="nh-roster__live-dot" aria-hidden="true" title={liveTooltip(task)} />
+        )}
+        <span className={`nh-roster__pill nh-roster__pill--${meta.cls}`}>{meta.label}</span>
+      </td>
+      {groups.map((g) => {
+        const skipped = !!g.neededWhen && !evalCondition(g.neededWhen, valuesByRef);
+        const childId = childIdByDefId[g.taskDefId];
+        return g.columns.map((col) => (
+          <PipelineCell
+            key={`${g.taskDefId}.${col.key}.${col.io}`}
+            col={col}
+            valuesByRef={valuesByRef}
+            childId={childId}
+            skipped={skipped}
+            loading={loading}
+            onOpenChild={onOpenTask}
+            onSaveInput={onSaveInput}
+          />
+        ));
+      })}
+      <td className="nh-roster__last-action" title={task.lastActionDetail}>
+        {task.lastAction}
+      </td>
+      <td className="nh-roster__who" title={task.who}>
+        {WHO_GLYPH[task.who]}
+      </td>
+      <td className="nh-roster__action-cell">
+        <RowAction task={task} onOpenTask={onOpenTask} onRetry={onRetry} />
+      </td>
+    </tr>
+  );
+}
+
 export function RosterTable({
   tasks,
   filter,
@@ -230,6 +502,33 @@ export function RosterTable({
     .map((c) => fieldByKey.get(c))
     .filter((f): f is TemplateField => !!f);
 
+  // ── pipeline mode (task-a4397184def4, T5) ────────────────────────────────
+  // Active whenever the project's template declares task-defs. In this mode the
+  // roster is a PIPELINE table: one row per JOB (meta-parent), pipeline group
+  // columns per task-def between Status and Last Action. When there are no
+  // task-defs, everything here is inert and the classic table renders unchanged.
+  const pipelineGroups = useMemo(
+    () => pipelineColumns(template.taskDefs ?? []),
+    [template.taskDefs],
+  );
+  const pipelineMode = pipelineGroups.length > 0;
+  const pipelineColCount = useMemo(
+    () => pipelineGroups.reduce((n, g) => n + g.columns.length, 0),
+    [pipelineGroups],
+  );
+  // Job rows = top-level rows (no parentTaskId) from the already-filtered set;
+  // a job's CHILD tasks are folded into its pipeline cells, never their own row.
+  const pipelineRows = useMemo(
+    () => (pipelineMode ? rows.filter((t) => !t.raw.parentTaskId) : []),
+    [pipelineMode, rows],
+  );
+  const pipelineJobIds = useMemo(() => pipelineRows.map((t) => t.id), [pipelineRows]);
+  const pipeline = usePipelineRoster({ enabled: pipelineMode, jobIds: pipelineJobIds });
+
+  // The rows the keyboard nav and empty-state logic operate on — job rows in
+  // pipeline mode, the flat task rows otherwise.
+  const navRows = pipelineMode ? pipelineRows : rows;
+
   const hasAnyTasks = tasks.length > 0;
   const isFiltered = filter !== 'all' || !!search.trim();
   // "Clear" resets BOTH dimensions so one click always gets you back to the
@@ -263,7 +562,7 @@ export function RosterTable({
     if (!target.dataset || target.dataset.rosterRow == null) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return; // don't shadow any chord
 
-    const ids = rows.map((t) => t.id);
+    const ids = navRows.map((t) => t.id);
     const currentId = target.dataset.rosterRow;
     const idx = ids.indexOf(currentId);
     if (idx === -1) return;
@@ -335,6 +634,96 @@ export function RosterTable({
       </div>
 
       <div className="nh-roster__table-wrap">
+        {pipelineMode ? (
+          <table className="nh-roster__table nh-pipe__table">
+            <thead>
+              <tr>
+                <th rowSpan={2}>Title</th>
+                <th rowSpan={2}>Status</th>
+                {pipelineGroups.map((g) => (
+                  <th
+                    key={g.taskDefId}
+                    colSpan={g.columns.length}
+                    className="nh-pipe__group-th"
+                    title={g.name}
+                  >
+                    {g.name}
+                  </th>
+                ))}
+                <th rowSpan={2}>Last Action</th>
+                <th rowSpan={2}>Who</th>
+                <th rowSpan={2} className="nh-roster__th-action" />
+              </tr>
+              <tr>
+                {pipelineGroups.flatMap((g) =>
+                  g.columns.map((col) => (
+                    <th
+                      key={`${g.taskDefId}.${col.key}.${col.io}`}
+                      className={`nh-pipe__field-th nh-pipe__field-th--${col.io}`}
+                      title={`${g.name} · ${col.label} · ${col.io === 'in' ? 'input' : 'output'}${col.required ? ' · required' : ''}`}
+                    >
+                      <span className="nh-pipe__field-label">{col.label}</span>
+                      <span className={`nh-pipe__io nh-pipe__io--${col.io}`}>
+                        {col.io === 'in' ? 'IN' : 'OUT'}
+                      </span>
+                      {col.required && <span className="nh-pipe__req">REQ</span>}
+                    </th>
+                  )),
+                )}
+              </tr>
+            </thead>
+            <tbody onKeyDown={onBodyKeyDown}>
+              {loading && !hasAnyTasks && (
+                <>
+                  {[0, 1, 2].map((i) => (
+                    <tr key={`skeleton-${i}`} className="nh-roster__row--skeleton" aria-hidden="true">
+                      <td colSpan={5 + pipelineColCount}>
+                        <div className="nh-roster__skeleton-bar" />
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              )}
+              {!loading && !hasAnyTasks && !isFiltered && (
+                <tr>
+                  <td colSpan={5 + pipelineColCount} className="nh-roster__empty">
+                    No jobs yet for this project.
+                  </td>
+                </tr>
+              )}
+              {!loading && pipelineRows.length === 0 && (hasAnyTasks || isFiltered) && (
+                <tr>
+                  <td colSpan={5 + pipelineColCount} className="nh-roster__empty">
+                    No jobs match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}.{' '}
+                    {isFiltered && (
+                      <button type="button" className="nh-roster__clear-filter" onClick={clearFilter}>
+                        Clear filter
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )}
+              {pipelineRows.map((t) => (
+                <PipelineRow
+                  key={t.id}
+                  task={t}
+                  groups={pipelineGroups}
+                  taskDefs={template.taskDefs ?? []}
+                  resolution={pipeline.resolveJob(t.id)}
+                  rowRef={(el) => {
+                    if (el) rowRefs.current.set(t.id, el);
+                    else rowRefs.current.delete(t.id);
+                  }}
+                  onOpenTask={onOpenTask}
+                  onRetry={onRetry}
+                  onSaveInput={(childId, key, value) => {
+                    void pipeline.saveInput(childId, key, value);
+                  }}
+                />
+              ))}
+            </tbody>
+          </table>
+        ) : (
         <table className="nh-roster__table">
           <thead>
             <tr>
@@ -434,6 +823,7 @@ export function RosterTable({
             })}
           </tbody>
         </table>
+        )}
       </div>
 
       {upcoming.length > 0 && (

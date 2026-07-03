@@ -336,6 +336,132 @@
   color: var(--nh-needs);
 }
 
+/* ── Pipeline table (task-a4397184def4, T5) ───────────────────────────────
+   Grouped, per-task-def columns aggregating INPUT (editable) + OUTPUT
+   (read-only) fields. Only rendered when the project's template has task-defs;
+   the classic table above is byte-for-byte unchanged for every other project. */
+.nh-pipe__table th {
+  vertical-align: bottom;
+}
+/* Grouped header: one cell spanning a task-def's fields, boxed so the grouping
+   reads at a glance. */
+.nh-pipe__group-th {
+  text-align: center !important;
+  border-left: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--border-1);
+  color: var(--text-on-panel) !important;
+  background: var(--bg-2);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nh-pipe__field-th {
+  border-left: 1px solid var(--border-1);
+  white-space: nowrap;
+}
+.nh-pipe__field-label {
+  margin-right: 6px;
+}
+/* IN / OUT / REQ chips on the field-header row. */
+.nh-pipe__io {
+  display: inline-block;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: var(--r-sm);
+  vertical-align: middle;
+}
+.nh-pipe__io--in {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.nh-pipe__io--out {
+  color: var(--nh-done);
+  background: var(--nh-done-soft);
+}
+.nh-pipe__req {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--nh-needs);
+}
+
+/* Body cells. */
+.nh-pipe__cell {
+  border-left: 1px solid var(--border-1);
+  white-space: nowrap;
+  min-width: 88px;
+}
+.nh-pipe__cell--out .nh-pipe__val {
+  color: var(--text-on-panel);
+}
+.nh-pipe__empty {
+  color: var(--muted-on-panel);
+}
+.nh-pipe__cell--missing {
+  background: color-mix(in srgb, var(--nh-needs-soft) 40%, transparent);
+}
+.nh-pipe__missing-mark {
+  color: var(--nh-needs);
+  font-weight: 700;
+  margin-left: 1px;
+}
+/* Conditional-skip: a whole task-def group hatched "n/a" — visually distinct
+   from a merely-empty (pending) cell. */
+.nh-pipe__cell--na {
+  color: var(--muted-on-panel);
+  cursor: default;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 5px,
+    color-mix(in srgb, var(--border-2) 60%, transparent) 5px,
+    color-mix(in srgb, var(--border-2) 60%, transparent) 6px
+  );
+}
+.nh-pipe__na {
+  font-size: var(--fs-2xs);
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/* Inline INPUT editor — the approved-prototype dashed-input pattern. */
+.nh-pipe__input {
+  appearance: none;
+  width: 100%;
+  min-width: 64px;
+  max-width: 160px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--border-2);
+  border-radius: 0;
+  color: var(--text-on-panel);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 2px 2px;
+}
+.nh-pipe__input::placeholder {
+  color: var(--muted-on-panel);
+}
+.nh-pipe__input:hover:not(:disabled) {
+  border-bottom-color: var(--accent);
+}
+.nh-pipe__input:focus {
+  outline: none;
+  border-bottom: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+.nh-pipe__input:disabled {
+  color: var(--muted-on-panel);
+  border-bottom-color: transparent;
+  cursor: default;
+}
+.nh-pipe__input--select {
+  cursor: pointer;
+}
+
 /* [data-theme="light"] needs no overrides — every value above routes through
    theme-safe composite tokens / the shared --nh-* status vars, which already
    resolve correctly per theme (see NewHomePage.css). */
