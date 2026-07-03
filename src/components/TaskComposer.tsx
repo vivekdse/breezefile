@@ -53,7 +53,7 @@ import { agentOptionHint } from './tasks/agent.mjs';
 // class, no new form/modal) with a "Template" question + dynamically
 // aggregated input/output questions when the chosen TypeBuild project has a
 // non-empty task-def template. See docs/task-templates-design.md.
-import type { TaskDef, TaskDefField, TemplateConfig } from './newhome/types';
+import type { TaskDef, TaskDefField } from './newhome/types';
 import {
   getTemplateConfig,
   instantiateTemplate,
@@ -1992,26 +1992,23 @@ export function TaskComposer(props: Props) {
     return { id: t.id };
   }
 
-  // task-04ea172532c0 — save path for a template job: one meta parent + one
-  // child per task-def, via the T4 instantiation seam (pinned signature —
-  // see docs/task-templates-design.md workstream table). Never creates a
-  // single plain task when a chain was chosen.
+  // task-04ea172532c0 / task-2fd63b922beb — save path for a template job: one
+  // meta parent + one child per task-def, via the T4 instantiation seam
+  // (pinned signature — see docs/task-templates-design.md workstream table).
+  // Never creates a single plain task when a chain was chosen. The chain
+  // (`defs`) is passed straight through — instantiateTemplate no longer reads
+  // it off a project TemplateConfig (task-2fd63b922beb correction); this
+  // call site still sources `taskDefs` from the project's template prefs
+  // mechanically for now, a parallel workstream reworks the composer's chain
+  // picker (inline define / copy-from-existing-chain) right after this.
   async function saveTemplateJob(): Promise<{ ok: boolean; taskId?: string; error?: string }> {
     setBusy(true);
     setError(null);
     try {
-      const template: TemplateConfig = templateConfig ?? {
-        fields: [],
-        columns: [],
-        approvalRules: [],
-        steps: [],
-        taskDefs,
-      };
       const result = await instantiateTemplate({
-        templateId: projectId || '_default',
-        template,
-        jobTitle: title.trim(),
+        name: title.trim(),
         projectId: projectId || undefined,
+        defs: taskDefs,
         values: templateValues,
         createTask: createTaskForTemplateJob,
       });

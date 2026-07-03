@@ -110,27 +110,85 @@ export function parseTaskOutputsBlock(body) {
   return { taskDefId: parsed.taskDefId, fields };
 }
 
-// ── task-template (meta parent body: the ordered task-def id list) ───────
+// ── task-template (meta parent body: the SELF-DESCRIBING chain, v2) ──────
+//
+// task-2fd63b922beb — corrected abstraction: the chain definition rides the
+// CHAINED TASK ITSELF, not a project-level TemplateConfig. The parent's
+// ```task-template block carries full TaskDef objects (id/name/notes/inputs/
+// outputs/neededWhen) so any surface can reconstruct the whole chain from the
+// tasks alone, with no project config lookup. v1 bodies (`{templateId,
+// taskDefIds}`, pre-correction) are still parsed — fail-soft, never thrown
+// away — but surface as a distinct `legacy` shape the caller must handle
+// explicitly rather than silently degrading into a v2-shaped value.
 
-/** Build the ```task-template block a job's meta parent carries. */
-export function buildTaskTemplateBlock(templateId, taskDefs) {
+function isTaskDefConditionLike(v) {
+  if (!v || typeof v !== 'object') return false;
+  if (typeof v.ref !== 'string') return false;
+  if (!['==', '!=', '<', '>'].includes(v.op)) return false;
+  if (typeof v.value !== 'string' && typeof v.value !== 'number') return false;
+  return true;
+}
+
+/** Defensive shaping for one TaskDef pulled out of a v2 ```task-template
+ *  block: drop malformed fields/conditions rather than rejecting the whole
+ *  def, same fail-soft convention as parseTaskOutputsBlock. Returns null when
+ *  the def itself is unusable (no id/name). */
+function sanitizeTaskDefForParse(v) {
+  if (!v || typeof v !== 'object') return null;
+  if (typeof v.id !== 'string' || typeof v.name !== 'string') return null;
+  const inputs = Array.isArray(v.inputs) ? v.inputs.filter(isTaskDefFieldLike) : [];
+  const outputs = Array.isArray(v.outputs) ? v.outputs.filter(isTaskDefFieldLike) : [];
+  const out = { id: v.id, name: v.name, inputs, outputs };
+  if (typeof v.notes === 'string') out.notes = v.notes;
+  if (v.neededWhen === null) out.neededWhen = null;
+  else if (v.neededWhen !== undefined && isTaskDefConditionLike(v.neededWhen)) out.neededWhen = v.neededWhen;
+  return out;
+}
+
+/** Build the ```task-template block a job's meta parent carries: the
+ *  chain's name plus every task-def IN FULL (v2). `defs` are serialized as
+ *  given (trusted in-memory TaskDef[] from the composer) — parse-time
+ *  defensive shaping lives in parseTaskTemplateBlock/sanitizeTaskDefForParse,
+ *  since that's the untrusted boundary (a task body any client can edit). */
+export function buildTaskTemplateBlock(name, defs) {
   return fenceBlock('task-template', {
-    templateId,
-    taskDefIds: (taskDefs ?? []).map((d) => d.id),
+    v: 2,
+    name,
+    defs: (defs ?? []).map((d) => {
+      const out = { id: d.id, name: d.name, inputs: d.inputs ?? [], outputs: d.outputs ?? [] };
+      if (d.notes !== undefined) out.notes = d.notes;
+      if (d.neededWhen !== undefined) out.neededWhen = d.neededWhen;
+      return out;
+    }),
   });
 }
 
-/** Parse a ```task-template block. Returns `{templateId, taskDefIds}` or null
- *  when absent/malformed. */
+/** Parse a ```task-template block.
+ *   - v2 (`{v:2, name, defs}`): returns `{name, defs}` — `defs` sanitized
+ *     (malformed defs/fields dropped, never throws).
+ *   - v1 legacy (`{templateId, taskDefIds}`, pre task-2fd63b922beb): returns
+ *     `{name: null, defs: null, legacy: {templateId, taskDefIds}}` so callers
+ *     can detect and handle the old project-hung-template shape explicitly.
+ *   - Absent/malformed: null. */
 export function parseTaskTemplateBlock(body) {
   const parsed = parseFencedJsonBlock(body, 'task-template');
   if (!parsed) return null;
+
+  if (parsed.v === 2) {
+    if (typeof parsed.name !== 'string') return null;
+    const defs = Array.isArray(parsed.defs)
+      ? parsed.defs.map(sanitizeTaskDefForParse).filter(Boolean)
+      : [];
+    return { name: parsed.name, defs };
+  }
+
+  // v1 legacy — fail-soft: still parse, but surface distinctly.
   if (typeof parsed.templateId !== 'string') return null;
   const taskDefIds = Array.isArray(parsed.taskDefIds)
     ? parsed.taskDefIds.filter((id) => typeof id === 'string')
     : null;
   if (!taskDefIds) return null;
-  return { templateId: parsed.templateId, taskDefIds };
+  return { name: null, defs: null, legacy: { templateId: parsed.templateId, taskDefIds } };
 }
 
 // ── Result contract (agent → client, submit_task_result type:"fields") ───

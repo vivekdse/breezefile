@@ -1,25 +1,39 @@
-# Task Templates — design contract (epic task-bb7665870605)
+# Task Templates — design contract (epic task-e7a5cf2ca6cc)
 
-A **template is a domain-neutral service that chains task-definitions.** Each
-task-def owns its **input fields** (human provides at creation) and **output
-fields** (agent produces; `required` outputs = the task's **evidence**). The
-template holds no fields of its own — forms and table columns are built by
-**dynamically aggregating** every task-def's fields. Approved prototype:
-claude.ai/code/artifact/5a49e9cf-d833-44ae-8986-c505bf3d5cff.
+A **chain is a self-describing sequence of task-defs that rides on the
+chained task itself.** Each task-def owns its **input fields** (human
+provides at creation) and **output fields** (agent produces; `required`
+outputs = the task's **evidence**). Forms and table columns are built by
+**dynamically aggregating** every task-def's fields — never from a separate
+stored template object.
 
-This doc is the **contract between the epic's parallel workstreams (T1–T8).**
-Shapes and block formats here are normative; do not invent variants.
+> **Corrected abstraction (task-2fd63b922beb).** The first pass of this work
+> (epic task-bb7665870605, R0) wrongly hung the chain definition on the
+> **project** (`TemplateConfig.taskDefs`, a per-project pref). That made a
+> project a prerequisite for a chain and made "the chain" a thing that lived
+> somewhere other than the tasks it produced. The corrected model: **the
+> chain definition rides the parent (meta) task's `task-template` block, in
+> full.** Any surface — roster, task detail, a future mobile client, an
+> agent reading the task body — can reconstruct the whole chain from the
+> parent task alone. **A project is just a category + a dynamically derived
+> view** over the chained tasks that happen to carry that `projectId`; it is
+> not where chains are defined or stored.
+
+This doc is the **contract between this epic's parallel workstreams
+(R1–R4).** Shapes and block formats here are normative; do not invent
+variants.
 
 ## Vocabulary
 
 | Term | Is | Implemented as |
 |---|---|---|
-| Template | reusable service: ordered `TaskDef[]` | `TemplateConfig.taskDefs` (per-project, server-backed prefs) |
+| Chain | ordered `TaskDef[]` + a name, self-describing | the parent task's v2 `task-template` block (`{v:2, name, defs}`) — **not** stored anywhere else |
 | Task-def | smallest primitive; owns inputs + outputs | `TaskDef` |
-| Job / meta task | one instantiation | parent task (`parent_task_id` on children) |
+| Job / meta task | one instantiation of a chain | parent task (`parent_task_id` on children), carries the v2 block |
 | Step | one unit of agent/human work | child task, ordered via `depends_on` |
 | Evidence | proof of completion | the task-def's `required` **output** fields — no separate system |
 | Not-needed | conditional skip | `neededWhen` unmet → child cancelled/annotated, cell renders `n/a` |
+| Project | category + derived view | `projectId` on chained tasks; the roster groups/filters by it, it defines nothing |
 
 ## Types (src/components/newhome/types.ts)
 
@@ -39,46 +53,75 @@ export type TaskDefCondition = {
 };
 
 export type TaskDef = {
-  id: string;               // slug, unique within the template
+  id: string;               // slug, unique within the chain
   name: string;
   notes?: string;           // base agent prompt for this step
   inputs: TaskDefField[];
   outputs: TaskDefField[];
   neededWhen?: TaskDefCondition | null;  // absent/null = always needed
 };
-// TemplateConfig gains: taskDefs?: TaskDef[]
-// Unification: chains/steps/repeatables semantics fold into taskDefs.
-// Back-compat: existing TemplateField/columns keep working; migration is
-// additive (a legacy repeatable ≈ a single TaskDef with no fields).
 ```
 
+**No stored template object anywhere.** `TaskDef[]` is either (a) held
+transiently in a composer's in-memory form state while a human is defining a
+new chain, or (b) parsed back out of a parent task's `task-template` block.
+There is no third place it lives. (R0's `TemplateConfig.taskDefs` /
+`TemplateEditor.tsx` / "customize template" flow are **removed/superseded**
+by this correction — see "Removed/superseded" below.)
+
 **PHI rule:** field *definitions* (keys, labels, types, conditions) are
-NON-PHI and may live in prefs/templates/docs. Field *values* are potentially
-PHI and ride only in task bodies / result payloads (encrypted channels) —
-never in prefs, logs, or notifications.
+NON-PHI and may live in task bodies, prefs, docs. Field *values* are
+potentially PHI and ride only in task bodies / result payloads (encrypted
+channels) — never in prefs, logs, or notifications.
 
 ## Transport blocks (task body)
 
 `TaskCreate` has no structured `data` map yet, so values ride the task body
 (the encrypted PHI channel) in fenced blocks — same precedent as the existing
 ` ```task-fields ` block from NewTaskModal. One JSON object per block, no
-comments, parse defensively (malformed → null → feature degrades, never throws).
+comments, parse defensively (malformed → null/fail-soft, never throws).
+
+> These client-side notes blocks are an **interim transport**. The server
+> epic task-3f0b7e41aed4 (`task_manager_api` project) already ships an
+> encrypted per-key data bag (`PATCH /chromeext/{id}/data`, per-key merge)
+> and a `Chain` primitive (`POST /chromeext/chains`) that will eventually
+> replace these fenced blocks with structured fields. Until a workstream
+> migrates the client onto that API, the blocks below are normative.
 
 Child task body, appended after the human/agent notes:
 
     ```task-fields
-    {"templateId":"<id>","taskDefId":"intake","values":{"customer":"...","items":"12"}}
+    {"templateId":"<chain name>","taskDefId":"intake","values":{"customer":"...","items":"12"}}
     ```
 
     ```task-outputs
     {"taskDefId":"intake","fields":[{"key":"has_stains","label":"Stains present?","type":"bool","required":true}]}
     ```
 
-Meta parent body:
+(`templateId` here is a legacy field name kept for the transport shape;
+today it carries the chain's `name`, not a lookup id — there is no id to look
+up. `task-fields`/`task-outputs` are otherwise unchanged from R0.)
+
+Meta parent body — **v2, self-describing** (task-2fd63b922beb):
 
     ```task-template
-    {"templateId":"<id>","taskDefIds":["intake","stain","wash"]}
+    {"v":2,"name":"Order pipeline","defs":[
+      {"id":"intake","name":"Intake","inputs":[...],"outputs":[...]},
+      {"id":"stain","name":"Stain treatment","neededWhen":{"ref":"intake.has_stains","op":"==","value":"Yes"},"inputs":[...],"outputs":[...]},
+      {"id":"wash","name":"Wash","inputs":[...],"outputs":[...]}
+    ]}
     ```
+
+`defs` are full `TaskDef` objects — id, name, optional notes, inputs,
+outputs, optional neededWhen. No `templateId`, no project lookup. A reader
+with only this block and nothing else can render the whole chain.
+
+**v1 (legacy, pre-correction)** bodies — `{"templateId":"<id>","taskDefIds":[...]}` —
+are still parsed, fail-soft, but surfaced as a distinct shape
+(`{name: null, defs: null, legacy: {templateId, taskDefIds}}`) so a caller
+must explicitly choose how to resolve them (e.g. TaskDetailDialog falls back
+to looking the ids up against a project's now-legacy `TemplateConfig.taskDefs`
+if that still exists locally) rather than silently misreading them as v2.
 
 ## Result contract (agent → client)
 
@@ -91,8 +134,8 @@ Agents submit outputs via `submit_task_result` with **`type: "fields"`**:
 Client side: `mapResult` (electron/sources/typebuild.ts:474) is open dispatch —
 `"fields"` passes through untouched. The renderer registry
 (src/components/tasks/taskResult.mjs `KNOWN_RESULT_TYPES` + TaskResult.tsx
-`RESULT_RENDERERS`) gains a `fields` renderer (T6). All values coerce via
-`coerceCell`-style defensive shaping.
+`RESULT_RENDERERS`) has a `fields` renderer. All values coerce via
+`coerceCell`-style defensive shaping. Unchanged from R0.
 
 ## Pure helper module — src/components/newhome/taskSchema.mjs (+ .d.mts)
 
@@ -102,10 +145,10 @@ Plain `.mjs` (mirrors taskResult.mjs; testable under `node --test`). API:
 fieldRef(taskDefId, key)                      → "id.key"
 buildTaskFieldsBlock(templateId, taskDefId, values)   → string (fenced block)
 buildTaskOutputsBlock(taskDef)                → string (fenced block)
-buildTaskTemplateBlock(templateId, taskDefs)  → string (fenced block)
+buildTaskTemplateBlock(name, defs)            → string (fenced block, v2: {v:2,name,defs})
 parseTaskFieldsBlock(body)    → {templateId,taskDefId,values} | null
 parseTaskOutputsBlock(body)   → {taskDefId,fields[]} | null
-parseTaskTemplateBlock(body)  → {templateId,taskDefIds[]} | null
+parseTaskTemplateBlock(body)  → {name,defs} | {name:null,defs:null,legacy:{templateId,taskDefIds}} | null
 resultFields(result)          → {taskDefId,fields} | null   // from {type:'fields',payload}
 evalCondition(cond, valuesByRef)              → boolean     // unknown upstream value → false
 taskDefStatus(taskDef, valuesByRef)           → 'done'|'active'|'pending'|'skip'
@@ -116,30 +159,113 @@ metaStatus(taskDefs, valuesByRef)             → 'done'|'active'|'pending'
 aggregateInputs(taskDefs)                     → [{taskDef, field}]  // form/table order
 ```
 
+`parseTaskTemplateBlock`'s v2 path sanitizes `defs` defensively — malformed
+fields/conditions/defs are dropped, never rejecting the whole block (same
+fail-soft convention as `parseTaskOutputsBlock`).
+
 `valuesByRef` is a flat `Record<string,string|number>` keyed by `fieldRef`,
 merging parsed input values and result fields across a job's children.
+
+## Chain instantiation — src/components/newhome/newHomePrefs.ts
+
+```ts
+instantiateTemplate(opts: {
+  name: string;                              // chain/job title
+  projectId?: string;
+  defs: TaskDef[];                           // the chain, given directly
+  values: Record<string, string>;            // fieldRef-keyed input values
+  createTask: (input: {
+    title: string; notes: string; projectId?: string;
+    parentTaskId?: string; dependsOn?: string[];
+  }) => Promise<{ id: string }>;
+}): Promise<{ parentId: string; childIds: string[] }>
+```
+
+`instantiateTemplate` takes the chain (`defs`) **directly from the caller** —
+never reads it off a project pref. It creates one meta parent (notes = a
+human-readable line + the v2 `task-template` block built from `defs`), then
+one linearly `dependsOn`-chained child per def (notes = the def's own
+`notes`, plus its `task-fields`/`task-outputs` blocks scoped to that def).
+Throws `InstantiateTemplateError` (carrying `parentId`/`childIds` already
+created) if a child create fails partway through — nothing is rolled back.
+
+## New Home composer — "New Chained Task"
+
+`TaskComposer.tsx` gets a **"New Chained Task"** entry point (not a separate
+form — the canonical composer, extended, same as R0's design). Defining a
+chain has two paths, and there is no third:
+
+1. **Inline definition** — the human adds task-defs (name, inputs, outputs,
+   optional `neededWhen`) directly in the composer, right before submitting.
+   Submitting calls `instantiateTemplate` with those `defs` in memory; the
+   chain is born already self-describing on the parent task, never touching
+   a project pref.
+2. **Copy from an existing chained task** — pick an existing parent task
+   that already carries a `task-template` v2 block, `parseTaskTemplateBlock`
+   it, and pre-fill the composer's in-memory `defs` from `parsed.defs`
+   (editable before submit — this is a copy, not a live link). This is how
+   "reuse a chain" works now: there is no saved template registry to browse,
+   only past chained tasks.
+
+New-job form = input questions grouped by owning task-def; outputs shown
+read-only ("the agent will produce: …, required") — same UX invariant as R0.
+
+The parallel workstream reworking `TaskComposer.tsx` properly (chain-def
+UI, copy-from-existing picker) lands right after this doc's R1; R1 itself
+only changes `instantiateTemplate`'s signature and mechanically threads the
+composer's existing `taskDefs` local through the new call shape so typecheck
+stays green — it does not build the new UI.
+
+## Removed / superseded (do not reintroduce)
+
+These were part of R0's project-hung model and are corrected by this epic.
+**Not deleted yet in R1** (that's R3) — flagged here so no new code depends
+on them:
+
+- `TemplateConfig.taskDefs` (project-level stored chain) — superseded by the
+  parent task's v2 block. A project no longer "has" a chain.
+- `TemplateEditor.tsx`'s task-def/chain editing UI — superseded by "New
+  Chained Task"'s inline-definition / copy-from-existing paths in the
+  composer.
+- Any "customize template" / "save as template" flow — there is no template
+  object to save; a chain is either being defined right now or already lives
+  on a past chained task you can copy from.
+- v1 `task-template` bodies (`{templateId, taskDefIds}`) — still parsed
+  fail-soft (`legacy` shape) for tasks created before this correction, never
+  produced by new code.
+
+## Roster / project view
+
+Unchanged in spirit from R0, reframed as a **derived view, not a stored
+config**: grouped headers per task-def (aggregated dynamically from whatever
+chained tasks exist under a project, by parsing each parent's v2 block —
+not from a project pref); inputs editable inline, outputs read-only;
+conditional-skip cells render hatched `n/a`; clicking a cell opens that
+child task, clicking the job cell opens the meta parent rollup.
+
+Meta rollup: ordered children, status pill each (Done / In progress /
+Pending / Not needed) + one-line outcome, rows click through to the child.
+
+Evidence log: submitted required outputs appear as first-class entries; an
+unmet requirement reads "awaiting agent — owes N required output(s)".
 
 ## Workstreams & file ownership (no overlaps within a wave)
 
 | Task | Owns | Depends |
 |---|---|---|
-| T1 task-8b694714b13c | types.ts, taskSchema.mjs/.d.mts, newHomeTemplateOps.ts, newHomePrefs.ts (types/migration only), tests | — |
-| T7 task-5170073890ed | electron/typebuild/operator-instructions.ts, task-context-bundle.ts (+execute.ts) | this doc only |
-| T2 task-af3a8fdc8974 | TemplateEditor.tsx | T1 |
-| T3 task-04ea172532c0 | TaskComposer.tsx — **extend the canonical composer, same class; no new form** | T1 |
-| T4 task-fb31518201da | newHomePrefs.ts instantiateChain → instantiateTemplate | T1, T3 |
-| T5 task-a4397184def4 | RosterTable.tsx, useNewHomeData.ts | T1, T4 |
-| T6 task-d83c6ada2d18 | TaskDetailDialog.tsx, taskResult.mjs, TaskResult.tsx | T1 |
-| T8 task-f17cc309a086 | integration, tests, HelpTour, gates, push | all |
+| R1 task-2fd63b922beb | taskSchema.mjs/.d.mts (v2 block), newHomePrefs.ts `instantiateTemplate` signature, TaskComposer.tsx call site (mechanical only), tests, this doc | — |
+| R2 task-? (TBD) | TaskComposer.tsx — "New Chained Task": inline chain-def UI + copy-from-existing-chain picker (the real UI rework, not the mechanical R1 call-site patch) | R1 |
+| R3 task-? (TBD) | Remove `TemplateConfig.taskDefs`, `TemplateEditor.tsx`'s chain/task-def UI, any "save as template" flow; strip the v1-legacy parse path's callers down to display-only (no new v1 production) | R2 |
+| R4 task-? (TBD) | Roster/project-view rework to derive its grouped view from chained tasks' v2 blocks directly (no project pref read for chain shape); integration, HelpTour, gates, push | R1–R3 |
 
-## UX invariants (from the approved prototype)
+## UX invariants (from the approved prototype, unchanged by the correction)
 
 - New-job form = **TaskComposer extended**: input questions grouped by owning
   task-def; outputs shown read-only ("the agent will produce: …, required").
 - Roster: grouped headers per task-def; **inputs editable inline, outputs
   read-only**; conditional-skip cells render hatched `n/a` (distinct from
-  empty/pending); **clicking a cell opens that child task**, clicking the job
-  cell opens the meta parent rollup.
+  empty/pending); **clicking a cell opens that child task**, clicking the
+  job cell opens the meta parent rollup.
 - Meta rollup: ordered children, status pill each (Done / In progress /
   Pending / Not needed) + one-line outcome, rows click through to the child.
 - Evidence log: submitted required outputs appear as first-class entries;

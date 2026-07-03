@@ -448,8 +448,14 @@ export function TaskDetailDialog({
   }, [childTasks]);
   const pipelineDefs = useMemo<TaskDef[]>(() => {
     if (!templateBlock) return [];
+    // task-2fd63b922beb — v2 blocks are self-describing (full TaskDefs on
+    // the parent itself); v1 legacy blocks only carried id refs, resolved
+    // against the project's (now-superseded) TemplateConfig.taskDefs.
+    if (templateBlock.defs) return templateBlock.defs;
     const byId = new Map((template.taskDefs ?? []).map((d) => [d.id, d]));
-    return templateBlock.taskDefIds.map((id) => byId.get(id)).filter((d): d is TaskDef => !!d);
+    return (templateBlock.legacy?.taskDefIds ?? [])
+      .map((id) => byId.get(id))
+      .filter((d): d is TaskDef => !!d);
   }, [templateBlock, template.taskDefs]);
 
   // ── evidence log: merge runs + messages + pending question + notes/flags ──

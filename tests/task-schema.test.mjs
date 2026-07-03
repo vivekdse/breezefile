@@ -92,21 +92,97 @@ test('parseTaskOutputsBlock returns null for missing/malformed input', () => {
   assert.equal(parseTaskOutputsBlock('```task-outputs\nnope\n```'), null);
 });
 
-// ── task-template block round-trip ──────────────────────────────────────────
-test('buildTaskTemplateBlock → parseTaskTemplateBlock round-trips', () => {
-  const taskDefs = [{ id: 'intake' }, { id: 'stain' }, { id: 'wash' }];
-  const block = buildTaskTemplateBlock('tmpl-1', taskDefs);
+// ── task-template block round-trip (v2 — task-2fd63b922beb) ────────────────
+test('buildTaskTemplateBlock → parseTaskTemplateBlock v2 round-trips full TaskDefs', () => {
+  const taskDefs = [
+    {
+      id: 'intake',
+      name: 'Intake',
+      notes: 'Collect the drop-off.',
+      inputs: [{ key: 'customer', label: 'Customer', type: 'text' }],
+      outputs: [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }],
+    },
+    {
+      id: 'stain',
+      name: 'Stain treatment',
+      neededWhen: { ref: 'intake.has_stains', op: '==', value: 'Yes' },
+      inputs: [],
+      outputs: [{ key: 'treated', label: 'Treated?', type: 'bool', required: true }],
+    },
+    { id: 'wash', name: 'Wash', inputs: [], outputs: [] },
+  ];
+  const block = buildTaskTemplateBlock('Order pipeline', taskDefs);
   const parsed = parseTaskTemplateBlock(block);
-  assert.deepEqual(parsed, { templateId: 'tmpl-1', taskDefIds: ['intake', 'stain', 'wash'] });
+  assert.deepEqual(parsed, {
+    name: 'Order pipeline',
+    defs: [
+      {
+        id: 'intake',
+        name: 'Intake',
+        notes: 'Collect the drop-off.',
+        inputs: [{ key: 'customer', label: 'Customer', type: 'text' }],
+        outputs: [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }],
+      },
+      {
+        id: 'stain',
+        name: 'Stain treatment',
+        neededWhen: { ref: 'intake.has_stains', op: '==', value: 'Yes' },
+        inputs: [],
+        outputs: [{ key: 'treated', label: 'Treated?', type: 'bool', required: true }],
+      },
+      { id: 'wash', name: 'Wash', inputs: [], outputs: [] },
+    ],
+  });
+});
+
+test('parseTaskTemplateBlock v2 sanitizes malformed defs/fields rather than rejecting the block', () => {
+  const body = [
+    '```task-template',
+    JSON.stringify({
+      v: 2,
+      name: 'Order pipeline',
+      defs: [
+        { id: 'intake', name: 'Intake', inputs: [{ key: 'c', label: 'C', type: 'text' }], outputs: [] },
+        { id: 'bad-no-name' }, // dropped: no name
+        'garbage', // dropped: not an object
+        {
+          id: 'stain',
+          name: 'Stain',
+          inputs: [{ bad: 'field' }, { key: 'method', label: 'Method', type: 'text' }],
+          outputs: [],
+          neededWhen: { ref: 'x', op: 'nope', value: 1 }, // malformed condition dropped
+        },
+      ],
+    }),
+    '```',
+  ].join('\n');
+  const parsed = parseTaskTemplateBlock(body);
+  assert.equal(parsed.name, 'Order pipeline');
+  assert.equal(parsed.defs.length, 2); // 'bad-no-name' and 'garbage' dropped
+  assert.equal(parsed.defs[0].id, 'intake');
+  assert.equal(parsed.defs[1].id, 'stain');
+  assert.deepEqual(parsed.defs[1].inputs, [{ key: 'method', label: 'Method', type: 'text' }]);
+  assert.equal(parsed.defs[1].neededWhen, undefined); // malformed condition dropped, not kept
+});
+
+test('parseTaskTemplateBlock v1 legacy bodies surface distinctly (name/defs null, legacy populated)', () => {
+  const block = '```task-template\n{"templateId":"tmpl-1","taskDefIds":["intake","stain","wash"]}\n```';
+  const parsed = parseTaskTemplateBlock(block);
+  assert.deepEqual(parsed, {
+    name: null,
+    defs: null,
+    legacy: { templateId: 'tmpl-1', taskDefIds: ['intake', 'stain', 'wash'] },
+  });
 });
 
 test('parseTaskTemplateBlock returns null for missing/malformed input', () => {
   assert.equal(parseTaskTemplateBlock(undefined), null);
-  assert.equal(parseTaskTemplateBlock('```task-template\n{"templateId":"x"}\n```'), null); // no taskDefIds
+  assert.equal(parseTaskTemplateBlock('```task-template\n{"v":2}\n```'), null); // v2 but no name
+  assert.equal(parseTaskTemplateBlock('```task-template\n{"templateId":"x"}\n```'), null); // legacy, no taskDefIds
   assert.equal(
     parseTaskTemplateBlock('```task-template\n{"taskDefIds":["a"]}\n```'),
     null,
-  ); // no templateId
+  ); // legacy, no templateId
 });
 
 // ── resultFields (submit_task_result type:"fields") ─────────────────────────

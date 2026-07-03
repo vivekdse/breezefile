@@ -426,19 +426,26 @@ async function instantiateChainImpl(
   return [container, ...created];
 }
 
-// ─── Template instantiation (task-fb31518201da) ────────────────────────────
+// ─── Template instantiation (task-fb31518201da, corrected task-2fd63b922beb) ─
 //
-// instantiateTemplate turns a TemplateConfig's `taskDefs` (the docs/
-// task-templates-design.md model — see that doc's "Vocabulary" and
-// "Transport blocks" sections) into real tasks: one META PARENT task (the
-// "job") carrying the ordered task-def id list in a ```task-template block,
-// then one CHILD task per task-def, in order, linked via `parentTaskId` +
-// a linear `dependsOn` chain (mirrors instantiateChainImpl's container/step
-// linking above — same structural pattern, values-driven instead of
+// instantiateTemplate turns a chain of TaskDefs — given directly by the
+// caller, NOT read off a project's TemplateConfig — into real tasks: one META
+// PARENT task (the "job") carrying the chain's name and every task-def IN
+// FULL in a v2 ```task-template block (buildTaskTemplateBlock), then one
+// CHILD task per task-def, in order, linked via `parentTaskId` + a linear
+// `dependsOn` chain (mirrors instantiateChainImpl's container/step linking
+// above — same structural pattern, values-driven instead of
 // title-template-driven). ALL task-defs get a child, including conditional
 // (`neededWhen`) ones: the condition is evaluated client-side later from
 // `taskDefStatus` (taskSchema.mjs), not at instantiation time, so the linear
 // chain ordering holds regardless of which steps end up "not needed".
+//
+// task-2fd63b922beb abstraction correction: the chain definition rides the
+// chained task itself (the parent's v2 block is fully self-describing), not a
+// project-level TemplateConfig — so this function takes `defs: TaskDef[]`
+// directly rather than a `template`/`templateId` pointing at project prefs.
+// Any surface can reconstruct the whole chain later from the parent task
+// alone (parseTaskTemplateBlock), no project config lookup required.
 //
 // Supersedes instantiateChain for the taskDefs model. instantiateChain stays
 // in place, unmodified, for the legacy ChainDef model (Repeatable Tasks /
@@ -491,14 +498,21 @@ export class InstantiateTemplateError extends Error {
   }
 }
 
-/** Turn one template instantiation ("job") into a meta parent task + one
- *  linearly-chained child task per task-def. See the module comment above
- *  and docs/task-templates-design.md for the contract. */
+/** Turn one chain instantiation ("job") into a meta parent task + one
+ *  linearly-chained child task per task-def. `defs` is the chain itself —
+ *  given directly by the caller (composer form state, or a chain copied from
+ *  an existing chained task), never read off a project's TemplateConfig. See
+ *  the module comment above and docs/task-templates-design.md for the
+ *  contract. */
 export async function instantiateTemplate(opts: {
-  templateId: string;
-  template: TemplateConfig;
-  jobTitle: string;
+  /** The chain/job title — also becomes the v2 ```task-template block's
+   *  `name`. */
+  name: string;
   projectId?: string;
+  /** The chain definition itself: full TaskDef objects, in order. Serialized
+   *  in full into the parent's v2 ```task-template block so the chain is
+   *  self-describing from the parent task alone. */
+  defs: TaskDef[];
   /** Flat map keyed by `fieldRef(taskDefId, fieldKey)` — INPUT values only.
    *  PHI: shaped in memory only, never logged. */
   values: Record<string, string>;
@@ -510,16 +524,16 @@ export async function instantiateTemplate(opts: {
     dependsOn?: string[];
   }) => Promise<{ id: string }>;
 }): Promise<{ parentId: string; childIds: string[] }> {
-  const { templateId, template, jobTitle, projectId, values, createTask } = opts;
-  const taskDefs = template.taskDefs ?? [];
+  const { name, projectId, defs, values, createTask } = opts;
+  const taskDefs = defs ?? [];
   const projectFields = projectId ? { projectId } : {};
 
   const parentNotes = joinNotesParts([
-    `Job created from template ${templateId}: ${taskDefs.length} task${taskDefs.length === 1 ? '' : 's'}.`,
-    buildTaskTemplateBlock(templateId, taskDefs),
+    `Job created from chain "${name}": ${taskDefs.length} task${taskDefs.length === 1 ? '' : 's'}.`,
+    buildTaskTemplateBlock(name, taskDefs),
   ]);
   const parent = await createTask({
-    title: jobTitle,
+    title: name,
     notes: parentNotes,
     ...projectFields,
   });
@@ -530,13 +544,13 @@ export async function instantiateTemplate(opts: {
     const defValues = valuesForTaskDef(values, def.id);
     const notes = joinNotesParts([
       def.notes,
-      buildTaskFieldsBlock(templateId, def.id, defValues),
+      buildTaskFieldsBlock(name, def.id, defValues),
       buildTaskOutputsBlock(def),
     ]);
     let child: { id: string };
     try {
       child = await createTask({
-        title: `${jobTitle} — ${def.name}`,
+        title: `${name} — ${def.name}`,
         notes,
         parentTaskId: parent.id,
         dependsOn: predecessorId ? [predecessorId] : undefined,

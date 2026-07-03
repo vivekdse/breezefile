@@ -12,7 +12,21 @@ export type ValuesByRef = Record<string, string | number | boolean>;
 
 export type ParsedTaskFields = { templateId: string; taskDefId: string; values: Record<string, unknown> };
 export type ParsedTaskOutputs = { taskDefId: string; fields: TaskDefField[] };
-export type ParsedTaskTemplate = { templateId: string; taskDefIds: string[] };
+
+/** v2 ```task-template block: the chain is fully self-describing on the
+ *  parent task — `defs` are complete TaskDef objects, no project lookup. */
+export type ParsedTaskTemplateV2 = { name: string; defs: TaskDef[] };
+/** v1 (legacy, pre task-2fd63b922beb) ```task-template block: the chain
+ *  definition lived on a project-level TemplateConfig, and the parent only
+ *  carried the id list. Still parsed fail-soft, surfaced distinctly so
+ *  callers can decide how (or whether) to resolve it. */
+export type ParsedTaskTemplateLegacy = {
+  name: null;
+  defs: null;
+  legacy: { templateId: string; taskDefIds: string[] };
+};
+export type ParsedTaskTemplate = ParsedTaskTemplateV2 | ParsedTaskTemplateLegacy;
+
 export type ParsedResultFields = { taskDefId: string; fields: Record<string, string | number | boolean> };
 
 export type TaskDefRenderStatus = 'done' | 'active' | 'pending' | 'skip';
@@ -26,7 +40,7 @@ export function buildTaskFieldsBlock(
   values: Record<string, unknown>,
 ): string;
 export function buildTaskOutputsBlock(taskDef: TaskDef): string;
-export function buildTaskTemplateBlock(templateId: string, taskDefs: TaskDef[]): string;
+export function buildTaskTemplateBlock(name: string, defs: TaskDef[]): string;
 
 export function parseTaskFieldsBlock(body: unknown): ParsedTaskFields | null;
 export function parseTaskOutputsBlock(body: unknown): ParsedTaskOutputs | null;

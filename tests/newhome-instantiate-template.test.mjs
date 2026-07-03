@@ -44,37 +44,31 @@ rmSync(tmpFile, { force: true });
 
 // ── fixtures ────────────────────────────────────────────────────────────
 
-function makeTemplate() {
-  return {
-    fields: [],
-    columns: [],
-    approvalRules: [],
-    steps: [],
-    taskDefs: [
-      {
-        id: 'intake',
-        name: 'Intake',
-        notes: 'Collect the customer drop-off.',
-        inputs: [{ key: 'customer', label: 'Customer', type: 'text' }],
-        outputs: [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }],
-      },
-      {
-        id: 'stain',
-        name: 'Stain treatment',
-        // conditional on intake.has_stains == "Yes" — instantiation must NOT
-        // filter this out; only rendering/status derivation does.
-        neededWhen: { ref: 'intake.has_stains', op: '==', value: 'Yes' },
-        inputs: [{ key: 'method', label: 'Method', type: 'text' }],
-        outputs: [{ key: 'treated', label: 'Treated?', type: 'bool', required: true }],
-      },
-      {
-        id: 'wash',
-        name: 'Wash',
-        inputs: [],
-        outputs: [{ key: 'done', label: 'Done?', type: 'bool', required: true }],
-      },
-    ],
-  };
+function makeDefs() {
+  return [
+    {
+      id: 'intake',
+      name: 'Intake',
+      notes: 'Collect the customer drop-off.',
+      inputs: [{ key: 'customer', label: 'Customer', type: 'text' }],
+      outputs: [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }],
+    },
+    {
+      id: 'stain',
+      name: 'Stain treatment',
+      // conditional on intake.has_stains == "Yes" — instantiation must NOT
+      // filter this out; only rendering/status derivation does.
+      neededWhen: { ref: 'intake.has_stains', op: '==', value: 'Yes' },
+      inputs: [{ key: 'method', label: 'Method', type: 'text' }],
+      outputs: [{ key: 'treated', label: 'Treated?', type: 'bool', required: true }],
+    },
+    {
+      id: 'wash',
+      name: 'Wash',
+      inputs: [],
+      outputs: [{ key: 'done', label: 'Done?', type: 'bool', required: true }],
+    },
+  ];
 }
 
 function stubCreateTask(idsOut, { failOn } = {}) {
@@ -102,10 +96,9 @@ test('instantiateTemplate creates the meta parent first, then one linearly-chain
   };
 
   const result = await instantiateTemplate({
-    templateId: 'tmpl-1',
-    template: makeTemplate(),
-    jobTitle: 'Order #42',
+    name: 'Order #42',
     projectId: 'proj-1',
+    defs: makeDefs(),
     values,
     createTask,
   });
@@ -121,9 +114,13 @@ test('instantiateTemplate creates the meta parent first, then one linearly-chain
   assert.equal(parentCall.input.projectId, 'proj-1');
   assert.equal(parentCall.input.parentTaskId, undefined);
   assert.equal(parentCall.input.dependsOn, undefined);
-  assert.match(parentCall.input.notes, /Job created from template tmpl-1: 3 tasks\./);
+  assert.match(parentCall.input.notes, /Job created from chain "Order #42": 3 tasks\./);
   assert.match(parentCall.input.notes, /```task-template/);
-  assert.match(parentCall.input.notes, /"taskDefIds":\["intake","stain","wash"\]/);
+  assert.match(parentCall.input.notes, /"v":2/);
+  assert.match(parentCall.input.notes, /"name":"Order #42"/);
+  assert.match(parentCall.input.notes, /"id":"intake"/);
+  assert.match(parentCall.input.notes, /"id":"stain"/);
+  assert.match(parentCall.input.notes, /"id":"wash"/);
 
   // intake child: first child, no dependsOn, parented to job
   assert.equal(intakeCall.input.title, 'Order #42 — Intake');
@@ -156,9 +153,8 @@ test('instantiateTemplate splits fieldRef-keyed values per task-def and re-keys 
   };
 
   await instantiateTemplate({
-    templateId: 'tmpl-1',
-    template: makeTemplate(),
-    jobTitle: 'Order',
+    name: 'Order',
+    defs: makeDefs(),
     values,
     createTask,
   });
@@ -168,7 +164,7 @@ test('instantiateTemplate splits fieldRef-keyed values per task-def and re-keys 
   assert.ok(fieldsMatch, 'intake child carries a task-fields block');
   const parsed = JSON.parse(fieldsMatch[1].trim());
   assert.deepEqual(parsed, {
-    templateId: 'tmpl-1',
+    templateId: 'Order',
     taskDefId: 'intake',
     values: { customer: 'Acme', items: '12' }, // bare keys, no "intake." prefix
   });
@@ -188,9 +184,8 @@ test('instantiateTemplate omits projectId entirely when none is given', async ()
   const calls = [];
   const createTask = stubCreateTask(calls);
   await instantiateTemplate({
-    templateId: 'tmpl-1',
-    template: makeTemplate(),
-    jobTitle: 'Order',
+    name: 'Order',
+    defs: makeDefs(),
     values: {},
     createTask,
   });
@@ -208,9 +203,8 @@ test('instantiateTemplate stops and throws with parentId + created childIds when
   await assert.rejects(
     () =>
       instantiateTemplate({
-        templateId: 'tmpl-1',
-        template: makeTemplate(),
-        jobTitle: 'Order',
+        name: 'Order',
+        defs: makeDefs(),
         values: {},
         createTask,
       }),
@@ -236,9 +230,8 @@ test('instantiateTemplate propagates a failure creating the parent itself with n
   await assert.rejects(
     () =>
       instantiateTemplate({
-        templateId: 'tmpl-1',
-        template: makeTemplate(),
-        jobTitle: 'Order',
+        name: 'Order',
+        defs: makeDefs(),
         values: {},
         createTask,
       }),
@@ -252,14 +245,13 @@ test('instantiateTemplate with no taskDefs still creates the meta parent with an
   const calls = [];
   const createTask = stubCreateTask(calls);
   const result = await instantiateTemplate({
-    templateId: 'tmpl-empty',
-    template: { fields: [], columns: [], approvalRules: [], steps: [], taskDefs: [] },
-    jobTitle: 'Empty job',
+    name: 'Empty job',
+    defs: [],
     values: {},
     createTask,
   });
   assert.equal(result.parentId, 't1');
   assert.deepEqual(result.childIds, []);
   assert.equal(calls.length, 1);
-  assert.match(calls[0].input.notes, /Job created from template tmpl-empty: 0 tasks\./);
+  assert.match(calls[0].input.notes, /Job created from chain "Empty job": 0 tasks\./);
 });
