@@ -13,6 +13,13 @@ export type NormalizedTable = {
   width: number;
 };
 
+/** A validated + normalized `fields` payload. `taskDefId` is null for a
+ *  generic (non-template) fields result. */
+export type NormalizedFields = {
+  taskDefId: string | null;
+  entries: Array<{ key: string; value: string }>;
+};
+
 export const KNOWN_RESULT_TYPES: readonly string[];
 
 export function resultRendererKind(result: unknown): string | null;
@@ -20,3 +27,5 @@ export function resultRendererKind(result: unknown): string | null;
 export function coerceCell(value: unknown): string;
 
 export function normalizeTablePayload(payload: unknown): NormalizedTable | null;
+
+export function normalizeFieldsPayload(payload: unknown): NormalizedFields | null;

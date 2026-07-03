@@ -49,6 +49,18 @@ import type { Agent, Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, Task
 // task-896f3f7f5e75 — pure agent display helpers (launch-mode caption for the
 // picker option hint). Shared with the detail panel + unit-tested in isolation.
 import { agentOptionHint } from './tasks/agent.mjs';
+// task-04ea172532c0 — Task Templates: the composer EXTENDS itself (same
+// class, no new form/modal) with a "Template" question + dynamically
+// aggregated input/output questions when the chosen TypeBuild project has a
+// non-empty task-def template. See docs/task-templates-design.md.
+import type { TaskDef, TaskDefField, TemplateConfig } from './newhome/types';
+import {
+  getTemplateConfig,
+  instantiateTemplate,
+  syncTemplateConfigFromServer,
+  type TemplateConfigExt,
+} from './newhome/newHomePrefs';
+import { aggregateInputs, fieldRef } from './newhome/taskSchema.mjs';
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
@@ -83,10 +95,19 @@ type Props = TaskComposerRequest & {
   onSaved?: () => void;
 };
 
+// task-04ea172532c0 — 'template' and 'outputs' are inserted right after
+// 'project' (create + TypeBuild only, and only when the attached project has
+// a non-empty task-def template); `field:<taskDefId>.<key>` ids are
+// synthesized per aggregated input field (see aggregateInputs) when a
+// template chain is chosen. All three are additive: a project with no
+// template, or the local target, never produces them — QUESTIONS is then
+// byte-for-byte QUESTIONS_LOCAL/QUESTIONS_TYPEBUILD, unchanged.
 type QuestionId =
   | 'title'
   | 'folder'
   | 'project'
+  | 'template'
+  | 'outputs'
   | 'who'
   | 'when'
   | 'status'
@@ -94,7 +115,8 @@ type QuestionId =
   | 'priority'
   | 'agent'
   | 'pin'
-  | 'notes';
+  | 'notes'
+  | `field:${string}`;
 // Order is the keyboard ↓ flow. Name, folder, and notes come first — they
 // are the only fields that actually matter for most tasks, and a task can
 // be created the moment they're filled (everything below is optional and
@@ -561,6 +583,28 @@ function FormCopilotBridge({
   return null;
 }
 
+// task-04ea172532c0 — synthetic QuestionId for one aggregated task-def input
+// field. `isFieldQuestion` narrows `active` back to that literal shape; both
+// are pure (no component state) so they live at module scope.
+function fieldQId(taskDefId: string, key: string): QuestionId {
+  return `field:${fieldRef(taskDefId, key)}` as QuestionId;
+}
+function isFieldQuestion(q: QuestionId): q is `field:${string}` {
+  return q.startsWith('field:');
+}
+// The option list for a select/bool field. bool renders as a 2-way Yes/No
+// pick (same shape as PIN_OPTIONS); select uses the field's own `options`.
+function fieldOptionList(field: TaskDefField): { value: string; label: string }[] {
+  if (field.type === 'bool') return [
+    { value: 'false', label: 'No' },
+    { value: 'true', label: 'Yes' },
+  ];
+  return (field.options ?? []).map((o) => ({ value: o, label: o }));
+}
+function isFieldOptionType(field: TaskDefField): boolean {
+  return field.type === 'select' || field.type === 'bool';
+}
+
 function formatDateNice(iso: string): string {
   if (!iso) return '';
   const d = new Date(iso + 'T00:00:00');
@@ -643,13 +687,11 @@ export function TaskComposer(props: Props) {
   // create that has nowhere to land.
   const noTarget = props.mode === 'create' && targets.length === 0;
 
-  const QUESTIONS = useMemo(() => composerQuestions(target), [target]);
-
-  const [activeIdx, setActiveIdx] = useState(0);
-  // Clamp the active index when the question list shrinks/grows on a target
-  // switch (TypeBuild drops 'folder', adds 'priority'), so we never index past
-  // the end and strand the keyboard cursor.
-  const active = QUESTIONS[Math.min(activeIdx, QUESTIONS.length - 1)];
+  // task-04ea172532c0 — QUESTIONS/activeIdx/active are declared further down
+  // (after `attachedProject`), once the template-related state they depend on
+  // (hasTemplate, templateChoice, templateFieldEntries) exists. Nothing
+  // between here and there reads them.
+  const baseQuestions = useMemo(() => composerQuestions(target), [target]);
 
   const [title, setTitle] = useState(
     initial?.title ?? (props.mode === 'create' ? props.initialTitle : undefined) ?? '',
@@ -1052,6 +1094,125 @@ export function TaskComposer(props: Props) {
     [projects, projectId],
   );
 
+  // ── Task Templates (task-04ea172532c0) ─────────────────────────────────
+  // A "template" is the attached project's TaskDef chain (types.ts /
+  // docs/task-templates-design.md). Read synchronously from the same
+  // localStorage-cached prefs TemplateEditor writes to (getTemplateConfig),
+  // with a best-effort background hydrate from the server so a machine that
+  // hasn't cached this project's template yet still sees it once the fetch
+  // lands (templateVersion bump forces the memo to re-read). Only offered for
+  // a fresh TypeBuild create — editing an existing task is a single task, not
+  // a new job, and the local target has no project/template concept at all.
+  const [templateVersion, setTemplateVersion] = useState(0);
+  const templateConfig: TemplateConfigExt | null = useMemo(
+    () => (isTypebuild ? getTemplateConfig(projectId || null) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isTypebuild, projectId, templateVersion],
+  );
+  useEffect(() => {
+    if (!isTypebuild) return;
+    let alive = true;
+    void syncTemplateConfigFromServer(projectId || null).then((updated) => {
+      if (alive && updated) setTemplateVersion((v) => v + 1);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [isTypebuild, projectId]);
+  const taskDefs: TaskDef[] = templateConfig?.taskDefs ?? [];
+  const hasTemplate = props.mode === 'create' && isTypebuild && taskDefs.length > 0;
+
+  type TemplateChoiceId = 'blank' | 'template';
+  const [templateChoice, setTemplateChoice] = useState<TemplateChoiceId>('blank');
+  const [templateHighlight, setTemplateHighlight] = useState(0);
+  // "Blank task" (today's flow) always first and always the default — picking
+  // it is a NON-REGRESSION no-op. The one available chain (a project has a
+  // single TaskDef list, not a named registry of several) is offered second.
+  const TEMPLATE_OPTIONS = useMemo(() => {
+    const out: { id: TemplateChoiceId; label: string; hint?: string }[] = [
+      { id: 'blank', label: 'Blank task', hint: "today's flow — one task" },
+    ];
+    if (hasTemplate) {
+      const name = attachedProject?.name ?? 'this project';
+      out.push({
+        id: 'template',
+        label: `Create job: ${name} — ${taskDefs.length} task${taskDefs.length === 1 ? '' : 's'}`,
+        hint: 'guided form, one task per step',
+      });
+    }
+    return out;
+  }, [hasTemplate, attachedProject, taskDefs.length]);
+  useEffect(() => {
+    const i = TEMPLATE_OPTIONS.findIndex((o) => o.id === templateChoice);
+    setTemplateHighlight(i >= 0 ? i : 0);
+  }, [TEMPLATE_OPTIONS, templateChoice]);
+  // A project switch that drops the template (or loses it) falls back to
+  // "Blank task" so the flow never strands on an option that's no longer offered.
+  useEffect(() => {
+    if (!hasTemplate && templateChoice !== 'blank') setTemplateChoice('blank');
+  }, [hasTemplate, templateChoice]);
+
+  // Every task-def's input fields, in aggregate/definition order (task-def
+  // order, then field order), ONLY when a chain is actually chosen — this is
+  // what dynamically extends the question flow.
+  const templateFieldEntries = useMemo(
+    () => (hasTemplate && templateChoice === 'template' ? aggregateInputs(taskDefs) : []),
+    [hasTemplate, templateChoice, taskDefs],
+  );
+  const templateFieldQIds = useMemo(
+    () => templateFieldEntries.map((e) => fieldQId(e.taskDef.id, e.field.key)),
+    [templateFieldEntries],
+  );
+  function fieldEntryFor(q: QuestionId): { taskDef: TaskDef; field: TaskDefField } | null {
+    if (!isFieldQuestion(q)) return null;
+    const ref = q.slice('field:'.length);
+    return templateFieldEntries.find((e) => fieldRef(e.taskDef.id, e.field.key) === ref) ?? null;
+  }
+
+  // Input VALUES, flat-keyed by fieldRef — PHI (a human's typed answer), held
+  // only in memory and passed to instantiateTemplate on save; never logged.
+  const [templateValues, setTemplateValues] = useState<Record<string, string>>({});
+  function setTemplateValue(ref: string, v: string) {
+    setTemplateValues((prev) => ({ ...prev, [ref]: v }));
+  }
+  // Highlight index per select/bool field, keyed by fieldRef (mirrors the
+  // single-question highlight states above, just keyed since there can be N).
+  const [templateFieldHighlight, setTemplateFieldHighlight] = useState<Record<string, number>>({});
+  // Focus targets for free-entry (text/number/date) field inputs, so the
+  // active-field effect below can focus them the same way title/notes do.
+  const fieldInputRefs = useRef(new Map<string, HTMLInputElement>());
+  function setFieldInputRef(ref: string) {
+    return (el: HTMLInputElement | null) => {
+      if (el) fieldInputRefs.current.set(ref, el);
+      else fieldInputRefs.current.delete(ref);
+    };
+  }
+
+  // Dynamically extend the question flow: 'template' (+ its aggregated
+  // field questions and a read-only 'outputs' summary) is spliced in right
+  // after 'project'. A project with no template, the local target, or edit
+  // mode never adds these — QUESTIONS is then `baseQuestions` unchanged
+  // (byte-for-byte QUESTIONS_LOCAL/QUESTIONS_TYPEBUILD).
+  const QUESTIONS = useMemo<QuestionId[]>(() => {
+    if (!hasTemplate) return baseQuestions;
+    const idx = baseQuestions.indexOf('project');
+    const before = baseQuestions.slice(0, idx + 1);
+    const after = baseQuestions.slice(idx + 1);
+    const extra: QuestionId[] = ['template'];
+    if (templateChoice === 'template') {
+      extra.push(...templateFieldQIds);
+      extra.push('outputs');
+    }
+    return [...before, ...extra, ...after];
+  }, [baseQuestions, hasTemplate, templateChoice, templateFieldQIds]);
+
+  const [activeIdx, setActiveIdx] = useState(0);
+  // Clamp the active index when the question list shrinks/grows on a target
+  // switch (TypeBuild drops 'folder', adds 'priority') or a template pick
+  // (adds/removes field + outputs questions), so we never index past the end
+  // and strand the keyboard cursor.
+  const active = QUESTIONS[Math.min(activeIdx, QUESTIONS.length - 1)];
+
   // If executor changes and the current When pick is hidden, reset.
   useEffect(() => {
     if (!visibleWhenOptions.some((w) => w.id === whenId)) {
@@ -1101,6 +1262,13 @@ export function TaskComposer(props: Props) {
       titleRef.current?.select();
     } else if (active === 'notes') {
       notesRef.current?.focus();
+    } else if (isFieldQuestion(active) && !isFieldOptionType(fieldEntryFor(active)?.field ?? { key: '', label: '', type: 'text' })) {
+      // task-04ea172532c0 — a free-entry (text/number/date) template field
+      // focuses its own input, same as title/notes; select/bool fields fall
+      // through to the generic section-focus branch below (they're option
+      // questions, driven by digits/Enter, not typing).
+      const entry = fieldEntryFor(active);
+      if (entry) fieldInputRefs.current.get(fieldRef(entry.taskDef.id, entry.field.key))?.focus();
     } else {
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
@@ -1285,6 +1453,26 @@ export function TaskComposer(props: Props) {
     enterCommitPhase();
   }
 
+  // task-04ea172532c0 — Template chain pick. Choosing "Blank task" (the
+  // default) leaves templateChoice untouched-equivalent (it already IS the
+  // default) — non-regression; choosing the chain dynamically inserts the
+  // aggregated field + outputs questions right after this one (see QUESTIONS).
+  function chooseTemplate(i: number) {
+    const o = TEMPLATE_OPTIONS[i];
+    if (!o) return;
+    setTemplateChoice(o.id);
+    setTemplateHighlight(i);
+    goNext();
+  }
+  // One aggregated select/bool INPUT field pick, keyed by fieldRef.
+  function chooseFieldOption(ref: string, options: { value: string; label: string }[], i: number) {
+    const o = options[i];
+    if (!o) return;
+    setTemplateValue(ref, o.value);
+    setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }));
+    goNext();
+  }
+
   function enterCommitPhase() {
     setPhase('commit');
     setTimeout(() => createBtnRef.current?.focus(), 0);
@@ -1377,6 +1565,32 @@ export function TaskComposer(props: Props) {
       else setPinHighlight((i) => i + 1);
       return;
     }
+    // task-04ea172532c0 — Template chain pick + its aggregated fields +
+    // read-only outputs summary. goNext() advances the index regardless of
+    // which concrete question comes next, so these compose transparently
+    // with the hardcoded 'project'/'who' transitions above.
+    if (active === 'template') {
+      if (templateHighlight >= TEMPLATE_OPTIONS.length - 1) goNext();
+      else setTemplateHighlight((i) => i + 1);
+      return;
+    }
+    if (active === 'outputs') {
+      goNext();
+      return;
+    }
+    if (isFieldQuestion(active)) {
+      const entry = fieldEntryFor(active);
+      if (entry && isFieldOptionType(entry.field)) {
+        const ref = fieldRef(entry.taskDef.id, entry.field.key);
+        const opts = fieldOptionList(entry.field);
+        const h = templateFieldHighlight[ref] ?? 0;
+        if (h >= opts.length - 1) goNext();
+        else setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: h + 1 }));
+      } else {
+        goNext();
+      }
+      return;
+    }
   }
   function moveUp() {
     if (active === 'title') return;
@@ -1454,6 +1668,28 @@ export function TaskComposer(props: Props) {
       goBack();
       return;
     }
+    // task-04ea172532c0 — mirrors the moveDown additions above.
+    if (active === 'template') {
+      if (templateHighlight === 0) goBack();
+      else setTemplateHighlight((i) => i - 1);
+      return;
+    }
+    if (active === 'outputs') {
+      goBack();
+      return;
+    }
+    if (isFieldQuestion(active)) {
+      const entry = fieldEntryFor(active);
+      if (entry && isFieldOptionType(entry.field)) {
+        const ref = fieldRef(entry.taskDef.id, entry.field.key);
+        const h = templateFieldHighlight[ref] ?? 0;
+        if (h === 0) goBack();
+        else setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: h - 1 }));
+      } else {
+        goBack();
+      }
+      return;
+    }
   }
 
   async function save(overrideWhenId?: string): Promise<{ ok: boolean; taskId?: string; error?: string }> {
@@ -1469,6 +1705,15 @@ export function TaskComposer(props: Props) {
       setActiveIdx(0);
       setTimeout(() => titleRef.current?.focus(), 0);
       return { ok: false, error: msg };
+    }
+    // task-04ea172532c0 — a template job doesn't consume when/start/cron (a
+    // chain's per-task scheduling isn't modeled by the composer's single
+    // When/Start pick), so it saves via a dedicated path that skips those
+    // validations entirely and calls the T4 instantiation seam instead of a
+    // single createTask. The title question doubles as the job's (meta
+    // parent's) title, per the design contract.
+    if (props.mode === 'create' && hasTemplate && templateChoice === 'template') {
+      return saveTemplateJob();
     }
     const effectiveWhenId = overrideWhenId ?? whenId;
     if (effectiveWhenId === 'pick-date' && !pickedDate) {
@@ -1711,6 +1956,87 @@ export function TaskComposer(props: Props) {
     }
   }
 
+  // task-04ea172532c0 — the createTask thunk instantiateTemplate calls once
+  // per task (the meta parent, then each child). It reuses the composer's
+  // EXISTING TypeBuild create path (the same `createTask(payload, target)`
+  // call `save()` makes above) so a template job's tasks are indistinguishable
+  // from any other TypeBuild create — same source, same shape — just with
+  // parentTaskId/dependsOn threaded through. The job's own status/pinned/
+  // priority/agent picks apply uniformly to every task in the chain; the
+  // scheduling (when/start/cron) questions aren't consumed here — a chain's
+  // per-step timing isn't modeled by the composer's single When/Start pick.
+  async function createTaskForTemplateJob(input: {
+    title: string;
+    notes: string;
+    projectId?: string;
+    parentTaskId?: string;
+    dependsOn?: string[];
+  }): Promise<{ id: string }> {
+    const parsedPriority = priority !== '' ? Number(priority) : undefined;
+    const payload: TaskCreate = {
+      title: input.title,
+      folder: '',
+      notes: input.notes,
+      status,
+      pinned,
+      auto_mode: false,
+      auto_agent: null,
+      auto_prompt: null,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(agentId ? { agentId } : {}),
+      ...(parsedPriority !== undefined ? { priority: parsedPriority } : {}),
+      ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
+      ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
+    };
+    const t = await createTask(payload, target);
+    return { id: t.id };
+  }
+
+  // task-04ea172532c0 — save path for a template job: one meta parent + one
+  // child per task-def, via the T4 instantiation seam (pinned signature —
+  // see docs/task-templates-design.md workstream table). Never creates a
+  // single plain task when a chain was chosen.
+  async function saveTemplateJob(): Promise<{ ok: boolean; taskId?: string; error?: string }> {
+    setBusy(true);
+    setError(null);
+    try {
+      const template: TemplateConfig = templateConfig ?? {
+        fields: [],
+        columns: [],
+        approvalRules: [],
+        steps: [],
+        taskDefs,
+      };
+      const result = await instantiateTemplate({
+        templateId: projectId || '_default',
+        template,
+        jobTitle: title.trim(),
+        projectId: projectId || undefined,
+        values: templateValues,
+        createTask: createTaskForTemplateJob,
+      });
+      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.parentId;
+      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
+      window.dispatchEvent(
+        new CustomEvent('fm:taskFlash', { detail: { taskId: result.parentId } }),
+      );
+      setCreated(true);
+      if (props.embedded) {
+        props.onSaved?.();
+        setBusy(false);
+        setTimeout(() => setCreated(false), 1400);
+      } else {
+        setTimeout(() => exit(), 900);
+      }
+      return { ok: true, taskId: result.parentId };
+    } catch (e) {
+      const msg = humanizeError(e).message;
+      setError(msg);
+      setBusy(false);
+      return { ok: false, error: msg };
+    }
+  }
+
   // Stable keydown listener that delegates to a ref-stored handler so
   // we never run a stale closure from before the latest state change.
   const handlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -1910,6 +2236,54 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
+    // task-04ea172532c0 — Template chain pick.
+    if (active === 'template') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        chooseTemplate(templateHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= TEMPLATE_OPTIONS.length) {
+        e.preventDefault();
+        chooseTemplate(n - 1);
+        return;
+      }
+      return;
+    }
+    // Outputs is a read-only summary — Enter/digits just advance like ↓.
+    if (active === 'outputs') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        goNext();
+        return;
+      }
+      return;
+    }
+    // One aggregated task-def INPUT field. select/bool are option questions
+    // (Enter/digits pick); text/number/date are handled by the field's own
+    // <input onKeyDown> (mirrors 'folder'/'start'/'when''s date/cron inputs),
+    // which the inText() guard above already returns for.
+    if (isFieldQuestion(active)) {
+      const entry = fieldEntryFor(active);
+      if (entry && isFieldOptionType(entry.field)) {
+        const ref = fieldRef(entry.taskDef.id, entry.field.key);
+        const opts = fieldOptionList(entry.field);
+        const h = templateFieldHighlight[ref] ?? 0;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          chooseFieldOption(ref, opts, h);
+          return;
+        }
+        const n = parseInt(e.key, 10);
+        if (!Number.isNaN(n) && n >= 1 && n <= opts.length) {
+          e.preventDefault();
+          chooseFieldOption(ref, opts, n - 1);
+          return;
+        }
+      }
+      return;
+    }
     // 'notes' has no option list; the textarea handles typing. Global
     // ↓ from outside the textarea moves to commit (handled in moveDown).
   };
@@ -1990,7 +2364,28 @@ export function TaskComposer(props: Props) {
     if (q === 'agent') return agentSummary();
     if (q === 'pin') return pinSummary();
     if (q === 'notes') return notesSummary();
+    if (q === 'template') return templateSummary();
+    if (q === 'outputs') return outputsSummary();
+    if (isFieldQuestion(q)) return fieldAnswer(q);
     return '';
+  }
+
+  // task-04ea172532c0 — Template/field/outputs summaries.
+  function templateSummary(): string {
+    return TEMPLATE_OPTIONS.find((o) => o.id === templateChoice)?.label ?? 'Blank task';
+  }
+  function outputsSummary(): string {
+    const total = taskDefs.reduce((n, d) => n + (d.outputs?.length ?? 0), 0);
+    if (total === 0) return 'No outputs defined';
+    return `${total} output field${total === 1 ? '' : 's'} across ${taskDefs.length} step${taskDefs.length === 1 ? '' : 's'}`;
+  }
+  function fieldAnswer(q: QuestionId): string {
+    const entry = fieldEntryFor(q);
+    if (!entry) return '';
+    const ref = fieldRef(entry.taskDef.id, entry.field.key);
+    const v = templateValues[ref] ?? '';
+    if (entry.field.type === 'bool') return v === 'true' ? 'Yes' : v === 'false' ? 'No' : '';
+    return v;
   }
 
   // Short caption that prefixes the answer in collapsed/past sections —
@@ -2009,6 +2404,12 @@ export function TaskComposer(props: Props) {
     if (q === 'agent') return 'agent';
     if (q === 'pin') return 'pin';
     if (q === 'notes') return 'notes';
+    if (q === 'template') return 'template';
+    if (q === 'outputs') return 'outputs';
+    if (isFieldQuestion(q)) {
+      const entry = fieldEntryFor(q);
+      return entry ? `${entry.taskDef.name} · ${entry.field.label}` : null;
+    }
     return null;
   }
 
@@ -2028,6 +2429,13 @@ export function TaskComposer(props: Props) {
       return executor === 'claude'
         ? "What should the agent do? (this becomes the prompt)"
         : 'Any notes?';
+    }
+    // task-04ea172532c0
+    if (q === 'template') return 'Use a template?';
+    if (q === 'outputs') return 'What the agent will produce';
+    if (isFieldQuestion(q)) {
+      const entry = fieldEntryFor(q);
+      return entry?.field.label ?? '';
     }
     return '';
   }
@@ -2062,6 +2470,8 @@ export function TaskComposer(props: Props) {
     if (id === 'who') return 'Who runs this';
     if (id === 'start') return isTypebuild ? 'Defer until' : 'Start date';
     if (id === 'when') return executor === 'claude' ? 'When it runs' : 'Due date';
+    // task-04ea172532c0 — grouped/labeled by owning task-def, e.g. "Intake · Customer".
+    if (isFieldQuestion(id)) return labelFor(id);
     const short = labelFor(id);
     return short ? short.charAt(0).toUpperCase() + short.slice(1) : null;
   }
@@ -2426,6 +2836,169 @@ export function TaskComposer(props: Props) {
                 </div>
               ) : (
                 renderInert('project')
+              )}
+            </section>
+          )}
+
+          {/* Template — task-04ea172532c0. Only when the attached project has
+              a non-empty task-def template (fresh TypeBuild create only).
+              "Blank task" is the default and reproduces today's flow exactly
+              — NON-REGRESSION. */}
+          {hasTemplate && (
+            <section
+              ref={sectionRefFor('template')}
+              className={sectionClasses('template')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('template'))}
+            >
+              {isActiveSection('template') ? (
+                <div className="composer__q-active-body">
+                  <FieldLabel id="template" />
+                  <div className="composer__q-prompt">{promptFor('template')}</div>
+                  <ul className="composer__options" role="listbox">
+                    {TEMPLATE_OPTIONS.map((o, i) => (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === templateHighlight}
+                          className={
+                            'composer__option' +
+                            (i === templateHighlight ? ' composer__option--active' : '')
+                          }
+                          onMouseEnter={() => setTemplateHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            chooseTemplate(i);
+                          }}
+                        >
+                          <kbd className="composer__option-key">{i + 1}</kbd>
+                          <span className="composer__option-label">{o.label}</span>
+                          {o.hint && (
+                            <span className="composer__option-hint">{o.hint}</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                renderInert('template')
+              )}
+            </section>
+          )}
+
+          {/* Template input fields — task-04ea172532c0. One question per
+              aggregated task-def INPUT field (taskSchema.mjs aggregateInputs),
+              grouped/labeled by owning task-def ("Intake · Customer"). Only
+              rendered once a chain is chosen. text/number/date are free entry;
+              select/bool are option questions (same pattern as who/status/pin). */}
+          {hasTemplate && templateChoice === 'template' && templateFieldEntries.map(({ taskDef, field }) => {
+            const ref = fieldRef(taskDef.id, field.key);
+            const qid = fieldQId(taskDef.id, field.key);
+            const optionType = isFieldOptionType(field);
+            const opts = optionType ? fieldOptionList(field) : [];
+            const highlight = templateFieldHighlight[ref] ?? 0;
+            const value = templateValues[ref] ?? '';
+            return (
+              <section
+                key={qid}
+                ref={sectionRefFor(qid)}
+                className={sectionClasses(qid)}
+                onClick={() => setActiveIdx(QUESTIONS.indexOf(qid))}
+              >
+                {isActiveSection(qid) ? (
+                  <div className="composer__q-active-body">
+                    <FieldLabel id={qid} />
+                    <div className="composer__q-prompt">{promptFor(qid)}</div>
+                    {optionType ? (
+                      <ul className="composer__options" role="listbox">
+                        {opts.map((o, i) => (
+                          <li key={o.value}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={i === highlight}
+                              className={
+                                'composer__option' +
+                                (i === highlight ? ' composer__option--active' : '')
+                              }
+                              onMouseEnter={() =>
+                                setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }))
+                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                chooseFieldOption(ref, opts, i);
+                              }}
+                            >
+                              <kbd className="composer__option-key">{i + 1}</kbd>
+                              <span className="composer__option-label">{o.label}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <input
+                        ref={setFieldInputRef(ref)}
+                        className="composer__path-input"
+                        type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                        value={value}
+                        onChange={(e) => setTemplateValue(ref, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                            e.preventDefault();
+                            (e.target as HTMLInputElement).blur();
+                            goNext();
+                          }
+                        }}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  renderInert(qid)
+                )}
+              </section>
+            );
+          })}
+
+          {/* Outputs summary — task-04ea172532c0. Read-only: per task-def,
+              the output fields the agent will produce, `required` marked as
+              evidence. No input is collected here. */}
+          {hasTemplate && templateChoice === 'template' && (
+            <section
+              ref={sectionRefFor('outputs')}
+              className={sectionClasses('outputs')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('outputs'))}
+            >
+              {isActiveSection('outputs') ? (
+                <div className="composer__q-active-body">
+                  <FieldLabel id="outputs" />
+                  <div className="composer__q-prompt">{promptFor('outputs')}</div>
+                  <ul className="composer__outputs-list">
+                    {taskDefs.map((def) => (
+                      <li key={def.id} className="composer__outputs-group">
+                        <div className="composer__outputs-group-name">{def.name}</div>
+                        {(def.outputs ?? []).length === 0 ? (
+                          <div className="composer__outputs-empty">no outputs defined</div>
+                        ) : (
+                          <ul className="composer__outputs-fields">
+                            {(def.outputs ?? []).map((f) => (
+                              <li key={f.key}>
+                                the agent will produce: {f.label}
+                                {f.required && (
+                                  <span className="composer__outputs-required"> — required (evidence)</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                renderInert('outputs')
               )}
             </section>
           )}

@@ -21,7 +21,7 @@
 // logged or persisted (docs/typebuild-data-field-contract.md).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { NewHomeTask, TemplateConfig, EvidenceEntry } from './types';
+import type { NewHomeTask, TemplateConfig, EvidenceEntry, TaskDef } from './types';
 import type { Task, TaskRun } from '../../types';
 import { useTaskCustomValues } from './useNewHomeData';
 import {
@@ -45,6 +45,14 @@ import {
 } from '../tasks/taskAnswer.mjs';
 import { formatOpError, formatSourceReason } from '../../errorMessages';
 import { TaskResultView } from '../tasks/TaskResult';
+import {
+  parseTaskFieldsBlock,
+  parseTaskOutputsBlock,
+  parseTaskTemplateBlock,
+  resultFields,
+  taskDefStatus,
+  fieldRef,
+} from './taskSchema.mjs';
 import './TaskDetailDialog.css';
 
 // ─── small formatting helpers (local — no shared-file dependency) ──────────
@@ -122,6 +130,25 @@ const MARKER: Record<EvidenceEntry['kind'], string> = {
   progress: '◐',
 };
 
+// ─── task-templates (docs/task-templates-design.md) — Outputs + Pipeline ───
+// A child task's body carries a `task-outputs` block (its output field
+// DEFINITIONS) and, once the agent submits, a `{type:'fields'}` result (the
+// VALUES). A meta-parent's body carries a `task-template` block (the ordered
+// task-def id list); its Pipeline section resolves each task-def's status
+// from its children. Both degrade to nothing when the body carries neither
+// block — see the file-header non-regression note.
+
+const DEF_STATUS_LABEL: Record<ReturnType<typeof taskDefStatus>, string> = {
+  done: 'Done',
+  active: 'In progress',
+  pending: 'Pending',
+  skip: 'Not needed',
+};
+
+function hasValue(v: unknown): boolean {
+  return v !== undefined && v !== null && v !== '';
+}
+
 // ─── metadata grid ──────────────────────────────────────────────────────────
 
 function StandardMeta({ task }: { task: Task }) {
@@ -150,14 +177,26 @@ export function TaskDetailDialog({
   taskId,
   task,
   template,
+  tasks,
   onClose,
   onResolved,
+  onOpenTask,
 }: {
   taskId: string;
   task?: NewHomeTask;
   template: TemplateConfig;
+  /** task-d83c6ada2d18 — the full (unfiltered) roster snapshot, used ONLY to
+   *  resolve a meta-parent's children for the Pipeline rollup (matched via
+   *  `raw.parentTaskId === taskId`). Optional/additive: omitted or empty ⇒
+   *  the Pipeline section simply has nothing to resolve, same as a task with
+   *  no `task-template` block (NON-REGRESSION). */
+  tasks?: NewHomeTask[];
   onClose: () => void;
   onResolved: (id: string) => void;
+  /** task-d83c6ada2d18 — opens another task in this same dialog (used by the
+   *  Pipeline section's rows to jump to a child). Optional: when absent,
+   *  Pipeline rows render without a click affordance. */
+  onOpenTask?: (id: string) => void;
 }) {
   const raw = task?.raw;
   const { dispatch } = useStore();
@@ -342,6 +381,77 @@ export function TaskDetailDialog({
     void actions.start(raw);
   }
 
+  // ── task-templates: this task's own output DEFINITIONS + submitted VALUES ─
+  // A CHILD task's body carries `task-outputs` (definitions); once the agent
+  // submits, `raw.result` carries `{type:'fields', payload:{taskDefId,
+  // fields}}` (values) — see docs/task-templates-design.md. Both parse
+  // fail-soft to null so a task with neither block/result degrades to
+  // exactly today's rendering.
+  const outputsBlock = useMemo(() => parseTaskOutputsBlock(raw?.notes ?? null), [raw?.notes]);
+  const submittedOutputs = useMemo(() => resultFields(raw?.result ?? null), [raw?.result]);
+  // Only trust the submitted result against THIS task's declared outputs when
+  // the taskDefIds actually match (defensive against a stray/mismatched
+  // result on the same task).
+  const submittedByKey = useMemo(() => {
+    if (!outputsBlock || !submittedOutputs) return {};
+    if (submittedOutputs.taskDefId !== outputsBlock.taskDefId) return {};
+    return submittedOutputs.fields;
+  }, [outputsBlock, submittedOutputs]);
+  const requiredOutputs = useMemo(
+    () => (outputsBlock?.fields ?? []).filter((f) => f.required),
+    [outputsBlock],
+  );
+  const requiredSubmittedCount = useMemo(
+    () => requiredOutputs.filter((f) => hasValue(submittedByKey[f.key])).length,
+    [requiredOutputs, submittedByKey],
+  );
+  const requiredMissingCount = requiredOutputs.length - requiredSubmittedCount;
+
+  // ── task-templates: META PARENT pipeline rollup ───────────────────────────
+  // A meta-parent's body carries `task-template` (ordered task-def ids); its
+  // children each carry `task-fields` (input VALUES, keyed by taskDefId) and,
+  // once worked, a `{type:'fields'}` result (output VALUES). Resolve the
+  // ordered TaskDef definitions from the project's template config, match
+  // children to task-defs by parsing each child's body, merge every value
+  // into one `valuesByRef` map, and derive each step's status/outcome from
+  // it — same helpers (`taskDefStatus`, `fieldRef`) the design doc specifies.
+  const templateBlock = useMemo(() => parseTaskTemplateBlock(raw?.notes ?? null), [raw?.notes]);
+  const childTasks = useMemo(() => {
+    if (!templateBlock || !tasks || !tasks.length) return [];
+    return tasks.filter((t) => t.raw.parentTaskId === taskId);
+  }, [templateBlock, tasks, taskId]);
+  const childByDefId = useMemo(() => {
+    const map = new Map<string, NewHomeTask>();
+    for (const c of childTasks) {
+      const fb = parseTaskFieldsBlock(c.raw.notes ?? null);
+      if (fb) map.set(fb.taskDefId, c);
+    }
+    return map;
+  }, [childTasks]);
+  const pipelineValuesByRef = useMemo(() => {
+    const out: Record<string, string | number> = {};
+    for (const c of childTasks) {
+      const fb = parseTaskFieldsBlock(c.raw.notes ?? null);
+      if (fb) {
+        for (const [k, v] of Object.entries(fb.values)) {
+          if (typeof v === 'string' || typeof v === 'number') out[fieldRef(fb.taskDefId, k)] = v;
+        }
+      }
+      const rf = resultFields(c.raw.result ?? null);
+      if (rf) {
+        for (const [k, v] of Object.entries(rf.fields)) {
+          out[fieldRef(rf.taskDefId, k)] = typeof v === 'boolean' ? String(v) : v;
+        }
+      }
+    }
+    return out;
+  }, [childTasks]);
+  const pipelineDefs = useMemo<TaskDef[]>(() => {
+    if (!templateBlock) return [];
+    const byId = new Map((template.taskDefs ?? []).map((d) => [d.id, d]));
+    return templateBlock.taskDefIds.map((id) => byId.get(id)).filter((d): d is TaskDef => !!d);
+  }, [templateBlock, template.taskDefs]);
+
   // ── evidence log: merge runs + messages + pending question + notes/flags ──
   const evidence = useMemo<EvidenceEntry[]>(() => {
     const entries: Array<EvidenceEntry & { sortMs: number }> = [];
@@ -396,6 +506,34 @@ export function TaskDetailDialog({
       });
     }
 
+    // task-d83c6ada2d18 — submitted required outputs become first-class
+    // evidence entries (design doc: "Evidence log: submitted required outputs
+    // appear as first-class entries"); a shortfall becomes ONE synthetic flag
+    // entry rather than one-per-missing-field, so the log stays skimmable.
+    if (outputsBlock) {
+      const ms = toMs(raw?.updatedAtIso) ?? raw?.updated_at ?? now;
+      for (const f of outputsBlock.fields) {
+        if (f.required && hasValue(submittedByKey[f.key])) {
+          entries.push({
+            ts: fmtTs(ms),
+            msg: `Evidence: ${f.label} submitted`,
+            kind: 'ok',
+            who: 'agent',
+            sortMs: ms,
+          });
+        }
+      }
+      if (requiredMissingCount > 0) {
+        entries.push({
+          ts: fmtTs(ms),
+          msg: `Agent owes ${requiredMissingCount} required output${requiredMissingCount === 1 ? '' : 's'} — evidence incomplete`,
+          kind: 'flag',
+          who: 'agent',
+          sortMs: ms,
+        });
+      }
+    }
+
     if (entries.length === 0 && task) {
       const ms = toMs(raw?.updatedAtIso) ?? raw?.updated_at ?? now;
       entries.push({
@@ -409,7 +547,7 @@ export function TaskDetailDialog({
 
     entries.sort((a, b) => a.sortMs - b.sortMs);
     return entries.map(({ sortMs: _sortMs, ...e }) => e);
-  }, [runs, raw, pendingQuestion, task]);
+  }, [runs, raw, pendingQuestion, task, outputsBlock, submittedByKey, requiredMissingCount]);
 
   // ── attachments: run output_path values, deduped ──────────────────────────
   const attachments = useMemo(() => {
@@ -561,6 +699,76 @@ export function TaskDetailDialog({
                 })}
                 {raw && <StandardMeta task={raw} />}
               </div>
+            </div>
+          )}
+
+          {outputsBlock && outputsBlock.fields.length > 0 && (
+            <div className="nh-dialog__section">
+              <div className="nh-dialog__section-title">Outputs</div>
+              <div className="nh-dialog__outputs">
+                {outputsBlock.fields.map((f) => {
+                  const v = submittedByKey[f.key];
+                  const submitted = hasValue(v);
+                  return (
+                    <div className="nh-dialog__output-item" key={f.key}>
+                      <div className="nh-dialog__output-k">
+                        {f.label}
+                        <span className="nh-dialog__output-type">{f.type}</span>
+                        {f.required && (
+                          <span className="nh-dialog__output-required">required — evidence</span>
+                        )}
+                      </div>
+                      <div
+                        className={`nh-dialog__output-v${submitted ? '' : ' nh-dialog__output-v--pending'}`}
+                      >
+                        {submitted ? String(v) : 'awaiting agent'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="nh-dialog__completion-line">
+                {requiredOutputs.length > 0
+                  ? `${requiredSubmittedCount} of ${requiredOutputs.length} required outputs submitted`
+                  : 'No required outputs for this step'}
+              </div>
+            </div>
+          )}
+
+          {templateBlock && pipelineDefs.length > 0 && (
+            <div className="nh-dialog__section">
+              <div className="nh-dialog__section-title">Pipeline</div>
+              <ol className="nh-dialog__pipeline">
+                {pipelineDefs.map((def, i) => {
+                  const defStatus = taskDefStatus(def, pipelineValuesByRef);
+                  const child = childByDefId.get(def.id);
+                  const firstOutput = def.outputs.find((f) =>
+                    hasValue(pipelineValuesByRef[fieldRef(def.id, f.key)]),
+                  );
+                  const outcome = firstOutput
+                    ? `${firstOutput.label}=${pipelineValuesByRef[fieldRef(def.id, firstOutput.key)]}`
+                    : null;
+                  const clickable = !!child && !!onOpenTask;
+                  return (
+                    <li
+                      key={def.id}
+                      className={`nh-dialog__pipeline-row${clickable ? ' nh-dialog__pipeline-row--clickable' : ''}`}
+                      onClick={clickable ? () => onOpenTask!(child!.id) : undefined}
+                      role={clickable ? 'button' : undefined}
+                      tabIndex={clickable ? 0 : undefined}
+                    >
+                      <span className="nh-dialog__pipeline-idx">{i + 1}</span>
+                      <span className="nh-dialog__pipeline-name">{def.name}</span>
+                      <span
+                        className={`nh-dialog__pipeline-pill nh-dialog__pipeline-pill--${defStatus}`}
+                      >
+                        {DEF_STATUS_LABEL[defStatus]}
+                      </span>
+                      <span className="nh-dialog__pipeline-outcome">{outcome ?? '—'}</span>
+                    </li>
+                  );
+                })}
+              </ol>
             </div>
           )}
 

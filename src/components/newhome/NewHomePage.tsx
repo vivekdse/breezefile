@@ -52,7 +52,7 @@ function isFilterState(v: unknown): v is FilterState {
   return typeof v === 'string' && (FILTER_STATES as string[]).includes(v);
 }
 
-const CUSTOMIZE_TABS: CustomizeTab[] = ['fields', 'columns', 'approvals', 'steps', 'chains', 'repeatable', 'preview'];
+const CUSTOMIZE_TABS: CustomizeTab[] = ['tasks', 'fields', 'columns', 'approvals', 'steps', 'chains', 'repeatable', 'preview'];
 function isCustomizeTab(v: unknown): v is CustomizeTab {
   return typeof v === 'string' && (CUSTOMIZE_TABS as string[]).includes(v);
 }
@@ -407,6 +407,8 @@ export function NewHomePage() {
           taskId={openTaskId}
           task={openTask}
           template={template}
+          tasks={tasks}
+          onOpenTask={openTaskDetail}
           onClose={() => setOpenTaskId(null)}
           onResolved={() => {
             // Resolve/cancel/retry all flow through here so stats, the

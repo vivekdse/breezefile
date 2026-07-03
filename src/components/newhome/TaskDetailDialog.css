@@ -291,6 +291,113 @@
   font-size: var(--fs-xs);
 }
 
+/* ── task-templates: Outputs (child task) ─────────────────────────────── */
+.nh-dialog__outputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.nh-dialog__output-item {
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--rule-on-panel);
+}
+.nh-dialog__output-item:last-child {
+  border-bottom: none;
+}
+.nh-dialog__output-k {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted-on-panel);
+}
+.nh-dialog__output-type {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--muted-on-panel);
+  opacity: 0.7;
+}
+.nh-dialog__output-required {
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--nh-needs);
+}
+.nh-dialog__output-v {
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  word-break: break-word;
+}
+.nh-dialog__output-v--pending {
+  color: var(--muted-on-panel);
+  font-style: italic;
+}
+.nh-dialog__completion-line {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+
+/* ── task-templates: Pipeline (meta parent rollup) ────────────────────── */
+.nh-dialog__pipeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.nh-dialog__pipeline-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+}
+.nh-dialog__pipeline-row--clickable {
+  cursor: pointer;
+}
+.nh-dialog__pipeline-row--clickable:hover {
+  background: var(--bg-2);
+}
+.nh-dialog__pipeline-idx {
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xs);
+  min-width: 1.2em;
+}
+.nh-dialog__pipeline-name {
+  flex: 1;
+  color: var(--text-on-panel);
+  font-weight: 500;
+}
+.nh-dialog__pipeline-pill {
+  padding: 2px 8px;
+  border-radius: var(--r-pill, 999px);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  white-space: nowrap;
+}
+.nh-dialog__pipeline-pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
+.nh-dialog__pipeline-pill--active { background: var(--nh-progress-soft); color: var(--nh-progress); }
+.nh-dialog__pipeline-pill--pending { background: var(--nh-queued-soft); color: var(--nh-queued); }
+.nh-dialog__pipeline-pill--skip { background: var(--bg-2); color: var(--muted-on-panel); }
+.nh-dialog__pipeline-outcome {
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xs);
+  max-width: 40%;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── attachments ───────────────────────────────────────────────────────── */
 .nh-dialog__attachments {
   display: flex;

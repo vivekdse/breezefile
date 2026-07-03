@@ -18,6 +18,7 @@
 
 import type { ComponentType } from 'react';
 import {
+  normalizeFieldsPayload,
   normalizeTablePayload,
   resultRendererKind,
 } from './taskResult.mjs';
@@ -65,6 +66,31 @@ export function TableResult({ payload }: ResultRendererProps) {
   );
 }
 
+// ── the `fields` renderer ───────────────────────────────────────────────────
+// payload: `{ taskDefId?, fields: { key: value } }` — the task-templates
+// design doc's submit_task_result "fields" contract (docs/task-templates-
+// design.md, "Result contract"). Renders as a plain label/value definition
+// list (key used as the label — this renderer is domain-neutral and has no
+// access to a TaskDef's field labels; TaskDetailDialog's template-aware
+// Outputs section is the place that resolves real labels). A malformed/empty
+// payload normalizes to null so the host falls back to notes.
+export function FieldsResult({ payload }: ResultRendererProps) {
+  const fields = normalizeFieldsPayload(payload);
+  if (!fields) return null;
+  return (
+    <div className="tasks__result tasks__result--fields">
+      <dl className="tasks__result-fields">
+        {fields.entries.map((e) => (
+          <div className="tasks__result-field" key={e.key}>
+            <dt className="tasks__result-field-k">{e.key}</dt>
+            <dd className="tasks__result-field-v">{e.value || '—'}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 // ── the renderer registry ───────────────────────────────────────────────────
 // type-string → React component. To add a new result type: (1) add its name to
 // KNOWN_RESULT_TYPES in taskResult.mjs, (2) add a row here mapping it to a
@@ -75,6 +101,7 @@ export const RESULT_RENDERERS: Record<
   ComponentType<ResultRendererProps>
 > = {
   table: TableResult,
+  fields: FieldsResult,
 };
 
 // ── the dispatcher ──────────────────────────────────────────────────────────

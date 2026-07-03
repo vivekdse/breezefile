@@ -323,6 +323,98 @@
   padding-top: var(--sp-2);
 }
 
+/* ─── Task-defs (task-af3a8fdc8974 — the Tasks tab) ───────────────────── */
+.nh-te__taskdef {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.nh-te__taskdef-head {
+  align-items: center;
+}
+
+.nh-te__taskdef-num {
+  flex: 0 0 auto;
+  min-width: 1.4em;
+  text-align: center;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted-on-panel);
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.nh-te__textarea {
+  flex: 1 1 100%;
+  min-height: 3.2em;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+/* The two field groups (Inputs / Outputs) inside a task-def card. */
+.nh-te__taskdef-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  border-top: 1px dashed var(--border-1);
+  padding-top: var(--sp-2);
+}
+
+.nh-te__subhead {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-on-panel);
+}
+
+/* neededWhen condition picker. */
+.nh-te__needed {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  border-top: 1px dashed var(--border-1);
+  padding-top: var(--sp-2);
+}
+.nh-te__needed-note {
+  border-top: 1px dashed var(--border-1);
+  padding-top: var(--sp-2);
+}
+.nh-te__select--op {
+  flex: 0 0 auto;
+  min-width: 3.5em;
+}
+
+/* Invalid slug key (must match [a-z0-9._-]+). */
+.nh-te__input--invalid {
+  border-color: var(--nh-failed);
+}
+
+/* Legacy-tab banner + badge (Repeatable / Chains / Steps are superseded). */
+.nh-te__legacy {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xs);
+}
+.nh-te__badge--legacy {
+  color: var(--muted-on-panel);
+  background: var(--bg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
 /* ─── Form preview ────────────────────────────────────────────────────── */
 .nh-te__form-preview {
   display: flex;

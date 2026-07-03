@@ -22,7 +22,7 @@
 
 /** The set of result types this client knows how to render. Keep in lockstep
  *  with the RESULT_RENDERERS map in TaskResult.tsx (a test asserts parity). */
-export const KNOWN_RESULT_TYPES = ['table'];
+export const KNOWN_RESULT_TYPES = ['table', 'fields'];
 
 /** Does this task carry a STRUCTURED result with a known, renderable type?
  *  Defensive against any shape: missing, null, non-object, or unknown-type all
@@ -93,4 +93,29 @@ export function normalizeTablePayload(payload) {
   if (headers.length === 0 && rows.length === 0) return null;
 
   return { headers, rows, width };
+}
+
+/** Validate + normalize a `fields` payload (task-templates design doc: agents
+ *  submit `{taskDefId, fields: {key: value}}` via `submit_task_result` with
+ *  `type: "fields"`) into a safe `{ taskDefId, entries }` shape, or null when
+ *  malformed/empty (so the caller falls back to notes). `entries` is an
+ *  ordered `[{key, value}]` list — insertion order of the source object,
+ *  values coerced with `coerceCell` so any shape (number/bool/null/nested)
+ *  renders safely. A payload with no usable entries is treated as empty →
+ *  null, same convention as `normalizeTablePayload`. `taskDefId` is optional —
+ *  a generic (non-template) `fields` result with no `taskDefId` still
+ *  renders, so this renderer isn't template-specific. */
+export function normalizeFieldsPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const fieldsIn = payload.fields;
+  if (!fieldsIn || typeof fieldsIn !== 'object' || Array.isArray(fieldsIn)) return null;
+
+  const entries = Object.entries(fieldsIn).map(([key, value]) => ({
+    key: String(key),
+    value: coerceCell(value),
+  }));
+  if (entries.length === 0) return null;
+
+  const taskDefId = typeof payload.taskDefId === 'string' ? payload.taskDefId : null;
+  return { taskDefId, entries };
 }

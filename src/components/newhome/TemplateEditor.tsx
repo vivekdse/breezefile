@@ -15,7 +15,7 @@
 // .css, and newHomeTemplateOps.ts. Chains ride on the local `TemplateConfigExt`
 // extension (newHomePrefs.ts), not the shared `TemplateConfig`.
 import { useEffect, useMemo, useState } from 'react';
-import type { TemplateField } from './types';
+import type { TemplateField, TaskDef, TaskDefField, TaskDefCondition } from './types';
 import type { TemplateConfigExt } from './newHomePrefs';
 import { ChainStrip, type ChainStripStep } from './ChainStrip';
 import { listApprovedQueries, type SavedQuerySummary } from '../../copilot/savedQueries';
@@ -23,6 +23,7 @@ import * as ops from './newHomeTemplateOps';
 import './TemplateEditor.css';
 
 export type CustomizeTab =
+  | 'tasks'
   | 'fields'
   | 'columns'
   | 'approvals'
@@ -31,7 +32,12 @@ export type CustomizeTab =
   | 'repeatable'
   | 'preview';
 
+// task-af3a8fdc8974 — the Tasks tab is the primary/forward way to author a
+// template (an ordered chain of TaskDefs). The Repeatable/Chains/Steps tabs are
+// LEGACY: kept rendering so existing templates don't break, but superseded by
+// Tasks. Fields/Columns/Approvals/Preview are unchanged.
 const TABS: { id: CustomizeTab; label: string }[] = [
+  { id: 'tasks', label: 'Tasks' },
   { id: 'fields', label: 'Fields' },
   { id: 'columns', label: 'Columns' },
   { id: 'repeatable', label: 'Repeatable Tasks' },
@@ -40,6 +46,25 @@ const TABS: { id: CustomizeTab; label: string }[] = [
   { id: 'approvals', label: 'Approvals' },
   { id: 'preview', label: 'Preview' },
 ];
+
+// A field key must be a slug ([a-z0-9._-]+, see types.ts / docs). Used to flag
+// an invalid key inline in the task-def field editor.
+const KEY_PATTERN = /^[a-z0-9._-]+$/;
+/** Coerce free text toward the slug charset as the user types (lowercase, only
+ *  [a-z0-9._-]) so an edited key stays valid without fighting the user. */
+function sanitizeKey(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9._-]/g, '');
+}
+/** Split a TaskDefCondition.ref ("<taskDefId>.<outputKey>") into its parts.
+ *  taskDef ids are uid()-generated (hyphens, never dots), while an output key
+ *  may itself contain a dot — so split on the FIRST dot: everything before it
+ *  is the id, everything after is the key. */
+function splitRef(ref: string): { taskDefId: string; key: string } {
+  const i = ref.indexOf('.');
+  if (i < 0) return { taskDefId: ref, key: '' };
+  return { taskDefId: ref.slice(0, i), key: ref.slice(i + 1) };
+}
+const COND_OPS: TaskDefCondition['op'][] = ['==', '!=', '<', '>'];
 
 const BUILTIN_COLUMNS = [
   { id: 'title', label: 'Title' },
@@ -99,6 +124,7 @@ export function TemplateEditor({
   }, []);
 
   const chains = config.chains ?? [];
+  const taskDefs = config.taskDefs ?? [];
   // Keep the selected chain valid as chains are added/removed out from under us
   // (e.g. by a copilot action). Fall back to the first chain, or null.
   const activeChain =
@@ -145,6 +171,236 @@ export function TemplateEditor({
     setActiveChainId(chainId);
   }
 
+  // ─── Tasks tab (task-af3a8fdc8974) render helpers ───────────────────────
+  // All mutations route through the shared ops in newHomeTemplateOps.ts — this
+  // panel never reimplements the state logic those ops already own.
+
+  /** One editable input/output field row inside a task-def. `kind` decides
+   *  whether the "required (evidence)" toggle shows (outputs only). */
+  function renderTaskDefField(
+    taskDef: TaskDef,
+    kind: 'inputs' | 'outputs',
+    field: TaskDefField,
+    i: number,
+    count: number,
+  ) {
+    const keyValid = KEY_PATTERN.test(field.key);
+    return (
+      <div className="nh-te__row nh-te__field-row" key={kind + ':' + field.key}>
+        <div className="nh-te__step-order">
+          <button
+            type="button"
+            className="nh-te__icon-btn"
+            onClick={() => onChange(ops.moveTaskDefField(config, taskDef.id, kind, field.key, -1))}
+            disabled={i === 0}
+            title="Move up"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="nh-te__icon-btn"
+            onClick={() => onChange(ops.moveTaskDefField(config, taskDef.id, kind, field.key, 1))}
+            disabled={i === count - 1}
+            title="Move down"
+          >
+            ↓
+          </button>
+        </div>
+        <input
+          className="nh-te__input"
+          placeholder="Label"
+          value={field.label}
+          onChange={(e) =>
+            onChange(ops.updateTaskDefField(config, taskDef.id, kind, field.key, { label: e.target.value }))
+          }
+        />
+        <input
+          className={'nh-te__input nh-te__input--key' + (keyValid ? '' : ' nh-te__input--invalid')}
+          placeholder="key"
+          value={field.key}
+          title={keyValid ? 'Field key' : 'Key must match [a-z0-9._-]+'}
+          onChange={(e) =>
+            onChange(
+              ops.updateTaskDefField(config, taskDef.id, kind, field.key, {
+                key: sanitizeKey(e.target.value),
+              }),
+            )
+          }
+        />
+        <select
+          className="nh-te__select"
+          value={field.type}
+          onChange={(e) =>
+            onChange(
+              ops.updateTaskDefField(config, taskDef.id, kind, field.key, {
+                type: e.target.value as TaskDefField['type'],
+              }),
+            )
+          }
+        >
+          <option value="text">text</option>
+          <option value="number">number</option>
+          <option value="date">date</option>
+          <option value="select">select</option>
+          <option value="bool">bool</option>
+        </select>
+        {field.type === 'select' && (
+          <input
+            className="nh-te__input"
+            placeholder="options, comma-separated"
+            value={(field.options ?? []).join(', ')}
+            onChange={(e) =>
+              onChange(
+                ops.updateTaskDefField(config, taskDef.id, kind, field.key, {
+                  options: e.target.value
+                    .split(',')
+                    .map((o) => o.trim())
+                    .filter(Boolean),
+                }),
+              )
+            }
+          />
+        )}
+        {kind === 'outputs' && (
+          <label
+            className="nh-te__checkbox"
+            title="Required output = the task's evidence of completion"
+          >
+            <input
+              type="checkbox"
+              checked={!!field.required}
+              onChange={(e) =>
+                onChange(
+                  ops.updateTaskDefField(config, taskDef.id, kind, field.key, {
+                    required: e.target.checked,
+                  }),
+                )
+              }
+            />
+            required (evidence)
+          </label>
+        )}
+        <button
+          type="button"
+          className="nh-te__icon-btn"
+          onClick={() => onChange(ops.removeTaskDefField(config, taskDef.id, kind, field.key))}
+          title="Remove field"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  /** The neededWhen condition picker for one task-def. Upstream = any task-def
+   *  strictly EARLIER in the chain (`upstream`); an empty selection means
+   *  "always needed" (neededWhen cleared to null). */
+  function renderNeededWhen(taskDef: TaskDef, upstream: TaskDef[]) {
+    const cond = taskDef.neededWhen ?? null;
+    const parsed = cond ? splitRef(cond.ref) : null;
+    // The upstream def the current condition points at (if still valid).
+    const selectedDef = parsed ? upstream.find((d) => d.id === parsed.taskDefId) : undefined;
+
+    if (upstream.length === 0) {
+      return (
+        <p className="nh-te__hint nh-te__needed-note">
+          Always needed — the first task-def in the chain has no upstream output to gate on.
+        </p>
+      );
+    }
+
+    function setCond(next: Partial<{ taskDefId: string; key: string; op: TaskDefCondition['op']; value: string }>) {
+      const curTaskDefId = next.taskDefId ?? parsed?.taskDefId ?? '';
+      const curKey = next.key ?? parsed?.key ?? '';
+      const curOp = next.op ?? cond?.op ?? '==';
+      const curValue = next.value ?? (cond ? String(cond.value) : '');
+      if (!curTaskDefId) {
+        // No upstream selected → "always needed".
+        onChange(ops.setTaskDefNeededWhen(config, taskDef.id, null));
+        return;
+      }
+      onChange(
+        ops.setTaskDefNeededWhen(config, taskDef.id, {
+          ref: `${curTaskDefId}.${curKey}`,
+          op: curOp,
+          value: curValue,
+        }),
+      );
+    }
+
+    return (
+      <div className="nh-te__needed">
+        <span className="nh-te__subhead">Needed when</span>
+        <select
+          className="nh-te__select"
+          value={parsed?.taskDefId ?? ''}
+          title="Upstream task-def whose output gates this step"
+          onChange={(e) => {
+            const id = e.target.value;
+            if (!id) {
+              onChange(ops.setTaskDefNeededWhen(config, taskDef.id, null));
+              return;
+            }
+            const def = upstream.find((d) => d.id === id);
+            const firstKey = def?.outputs[0]?.key ?? '';
+            setCond({ taskDefId: id, key: firstKey });
+          }}
+        >
+          <option value="">Always needed</option>
+          {upstream.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name || 'Untitled step'}
+            </option>
+          ))}
+        </select>
+        {selectedDef && (
+          <>
+            <select
+              className="nh-te__select"
+              value={parsed?.key ?? ''}
+              title="Which output of the upstream task-def to compare"
+              onChange={(e) => setCond({ key: e.target.value })}
+            >
+              {selectedDef.outputs.length === 0 && <option value="">(no outputs)</option>}
+              {selectedDef.outputs.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label || o.key}
+                </option>
+              ))}
+            </select>
+            <select
+              className="nh-te__select nh-te__select--op"
+              value={cond?.op ?? '=='}
+              title="Comparison"
+              onChange={(e) => setCond({ op: e.target.value as TaskDefCondition['op'] })}
+            >
+              {COND_OPS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+            <input
+              className="nh-te__input"
+              placeholder="value"
+              value={cond ? String(cond.value) : ''}
+              onChange={(e) => setCond({ value: e.target.value })}
+            />
+            <button
+              type="button"
+              className="nh-te__icon-btn"
+              onClick={() => onChange(ops.setTaskDefNeededWhen(config, taskDef.id, null))}
+              title="Clear condition (always needed)"
+            >
+              ✕
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <section className="nh-te nh-te--inline" aria-label="Customize template">
       <div className="nh-te__head">
@@ -172,6 +428,118 @@ export function TemplateEditor({
       </div>
 
       <div className="nh-te__body">
+        {tab === 'tasks' && (
+          <div className="nh-te__section">
+            <p className="nh-te__hint">
+              A template is an ordered chain of task-defs. Each task-def owns its own inputs (the
+              human supplies at creation) and outputs (the agent produces; required outputs are the
+              step&apos;s evidence). The new-task form and roster columns are built by aggregating
+              every task-def&apos;s fields.
+            </p>
+            {taskDefs.length === 0 && (
+              <p className="nh-te__empty">No task-defs yet — add one to start the chain.</p>
+            )}
+            {taskDefs.map((taskDef, i) => {
+              const upstream = taskDefs.slice(0, i);
+              return (
+                <div className="nh-te__taskdef" key={taskDef.id}>
+                  <div className="nh-te__row nh-te__taskdef-head">
+                    <div className="nh-te__step-order">
+                      <button
+                        type="button"
+                        className="nh-te__icon-btn"
+                        onClick={() => onChange(ops.moveTaskDef(config, taskDef.id, -1))}
+                        disabled={i === 0}
+                        title="Move up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="nh-te__icon-btn"
+                        onClick={() => onChange(ops.moveTaskDef(config, taskDef.id, 1))}
+                        disabled={i === taskDefs.length - 1}
+                        title="Move down"
+                      >
+                        ↓
+                      </button>
+                    </div>
+                    <span className="nh-te__taskdef-num">{i + 1}</span>
+                    <input
+                      className="nh-te__input nh-te__input--wide"
+                      placeholder="Task-def name"
+                      value={taskDef.name}
+                      onChange={(e) => onChange(ops.updateTaskDef(config, taskDef.id, { name: e.target.value }))}
+                    />
+                    <button
+                      type="button"
+                      className="nh-te__icon-btn"
+                      onClick={() => onChange(ops.removeTaskDef(config, taskDef.id))}
+                      title="Remove task-def"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <textarea
+                    className="nh-te__input nh-te__textarea"
+                    placeholder="Notes — base agent prompt for this step (optional)"
+                    value={taskDef.notes ?? ''}
+                    onChange={(e) => onChange(ops.updateTaskDef(config, taskDef.id, { notes: e.target.value }))}
+                  />
+
+                  {renderNeededWhen(taskDef, upstream)}
+
+                  <div className="nh-te__taskdef-fields">
+                    <span className="nh-te__subhead">Inputs</span>
+                    {taskDef.inputs.length === 0 && (
+                      <p className="nh-te__empty">No input fields.</p>
+                    )}
+                    {taskDef.inputs.map((f, fi) =>
+                      renderTaskDefField(taskDef, 'inputs', f, fi, taskDef.inputs.length),
+                    )}
+                    <button
+                      type="button"
+                      className="nh-te__add-btn"
+                      onClick={() =>
+                        onChange(ops.addTaskDefField(config, taskDef.id, 'inputs', { label: 'New input' }).cfg)
+                      }
+                    >
+                      + Add input
+                    </button>
+                  </div>
+
+                  <div className="nh-te__taskdef-fields">
+                    <span className="nh-te__subhead">Outputs</span>
+                    {taskDef.outputs.length === 0 && (
+                      <p className="nh-te__empty">No output fields.</p>
+                    )}
+                    {taskDef.outputs.map((f, fi) =>
+                      renderTaskDefField(taskDef, 'outputs', f, fi, taskDef.outputs.length),
+                    )}
+                    <button
+                      type="button"
+                      className="nh-te__add-btn"
+                      onClick={() =>
+                        onChange(ops.addTaskDefField(config, taskDef.id, 'outputs', { label: 'New output' }).cfg)
+                      }
+                    >
+                      + Add output
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              className="nh-te__add-btn"
+              onClick={() => onChange(ops.addTaskDef(config).cfg)}
+            >
+              + Add task-def
+            </button>
+          </div>
+        )}
+
         {tab === 'fields' && (
           <div className="nh-te__section">
             {config.fields.length === 0 && <p className="nh-te__empty">No custom fields yet.</p>}
@@ -395,6 +763,10 @@ export function TemplateEditor({
 
         {tab === 'steps' && (
           <div className="nh-te__section">
+            <p className="nh-te__legacy">
+              <span className="nh-te__badge nh-te__badge--legacy">Legacy</span>
+              Superseded by the Tasks tab — a step is now a task-def. Kept for existing templates.
+            </p>
             {config.steps.length === 0 && <p className="nh-te__empty">No steps yet.</p>}
             {config.steps.map((step, i) => (
               <div className="nh-te__row nh-te__step-row" key={step.id}>
@@ -456,6 +828,11 @@ export function TemplateEditor({
 
         {tab === 'chains' && (
           <div className="nh-te__section nh-te__chains">
+            <p className="nh-te__legacy">
+              <span className="nh-te__badge nh-te__badge--legacy">Legacy</span>
+              Superseded by the Tasks tab — task-defs are the ordered chain now. Kept for existing
+              templates.
+            </p>
             <div className="nh-te__chain-list">
               {chains.map((c) => (
                 <button
@@ -617,6 +994,11 @@ export function TemplateEditor({
 
         {tab === 'repeatable' && (
           <div className="nh-te__section">
+            <p className="nh-te__legacy">
+              <span className="nh-te__badge nh-te__badge--legacy">Legacy</span>
+              Superseded by the Tasks tab — a repeatable ≈ a single task-def. Kept for existing
+              templates.
+            </p>
             <p className="nh-te__hint">
               Repeatable tasks are templates you can spawn on demand (<em>Run now</em>) or on a
               schedule. A scheduled task repeats after each completion (the server spawns the next

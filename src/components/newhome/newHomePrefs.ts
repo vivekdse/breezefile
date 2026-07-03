@@ -18,6 +18,7 @@
 import type { TemplateConfig, TaskDef, TaskDefField, TaskDefCondition } from './types';
 import type { Task, TaskCreate } from '../../types';
 import { fm } from '../../bridge';
+import { buildTaskFieldsBlock, buildTaskOutputsBlock, buildTaskTemplateBlock } from './taskSchema.mjs';
 
 const KEY_PREFIX = 'fm.newHome.template.v1.';
 const UNSCOPED_KEY = `${KEY_PREFIX}__none__`;
@@ -423,4 +424,136 @@ async function instantiateChainImpl(
   }
 
   return [container, ...created];
+}
+
+// ─── Template instantiation (task-fb31518201da) ────────────────────────────
+//
+// instantiateTemplate turns a TemplateConfig's `taskDefs` (the docs/
+// task-templates-design.md model — see that doc's "Vocabulary" and
+// "Transport blocks" sections) into real tasks: one META PARENT task (the
+// "job") carrying the ordered task-def id list in a ```task-template block,
+// then one CHILD task per task-def, in order, linked via `parentTaskId` +
+// a linear `dependsOn` chain (mirrors instantiateChainImpl's container/step
+// linking above — same structural pattern, values-driven instead of
+// title-template-driven). ALL task-defs get a child, including conditional
+// (`neededWhen`) ones: the condition is evaluated client-side later from
+// `taskDefStatus` (taskSchema.mjs), not at instantiation time, so the linear
+// chain ordering holds regardless of which steps end up "not needed".
+//
+// Supersedes instantiateChain for the taskDefs model. instantiateChain stays
+// in place, unmodified, for the legacy ChainDef model (Repeatable Tasks /
+// free-form chains); the two share the small notes-joining helper below
+// rather than one copy-pasting the other (unify, don't mirror).
+
+/** Join notes parts with blank-line separators, dropping empty/whitespace-only
+ *  parts and trimming each — shared by instantiateTemplate's parent/child
+ *  notes assembly below. */
+function joinNotesParts(parts: (string | undefined | null)[]): string {
+  return parts
+    .map((p) => (typeof p === 'string' ? p.trim() : ''))
+    .filter((p) => p.length > 0)
+    .join('\n\n');
+}
+
+/** Split a flat `values` map — keyed by `fieldRef(taskDefId, key)` per the
+ *  TaskComposer/task-templates-design.md contract — into one bare-keyed map
+ *  scoped to a single task-def, so each child's ```task-fields block only
+ *  ever carries that task-def's own values. PHI: `values` flows through
+ *  in-memory only, never logged. */
+function valuesForTaskDef(
+  values: Record<string, string> | null | undefined,
+  taskDefId: string,
+): Record<string, string> {
+  const prefix = `${taskDefId}.`;
+  const out: Record<string, string> = {};
+  for (const [ref, v] of Object.entries(values ?? {})) {
+    if (ref.startsWith(prefix)) out[ref.slice(prefix.length)] = v;
+  }
+  return out;
+}
+
+/** Thrown by instantiateTemplate when a child create fails partway through.
+ *  The meta parent (and any children created before the failing one) are
+ *  NOT rolled back — `parentId`/`childIds` let the caller surface/resume the
+ *  partially-created job instead of silently losing it. Mirrors
+ *  instantiateChainImpl's behavior today: a throw from `createFn` propagates
+ *  as-is and whatever was already created stays created. */
+export class InstantiateTemplateError extends Error {
+  parentId: string;
+  childIds: string[];
+  override cause: unknown;
+  constructor(message: string, parentId: string, childIds: string[], cause: unknown) {
+    super(message);
+    this.name = 'InstantiateTemplateError';
+    this.parentId = parentId;
+    this.childIds = childIds;
+    this.cause = cause;
+  }
+}
+
+/** Turn one template instantiation ("job") into a meta parent task + one
+ *  linearly-chained child task per task-def. See the module comment above
+ *  and docs/task-templates-design.md for the contract. */
+export async function instantiateTemplate(opts: {
+  templateId: string;
+  template: TemplateConfig;
+  jobTitle: string;
+  projectId?: string;
+  /** Flat map keyed by `fieldRef(taskDefId, fieldKey)` — INPUT values only.
+   *  PHI: shaped in memory only, never logged. */
+  values: Record<string, string>;
+  createTask: (input: {
+    title: string;
+    notes: string;
+    projectId?: string;
+    parentTaskId?: string;
+    dependsOn?: string[];
+  }) => Promise<{ id: string }>;
+}): Promise<{ parentId: string; childIds: string[] }> {
+  const { templateId, template, jobTitle, projectId, values, createTask } = opts;
+  const taskDefs = template.taskDefs ?? [];
+  const projectFields = projectId ? { projectId } : {};
+
+  const parentNotes = joinNotesParts([
+    `Job created from template ${templateId}: ${taskDefs.length} task${taskDefs.length === 1 ? '' : 's'}.`,
+    buildTaskTemplateBlock(templateId, taskDefs),
+  ]);
+  const parent = await createTask({
+    title: jobTitle,
+    notes: parentNotes,
+    ...projectFields,
+  });
+
+  const childIds: string[] = [];
+  let predecessorId: string | undefined;
+  for (const def of taskDefs) {
+    const defValues = valuesForTaskDef(values, def.id);
+    const notes = joinNotesParts([
+      def.notes,
+      buildTaskFieldsBlock(templateId, def.id, defValues),
+      buildTaskOutputsBlock(def),
+    ]);
+    let child: { id: string };
+    try {
+      child = await createTask({
+        title: `${jobTitle} — ${def.name}`,
+        notes,
+        parentTaskId: parent.id,
+        dependsOn: predecessorId ? [predecessorId] : undefined,
+        ...projectFields,
+      });
+    } catch (err) {
+      throw new InstantiateTemplateError(
+        `instantiateTemplate: failed creating child for task-def "${def.id}" ` +
+          `(${childIds.length} of ${taskDefs.length} children created before failure)`,
+        parent.id,
+        childIds,
+        err,
+      );
+    }
+    childIds.push(child.id);
+    predecessorId = child.id;
+  }
+
+  return { parentId: parent.id, childIds };
 }

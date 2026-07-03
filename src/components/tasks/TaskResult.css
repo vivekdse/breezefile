@@ -53,3 +53,33 @@
   /* Subtle zebra so wide rows stay readable. */
   background: color-mix(in srgb, var(--panel-2) 40%, transparent);
 }
+
+/* ── the `fields` renderer: a plain label/value definition list ─────────── */
+.tasks__result-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-2) 0;
+  margin: 0;
+}
+.tasks__result-field {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--rule-on-panel);
+}
+.tasks__result-field:last-child {
+  border-bottom: none;
+}
+.tasks__result-field-k {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted-on-panel);
+  margin: 0;
+}
+.tasks__result-field-v {
+  font-size: var(--fs-sm, var(--fs-md));
+  color: var(--text-on-panel);
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

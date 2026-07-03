@@ -9,11 +9,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   KNOWN_RESULT_TYPES,
   resultRendererKind,
   coerceCell,
   normalizeTablePayload,
+  normalizeFieldsPayload,
 } from '../src/components/tasks/taskResult.mjs';
 
 // ── resultRendererKind: the type→renderer dispatch key + fallback gate ───────
@@ -38,8 +41,31 @@ test('resultRendererKind falls back (null) for missing/unknown/malformed', () =>
   assert.equal(resultRendererKind(42), null);
 });
 
-test('table is a known result type', () => {
+test('table and fields are known result types', () => {
   assert.ok(KNOWN_RESULT_TYPES.includes('table'));
+  assert.ok(KNOWN_RESULT_TYPES.includes('fields'));
+});
+
+// ── parity: KNOWN_RESULT_TYPES vs TaskResult.tsx's RESULT_RENDERERS ────────
+// TaskResult.tsx is TSX (no transpile step under plain `node --test`), so we
+// can't import it directly here; instead we statically extract the
+// RESULT_RENDERERS map's keys from its source text and assert every known
+// type has a registered renderer (and vice versa) — the drift the module's
+// own comments warn about.
+test('every KNOWN_RESULT_TYPES entry has a RESULT_RENDERERS entry in TaskResult.tsx (and vice versa)', () => {
+  const tsxPath = fileURLToPath(
+    new URL('../src/components/tasks/TaskResult.tsx', import.meta.url),
+  );
+  const src = readFileSync(tsxPath, 'utf8');
+  const match = /RESULT_RENDERERS[\s\S]*?=\s*\{([\s\S]*?)\};/.exec(src);
+  assert.ok(match, 'RESULT_RENDERERS map not found in TaskResult.tsx');
+  const body = match[1];
+  const registeredTypes = [...body.matchAll(/^\s*([a-zA-Z0-9_]+):/gm)].map((m) => m[1]);
+  assert.deepEqual(
+    [...registeredTypes].sort(),
+    [...KNOWN_RESULT_TYPES].sort(),
+    'RESULT_RENDERERS keys must exactly match KNOWN_RESULT_TYPES',
+  );
 });
 
 // ── coerceCell: safe stringification of any cell value ───────────────────────
@@ -121,6 +147,48 @@ test('normalizeTablePayload falls back (null) for empty/malformed payloads', () 
   assert.equal(normalizeTablePayload({}), null);
   assert.equal(normalizeTablePayload({ headers: [], rows: [] }), null);
   assert.equal(normalizeTablePayload({ headers: 'no', rows: 'no' }), null);
+});
+
+// ── normalizeFieldsPayload: label/value entries for the `fields` renderer ───
+test('normalizeFieldsPayload produces ordered {key,value} entries', () => {
+  const f = normalizeFieldsPayload({
+    taskDefId: 'intake',
+    fields: { has_stains: 'Yes', item_count: 12, urgent: true },
+  });
+  assert.ok(f);
+  assert.equal(f.taskDefId, 'intake');
+  assert.deepEqual(f.entries, [
+    { key: 'has_stains', value: 'Yes' },
+    { key: 'item_count', value: '12' },
+    { key: 'urgent', value: 'true' },
+  ]);
+});
+
+test('normalizeFieldsPayload allows a missing taskDefId (generic fields result)', () => {
+  const f = normalizeFieldsPayload({ fields: { note: 'ok' } });
+  assert.ok(f);
+  assert.equal(f.taskDefId, null);
+  assert.deepEqual(f.entries, [{ key: 'note', value: 'ok' }]);
+});
+
+test('normalizeFieldsPayload coerces null/undefined values to blank cells, not "null"', () => {
+  const f = normalizeFieldsPayload({ fields: { a: null, b: undefined } });
+  assert.ok(f);
+  assert.deepEqual(f.entries, [
+    { key: 'a', value: '' },
+    { key: 'b', value: '' },
+  ]);
+});
+
+test('normalizeFieldsPayload falls back (null) for empty/malformed payloads', () => {
+  assert.equal(normalizeFieldsPayload(null), null);
+  assert.equal(normalizeFieldsPayload(undefined), null);
+  assert.equal(normalizeFieldsPayload('nope'), null);
+  assert.equal(normalizeFieldsPayload(42), null);
+  assert.equal(normalizeFieldsPayload({}), null);
+  assert.equal(normalizeFieldsPayload({ fields: {} }), null);
+  assert.equal(normalizeFieldsPayload({ fields: 'no' }), null);
+  assert.equal(normalizeFieldsPayload({ fields: [1, 2] }), null);
 });
 
 test('normalizeTablePayload drops non-array rows without throwing', () => {
