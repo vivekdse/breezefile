@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { fm, type UrlSuggestion } from '../bridge';
 import { SavePasswordPrompt, type CapturedCredential } from './SavePasswordPrompt';
 import { Icon } from './Icon';
+import { useIsMac } from '../platform';
 
 // The ONE embedded-browser surface (browser/operator unification). Drives a
 // main-process WebContentsView (created by electron/browser/views.ts) over the
@@ -63,6 +64,12 @@ export function BrowserSurface({
 }) {
   // Operator mode binds to a pre-created view; tab mode attaches its own.
   const operatorMode = viewId != null;
+  // Cmd (macOS) vs Ctrl (Linux/Windows) for the browser shortcuts below. Read
+  // from PlatformContext via useIsMac() — never navigator/process.platform in
+  // the renderer (docs/cross-platform-strategy.md rule 5). We check the exact
+  // modifier for the platform so a stray Ctrl on macOS (or Cmd on Linux)
+  // doesn't fire a browser action.
+  const isMac = useIsMac();
   const viewRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -395,8 +402,73 @@ export function BrowserSurface({
       });
   };
 
+  // Chromium-style browser shortcuts, SCOPED to this surface: the handler is
+  // attached to the `.browser-pane` container's onKeyDown (below), so it only
+  // fires when focus is inside a mounted browser surface — it never installs a
+  // document/window listener, so it can't hijack keys app-wide when the browser
+  // isn't visible. Maps the platform modifier + key to the browser actions that
+  // ALREADY exist on this surface (back/forward/reload/focus-address). We do NOT
+  // bind new-tab (⌘T) — this surface has no tab model; App owns tabs and reuses a
+  // single browser tab — or bookmark (⌘D) — there is no bookmark action here
+  // (bookmark is only an autocomplete suggestion kind).
+  const onPaneKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const id = idRef.current;
+    if (id == null) return;
+    // The platform's primary modifier: Cmd on macOS, Ctrl elsewhere.
+    const primaryMod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+
+    // Alt+Left / Alt+Right → back / forward (works regardless of the primary mod).
+    if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      if (e.key === 'ArrowLeft') {
+        if (nav.canGoBack) {
+          e.preventDefault();
+          fm.browserBack(id);
+        }
+        return;
+      }
+      if (e.key === 'ArrowRight') {
+        if (nav.canGoForward) {
+          e.preventDefault();
+          fm.browserForward(id);
+        }
+        return;
+      }
+    }
+
+    if (!primaryMod || e.altKey || e.shiftKey) return;
+
+    // ⌘/Ctrl+L → focus + select the address bar.
+    if (e.key === 'l' || e.key === 'L') {
+      e.preventDefault();
+      addrRef.current?.focus();
+      addrRef.current?.select();
+      return;
+    }
+    // ⌘/Ctrl+R → reload.
+    if (e.key === 'r' || e.key === 'R') {
+      e.preventDefault();
+      fm.browserReload(id);
+      return;
+    }
+    // ⌘/Ctrl+[ / ⌘/Ctrl+] → back / forward (Chromium's alt shortcuts).
+    if (e.key === '[') {
+      if (nav.canGoBack) {
+        e.preventDefault();
+        fm.browserBack(id);
+      }
+      return;
+    }
+    if (e.key === ']') {
+      if (nav.canGoForward) {
+        e.preventDefault();
+        fm.browserForward(id);
+      }
+      return;
+    }
+  };
+
   return (
-    <div className="browser-pane" ref={paneRef}>
+    <div className="browser-pane" ref={paneRef} onKeyDown={onPaneKeyDown}>
       <div className="browser-pane__bar" ref={barRef}>
         <button
           className="browser-pane__btn"
