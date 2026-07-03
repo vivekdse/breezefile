@@ -15,7 +15,7 @@
 // `TemplateConfig`, and a plain `TemplateConfig` without `chains` still
 // satisfies `TemplateConfigExt` since the field is optional).
 
-import type { TemplateConfig } from './types';
+import type { TemplateConfig, TaskDef, TaskDefField, TaskDefCondition } from './types';
 import type { Task, TaskCreate } from '../../types';
 import { fm } from '../../bridge';
 
@@ -80,6 +80,7 @@ const DEFAULT_TEMPLATE: TemplateConfigExt = {
   steps: [],
   chains: [],
   repeatables: [],
+  taskDefs: [],
 };
 
 function keyFor(projectId: string | null | undefined): string {
@@ -139,6 +140,66 @@ function sanitizeChain(v: unknown): ChainDef | null {
   return { id: c.id, name: c.name, entries };
 }
 
+// task-8b694714b13c — TaskDef round-trip. Definitions only (non-PHI); see
+// types.ts / taskSchema.mjs for the PHI split (values never live here).
+
+function isTaskDefFieldShape(v: unknown): v is TaskDefField {
+  if (!v || typeof v !== 'object') return false;
+  const f = v as Record<string, unknown>;
+  if (typeof f.key !== 'string' || typeof f.label !== 'string') return false;
+  if (!['text', 'number', 'date', 'select', 'bool'].includes(f.type as string)) return false;
+  if (f.options !== undefined && !Array.isArray(f.options)) return false;
+  if (f.required !== undefined && typeof f.required !== 'boolean') return false;
+  return true;
+}
+
+function sanitizeTaskDefField(v: unknown): TaskDefField | null {
+  if (!isTaskDefFieldShape(v)) return null;
+  const out: TaskDefField = { key: v.key, label: v.label, type: v.type };
+  if (Array.isArray(v.options)) out.options = v.options.filter((o): o is string => typeof o === 'string');
+  if (typeof v.required === 'boolean') out.required = v.required;
+  return out;
+}
+
+function sanitizeTaskDefCondition(v: unknown): TaskDefCondition | null {
+  if (!v || typeof v !== 'object') return null;
+  const c = v as Record<string, unknown>;
+  if (typeof c.ref !== 'string') return null;
+  if (!['==', '!=', '<', '>'].includes(c.op as string)) return null;
+  if (typeof c.value !== 'string' && typeof c.value !== 'number') return null;
+  return { ref: c.ref, op: c.op as TaskDefCondition['op'], value: c.value as string | number };
+}
+
+function sanitizeTaskDef(v: unknown): TaskDef | null {
+  if (!v || typeof v !== 'object') return null;
+  const d = v as Record<string, unknown>;
+  if (typeof d.id !== 'string' || typeof d.name !== 'string') return null;
+  const inputs = Array.isArray(d.inputs)
+    ? (d.inputs.map(sanitizeTaskDefField).filter(Boolean) as TaskDefField[])
+    : [];
+  const outputs = Array.isArray(d.outputs)
+    ? (d.outputs.map(sanitizeTaskDefField).filter(Boolean) as TaskDefField[])
+    : [];
+  const out: TaskDef = { id: d.id, name: d.name, inputs, outputs };
+  if (typeof d.notes === 'string') out.notes = d.notes;
+  if (d.neededWhen === null) out.neededWhen = null;
+  else if (d.neededWhen !== undefined) {
+    const cond = sanitizeTaskDefCondition(d.neededWhen);
+    if (cond) out.neededWhen = cond;
+  }
+  return out;
+}
+
+/** task-8b694714b13c — a legacy repeatable maps conceptually to a single
+ *  TaskDef with no fields (a one-step, field-less template entry). NOT wired
+ *  into instantiateChain/instantiateTemplate here — that migration path is
+ *  T4's (task-fb31518201da); this is just the pure, additive conversion T4
+ *  can reach for a low-risk "coexistence" migration without T1 owning any of
+ *  the instantiation logic. */
+export function repeatableToTaskDef(rep: RepeatableTaskDef): TaskDef {
+  return { id: rep.id, name: rep.title, notes: rep.notes, inputs: [], outputs: [] };
+}
+
 function sanitizeRepeatable(v: unknown): RepeatableTaskDef | null {
   if (!v || typeof v !== 'object') return null;
   const r = v as Record<string, unknown>;
@@ -179,7 +240,14 @@ function sanitize(parsed: unknown): TemplateConfigExt {
   const repeatables = Array.isArray(p.repeatables)
     ? (p.repeatables.map(sanitizeRepeatable).filter(Boolean) as RepeatableTaskDef[])
     : [];
-  return { fields, columns, approvalRules, steps, chains, repeatables };
+  // Additive/non-regression: a template with no `taskDefs` (every template
+  // saved before task-8b694714b13c) sanitizes to an empty array here, so
+  // every existing consumer that doesn't know about TaskDef sees the exact
+  // same shape it always has.
+  const taskDefs = Array.isArray(p.taskDefs)
+    ? (p.taskDefs.map(sanitizeTaskDef).filter(Boolean) as TaskDef[])
+    : [];
+  return { fields, columns, approvalRules, steps, chains, repeatables, taskDefs };
 }
 
 /** Read the template config for a project (or the unscoped default when

@@ -20,7 +20,7 @@ import type {
   ChainStepTemplate,
   RepeatableTaskDef,
 } from './newHomePrefs';
-import type { TemplateField } from './types';
+import type { TemplateField, TaskDef, TaskDefField, TaskDefCondition } from './types';
 
 let uidCounter = 0;
 export function uid(prefix: string): string {
@@ -296,4 +296,158 @@ export function removeRepeatable(cfg: TemplateConfigExt, id: string): TemplateCo
 
 export function moveRepeatable(cfg: TemplateConfigExt, id: string, dir: -1 | 1): TemplateConfigExt {
   return { ...cfg, repeatables: moveById(repeatableList(cfg), id, dir) };
+}
+
+// ─── Task defs (task-8b694714b13c, docs/task-templates-design.md) ──────────
+//
+// A template is an ordered TaskDef[]; each TaskDef owns its own `inputs` and
+// `outputs` field lists (see types.ts). Same op style as everything above:
+// pure, addressed by stable id/key, reorder via (id, dir).
+
+function taskDefList(cfg: TemplateConfigExt): TaskDef[] {
+  return cfg.taskDefs ?? [];
+}
+
+/** Add a task-def and return the new config plus its id (callers that select
+ *  the freshly-added task-def need it, same pattern as addChain). */
+export function addTaskDef(
+  cfg: TemplateConfigExt,
+  patch: Partial<Omit<TaskDef, 'inputs' | 'outputs'>> = {},
+): { cfg: TemplateConfigExt; taskDefId: string } {
+  const taskDef: TaskDef = {
+    id: uid('taskdef'),
+    name: 'New step',
+    inputs: [],
+    outputs: [],
+    ...patch,
+  };
+  return { cfg: { ...cfg, taskDefs: [...taskDefList(cfg), taskDef] }, taskDefId: taskDef.id };
+}
+
+export function updateTaskDef(
+  cfg: TemplateConfigExt,
+  taskDefId: string,
+  patch: Partial<Omit<TaskDef, 'id' | 'inputs' | 'outputs'>>,
+): TemplateConfigExt {
+  return {
+    ...cfg,
+    taskDefs: taskDefList(cfg).map((d) => (d.id === taskDefId ? { ...d, ...patch } : d)),
+  };
+}
+
+export function removeTaskDef(cfg: TemplateConfigExt, taskDefId: string): TemplateConfigExt {
+  return { ...cfg, taskDefs: taskDefList(cfg).filter((d) => d.id !== taskDefId) };
+}
+
+export function moveTaskDef(cfg: TemplateConfigExt, taskDefId: string, dir: -1 | 1): TemplateConfigExt {
+  return { ...cfg, taskDefs: moveById(taskDefList(cfg), taskDefId, dir) };
+}
+
+/** Set (or clear, with `cond = null`) a task-def's `neededWhen` gate. */
+export function setTaskDefNeededWhen(
+  cfg: TemplateConfigExt,
+  taskDefId: string,
+  cond: TaskDefCondition | null,
+): TemplateConfigExt {
+  return {
+    ...cfg,
+    taskDefs: taskDefList(cfg).map((d) => (d.id === taskDefId ? { ...d, neededWhen: cond } : d)),
+  };
+}
+
+type TaskDefFieldKind = 'inputs' | 'outputs';
+
+function fieldListOf(taskDef: TaskDef, kind: TaskDefFieldKind): TaskDefField[] {
+  return kind === 'inputs' ? taskDef.inputs : taskDef.outputs;
+}
+
+/** Add a field (input or output) to a task-def. The key is slugified from the
+ *  label and de-duped against the existing list in that same kind (inputs and
+ *  outputs are addressed independently, so the same key may appear once as an
+ *  input and once as an output). Returns the new config plus the field's key. */
+export function addTaskDefField(
+  cfg: TemplateConfigExt,
+  taskDefId: string,
+  kind: TaskDefFieldKind,
+  patch: Partial<TaskDefField> & { label: string },
+): { cfg: TemplateConfigExt; key: string } {
+  const taskDef = taskDefList(cfg).find((d) => d.id === taskDefId);
+  const existing = taskDef ? fieldListOf(taskDef, kind).map((f) => f.key) : [];
+  let key = slugify(patch.key ?? patch.label);
+  let n = 2;
+  while (existing.includes(key)) {
+    key = `${slugify(patch.key ?? patch.label)}_${n}`;
+    n += 1;
+  }
+  const field: TaskDefField = { key, label: patch.label, type: patch.type ?? 'text' };
+  if (patch.options) field.options = patch.options;
+  if (patch.required !== undefined) field.required = patch.required;
+  return {
+    cfg: {
+      ...cfg,
+      taskDefs: taskDefList(cfg).map((d) =>
+        d.id === taskDefId ? { ...d, [kind]: [...fieldListOf(d, kind), field] } : d,
+      ),
+    },
+    key,
+  };
+}
+
+export function updateTaskDefField(
+  cfg: TemplateConfigExt,
+  taskDefId: string,
+  kind: TaskDefFieldKind,
+  key: string,
+  patch: Partial<TaskDefField>,
+): TemplateConfigExt {
+  return {
+    ...cfg,
+    taskDefs: taskDefList(cfg).map((d) =>
+      d.id === taskDefId
+        ? { ...d, [kind]: fieldListOf(d, kind).map((f) => (f.key === key ? { ...f, ...patch } : f)) }
+        : d,
+    ),
+  };
+}
+
+export function removeTaskDefField(
+  cfg: TemplateConfigExt,
+  taskDefId: string,
+  kind: TaskDefFieldKind,
+  key: string,
+): TemplateConfigExt {
+  return {
+    ...cfg,
+    taskDefs: taskDefList(cfg).map((d) =>
+      d.id === taskDefId ? { ...d, [kind]: fieldListOf(d, kind).filter((f) => f.key !== key) } : d,
+    ),
+  };
+}
+
+/** Move a field within a task-def's input or output list by key (fields have
+ *  no `id`, only `key`, so this can't reuse `moveById` directly). */
+function moveByKey<T extends { key: string }>(arr: T[], key: string, dir: -1 | 1): T[] {
+  const index = arr.findIndex((x) => x.key === key);
+  if (index < 0) return arr;
+  const target = index + dir;
+  if (target < 0 || target >= arr.length) return arr;
+  const next = arr.slice();
+  const [item] = next.splice(index, 1);
+  next.splice(target, 0, item);
+  return next;
+}
+
+export function moveTaskDefField(
+  cfg: TemplateConfigExt,
+  taskDefId: string,
+  kind: TaskDefFieldKind,
+  key: string,
+  dir: -1 | 1,
+): TemplateConfigExt {
+  return {
+    ...cfg,
+    taskDefs: taskDefList(cfg).map((d) =>
+      d.id === taskDefId ? { ...d, [kind]: moveByKey(fieldListOf(d, kind), key, dir) } : d,
+    ),
+  };
 }

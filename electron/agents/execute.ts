@@ -12,6 +12,12 @@ import type { Task, TaskRun } from '../tasks';
 import { getAgent, defaultAgentId } from './registry';
 import type { AgentRunResult } from './types';
 import { breezeHost } from '../core/host';
+// task-5170073890ed (T7) — when a task's body carries a ```task-outputs
+// block (docs/task-templates-design.md), tell the agent what evidence it
+// owes and how to submit it. Pure/Electron-free .mjs, same pattern as
+// electron/typebuild/credential-normalize.mjs, so it stays unit-testable
+// under `node --test` with no Electron in the loop.
+import { renderTaskOutputsInstructions } from '../typebuild/task-outputs-instructions.mjs';
 
 const RUNS_ROOT = path.join(os.homedir(), '.breezefile', 'runs');
 
@@ -308,10 +314,21 @@ export async function executeTaskRun(
 
 /** Compose the prompt the agent sees. Override wins; otherwise we
  *  weave together the task's title + notes + a small context preamble
- *  so the agent knows why it's been invoked unattended. */
+ *  so the agent knows why it's been invoked unattended.
+ *
+ *  task-5170073890ed (T7) — either way, when the EFFECTIVE body (auto_prompt
+ *  when set — this is where a headless TypeBuild run via daemon/breezed.ts
+ *  carries the decrypted task body verbatim, see syntheticTaskFrom — else
+ *  `task.notes`) carries a ```task-outputs block, we append the evidence
+ *  instructions section so the agent knows to call submit_task_result before
+ *  submit_task. A body with no block renders '' and appends nothing, so
+ *  every pre-existing task's prompt is byte-identical to today
+ *  (NON-REGRESSION). */
 export function buildPrompt(task: Task, cwd: string = task.folder): string {
   if (task.auto_prompt && task.auto_prompt.trim()) {
-    return task.auto_prompt.trim();
+    const base = task.auto_prompt.trim();
+    const outputs = renderTaskOutputsInstructions(base);
+    return outputs ? `${base}\n\n${outputs}` : base;
   }
   const parts: string[] = [];
   parts.push(
@@ -324,6 +341,11 @@ export function buildPrompt(task: Task, cwd: string = task.folder): string {
   if (task.notes && task.notes.trim()) {
     parts.push('');
     parts.push(task.notes.trim());
+  }
+  const outputs = renderTaskOutputsInstructions(task.notes ?? '');
+  if (outputs) {
+    parts.push('');
+    parts.push(outputs);
   }
   return parts.join('\n');
 }

@@ -101,6 +101,48 @@ export type TemplateConfig = {
   columns: string[];
   approvalRules: { id: string; description: string }[];
   steps: { id: string; name: string; description: string; humanGate: boolean }[];
+  /** task-8b694714b13c / docs/task-templates-design.md — a template is a
+   *  domain-neutral chain of TaskDefs; the template itself holds no fields of
+   *  its own (forms/columns are built by aggregating every task-def's fields,
+   *  see taskSchema.mjs `aggregateInputs`). Optional/additive: a template
+   *  without `taskDefs` behaves exactly as today (chains/steps/repeatables),
+   *  and existing consumers that only know `TemplateConfig` keep compiling. */
+  taskDefs?: TaskDef[];
+};
+
+/** task-8b694714b13c — one input or output field on a TaskDef. Definitions
+ *  (key/label/type/options/required) are NON-PHI configuration; the VALUE a
+ *  human/agent later fills in for a given task is the PHI, and it never rides
+ *  on this type — see the transport-block contract in taskSchema.mjs. */
+export type TaskDefField = {
+  key: string; // [a-z0-9._-]+, unique within the task-def
+  label: string;
+  type: 'text' | 'number' | 'date' | 'select' | 'bool';
+  options?: string[]; // select only
+  required?: boolean; // OUTPUT fields: required === evidence
+};
+
+/** task-8b694714b13c — a conditional gate on a downstream TaskDef, keyed off
+ *  an UPSTREAM task-def's output. `ref` is a `fieldRef` string
+ *  ("<taskDefId>.<outputKey>", see taskSchema.mjs). */
+export type TaskDefCondition = {
+  ref: string; // "<taskDefId>.<outputKey>" of an UPSTREAM task-def
+  op: '==' | '!=' | '<' | '>';
+  value: string | number;
+};
+
+/** task-8b694714b13c — the smallest primitive in a template: one step that
+ *  owns its own input fields (human provides at creation) and output fields
+ *  (agent produces; `required` outputs are the step's evidence). See
+ *  docs/task-templates-design.md for the full contract (vocabulary, transport
+ *  blocks, status derivation). */
+export type TaskDef = {
+  id: string; // slug, unique within the template
+  name: string;
+  notes?: string; // base agent prompt for this step
+  inputs: TaskDefField[];
+  outputs: TaskDefField[];
+  neededWhen?: TaskDefCondition | null; // absent/null = always needed
 };
 
 /** One entry in a task's evidence/activity trail (TaskDetailDialog). */
