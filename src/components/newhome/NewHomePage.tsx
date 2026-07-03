@@ -108,13 +108,21 @@ export function NewHomePage() {
     function onTemplateChanged() {
       setTemplateVersion((v) => v + 1);
     }
+    // Copilot select_home_project drives the project picker (detail.projectId,
+    // or null/'' for "All projects"). Same setter the <select> onChange calls.
+    function onSelectProject(e: Event) {
+      const id = (e as CustomEvent<{ projectId?: string | null }>).detail?.projectId;
+      setSelectedProjectId(id ? id : null);
+    }
     window.addEventListener('fm:newhome:filter', onFilter);
     window.addEventListener('fm:newhome:openTask', onOpenTask);
     window.addEventListener('fm:newhome:templateChanged', onTemplateChanged);
+    window.addEventListener('fm:newhome:selectProject', onSelectProject);
     return () => {
       window.removeEventListener('fm:newhome:filter', onFilter);
       window.removeEventListener('fm:newhome:openTask', onOpenTask);
       window.removeEventListener('fm:newhome:templateChanged', onTemplateChanged);
+      window.removeEventListener('fm:newhome:selectProject', onSelectProject);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -139,12 +147,13 @@ export function NewHomePage() {
     setNewHomeContext({
       surface: 'new-home',
       project: selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null,
+      availableProjects: projects.map((p) => ({ id: p.id, name: p.name })),
       counts,
       needsYou: tasks
         .filter((t) => t.status === 'needs')
         .map((t) => ({ id: t.id, title: t.title })),
     });
-  }, [selectedProject, counts, tasks]);
+  }, [selectedProject, projects, counts, tasks]);
 
   useEffect(() => clearNewHomeContext, []);
 

@@ -17,7 +17,11 @@ export type NeedsYouTaskSummary = { id: string; title: string };
 export type NewHomeContext = {
   /** Which app surface is focused; 'other' when New Home isn't mounted. */
   surface: 'new-home' | 'other';
+  /** The project the New Home picker is currently scoped to (null = All). */
   project: { id: string; name: string } | null;
+  /** Every project the picker offers (id + name), so the copilot can SEE the
+   *  options and pick one via the select_home_project action. NON-PHI. */
+  availableProjects: { id: string; name: string }[];
   counts: Record<'done' | 'progress' | 'queued' | 'needs' | 'failed', number>;
   /** Titles + ids only (NOT bodies) of tasks in the 'needs' bucket. */
   needsYou: NeedsYouTaskSummary[];
@@ -26,6 +30,7 @@ export type NewHomeContext = {
 const EMPTY: NewHomeContext = {
   surface: 'other',
   project: null,
+  availableProjects: [],
   counts: { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 },
   needsYou: [],
 };
