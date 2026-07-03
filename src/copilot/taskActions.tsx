@@ -27,7 +27,7 @@ export function TaskActions() {
   // so the copilot can retrieve/act on ANY task, not just the ones rendered on
   // the current page (task-24ea35660cd0). Not scoped to the active project.
   const { tasks } = useTasks({ includeDone: true });
-  const { setStatus, togglePin, setDue, bulkDelete } = useTaskActions();
+  const { setStatus, togglePin, setDue, bulkDelete, bulkPatch } = useTaskActions();
 
   // STALE-CLOSURE NOTE (see FormCopilotBridge): immediateAction/confirmedAction
   // register each handler ONCE, so a handler closing over `tasks`/actions
@@ -35,8 +35,8 @@ export function TaskActions() {
   // since tasks load async. That's exactly why "retrieve any task" failed.
   // Read through `live` (a ref refreshed each render) so handlers always see
   // the current task inventory + mutation fns.
-  const live = useRef({ tasks, setStatus, togglePin, setDue, bulkDelete });
-  live.current = { tasks, setStatus, togglePin, setDue, bulkDelete };
+  const live = useRef({ tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch });
+  live.current = { tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch };
 
   const find = (taskId: string): Task | undefined =>
     live.current.tasks.find((t) => t.id === taskId);
@@ -236,6 +236,89 @@ export function TaskActions() {
       if (!task) return `No task found with id "${taskId}".`;
       await live.current.bulkDelete([task]);
       return `Deleted "${task.title}".`;
+    },
+  });
+
+  // ─── Bulk update (task-fa9c5dea9037) ───────────────────────────────────
+  // The write-side primitive: apply ONE change to MANY tasks at once. The
+  // model picks the target set (usually via find_tasks) and passes their ids;
+  // this previews the affected tasks + the change for human approval, then
+  // applies through the SAME bulkPatch the Tasks UI uses (per-capability
+  // partitioning + reporting included). Composable with find_tasks: query →
+  // ids → bulk_update_tasks.
+  confirmedAction({
+    name: 'bulk_update_tasks',
+    description:
+      'Apply the SAME change (status, due date, and/or pin) to MANY tasks at once. Pass the task ids (get them from find_tasks) and at least one field to change. Requires human approval, which shows exactly which tasks change.',
+    parameters: z.object({
+      taskIds: z
+        .array(z.string())
+        .describe('Ids of the tasks to update (from find_tasks).'),
+      status: z
+        .enum(['done', 'pending', 'in_progress', 'cancelled'])
+        .optional()
+        .describe('Set every task to this status.'),
+      due: z
+        .string()
+        .optional()
+        .describe('Set every task\'s due date to this ISO date (e.g. 2026-07-15), or "" to clear it.'),
+      pinned: z.boolean().optional().describe('Pin (true) or unpin (false) every task.'),
+    }),
+    title: 'Update these tasks?',
+    validate: ({ taskIds, status, due, pinned }) => {
+      if (!Array.isArray(taskIds) || taskIds.length === 0) {
+        return 'Failed: no task ids given. Use find_tasks first to get the ids.';
+      }
+      if (status === undefined && due === undefined && pinned === undefined) {
+        return 'Failed: nothing to change — set at least one of status, due, or pinned.';
+      }
+      const missing = taskIds.filter((id) => !find(id));
+      if (missing.length === taskIds.length) {
+        return `Failed: none of those task ids matched. (${missing.slice(0, 5).join(', ')}…)`;
+      }
+      return null;
+    },
+    summary: ({ taskIds, status, due, pinned }) => {
+      const tasks = taskIds.map(find).filter(Boolean) as Task[];
+      const changes: string[] = [];
+      if (status !== undefined) changes.push(`status → ${status}`);
+      if (due !== undefined) changes.push(due.trim() ? `due → ${due.trim()}` : 'clear due date');
+      if (pinned !== undefined) changes.push(pinned ? 'pin' : 'unpin');
+      const shown = tasks.slice(0, 8);
+      return (
+        <>
+          Apply <strong>{changes.join(', ')}</strong> to <strong>{tasks.length}</strong> task
+          {tasks.length === 1 ? '' : 's'}?
+          <div className="ck-confirm-note">
+            {shown.map((t) => t.title).join(' · ')}
+            {tasks.length > shown.length ? ` · +${tasks.length - shown.length} more` : ''}
+          </div>
+        </>
+      );
+    },
+    confirmLabel: 'Apply to all',
+    rejectLabel: 'Cancel',
+    rejectedMessage: 'Cancelled — no tasks were changed.',
+    perform: async ({ taskIds, status, due, pinned }) => {
+      const tasks = taskIds.map(find).filter(Boolean) as Task[];
+      if (tasks.length === 0) return 'Failed: none of those task ids matched.';
+      const patch: Record<string, unknown> = {};
+      const verbBits: string[] = [];
+      if (status !== undefined) {
+        patch.status = status;
+        verbBits.push(`set ${status}`);
+      }
+      if (due !== undefined) {
+        patch.due_at = due.trim() ? due.trim() : null;
+        verbBits.push(due.trim() ? `due ${due.trim()}` : 'cleared due');
+      }
+      if (pinned !== undefined) {
+        patch.pinned = pinned;
+        verbBits.push(pinned ? 'pinned' : 'unpinned');
+      }
+      const verb = verbBits.join(', ');
+      await live.current.bulkPatch(tasks, patch as never, verb);
+      return `Updated ${tasks.length} task${tasks.length === 1 ? '' : 's'} (${verb}).`;
     },
   });
 
