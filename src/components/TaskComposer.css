@@ -668,3 +668,251 @@
   color: var(--accent);
   font-weight: 500;
 }
+
+/* task-2fd63b922beb (R2) — the inline chain builder. A structured sub-form
+   (buttons/inputs, not the digit-select option pattern) for defining a
+   chain's task-defs right in the composer: add/remove/reorder steps,
+   per-step name/notes/inputs/outputs/neededWhen, plus a "copy from an
+   existing chained task" affordance. */
+.composer__chain-copyfrom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.composer__chain-copyfrom-select {
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.composer__chain-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.composer__chain-step {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+}
+.composer__chain-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.composer__chain-step-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.composer__chain-step-name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+  padding: 3px 2px;
+}
+.composer__chain-step-name:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+.composer__chain-step-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.composer__chain-icon-btn {
+  font-size: 12px;
+  line-height: 1;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.composer__chain-icon-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.composer__chain-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.composer__chain-icon-btn--danger:hover:not(:disabled) {
+  color: #d64545;
+  border-color: #d64545;
+}
+.composer__chain-step-notes {
+  font-size: 13px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 8px;
+  resize: vertical;
+  font-family: inherit;
+}
+.composer__chain-step-notes:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.composer__chain-fieldgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.composer__chain-fieldgroup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.composer__chain-add-btn {
+  font-size: 12px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px 8px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+.composer__chain-add-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.composer__chain-field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.composer__chain-field-key {
+  width: 110px;
+  font-size: 13px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  padding: 4px 6px;
+}
+.composer__chain-field-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  padding: 4px 6px;
+}
+.composer__chain-field-type {
+  font-size: 13px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 4px 6px;
+}
+.composer__chain-field-options {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  padding: 4px 6px;
+}
+.composer__chain-field-key:focus,
+.composer__chain-field-label:focus,
+.composer__chain-field-type:focus,
+.composer__chain-field-options:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.composer__chain-field-required {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.composer__chain-neededwhen {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--rule);
+}
+.composer__chain-neededwhen-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.composer__chain-neededwhen-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.composer__chain-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.composer__chain-add-step-btn {
+  font-size: 13px;
+  border: 1px dashed var(--rule);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.composer__chain-add-step-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.composer__chain-continue-btn {
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-ink, white);
+  padding: 6px 16px;
+  cursor: pointer;
+}
+.composer__chain-continue-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
