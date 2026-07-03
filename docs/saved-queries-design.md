@@ -168,3 +168,76 @@ diff hashes. Display snapshots follow the same rules as task bodies
 
 Deferred: webhooks/subscriptions, `SavedAction` (write-back), SQL/native-FHIR
 executors, no-code admin UI for sources/triggers (config-first for v1).
+
+## Addendum (2026-07-02): org-shared artifacts + the FormExtension primitive
+
+This addendum answers a broader framing of the same need: *"register an API
+available to both CopilotKit and the client; let CopilotKit author custom form
+behavior; and make whatever is authored available to the whole org, not just the
+authoring user."* Two clarifications to the design above, both confirmed with the
+product owner.
+
+### 1. Sharing is a scope field, not a mechanism
+
+The three authored artifacts — **DataSource**, **SavedQuery**, and the new
+**FormExtension** below — are **first-class server records in the task API,
+scoped `per-project` and shared org-wide on approval.** The client is a cache,
+not a store. This makes org sharing free and is the whole answer to "available
+to other users in the same org":
+
+- Every artifact carries `projectId`. Every member of that project, on every
+  machine, receives it by fetching the project config the client already fetches.
+- The **approval gate doubles as the sharing gate.** `status: draft` → visible
+  only to the author (private iteration). Human approval → `status: approved`,
+  the version freezes AND the artifact becomes project-visible. There is no
+  separate "publish" step; approve *is* publish.
+- Credentials never ride the artifact — `DataSource.auth` is server-only and
+  never enters LLM context or the client (unchanged from above).
+- Scope decision: **per-project, not org-wide-all-projects** — an EHR query for
+  one practice must not leak into unrelated projects. A future org-scoped tier
+  can be added behind an explicit `scope` field if a real cross-project need
+  appears.
+
+The four Copilot authoring actions (`register_data_source`, `author_query`,
+`author_form_extension`, plus `lookup_record`) are all `confirmedAction`s
+(`src/copilot/actionKit.tsx`) — the human-in-the-loop approve/reject card IS the
+design-time gate, and the moment a private draft becomes an org-shared,
+immutable version.
+
+### 2. FormExtension — "custom form behavior" WITHOUT arbitrary DOM code
+
+"CopilotKit creates custom JavaScript to add things to a form" must NOT become
+LLM-authored React/DOM injected into a PHI-carrying form (XSS / PHI-exfil hole;
+the Copilot runtime is already CORS-locked precisely because it is PHI-adjacent
+— `electron/copilot/runtime.ts`). Instead a **FormExtension** is a *declarative
+manifest + a sandboxed PURE logic function*, run in the SAME V8 isolate the
+SavedQuery executor already provides:
+
+```jsonc
+{
+  "id": "fx_...", "version": 2, "status": "approved",
+  "projectId": "project-...",              // scope = org sharing (see §1)
+  "appliesTo": { "template": "intake" },
+  "fields": [                              // declarative; rendered by the client's
+    { "key": "patient", "label": "Patient", "widget": "typeahead",
+      "source": { "savedQueryId": "sq_patients", "version": 3 } }, // binds a SavedQuery
+    { "key": "surgeryDate", "label": "Surgery date", "widget": "date" }
+  ],
+  "logic": "export default ({values, changed}) => ({ setVisible, setValue, setOptions, validate })",
+  "limits": { "timeoutMs": 200 }           // pure by default: no ctx.fetch
+}
+```
+
+`logic` receives `{values, changed}` and returns a **declarative effect object**
+(`setValue` / `setVisible` / `setOptions` / `validate`) that the trusted client
+interprets against widgets it already owns — the client never `eval`s markup.
+This delivers dependent fields, computed values, dynamic option lists, and custom
+validation with zero arbitrary-DOM risk and identical behavior on every machine.
+When an extension needs live data it **binds a SavedQuery** rather than fetching
+inline, so all I/O stays on the one audited, credential-injected path.
+
+**Sequencing (confirmed):** ship the declarative typeahead
+(`TemplateField.source → savedQueryId`, v1 slice above) FIRST — it is 80% of the
+value, is already testable against the dummy `/people` API
+(`task-6fcced694f19`), and de-risks the sandbox. Add FormExtension `logic` as a
+fast-follow once the executor is hardened.
