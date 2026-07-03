@@ -23,6 +23,7 @@ import { restoreSources } from './sources';
 import { registerBreezeHooks } from './hooks-register';
 import { registerTypebuildAuthIpc } from './typebuild/ipc-auth';
 import { registerTypebuildVaultIpc } from './typebuild/ipc-vault';
+import { registerTypebuildTaskDataIpc } from './typebuild/ipc-task-data';
 import { registerTypebuildCredentialsIpc } from './typebuild/ipc-credentials';
 import { registerTypebuildProjectsIpc } from './typebuild/ipc-projects';
 import { registerTypebuildDetectIpc } from './typebuild/detect';
@@ -331,6 +332,10 @@ app.whenReady().then(() => {
   timeSync('boot:registerTypebuildAuthIpc', () => registerTypebuildAuthIpc());
   // User credential vault IPC (:secrets panel) — class-2 data. Server-backed.
   timeSync('boot:registerTypebuildVaultIpc', () => registerTypebuildVaultIpc());
+  // task-1af4f59428eb — task `data` (class-1 PHI) resolve IPC for New Home's
+  // own display reads (TaskDetailDialog customValues), separate from the
+  // browser-agent fill path. Server-backed; never cached in main.
+  timeSync('boot:registerTypebuildTaskDataIpc', () => registerTypebuildTaskDataIpc());
   // task-d60860fb4d7f — site-keyed credential vault IPC (Save-password prompt +
   // autofill). Server-backed; password encrypted at rest, never cached in main.
   timeSync('boot:registerTypebuildCredentialsIpc', () =>

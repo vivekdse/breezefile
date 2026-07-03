@@ -7,7 +7,8 @@
 // PHI: `title`, `lastAction`, `customValues` values, and `risk` may carry
 // task text — render in memory only, never persist/log (see
 // docs/typebuild-data-field-contract.md).
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { NewHomeStatus, NewHomeTask, TemplateConfig, TemplateField } from './types';
 import { claimFreshness } from '../tasks/lifecycle.mjs';
 import './RosterTable.css';
@@ -238,6 +239,57 @@ export function RosterTable({
     onSearch?.('');
   };
 
+  // task-1af4f59428eb (Item 4) — j/k + arrow-key row navigation, SCOPED to
+  // this table: the handler lives on <tbody>'s onKeyDown (React's synthetic
+  // bubble phase), fires only while focus is already inside the roster (a
+  // row has tabIndex=0 and DOM focus), and calls stopPropagation so the key
+  // never reaches src/useKeyboard.ts's window-level listener — the SAME
+  // scoping pattern BrowserSurface uses for its Chromium shortcuts
+  // (`.browser-pane`'s onKeyDown, never a document/window listener). This is
+  // additive: it only handles j/k/ArrowUp/ArrowDown/Enter while a <tr> has
+  // focus; clicking a row (onOpenTask) and the existing per-row Enter handler
+  // are untouched, so nothing that worked today changes.
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+
+  const focusRow = (id: string) => {
+    rowRefs.current.get(id)?.focus();
+  };
+
+  const onBodyKeyDown = (e: ReactKeyboardEvent<HTMLTableSectionElement>) => {
+    // Only handle when a ROW itself has focus (not e.g. the search input or
+    // a row's Answer/Retry button) — mirrors BrowserSurface's "only fires
+    // when focus is inside the surface" scoping, one level tighter.
+    const target = e.target as HTMLElement;
+    if (!target.dataset || target.dataset.rosterRow == null) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // don't shadow any chord
+
+    const ids = rows.map((t) => t.id);
+    const currentId = target.dataset.rosterRow;
+    const idx = ids.indexOf(currentId);
+    if (idx === -1) return;
+
+    if (e.key === 'j' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      const next = ids[Math.min(idx + 1, ids.length - 1)];
+      focusRow(next);
+      return;
+    }
+    if (e.key === 'k' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      const prev = ids[Math.max(idx - 1, 0)];
+      focusRow(prev);
+      return;
+    }
+    if (e.key === 'Enter') {
+      // Already handled per-row below; stop it here too so a future refactor
+      // that removes the per-row handler doesn't silently lose Enter-to-open.
+      e.stopPropagation();
+      onOpenTask(currentId);
+    }
+  };
+
   return (
     <div className="nh-roster">
       <div className="nh-roster__toolbar">
@@ -296,7 +348,7 @@ export function RosterTable({
               <th className="nh-roster__th-action" />
             </tr>
           </thead>
-          <tbody>
+          <tbody onKeyDown={onBodyKeyDown}>
             {loading && !hasAnyTasks && (
               <>
                 {[0, 1, 2].map((i) => (
@@ -335,6 +387,11 @@ export function RosterTable({
               return (
                 <tr
                   key={t.id}
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(t.id, el);
+                    else rowRefs.current.delete(t.id);
+                  }}
+                  data-roster-row={t.id}
                   className={rowTint}
                   tabIndex={0}
                   onClick={() => onOpenTask(t.id)}

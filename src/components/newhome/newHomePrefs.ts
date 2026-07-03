@@ -17,6 +17,7 @@
 
 import type { TemplateConfig } from './types';
 import type { Task, TaskCreate } from '../../types';
+import { fm } from '../../bridge';
 
 const KEY_PREFIX = 'fm.newHome.template.v1.';
 const UNSCOPED_KEY = `${KEY_PREFIX}__none__`;
@@ -84,6 +85,21 @@ const DEFAULT_TEMPLATE: TemplateConfigExt = {
 function keyFor(projectId: string | null | undefined): string {
   return projectId ? `${KEY_PREFIX}${projectId}` : UNSCOPED_KEY;
 }
+
+// Server-side id for the unscoped/no-project default (reserved by the
+// project-templates endpoint contract; see typebuild:project-template:*).
+const SERVER_DEFAULT_ID = '_default';
+
+function serverIdFor(projectId: string | null | undefined): string {
+  return projectId ?? SERVER_DEFAULT_ID;
+}
+
+// task-a067636e599b — projects whose cache has already been hydrated from the
+// server this session, so repeated mounts (project switch back-and-forth,
+// re-renders) don't re-fetch. Cleared for nothing — a fresh server value only
+// ever needs fetching once per project per app session; setTemplateConfig
+// keeps the cache authoritative after that via its own PUT.
+const hydrated = new Set<string>();
 
 function isTemplateField(v: unknown): v is TemplateConfig['fields'][number] {
   if (!v || typeof v !== 'object') return false;
@@ -184,16 +200,60 @@ export function getTemplateConfig(projectId: string | null | undefined): Templat
 
 /** Persist the template config for a project (or the unscoped default).
  *  Accepts a plain `TemplateConfig` too (chains is optional) so callers that
- *  only know the shared type keep type-checking unmodified. */
+ *  only know the shared type keep type-checking unmodified.
+ *
+ *  task-a067636e599b — server-authoritative with a localStorage
+ *  write-through cache: the localStorage write happens synchronously first
+ *  (so the edit is never lost and every existing sync caller keeps working
+ *  unmodified), THEN a best-effort PUT to the server is fired off
+ *  fire-and-forget. A server failure (signed out, offline, transient error)
+ *  never loses the local edit — localStorage remains the durable record and
+ *  callers don't need to await anything. */
 export function setTemplateConfig(
   projectId: string | null | undefined,
   cfg: TemplateConfigExt,
 ): void {
-  if (typeof localStorage === 'undefined') return;
+  const clean = sanitize(cfg);
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(keyFor(projectId), JSON.stringify(clean));
+    } catch {
+      /* ignore quota / unavailable storage */
+    }
+  }
+  // Best-effort server persist. Swallow all errors (signed out / offline /
+  // transient) — the localStorage write above already happened, so there is
+  // nothing left to protect here.
+  void fm.typebuild.projectTemplate.set(serverIdFor(projectId), clean).catch(() => {
+    /* offline / signed out — localStorage is the durable record */
+  });
+}
+
+/** task-a067636e599b — hydrate the localStorage cache for `projectId` from
+ *  the server, once per project per app session. Call this once from a
+ *  higher-level place that loads a project (New Home mounts / project
+ *  switch) — NOT from every `getTemplateConfig` read, so reads stay
+ *  synchronous and cheap. Silently no-ops on any failure (signed out,
+ *  offline, no server template yet) and leaves the existing localStorage
+ *  cache / DEFAULT_TEMPLATE in place; never throws. Returns true if the
+ *  cache was updated from a server value, so callers can re-read + re-render
+ *  if they want to (NewHomePage does, via its templateVersion bump). */
+export async function syncTemplateConfigFromServer(
+  projectId: string | null | undefined,
+): Promise<boolean> {
+  const serverId = serverIdFor(projectId);
+  if (hydrated.has(serverId)) return false;
+  hydrated.add(serverId);
   try {
-    localStorage.setItem(keyFor(projectId), JSON.stringify(sanitize(cfg)));
+    const template = await fm.typebuild.projectTemplate.get(serverId);
+    if (!template) return false;
+    if (typeof localStorage === 'undefined') return false;
+    localStorage.setItem(keyFor(projectId), JSON.stringify(sanitize(template)));
+    return true;
   } catch {
-    /* ignore quota / unavailable storage */
+    // Signed out / offline / server error — keep using the localStorage
+    // cache (or DEFAULT_TEMPLATE) unmodified. Don't block UI, don't throw.
+    return false;
   }
 }
 

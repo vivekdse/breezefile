@@ -25,7 +25,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNewHomeData } from './useNewHomeData';
-import { getTemplateConfig, setTemplateConfig, runRepeatable, instantiateChain } from './newHomePrefs';
+import {
+  getTemplateConfig,
+  setTemplateConfig,
+  syncTemplateConfigFromServer,
+  runRepeatable,
+  instantiateChain,
+} from './newHomePrefs';
 import { scheduleLabel } from './newHomeTemplateOps';
 import { compileTaskQuery, runTaskQuery } from './taskQuery';
 import { createTask } from '../../tasks';
@@ -124,6 +130,21 @@ export function NewHomePage() {
     if (tab) setCustomizeTab(tab);
     setShowCustomize(true);
   }
+
+  // task-a067636e599b — hydrate the localStorage template cache from the
+  // server once per project (per app session; see syncTemplateConfigFromServer's
+  // own dedup). Silently no-ops when signed out / offline. Bumping
+  // templateVersion on a real update re-runs the `template` useMemo below
+  // through the same change signal the inline editor + copilot actions use.
+  useEffect(() => {
+    let cancelled = false;
+    void syncTemplateConfigFromServer(selectedProjectId).then((updated) => {
+      if (updated && !cancelled) setTemplateVersion((v) => v + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProjectId]);
 
   const template = useMemo(
     () => getTemplateConfig(selectedProjectId),

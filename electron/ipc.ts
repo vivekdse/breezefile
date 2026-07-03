@@ -3074,6 +3074,23 @@ end tell`;
       return src.newQueryVersion(savedQueryId, patch);
     },
   );
+  // task-a067636e599b — Project template (New Home TemplateConfig), server-
+  // backed with a localStorage write-through cache client-side (see
+  // src/components/newhome/newHomePrefs.ts). Signed out → both reject; the
+  // caller catches and keeps using its local cache. Config is NON-PHI.
+  ipcMain.handle('typebuild:project-template:get', (_e, projectId: string) => {
+    const src = typebuildSource();
+    if (!src) throw new Error('typebuild: signed out');
+    return src.getProjectTemplate(projectId);
+  });
+  ipcMain.handle(
+    'typebuild:project-template:set',
+    (_e, projectId: string, config: unknown) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.setProjectTemplate(projectId, config);
+    },
+  );
   // task-ae0ec0348930 — FormExtensions (the CLIENT half of the primitive): the
   // interpreter renders an approved extension's fields[] + applies its logic's
   // allowlisted effects, and the design-time copilot authors/approves them.

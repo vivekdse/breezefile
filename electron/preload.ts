@@ -847,6 +847,15 @@ const fm = {
       remove: (origin: string, username: string) =>
         ipcRenderer.invoke('typebuild:cred:delete', origin, username) as Promise<void>,
     },
+    // task-1af4f59428eb — task `data` (class-1 PHI) resolve, for New Home's own
+    // display reads (TaskDetailDialog "Details" grid), separate from the
+    // browser-agent fill path (electron/api-server.ts /app/task-data). One ref
+    // per call; resolves to null (never throws) when there's no value to show —
+    // never logged on this hop.
+    taskData: {
+      resolve: (taskId: string, ref: string) =>
+        ipcRenderer.invoke('typebuild:data:resolve', taskId, ref) as Promise<string | null>,
+    },
     // task-ab1d7955e23f — TypeBuild Projects: named task containers with
     // optional instructions + owned folders. NON-PHI; server-backed via the
     // TypeBuild source. `resolve` is the auto-attach lookup (folder → owner or
@@ -1006,6 +1015,17 @@ const fm = {
           version: number;
           status: string;
         }>,
+    },
+    // task-a067636e599b — Project template (New Home TemplateConfig),
+    // server-backed. `get` returns the stored blob or null (no server
+    // template yet); `set` upserts the full config. Signed out → both
+    // reject; the renderer catches and falls back to its localStorage cache.
+    // Config is NON-PHI.
+    projectTemplate: {
+      get: (projectId: string) =>
+        ipcRenderer.invoke('typebuild:project-template:get', projectId) as Promise<unknown | null>,
+      set: (projectId: string, config: unknown) =>
+        ipcRenderer.invoke('typebuild:project-template:set', projectId, config) as Promise<void>,
     },
     // task-ae0ec0348930 — FormExtensions (client interpreter + design-time
     // authoring). `list` enumerates extensions ([] signed-out); `create`/`get`/

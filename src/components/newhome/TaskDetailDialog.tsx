@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NewHomeTask, TemplateConfig, EvidenceEntry } from './types';
 import type { Task, TaskRun } from '../../types';
+import { useTaskCustomValues } from './useNewHomeData';
 import {
   useTaskRuns,
   useLastRun,
@@ -167,6 +168,15 @@ export function TaskDetailDialog({
   // ── evidence sources ──────────────────────────────────────────────────────
   const runs = useTaskRuns(taskId, 50);
   const lastRun = useLastRun(taskId);
+
+  // task-1af4f59428eb (Item 1) — resolve this task's real `data`-backed
+  // custom-field values on demand (one ref per template field key, via
+  // fm.typebuild.taskData.resolve), the same lazy-on-open pattern as
+  // runs/lastRun above. Merged over task.customValues (today always {}, see
+  // useNewHomeData) below so a field resolves from the server when present
+  // and simply falls back to the existing (currently empty) view-model value
+  // otherwise — additive, never regresses the no-data case.
+  const resolvedCustomValues = useTaskCustomValues(taskId, template.fields);
 
   // ── project name (best-effort; NewHomePage's prop contract doesn't carry
   //    the projects list down to this dialog, so we resolve it ourselves —
@@ -534,7 +544,13 @@ export function TaskDetailDialog({
               <div className="nh-dialog__section-title">Details</div>
               <div className="nh-dialog__meta-grid">
                 {template.fields.map((f) => {
-                  const v = task?.customValues[f.key];
+                  // task-1af4f59428eb (Item 1) — prefer the LIVE resolved
+                  // value (fetched from the task's `data` bag on open) and
+                  // fall back to the view-model's customValues (today always
+                  // empty, see useNewHomeData) so a field with no server-side
+                  // data entry — or a signed-out/offline resolve — degrades to
+                  // exactly today's "omit the row" behavior (NON-REGRESSION).
+                  const v = resolvedCustomValues[f.key] ?? task?.customValues[f.key];
                   if (!v) return null;
                   return (
                     <div className="nh-dialog__meta-item" key={f.key}>

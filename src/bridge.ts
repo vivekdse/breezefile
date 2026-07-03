@@ -503,6 +503,15 @@ type Fm = {
         patch?: { code?: string; outputSchema?: unknown; inputs?: unknown; limits?: unknown },
       ) => Promise<{ id: string; name: string; version: number; status: string }>;
     };
+    // task-a067636e599b — Project template (New Home TemplateConfig),
+    // server-backed. `get` returns the stored blob or null (no server
+    // template yet); `set` upserts the full config. Signed out → both
+    // reject; the renderer catches and falls back to its localStorage cache.
+    // Config is NON-PHI. See src/components/newhome/newHomePrefs.ts.
+    projectTemplate: {
+      get: (projectId: string) => Promise<unknown | null>;
+      set: (projectId: string, config: unknown) => Promise<void>;
+    };
     // task-ae0ec0348930 — FormExtensions: the client interpreter (renders an
     // approved extension's fields[] + applies its logic's allowlisted effects)
     // and the design-time authoring lifecycle. `list` enumerates extensions
@@ -573,6 +582,14 @@ type Fm = {
         password: string;
       }) => Promise<{ origin: string; username: string }>;
       remove: (origin: string, username: string) => Promise<void>;
+    };
+    // task-1af4f59428eb — task `data` (class-1 PHI) resolve, for New Home's own
+    // display reads (TaskDetailDialog "Details" grid), separate from the
+    // browser-agent fill path. One ref per call; resolves to null (never
+    // throws) when there's no value for that ref on this task — never logged
+    // on this hop. See docs/typebuild-data-field-contract.md.
+    taskData: {
+      resolve: (taskId: string, ref: string) => Promise<string | null>;
     };
     // task-ab1d7955e23f — TypeBuild Projects: named task containers with
     // optional instructions + owned folders. NON-PHI. `resolve` is the
