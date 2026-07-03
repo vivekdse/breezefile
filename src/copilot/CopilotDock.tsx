@@ -26,6 +26,7 @@ import { useStore } from '../store';
 import { useTheme, isDarkTheme } from '../theme';
 import { useCopilotInfo } from './useCopilotInfo';
 import { CopilotActions } from './actions';
+import { CustomizeActions } from './customizeActions';
 import { TaskActions } from './taskActions';
 import { NavActions } from './navActions';
 import { SavedQueryAuthoringActions } from './savedQueryAuthoring';
@@ -81,6 +82,7 @@ function CopilotGrounding() {
   return (
     <CopilotChatConfigurationProvider isModalDefaultOpen={false}>
       <CopilotActions />
+      <CustomizeActions />
       <TaskActions />
       <NavActions />
       <SavedQueryAuthoringActions />
