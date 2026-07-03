@@ -75,7 +75,11 @@
    no Sidebar/Preview), so it needs the identical collapse — otherwise the dead
    gutters reappear on Home. */
 .shell[data-tab-kind="projects"],
-.shell[data-tab-kind="home"] {
+.shell[data-tab-kind="home"],
+/* task-f83e66dc8fed — New Home is now the default home surface and renders
+   neither Sidebar nor Preview, so it needs the identical collapse or the dead
+   240px/340px gutters reappear (they were framing the task table). */
+.shell[data-tab-kind="newhome"] {
   --sidebar-w: 0px;
   --preview-w: 0px;
   grid-template-columns: 0px 1fr 0px var(--chat-w);
