@@ -156,14 +156,20 @@ function RowAction({
 export function RosterTable({
   tasks,
   filter,
+  search = '',
   template,
   onOpenTask,
   onRetry,
   onFilter,
+  onSearch,
   loading,
 }: {
   tasks: NewHomeTask[];
   filter: 'all' | NewHomeStatus;
+  /** Free-text search query, ANDed with the status filter. NewHomePage owns
+   *  the actual filtering (it pre-filters `tasks`); this component just renders
+   *  the box + reflects the current value. */
+  search?: string;
   template: TemplateConfig;
   onOpenTask: (id: string) => void;
   onRetry: (id: string) => void;
@@ -176,6 +182,9 @@ export function RosterTable({
    *  (matching the V11 reference's toolbar). Until then the pills reflect
    *  the current `filter` and are a no-op if clicked without a handler. */
   onFilter?: (f: 'all' | NewHomeStatus) => void;
+  /** Set the free-text search query. Optional so older call sites still
+   *  compile; when absent the search box is hidden. */
+  onSearch?: (query: string) => void;
   /** Optional — NewHomePage doesn't thread its `loading` flag down to this
    *  component yet; wire it in a follow-up so the table can show a skeleton
    *  during the initial fetch instead of a bare "No tasks" flash. */
@@ -213,7 +222,13 @@ export function RosterTable({
     .filter((f): f is TemplateField => !!f);
 
   const hasAnyTasks = tasks.length > 0;
-  const clearFilter = () => onFilter?.('all');
+  const isFiltered = filter !== 'all' || !!search.trim();
+  // "Clear" resets BOTH dimensions so one click always gets you back to the
+  // full roster, regardless of which filter emptied it.
+  const clearFilter = () => {
+    onFilter?.('all');
+    onSearch?.('');
+  };
 
   return (
     <div className="nh-roster">
@@ -232,6 +247,18 @@ export function RosterTable({
             </button>
           ))}
         </div>
+        {onSearch && (
+          <div className="nh-roster__search">
+            <input
+              type="search"
+              className="nh-roster__search-input"
+              placeholder="Search tasks…"
+              aria-label="Search tasks"
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+            />
+          </div>
+        )}
       </div>
 
       <div className="nh-roster__table-wrap">
@@ -260,17 +287,17 @@ export function RosterTable({
                 ))}
               </>
             )}
-            {!loading && !hasAnyTasks && (
+            {!loading && !hasAnyTasks && !isFiltered && (
               <tr>
                 <td colSpan={5 + customColumns.length} className="nh-roster__empty">
                   No tasks yet for this project.
                 </td>
               </tr>
             )}
-            {hasAnyTasks && rows.length === 0 && (
+            {!loading && rows.length === 0 && isFiltered && (
               <tr>
                 <td colSpan={5 + customColumns.length} className="nh-roster__empty">
-                  No tasks match this filter.{' '}
+                  No tasks match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}.{' '}
                   <button type="button" className="nh-roster__clear-filter" onClick={clearFilter}>
                     Clear filter
                   </button>

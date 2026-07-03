@@ -49,6 +49,9 @@ export type NewHomeContext = {
   needsYou: NeedsYouTaskSummary[];
   /** The Customize panel's live state (see CustomizeContext). */
   customize: CustomizeContext;
+  /** The roster's live filter: status bucket + free-text search. NON-PHI on
+   *  its own (the search STRING was typed by the user into the copilot/box). */
+  rosterFilter: { status: string; search: string };
 };
 
 const EMPTY_CUSTOMIZE: CustomizeContext = {
@@ -68,6 +71,7 @@ const EMPTY: NewHomeContext = {
   counts: { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 },
   needsYou: [],
   customize: EMPTY_CUSTOMIZE,
+  rosterFilter: { status: 'all', search: '' },
 };
 
 let current: NewHomeContext = EMPTY;

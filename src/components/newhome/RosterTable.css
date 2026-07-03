@@ -13,7 +13,28 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-3) 0;
+}
+
+/* Free-text roster search (task-7bdb94445321 follow-up). */
+.nh-roster__search {
+  flex: 0 1 240px;
+}
+.nh-roster__search-input {
+  width: 100%;
+  appearance: none;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  color: var(--text-on-panel);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 6px 10px;
+}
+.nh-roster__search-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .nh-roster__pills {

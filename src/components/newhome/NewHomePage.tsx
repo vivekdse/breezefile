@@ -51,10 +51,37 @@ function isCustomizeTab(v: unknown): v is CustomizeTab {
   return typeof v === 'string' && (CUSTOMIZE_TABS as string[]).includes(v);
 }
 
+// Free-text roster search. Every whitespace-separated token in the query must
+// appear (case-insensitive substring) somewhere in the row's searchable text:
+// title, status, who, last-action text, risk, and any custom-field VALUES. This
+// is in-memory only (PHI never leaves the render) — the same rule the roster
+// already follows. Empty/whitespace query => no filtering.
+function applySearch(tasks: import('./types').NewHomeTask[], query: string): import('./types').NewHomeTask[] {
+  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return tasks;
+  return tasks.filter((t) => {
+    const haystack = [
+      t.title,
+      t.status,
+      t.who,
+      t.lastAction,
+      t.lastActionDetail,
+      t.risk ?? '',
+      ...Object.values(t.customValues),
+    ]
+      .join(' ')
+      .toLowerCase();
+    return tokens.every((tok) => haystack.includes(tok));
+  });
+}
+
 export function NewHomePage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterState>('all');
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // task-7bdb94445321 follow-up — free-text roster search, ANDed with the
+  // status filter. Empty string = no text filter (status filter still applies).
+  const [search, setSearch] = useState('');
   const [showNewTask, setShowNewTask] = useState(false);
   const [showCustomize, setShowCustomize] = useState(false);
   const [customizeTab, setCustomizeTab] = useState<CustomizeTab>('fields');
@@ -138,8 +165,11 @@ export function NewHomePage() {
   // in-memory copy of the template beyond the memo above.
   useEffect(() => {
     function onFilter(e: Event) {
-      const detail = (e as CustomEvent<{ filter?: string }>).detail;
+      const detail = (e as CustomEvent<{ filter?: string; search?: string }>).detail;
       if (detail && isFilterState(detail.filter)) setFilter(detail.filter);
+      // A search string of '' explicitly clears the text filter, so honor the
+      // key's PRESENCE rather than truthiness.
+      if (detail && typeof detail.search === 'string') setSearch(detail.search);
     }
     function onOpenTask(e: Event) {
       const detail = (e as CustomEvent<{ taskId?: string }>).detail;
@@ -180,10 +210,10 @@ export function NewHomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredTasks = useMemo(
-    () => (filter === 'all' ? tasks : tasks.filter((t) => t.status === filter)),
-    [tasks, filter],
-  );
+  const filteredTasks = useMemo(() => {
+    const byStatus = filter === 'all' ? tasks : tasks.filter((t) => t.status === filter);
+    return applySearch(byStatus, search);
+  }, [tasks, filter, search]);
 
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
@@ -225,8 +255,9 @@ export function NewHomePage() {
           schedule: scheduleLabel(r.recurrence),
         })),
       },
+      rosterFilter: { status: filter, search },
     });
-  }, [selectedProject, projects, counts, tasks, showCustomize, customizeTab, template]);
+  }, [selectedProject, projects, counts, tasks, showCustomize, customizeTab, template, filter, search]);
 
   useEffect(() => clearNewHomeContext, []);
 
@@ -304,10 +335,12 @@ export function NewHomePage() {
         <RosterTable
           tasks={filteredTasks}
           filter={filter}
+          search={search}
           template={template}
           loading={loading}
           onOpenTask={openTaskDetail}
           onFilter={setFilter}
+          onSearch={setSearch}
           onRetry={() => void refresh()}
         />
 

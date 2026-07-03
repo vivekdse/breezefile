@@ -98,9 +98,11 @@ export function CopilotActions() {
       "Home grounding: which surface is focused, the currently selected Home project (if any), " +
       "the FULL list of projects the picker offers (availableProjects: id+name — use these with select_home_project), " +
       "roster status counts, the titles+ids of tasks that need a human right now (NOT full task bodies), " +
-      "and `customize` — the live state of the inline Customize panel (whether it's open, which tab, and the " +
-      "template's fields/steps/approval rules/chains). When customize.open is true you are looking at the SAME " +
-      "panel the human sees; open it with open_customize before editing the template if it is closed.",
+      "`customize` — the live state of the inline Customize panel (whether it's open, which tab, and the " +
+      "template's fields/steps/approval rules/chains); and `rosterFilter` — the roster's current status bucket + " +
+      "free-text search. When customize.open is true you are looking at the SAME panel the human sees; open it " +
+      "with open_customize before editing the template if it is closed. Use set_roster_filter to change either the " +
+      "status filter or the free-text search.",
     value: nh,
   });
 
@@ -285,19 +287,35 @@ export function CopilotActions() {
   immediateAction({
     name: 'set_roster_filter',
     description:
-      'Filter the Home roster table by status. Only takes effect when Home is the focused surface.',
+      'Filter the Home roster table by status AND/OR a free-text search. Pass `filter` for the status bucket, `search` for arbitrary text (matched case-insensitively across task titles, status, who, last-action, and custom-field values — every whitespace-separated word must match). The two combine (AND). Pass search="" to clear the text search; omit a param to leave that dimension unchanged. At least one of filter/search is required. Only takes effect when Home is the focused surface.',
     parameters: z.object({
-      filter: z.string().describe('One of: all, done, progress, queued, needs, failed.'),
+      filter: z
+        .string()
+        .optional()
+        .describe('Status bucket: one of all, done, progress, queued, needs, failed.'),
+      search: z
+        .string()
+        .optional()
+        .describe('Free-text query to match against tasks (e.g. "insurance", "jane doe"). Empty string clears it.'),
     }),
-    perform: async ({ filter }) => {
-      if (!isFilterValue(filter)) {
+    perform: async ({ filter, search }) => {
+      if (filter === undefined && search === undefined) {
+        return 'Failed: pass a status `filter`, a `search` string, or both.';
+      }
+      if (filter !== undefined && !isFilterValue(filter)) {
         return `Failed: filter must be one of ${FILTER_VALUES.join(', ')} (got "${filter}").`;
       }
       if (nhRef.current.surface !== 'new-home') {
         return 'Home is not currently open, so there is no roster to filter. Open Home first.';
       }
-      window.dispatchEvent(new CustomEvent(FILTER_EVENT, { detail: { filter } }));
-      return `Filtered the roster to "${filter}".`;
+      const detail: { filter?: string; search?: string } = {};
+      if (filter !== undefined) detail.filter = filter;
+      if (search !== undefined) detail.search = search;
+      window.dispatchEvent(new CustomEvent(FILTER_EVENT, { detail }));
+      const parts: string[] = [];
+      if (filter !== undefined) parts.push(`status "${filter}"`);
+      if (search !== undefined) parts.push(search ? `search "${search}"` : 'cleared search');
+      return `Filtered the roster: ${parts.join(' + ')}.`;
     },
   });
 
