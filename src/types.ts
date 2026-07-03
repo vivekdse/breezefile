@@ -383,6 +383,12 @@ export type TaskCreate = {
   // instead of encoding relationships in free-text notes.
   parentTaskId?: string | null;
   dependsOn?: string[] | null;
+  // task-7bdb94445321 — optional NON-PHI repeat schedule (RRULE-lite '<n><unit>',
+  // unit d|w|m, e.g. '1w'). The local source ignores it; TypeBuild maps it to
+  // the server's `recurrence` on create (accepted by /chromeext/tasks as of the
+  // task_manager_api recurrence-on-create change), so a "repeatable task"
+  // repeats from birth: a done submit spawns the next deferred occurrence.
+  recurrence?: string | null;
 };
 
 // task-ab1d7955e23f — a TypeBuild Project as the renderer sees it (camelCase,

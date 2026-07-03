@@ -22,14 +22,22 @@ import { listApprovedQueries, type SavedQuerySummary } from '../../copilot/saved
 import * as ops from './newHomeTemplateOps';
 import './TemplateEditor.css';
 
-export type CustomizeTab = 'fields' | 'columns' | 'approvals' | 'steps' | 'chains' | 'preview';
+export type CustomizeTab =
+  | 'fields'
+  | 'columns'
+  | 'approvals'
+  | 'steps'
+  | 'chains'
+  | 'repeatable'
+  | 'preview';
 
 const TABS: { id: CustomizeTab; label: string }[] = [
   { id: 'fields', label: 'Fields' },
   { id: 'columns', label: 'Columns' },
-  { id: 'approvals', label: 'Approvals' },
-  { id: 'steps', label: 'Steps' },
+  { id: 'repeatable', label: 'Repeatable Tasks' },
   { id: 'chains', label: 'Chains' },
+  { id: 'steps', label: 'Steps' },
+  { id: 'approvals', label: 'Approvals' },
   { id: 'preview', label: 'Preview' },
 ];
 
@@ -48,6 +56,7 @@ export function TemplateEditor({
   onClose,
   tab,
   onTabChange,
+  onRunRepeatable,
 }: {
   projectId: string;
   /** The persisted config (already the extended shape, chains included). This
@@ -61,6 +70,9 @@ export function TemplateEditor({
    *  action can drive it (see NewHomePage's fm:newhome:openCustomize). */
   tab: CustomizeTab;
   onTabChange: (tab: CustomizeTab) => void;
+  /** Spawn a real task from a repeatable-task definition ("Run now"). The
+   *  parent owns task creation (createTask + refresh); this panel only asks. */
+  onRunRepeatable: (id: string) => void;
 }) {
   const [activeChainId, setActiveChainId] = useState<string | null>(
     config.chains && config.chains.length ? config.chains[0].id : null,
@@ -539,6 +551,91 @@ export function TemplateEditor({
             ) : (
               <p className="nh-te__empty">No chains yet — add one to define a reusable task sequence.</p>
             )}
+          </div>
+        )}
+
+        {tab === 'repeatable' && (
+          <div className="nh-te__section">
+            <p className="nh-te__hint">
+              Repeatable tasks are templates you can spawn on demand (<em>Run now</em>) or on a
+              schedule. A scheduled task repeats after each completion (the server spawns the next
+              occurrence).
+            </p>
+            {(config.repeatables ?? []).length === 0 && (
+              <p className="nh-te__empty">No repeatable tasks yet.</p>
+            )}
+            {(config.repeatables ?? []).map((rep, i) => (
+              <div className="nh-te__row nh-te__field-row nh-te__rep-row" key={rep.id}>
+                <div className="nh-te__step-order">
+                  <button
+                    type="button"
+                    className="nh-te__icon-btn"
+                    onClick={() => onChange(ops.moveRepeatable(config, rep.id, -1))}
+                    disabled={i === 0}
+                    title="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="nh-te__icon-btn"
+                    onClick={() => onChange(ops.moveRepeatable(config, rep.id, 1))}
+                    disabled={i === (config.repeatables ?? []).length - 1}
+                    title="Move down"
+                  >
+                    ↓
+                  </button>
+                </div>
+                <input
+                  className="nh-te__input nh-te__input--wide"
+                  placeholder="Task title"
+                  value={rep.title}
+                  onChange={(e) => onChange(ops.updateRepeatable(config, rep.id, { title: e.target.value }))}
+                />
+                <input
+                  className="nh-te__input nh-te__input--wide"
+                  placeholder="Notes (optional)"
+                  value={rep.notes ?? ''}
+                  onChange={(e) => onChange(ops.updateRepeatable(config, rep.id, { notes: e.target.value }))}
+                />
+                <select
+                  className="nh-te__select"
+                  value={rep.recurrence ?? ''}
+                  title="Schedule"
+                  onChange={(e) => onChange(ops.updateRepeatable(config, rep.id, { recurrence: e.target.value }))}
+                >
+                  {ops.SCHEDULE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="nh-te__run-btn"
+                  onClick={() => onRunRepeatable(rep.id)}
+                  disabled={!rep.title.trim()}
+                  title={rep.recurrence ? 'Create this task now; it will repeat on schedule' : 'Create this task now'}
+                >
+                  ▶ Run now
+                </button>
+                <button
+                  type="button"
+                  className="nh-te__icon-btn"
+                  onClick={() => onChange(ops.removeRepeatable(config, rep.id))}
+                  title="Remove repeatable task"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="nh-te__add-btn"
+              onClick={() => onChange(ops.addRepeatable(config).cfg)}
+            >
+              + Add repeatable task
+            </button>
           </div>
         )}
 

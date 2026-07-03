@@ -41,11 +41,27 @@ export type ChainDef = {
   entries: ChainStepTemplate[];
 };
 
+/** task-7bdb94445321 — a REPEATABLE TASK: a reusable task template a project
+ *  can spawn on demand ("Run now") or on a schedule. `recurrence` is a NON-PHI
+ *  RRULE-lite string ('<n><unit>', unit d|w|m — '' / undefined = one-shot);
+ *  when set, the created task carries it so the server auto-spawns the next
+ *  occurrence after each completion. `title`/`notes` are configuration strings
+ *  (NON-PHI) — the PHI values a user/agent fills in later live on the spawned
+ *  TASK, never here. */
+export type RepeatableTaskDef = {
+  id: string;
+  title: string;
+  notes?: string;
+  /** RRULE-lite '<n><unit>' (unit d|w|m), or '' for run-on-demand only. */
+  recurrence?: string;
+};
+
 /** Local extension of the shared `TemplateConfig` — additive only. Keep
  *  `types.ts` untouched; this is the seam for New Home-editor-local config
  *  that hasn't earned a place in the shared contract yet. */
 export type TemplateConfigExt = TemplateConfig & {
   chains?: ChainDef[];
+  repeatables?: RepeatableTaskDef[];
 };
 
 // Sensible default: no custom fields, just the built-in roster columns every
@@ -56,6 +72,7 @@ const DEFAULT_TEMPLATE: TemplateConfigExt = {
   approvalRules: [],
   steps: [],
   chains: [],
+  repeatables: [],
 };
 
 function keyFor(projectId: string | null | undefined): string {
@@ -88,6 +105,16 @@ function sanitizeChain(v: unknown): ChainDef | null {
   return { id: c.id, name: c.name, entries };
 }
 
+function sanitizeRepeatable(v: unknown): RepeatableTaskDef | null {
+  if (!v || typeof v !== 'object') return null;
+  const r = v as Record<string, unknown>;
+  if (typeof r.id !== 'string' || typeof r.title !== 'string') return null;
+  const out: RepeatableTaskDef = { id: r.id, title: r.title };
+  if (typeof r.notes === 'string') out.notes = r.notes;
+  if (typeof r.recurrence === 'string') out.recurrence = r.recurrence;
+  return out;
+}
+
 function sanitize(parsed: unknown): TemplateConfigExt {
   if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_TEMPLATE };
   const p = parsed as Partial<TemplateConfigExt>;
@@ -115,7 +142,10 @@ function sanitize(parsed: unknown): TemplateConfigExt {
   const chains = Array.isArray(p.chains)
     ? (p.chains.map(sanitizeChain).filter(Boolean) as ChainDef[])
     : [];
-  return { fields, columns, approvalRules, steps, chains };
+  const repeatables = Array.isArray(p.repeatables)
+    ? (p.repeatables.map(sanitizeRepeatable).filter(Boolean) as RepeatableTaskDef[])
+    : [];
+  return { fields, columns, approvalRules, steps, chains, repeatables };
 }
 
 /** Read the template config for a project (or the unscoped default when
@@ -167,6 +197,26 @@ export function instantiateChain(
   createFn: (input: TaskCreate) => Promise<Task>,
 ): Promise<Task[]> {
   return instantiateChainImpl(chain, projectId, createFn);
+}
+
+// task-7bdb94445321 — spawn one real task from a RepeatableTaskDef. Shared by
+// the editor's "Run now" button and the copilot's run_repeatable_task action
+// (one implementation, no mirroring). When the def carries a `recurrence`, it
+// rides onto the created task so the server auto-spawns the next occurrence
+// after each completion; otherwise it's a plain one-shot create.
+export function runRepeatable(
+  def: RepeatableTaskDef,
+  projectId: string | null | undefined,
+  createFn: (input: TaskCreate) => Promise<Task>,
+): Promise<Task> {
+  const recurrence = (def.recurrence ?? '').trim();
+  return createFn({
+    title: def.title,
+    folder: '',
+    notes: def.notes ?? '',
+    ...(recurrence ? { recurrence } : {}),
+    ...(projectId ? { projectId } : {}),
+  });
 }
 
 function renderChainTitle(template: string, ctx: { index: number; chainName: string }): string {

@@ -235,6 +235,32 @@
   background: var(--nh-needs-soft);
 }
 
+/* ─── Repeatable tasks ────────────────────────────────────────────────── */
+.nh-te__rep-row {
+  align-items: center;
+}
+
+.nh-te__run-btn {
+  appearance: none;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.nh-te__run-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.nh-te__run-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* ─── Chains ──────────────────────────────────────────────────────────── */
 .nh-te__chains {
   gap: var(--sp-3);

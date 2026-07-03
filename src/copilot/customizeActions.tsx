@@ -22,10 +22,15 @@
 // user authored — never additionally logged here.
 import { useRef } from 'react';
 import { z } from 'zod';
-import { getTemplateConfig, setTemplateConfig } from '../components/newhome/newHomePrefs';
+import {
+  getTemplateConfig,
+  setTemplateConfig,
+  runRepeatable,
+} from '../components/newhome/newHomePrefs';
 import * as ops from '../components/newhome/newHomeTemplateOps';
+import { createTask } from '../tasks';
 import { useNewHomeContext } from './newHomeContext';
-import { immediateAction } from './actionKit';
+import { confirmedAction, immediateAction } from './actionKit';
 
 const TEMPLATE_CHANGED_EVENT = 'fm:newhome:templateChanged';
 const OPEN_CUSTOMIZE_EVENT = 'fm:newhome:openCustomize';
@@ -36,6 +41,32 @@ function dirOf(direction: string): Dir | null {
   if (d === 'up' || d === 'earlier' || d === 'before') return -1;
   if (d === 'down' || d === 'later' || d === 'after') return 1;
   return null;
+}
+
+/** Map a schedule the LLM might say (friendly word or raw RRULE-lite) to a
+ *  stored recurrence code, or return {error} for anything unrecognized.
+ *  '' / 'none' / 'on demand' => one-shot (no recurrence). */
+function parseSchedule(input: string | undefined): { value: string } | { error: string } {
+  const s = (input ?? '').trim().toLowerCase();
+  if (!s || s === 'none' || s === 'on demand' || s === 'on-demand' || s === 'once') {
+    return { value: '' };
+  }
+  const words: Record<string, string> = {
+    daily: '1d',
+    day: '1d',
+    weekly: '1w',
+    week: '1w',
+    biweekly: '2w',
+    fortnightly: '2w',
+    monthly: '1m',
+    month: '1m',
+  };
+  if (words[s]) return { value: words[s] };
+  // Raw RRULE-lite '<n><unit>' (unit d|w|m).
+  if (/^\d+[dwm]$/.test(s)) return { value: s };
+  return {
+    error: `unrecognized schedule "${input}" — use one of: on demand, daily, weekly, biweekly, monthly (or RRULE-lite like "2w").`,
+  };
 }
 
 /** Mount once inside the CopilotKit provider (CopilotDock.tsx), alongside
@@ -346,6 +377,130 @@ export function CustomizeActions() {
       if (!entry) return `Failed: no step in chain "${found.name}" matches "${step}".`;
       const where = commit(scopedId, ops.moveChainEntry(cfg, found.id, entry.id, dir), 'chains');
       return `Moved a step ${dir === -1 ? 'up' : 'down'} in chain "${found.name}" in ${where}.`;
+    },
+  });
+
+  // ─── Repeatable tasks ──────────────────────────────────────────────────
+
+  function findRepeatable(cfg: ReturnType<typeof getTemplateConfig>, ref: string) {
+    const r = ref.trim();
+    const rl = r.toLowerCase();
+    const reps = cfg.repeatables ?? [];
+    return reps.find((x) => x.id === r) ?? reps.find((x) => x.title.toLowerCase() === rl) ?? null;
+  }
+
+  immediateAction({
+    name: 'add_repeatable_task',
+    description:
+      'Define a repeatable task — a reusable task template that can be spawned on demand (run_repeatable_task) or on a schedule. A scheduled repeatable repeats after each completion.',
+    parameters: z.object({
+      title: z.string().describe('Task title.'),
+      notes: z.string().optional().describe('Optional task notes/body.'),
+      schedule: z
+        .string()
+        .optional()
+        .describe('on demand (default), daily, weekly, biweekly, monthly, or RRULE-lite like "2w".'),
+      projectId: z.string().optional(),
+    }),
+    perform: ({ title, notes, schedule, projectId }) => {
+      if (!title?.trim()) return 'Failed: a task title is required.';
+      const sched = parseSchedule(schedule);
+      if ('error' in sched) return `Failed: ${sched.error}`;
+      const scopedId = scopeOf(projectId);
+      const { cfg } = ops.addRepeatable(getTemplateConfig(scopedId), {
+        title: title.trim(),
+        notes: notes?.trim() ?? '',
+        recurrence: sched.value,
+      });
+      const where = commit(scopedId, cfg, 'repeatable');
+      return `Added repeatable task "${title.trim()}" (${ops.scheduleLabel(sched.value)}) to ${where}.`;
+    },
+  });
+
+  immediateAction({
+    name: 'update_repeatable_task',
+    description: 'Edit a repeatable task — change its title, notes, or schedule. Identify it by title or id.',
+    parameters: z.object({
+      task: z.string().describe('The repeatable task to edit, by title or id.'),
+      title: z.string().optional().describe('New title.'),
+      notes: z.string().optional().describe('New notes.'),
+      schedule: z
+        .string()
+        .optional()
+        .describe('New schedule: on demand, daily, weekly, biweekly, monthly, or RRULE-lite.'),
+      projectId: z.string().optional(),
+    }),
+    perform: ({ task, title, notes, schedule, projectId }) => {
+      const scopedId = scopeOf(projectId);
+      const cfg = getTemplateConfig(scopedId);
+      const found = findRepeatable(cfg, task);
+      if (!found) return `Failed: no repeatable task matches "${task}".`;
+      const patch: Record<string, unknown> = {};
+      if (title !== undefined) patch.title = title.trim();
+      if (notes !== undefined) patch.notes = notes.trim();
+      if (schedule !== undefined) {
+        const sched = parseSchedule(schedule);
+        if ('error' in sched) return `Failed: ${sched.error}`;
+        patch.recurrence = sched.value;
+      }
+      if (Object.keys(patch).length === 0) return 'Failed: nothing to change — pass title, notes, or schedule.';
+      const where = commit(scopedId, ops.updateRepeatable(cfg, found.id, patch), 'repeatable');
+      return `Updated repeatable task "${found.title}" in ${where}.`;
+    },
+  });
+
+  immediateAction({
+    name: 'remove_repeatable_task',
+    description: 'Delete a repeatable-task template (does not affect tasks already spawned from it).',
+    parameters: z.object({
+      task: z.string().describe('The repeatable task to delete, by title or id.'),
+      projectId: z.string().optional(),
+    }),
+    perform: ({ task, projectId }) => {
+      const scopedId = scopeOf(projectId);
+      const cfg = getTemplateConfig(scopedId);
+      const found = findRepeatable(cfg, task);
+      if (!found) return `Failed: no repeatable task matches "${task}".`;
+      const where = commit(scopedId, ops.removeRepeatable(cfg, found.id), 'repeatable');
+      return `Deleted repeatable task "${found.title}" from ${where}.`;
+    },
+  });
+
+  confirmedAction({
+    name: 'run_repeatable_task',
+    description:
+      'Spawn a real task NOW from a repeatable-task template ("Run now"). If the template is scheduled, the created task repeats after each completion.',
+    parameters: z.object({
+      task: z.string().describe('The repeatable task to run, by title or id.'),
+      projectId: z.string().optional(),
+    }),
+    title: 'Run repeatable task?',
+    summary: ({ task, projectId }) => {
+      const cfg = getTemplateConfig(scopeOf(projectId));
+      const found = findRepeatable(cfg, task);
+      return found ? (
+        <>
+          Create a task now from <strong>{found.title}</strong>
+          {found.recurrence ? <> (repeats {ops.scheduleLabel(found.recurrence)})</> : null}?
+        </>
+      ) : (
+        <>Run repeatable task "{task}"?</>
+      );
+    },
+    confirmLabel: 'Run now',
+    rejectedMessage: 'Cancelled — no task was created.',
+    validate: ({ task, projectId }) => {
+      const found = findRepeatable(getTemplateConfig(scopeOf(projectId)), task);
+      return found ? null : `Failed: no repeatable task matches "${task}".`;
+    },
+    perform: async ({ task, projectId }) => {
+      const scopedId = scopeOf(projectId);
+      const found = findRepeatable(getTemplateConfig(scopedId), task);
+      if (!found) return `Failed: no repeatable task matches "${task}".`;
+      const created = await runRepeatable(found, scopedId, createTask);
+      return `Created task "${created.title}" from "${found.title}"${
+        found.recurrence ? ` (repeats ${ops.scheduleLabel(found.recurrence)})` : ''
+      }.`;
     },
   });
 

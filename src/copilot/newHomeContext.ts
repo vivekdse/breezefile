@@ -32,6 +32,8 @@ export type CustomizeContext = {
   approvalRules: string[];
   /** Chain names + how many entries each has (in order). */
   chains: { id: string; name: string; entryCount: number }[];
+  /** Repeatable-task templates: title + human-readable schedule (in order). */
+  repeatables: { id: string; title: string; schedule: string }[];
 };
 
 export type NewHomeContext = {
@@ -56,6 +58,7 @@ const EMPTY_CUSTOMIZE: CustomizeContext = {
   steps: [],
   approvalRules: [],
   chains: [],
+  repeatables: [],
 };
 
 const EMPTY: NewHomeContext = {

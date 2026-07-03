@@ -38,7 +38,7 @@ const OPEN_TASK_EVENT = 'fm:newhome:openTask';
 const SELECT_PROJECT_EVENT = 'fm:newhome:selectProject';
 const OPEN_CUSTOMIZE_EVENT = 'fm:newhome:openCustomize';
 
-const CUSTOMIZE_TABS = ['fields', 'columns', 'approvals', 'steps', 'chains', 'preview'] as const;
+const CUSTOMIZE_TABS = ['fields', 'columns', 'approvals', 'steps', 'chains', 'repeatable', 'preview'] as const;
 type CustomizeTabValue = (typeof CUSTOMIZE_TABS)[number];
 function isCustomizeTab(v: string): v is CustomizeTabValue {
   return (CUSTOMIZE_TABS as readonly string[]).includes(v);

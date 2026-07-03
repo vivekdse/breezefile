@@ -1088,6 +1088,10 @@ export class TypeBuildTaskSource implements TaskSource {
     // non-PHI). See TaskCreate.parentTaskId/dependsOn (src/types.ts).
     if (input.parentTaskId) payload.parent_task_id = input.parentTaskId;
     if (input.dependsOn && input.dependsOn.length > 0) payload.depends_on = input.dependsOn;
+    // task-7bdb94445321 — optional repeat schedule (RRULE-lite, NON-PHI). The
+    // server validates + persists it on create; a done submit then spawns the
+    // next deferred occurrence. Omit when unset so plain creates are unchanged.
+    if (input.recurrence) payload.recurrence = input.recurrence;
 
     const res = await this.request('POST', '/chromeext/tasks', payload);
     if (!res.ok) {

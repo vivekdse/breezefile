@@ -25,7 +25,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNewHomeData } from './useNewHomeData';
-import { getTemplateConfig, setTemplateConfig } from './newHomePrefs';
+import { getTemplateConfig, setTemplateConfig, runRepeatable } from './newHomePrefs';
+import { scheduleLabel } from './newHomeTemplateOps';
+import { createTask } from '../../tasks';
 import type { NewHomeStatus } from './types';
 import { ApprovalBar } from './ApprovalBar';
 import { HeroStats } from './HeroStats';
@@ -44,7 +46,7 @@ function isFilterState(v: unknown): v is FilterState {
   return typeof v === 'string' && (FILTER_STATES as string[]).includes(v);
 }
 
-const CUSTOMIZE_TABS: CustomizeTab[] = ['fields', 'columns', 'approvals', 'steps', 'chains', 'preview'];
+const CUSTOMIZE_TABS: CustomizeTab[] = ['fields', 'columns', 'approvals', 'steps', 'chains', 'repeatable', 'preview'];
 function isCustomizeTab(v: unknown): v is CustomizeTab {
   return typeof v === 'string' && (CUSTOMIZE_TABS as string[]).includes(v);
 }
@@ -99,6 +101,19 @@ export function NewHomePage() {
   function applyTemplateChange(cfg: Parameters<typeof setTemplateConfig>[1]) {
     setTemplateConfig(selectedProjectId, cfg);
     setTemplateVersion((v) => v + 1);
+  }
+
+  // "Run now" for a repeatable task: spawn a real task through the SAME
+  // createTask path the New Task form uses (recurrence rides along when the
+  // def is scheduled), then refresh so the roster shows it.
+  function runRepeatableById(id: string) {
+    const def = (template.repeatables ?? []).find((r) => r.id === id);
+    if (!def) return;
+    void runRepeatable(def, selectedProjectId, createTask)
+      .then(() => refresh())
+      .catch(() => {
+        /* surfaced by the app's task-error channel; nothing to do here */
+      });
   }
 
   // Copilot action bridge (task-ce125a047c70): set_roster_filter and
@@ -191,6 +206,11 @@ export function NewHomePage() {
           name: c.name,
           entryCount: c.entries.length,
         })),
+        repeatables: (template.repeatables ?? []).map((r) => ({
+          id: r.id,
+          title: r.title,
+          schedule: scheduleLabel(r.recurrence),
+        })),
       },
     });
   }, [selectedProject, projects, counts, tasks, showCustomize, customizeTab, template]);
@@ -254,6 +274,7 @@ export function NewHomePage() {
             tab={customizeTab}
             onTabChange={setCustomizeTab}
             onChange={applyTemplateChange}
+            onRunRepeatable={runRepeatableById}
             onClose={() => setShowCustomize(false)}
           />
         )}

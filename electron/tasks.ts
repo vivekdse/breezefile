@@ -130,6 +130,10 @@ export type TaskCreate = {
   // parentTaskId → `parent_task_id` and dependsOn → `depends_on` on create.
   parentTaskId?: string | null;
   dependsOn?: string[] | null;
+  // task-7bdb94445321 — optional NON-PHI repeat schedule (RRULE-lite '<n><unit>',
+  // unit d|w|m). The local store ignores it; the TypeBuild source maps it to the
+  // server's `recurrence` on create so a "repeatable task" repeats from birth.
+  recurrence?: string | null;
 };
 
 export type TaskUpdate = Partial<{

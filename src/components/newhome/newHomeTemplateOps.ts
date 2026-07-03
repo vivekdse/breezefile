@@ -14,7 +14,12 @@
 // and title templates are all CONFIGURATION, not patient data (see the
 // newHomePrefs header). Safe to build/return here and to surface to the LLM.
 
-import type { TemplateConfigExt, ChainDef, ChainStepTemplate } from './newHomePrefs';
+import type {
+  TemplateConfigExt,
+  ChainDef,
+  ChainStepTemplate,
+  RepeatableTaskDef,
+} from './newHomePrefs';
 import type { TemplateField } from './types';
 
 let uidCounter = 0;
@@ -235,4 +240,60 @@ export function moveChainEntry(
       c.id === chainId ? { ...c, entries: moveById(c.entries, entryId, dir) } : c,
     ),
   };
+}
+
+// ─── Repeatable tasks ────────────────────────────────────────────────────────
+
+/** RRULE-lite schedules the UI + copilot offer, mapped to their server
+ *  recurrence code. '' = run-on-demand only (no auto-repeat). */
+export const SCHEDULE_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'On demand only' },
+  { value: '1d', label: 'Daily' },
+  { value: '1w', label: 'Weekly' },
+  { value: '2w', label: 'Every 2 weeks' },
+  { value: '1m', label: 'Monthly' },
+];
+
+/** Human-readable label for a stored recurrence code (falls back to the raw
+ *  code for anything outside the preset list). */
+export function scheduleLabel(recurrence: string | undefined): string {
+  const found = SCHEDULE_OPTIONS.find((o) => o.value === (recurrence ?? ''));
+  return found ? found.label : (recurrence as string);
+}
+
+function repeatableList(cfg: TemplateConfigExt): RepeatableTaskDef[] {
+  return cfg.repeatables ?? [];
+}
+
+export function addRepeatable(
+  cfg: TemplateConfigExt,
+  patch: Partial<RepeatableTaskDef> = {},
+): { cfg: TemplateConfigExt; id: string } {
+  const def: RepeatableTaskDef = {
+    id: uid('rep'),
+    title: 'New repeatable task',
+    notes: '',
+    recurrence: '',
+    ...patch,
+  };
+  return { cfg: { ...cfg, repeatables: [...repeatableList(cfg), def] }, id: def.id };
+}
+
+export function updateRepeatable(
+  cfg: TemplateConfigExt,
+  id: string,
+  patch: Partial<RepeatableTaskDef>,
+): TemplateConfigExt {
+  return {
+    ...cfg,
+    repeatables: repeatableList(cfg).map((r) => (r.id === id ? { ...r, ...patch } : r)),
+  };
+}
+
+export function removeRepeatable(cfg: TemplateConfigExt, id: string): TemplateConfigExt {
+  return { ...cfg, repeatables: repeatableList(cfg).filter((r) => r.id !== id) };
+}
+
+export function moveRepeatable(cfg: TemplateConfigExt, id: string, dir: -1 | 1): TemplateConfigExt {
+  return { ...cfg, repeatables: moveById(repeatableList(cfg), id, dir) };
 }
