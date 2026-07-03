@@ -17,9 +17,13 @@
   padding: var(--sp-3) var(--sp-3) 0;
 }
 
-/* Free-text roster search (task-7bdb94445321 follow-up). */
+/* Roster search / query box (task-7bdb94445321 follow-up). */
 .nh-roster__search {
-  flex: 0 1 240px;
+  flex: 0 1 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
 }
 .nh-roster__search-input {
   width: 100%;
@@ -35,6 +39,27 @@
 .nh-roster__search-input:focus {
   outline: none;
   border-color: var(--accent);
+}
+/* Structured query recognized — tint the border to signal "this is a query". */
+.nh-roster__search-input--query {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.nh-roster__search-input--invalid {
+  border-color: var(--nh-failed);
+}
+.nh-roster__search-hint {
+  font-size: var(--fs-2xs);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nh-roster__search-hint--query {
+  color: var(--accent);
+}
+.nh-roster__search-hint--invalid {
+  color: var(--nh-failed);
 }
 
 .nh-roster__pills {

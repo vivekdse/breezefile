@@ -38,16 +38,19 @@ export type Literal =
   | { kind: 'time'; value: number }
   | { kind: 'time'; nowOffsetMs: number };
 
-/** The AST. `tag` is the self-reference atom resolved via opts.resolveTag. */
+/** The AST. `tag` is the self-reference atom resolved via opts.resolveTag.
+ *  `field` is a string: for the default file catalogue it's a FieldName, but a
+ *  custom parse({fields}) catalogue (e.g. task fields) allows any declared
+ *  field name. */
 export type Ast =
   | { type: 'and'; left: Ast; right: Ast }
   | { type: 'or'; left: Ast; right: Ast }
   | { type: 'not'; expr: Ast }
   | { type: 'tag'; name: string }
-  | { type: 'compare'; field: FieldName; op: CompareOp; value: Literal }
-  | { type: 'in'; field: FieldName; values: Literal[] }
-  | { type: 'between'; field: FieldName; low: Literal; high: Literal }
-  | { type: 'glob'; field: FieldName; pattern: string };
+  | { type: 'compare'; field: string; op: CompareOp; value: Literal }
+  | { type: 'in'; field: string; values: Literal[] }
+  | { type: 'between'; field: string; low: Literal; high: Literal }
+  | { type: 'glob'; field: string; pattern: string };
 
 /** A row of file metadata. Accepts DSL names AND the repo Entry shape
  *  (mtimeMs/kind/isHidden), normalized on read. Fully optional — missing
@@ -77,6 +80,17 @@ export interface FileRow {
   [k: string]: unknown;
 }
 
+/** Value-kind catalogue: field name → coercion kind. */
+export type FieldCatalogue = Record<string, 'string' | 'number' | 'time' | 'bool'>;
+
+export interface ParseOpts {
+  /** Field catalogue to validate names against + drive literal coercion.
+   *  Defaults to the file-metadata FIELDS. Supply a different one (e.g. task
+   *  fields) to parse queries over a different record shape with the same
+   *  grammar. */
+  fields?: FieldCatalogue;
+}
+
 export interface EvalOpts {
   /** Injectable clock for `now` / relative dates. Number or thunk. */
   now?: number | (() => number);
@@ -84,6 +98,10 @@ export interface EvalOpts {
    *  resolves to a boolean for this row (predicate, manual set, nested DSL …).
    *  Required only if the AST contains a `tag` atom. */
   resolveTag?: (name: string, row: FileRow) => boolean;
+  /** Field accessor: resolve a field name to a value off `row`. Defaults to the
+   *  file-metadata accessor. Supply one to evaluate against a different record
+   *  shape (e.g. a task). */
+  fieldValue?: (field: string, row: unknown) => unknown;
 }
 
 export class ParseError extends Error {
@@ -91,10 +109,11 @@ export class ParseError extends Error {
 }
 
 /** Parse a query string into an AST. Throws ParseError on bad input. */
-export function parse(query: string): Ast;
+export function parse(query: string, opts?: ParseOpts): Ast;
 
-/** Evaluate a parsed AST against a file row. Pure; no fs access. */
-export function evaluate(ast: Ast, fileRow: FileRow, opts?: EvalOpts): boolean;
+/** Evaluate a parsed AST against a row. Pure; no fs access. With a custom
+ *  opts.fieldValue the row may be any record shape. */
+export function evaluate(ast: Ast, row: FileRow | unknown, opts?: EvalOpts): boolean;
 
 export const _internal: {
   tokenize(input: string): Array<{ type: string; value: unknown; pos: number }>;

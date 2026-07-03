@@ -28,6 +28,7 @@ import {
   setTemplateConfig,
   type TemplateConfigExt,
 } from '../components/newhome/newHomePrefs';
+import { compileTaskQuery, TASK_QUERY_FIELDS } from '../components/newhome/taskQuery';
 import type { TemplateField } from '../components/newhome/types';
 import { useNewHomeContext } from './newHomeContext';
 import { confirmedAction, immediateAction } from './actionKit';
@@ -316,6 +317,43 @@ export function CopilotActions() {
       if (filter !== undefined) parts.push(`status "${filter}"`);
       if (search !== undefined) parts.push(search ? `search "${search}"` : 'cleared search');
       return `Filtered the roster: ${parts.join(' + ')}.`;
+    },
+  });
+
+  immediateAction({
+    name: 'query_roster',
+    description:
+      'Filter the Home roster with a STRUCTURED, SQL-like query over task fields (more precise than set_roster_filter\'s free-text search). ' +
+      'Grammar: boolean `and`/`or`/`not` + parens; comparisons `field op value` (op ∈ = != > < >= <= ~ !~, where ~ / !~ are regex); ' +
+      '`field in (a, b, c)`; `field between lo and hi`; `field glob "pat"`; a bare bool field is a truthiness test. ' +
+      'Time fields accept `now`, `now-2h`, `now+7d`, and ISO dates. ' +
+      'Base fields: ' +
+      TASK_QUERY_FIELDS.map((f) => `${f.name} (${f.kind})`).join(', ') +
+      '. Custom fields declared on the project (see grounding customize.fields) are also queryable by their key. ' +
+      'Examples: `status = needs and repeatable`; `status in (needs, failed) and risk ~ retry`; `due between now and now+7d`. ' +
+      'Pass an empty query to clear. Only takes effect when Home is the focused surface.',
+    parameters: z.object({
+      query: z.string().describe('The structured query, or "" to clear.'),
+    }),
+    perform: async ({ query }) => {
+      if (nhRef.current.surface !== 'new-home') {
+        return 'Home is not currently open, so there is no roster to query. Open Home first.';
+      }
+      const q = (query ?? '').trim();
+      if (!q) {
+        window.dispatchEvent(new CustomEvent(FILTER_EVENT, { detail: { search: '' } }));
+        return 'Cleared the roster query.';
+      }
+      // Validate against the currently-scoped project's fields so a bad field/
+      // syntax comes straight back to the model instead of silently matching
+      // nothing. Same compile the roster uses (one engine).
+      const scopedId = nhRef.current.project?.id || null;
+      const compiled = compileTaskQuery(q, getTemplateConfig(scopedId).fields);
+      if (!compiled.ok) {
+        return `Failed: invalid query — ${compiled.error}.`;
+      }
+      window.dispatchEvent(new CustomEvent(FILTER_EVENT, { detail: { search: q } }));
+      return `Applied roster query: ${q}`;
     },
   });
 

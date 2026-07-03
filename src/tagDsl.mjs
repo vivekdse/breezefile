@@ -333,10 +333,17 @@ function describeTok(t) {
 //   { kind:'bool',   value:boolean }
 //   { kind:'time',   value:<epoch ms> }              absolute
 //   { kind:'time',   nowOffsetMs:<ms> }              now + offset (lazy)
-function parse(input) {
+// parse(input, opts?) -> AST
+//   opts.fields — a field catalogue { name: 'string'|'number'|'time'|'bool' }
+//     to validate field names + drive literal coercion against. Defaults to the
+//     file-metadata FIELDS, so existing callers (the tag store) are unchanged.
+//     A different catalogue (e.g. task fields) lets the SAME grammar/parser
+//     query a different record shape — see src/components/newhome/taskQuery.ts.
+function parse(input, opts) {
   if (typeof input !== 'string') throw new ParseError('query must be a string');
   if (input.trim() === '') throw new ParseError('empty query');
 
+  const fields = opts?.fields ?? FIELDS;
   const toks = tokenize(input);
   let p = 0;
 
@@ -407,9 +414,9 @@ function parse(input) {
     if (fieldTok.type !== 'word')
       throw new ParseError(`expected a field name, got ${describeTok(fieldTok)}`, fieldTok.pos);
     const field = fieldTok.value.toLowerCase();
-    if (!(field in FIELDS)) throw new ParseError(`unknown field '${fieldTok.value}'`, fieldTok.pos);
+    if (!(field in fields)) throw new ParseError(`unknown field '${fieldTok.value}'`, fieldTok.pos);
     next();
-    const kind = FIELDS[field];
+    const kind = fields[field];
 
     // bool field with no operator → truthiness shorthand: `is_dir` ≡ `is_dir = true`
     if (
@@ -714,10 +721,15 @@ function compareValues(actual, op, lit, opts) {
   }
 }
 
+// evaluate(ast, row, opts?) -> boolean
+//   opts.fieldValue — a (field, row) => value accessor. Defaults to the
+//     file-metadata accessor, so existing callers are unchanged. A different
+//     accessor resolves fields off a different record shape (e.g. a task).
 function evaluate(ast, fileRow, opts) {
   if (ast == null || typeof ast !== 'object')
     throw new TypeError('evaluate: ast must be a parsed AST node');
   const row = fileRow ?? {};
+  const getField = opts?.fieldValue ?? fieldValue;
   switch (ast.type) {
     case 'and':
       return evaluate(ast.left, row, opts) && evaluate(ast.right, row, opts);
@@ -734,15 +746,15 @@ function evaluate(ast, fileRow, opts) {
       return !!resolve(ast.name, row);
     }
     case 'compare':
-      return compareValues(fieldValue(ast.field, row), ast.op, ast.value, opts);
+      return compareValues(getField(ast.field, row), ast.op, ast.value, opts);
     case 'glob':
-      return globToRegExp(ast.pattern).test(asString(fieldValue(ast.field, row)));
+      return globToRegExp(ast.pattern).test(asString(getField(ast.field, row)));
     case 'in': {
-      const actual = fieldValue(ast.field, row);
+      const actual = getField(ast.field, row);
       return ast.values.some((lit) => compareValues(actual, '=', lit, opts));
     }
     case 'between': {
-      const actual = fieldValue(ast.field, row);
+      const actual = getField(ast.field, row);
       return (
         compareValues(actual, '>=', ast.low, opts) &&
         compareValues(actual, '<=', ast.high, opts)

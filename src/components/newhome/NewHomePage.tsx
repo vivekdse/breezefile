@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNewHomeData } from './useNewHomeData';
 import { getTemplateConfig, setTemplateConfig, runRepeatable, instantiateChain } from './newHomePrefs';
 import { scheduleLabel } from './newHomeTemplateOps';
+import { compileTaskQuery, runTaskQuery } from './taskQuery';
 import { createTask } from '../../tasks';
 import type { NewHomeStatus } from './types';
 import { ApprovalBar } from './ApprovalBar';
@@ -49,6 +50,15 @@ function isFilterState(v: unknown): v is FilterState {
 const CUSTOMIZE_TABS: CustomizeTab[] = ['fields', 'columns', 'approvals', 'steps', 'chains', 'repeatable', 'preview'];
 function isCustomizeTab(v: unknown): v is CustomizeTab {
   return typeof v === 'string' && (CUSTOMIZE_TABS as string[]).includes(v);
+}
+
+// Heuristic: does this input look like a STRUCTURED query (vs. plain words)?
+// True when it contains a comparison operator or a DSL keyword — used to decide
+// whether a compile failure is a real query error worth surfacing, or just
+// free-text the user typed. (A bare "insurance" is free-text, not a typo'd
+// query.)
+function looksLikeQuery(s: string): boolean {
+  return /[=<>~]|(^|\s)(and|or|not|in|between|glob)(\s|$)/i.test(s);
 }
 
 // Free-text roster search. Every whitespace-separated token in the query must
@@ -210,10 +220,26 @@ export function NewHomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The search box is dual-mode: if the text compiles as a structured query
+  // (SQL-like DSL over task fields — see taskQuery.ts) we run that; otherwise
+  // it's free-text. A query-shaped-but-invalid input surfaces its parse error
+  // (kind 'invalid') instead of silently matching nothing.
+  const queryState = useMemo(() => {
+    const q = search.trim();
+    if (!q) return { kind: 'none' as const };
+    const c = compileTaskQuery(q, template.fields);
+    if (c.ok) return { kind: 'query' as const, compiled: c.compiled };
+    if (looksLikeQuery(q)) return { kind: 'invalid' as const, error: c.error };
+    return { kind: 'text' as const };
+  }, [search, template.fields]);
+
   const filteredTasks = useMemo(() => {
     const byStatus = filter === 'all' ? tasks : tasks.filter((t) => t.status === filter);
-    return applySearch(byStatus, search);
-  }, [tasks, filter, search]);
+    if (queryState.kind === 'query') return runTaskQuery(byStatus, queryState.compiled, Date.now());
+    if (queryState.kind === 'text') return applySearch(byStatus, search);
+    // 'invalid' → don't filter (the error hint tells the user why); 'none' → all.
+    return byStatus;
+  }, [tasks, filter, search, queryState]);
 
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
@@ -336,6 +362,8 @@ export function NewHomePage() {
           tasks={filteredTasks}
           filter={filter}
           search={search}
+          queryMode={queryState.kind}
+          queryError={queryState.kind === 'invalid' ? queryState.error : undefined}
           template={template}
           loading={loading}
           onOpenTask={openTaskDetail}

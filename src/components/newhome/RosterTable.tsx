@@ -157,6 +157,8 @@ export function RosterTable({
   tasks,
   filter,
   search = '',
+  queryMode = 'none',
+  queryError,
   template,
   onOpenTask,
   onRetry,
@@ -170,6 +172,12 @@ export function RosterTable({
    *  the actual filtering (it pre-filters `tasks`); this component just renders
    *  the box + reflects the current value. */
   search?: string;
+  /** How NewHomePage interpreted the search box: 'none' (empty), 'text'
+   *  (free-text), 'query' (structured DSL matched), 'invalid' (query-shaped but
+   *  didn't parse). Drives the hint under the box. */
+  queryMode?: 'none' | 'text' | 'query' | 'invalid';
+  /** Parse error to show when queryMode === 'invalid'. */
+  queryError?: string;
   template: TemplateConfig;
   onOpenTask: (id: string) => void;
   onRetry: (id: string) => void;
@@ -251,12 +259,25 @@ export function RosterTable({
           <div className="nh-roster__search">
             <input
               type="search"
-              className="nh-roster__search-input"
-              placeholder="Search tasks…"
-              aria-label="Search tasks"
+              className={
+                'nh-roster__search-input' +
+                (queryMode === 'query' ? ' nh-roster__search-input--query' : '') +
+                (queryMode === 'invalid' ? ' nh-roster__search-input--invalid' : '')
+              }
+              placeholder="Search, or query e.g. status=needs and repeatable"
+              aria-label="Search or query tasks"
+              title="Type words to search, or a query like: status in (needs, failed) and due < now+7d"
               value={search}
               onChange={(e) => onSearch(e.target.value)}
             />
+            {queryMode === 'query' && (
+              <span className="nh-roster__search-hint nh-roster__search-hint--query">⚡ query</span>
+            )}
+            {queryMode === 'invalid' && (
+              <span className="nh-roster__search-hint nh-roster__search-hint--invalid" title={queryError}>
+                ⚠ {queryError}
+              </span>
+            )}
           </div>
         )}
       </div>
