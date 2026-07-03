@@ -910,6 +910,35 @@ const fm = {
       ipcRenderer.invoke('typebuild:audit', taskId, limit) as Promise<
         Array<{ user: string; action: string; detail: string; at: string }>
       >,
+    // task-e713f307c422 — SavedQuery selectors. `execute` runs a form-field
+    // query on demand (New Task typeahead + the lookup_record copilot action);
+    // `list` enumerates approved queries for the Template Editor's source
+    // picker. Executed rows' display fields may carry PHI (memory-only, never
+    // logged); the list is NON-PHI (name/version/status). See
+    // docs/saved-queries-design.md + docs/typebuild-data-field-contract.md.
+    queries: {
+      execute: (
+        savedQueryId: string,
+        inputs: Record<string, string>,
+        version?: number,
+      ) =>
+        ipcRenderer.invoke(
+          'typebuild:queries:execute',
+          savedQueryId,
+          inputs,
+          version,
+        ) as Promise<
+          Array<
+            {
+              ref: { sourceId: string; entityType: string; externalId: string };
+            } & Record<string, unknown>
+          >
+        >,
+      list: (status?: string) =>
+        ipcRenderer.invoke('typebuild:queries:list', status) as Promise<
+          Array<{ id: string; name: string; version: number; status: string; entityType?: string }>
+        >,
+    },
   },
   // ─── TypeBuild side-by-side layout (fm-b5at.6) ────────────────────────
   // Self-contained block. Chrome left / our window right while a TypeBuild

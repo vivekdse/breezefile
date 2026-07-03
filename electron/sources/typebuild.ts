@@ -1743,6 +1743,86 @@ export class TypeBuildTaskSource implements TaskSource {
     }));
   }
 
+  // ─── SavedQuery selectors (task-e713f307c422) ────────────────────────────
+  // Form fields backed by a live external-API query (docs/saved-queries-design.md).
+  // The executor lives server-side; the client reaches it over the same
+  // Firebase-authed /chromeext path. execute runs one query on demand; list
+  // enumerates approved queries for the Template Editor's source picker.
+  //
+  // PHI: executed rows' DISPLAY fields may carry PHI — they cross this hop and
+  // are held in renderer memory only; never logged here. Only the row `ref`
+  // (opaque ids) + a display snapshot are persisted onto a task (as `data`
+  // placeholder keys). The SavedQuery list is NON-PHI (name/version/status).
+
+  // POST /chromeext/queries/:id/execute { inputs, version? } →
+  //   { rows: [{ ref: {sourceId, entityType, externalId}, ...displayFields }] }
+  async executeQuery(
+    savedQueryId: string,
+    inputs: Record<string, string>,
+    version?: number,
+  ): Promise<
+    Array<{ ref: { sourceId: string; entityType: string; externalId: string } } & Record<string, unknown>>
+  > {
+    const body: { inputs: Record<string, string>; version?: number } = { inputs };
+    if (version != null) body.version = version;
+    const res = await this.request(
+      'POST',
+      `/chromeext/queries/${encodeURIComponent(savedQueryId)}/execute`,
+      body,
+    );
+    if (!res.ok) throw new Error(`typebuild: query execute failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as {
+      rows?: Array<{ ref?: { sourceId?: string; entityType?: string; externalId?: string } } & Record<string, unknown>>;
+    };
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    // Keep only rows carrying a usable ref; a selection with no ref is useless
+    // (nothing to thread onto the task). Stamp missing sourceId defensively.
+    return rows
+      .filter((r) => r && r.ref && typeof r.ref.externalId === 'string')
+      .map((r) => ({
+        ...r,
+        ref: {
+          sourceId: r.ref!.sourceId ?? '',
+          entityType: r.ref!.entityType ?? '',
+          externalId: r.ref!.externalId!,
+        },
+      }));
+  }
+
+  // GET /chromeext/queries?status=approved → { queries: [{ id, name, version,
+  //   status, outputSchema?: { ref?: { entityType } } }] }. Public projection —
+  //   no code/auth. [] on a parse miss so the picker degrades to "none".
+  async listQueries(
+    status?: string,
+  ): Promise<Array<{ id: string; name: string; version: number; status: string; entityType?: string }>> {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await this.request('GET', `/chromeext/queries${qs}`);
+    if (!res.ok) throw new Error(`typebuild: query list failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as {
+      queries?: Array<{
+        id?: string;
+        name?: string;
+        version?: number;
+        status?: string;
+        entityType?: string;
+        // The server returns snake_case `output_schema` (app/utils/saved_queries_db.py
+        // `_sq_public`); keep the camelCase alias as a defensive fallback.
+        output_schema?: { ref?: { entityType?: string } };
+        outputSchema?: { ref?: { entityType?: string } };
+      }>;
+    };
+    return (Array.isArray(data.queries) ? data.queries : [])
+      .filter((q) => typeof q.id === 'string')
+      .map((q) => ({
+        id: q.id!,
+        name: q.name ?? q.id!,
+        version: typeof q.version === 'number' ? q.version : 1,
+        status: q.status ?? 'unknown',
+        entityType:
+          q.entityType ?? q.output_schema?.ref?.entityType ?? q.outputSchema?.ref?.entityType,
+      }));
+  }
+
   // ─── runNow / Start (fm-b5at.5, MCP auth handoff fm-b5at.9) ──────────────
   // "Start" launches an INTERACTIVE embedded-terminal claude session, pre-
   // wired to this task AND pre-authenticated. The user never types a command

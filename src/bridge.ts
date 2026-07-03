@@ -426,6 +426,30 @@ type Fm = {
     listUsers: () => Promise<TaskUser[]>;
     // fm-k6wz (S7) — per-task audit history (NON-PHI actor/action/detail/time).
     audit: (taskId: string, limit?: number) => Promise<TaskAuditEvent[]>;
+    // task-e713f307c422 — SavedQuery selectors (data-source-backed form fields).
+    // `execute` runs a query on demand for the New Task typeahead + the
+    // lookup_record copilot action; `list` enumerates approved queries for the
+    // Template Editor's source picker. Executed rows' display fields may carry
+    // PHI (memory-only, never logged); the list is NON-PHI. See
+    // docs/saved-queries-design.md + docs/typebuild-data-field-contract.md.
+    queries: {
+      execute: (
+        savedQueryId: string,
+        inputs: Record<string, string>,
+        version?: number,
+      ) => Promise<
+        Array<
+          {
+            ref: { sourceId: string; entityType: string; externalId: string };
+          } & Record<string, unknown>
+        >
+      >;
+      list: (
+        status?: string,
+      ) => Promise<
+        Array<{ id: string; name: string; version: number; status: string; entityType?: string }>
+      >;
+    };
     // Credential vault — the user's OWN identifiers (NPI, Tax ID, login IDs),
     // NOT patient PHI. Values are encrypted on TypeBuild, scoped to the user,
     // and never persisted to this machine's disk. `list` returns NAMES only

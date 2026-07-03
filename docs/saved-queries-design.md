@@ -171,6 +171,30 @@ is unchanged.
    generated task's `data` field. Instantiation marker recorded to guarantee
    idempotency across polling cycles.
 
+#### Poll/trigger engine implementation (2026-07-02)
+
+`app/utils/query_poll.py` + `app/routers/triggers.py` (task API). `poll()` reuses
+the executor for row production and diffs ref-hashes against a per-`(trigger,
+query-family)` snapshot (hashes only, never row values). `condition` is a fixed
+declarative `{field, op, value}` predicate (op allowlist eq/ne/gt/lt/gte/lte/
+truthy/falsy/contains; **never eval'd**). A minimal server-side **Chain** = ordered
+`{title_template, body_template, human_gate}` steps (JSON `chains` table); a
+**TriggerRule** binds a SavedQuery version + condition + chain + interval
+`schedule_secs`. On a cycle, each added/changed row satisfying the condition with
+no marker instantiates the chain as ordered tasks (`depends_on`, container
+`parent_task_id`), the row's ref bound into each task's `data` as `trigger.ref`
+(JSON-encoded, encrypted at rest). **Idempotency** is a `(trigger_id, ref_hash)`
+ledger, reserved before task creation in one `BEGIN IMMEDIATE` txn — a ref fires
+exactly once, ever. **Scheduling** is CLI-invoked (`python app/utils/query_poll.py
+run-due`, no in-process scheduler dep); deploy via cron/systemd-timer.
+
+v1 sign-off items (deliberate, revisit if needed): (a) the marker commits *before*
+task creation, so a mid-instantiation crash permanently suppresses that ref
+(chose "never fire twice" over retry; a partial chain is auditable). (b) No
+create-time approval gate on the referenced query — the executor still refuses a
+non-approved version at run time, so a trigger on a draft errors on run rather than
+being rejected up front.
+
 ### Authoring flow (CopilotKit)
 
 Admin describes the need in chat ("dropdown of patients with upcoming

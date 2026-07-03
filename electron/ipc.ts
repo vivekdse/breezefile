@@ -3001,6 +3001,24 @@ end tell`;
     const src = typebuildSource();
     return src ? src.getAudit(taskId, limit ?? 20) : [];
   });
+  // task-e713f307c422 — SavedQuery selectors: run a form-field query on demand
+  // (New Task typeahead + the lookup_record copilot action) and enumerate
+  // approved queries for the Template Editor's source picker. Both route
+  // through the live TypeBuild source; signed out → execute rejects (the
+  // typeahead debounce swallows it) and list returns [] so the picker degrades.
+  // Executed rows may carry PHI in display fields — never logged on this hop.
+  ipcMain.handle(
+    'typebuild:queries:execute',
+    (_e, savedQueryId: string, inputs: Record<string, string>, version?: number) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.executeQuery(savedQueryId, inputs ?? {}, version);
+    },
+  );
+  ipcMain.handle('typebuild:queries:list', (_e, status?: string) => {
+    const src = typebuildSource();
+    return src ? src.listQueries(status) : [];
+  });
   // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. Lets a
   // time-gated remote (TypeBuild) task fire on the local cron. Rows carry
   // ONLY opaque ids + a cron string — never titles/bodies. setSchedule

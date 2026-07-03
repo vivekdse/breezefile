@@ -19,6 +19,8 @@ import { createTask } from '../../tasks';
 import type { TemplateConfig, TemplateField } from './types';
 import { useCopilotInfo } from '../../copilot/useCopilotInfo';
 import { NewTaskCopilotChat } from '../../copilot/NewTaskCopilotChat';
+import { SourceTypeahead } from './SourceTypeahead';
+import type { QueryRef } from '../../copilot/savedQueries';
 import './NewTaskModal.css';
 
 // ─── Conversation driver types (local to this file; not part of the shared
@@ -370,19 +372,48 @@ function summarizeBody(title: string, template: TemplateConfig, values: Record<s
   return lines.join('\n');
 }
 
+// task-e713f307c422 — a data-source-backed field's selection: the opaque
+// resource `ref` (NON-PHI — {sourceId, entityType, externalId}) plus the display
+// snapshot shown in the form preview.
+export type FieldRef = { ref: QueryRef; display: string };
+
 // TaskCreate (src/types.ts) has no `data`/custom-values carrier today — see
 // docs/typebuild-data-field-contract.md, which proposes one for the server
 // but it isn't wired into TaskCreate/tasksCreate yet. Until that lands we
 // embed a machine-parseable, clearly-delimited block in the body instead of
 // silently dropping the structured answers.
-// TODO(typebuild-data-field-contract): once TaskCreate carries a `data`
-// map, replace this block with real `data: values` (non-PII literals may
-// stay inline per the contract; PII-shaped values should be re-keyed to
-// placeholders and threaded through the contract's `data` bag instead).
-function buildStructuredBlock(template: TemplateConfig, values: Record<string, string>): string {
+//
+// task-e713f307c422 — for data-source-backed fields we ALSO carry the row's
+// resource `ref` here, as the placeholder KEYS the data-field contract
+// prescribes (`field.<key>.ref` → JSON.stringify(ref), `field.<key>.display` →
+// snapshot). The contract wants these in the task `data` bag, NOT flattened
+// into prose; since TaskCreate has no `data` member yet they ride this
+// clearly-delimited machine-parseable block instead of the summary text. The
+// ref is opaque/NON-PHI; the display snapshot is a short label (treat as
+// PHI-adjacent — it is only a placeholder VALUE the server will re-key).
+// TODO(typebuild-data-field-contract): once TaskCreate carries a `data` map,
+// move `field.<key>.ref` / `field.<key>.display` (and the plain values) into it
+// as real placeholder keys and drop this fallback block. See
+// docs/typebuild-data-field-contract.md §1–§2.
+function buildStructuredBlock(
+  template: TemplateConfig,
+  values: Record<string, string>,
+  refs: Record<string, FieldRef> = {},
+): string {
   if (template.fields.length === 0) return '';
-  const lines = ['', '```task-fields', ...template.fields.filter((f) => values[f.key]).map((f) => `${f.key}: ${values[f.key]}`), '```'];
-  return lines.join('\n');
+  const rows: string[] = [];
+  for (const f of template.fields) {
+    const fr = refs[f.key];
+    if (fr) {
+      // Placeholder keys per the data-field contract (see comment above).
+      rows.push(`field.${f.key}.ref: ${JSON.stringify(fr.ref)}`);
+      rows.push(`field.${f.key}.display: ${fr.display}`);
+    } else if (values[f.key]) {
+      rows.push(`${f.key}: ${values[f.key]}`);
+    }
+  }
+  if (rows.length === 0) return '';
+  return ['', '```task-fields', ...rows, '```'].join('\n');
 }
 
 export function NewTaskModal({
@@ -417,6 +448,13 @@ export function NewTaskModal({
   const copilotEnabled = !!(copilotInfo?.enabled && copilotInfo.port);
   const [cpTitle, setCpTitle] = useState('');
   const [cpValues, setCpValues] = useState<Record<string, string>>({});
+
+  // task-e713f307c422 — data-source-backed field selections, SHARED across both
+  // the deterministic and copilot paths (the form preview is the single source
+  // of truth). Keyed by TemplateField.key → { ref (opaque, NON-PHI) + display
+  // snapshot }. Threaded onto the created task's `data` (via buildStructuredBlock)
+  // as placeholder keys per docs/typebuild-data-field-contract.md.
+  const [refs, setRefs] = useState<Record<string, FieldRef>>({});
 
   // Kick off the conversation once on mount (deterministic driver only —
   // the copilot path starts itself via NewTaskCopilotChat's initial label).
@@ -464,6 +502,21 @@ export function NewTaskModal({
   const allRequiredFilled = req.every((f) => f.key in values);
   const canSubmit = title.trim().length > 0 && allRequiredFilled;
 
+  // task-e713f307c422 — a typeahead selection lands in the SAME value store the
+  // rest of the form uses (so allRequiredFilled/canSubmit see it), plus records
+  // the ref for the `data` bag. Writes into the copilot path's state when
+  // enabled, else the deterministic engine's — one handler, both paths.
+  function selectFieldRef(fieldKey: string, label: string, ref: QueryRef) {
+    setRefs((prev) => ({ ...prev, [fieldKey]: { ref, display: label } }));
+    if (copilotEnabled) {
+      setCpValues((prev) => ({ ...prev, [fieldKey]: label }));
+    } else {
+      engine.state.values[fieldKey] = label;
+      engine.state.asked.add(fieldKey);
+      rerender();
+    }
+  }
+
   function send() {
     const text = draft;
     setDraft('');
@@ -482,7 +535,7 @@ export function NewTaskModal({
     setErr(null);
     try {
       const finalTitle = title.trim();
-      const body = summarizeBody(finalTitle, template, values) + buildStructuredBlock(template, values);
+      const body = summarizeBody(finalTitle, template, values) + buildStructuredBlock(template, values, refs);
       const t = await createTask({
         title: finalTitle,
         folder: '',
@@ -524,6 +577,7 @@ export function NewTaskModal({
                 template={template}
                 onSetTitle={setCpTitle}
                 onSetValue={(key, value) => setCpValues((prev) => ({ ...prev, [key]: value }))}
+                onSelectRef={(fieldKey, label, ref) => selectFieldRef(fieldKey, label, ref)}
               />
             ) : (
               <>
@@ -585,6 +639,31 @@ export function NewTaskModal({
               {template.fields.map((f) => {
                 const value = values[f.key];
                 const filled = value !== undefined;
+                // task-e713f307c422 — a data-source-backed field renders as a
+                // live typeahead (SavedQuery-driven) right in the form panel,
+                // superseding the plain value display. Selecting a row records
+                // its ref + display snapshot via selectFieldRef.
+                if (f.source) {
+                  return (
+                    <div
+                      key={f.key}
+                      className={`nh-form-field nh-form-field--source ${filled ? 'nh-form-field--filled' : 'nh-form-field--pending'}`}
+                    >
+                      <div className="nh-form-field__k">
+                        {f.label}
+                        {!f.required && <span className="nh-form-field__optional"> (optional)</span>}
+                        <span className="nh-form-field__badge" title="Data-source lookup">🔎</span>
+                      </div>
+                      <div className="nh-form-field__v">
+                        <SourceTypeahead
+                          field={f}
+                          display={refs[f.key]?.display ?? value}
+                          onSelect={(label, ref) => selectFieldRef(f.key, label, ref)}
+                        />
+                      </div>
+                    </div>
+                  );
+                }
                 return (
                   <div
                     key={f.key}

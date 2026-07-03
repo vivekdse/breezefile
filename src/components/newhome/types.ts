@@ -74,10 +74,22 @@ export type TemplateField = {
   type: 'text' | 'date' | 'select' | 'number';
   required: boolean;
   /** True when an agent can look this value up itself (vs. requiring the
-   *  human to supply it in the New Task modal). */
+   *  human to supply it in the New Task modal). Kept for back-compat; a field
+   *  with `source` set (below) SUPERSEDES this — it becomes a live typeahead. */
   agentFetchable: boolean;
   /** Choices when type === 'select'. */
   options?: string[];
+  /** task-e713f307c422 — data-source-backed field. When set, the New Task
+   *  modal renders this field as a live TYPEAHEAD driven by a SavedQuery
+   *  (docs/saved-queries-design.md, "Consumers → Form selectors") instead of a
+   *  plain value/question: as the user types, the client calls
+   *  `POST /chromeext/queries/{savedQueryId}/execute` and shows the returned
+   *  rows. Selecting a row stores its opaque resource `ref` (threaded onto the
+   *  created task's `data` as placeholder keys — NON-PHI) plus a display
+   *  snapshot for the form preview. Supersedes `agentFetchable` when present.
+   *  `entityType` is the declared resource type (outputSchema.ref) carried for
+   *  display/validation; the authoritative ref comes from each executed row. */
+  source?: { savedQueryId: string; version?: number; entityType?: string };
 };
 
 /** Per-project New Home configuration: which custom fields exist, which of

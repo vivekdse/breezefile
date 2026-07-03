@@ -14,6 +14,7 @@ import type { TemplateConfig, TemplateField } from './types';
 import type { ChainDef, ChainStepTemplate } from './newHomePrefs';
 import { getTemplateConfig } from './newHomePrefs';
 import { ChainStrip, type ChainStripStep } from './ChainStrip';
+import { listApprovedQueries, type SavedQuerySummary } from '../../copilot/savedQueries';
 import './TemplateEditor.css';
 
 type TemplateConfigExt = TemplateConfig & { chains?: ChainDef[] };
@@ -92,6 +93,24 @@ export function TemplateEditor({
   const [activeChainId, setActiveChainId] = useState<string | null>(
     initial.chains && initial.chains.length ? initial.chains[0].id : null,
   );
+
+  // task-e713f307c422 — approved SavedQueries a field can bind as its data
+  // source (typeahead). Fetched once on mount; [] when signed out so the
+  // picker degrades to "none". NON-PHI (name/version/status).
+  const [approvedQueries, setApprovedQueries] = useState<SavedQuerySummary[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void listApprovedQueries()
+      .then((qs) => {
+        if (!cancelled) setApprovedQueries(qs);
+      })
+      .catch(() => {
+        /* signed out / offline — leave the picker empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function updateField(index: number, patch: Partial<TemplateField>) {
     setDraft((d) => {
@@ -354,6 +373,46 @@ export function TemplateEditor({
                       onChange={(e) => updateField(i, { agentFetchable: e.target.checked })}
                     />
                     agent-fetchable
+                  </label>
+                  {/* task-e713f307c422 — bind an approved SavedQuery so this
+                      field becomes a live typeahead in New Task (supersedes
+                      agent-fetchable). Empty = plain field. */}
+                  <label className="nh-te__checkbox nh-te__source" title="Back this field with a live data source (typeahead)">
+                    <span className="nh-te__source-label">source</span>
+                    <select
+                      className="nh-te__select"
+                      value={field.source?.savedQueryId ?? ''}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        if (!id) {
+                          updateField(i, { source: undefined });
+                          return;
+                        }
+                        const q = approvedQueries.find((sq) => sq.id === id);
+                        updateField(i, {
+                          source: {
+                            savedQueryId: id,
+                            version: q?.version,
+                            entityType: q?.entityType,
+                          },
+                        });
+                      }}
+                    >
+                      <option value="">none</option>
+                      {/* Keep a stale bound query visible even if the approved
+                          list doesn't include it (offline / disabled). */}
+                      {field.source?.savedQueryId &&
+                        !approvedQueries.some((q) => q.id === field.source!.savedQueryId) && (
+                          <option value={field.source.savedQueryId}>
+                            {field.source.savedQueryId} (unavailable)
+                          </option>
+                        )}
+                      {approvedQueries.map((q) => (
+                        <option key={q.id} value={q.id}>
+                          {q.name} v{q.version}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <button type="button" className="nh-te__icon-btn" onClick={() => removeField(i)} title="Remove field">
                     ✕
