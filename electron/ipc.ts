@@ -878,7 +878,26 @@ function killManagedPty(id: number, signal?: string): void {
   ptys.delete(id);
 }
 
-export { spawnManagedPty, reservePtyId, killManagedPty };
+/** Write raw data into a managed PTY's stdin from MAIN (no IPC round-trip,
+ *  no renderer involvement) — the same write path term:write uses (r.proc.
+ *  write), just callable directly by main-process code. task-bd35fc4330c0:
+ *  this is the channel the interactive launcher uses to deliver the
+ *  pre-assembled, PHI-bearing task-work bundle as the agent's first message —
+ *  the bundle text lives in process memory only (never argv, never a file)
+ *  and crosses straight into the pty's stdin fd, exactly as if the user had
+ *  typed it into the embedded terminal. No-op if the id is unknown or the
+ *  child already exited (mirrors killManagedPty's tolerance). */
+function writeManagedPty(id: number, data: string): void {
+  const r = ptys.get(id);
+  if (!r) return;
+  try {
+    r.proc.write(data);
+  } catch {
+    /* pty may have just exited */
+  }
+}
+
+export { spawnManagedPty, reservePtyId, killManagedPty, writeManagedPty };
 export type { SpawnManagedPtyOpts };
 
 export function registerIpc() {

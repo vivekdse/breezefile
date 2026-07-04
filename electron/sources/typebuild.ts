@@ -2739,14 +2739,77 @@ export class TypeBuildTaskSource implements TaskSource {
         ? `${withInstructions}\n${playwrightPromptAddendum()}`
         : withInstructions;
 
+    // task-bd35fc4330c0 — pre-assembled task-work bundle (title + full body +
+    // resolved input values + output schema/evidence + project instructions +
+    // attached skills), delivered as the agent's FIRST message over STDIN (see
+    // electron/agents/interactive.ts injectWorkBundle / electron/typebuild/
+    // task-work-bundle.ts). Goal: the agent's FIRST tool call is task WORK, not
+    // get_task. Skipped on resume — --continue already has this context from
+    // the original launch; re-injecting would duplicate it in the transcript.
+    //
+    // FRESHNESS: fetched/resolved HERE, at launch time — not from any earlier
+    // cache — so the body/values reflect the current claim-holder's read
+    // (per the task spec). Fully defensive/best-effort: ANY failure (network,
+    // 404, resolve error) degrades to workBundle:'' and the launch proceeds on
+    // the existing /work-claim fallback prompt exactly as before this change
+    // (NON-REGRESSION) — the agent just falls back to calling get_task itself.
+    //
+    // PHI: the fetched body + resolved values NEVER touch argv/disk/the
+    // --append-system-prompt strings above. They live in this function's stack
+    // only, on the way into runTaskInteractive's workBundle option, which
+    // writes them straight into the pty's stdin fd.
+    let workBundle = '';
+    if (!opts.resume) {
+      try {
+        const { resolveTaskDataRef } = await import('../typebuild/task-data');
+        const { buildTaskWorkBundle } = await import('../typebuild/task-work-bundle');
+        const detail = await this.getTask(id);
+        if (detail) {
+          const dataKeys = detail.dataKeys ?? [];
+          const resolvedInputs: { key: string; value: string }[] = [];
+          for (const key of dataKeys) {
+            try {
+              const value = await resolveTaskDataRef(id, key);
+              resolvedInputs.push({ key, value });
+            } catch {
+              // Unresolved key — bundle renders it as "(unresolved)" rather
+              // than silently omitting it; never blocks the rest of the launch.
+            }
+          }
+          const rawSkills = (detail as unknown as { skills?: unknown }).skills;
+          workBundle = buildTaskWorkBundle(
+            {
+              id,
+              title: detail.title,
+              body: detail.notes ?? null,
+              dataKeys,
+              outputSchema: detail.outputSchema,
+              projectInstructions: projectCtx.instructions,
+              skills: rawSkills,
+              preclaimed: opts.preclaimed,
+            },
+            resolvedInputs,
+          );
+        }
+      } catch {
+        /* best-effort — the /work-claim prompt fallback still runs the task */
+      }
+    }
+
     let ptyId = 0;
     const res = await runTaskInteractive(synthetic, {
       agentId: 'claude',
       // task-3f0c6a6abe41 — the resolved live MAIN window (see above). undefined
       // falls through to runTaskInteractive's own hostable-window resolution.
       window: hostWindow,
-      // ONLY the opaque task id — never a title/body (PHI).
+      // ONLY the opaque task id — never a title/body (PHI). This positional
+      // prompt (→ argv) stays SHORT and content-free; the actual task content
+      // rides workBundle over stdin instead (task-bd35fc4330c0).
       prompt,
+      // task-bd35fc4330c0 — the pre-assembled bundle, injected over stdin once
+      // the session proves alive. '' when the fetch/resolve above didn't run
+      // or failed — runTaskInteractive's injectWorkBundle no-ops on empty.
+      workBundle,
       // On resume, suppress the positional prompt so --continue resumes the
       // existing conversation rather than seeding a new /work claim.
       omitPrompt: opts.resume,

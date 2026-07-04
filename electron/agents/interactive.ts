@@ -21,7 +21,7 @@ import { defaultAgentId } from './registry';
 import { flagsToArgs } from './flags';
 import { openBrowserWindow, markSessionEnded } from '../browser/window';
 import { resolveClaudeBin } from './claude';
-import { spawnManagedPty, reservePtyId, awaitPtyLiveness } from '../ipc';
+import { spawnManagedPty, reservePtyId, awaitPtyLiveness, writeManagedPty } from '../ipc';
 import type { PtyLivenessVerdict } from '../ipc';
 import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
 
@@ -73,6 +73,21 @@ export type InteractiveRunOptions = {
    *  running session. Omitted → legacy fire-and-forget (returns as soon as the
    *  pty is spawned). */
   awaitLiveness?: { minAliveMs?: number };
+  /** task-bd35fc4330c0 — a pre-assembled, PHI-bearing task-work bundle (title +
+   *  full body + resolved input values + output schema/evidence instruction +
+   *  project instructions + attached skills) delivered as the agent's FIRST
+   *  message via STDIN INJECTION, not argv and not --append-system-prompt —
+   *  see electron/typebuild/task-work-bundle.ts for why (PHI must never ride
+   *  argv or disk). When set, this replaces the positional `prompt` as far as
+   *  the agent's first turn is concerned: `prompt`/`effectivePrompt` still
+   *  seeds the CLI's positional arg (so claude launches straight into a turn
+   *  instead of an empty prompt box) but should be a short, PHI-free framing
+   *  line (e.g. "Run /typebuild:typebuild-work..."), and this bundle is typed
+   *  into the pty's stdin as a SECOND, immediately-following message carrying
+   *  the actual task content. Omitted → legacy behavior (positional prompt
+   *  only, agent fetches the rest itself via get_task). Ignored when
+   *  `omitPrompt` is set (a --continue resume already has this context). */
+  workBundle?: string;
 };
 
 export type InteractiveRunResult = {
@@ -336,8 +351,34 @@ export async function runTaskInteractive(
     const liveness = await awaitPtyLiveness(ptyId, {
       minAliveMs: opts.awaitLiveness.minAliveMs,
     });
+    if (liveness.alive) injectWorkBundle(ptyId, opts);
     return { run, ptyId, launched: true, liveness };
   }
 
+  // No liveness gate requested — the caller (a non-TypeBuild `claude` launch)
+  // still gets the bundle, but we have no signal for "the TUI is ready for
+  // input" here, so fall back to a short fixed delay before writing. This
+  // path is not exercised by the TypeBuild Start flow (which always passes
+  // awaitLiveness), so the delay's coarseness is acceptable.
+  if (opts.workBundle && !opts.omitPrompt) {
+    setTimeout(() => injectWorkBundle(ptyId, opts), 1500);
+  }
+
   return { run, ptyId, launched: true };
+}
+
+// task-bd35fc4330c0 — write the pre-assembled task-work bundle into the pty's
+// stdin as the agent's first message, right after we've confirmed the claude
+// child is genuinely up (liveness alive / TUI ready for input). PHI-safe: the
+// bundle text lives in process memory only and crosses straight into the
+// pty's stdin fd (writeManagedPty → node-pty's proc.write) — never argv, never
+// a file, never a --append-system-prompt string. Trailing `\r` submits it,
+// same as a human pressing Enter in the embedded terminal.
+//
+// Skipped on a resume (`omitPrompt`): --continue resumes a conversation that
+// already received this bundle on its original launch, so re-injecting would
+// duplicate it into the transcript.
+function injectWorkBundle(ptyId: number, opts: InteractiveRunOptions): void {
+  if (!opts.workBundle || opts.omitPrompt) return;
+  writeManagedPty(ptyId, `${opts.workBundle}\r`);
 }
