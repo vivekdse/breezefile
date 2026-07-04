@@ -40,6 +40,14 @@ import { useTaskActions } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import './NewHomePage.css';
 
+// task-69651204e222 — CONVERGENCE FLAG. When true, New Home's task-open path
+// routes to the app-wide unified TaskDetailDrawer (via the fm:openTaskDetail
+// event App.tsx listens on) instead of this surface's own TaskDetailDialog.
+// The dialog stays MOUNTED behind this flag; flip this to `false` to restore
+// the old dialog for one release if the drawer regresses. Remove the dialog
+// (and this flag) only after the drawer has proven out.
+const USE_UNIFIED_DETAIL = true;
+
 type FilterState = 'all' | NewHomeStatus;
 
 const FILTER_STATES: FilterState[] = ['all', 'done', 'progress', 'queued', 'needs', 'failed'];
@@ -105,7 +113,31 @@ export function NewHomePage() {
   // + refresh so RosterTable stays presentational (mirrors the onRetry pattern).
   const actions = useTaskActions();
 
+  // task-69651204e222 — the ONE open path all four New-Home sources funnel
+  // through (RosterTable rows, OutcomesPanel, the copilot open_task listener,
+  // and the Pipeline child jumps). When USE_UNIFIED_DETAIL is on it resolves
+  // the underlying Task from the current roster snapshot and dispatches the
+  // app-wide fm:openTaskDetail event (App.tsx → TaskDetailDrawer) — matching
+  // the payload shape App.tsx expects: { task, roster, onOpenTask }. When off
+  // it falls back to the old local dialog (setOpenTaskId).
   function openTaskDetail(id: string) {
+    if (USE_UNIFIED_DETAIL) {
+      const t = tasks.find((x) => x.id === id);
+      if (!t) return;
+      window.dispatchEvent(
+        new CustomEvent('fm:openTaskDetail', {
+          detail: {
+            task: t.raw,
+            // The full roster (as raw Tasks) so the drawer's Pipeline rollup
+            // can resolve a meta-parent's children; onOpenTask re-enters this
+            // same path so a child jump reopens the drawer on that child.
+            roster: tasks.map((x) => x.raw),
+            onOpenTask: openTaskDetail,
+          },
+        }),
+      );
+      return;
+    }
     setOpenTaskId(id);
   }
   function startTask(id: string) {

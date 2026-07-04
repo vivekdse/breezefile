@@ -35,6 +35,9 @@ import {
   useTaskRuns,
   useTaskSources,
   useTypebuildReadiness,
+  postTaskMessage,
+  formatMessageSendReason,
+  injectMessageIntoSession,
 } from '../../tasks';
 import { useOpenResumeInTab } from '../../openResumeInTab';
 import { useRunningSessions } from './useRunningSessions';
@@ -47,6 +50,16 @@ import { TaskStatusDot } from '../TaskIndicators';
 import { homeRel } from './helpers';
 import { claimSummary } from './lifecycle.mjs';
 import { TaskTimeline } from './TaskTimeline';
+import { TaskResultView } from './TaskResult';
+import {
+  parseTaskFieldsBlock,
+  parseTaskOutputsBlock,
+  parseTaskTemplateBlock,
+  resultFields,
+  taskDefStatus,
+  fieldRef,
+} from '../newhome/taskSchema.mjs';
+import type { TaskDef } from '../newhome/types';
 import '../TasksPage.css';
 import { resolveEffectiveInstructions } from '../../projects/index.mjs';
 import type {
@@ -86,6 +99,23 @@ function formatAskedAt(asked_at: string): string {
   if (Number.isNaN(ms)) return asked_at;
   return `asked ${new Date(ms).toLocaleString()}`;
 }
+
+// task-69651204e222 — small local helpers for the ported task-template /
+// attachments sections (mirrors TaskDetailDialog's local helpers).
+function basename(p: string): string {
+  const trimmed = p.replace(/\/+$/, '');
+  const slash = trimmed.lastIndexOf('/');
+  return slash >= 0 ? trimmed.slice(slash + 1) || p : trimmed;
+}
+function hasValue(v: unknown): boolean {
+  return v !== undefined && v !== null && v !== '';
+}
+const DEF_STATUS_LABEL: Record<ReturnType<typeof taskDefStatus>, string> = {
+  done: 'Done',
+  active: 'In progress',
+  pending: 'Pending',
+  skip: 'Not needed',
+};
 
 // A live-status descriptor: the ONE colored signal per the design language
 // (working=accent, needs-you=warn, blocked=err, neutral otherwise).
@@ -162,10 +192,19 @@ function teachReason(scope: 'project' | 'task', reason: string): string {
 export function TaskDetailDrawer({
   task,
   initialTab,
+  roster,
+  onOpenTask,
   onClose,
 }: {
   task: Task;
   initialTab?: InitialTab;
+  // task-69651204e222 — OPTIONAL roster snapshot + child-open callback, used
+  // ONLY by the ported Pipeline rollup to resolve a meta-parent's children
+  // (matched via `parentTaskId === task.id`) and jump between them. Omitted or
+  // empty ⇒ the Pipeline section has nothing to resolve, exactly like a task
+  // with no `task-template` block (NON-REGRESSION).
+  roster?: Task[];
+  onOpenTask?: (id: string) => void;
   onClose: () => void;
 }) {
   const { exit, state } = useOverlayExit(onClose);
@@ -198,6 +237,33 @@ export function TaskDetailDrawer({
   // resumable conversation, or any run in the timeline.
   const hasActivity =
     !!session || !!latestRun?.conversation_id || runs.length > 0;
+
+  // Attachments — run output_path values, deduped. (No `body` dependency.)
+  const attachments = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<{ path: string; name: string }> = [];
+    for (const r of runs) {
+      if (r.output_path && !seen.has(r.output_path)) {
+        seen.add(r.output_path);
+        list.push({ path: r.output_path, name: basename(r.output_path) });
+      }
+    }
+    return list;
+  }, [runs]);
+
+  // Talk-back (free-text message) — mirrors TaskDetailDialog.sendMessage's
+  // exact call shape (postTaskMessage → inject into live session / resume).
+  const [messageDraft, setMessageDraft] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageSent, setMessageSent] = useState<string | null>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    setMessageDraft('');
+    setSendingMessage(false);
+    setMessageError(null);
+    setMessageSent(null);
+  }, [task.id]);
 
   // The visible tabs, in keyboard/digit order. Activity is appended only when
   // there's something to show, so the digit map (1..N) stays contiguous.
@@ -252,6 +318,61 @@ export function TaskDetailDrawer({
       setBody(null);
     };
   }, [task.id, isTypebuild, task.notes, refreshBody]);
+
+  // ── task-69651204e222: ported task-template state (depends on decrypted body)
+  // All fail-soft & conditional: a task with none of this data renders exactly
+  // as before. `body` is the decrypted, memory-only task text.
+
+  // Outputs (this task's own output DEFINITIONS + submitted VALUES).
+  const outputsBlock = useMemo(() => parseTaskOutputsBlock(body ?? null), [body]);
+  const submittedOutputs = useMemo(() => resultFields(task.result ?? null), [task.result]);
+  const submittedByKey = useMemo(() => {
+    if (!outputsBlock || !submittedOutputs) return {} as Record<string, string | number | boolean>;
+    if (submittedOutputs.taskDefId !== outputsBlock.taskDefId) return {};
+    return submittedOutputs.fields;
+  }, [outputsBlock, submittedOutputs]);
+  const requiredOutputs = useMemo(
+    () => (outputsBlock?.fields ?? []).filter((f) => f.required),
+    [outputsBlock],
+  );
+  const requiredSubmittedCount = useMemo(
+    () => requiredOutputs.filter((f) => hasValue(submittedByKey[f.key])).length,
+    [requiredOutputs, submittedByKey],
+  );
+
+  // Meta-parent PIPELINE rollup — needs the roster snapshot to resolve children.
+  const templateBlock = useMemo(() => parseTaskTemplateBlock(body ?? null), [body]);
+  const childTasks = useMemo(() => {
+    if (!templateBlock?.defs || !roster || !roster.length) return [] as Task[];
+    return roster.filter((t) => t.parentTaskId === task.id);
+  }, [templateBlock, roster, task.id]);
+  const childByDefId = useMemo(() => {
+    const map = new Map<string, Task>();
+    for (const c of childTasks) {
+      const fb = parseTaskFieldsBlock(c.notes ?? null);
+      if (fb) map.set(fb.taskDefId, c);
+    }
+    return map;
+  }, [childTasks]);
+  const pipelineValuesByRef = useMemo(() => {
+    const out: Record<string, string | number> = {};
+    for (const c of childTasks) {
+      const fb = parseTaskFieldsBlock(c.notes ?? null);
+      if (fb) {
+        for (const [k, v] of Object.entries(fb.values)) {
+          if (typeof v === 'string' || typeof v === 'number') out[fieldRef(fb.taskDefId, k)] = v;
+        }
+      }
+      const rf = resultFields(c.result ?? null);
+      if (rf) {
+        for (const [k, v] of Object.entries(rf.fields)) {
+          out[fieldRef(rf.taskDefId, k)] = typeof v === 'boolean' ? String(v) : v;
+        }
+      }
+    }
+    return out;
+  }, [childTasks]);
+  const pipelineDefs = useMemo<TaskDef[]>(() => templateBlock?.defs ?? [], [templateBlock]);
 
   // ── effective instruction set (foundation resolver) ───────────────────────
   // Resolve the project leg lazily (NON-PHI) and feed task notes as the task
@@ -544,6 +665,71 @@ export function TaskDetailDrawer({
     say('no session yet — Start the task to open one');
   }
 
+  // task-69651204e222 — free-text talk-back. Reuses the SAME bridge call the
+  // New-Home dialog uses (postTaskMessage → fm.typebuild.taskMessage), then
+  // injects into a live session tab / resumes the last conversation so the
+  // agent picks it up promptly. Works on any status (server append is
+  // visibility-gated only). PHI: the message text lives in memory only.
+  async function sendMessage(alsoOpenSession = false) {
+    const text = messageDraft.trim();
+    if (!text || sendingMessage) {
+      messageRef.current?.focus();
+      return;
+    }
+    setSendingMessage(true);
+    setMessageError(null);
+    setMessageSent(null);
+    try {
+      const res = await postTaskMessage(task.id, text);
+      if (res.ok) {
+        setMessageDraft('');
+        if (session) {
+          injectMessageIntoSession(session.ptyId, text);
+          setMessageSent('Sent — delivered to the open session');
+        } else if (alsoOpenSession && task.folder && latestRun?.conversation_id) {
+          setMessageSent('Sent — opening the session…');
+          await openResumeInTab(task.folder, latestRun.conversation_id, task.title);
+          exit();
+          return;
+        } else {
+          setMessageSent('Sent — the agent will see this');
+        }
+      } else {
+        setMessageError(formatMessageSendReason(res.reason));
+      }
+    } catch (e) {
+      setMessageError(formatOpError('send message', e));
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
+  // task-69651204e222 — Cancel / Retry footer controls, ported from the
+  // New-Home dialog and routed through the SAME useTaskActions the dialog uses.
+  // Cancel is offered only for a non-terminal task; Retry only for a failed one.
+  const canCancel = !isTerminal && (caps?.canDelete || isTypebuild);
+  const canRetry = raw === 'failed' || raw === 'error';
+  function cancelTask() {
+    window.dispatchEvent(
+      new CustomEvent('fm:confirm', {
+        detail: {
+          title: `Cancel "${task.title}"?`,
+          body: 'The agent will stop working on this task.',
+          confirmLabel: 'Cancel task',
+          destructive: true,
+          onConfirm: async () => {
+            if (isTypebuild) await actions.sourceAction(task, 'cancel');
+            else await actions.remove(task);
+            exit();
+          },
+        },
+      }),
+    );
+  }
+  function retry() {
+    void actions.start(task);
+  }
+
   // ── keyboard: Esc closes; 1/2/3 or h/l switch tabs ────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -700,16 +886,109 @@ export function TaskDetailDrawer({
             </section>
           )}
           {tab === 'activity' && (
-            <ActivityTab
-              runs={runs}
-              running={running}
-              liveLabel={liveLabel}
-              tone={tone}
-              hasLiveSession={!!session}
-              latestRun={latestRun}
-              onOpenSession={openSession}
-              onEnterThread={canEnterThread ? enterThread : undefined}
-            />
+            <>
+              <ActivityTab
+                runs={runs}
+                running={running}
+                liveLabel={liveLabel}
+                tone={tone}
+                hasLiveSession={!!session}
+                latestRun={latestRun}
+                onOpenSession={openSession}
+                onEnterThread={canEnterThread ? enterThread : undefined}
+              />
+              {/* task-69651204e222 — ported from the New-Home dialog into the
+                  Activity tab: the merged EVIDENCE log (run evidence),
+                  ATTACHMENTS (run outputs), and OUTCOME (structured result).
+                  Each is conditionally rendered so an activity tab with none of
+                  this data renders as before. */}
+              <EvidenceLog
+                runs={runs}
+                task={task}
+                pendingQuestion={pendingQuestion}
+                outputsBlock={outputsBlock}
+                submittedByKey={submittedByKey}
+                requiredOutputs={requiredOutputs}
+                requiredSubmittedCount={requiredSubmittedCount}
+              />
+              {attachments.length > 0 && (
+                <section className="tdd__sect tdd__attachments-sect">
+                  <div className="tdd__sect-h">Attachments</div>
+                  <div className="tdd__attachments">
+                    {attachments.map((a) => (
+                      <button
+                        type="button"
+                        key={a.path}
+                        className="tdd__attachment"
+                        onClick={() => void fm.open(a.path)}
+                        title={a.path}
+                      >
+                        <span aria-hidden="true">📄</span>
+                        <span className="tdd__attach-name">{a.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+              {isTerminal && (
+                <section className="tdd__sect tdd__outcome-sect">
+                  <div className="tdd__sect-h">Outcome</div>
+                  <TaskResultView result={task.result} />
+                  {!task.result && (
+                    <p className="tdd__muted">No structured result recorded.</p>
+                  )}
+                </section>
+              )}
+              {/* Free-text talk-back — sits alongside the pinned pending-question
+                  card + TaskAnswerBox (which handle the ask_user case). This is
+                  the always-available message channel to the agent. */}
+              <section className="tdd__sect tdd__talkback">
+                <div className="tdd__sect-h">Talk back</div>
+                {!session && (
+                  <p className="tdd__muted">
+                    No open session in this window — the message reaches the agent either way.
+                  </p>
+                )}
+                <textarea
+                  ref={messageRef}
+                  className="tdd__teach-input"
+                  placeholder="Send a message to the agent…"
+                  value={messageDraft}
+                  disabled={sendingMessage}
+                  onChange={(e) => {
+                    setMessageDraft(e.target.value);
+                    setMessageSent(null);
+                  }}
+                />
+                <div className="tdd__teach-actions">
+                  <span className="tdd__teach-spacer" />
+                  {messageSent && <span className="tdd__sent">{messageSent}</span>}
+                  {!session && task.folder && latestRun?.conversation_id && (
+                    <button
+                      type="button"
+                      className="tdd__btn"
+                      disabled={sendingMessage || !messageDraft.trim()}
+                      onClick={() => void sendMessage(true)}
+                    >
+                      Send &amp; open session
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="tdd__btn"
+                    disabled={sendingMessage || !messageDraft.trim()}
+                    onClick={() => void sendMessage()}
+                  >
+                    {sendingMessage ? 'Sending…' : 'Send message'}
+                  </button>
+                </div>
+                {messageError && (
+                  <p className="tdd__teach-feedback tdd__teach-feedback--err" role="alert">
+                    Couldn’t send · {messageError}
+                  </p>
+                )}
+              </section>
+            </>
           )}
           {tab === 'details' && (
             <div className="tdd__details">
@@ -735,6 +1014,77 @@ export function TaskDetailDrawer({
                 claimedBy={claimedBy}
                 claimedByMe={claimedByMe}
               />
+              {/* task-69651204e222 — ported from the New-Home dialog: this
+                  task's own OUTPUT fields (definitions + submitted values) and,
+                  for a meta-parent, the PIPELINE rollup over its children.
+                  Both gated on a parsed template block so a non-template task
+                  renders EXACTLY as before. */}
+              {outputsBlock && outputsBlock.fields.length > 0 && (
+                <section className="tdd__sect tdd__outputs">
+                  <div className="tdd__sect-h">Outputs</div>
+                  {outputsBlock.fields.map((f) => {
+                    const v = submittedByKey[f.key];
+                    const submitted = hasValue(v);
+                    return (
+                      <div className="tdd__output-item" key={f.key}>
+                        <div className="tdd__output-k">
+                          {f.label}
+                          <span className="tdd__output-type">{f.type}</span>
+                          {f.required && (
+                            <span className="tdd__output-required">required — evidence</span>
+                          )}
+                        </div>
+                        <div
+                          className={`tdd__output-v${submitted ? '' : ' tdd__output-v--pending'}`}
+                        >
+                          {submitted ? String(v) : 'awaiting agent'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="tdd__muted">
+                    {requiredOutputs.length > 0
+                      ? `${requiredSubmittedCount} of ${requiredOutputs.length} required outputs submitted`
+                      : 'No required outputs for this step'}
+                  </div>
+                </section>
+              )}
+              {templateBlock && pipelineDefs.length > 0 && (
+                <section className="tdd__sect tdd__pipeline-sect">
+                  <div className="tdd__sect-h">Pipeline</div>
+                  <ol className="tdd__pipeline">
+                    {pipelineDefs.map((def, i) => {
+                      const defStatus = taskDefStatus(def, pipelineValuesByRef);
+                      const child = childByDefId.get(def.id);
+                      const firstOutput = def.outputs.find((f) =>
+                        hasValue(pipelineValuesByRef[fieldRef(def.id, f.key)]),
+                      );
+                      const outcome = firstOutput
+                        ? `${firstOutput.label}=${pipelineValuesByRef[fieldRef(def.id, firstOutput.key)]}`
+                        : null;
+                      const clickable = !!child && !!onOpenTask;
+                      return (
+                        <li
+                          key={def.id}
+                          className={`tdd__pipeline-row${clickable ? ' tdd__pipeline-row--clickable' : ''}`}
+                          onClick={clickable ? () => onOpenTask!(child!.id) : undefined}
+                          role={clickable ? 'button' : undefined}
+                          tabIndex={clickable ? 0 : undefined}
+                        >
+                          <span className="tdd__pipeline-idx">{i + 1}</span>
+                          <span className="tdd__pipeline-name">{def.name}</span>
+                          <span
+                            className={`tdd__pipeline-pill tdd__pipeline-pill--${defStatus}`}
+                          >
+                            {DEF_STATUS_LABEL[defStatus]}
+                          </span>
+                          <span className="tdd__pipeline-outcome">{outcome ?? '—'}</span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </section>
+              )}
               {/* task-a784a424bd63 — the effective instruction set NO LONGER
                   appears here. It lives ONLY in the Teach tab (rendered as a
                   provenance document grouped by originating scope), so the
@@ -775,6 +1125,25 @@ export function TaskDetailDrawer({
               }}
             >
               Edit
+            </button>
+          )}
+          {/* task-69651204e222 — Cancel / Retry, ported from the New-Home
+              dialog's footer. Cancel confirms then routes via useTaskActions
+              (cancel for TypeBuild / remove otherwise); Retry re-runs the same
+              claim-then-launch path Start uses. Conditional so a task that's
+              neither cancellable nor failed shows neither button (as before). */}
+          {canRetry && (
+            <button type="button" className="tdd__btn" onClick={retry}>
+              Retry
+            </button>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              className="tdd__btn tdd__btn--danger"
+              onClick={cancelTask}
+            >
+              Cancel task
             </button>
           )}
           <span className="tdd__foot-spacer" />
@@ -888,6 +1257,142 @@ function RunTimeline({
         );
       })}
     </ol>
+  );
+}
+
+// ── EVIDENCE LOG (ported from TaskDetailDialog) ──────────────────────────────
+// task-69651204e222 — the run/activity evidence trail, merged from runs +
+// messages + notes/flags + the pending question + submitted required outputs,
+// sorted chronologically. Lives in the Activity tab (it's run evidence). PHI:
+// every text field renders from memory only; never logged/persisted.
+type EvKind = 'ok' | 'flag' | 'pause' | 'progress';
+const EV_MARKER: Record<EvKind, string> = {
+  ok: '✓',
+  flag: '⚠',
+  pause: '⏸',
+  progress: '◐',
+};
+const EV_RUN_KIND: Record<TaskRun['status'], EvKind> = {
+  queued: 'progress',
+  running: 'progress',
+  retrying: 'progress',
+  succeeded: 'ok',
+  failed: 'flag',
+  cancelled: 'pause',
+};
+function evRunMessage(run: TaskRun): string {
+  switch (run.status) {
+    case 'queued':
+      return `Run queued (attempt ${run.attempt})`;
+    case 'running':
+      return `Run in progress (attempt ${run.attempt}, agent: ${run.agent})`;
+    case 'retrying':
+      return `Retrying (attempt ${run.attempt})`;
+    case 'succeeded':
+      return `Run succeeded (attempt ${run.attempt})`;
+    case 'cancelled':
+      return `Run cancelled (attempt ${run.attempt})`;
+    case 'failed':
+      return `Run failed (attempt ${run.attempt})${run.error_message ? ` — ${run.error_message}` : ''}`;
+    default:
+      return `Run ${run.status} (attempt ${run.attempt})`;
+  }
+}
+function evTs(input: string | number | null | undefined): string {
+  if (input == null) return '—';
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+function evMs(iso: string | number | null | undefined): number | null {
+  if (iso == null) return null;
+  const n = typeof iso === 'number' ? iso : Date.parse(iso);
+  return Number.isNaN(n) ? null : n;
+}
+
+function EvidenceLog({
+  runs,
+  task,
+  pendingQuestion,
+  outputsBlock,
+  submittedByKey,
+  requiredOutputs,
+  requiredSubmittedCount,
+}: {
+  runs: TaskRun[];
+  task: Task;
+  pendingQuestion: Task['pending_question'] | null;
+  outputsBlock: ReturnType<typeof parseTaskOutputsBlock>;
+  submittedByKey: Record<string, string | number | boolean>;
+  requiredOutputs: { key: string; label: string; required?: boolean }[];
+  requiredSubmittedCount: number;
+}) {
+  const entries = useMemo(() => {
+    const out: Array<{ ts: string; msg: string; kind: EvKind; who: 'agent' | 'human'; sortMs: number }> = [];
+    const now = Date.now();
+    for (const run of runs) {
+      const ms = run.finished_at ?? run.started_at ?? run.scheduled_for ?? now;
+      out.push({ ts: evTs(ms), msg: evRunMessage(run), kind: EV_RUN_KIND[run.status] ?? 'progress', who: 'agent', sortMs: ms });
+    }
+    if (task.notes && task.notes.trim()) {
+      const ms = evMs(task.updated_at) ?? now;
+      out.push({
+        ts: evTs(ms),
+        msg: task.notes.trim().split('\n')[0],
+        kind: task.status === 'in_progress' ? 'progress' : 'ok',
+        who: 'agent',
+        sortMs: ms,
+      });
+    }
+    if (pendingQuestion) {
+      const ms = evMs(pendingQuestion.asked_at) ?? evMs(task.updated_at) ?? now;
+      out.push({ ts: evTs(ms), msg: `Asked: ${pendingQuestion.text}`, kind: 'pause', who: 'agent', sortMs: ms });
+    }
+    if (outputsBlock) {
+      const ms = evMs(task.updated_at) ?? now;
+      for (const f of outputsBlock.fields) {
+        if (f.required && hasValue(submittedByKey[f.key])) {
+          out.push({ ts: evTs(ms), msg: `Evidence: ${f.label} submitted`, kind: 'ok', who: 'agent', sortMs: ms });
+        }
+      }
+      const missing = requiredOutputs.length - requiredSubmittedCount;
+      if (missing > 0) {
+        out.push({
+          ts: evTs(ms),
+          msg: `Agent owes ${missing} required output${missing === 1 ? '' : 's'} — evidence incomplete`,
+          kind: 'flag',
+          who: 'agent',
+          sortMs: ms,
+        });
+      }
+    }
+    out.sort((a, b) => a.sortMs - b.sortMs);
+    return out;
+  }, [runs, task, pendingQuestion, outputsBlock, submittedByKey, requiredOutputs, requiredSubmittedCount]);
+
+  if (entries.length === 0) return null;
+  return (
+    <section className="tdd__sect tdd__evidence-sect">
+      <div className="tdd__sect-h">Evidence log</div>
+      <ol className="tdd__evidence">
+        {entries.map((e, i) => (
+          <li key={i} className={`tdd__ev tdd__ev--${e.kind}`}>
+            <span className="tdd__ev-marker" aria-hidden="true">
+              {EV_MARKER[e.kind]}
+            </span>
+            <span className="tdd__ev-ts">{e.ts}</span>
+            <span className="tdd__ev-msg">
+              {e.msg} <span aria-hidden="true">{e.who === 'agent' ? '🤖' : '👤'}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

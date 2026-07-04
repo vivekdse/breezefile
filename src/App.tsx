@@ -165,6 +165,12 @@ function Shell() {
     // accepted from legacy callers and mapped to 'details' inside the drawer.
     // task-f60a8003efa9 — 'trace'/'session' map onto the clubbed 'activity' tab.
     initialTab?: 'details' | 'trace' | 'config' | 'session' | 'activity';
+    // task-69651204e222 — OPTIONAL roster snapshot + child-open callback carried
+    // through so the drawer's ported Pipeline rollup (a meta-parent's children)
+    // can resolve children and jump between them. Absent for every caller that
+    // doesn't have a roster (the Pipeline section simply has nothing to resolve).
+    roster?: Task[];
+    onOpenTask?: (id: string) => void;
   } | null>(null);
   // fm-femh — Run-task modal: pick a task to run in the active folder tab.
   const [runTaskCwd, setRunTaskCwd] = useState<string | null>(null);
@@ -1219,9 +1225,20 @@ function Shell() {
     }
     function onOpenTaskDetail(e: Event) {
       const detail = (e as CustomEvent).detail as
-        | { task?: Task; initialTab?: 'trace' | 'config' | 'session' | 'activity' }
+        | {
+            task?: Task;
+            initialTab?: 'trace' | 'config' | 'session' | 'activity';
+            roster?: Task[];
+            onOpenTask?: (id: string) => void;
+          }
         | undefined;
-      if (detail?.task) setTaskDetail({ task: detail.task, initialTab: detail.initialTab });
+      if (detail?.task)
+        setTaskDetail({
+          task: detail.task,
+          initialTab: detail.initialTab,
+          roster: detail.roster,
+          onOpenTask: detail.onOpenTask,
+        });
     }
     function onOpenRunTask(e: Event) {
       const detail = (e as CustomEvent).detail as { cwd?: string } | undefined;
@@ -1708,6 +1725,8 @@ function Shell() {
         <TaskDetailDrawer
           task={taskDetail.task}
           initialTab={taskDetail.initialTab}
+          roster={taskDetail.roster}
+          onOpenTask={taskDetail.onOpenTask}
           onClose={() => setTaskDetail(null)}
         />
       )}
