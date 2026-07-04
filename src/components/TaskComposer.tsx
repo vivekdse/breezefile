@@ -18,6 +18,11 @@
 //   due/schedule, pin, working folder) are only walked into when expanded.
 //   Launch flags are a multi-select option question — digits / Enter toggle a
 //   flag on/off (they don't advance); ↓ off the last flag advances.
+// - T toggles "Make this a template" (task-899af8b03aa6) — a MAIN-form yes/no
+//   step whose declared input/output fields become the template's variables.
+//   A template is auto-registered server-side on create-with-fields (no explicit
+//   create API), so T is an intent+guarantee: ON requires ≥1 input on save; in
+//   EDIT it reflects whether the task already backs a template.
 // - The Inputs & outputs step (and the chain builder's per-step field lists)
 //   are keyboard-driven (task-330b2e31e9d3): with the editor focused,
 //   i = add input, o = add output, ↑/↓ walk the rows, Enter edits the cursor
@@ -173,6 +178,9 @@ type QuestionId =
   | 'priority'
   | 'agent'
   | 'pin'
+  // task-899af8b03aa6 — the MAIN-form "Make this a template" yes/no step: the
+  // declared input/output fields become the reusable template's variables.
+  | 'template'
   | 'notes'
   | `field:${string}`;
 // Order is the keyboard ↓ flow. Name, folder, and notes come first — they
@@ -347,6 +355,15 @@ const START_OPTIONS: StartOption[] = [
 const PIN_OPTIONS: { id: 'no' | 'yes'; label: string; hint?: string }[] = [
   { id: 'no', label: 'Not pinned', hint: 'sits in normal order' },
   { id: 'yes', label: 'Pin', hint: 'floats to the top of every list' },
+];
+
+// task-899af8b03aa6 — the "Make this a template" yes/no options (same shape as
+// PIN_OPTIONS). "Yes" declares the task's input/output fields as reusable
+// template variables; the server auto-registers the template on create-with-
+// fields, so this is intent (+ a ≥1-input guarantee on save), not a create call.
+const TEMPLATE_OPTIONS: { id: 'no' | 'yes'; label: string; hint?: string }[] = [
+  { id: 'no', label: 'Just this task', hint: 'a one-off, not reusable' },
+  { id: 'yes', label: 'Make this a template', hint: 'reuse it via New from Template' },
 ];
 
 function pickStartIdFromTask(task: Task | null, today: string): string {
@@ -1366,6 +1383,15 @@ export function TaskComposer(props: Props) {
   });
   const [agentHighlight, setAgentHighlight] = useState(0);
   const [pinHighlight, setPinHighlight] = useState(() => (pinned ? 1 : 0));
+  // task-899af8b03aa6 — "Make this a template" intent. A template is a first-
+  // class server object AUTO-registered when a task is created with input/output
+  // field definitions (there is NO explicit create-template API — see
+  // fm.typebuild.templates.*). So this is an intent+guarantee, not a create
+  // call: ON requires ≥1 named input on save so the created task actually
+  // registers as reusable. In EDIT mode it REFLECTS whether the task already
+  // backs a template (set by the name-match effect below). Default OFF.
+  const [makeTemplate, setMakeTemplate] = useState(false);
+  const [templateHighlight, setTemplateHighlight] = useState(0);
   // task-f5a318566148 — the collapsible ADVANCED options section (collapsed by
   // default) and the multi-select cursor for the launch-flags question.
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -2032,6 +2058,17 @@ export function TaskComposer(props: Props) {
   // actually defined outputs.
   const showOutputsStep = hasChainOption && (templateChoice === 'chain' || definedOutputsCount > 0);
 
+  // task-899af8b03aa6 — the "Make this a template" step shows for the TypeBuild
+  // target only (templates are a TypeBuild concept): on a PLAIN create (not a
+  // chain, not the New-from-Template picker) where the fields it describes live,
+  // and on any EDIT (as a reflection of existing template state). Never on a
+  // chained job (its own thin container) or a local/other source.
+  const templateStepAvailable =
+    isTypebuild &&
+    !isFromTemplateMode &&
+    !isMinimalChain &&
+    (props.mode === 'edit' || templateChoice === 'blank');
+
   // Every driving def's input fields, in aggregate/definition order (def order,
   // then field order) — this is what dynamically extends the question flow.
   // Empty (no inputs, or not a TypeBuild create) → no field questions.
@@ -2076,7 +2113,18 @@ export function TaskComposer(props: Props) {
   // main list unchanged.
   const mainQuestions = useMemo<QuestionId[]>(() => {
     const main = questionSplit.main;
-    if (!hasChainOption) return main;
+    if (!hasChainOption) {
+      // Create-local or EDIT (any source). task-899af8b03aa6 — a TypeBuild EDIT
+      // surfaces the "Make this a template" reflection step (pre-checked when
+      // the task already backs a template) right before 'notes'; local/other
+      // edits are unchanged.
+      if (templateStepAvailable) {
+        const nIdx = main.indexOf('notes');
+        const at = nIdx >= 0 ? nIdx : main.length;
+        return [...main.slice(0, at), 'template', ...main.slice(at)];
+      }
+      return main;
+    }
     // task-2fd63b922beb correction (Part B) — a "Chained task" is a THIN
     // container: name (title) + project + the chain + a read-only outputs
     // summary. The task-form questions (who/notes/advanced) are DROPPED.
@@ -2087,12 +2135,15 @@ export function TaskComposer(props: Props) {
     // task-2fd63b922beb correction (Part A) — a plain task's OWN optional
     // input/output fields. task-0d63c7b0ebdb — the 'fields' step DEFINES the
     // fields; values are filled later. Any outputs still add the read-only
-    // summary step.
+    // summary step. task-899af8b03aa6 — the "Make this a template" step follows
+    // the fields it describes (those inputs/outputs become the template's
+    // variables), before body/notes.
     const wIdx = main.indexOf('who');
     const extra: QuestionId[] = ['fields'];
     if (definedOutputsCount > 0) extra.push('outputs');
+    if (templateStepAvailable) extra.push('template');
     return [...main.slice(0, wIdx + 1), ...extra, ...main.slice(wIdx + 1)];
-  }, [questionSplit, hasChainOption, templateChoice, definedOutputsCount]);
+  }, [questionSplit, hasChainOption, templateChoice, definedOutputsCount, templateStepAvailable]);
 
   // task-f5a318566148 — the ADVANCED block, only walked into when the section
   // is expanded. 'flags' is relevant only to Claude tasks (hidden when manual).
@@ -2165,6 +2216,7 @@ export function TaskComposer(props: Props) {
       case 'agent': setAgentHighlight(Math.max(0, AGENT_OPTIONS.findIndex((o) => o.value === agentId))); break;
       case 'status': setStatusHighlight(Math.max(0, STATUS_OPTIONS.findIndex((s) => s.id === status))); break;
       case 'pin': setPinHighlight(pinned ? 1 : 0); break;
+      case 'template': setTemplateHighlight(makeTemplate ? 1 : 0); break;
       case 'flags': setFlagsHighlight(0); break;
       default: break;
     }
@@ -2188,6 +2240,33 @@ export function TaskComposer(props: Props) {
       setFolderHighlight(0);
     }
   }, [executor, cwdSuggestion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // task-899af8b03aa6 — EDIT reflection: a task "is a template" when a first-
+  // class template with the same name exists. The server does not emit an
+  // isTemplate flag / template_id yet (see task-source.ts), so name (+ project)
+  // is the only available signal — the same identity listTemplates keys on.
+  // Fetch ONCE on mount for the TypeBuild edit target and pre-check the toggle.
+  // NON-PHI (template names + field defs only); best-effort, silent on failure.
+  useEffect(() => {
+    if (props.mode !== 'edit' || !isTypebuild) return;
+    const name = (initial?.title ?? '').trim();
+    if (!name) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await fm.typebuild.templates.list(initial?.projectId || undefined);
+        if (cancelled) return;
+        if (rows.some((t) => t.name.trim() === name)) {
+          setMakeTemplate(true);
+          setTemplateHighlight(1);
+        }
+      } catch {
+        /* best-effort reflection — leave the toggle at its default */
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const titleRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -2473,6 +2552,16 @@ export function TaskComposer(props: Props) {
     // advanced block ends with 'folder'), so advance rather than commit.
     goNext();
   }
+
+  // task-899af8b03aa6 — the "Make this a template" yes/no pick (mirrors
+  // choosePin). Advances rather than commits (it sits before 'notes').
+  function chooseTemplate(i: number) {
+    const o = TEMPLATE_OPTIONS[i];
+    if (!o) return;
+    setMakeTemplate(o.id === 'yes');
+    setTemplateHighlight(i);
+    goNext();
+  }
   // task-f5a318566148 — one launch flag toggled (multi-select). Unlike the
   // single-select pickers this does NOT advance — it flips the flag on/off and
   // stays put, mirroring a checkbox list; ↓ off the last flag advances.
@@ -2580,6 +2669,12 @@ export function TaskComposer(props: Props) {
       else setPinHighlight((i) => i + 1);
       return;
     }
+    // task-899af8b03aa6 — the "Make this a template" yes/no step (mirrors pin).
+    if (active === 'template') {
+      if (templateHighlight >= TEMPLATE_OPTIONS.length - 1) goNext();
+      else setTemplateHighlight((i) => i + 1);
+      return;
+    }
     // task-2fd63b922beb (R2) — the chain builder + its read-only outputs
     // summary. goNext() advances (or commits at the end) transparently.
     if (active === 'chain') {
@@ -2659,6 +2754,12 @@ export function TaskComposer(props: Props) {
     if (active === 'pin') {
       if (pinHighlight === 0) goBack();
       else setPinHighlight((i) => i - 1);
+      return;
+    }
+    // task-899af8b03aa6 — the "Make this a template" yes/no step (mirrors pin).
+    if (active === 'template') {
+      if (templateHighlight === 0) goBack();
+      else setTemplateHighlight((i) => i - 1);
       return;
     }
     // Notes is a textarea (no option list) — ↑ walks straight back.
@@ -2766,6 +2867,22 @@ export function TaskComposer(props: Props) {
           setActiveIdx(QUESTIONS.indexOf(fieldQId('task', f.key)));
           return { ok: false, error: msg };
         }
+      }
+    }
+    // task-899af8b03aa6 — "Make this a template" is ON: the server auto-registers
+    // a template only from a task that actually carries input-field definitions
+    // (they become its variables), and there is NO explicit create-template API
+    // to force it. So a template with zero inputs is meaningless — block the save
+    // and send the user back to the fields step to add at least one variable (or
+    // turn the toggle off). Only meaningful on a plain TypeBuild create (the only
+    // path that writes structured fields); an EDIT can't re-register, so skip it.
+    if (props.mode === 'create' && hasChainOption && templateChoice === 'blank' && makeTemplate) {
+      const namedInputs = taskInputs.filter((f) => effectiveFieldKey(f));
+      if (namedInputs.length === 0) {
+        const msg = 'A template needs at least one input field (its variable). Add one on the Inputs & outputs step, or turn off "Make this a template".';
+        setError(msg);
+        setActiveIdx(QUESTIONS.indexOf('fields'));
+        return { ok: false, error: msg };
       }
     }
     setBusy(true);
@@ -3339,6 +3456,22 @@ export function TaskComposer(props: Props) {
       return;
     }
 
+    // task-899af8b03aa6 — 'T' toggles "Make this a template" and jumps to the
+    // step. Same bare-letter safety as 'A' (text inputs already returned via the
+    // guards above; no option question binds T — the When quick-picks are W/F/M).
+    // Only when the step exists (TypeBuild, not chain / from-template picker).
+    if (
+      (e.key === 't' || e.key === 'T') &&
+      !e.metaKey && !e.ctrlKey && !e.altKey &&
+      templateStepAvailable
+    ) {
+      e.preventDefault();
+      setMakeTemplate((v) => !v);
+      const ti = QUESTIONS.indexOf('template');
+      if (ti >= 0) setActiveIdx(ti);
+      return;
+    }
+
     if (active === 'folder') {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -3477,6 +3610,21 @@ export function TaskComposer(props: Props) {
       if (!Number.isNaN(n) && n >= 1 && n <= PIN_OPTIONS.length) {
         e.preventDefault();
         choosePin(n - 1);
+        return;
+      }
+      return;
+    }
+    // task-899af8b03aa6 — "Make this a template" yes/no (mirrors pin).
+    if (active === 'template') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        chooseTemplate(templateHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= TEMPLATE_OPTIONS.length) {
+        e.preventDefault();
+        chooseTemplate(n - 1);
         return;
       }
       return;
@@ -3623,6 +3771,10 @@ export function TaskComposer(props: Props) {
   function pinSummary(): string {
     return pinned ? 'Pinned' : 'Not pinned';
   }
+  // task-899af8b03aa6 — collapsed answer for the "Make this a template" step.
+  function templateSummary(): string {
+    return makeTemplate ? 'Template' : 'Just this task';
+  }
   // task-f5a318566148 — the ON launch flags, by label, or "None".
   function flagsSummary(): string {
     const on = FLAG_OPTIONS.filter((o) => flags.has(o.id)).map((o) => o.label);
@@ -3646,6 +3798,7 @@ export function TaskComposer(props: Props) {
     if (q === 'priority') return prioritySummary();
     if (q === 'agent') return agentSummary();
     if (q === 'pin') return pinSummary();
+    if (q === 'template') return templateSummary();
     if (q === 'flags') return flagsSummary();
     if (q === 'notes') return notesSummary();
     if (q === 'chain') return chainSummary();
@@ -3704,6 +3857,7 @@ export function TaskComposer(props: Props) {
     if (q === 'priority') return 'priority';
     if (q === 'agent') return 'agent';
     if (q === 'pin') return 'pin';
+    if (q === 'template') return 'template';
     if (q === 'flags') return 'flags';
     if (q === 'notes') return 'notes';
     if (q === 'chain') return 'chain';
@@ -3728,6 +3882,7 @@ export function TaskComposer(props: Props) {
     if (q === 'priority') return 'Priority?';
     if (q === 'agent') return 'Which agent?';
     if (q === 'pin') return 'Pin this task?';
+    if (q === 'template') return 'Make this a template?';
     if (q === 'flags') return 'Launch flags?';
     if (q === 'notes') {
       return executor === 'claude'
@@ -4906,6 +5061,71 @@ export function TaskComposer(props: Props) {
                 </div>
               ) : (
                 renderInert('outputs')
+              )}
+            </section>
+          )}
+
+          {/* task-899af8b03aa6 — "Make this a template". A yes/no step (mirrors
+              Pin) plus inline explanatory copy: the declared input/output fields
+              become the template's variables, reused later via New from Template.
+              Shown for the TypeBuild target (plain create or any edit); in edit
+              it reflects whether the task already backs a template. */}
+          {templateStepAvailable && (
+            <section
+              ref={sectionRefFor('template')}
+              className={sectionClasses('template')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('template'))}
+            >
+              {isActiveSection('template') ? (
+                <div className="composer__q-active-body">
+                  <FieldLabel id="template" />
+                  <div className="composer__q-prompt">{promptFor('template')}</div>
+                  <p className="composer__template-explainer">
+                    A <strong>template</strong> is a reusable task definition — this
+                    task's title plus its declared{' '}
+                    <strong>input &amp; output fields, which become variables</strong>.
+                    Later you pick <em>New from Template</em> and only fill the
+                    values; everything else is prefilled. Turning this on makes sure
+                    the task has at least one input field to fill.
+                  </p>
+                  {props.mode === 'edit' && makeTemplate && (
+                    <p className="composer__template-note">
+                      This task already backs a template. Its fields are edited on
+                      the task; instances are created via New from Template.
+                    </p>
+                  )}
+                  <ul className="composer__options" role="listbox">
+                    {TEMPLATE_OPTIONS.map((o, i) => (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === templateHighlight}
+                          className={
+                            'composer__option' +
+                            (i === templateHighlight ? ' composer__option--active' : '')
+                          }
+                          onMouseEnter={() => setTemplateHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            chooseTemplate(i);
+                          }}
+                        >
+                          <kbd className="composer__option-key">{i + 1}</kbd>
+                          <span className="composer__option-label">{o.label}</span>
+                          {o.hint && (
+                            <span className="composer__option-hint">{o.hint}</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="composer__template-hint">
+                    Press <kbd>T</kbd> anywhere to toggle.
+                  </p>
+                </div>
+              ) : (
+                renderInert('template')
               )}
             </section>
           )}

@@ -162,6 +162,38 @@
   margin: 0 0 4px;
 }
 
+/* ── "Make this a template" explainer (task-899af8b03aa6) ──────────────
+   Tight explanatory copy under the prompt; the ON hint sits below the
+   options. Muted, readable, no boxing so it reads as guidance not a banner. */
+.composer__template-explainer {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 2px 0 10px;
+  max-width: 60ch;
+}
+.composer__template-explainer strong { color: var(--ink); font-weight: 600; }
+.composer__template-explainer em { font-style: italic; color: var(--ink); }
+.composer__template-note {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin: 8px 0 4px;
+  max-width: 60ch;
+}
+.composer__template-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+.composer__template-hint kbd {
+  font: inherit;
+  padding: 1px 5px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+  border-radius: 4px;
+  background: rgba(128, 128, 128, 0.12);
+}
+
 /* ── Title input ───────────────────────────────────────────────────── */
 
 .composer__title-row {
