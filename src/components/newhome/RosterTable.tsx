@@ -19,9 +19,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { NewHomeStatus, NewHomeTask } from './types';
+import type { Task } from '../../types';
 import { claimFreshness } from '../tasks/lifecycle.mjs';
-import { evalCondition, fieldRef, metaStatus } from './taskSchema.mjs';
-import { pipelineColumns, partitionJobs } from './pipelineRoster.mjs';
+import { evalCondition, fieldRef, metaStatus, taskDefStatus } from './taskSchema.mjs';
+import { pipelineColumns, partitionJobs, runnableStepId } from './pipelineRoster.mjs';
 import type { PipelineColumn, PipelineGroup } from './pipelineRoster.mjs';
 import { useChainedRoster } from './useNewHomeData';
 import type { ChainedJobResolution } from './useNewHomeData';
@@ -78,6 +79,7 @@ function RowAction({
   onRetry,
   onStart,
   startAction,
+  chainStart,
 }: {
   task: NewHomeTask;
   onOpenTask: (id: string) => void;
@@ -87,6 +89,15 @@ function RowAction({
    *  Tasks page's state machine). `enabled` gates on TypeBuild readiness;
    *  `tooltip` is the same hover text the old play button shows. */
   startAction: { enabled: boolean; tooltip?: string } | null;
+  /** task-4045bcee23cb (U3a #1) — set ONLY for a chained-job parent row whose
+   *  own primaryActionFor is 'none' (fm-bq86: a parent with open children can't
+   *  itself be "started" — the container has nothing to run). This is a
+   *  DIFFERENT action: launch the first RUNNABLE CHILD in chain order, so a
+   *  chain becomes startable from the summary row instead of only via
+   *  cell → child drawer → Start. Eligibility still comes from primaryActionFor
+   *  run against that CHILD (see startActionFor in the parent component) — this
+   *  is not a new eligibility rule, just a new entry point to the same one. */
+  chainStart: { childId: string; enabled: boolean; tooltip?: string } | null;
 }) {
   if (task.status === 'needs') {
     return (
@@ -138,6 +149,25 @@ function RowAction({
       </button>
     );
   }
+  // ▶ Start chain — task-4045bcee23cb (U3a #1). The parent itself has nothing
+  // startable (it's a container with open children — fm-bq86), but the CHAIN
+  // does: launch the first runnable child, same mechanism as any row Start.
+  if (chainStart) {
+    return (
+      <button
+        type="button"
+        className="nh-roster__action nh-roster__action--start"
+        disabled={!chainStart.enabled}
+        title={chainStart.tooltip}
+        onClick={(e) => {
+          e.stopPropagation();
+          onStart(chainStart.childId);
+        }}
+      >
+        {'▶ Start chain'}
+      </button>
+    );
+  }
   return <span className="nh-roster__action-empty">{'—'}</span>;
 }
 
@@ -147,12 +177,68 @@ function RowAction({
 // Rendered as a nested subtable beneath the job's summary row.
 
 /** metaStatus ('done'|'active'|'pending') → the roster pill class + label the
- *  built-in status column already ships. */
+ *  built-in status column already ships. task-4045bcee23cb (U3a polish a) —
+ *  the 'pending' bucket now says "Queued", matching STATUS_LABEL/FILTER_PILLS
+ *  above (same `queued` pill class, same state, one token everywhere on the
+ *  roster — a chained job row no longer says "Pending" while the stats card
+ *  and every plain row for the identical state say "Queued"). */
 const META_PILL: Record<ReturnType<typeof metaStatus>, { cls: NewHomeStatus; label: string }> = {
   done: { cls: 'done', label: 'Done' },
   active: { cls: 'progress', label: 'In Progress' },
-  pending: { cls: 'queued', label: 'Pending' },
+  pending: { cls: 'queued', label: 'Queued' },
 };
+
+// task-4045bcee23cb (U3a) — per-step status chip label, rendered on a
+// subtable GROUP HEADER (one per task-def). 'queued' — not 'pending' — to
+// match the unified vocabulary above; 'n/a' for a conditionally-skipped step.
+const STEP_CHIP_LABEL: Record<ReturnType<typeof taskDefStatus>, string> = {
+  done: 'done',
+  active: 'running',
+  pending: 'queued',
+  skip: 'n/a',
+};
+
+/** One subtable group-header's status chip — "done"/"running"/"queued"/"n/a",
+ *  plus a ▶ affordance when this step is THE runnable one (task-4045bcee23cb
+ *  U3a #2). Eligibility for the ▶ still goes through `startAction` (built by
+ *  the caller from `primaryActionFor`, the U3 single source of truth) — this
+ *  component only decides WHERE to show it (the runnable step's own header),
+ *  never whether starting is allowed. */
+function StepChip({
+  status,
+  runnable,
+  startAction,
+  onStart,
+}: {
+  status: ReturnType<typeof taskDefStatus>;
+  runnable: boolean;
+  /** null when there's no child to start yet, or primaryActionFor doesn't
+   *  offer 'start' for it (e.g. claimed by someone else, already running). */
+  startAction: { enabled: boolean; tooltip?: string } | null;
+  onStart: () => void;
+}) {
+  return (
+    <span className="nh-pipe__step-chip-wrap">
+      <span className={`nh-pipe__step-chip nh-pipe__step-chip--${status}`}>
+        {STEP_CHIP_LABEL[status]}
+      </span>
+      {runnable && startAction && (
+        <button
+          type="button"
+          className="nh-pipe__step-start"
+          disabled={!startAction.enabled}
+          title={startAction.tooltip ?? 'Start this step'}
+          onClick={(e) => {
+            e.stopPropagation();
+            onStart();
+          }}
+        >
+          {'▶'}
+        </button>
+      )}
+    </span>
+  );
+}
 
 function hasCellValue(v: string | number | undefined): boolean {
   return v !== undefined && v !== null && v !== '';
@@ -236,6 +322,16 @@ function PipelineInput({
       onKeyDown={(e) => {
         stop(e);
         if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') {
+          // task-4045bcee23cb (U3a polish c) — Escape reverts the draft to the
+          // last-committed value AND blurs, instead of merely stopping
+          // propagation (which left the cursor/focus sitting in the input with
+          // whatever half-typed text was there). Blur fires after the draft
+          // reset below, so `commit`'s draft!==value check sees the reverted
+          // draft and correctly no-ops (nothing to save).
+          setDraft(value);
+          e.currentTarget.blur();
+        }
       }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
@@ -289,19 +385,21 @@ function PipelineCell({
       <td
         className={`nh-pipe__cell nh-pipe__cell--out${missing ? ' nh-pipe__cell--missing' : ''}`}
         onClick={openChild}
-        title={col.label}
+        title={missing ? undefined : col.label}
       >
         {has ? (
           <span className="nh-pipe__val">{String(value)}</span>
-        ) : (
-          <span className="nh-pipe__empty">
-            {loading ? '·' : '—'}
-            {missing && (
-              <sup className="nh-pipe__missing-mark" title="required output not yet submitted">
-                *
-              </sup>
-            )}
+        ) : missing && !loading ? (
+          // task-4045bcee23cb (U3a polish b) — a required-but-unsubmitted
+          // output is no longer a plain "—*"; the dashed underline + tooltip
+          // is the affordance (mirrors the dashed-input pattern PipelineInput
+          // already uses for editable cells), so a missing required output
+          // reads as "there's something here to notice", not stray punctuation.
+          <span className="nh-pipe__empty nh-pipe__empty--missing" title="required — awaiting agent">
+            —
           </span>
+        ) : (
+          <span className="nh-pipe__empty">{loading ? '·' : '—'}</span>
         )}
       </td>
     );
@@ -330,22 +428,61 @@ function ChainedJobSubtable({
   resolution,
   onOpenTask,
   onSaveInput,
+  allTasksById,
+  onStartChild,
 }: {
   groups: PipelineGroup[];
   resolution: Extract<ChainedJobResolution, { status: 'chained' }>;
   onOpenTask: (id: string) => void;
   onSaveInput: (childId: string, key: string, value: string) => void;
+  /** task-4045bcee23cb (U3a #2) — full-roster id→Task lookup, so the runnable
+   *  group header can resolve its child's raw Task and run it through
+   *  primaryActionFor (start-eligibility must never be guessed from the
+   *  view-model alone). */
+  allTasksById: Map<string, Task>;
+  onStartChild: (childId: string) => void;
 }) {
-  const { valuesByRef, childIdByDefId, childrenLoading } = resolution;
+  const { valuesByRef, childIdByDefId, childrenLoading, defs } = resolution;
+  const tbReady = useTypebuildReadiness();
+  const actions = useTaskActions();
+  const sessions = useRunningSessions();
+  const runnableId = useMemo(() => runnableStepId(defs, valuesByRef), [defs, valuesByRef]);
   return (
     <table className="nh-pipe__table nh-pipe__subtable">
       <thead>
         <tr>
-          {groups.map((g) => (
-            <th key={g.taskDefId} colSpan={g.columns.length} className="nh-pipe__group-th" title={g.name}>
-              {g.name}
-            </th>
-          ))}
+          {groups.map((g) => {
+            const def = defs.find((d) => d.id === g.taskDefId);
+            const status = def ? taskDefStatus(def, valuesByRef) : 'pending';
+            const childId = childIdByDefId[g.taskDefId];
+            const child = childId ? allTasksById.get(childId) : undefined;
+            const runnable = g.taskDefId === runnableId;
+            // task-4045bcee23cb (U3a) — same actionsFor eligibility rule as the
+            // row-level ▶ Start and the parent's Start-chain: never invent a
+            // second rule for "can this step be started".
+            const startAction =
+              child &&
+              (() => {
+                const pa = primaryActionFor(child, {
+                  caps: actions.caps(child),
+                  tbReady,
+                  myEmail: tbReady.email,
+                  session: sessions.get(child.id),
+                });
+                return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
+              })();
+            return (
+              <th key={g.taskDefId} colSpan={g.columns.length} className="nh-pipe__group-th" title={g.name}>
+                <span className="nh-pipe__group-name">{g.name}</span>
+                <StepChip
+                  status={status}
+                  runnable={runnable}
+                  startAction={startAction ?? null}
+                  onStart={() => childId && onStartChild(childId)}
+                />
+              </th>
+            );
+          })}
         </tr>
         <tr>
           {groups.flatMap((g) =>
@@ -465,6 +602,10 @@ export function RosterTable({
     }
     return set;
   }, [allTasks]);
+  // task-4045bcee23cb (U3a) — id → raw Task lookup so a chained job's step
+  // chips / parent Start-chain can resolve a CHILD's full Task (primaryActionFor
+  // needs the whole object, not just an id) without each subtable re-fetching.
+  const allTasksById = useMemo(() => new Map(allTasks.map((t) => [t.id, t])), [allTasks]);
   const startActionFor = (
     t: NewHomeTask,
   ): { enabled: boolean; tooltip?: string } | null => {
@@ -476,6 +617,31 @@ export function RosterTable({
       hasOpenChildren: openChildParentIds.has(t.id),
     });
     return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
+  };
+
+  // task-4045bcee23cb (U3a #1) — "▶ Start chain": for a chained-job parent row
+  // (whose OWN primaryActionFor is 'none' per fm-bq86 — a container can't be
+  // Started while it has open children), resolve the first RUNNABLE child (in
+  // chain/dependency order, via runnableStepId — the same walk metaStatus
+  // already does) and run THAT child through primaryActionFor. Reuses the
+  // exact eligibility rule the row/step-chip Start buttons use; this is only a
+  // new entry point (parent row), never a new rule.
+  const chainStartFor = (
+    chainedRes: Extract<ChainedJobResolution, { status: 'chained' }>,
+  ): { childId: string; enabled: boolean; tooltip?: string } | null => {
+    const stepId = runnableStepId(chainedRes.defs, chainedRes.valuesByRef);
+    if (!stepId) return null;
+    const childId = chainedRes.childIdByDefId[stepId];
+    if (!childId) return null;
+    const child = allTasksById.get(childId);
+    if (!child) return null;
+    const pa = primaryActionFor(child, {
+      caps: actions.caps(child),
+      tbReady,
+      myEmail: tbReady.email,
+      session: sessions.get(childId),
+    });
+    return pa.kind === 'start' ? { childId, enabled: pa.enabled, tooltip: pa.tooltip } : null;
   };
 
   // ── chained-job detection (task-b1fa5098da3e, R3) ─────────────────────────
@@ -717,6 +883,7 @@ export function RosterTable({
                         onRetry={onRetry}
                         onStart={onStart}
                         startAction={startActionFor(t)}
+                        chainStart={chainedRes ? chainStartFor(chainedRes) : null}
                       />
                     </td>
                   </tr>
@@ -730,6 +897,8 @@ export function RosterTable({
                           onSaveInput={(childId, key, value) => {
                             void chained.saveInput(childId, key, value);
                           }}
+                          allTasksById={allTasksById}
+                          onStartChild={onStart}
                         />
                       </td>
                     </tr>

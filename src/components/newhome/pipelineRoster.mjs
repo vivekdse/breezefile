@@ -29,6 +29,7 @@ import {
   parseTaskOutputsBlock,
   resultFields,
   buildTaskFieldsBlock,
+  taskDefStatus,
 } from './taskSchema.mjs';
 
 /**
@@ -194,4 +195,32 @@ export function rewriteTaskFieldsBlock(body, templateId, taskDefId, values) {
   // No existing block (defensive — a template child should always have one):
   // append it after the existing notes, blank-line separated.
   return src.trim() ? `${src.trim()}\n\n${block}` : block;
+}
+
+/**
+ * task-4045bcee23cb (U3a) — the single "which step is runnable next" rule,
+ * shared by the parent-row "▶ Start chain" action, the subtable group-header
+ * chips, and the detail Pipeline rollup so all three surfaces always agree.
+ *
+ * "Runnable" = the FIRST task-def, in chain (dependency) order, that is not
+ * `skip` (its `neededWhen` gate is unmet) and not `done`. This mirrors
+ * `metaStatus`'s own walk order — chain order IS the dependency order for a
+ * v2 task-template block (docs/task-templates-design.md) — so this doesn't
+ * invent a new ordering model, it just stops at the first not-done step.
+ *
+ * Returns null when every def is done or skipped (nothing left to run) or
+ * `taskDefs` is empty.
+ *
+ * @param {import('./types').TaskDef[]} taskDefs
+ * @param {Record<string, string|number>} valuesByRef
+ * @returns {string|null} the runnable task-def's id, or null
+ */
+export function runnableStepId(taskDefs, valuesByRef) {
+  for (const def of taskDefs ?? []) {
+    if (!def || typeof def.id !== 'string') continue;
+    const status = taskDefStatus(def, valuesByRef);
+    if (status === 'skip' || status === 'done') continue;
+    return def.id;
+  }
+  return null;
 }

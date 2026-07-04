@@ -388,6 +388,48 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.nh-pipe__group-name {
+  margin-right: 6px;
+}
+/* task-4045bcee23cb (U3a #2) — per-step status chip on a subtable GROUP
+   HEADER (done / running / queued / n-a), plus the ▶ that appears only on the
+   one runnable step. */
+.nh-pipe__step-chip-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+.nh-pipe__step-chip {
+  display: inline-block;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.nh-pipe__step-chip--done { background: var(--nh-done-soft); color: var(--nh-done); }
+.nh-pipe__step-chip--active { background: var(--nh-progress-soft); color: var(--nh-progress); }
+.nh-pipe__step-chip--pending { background: var(--nh-queued-soft); color: var(--nh-queued); }
+.nh-pipe__step-chip--skip { background: var(--bg-2); color: var(--muted-on-panel); }
+.nh-pipe__step-start {
+  border: none;
+  background: var(--nh-progress-soft);
+  color: var(--nh-progress);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.nh-pipe__step-start:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+.nh-pipe__step-start:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .nh-pipe__field-th {
   border-left: 1px solid var(--border-1);
   white-space: nowrap;
@@ -436,10 +478,15 @@
 .nh-pipe__cell--missing {
   background: color-mix(in srgb, var(--nh-needs-soft) 40%, transparent);
 }
-.nh-pipe__missing-mark {
-  color: var(--nh-needs);
-  font-weight: 700;
-  margin-left: 1px;
+/* task-4045bcee23cb (U3a polish b) — a required-but-unsubmitted output reads
+   as a dashed underline (hover for "required — awaiting agent") rather than a
+   bare "—*", so the affordance is discoverable without relying on a
+   superscript asterisk. */
+.nh-pipe__empty--missing {
+  text-decoration: underline dashed;
+  text-decoration-color: var(--nh-needs);
+  text-underline-offset: 2px;
+  cursor: help;
 }
 /* Conditional-skip: a whole task-def group hatched "n/a" — visually distinct
    from a merely-empty (pending) cell. */

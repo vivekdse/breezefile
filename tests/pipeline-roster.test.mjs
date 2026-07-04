@@ -9,6 +9,7 @@ import {
   pipelineColumns,
   buildJobValuesByRef,
   rewriteTaskFieldsBlock,
+  runnableStepId,
 } from '../src/components/newhome/pipelineRoster.mjs';
 import {
   buildTaskFieldsBlock,
@@ -188,4 +189,72 @@ test('rewriteTaskFieldsBlock appends a block when the body has none', () => {
   assert.ok(next.startsWith('just some notes'));
   const parsed = parseTaskFieldsBlock(next);
   assert.deepEqual(parsed.values, { a: '1' });
+});
+
+// ── runnableStepId (task-4045bcee23cb, U3a) ─────────────────────────────────
+// The single "which step is runnable next" rule shared by the parent-row
+// "▶ Start chain" action, the subtable group-header chips, and the detail
+// Pipeline rollup.
+test('runnableStepId returns the first non-done, non-skip def in chain order', () => {
+  const taskDefs = [
+    {
+      id: 'intake',
+      name: 'Intake',
+      inputs: [],
+      outputs: [{ key: 'has_stains', label: 'Stains?', type: 'bool', required: true }],
+    },
+    {
+      id: 'wash',
+      name: 'Wash',
+      inputs: [],
+      outputs: [{ key: 'done_at', label: 'Done at', type: 'date', required: true }],
+    },
+  ];
+  // Nothing done yet → the FIRST def is runnable.
+  assert.equal(runnableStepId(taskDefs, {}), 'intake');
+  // intake done → wash is runnable next.
+  assert.equal(
+    runnableStepId(taskDefs, { [fieldRef('intake', 'has_stains')]: 'Yes' }),
+    'wash',
+  );
+  // everything done → nothing left to run.
+  assert.equal(
+    runnableStepId(taskDefs, {
+      [fieldRef('intake', 'has_stains')]: 'Yes',
+      [fieldRef('wash', 'done_at')]: '2026-07-03',
+    }),
+    null,
+  );
+});
+
+test('runnableStepId skips a conditionally-gated (n/a) def and lands on the next runnable one', () => {
+  const taskDefs = [
+    {
+      id: 'intake',
+      name: 'Intake',
+      inputs: [],
+      outputs: [{ key: 'has_stains', label: 'Stains?', type: 'bool', required: true }],
+    },
+    {
+      id: 'wash',
+      name: 'Wash',
+      neededWhen: { ref: fieldRef('intake', 'has_stains'), op: '==', value: 'Yes' },
+      inputs: [],
+      outputs: [{ key: 'done_at', label: 'Done at', type: 'date', required: true }],
+    },
+    {
+      id: 'deliver',
+      name: 'Deliver',
+      inputs: [],
+      outputs: [{ key: 'delivered_at', label: 'Delivered at', type: 'date', required: true }],
+    },
+  ];
+  // intake done, has_stains=No → wash is skipped (n/a) → deliver is runnable.
+  const values = { [fieldRef('intake', 'has_stains')]: 'No' };
+  assert.equal(runnableStepId(taskDefs, values), 'deliver');
+});
+
+test('runnableStepId returns null for an empty def list', () => {
+  assert.equal(runnableStepId([], {}), null);
+  assert.equal(runnableStepId(undefined, {}), null);
 });

@@ -397,6 +397,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* task-4045bcee23cb (U3a #3) — the per-step ▶ Start, shown only on the one
+   runnable step (same eligibility rule as the roster's row Start / group-
+   header chips). */
+.nh-dialog__pipeline-start {
+  appearance: none;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nh-dialog__pipeline-start:hover:not(:disabled) { background: var(--accent); color: var(--bg-1); }
+.nh-dialog__pipeline-start:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── attachments ───────────────────────────────────────────────────────── */
 .nh-dialog__attachments {

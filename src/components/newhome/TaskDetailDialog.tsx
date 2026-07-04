@@ -58,6 +58,7 @@ import {
   taskDefStatus,
   fieldRef,
 } from './taskSchema.mjs';
+import { runnableStepId } from './pipelineRoster.mjs';
 import './TaskDetailDialog.css';
 
 // ─── small formatting helpers (local — no shared-file dependency) ──────────
@@ -143,10 +144,14 @@ const MARKER: Record<EvidenceEntry['kind'], string> = {
 // from its children. Both degrade to nothing when the body carries neither
 // block — see the file-header non-regression note.
 
+// task-4045bcee23cb (U3a polish a) — 'pending' says "Queued" here too, matching
+// the roster's own status vocabulary (STATUS_LABEL/META_PILL in RosterTable.tsx)
+// so a step never says "Pending" in one place and "Queued" in another for the
+// identical not-yet-started state.
 const DEF_STATUS_LABEL: Record<ReturnType<typeof taskDefStatus>, string> = {
   done: 'Done',
   active: 'In progress',
-  pending: 'Pending',
+  pending: 'Queued',
   skip: 'Not needed',
 };
 
@@ -485,6 +490,13 @@ export function TaskDetailDialog({
   // that no longer exists (removed R3) — it degrades to no pipeline section
   // rather than trying to resolve anything.
   const pipelineDefs = useMemo<TaskDef[]>(() => templateBlock?.defs ?? [], [templateBlock]);
+  // task-4045bcee23cb (U3a #3) — the SAME "which step is runnable next" rule
+  // the roster's group-header chips and parent Start-chain use, so this
+  // rollup's ▶ never drifts from the roster's.
+  const pipelineRunnableId = useMemo(
+    () => runnableStepId(pipelineDefs, pipelineValuesByRef),
+    [pipelineDefs, pipelineValuesByRef],
+  );
 
   // ── evidence log: merge runs + messages + pending question + notes/flags ──
   const evidence = useMemo<EvidenceEntry[]>(() => {
@@ -764,6 +776,23 @@ export function TaskDetailDialog({
                     ? `${firstOutput.label}=${pipelineValuesByRef[fieldRef(def.id, firstOutput.key)]}`
                     : null;
                   const clickable = !!child && !!onOpenTask;
+                  // task-4045bcee23cb (U3a #3) — same actionsFor
+                  // (primaryActionFor) eligibility as the roster's row
+                  // Start / step chips; this rollup just adds another entry
+                  // point to the identical rule.
+                  const runnable = def.id === pipelineRunnableId;
+                  const stepStart =
+                    runnable && child
+                      ? (() => {
+                          const pa = primaryActionFor(child.raw, {
+                            caps: actions.caps(child.raw),
+                            tbReady,
+                            myEmail: tbReady.email,
+                            session: sessions.get(child.id),
+                          });
+                          return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
+                        })()
+                      : null;
                   return (
                     <li
                       key={def.id}
@@ -780,6 +809,20 @@ export function TaskDetailDialog({
                         {DEF_STATUS_LABEL[defStatus]}
                       </span>
                       <span className="nh-dialog__pipeline-outcome">{outcome ?? '—'}</span>
+                      {stepStart && (
+                        <button
+                          type="button"
+                          className="nh-dialog__pipeline-start"
+                          disabled={!stepStart.enabled}
+                          title={stepStart.tooltip ?? 'Start this step'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void actions.start(child!.raw);
+                          }}
+                        >
+                          {'▶ Start'}
+                        </button>
+                      )}
                     </li>
                   );
                 })}

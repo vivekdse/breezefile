@@ -51,3 +51,8 @@ export function rewriteTaskFieldsBlock(
   taskDefId: string,
   values: Record<string, string>,
 ): string;
+
+export function runnableStepId(
+  taskDefs: TaskDef[] | null | undefined,
+  valuesByRef: Record<string, string | number>,
+): string | null;
