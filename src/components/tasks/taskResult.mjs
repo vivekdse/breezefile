@@ -95,27 +95,40 @@ export function normalizeTablePayload(payload) {
   return { headers, rows, width };
 }
 
-/** Validate + normalize a `fields` payload (task-templates design doc: agents
- *  submit `{taskDefId, fields: {key: value}}` via `submit_task_result` with
- *  `type: "fields"`) into a safe `{ taskDefId, entries }` shape, or null when
- *  malformed/empty (so the caller falls back to notes). `entries` is an
- *  ordered `[{key, value}]` list — insertion order of the source object,
- *  values coerced with `coerceCell` so any shape (number/bool/null/nested)
- *  renders safely. A payload with no usable entries is treated as empty →
- *  null, same convention as `normalizeTablePayload`. `taskDefId` is optional —
- *  a generic (non-template) `fields` result with no `taskDefId` still
- *  renders, so this renderer isn't template-specific. */
+/** Validate + normalize a `fields` payload into a safe `{ taskDefId, entries }`
+ *  shape, or null when malformed/empty (so the caller falls back to notes).
+ *  `entries` is an ordered `[{key, value}]` list — insertion order of the
+ *  source object, values coerced with `coerceCell` so any shape (number/bool/
+ *  null/nested) renders safely. A payload with no usable entries is treated
+ *  as empty → null, same convention as `normalizeTablePayload`.
+ *
+ *  task-2638eeedd9ef — the server adopted FLAT as canonical
+ *  (`submit_task_result(type="fields", payload={key: value, ...})`); this
+ *  accepts BOTH shapes:
+ *   - FLAT `{key: value}` (canonical) — every own-enumerable key is an entry;
+ *     `taskDefId` is null (a bare flat payload carries no def id).
+ *   - LEGACY NESTED `{taskDefId, fields: {key: value}}` — still read
+ *     correctly so existing results (e.g. task-7d65e61fb581, stored nested)
+ *     still render; `taskDefId` comes from the payload.
+ *  `taskDefId` is optional either way — a generic (non-template) `fields`
+ *  result with no `taskDefId` still renders, so this renderer isn't
+ *  template-specific. */
 export function normalizeFieldsPayload(payload) {
-  if (!payload || typeof payload !== 'object') return null;
-  const fieldsIn = payload.fields;
-  if (!fieldsIn || typeof fieldsIn !== 'object' || Array.isArray(fieldsIn)) return null;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
 
+  const isLegacyNested =
+    typeof payload.taskDefId === 'string' &&
+    !!payload.fields &&
+    typeof payload.fields === 'object' &&
+    !Array.isArray(payload.fields);
+
+  const fieldsIn = isLegacyNested ? payload.fields : payload;
   const entries = Object.entries(fieldsIn).map(([key, value]) => ({
     key: String(key),
     value: coerceCell(value),
   }));
   if (entries.length === 0) return null;
 
-  const taskDefId = typeof payload.taskDefId === 'string' ? payload.taskDefId : null;
+  const taskDefId = isLegacyNested ? payload.taskDefId : null;
   return { taskDefId, entries };
 }

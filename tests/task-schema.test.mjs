@@ -205,15 +205,42 @@ test('resultFields drops non-primitive field values without throwing', () => {
   assert.deepEqual(resultFields(result), { taskDefId: 'intake', fields: { good: 'x' } });
 });
 
+// task-2638eeedd9ef: the server adopted FLAT as canonical
+// (submit_task_result(type="fields", payload={key: value, ...})) — no
+// taskDefId wrapper. resultFields must read this shape too, alongside the
+// legacy nested one above (still read so e.g. task-7d65e61fb581 renders).
+test('resultFields reads a FLAT (canonical) payload — taskDefId comes back null', () => {
+  const result = { type: 'fields', payload: { has_stains: 'Yes', count: 3, ok: true } };
+  assert.deepEqual(resultFields(result), {
+    taskDefId: null,
+    fields: { has_stains: 'Yes', count: 3, ok: true },
+  });
+});
+
+test('resultFields (flat) drops non-primitive values without throwing', () => {
+  const result = { type: 'fields', payload: { good: 'x', bad: { nested: true }, alsoBad: [1, 2] } };
+  assert.deepEqual(resultFields(result), { taskDefId: null, fields: { good: 'x' } });
+});
+
+test('resultFields (flat) with zero usable entries → null (falls back)', () => {
+  assert.equal(resultFields({ type: 'fields', payload: {} }), null);
+  assert.equal(resultFields({ type: 'fields', payload: { onlyObj: { a: 1 } } }), null);
+});
+
 test('resultFields returns null for non-"fields" or malformed results', () => {
   assert.equal(resultFields(undefined), null);
   assert.equal(resultFields({ type: 'table', payload: {} }), null);
   assert.equal(resultFields({ type: 'fields', payload: null }), null);
-  assert.equal(resultFields({ type: 'fields', payload: { fields: {} } }), null); // no taskDefId
-  assert.equal(
-    resultFields({ type: 'fields', payload: { taskDefId: 'x', fields: 'nope' } }),
-    null,
-  );
+});
+
+// `{taskDefId:'x', fields:'nope'}` isn't a valid LEGACY NESTED payload (its
+// `fields` isn't an object) — it falls through to the FLAT reading, where
+// `taskDefId` and `fields` are just two string-valued keys.
+test('resultFields: a not-quite-nested payload (fields not an object) reads as flat', () => {
+  assert.deepEqual(resultFields({ type: 'fields', payload: { taskDefId: 'x', fields: 'nope' } }), {
+    taskDefId: null,
+    fields: { taskDefId: 'x', fields: 'nope' },
+  });
 });
 
 // ── evalCondition ────────────────────────────────────────────────────────

@@ -47,19 +47,21 @@ test('valid block: instruction section lists every field with required/evidence 
   // Every field key + label + type is present.
   assert.match(out, /has_stains/);
   assert.match(out, /Stains present\?/);
-  assert.match(out, /type: bool/);
+  assert.match(out, /\[bool\]/);
   assert.match(out, /intake_photo/);
-  assert.match(out, /type: text/);
+  assert.match(out, /\[text\]/);
   assert.match(out, /notes/);
   // Required/evidence wording present.
   assert.match(out, /REQUIRED/);
   assert.match(out, /evidence/i);
   assert.match(out, /not complete until/i);
-  // submit_task_result contract: type "fields", correct payload shape, before submit_task.
-  assert.match(out, /submit_task_result/);
-  assert.match(out, /type:\s*"fields"/);
-  assert.match(out, /"taskDefId"\s*:\s*"intake"/);
-  assert.match(out, /before[\s\S]*submit_task`/i);
+  // submit_task_result contract: type "fields", FLAT payload shape (no taskDefId
+  // wrapper), before submit_task — matches the server's own agent wording
+  // (task-2638eeedd9ef: flat is canonical).
+  assert.match(out, /submit_task_result\(type="fields", payload=/);
+  assert.match(out, /"has_stains":\s*"<value>"/);
+  assert.doesNotMatch(out, /"taskDefId"/);
+  assert.match(out, /before submit_task/i);
   // PHI warning: never persist values to files/notes/logs.
   assert.match(out, /never write field values to files, notes, or logs/i);
   assert.match(out, /encrypted/i);

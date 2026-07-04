@@ -27,7 +27,12 @@ export type ParsedTaskTemplateLegacy = {
 };
 export type ParsedTaskTemplate = ParsedTaskTemplateV2 | ParsedTaskTemplateLegacy;
 
-export type ParsedResultFields = { taskDefId: string; fields: Record<string, string | number | boolean> };
+/** `taskDefId` is non-null only when read from a LEGACY NESTED payload
+ *  (`{taskDefId, fields}`); a FLAT (canonical) payload carries no def id of
+ *  its own, so it comes back null — callers that know the owning task-def
+ *  (e.g. pipelineRoster.mjs, from the child's own task-outputs block) should
+ *  use that known id instead. */
+export type ParsedResultFields = { taskDefId: string | null; fields: Record<string, string | number | boolean> };
 
 export type TaskDefRenderStatus = 'done' | 'active' | 'pending' | 'skip';
 export type MetaStatus = 'done' | 'active' | 'pending';

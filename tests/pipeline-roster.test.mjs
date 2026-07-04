@@ -111,6 +111,53 @@ test('buildJobValuesByRef ignores unfetched children (null notes/result)', () =>
   assert.deepEqual(childIdByDefId, {});
 });
 
+// task-2638eeedd9ef: the server's canonical result is now FLAT ({key:value},
+// no taskDefId). buildJobValuesByRef must still land those values under the
+// right task-def group by falling back to the def id already known from the
+// SAME child's task-fields/task-outputs blocks.
+test('buildJobValuesByRef: FLAT result + task-fields block on the same child → indexed by that def', () => {
+  const children = [
+    {
+      id: 'c-intake',
+      notes: `prompt\n\n${buildTaskFieldsBlock('tmpl', 'intake', { customer: 'Acme' })}`,
+      result: { type: 'fields', payload: { has_stains: 'Yes' } }, // flat, no taskDefId
+    },
+  ];
+  const { valuesByRef, childIdByDefId } = buildJobValuesByRef(children);
+  assert.equal(valuesByRef[fieldRef('intake', 'customer')], 'Acme');
+  assert.equal(valuesByRef[fieldRef('intake', 'has_stains')], 'Yes');
+  assert.deepEqual(childIdByDefId, { intake: 'c-intake' });
+});
+
+test('buildJobValuesByRef: FLAT result with only a task-outputs block (no task-fields) → still indexed', () => {
+  const children = [
+    {
+      id: 'c-wash',
+      notes: buildTaskOutputsBlock({
+        id: 'wash',
+        outputs: [{ key: 'done_at', label: 'Done at', type: 'text' }],
+      }),
+      result: { type: 'fields', payload: { done_at: '2026-07-03' } },
+    },
+  ];
+  const { valuesByRef, childIdByDefId } = buildJobValuesByRef(children);
+  assert.equal(valuesByRef[fieldRef('wash', 'done_at')], '2026-07-03');
+  assert.deepEqual(childIdByDefId, { wash: 'c-wash' });
+});
+
+test('buildJobValuesByRef: legacy NESTED result (task-7d65e61fb581-style) still reads correctly', () => {
+  const children = [
+    {
+      id: 'c-legacy',
+      notes: null,
+      result: { type: 'fields', payload: { taskDefId: 'intake', fields: { has_stains: 'Yes' } } },
+    },
+  ];
+  const { valuesByRef, childIdByDefId } = buildJobValuesByRef(children);
+  assert.equal(valuesByRef[fieldRef('intake', 'has_stains')], 'Yes');
+  assert.deepEqual(childIdByDefId, { intake: 'c-legacy' });
+});
+
 // ── rewriteTaskFieldsBlock ───────────────────────────────────────────────────
 test('rewriteTaskFieldsBlock replaces only the task-fields block, preserving surroundings', () => {
   const notes = [

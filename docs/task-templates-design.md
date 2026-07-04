@@ -125,17 +125,45 @@ if that still exists locally) rather than silently misreading them as v2.
 
 ## Result contract (agent → client)
 
-Agents submit outputs via `submit_task_result` with **`type: "fields"`**:
+task-2638eeedd9ef: the server (task-d66c71c0ca38) adopted **FLAT as
+canonical**. Agents submit outputs via `submit_task_result` with
+**`type: "fields"`** and a flat payload — one key per output field, no
+wrapper:
+
+```json
+{ "has_stains": "Yes", "intake_photo": "ph_8831" }
+```
+
+This is the exact shape both the server's own agent instructions
+(`_output_schema_instruction` in task_manager_api's mcp_server.py, and the S3
+operator instructions) and the client's `renderTaskOutputsInstructions`
+(electron/typebuild/task-outputs-instructions.mjs) tell agents to submit —
+headless and interactive agents get the identical directive, so a schema'd
+task can always satisfy the server's `missing_required_outputs` gate
+regardless of which surface the agent used.
+
+**Legacy nested** (pre task-2638eeedd9ef) — still READ, never written:
 
 ```json
 { "taskDefId": "intake", "fields": { "has_stains": "Yes", "intake_photo": "ph_8831" } }
 ```
 
+Existing results stored this way (e.g. task-7d65e61fb581) must keep
+rendering, so every reader on both client and server accepts nested as a
+fallback shape — unwrap `payload.fields` when `payload.taskDefId` is a string
+and `payload.fields` is an object; otherwise treat `payload` itself as the
+flat field map. New results are always written flat.
+
 Client side: `mapResult` (electron/sources/typebuild.ts:474) is open dispatch —
 `"fields"` passes through untouched. The renderer registry
 (src/components/tasks/taskResult.mjs `KNOWN_RESULT_TYPES` + TaskResult.tsx
-`RESULT_RENDERERS`) has a `fields` renderer. All values coerce via
-`coerceCell`-style defensive shaping. Unchanged from R0.
+`RESULT_RENDERERS`) has a `fields` renderer; `normalizeFieldsPayload` accepts
+both flat and legacy-nested shapes. `src/components/newhome/taskSchema.mjs`
+`resultFields()` likewise accepts both — `taskDefId` comes back `null` for a
+flat payload (it carries no def id of its own); callers that need the owning
+task-def (pipelineRoster.mjs `buildJobValuesByRef`) fall back to the def id
+already known from the child's own `task-fields`/`task-outputs` blocks. All
+values coerce via `coerceCell`-style defensive shaping.
 
 ## Pure helper module — src/components/newhome/taskSchema.mjs (+ .d.mts)
 
@@ -150,6 +178,8 @@ parseTaskFieldsBlock(body)    → {templateId,taskDefId,values} | null
 parseTaskOutputsBlock(body)   → {taskDefId,fields[]} | null
 parseTaskTemplateBlock(body)  → {name,defs} | {name:null,defs:null,legacy:{templateId,taskDefIds}} | null
 resultFields(result)          → {taskDefId,fields} | null   // from {type:'fields',payload}
+    // payload FLAT {k:v} (canonical) → taskDefId:null; LEGACY NESTED
+    // {taskDefId,fields:{k:v}} still read → taskDefId from payload.
 evalCondition(cond, valuesByRef)              → boolean     // unknown upstream value → false
 taskDefStatus(taskDef, valuesByRef)           → 'done'|'active'|'pending'|'skip'
     // skip: neededWhen unmet. No required outputs: any output present → done.

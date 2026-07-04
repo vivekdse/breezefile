@@ -164,15 +164,15 @@ test('normalizeFieldsPayload produces ordered {key,value} entries', () => {
   ]);
 });
 
-test('normalizeFieldsPayload allows a missing taskDefId (generic fields result)', () => {
-  const f = normalizeFieldsPayload({ fields: { note: 'ok' } });
+test('normalizeFieldsPayload allows a missing taskDefId (legacy nested, generic fields result)', () => {
+  const f = normalizeFieldsPayload({ taskDefId: 'x', fields: { note: 'ok' } });
   assert.ok(f);
-  assert.equal(f.taskDefId, null);
+  assert.equal(f.taskDefId, 'x');
   assert.deepEqual(f.entries, [{ key: 'note', value: 'ok' }]);
 });
 
 test('normalizeFieldsPayload coerces null/undefined values to blank cells, not "null"', () => {
-  const f = normalizeFieldsPayload({ fields: { a: null, b: undefined } });
+  const f = normalizeFieldsPayload({ a: null, b: undefined });
   assert.ok(f);
   assert.deepEqual(f.entries, [
     { key: 'a', value: '' },
@@ -186,9 +186,34 @@ test('normalizeFieldsPayload falls back (null) for empty/malformed payloads', ()
   assert.equal(normalizeFieldsPayload('nope'), null);
   assert.equal(normalizeFieldsPayload(42), null);
   assert.equal(normalizeFieldsPayload({}), null);
-  assert.equal(normalizeFieldsPayload({ fields: {} }), null);
-  assert.equal(normalizeFieldsPayload({ fields: 'no' }), null);
-  assert.equal(normalizeFieldsPayload({ fields: [1, 2] }), null);
+  assert.equal(normalizeFieldsPayload({ taskDefId: 'x', fields: {} }), null);
+});
+
+// task-2638eeedd9ef: the server's canonical result is FLAT ({key:value}, no
+// taskDefId wrapper) — the fields renderer must render it directly.
+test('normalizeFieldsPayload reads a FLAT (canonical) payload — taskDefId null', () => {
+  const f = normalizeFieldsPayload({ has_stains: 'Yes', item_count: 12, urgent: true });
+  assert.ok(f);
+  assert.equal(f.taskDefId, null);
+  assert.deepEqual(f.entries, [
+    { key: 'has_stains', value: 'Yes' },
+    { key: 'item_count', value: '12' },
+    { key: 'urgent', value: 'true' },
+  ]);
+});
+
+test('normalizeFieldsPayload: legacy NESTED payload (task-7d65e61fb581-style) still reads correctly', () => {
+  const f = normalizeFieldsPayload({
+    taskDefId: 'intake',
+    fields: { has_stains: 'Yes', item_count: 12, urgent: true },
+  });
+  assert.ok(f);
+  assert.equal(f.taskDefId, 'intake');
+  assert.deepEqual(f.entries, [
+    { key: 'has_stains', value: 'Yes' },
+    { key: 'item_count', value: '12' },
+    { key: 'urgent', value: 'true' },
+  ]);
 });
 
 test('normalizeTablePayload drops non-array rows without throwing', () => {

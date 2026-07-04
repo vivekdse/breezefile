@@ -26,6 +26,7 @@
 import {
   fieldRef,
   parseTaskFieldsBlock,
+  parseTaskOutputsBlock,
   resultFields,
   buildTaskFieldsBlock,
 } from './taskSchema.mjs';
@@ -121,6 +122,13 @@ function coerceValue(v) {
  * (notes/result null) simply contribute nothing — the caller degrades those
  * cells to a loading em-dash.
  *
+ * task-2638eeedd9ef: a result's `taskDefId` is only known when the child was
+ * given a LEGACY NESTED result (`{taskDefId, fields}`). The canonical FLAT
+ * result (`{key:value}`, no def id) carries none, so this falls back — in
+ * order — to (1) the input block's def id already parsed off the SAME child,
+ * then (2) the child's own ```task-outputs block def id, so a flat result
+ * still lands on the right column group.
+ *
  * @param {{ id: string, notes?: string|null, result?: unknown }[]} children
  * @returns {{ valuesByRef: Record<string, string|number>, childIdByDefId: Record<string, string> }}
  */
@@ -130,7 +138,9 @@ export function buildJobValuesByRef(children) {
   for (const c of children ?? []) {
     if (!c || typeof c.id !== 'string') continue;
     const fields = parseTaskFieldsBlock(c.notes ?? null);
+    let defIdForChild = null;
     if (fields) {
+      defIdForChild = fields.taskDefId;
       childIdByDefId[fields.taskDefId] = c.id;
       for (const [k, v] of Object.entries(fields.values)) {
         const cv = coerceValue(v);
@@ -139,12 +149,19 @@ export function buildJobValuesByRef(children) {
     }
     const rf = resultFields(c.result ?? null);
     if (rf) {
-      // A result can arrive before/without the input block being re-fetched;
-      // still index the child by its result's task-def id if not already.
-      if (!(rf.taskDefId in childIdByDefId)) childIdByDefId[rf.taskDefId] = c.id;
-      for (const [k, v] of Object.entries(rf.fields)) {
-        const cv = coerceValue(v);
-        if (cv !== undefined) valuesByRef[fieldRef(rf.taskDefId, k)] = cv;
+      // Prefer the result's own def id (legacy nested); else the input
+      // block's def id already parsed above; else the child's task-outputs
+      // block def id (the FLAT-result case — no def id rides the result).
+      const outputs = defIdForChild ? null : parseTaskOutputsBlock(c.notes ?? null);
+      const rDefId = rf.taskDefId ?? defIdForChild ?? outputs?.taskDefId ?? null;
+      if (rDefId) {
+        // A result can arrive before/without the input block being re-fetched;
+        // still index the child by its result's task-def id if not already.
+        if (!(rDefId in childIdByDefId)) childIdByDefId[rDefId] = c.id;
+        for (const [k, v] of Object.entries(rf.fields)) {
+          const cv = coerceValue(v);
+          if (cv !== undefined) valuesByRef[fieldRef(rDefId, k)] = cv;
+        }
       }
     }
   }

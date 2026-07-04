@@ -192,25 +192,68 @@ export function parseTaskTemplateBlock(body) {
 }
 
 // ── Result contract (agent → client, submit_task_result type:"fields") ───
+//
+// task-2638eeedd9ef — the server (task-d66c71c0ca38) adopted FLAT as canonical:
+// `submit_task_result(type="fields", payload={<key>: <value>, ...})` — a flat
+// Record<string, value>, no taskDefId wrapper. This client now READS both:
+//   - FLAT `{key: value}` (canonical) — taskDefId is inferred by the caller
+//     (this function returns null for it since a bare flat payload carries no
+//     def id of its own; see `resultFieldsForDef` below for the def-aware
+//     reader pipelineRoster.mjs uses).
+//   - LEGACY NESTED `{taskDefId, fields:{key: value}}` — still read correctly
+//     so existing results (e.g. task-7d65e61fb581, stored nested) still render.
 
-/** Extract `{taskDefId, fields}` from a task's structured result
- *  (`{type:'fields', payload:{taskDefId, fields}}`), or null when the result
- *  isn't a well-shaped fields result. `fields` is a flat
- *  Record<string, string|number|boolean> of OUTPUT VALUES — PHI, shape only,
- *  never persist/log. */
+/** Does `payload` look like the LEGACY NESTED shape (`{taskDefId, fields:{...}}`)? */
+function isLegacyNestedFieldsPayload(payload) {
+  return (
+    !!payload &&
+    typeof payload === 'object' &&
+    typeof payload.taskDefId === 'string' &&
+    !!payload.fields &&
+    typeof payload.fields === 'object' &&
+    !Array.isArray(payload.fields)
+  );
+}
+
+function coerceFieldValue(v) {
+  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? v : undefined;
+}
+
+/** Extract `{taskDefId, fields}` from a task's structured `{type:'fields'}`
+ *  result, accepting BOTH shapes:
+ *   - LEGACY NESTED `{taskDefId, fields:{key:value}}` — `taskDefId` comes from
+ *     the payload itself.
+ *   - FLAT `{key:value}` (canonical) — there is no def id to read here, so
+ *     `taskDefId` is null; callers that know the owning task-def (e.g.
+ *     pipelineRoster.mjs, which has the child's own task-outputs block) should
+ *     use that known id instead of relying on this field for flat payloads.
+ *  Returns null when the result isn't a well-shaped fields result (wrong
+ *  type, non-object payload, or a payload with zero usable entries).
+ *  `fields` is a flat Record<string, string|number|boolean> of OUTPUT VALUES —
+ *  PHI, shape only, never persist/log. */
 export function resultFields(result) {
   if (!result || typeof result !== 'object') return null;
   if (result.type !== 'fields') return null;
   const payload = result.payload;
-  if (!payload || typeof payload !== 'object') return null;
-  if (typeof payload.taskDefId !== 'string') return null;
-  const fieldsIn = payload.fields;
-  if (!fieldsIn || typeof fieldsIn !== 'object' || Array.isArray(fieldsIn)) return null;
-  const fields = {};
-  for (const [k, v] of Object.entries(fieldsIn)) {
-    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') fields[k] = v;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+
+  if (isLegacyNestedFieldsPayload(payload)) {
+    const fields = {};
+    for (const [k, v] of Object.entries(payload.fields)) {
+      const cv = coerceFieldValue(v);
+      if (cv !== undefined) fields[k] = cv;
+    }
+    return { taskDefId: payload.taskDefId, fields };
   }
-  return { taskDefId: payload.taskDefId, fields };
+
+  // FLAT (canonical): every own-enumerable key is an output field.
+  const fields = {};
+  for (const [k, v] of Object.entries(payload)) {
+    const cv = coerceFieldValue(v);
+    if (cv !== undefined) fields[k] = cv;
+  }
+  if (Object.keys(fields).length === 0) return null;
+  return { taskDefId: null, fields };
 }
 
 // ── Condition evaluation ──────────────────────────────────────────────────

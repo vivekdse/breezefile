@@ -67,47 +67,46 @@ export function parseTaskOutputsBlock(body) {
  *  is a no-op for every task that predates/lacks Task Templates —
  *  NON-REGRESSION by construction).
  *
- *  The section:
+ *  task-2638eeedd9ef — FLAT is now canonical, matching the server's own
+ *  agent-facing wording EXACTLY (task_manager_api mcp_server.py
+ *  `_output_schema_instruction` / the S3 operator instructions): a headless
+ *  agent obeying this instruction and an interactive agent obeying the
+ *  server's must submit the identical shape, or a schema'd task can never
+ *  satisfy the `missing_required_outputs` gate. The section:
  *   - lists every declared output field (key, label, type, required flag),
  *   - states that REQUIRED fields are this task's EVIDENCE and the task is
  *     not complete without them,
  *   - instructs the agent to call `submit_task_result` with `type: "fields"`
- *     and a `{"taskDefId","fields"}` payload BEFORE `submit_task`,
+ *     and a FLAT `{key: value, ...}` payload BEFORE `submit_task`,
  *   - warns that field VALUES may be PHI: the submit_task_result payload is
  *     the encrypted channel for them — never files/notes/logs. */
 export function renderTaskOutputsInstructions(body) {
   const parsed = parseTaskOutputsBlock(body);
   if (!parsed || parsed.fields.length === 0) return '';
-  const { taskDefId, fields } = parsed;
+  const { fields } = parsed;
 
   const lines = [
     '# Required task outputs (evidence)',
     '',
-    `This task declares output fields for task-def "${taskDefId}". You must` +
-      ' produce them as part of completing this task:',
+    'This task must produce OUTPUT fields. Before submit_task, call',
+    'submit_task_result(type="fields", payload={<key>: <value>, ...})',
+    'supplying at least every REQUIRED field below (the server rejects a',
+    "'done' submit until they are all present):",
     '',
   ];
   for (const f of fields) {
     const flag = f.required ? 'REQUIRED — evidence' : 'optional';
-    lines.push(`- \`${f.key}\` — "${f.label}" (type: ${f.type}) — ${flag}`);
+    lines.push(`  - ${f.key}: ${f.label} [${f.type}] (${flag})`);
   }
   lines.push(
     '',
     'REQUIRED fields are this task\'s EVIDENCE: the task is NOT complete until',
-    'every required field above has been submitted. Before calling',
-    '`submit_task`, call `submit_task_result` with `type: "fields"` and a',
-    'payload shaped exactly like this (include every field you have a value',
-    'for, required and optional):',
+    'every required field above has been submitted. The payload is FLAT — one',
+    'key per field, no wrapper — shaped exactly like this (include every field',
+    'you have a value for, required and optional):',
     '',
     '```json',
-    JSON.stringify(
-      {
-        taskDefId,
-        fields: Object.fromEntries(fields.map((f) => [f.key, '<value>'])),
-      },
-      null,
-      2,
-    ),
+    JSON.stringify(Object.fromEntries(fields.map((f) => [f.key, '<value>'])), null, 2),
     '```',
     '',
     'The submit_task_result payload rides an ENCRYPTED channel — field values',

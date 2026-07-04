@@ -365,8 +365,15 @@ export function TaskDetailDrawer({
       }
       const rf = resultFields(c.result ?? null);
       if (rf) {
-        for (const [k, v] of Object.entries(rf.fields)) {
-          out[fieldRef(rf.taskDefId, k)] = typeof v === 'boolean' ? String(v) : v;
+        // task-2638eeedd9ef: a canonical FLAT result carries no taskDefId —
+        // fall back to the input block's def id (above), else this child's
+        // own task-outputs block def id, so the values still land under the
+        // right pipeline group.
+        const rDefId = rf.taskDefId ?? fb?.taskDefId ?? parseTaskOutputsBlock(c.notes ?? null)?.taskDefId;
+        if (rDefId) {
+          for (const [k, v] of Object.entries(rf.fields)) {
+            out[fieldRef(rDefId, k)] = typeof v === 'boolean' ? String(v) : v;
+          }
         }
       }
     }
