@@ -253,6 +253,13 @@ export type Task = {
   // task-ab1d7955e23f — owning TypeBuild project container (opaque id,
   // non-PHI). Carried from the server `project_id`; absent on local rows.
   projectId?: string | null;
+  // task-b8fa34a80a34 — the TEMPLATE this task was instantiated from (opaque,
+  // NON-PHI id). FORWARD-COMPATIBLE: the server does NOT yet return this on
+  // list/detail rows — mapListRow/mapDetail map it only when the field is
+  // present (`template_id`). Until then it is undefined and the New Home roster
+  // falls back to grouping template instances by (name, project). Absent on
+  // local rows.
+  templateId?: string | null;
   // task-896f3f7f5e75 — the AGENT assigned to this task (scalar: one agent per
   // task). `agentId` is the opaque, NON-PHI registry id carried from the server
   // `agent_id`; absent on local rows and on unassigned tasks. `agent` is the

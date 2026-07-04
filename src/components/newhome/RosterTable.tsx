@@ -40,7 +40,9 @@ import {
   shouldResolveParent,
 } from './chainParentResolve.mjs';
 import type { PipelineColumn, PipelineGroup, ChildStatusLike } from './pipelineRoster.mjs';
-import { useChainedRoster } from './useNewHomeData';
+import { buildRosterGroups } from './rosterGroups.mjs';
+import type { RosterGroup, RosterGroupInput, OutputCol, InputCol } from './rosterGroups.mjs';
+import { useChainedRoster, useTaskDataValues } from './useNewHomeData';
 import type { ChainedJobResolution } from './useNewHomeData';
 // task — the "▶ Start" row action reuses the OLD Tasks page's exact launch
 // path: primaryActionFor (the single source of truth for which primary action a
@@ -921,6 +923,200 @@ function ChainedJobSubtable({
   );
 }
 
+// ─── template-grouped section (task-b8fa34a80a34) ──────────────────────────
+// The extended, TEMPLATE-GROUPED table that REPLACES the old per-task 'fielded'
+// subtable: a section per template, one subheading, an Inputs|Outputs two-tier
+// header with IN/OUT/REQ badges, a sticky-left Run column (status pill +
+// distinguishing instance id), and value cells filled from the lazily-resolved
+// task detail (outputs) + data bag (inputs). The field-column region scrolls
+// horizontally inside its own container while the Run column stays pinned.
+//
+// PHI: input/output VALUES render in memory only (resolved via the lazy detail
+// resolver + taskData.resolve) — never logged or persisted.
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const URL_RE = /^(https?:\/\/|www\.)[^\s]+$|^[a-z0-9-]+(\.[a-z0-9-]+)+(\/[^\s]*)?$/i;
+
+/** Render a single field VALUE, linkifying url/email types; everything else is
+ *  a mono/tabular value truncated with a title-hover. PHI: memory-only. */
+function TemplateValue({ value }: { value: string }) {
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  if (EMAIL_RE.test(value)) {
+    return (
+      <a className="nh-tmpl__link" href={`mailto:${value}`} onClick={stop}>
+        {value}
+      </a>
+    );
+  }
+  if (URL_RE.test(value)) {
+    const href = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+    return (
+      <a className="nh-tmpl__link nh-tmpl__link--plain" href={href} target="_blank" rel="noreferrer" onClick={stop}>
+        {value}
+      </a>
+    );
+  }
+  return (
+    <span className="nh-tmpl__val" title={value}>
+      {value}
+    </span>
+  );
+}
+
+function TemplateSection({
+  group,
+  getOutput,
+  isRowLoading,
+  dataValues,
+  onOpenTask,
+  onNewRun,
+}: {
+  group: RosterGroup;
+  /** Resolved OUTPUT value for (taskId, outputKey), or undefined until it lands. */
+  getOutput: (taskId: string, key: string) => string | number | undefined;
+  /** True while this row's detail is still resolving (cells show a subtle "…"). */
+  isRowLoading: (taskId: string) => boolean;
+  /** taskId → { inputKey → resolved data-bag value }. */
+  dataValues: Map<string, Record<string, string>>;
+  onOpenTask: (id: string) => void;
+  onNewRun: (group: RosterGroup) => void;
+}) {
+  const { inputCols, outputCols, rows } = group;
+  const allCols: (InputCol | OutputCol)[] = [...inputCols, ...outputCols];
+  const firstInputKey = inputCols[0]?.key ?? null;
+  return (
+    <section className="nh-tmpl-section">
+      <div className="nh-tmpl__head">
+        <span className="nh-tmpl__title">{group.name}</span>
+        <span className="nh-tmpl__count">
+          {rows.length} run{rows.length === 1 ? '' : 's'}
+        </span>
+        {/* Hover affordance — opens the canonical New-from-Template flow. */}
+        <button type="button" className="nh-tmpl__new" onClick={() => onNewRun(group)}>
+          <span className="nh-tmpl__new-plus">+</span> New run
+        </button>
+      </div>
+      <div className="nh-tmpl__shell">
+        <div className="nh-tmpl__scroll">
+          <table className="nh-tmpl__table">
+            <thead>
+              <tr className="nh-tmpl__band">
+                <th className="nh-tmpl__lead nh-tmpl__band-cell">&nbsp;</th>
+                {inputCols.length > 0 && (
+                  <th className="nh-tmpl__band-in nh-tmpl__band-cell" colSpan={inputCols.length}>
+                    Inputs
+                  </th>
+                )}
+                {outputCols.length > 0 && (
+                  <th className="nh-tmpl__band-out nh-tmpl__band-cell" colSpan={outputCols.length}>
+                    Outputs
+                  </th>
+                )}
+              </tr>
+              <tr className="nh-tmpl__cols">
+                <th className="nh-tmpl__lead">Run</th>
+                {allCols.map((c) => (
+                  <th
+                    key={`${c.io}.${c.key}`}
+                    className={`nh-tmpl__col nh-tmpl__col--${c.io}${c.type === 'number' ? ' nh-tmpl__col--num' : ''}`}
+                  >
+                    <span className="nh-tmpl__colwrap">
+                      {c.label}
+                      <span className={`nh-tmpl__badge nh-tmpl__badge--${c.io}`}>
+                        {c.io === 'in' ? 'IN' : 'OUT'}
+                      </span>
+                      {c.io === 'out' && (c as OutputCol).required && (
+                        <span className="nh-tmpl__badge nh-tmpl__badge--req">REQ</span>
+                      )}
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const loading = isRowLoading(r.taskId);
+                const inVals = dataValues.get(r.taskId) ?? {};
+                const status = (r.status ?? 'queued') as NewHomeStatus;
+                // Instance id: prefer the resolved first-INPUT value (e.g.
+                // source=cnn.com), else the value-free helper fallback
+                // (title-or-#n). PHI: the value renders in memory only.
+                const firstInputVal = firstInputKey ? inVals[firstInputKey] : undefined;
+                const instId = firstInputVal || r.instanceId;
+                // task-b8fa34a80a34 — an in-progress row collapses its OUTPUT
+                // cells into one "Awaiting results…" span so a running row never
+                // reads as a line of empty cells.
+                const collapseOutputs = status === 'progress' && outputCols.length > 0;
+                return (
+                  <tr key={r.taskId} onClick={() => onOpenTask(r.taskId)}>
+                    <td className="nh-tmpl__lead">
+                      <div className="nh-tmpl__lead-inner">
+                        <span className={`nh-roster__pill nh-roster__pill--${status}`}>
+                          {STATUS_LABEL[status]}
+                        </span>
+                        <span
+                          className={`nh-tmpl__inst${firstInputVal ? '' : ' nh-tmpl__inst--faint'}`}
+                          title={instId}
+                        >
+                          {instId}
+                        </span>
+                      </div>
+                    </td>
+                    {inputCols.map((c) => {
+                      const v = inVals[c.key];
+                      return (
+                        <td key={`in.${c.key}`} className="nh-tmpl__cell">
+                          {v ? (
+                            <TemplateValue value={v} />
+                          ) : loading ? (
+                            <span className="nh-tmpl__loading">…</span>
+                          ) : (
+                            <span className="nh-tmpl__empty">—</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    {collapseOutputs ? (
+                      <td className="nh-tmpl__cell nh-tmpl__await-cell" colSpan={outputCols.length}>
+                        <span className="nh-tmpl__await">Awaiting results…</span>
+                      </td>
+                    ) : (
+                      outputCols.map((c) => {
+                        const raw = getOutput(r.taskId, c.key);
+                        const v = raw === undefined || raw === null || raw === '' ? '' : String(raw);
+                        const missing = c.required && !v;
+                        return (
+                          <td
+                            key={`out.${c.key}`}
+                            className={`nh-tmpl__cell${c.type === 'number' ? ' nh-tmpl__cell--num' : ''}`}
+                          >
+                            {v ? (
+                              <TemplateValue value={v} />
+                            ) : loading ? (
+                              <span className="nh-tmpl__loading">…</span>
+                            ) : (
+                              <span
+                                className={`nh-tmpl__empty${missing ? ' nh-tmpl__empty--missing' : ''}`}
+                                title={missing ? 'required — awaiting agent' : undefined}
+                              >
+                                —
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function RosterTable({
   tasks,
   filter,
@@ -1130,6 +1326,108 @@ export function RosterTable({
     [rows, hiddenChildIds],
   );
 
+  // ── template-grouped sections (task-b8fa34a80a34) ─────────────────────────
+  // THE CHAINS SPLIT: a v2-chained job (resolution.status === 'chained') keeps
+  // its EXISTING parent+child subtable rollup in the flat table below — it is
+  // deliberately NOT folded into the new grouped-section treatment. Everything
+  // grouped here is a SINGLE fielded-task template INSTANCE (a childless task
+  // that declares input data-keys and/or an output schema). This replaces the
+  // old per-task 'fielded' subtable, which is removed.
+  //
+  // Grouping is forward-compatible (rosterGroups.mjs): by `templateId` when the
+  // server ships it, else by (templateName || title, projectId) — so multiple
+  // instances that share a title group into one section NOW. Field metadata is
+  // sourced defensively: the resolved 'fielded' detail's output defs (today) OR
+  // the raw list/detail schema (when the server carries it on the row).
+  const groupableInputs = useMemo<RosterGroupInput[]>(() => {
+    const out: RosterGroupInput[] = [];
+    for (const t of visibleRows) {
+      const res = resolutions.get(t.id);
+      // Chains stay in the flat table (their rollup owns them) — never grouped.
+      if (res && res.status === 'chained') continue;
+      const fieldedOutputs =
+        res && res.status === 'fielded' ? res.defs[0]?.outputs ?? [] : [];
+      const rawOutputs = t.raw.outputSchema ?? [];
+      const outputSchema = fieldedOutputs.length > 0 ? fieldedOutputs : rawOutputs;
+      const dataKeys = t.raw.dataKeys ?? [];
+      // Not field-bearing → leave it in the flat table (a plain / "other" row).
+      if (outputSchema.length === 0 && dataKeys.length === 0) continue;
+      out.push({
+        id: t.id,
+        title: t.title,
+        projectId: t.projectId,
+        // Forward-compatible: templateId upgrades grouping to exact when present;
+        // templateName isn't surfaced on the row yet, so grouping falls back to
+        // the shared title (rosterGroups.groupNameFor).
+        templateId: t.templateId ?? null,
+        templateName: null,
+        dataKeys,
+        outputSchema,
+        status: t.status,
+        createdAt: t.raw.created_at ?? null,
+      });
+    }
+    return out;
+  }, [visibleRows, resolutions]);
+
+  const { groups: templateGroups } = useMemo(
+    () => buildRosterGroups(groupableInputs),
+    [groupableInputs],
+  );
+
+  // Grouped instances are lifted OUT of the flat table (no double render).
+  const groupedTaskIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of templateGroups) for (const r of g.rows) set.add(r.taskId);
+    return set;
+  }, [templateGroups]);
+
+  const flatRows = useMemo(
+    () => visibleRows.filter((t) => !groupedTaskIds.has(t.id)),
+    [visibleRows, groupedTaskIds],
+  );
+
+  // INPUT cell values (data bag) — resolved lazily, bounded, PHI-safe.
+  const dataRequests = useMemo(() => {
+    const reqs: { taskId: string; keys: string[] }[] = [];
+    for (const g of templateGroups) {
+      const keys = g.inputCols.map((c) => c.key);
+      if (keys.length === 0) continue;
+      for (const r of g.rows) reqs.push({ taskId: r.taskId, keys });
+    }
+    return reqs;
+  }, [templateGroups]);
+  const dataValues = useTaskDataValues(dataRequests);
+
+  // OUTPUT cell values come from the SAME lazy detail resolution the flat
+  // table's chained/fielded rows use: a 'fielded' resolution carries the task's
+  // result folded into `valuesByRef`, keyed by fieldRef(defId, outputKey).
+  const getOutput = (taskId: string, key: string): string | number | undefined => {
+    const res = resolutions.get(taskId);
+    if (res && res.status === 'fielded') {
+      const defId = res.defs[0]?.id;
+      if (defId) return res.valuesByRef[fieldRef(defId, key)];
+    }
+    return undefined;
+  };
+  const isRowLoading = (taskId: string): boolean => {
+    const res = resolutions.get(taskId);
+    return !res || res.status === 'loading';
+  };
+  const onNewRun = (_group: RosterGroup) => {
+    // task-b8fa34a80a34 — open the canonical New-from-Template flow. Pre-picking
+    // THIS template isn't wired yet (the composer's template picker doesn't
+    // accept an initial template id/name); until it does, this opens the picker.
+    window.dispatchEvent(
+      new CustomEvent('fm:openTask', { detail: { mode: 'create', initialKind: 'template' } }),
+    );
+    window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
+  };
+  // When every task is grouped (no flat rows) AND there ARE groups, hide the
+  // flat table entirely; otherwise render it so plain/"other" + chained rows —
+  // and the empty state — show exactly as today (non-regression).
+  const showFlatTable = flatRows.length > 0 || templateGroups.length === 0;
+
   const hasAnyTasks = tasks.length > 0;
   const isFiltered = filter !== 'all' || !!search.trim();
   // "Clear" resets BOTH dimensions so one click always gets you back to the
@@ -1163,7 +1461,7 @@ export function RosterTable({
     if (!target.dataset || target.dataset.rosterRow == null) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return; // don't shadow any chord
 
-    const ids = visibleRows.map((t) => t.id);
+    const ids = flatRows.map((t) => t.id);
     const currentId = target.dataset.rosterRow;
     const idx = ids.indexOf(currentId);
     if (idx === -1) return;
@@ -1234,6 +1532,22 @@ export function RosterTable({
         )}
       </div>
 
+      {/* Template-grouped sections first (task-b8fa34a80a34): one section per
+          template, then the flat table (chained rollups + plain/"other" rows)
+          below. */}
+      {templateGroups.map((g) => (
+        <TemplateSection
+          key={g.key}
+          group={g}
+          getOutput={getOutput}
+          isRowLoading={isRowLoading}
+          dataValues={dataValues}
+          onOpenTask={onOpenTask}
+          onNewRun={onNewRun}
+        />
+      ))}
+
+      {showFlatTable && (
       <div className="nh-roster__table-wrap">
         <table className="nh-roster__table">
           <thead>
@@ -1264,7 +1578,7 @@ export function RosterTable({
                 </td>
               </tr>
             )}
-            {!loading && visibleRows.length === 0 && isFiltered && (
+            {!loading && flatRows.length === 0 && templateGroups.length === 0 && isFiltered && (
               <tr>
                 <td colSpan={BASE_COLUMN_COUNT} className="nh-roster__empty">
                   No tasks match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}.{' '}
@@ -1274,17 +1588,16 @@ export function RosterTable({
                 </td>
               </tr>
             )}
-            {visibleRows.map((t) => {
+            {flatRows.map((t) => {
               const resolution = resolutions.get(t.id);
-              // task-ce4b4c8ca955 — 'fielded' (single-task output fields) reuses
-              // the exact same subtable render as 'chained'; only the
-              // Start-chain row action (chainStartFor below) stays chain-only,
-              // since a fielded job has no separate child step to start.
+              // task-b8fa34a80a34 — CHAINS SPLIT: only a v2-chained job renders
+              // an inline subtable rollup here. The old 'fielded' single-task
+              // subtable is REMOVED — those instances are now lifted into the
+              // template-grouped sections above (groupableInputs), so they never
+              // reach the flat table (groupedTaskIds filters them out).
               const subtableRes =
-                resolution && (resolution.status === 'chained' || resolution.status === 'fielded')
-                  ? resolution
-                  : null;
-              const chainedRes = resolution && resolution.status === 'chained' ? resolution : null;
+                resolution && resolution.status === 'chained' ? resolution : null;
+              const chainedRes = subtableRes;
               const isChained = !!subtableRes;
               const groups = subtableRes ? pipelineColumns(subtableRes.defs) : [];
               const meta = subtableRes ? META_PILL[metaStatus(subtableRes.defs, subtableRes.valuesByRef)] : null;
@@ -1391,6 +1704,7 @@ export function RosterTable({
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

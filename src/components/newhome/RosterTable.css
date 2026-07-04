@@ -638,6 +638,255 @@
   cursor: pointer;
 }
 
+/* ── Template-grouped sections (task-b8fa34a80a34) ────────────────────────
+   The extended, TEMPLATE-GROUPED table that REPLACES the old per-task
+   'fielded' subtable: a section per template with a single subheading, an
+   Inputs|Outputs two-tier header (IN/OUT/REQ badges), a sticky-left Run column
+   (status pill + instance id), and a horizontally-scrolling field region.
+   Every value routes through the app's shared tokens / --nh-* status vars, so
+   both themes resolve without an override. */
+.nh-tmpl-section {
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+.nh-tmpl-section:first-of-type {
+  padding-top: var(--sp-2);
+}
+
+.nh-tmpl__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.nh-tmpl__title {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-on-panel);
+}
+.nh-tmpl__count {
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Hover-reveal "+ New run" affordance (keyboard-focusable → always shown). */
+.nh-tmpl__new {
+  margin-left: auto;
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--motion-hover), color var(--motion-hover),
+    border-color var(--motion-hover), background var(--motion-hover);
+}
+.nh-tmpl-section:hover .nh-tmpl__new,
+.nh-tmpl__new:focus-visible {
+  opacity: 1;
+}
+.nh-tmpl__new:hover,
+.nh-tmpl__new:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+.nh-tmpl__new-plus {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.nh-tmpl__shell {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+/* Only the field columns scroll; the Run column is pinned via sticky-left. */
+.nh-tmpl__scroll {
+  overflow-x: auto;
+}
+
+.nh-tmpl__table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: max-content;
+  font-size: var(--fs-sm);
+}
+.nh-tmpl__table th,
+.nh-tmpl__table td {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.nh-tmpl__table tbody tr:last-child td {
+  border-bottom: none;
+}
+.nh-tmpl__table tbody tr {
+  cursor: pointer;
+  transition: background var(--motion-hover);
+}
+.nh-tmpl__table tbody tr:hover td {
+  background: var(--bg-2);
+}
+
+/* group band row (Inputs | Outputs) */
+.nh-tmpl__band th {
+  padding-top: var(--sp-2);
+  padding-bottom: 4px;
+  font-size: var(--fs-2xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--muted-on-panel);
+  border-bottom: 1px solid var(--border-1);
+}
+.nh-tmpl__band-in {
+  color: var(--accent);
+}
+.nh-tmpl__band-out {
+  color: var(--nh-done);
+}
+
+/* field-label row */
+.nh-tmpl__cols th {
+  padding-top: 6px;
+  padding-bottom: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted-on-panel);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border-2);
+  vertical-align: bottom;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.nh-tmpl__colwrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.nh-tmpl__col--num {
+  text-align: right;
+}
+
+/* IN / OUT / REQ badges */
+.nh-tmpl__badge {
+  display: inline-block;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  border-radius: var(--r-sm);
+  line-height: 1.4;
+}
+.nh-tmpl__badge--in {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.nh-tmpl__badge--out {
+  color: var(--nh-done);
+  background: var(--nh-done-soft);
+}
+.nh-tmpl__badge--req {
+  color: var(--nh-needs);
+  background: var(--nh-needs-soft);
+}
+
+/* pinned lead (Run) column: status pill + instance id */
+.nh-tmpl__lead {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-2);
+  min-width: 208px;
+}
+.nh-tmpl__band .nh-tmpl__lead,
+.nh-tmpl__cols .nh-tmpl__lead {
+  background: var(--bg-2);
+  z-index: 3;
+}
+.nh-tmpl__table tbody tr:hover .nh-tmpl__lead {
+  background: var(--bg-2);
+}
+.nh-tmpl__lead-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.nh-tmpl__inst {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-xs);
+  color: var(--text-on-panel);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+.nh-tmpl__inst--faint {
+  color: var(--muted-on-panel);
+}
+
+/* value cells */
+.nh-tmpl__cell--num {
+  text-align: right;
+}
+.nh-tmpl__val {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-xs);
+  color: var(--text-on-panel);
+  font-variant-numeric: tabular-nums;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+.nh-tmpl__empty {
+  color: var(--muted-on-panel);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.nh-tmpl__empty--missing {
+  text-decoration: underline dashed;
+  text-decoration-color: var(--nh-needs);
+  text-underline-offset: 2px;
+  cursor: help;
+}
+.nh-tmpl__loading {
+  color: var(--muted-on-panel);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.nh-tmpl__await-cell {
+  color: var(--muted-on-panel);
+}
+.nh-tmpl__await {
+  font-style: italic;
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.nh-tmpl__link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-xs);
+}
+.nh-tmpl__link:hover {
+  border-bottom-color: var(--accent);
+}
+
 /* [data-theme="light"] needs no overrides — every value above routes through
    theme-safe composite tokens / the shared --nh-* status vars, which already
    resolve correctly per theme (see NewHomePage.css). */

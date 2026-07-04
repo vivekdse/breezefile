@@ -232,6 +232,12 @@ type ListRow = {
   parent_task_id?: string | null;
   // task-ab1d7955e23f — owning project container (opaque, non-PHI).
   project_id?: string | null;
+  // task-b8fa34a80a34 — the template this task was instantiated from (opaque,
+  // NON-PHI id). FORWARD-COMPATIBLE: the server does not emit this yet — typed
+  // OPTIONAL so IF/when the list (or detail) endpoint carries `template_id`, it
+  // flows through mapListRow to the client's Task.templateId and the New Home
+  // roster upgrades from (name,project) grouping to exact template grouping.
+  template_id?: string | null;
   // task-896f3f7f5e75 — assigned AGENT (scalar; server `agent_id`). Opaque,
   // NON-PHI id; null/absent when unassigned. Typed on ListRow so IF the list
   // endpoint carries it, it flows to LIST rows too; the detail endpoint also
@@ -722,6 +728,13 @@ function mapListRow(row: ListRow): SourcedTask {
     parentTaskId: row.parent_task_id ?? null,
     // task-ab1d7955e23f — owning project container (opaque, non-PHI).
     projectId: row.project_id ?? null,
+    // task-b8fa34a80a34 — template this task was instantiated from (opaque,
+    // non-PHI). DEFENSIVE / forward-compatible: the server does not emit
+    // `template_id` today, so this is undefined for now and the roster falls
+    // back to (name,project) grouping; it upgrades to exact template grouping
+    // the moment the field appears, with no other change. Absent → undefined
+    // (not null) so a row without it is indistinguishable from today.
+    templateId: typeof row.template_id === 'string' ? row.template_id : undefined,
     // task-896f3f7f5e75 — assigned AGENT (scalar; opaque, non-PHI id). Passed
     // through when the row carries it (the list MAY, the detail DOES); absent →
     // null so an unassigned task maps exactly as today (NON-REGRESSION). The

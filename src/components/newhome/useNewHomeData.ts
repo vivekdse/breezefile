@@ -327,6 +327,10 @@ function toNewHomeTask(
     title: t.title,
     status,
     projectId: t.projectId ?? null,
+    // task-b8fa34a80a34 — forward-compatible template id (undefined until the
+    // server ships `template_id` — see mapListRow). The template roster reads
+    // it defensively and falls back to (name,project) grouping when absent.
+    templateId: t.templateId ?? null,
     lastAction: lastActionAt === null ? '—' : compactAgo(lastActionAt, now),
     lastActionAt,
     // task-1af4f59428eb (Item 2) — `audit` (this task's latest audit event,
@@ -883,4 +887,95 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
   );
 
   return { resolveJob, saveInput };
+}
+
+// ─── task-b8fa34a80a34 — lazy task DATA-BAG value resolver ──────────────────
+// The template-grouped roster's INPUT cells show values from a task's `data`
+// bag (docs/typebuild-data-field-contract.md). Those values are NOT on the
+// list/detail row — they resolve ONE ref at a time via
+// fm.typebuild.taskData.resolve (GET .../data?ref=<key>), by design (never the
+// whole bag). This hook fans those per-(taskId,key) reads out with the SAME
+// bounded-concurrency + in-memory-cache discipline useLatestAuditByTask /
+// useChainedRoster use, so a wide grouped section doesn't issue an unbounded
+// burst.
+//
+// PHI (docs/typebuild-data-field-contract.md): resolved values are DECRYPTED
+// task content — held in this hook's React state (memory only), never logged
+// or persisted, cleared on unmount. A (taskId,key) is fetched once and cached
+// for the hook's lifetime (input values are set at creation and effectively
+// immutable for display); the cache never reaches disk.
+const TASK_DATA_CONCURRENCY = 4;
+
+export function useTaskDataValues(
+  requests: { taskId: string; keys: string[] }[],
+): Map<string, Record<string, string>> {
+  const [byTask, setByTask] = useState<Map<string, Record<string, string>>>(new Map());
+  // "taskId\0key" pairs we've already resolved (or attempted) — the cache/dedupe
+  // key. A ref (not state) since it's bookkeeping, not a render input.
+  const fetchedRef = useRef<Set<string>>(new Set());
+
+  // Stable dep: sorted (taskId, keys) pairs joined, so the effect only re-runs
+  // when the SET of requested refs actually changes — not on every render (the
+  // `requests` array identity is fresh each parent render).
+  const reqKey = useMemo(
+    () =>
+      requests
+        .map((r) => `${r.taskId}:${[...r.keys].sort().join('|')}`)
+        .sort()
+        .join(','),
+    [requests],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const due: { taskId: string; key: string }[] = [];
+    for (const r of requests) {
+      for (const k of r.keys) {
+        const cacheKey = `${r.taskId} ${k}`;
+        if (!fetchedRef.current.has(cacheKey)) due.push({ taskId: r.taskId, key: k });
+      }
+    }
+    if (due.length === 0) return;
+
+    void (async () => {
+      let idx = 0;
+      const results: Array<[string, string, string | null]> = [];
+      async function worker() {
+        while (idx < due.length) {
+          const { taskId, key } = due[idx++];
+          fetchedRef.current.add(`${taskId} ${key}`);
+          try {
+            const value = await fm.typebuild.taskData.resolve(taskId, key);
+            results.push([taskId, key, value]);
+          } catch {
+            // Signed out / offline / no value — leave the cell empty; the input
+            // column simply renders an em-dash for this ref.
+            results.push([taskId, key, null]);
+          }
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(TASK_DATA_CONCURRENCY, due.length) }, () => worker()),
+      );
+      if (cancelled) return;
+      setByTask((prev) => {
+        const next = new Map(prev);
+        for (const [taskId, key, value] of results) {
+          if (value == null || value === '') continue;
+          const rec = { ...(next.get(taskId) ?? {}) };
+          rec[key] = value;
+          next.set(taskId, rec);
+        }
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // reqKey encodes the full content of `requests`; re-run only when it moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reqKey]);
+
+  return byTask;
 }

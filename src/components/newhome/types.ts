@@ -37,6 +37,13 @@ export type NewHomeTask = {
   title: string;
   status: NewHomeStatus;
   projectId: string | null;
+  /** task-b8fa34a80a34 — the TEMPLATE this task was instantiated from (opaque,
+   *  NON-PHI id), when the server carries it. FORWARD-COMPATIBLE: absent today
+   *  (the server does not yet emit `template_id`), so the New Home template
+   *  roster groups instances by (name, project) and upgrades to exact
+   *  template-id grouping the moment this is populated — see rosterGroups.mjs.
+   *  Optional/additive so existing NewHomeTask consumers are unaffected. */
+  templateId?: string | null;
   /** Compact age of the most recent activity ("10m", "2h", "5d"), from
    *  lastActionAt. '—' when no timestamp is derivable. */
   lastAction: string;

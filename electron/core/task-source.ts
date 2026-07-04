@@ -78,6 +78,11 @@ export type SourcedTask = Omit<Task, 'folder'> & {
   // task-ab1d7955e23f — owning project container (opaque, non-PHI). Optional;
   // present when a task was created into / belongs to a TypeBuild Project.
   projectId?: string | null;
+  // task-b8fa34a80a34 — the TEMPLATE this task was instantiated from (opaque,
+  // NON-PHI id). FORWARD-COMPATIBLE: the server does not emit `template_id`
+  // yet, so mapListRow sets this only when present; until then it's undefined
+  // and the New Home roster groups template instances by (name, project).
+  templateId?: string | null;
   // task-896f3f7f5e75 — the AGENT assigned to this task (scalar; one per task).
   // `agentId` is the opaque, NON-PHI registry id (server `agent_id`); null/absent
   // when unassigned. `agent` is the RESOLVED agent block inlined by get_task
