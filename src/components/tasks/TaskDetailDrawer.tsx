@@ -607,6 +607,16 @@ export function TaskDetailDrawer({
         if (isTypebuild) void actions.sourceAction(task, 'reopen');
         else void actions.setStatus(task, 'pending');
         break;
+      case 'retry':
+        // task-457dd1cc6c8b — reopen→claim→launch, routed through the SAME
+        // never-silent wrapper the subtable's per-step ▶ uses (keyed by this
+        // task's own id so it can't collide with a child step's key). Never
+        // silent: pendingFor/errorFor below render the in-flight/error state.
+        void stepStartAction.run(task.id, {
+          kind: 'start',
+          run: () => actions.retry(task),
+        });
+        break;
       case 'start':
       case 'run-now':
         // Start auto-claims (TypeBuild) / runs-now (local auto), then lands the
@@ -846,7 +856,14 @@ export function TaskDetailDrawer({
         {(showPrimaryButton || showEnterThread || canStop) && (
           <div className="tdd__actionrow">
             {showPrimaryButton && (
-              <PrimaryActionButton action={primary} onInvoke={invokePrimary} variant="detail" />
+              <PrimaryActionButton
+                action={primary}
+                onInvoke={invokePrimary}
+                variant="detail"
+              />
+            )}
+            {primary.kind === 'retry' && stepStartAction.pendingFor(task.id) && (
+              <span className="tdd__action-pending">Reopening…</span>
             )}
             {showEnterThread && (
               <button type="button" className="tdd__action tdd__action--primary" onClick={enterThread}>
@@ -858,6 +875,15 @@ export function TaskDetailDrawer({
                 ◼ Stop <kbd>s</kbd>
               </button>
             )}
+          </div>
+        )}
+        {/* task-457dd1cc6c8b — Retry's reopen→claim→launch chain routes
+            through the never-silent wrapper; a failure (reopen rejected,
+            claim contested, or launch failed) surfaces here as a human
+            reason — never a bare token. */}
+        {primary.kind === 'retry' && stepStartAction.errorFor(task.id) && (
+          <div className="tdd__action-error" title={stepStartAction.errorFor(task.id) ?? undefined}>
+            ⚠ {stepStartAction.errorFor(task.id)}
           </div>
         )}
 

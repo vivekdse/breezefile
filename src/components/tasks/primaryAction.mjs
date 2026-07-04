@@ -16,7 +16,7 @@
 //                                    it first — Start would 409)
 //   typebuild done/partial/cancelled → none  (lives in DONE; Reopen is a
 //                                    kebab/detail action via PATCH {open})
-//   typebuild blocked             → reopen
+//   typebuild blocked             → retry (composite reopen→claim→launch)
 //   typebuild claimed by ME       → start ("you hold the claim")
 //   typebuild claimed by OTHER    → none + "◆ claimed by {email}"
 //   typebuild open/failed, free   → start (enabled gates on tbReady; the
@@ -111,8 +111,21 @@ export function primaryActionFor(task, ctx) {
       // primary `none` so the row stays calm in the collapsed DONE section.
       return { kind: 'none' };
     }
+    // task-457dd1cc6c8b — a blocked TypeBuild task can't be relaunched by a
+    // plain reopen: the server needs reopen → claim → launch in sequence, and
+    // a bare "Reopen" button (the old behavior) left the row still not
+    // runnable. Return a composite 'retry' action so the never-silent
+    // wrapper (useStartAction) knows to run the full chain instead of a
+    // single reopen call. `reason` is a human sentence (never the raw
+    // 'not_claimable' token) surfaced as the button's tooltip/status line.
     if (task.rawStatus === 'blocked') {
-      return { kind: 'reopen' };
+      const attempts = typeof task.attempts === 'number' ? task.attempts : null;
+      const maxAttempts = typeof task.maxAttempts === 'number' ? task.maxAttempts : null;
+      const reason =
+        attempts !== null && maxAttempts !== null && maxAttempts > 0
+          ? `Blocked after ${attempts}/${maxAttempts} attempts — Retry will reopen and relaunch`
+          : 'Blocked — Retry will reopen and relaunch';
+      return { kind: 'retry', reason };
     }
     // fm-bq86 (S3) — a parent/container with non-terminal children can't be
     // started: the server won't hand out the container until its children

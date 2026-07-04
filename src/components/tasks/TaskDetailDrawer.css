@@ -186,6 +186,16 @@
 }
 .tdd__action--stop:hover { background: color-mix(in srgb, var(--err) 12%, transparent); }
 
+/* task-457dd1cc6c8b — Retry's reopen→claim→launch pending/error feedback,
+   matching the pipeline rollup's per-step pending/error styling. */
+.tdd__action-pending { font-size: var(--fs-sm); color: var(--fg-3); }
+.tdd__action-error {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--nh-failed, #c0392b);
+  cursor: help;
+}
+
 /* ── tabs ── */
 .tdd__tabs {
   display: flex;

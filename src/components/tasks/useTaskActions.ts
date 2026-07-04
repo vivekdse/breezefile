@@ -86,6 +86,12 @@ export type TaskActions = {
    *  session actually spawned; also reports the same status-line text `say()`
    *  already shows, so most callers can ignore the return value entirely. */
   start: (task: Task) => Promise<StartOutcome>;
+  /** task-457dd1cc6c8b — Retry a blocked/failed TypeBuild task: reopen → then
+   *  the SAME claim-then-launch chain `start` uses. Always resolves (never
+   *  rejects) with a StartOutcome; a reopen failure is reported as a human
+   *  reason (never the raw server token) and short-circuits before any claim
+   *  is attempted, so a failed reopen can never strand a claim. */
+  retry: (task: Task) => Promise<StartOutcome>;
 };
 
 // Apply a management patch to ONE task using the RIGHT transport for its
@@ -396,6 +402,45 @@ export function useTaskActions(): TaskActions {
     [say],
   );
 
+  // task-457dd1cc6c8b — Retry on a blocked/failed task. The old behavior
+  // stopped at a bare reopen (or, for the never-silent wrapper, surfaced the
+  // raw `not_claimable` token when the reopen alone wasn't enough to make the
+  // task runnable). This chains reopen → claim → launch — the SAME
+  // claim-then-launch `start` already performs — so one Retry click actually
+  // relaunches the task instead of leaving it reopened-but-idle.
+  //
+  // Only a TypeBuild task can be blocked; a non-TypeBuild task has no reopen
+  // verb to chain, so fall back to `start` directly (defensive — primaryAction
+  // only offers 'retry' for typebuild-blocked rows).
+  const retry = useCallback(
+    async (task: Task): Promise<StartOutcome> => {
+      if (task.source !== 'typebuild') return start(task);
+      try {
+        const res = (await taskSourceAction(task.source, task.id, 'reopen')) as
+          | { ok?: boolean; reason?: string; claimedBy?: string | null }
+          | undefined;
+        if (res && res.ok === false) {
+          // fm-alfz (S1) vocabulary — humanize the reopen rejection (e.g. the
+          // raw 'not_claimable' token) instead of showing it bare, and STOP
+          // here: no claim was attempted, so there is nothing to release.
+          const message = formatSourceReason(res.reason, { claimedBy: res.claimedBy });
+          say(`couldn’t reopen · ${message} · ${task.title}`);
+          return { ok: false, spawned: false, message: `Reopen failed: ${message}`, released: false };
+        }
+      } catch (e) {
+        const message = formatOpError('reopen', e).replace(/^reopen failed — /, '');
+        say(`couldn’t reopen · ${message} · ${task.title}`);
+        return { ok: false, spawned: false, message: `Reopen failed: ${message}`, released: false };
+      }
+      // Reopened. Chain straight into the same claim-then-launch path Start
+      // uses — it already owns the pending/error/rollback contract (a failed
+      // claim or launch here is reported and, for a launch failure, releases
+      // the claim it just took).
+      return start(task);
+    },
+    [start, say],
+  );
+
   return {
     caps: capsFor,
     patch,
@@ -406,6 +451,7 @@ export function useTaskActions(): TaskActions {
     bulkPatch,
     bulkDelete,
     sourceAction,
+    retry,
     start,
   };
 }

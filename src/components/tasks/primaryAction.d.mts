@@ -25,6 +25,10 @@ export type PrimaryAction =
   | { kind: 'start'; enabled: boolean; tooltip?: string }
   | { kind: 'open-session'; tabIndex: number }
   | { kind: 'reopen' }
+  /** task-457dd1cc6c8b — a blocked TypeBuild task: Retry runs the composite
+   *  reopen→claim→launch chain (see useStartAction). `reason` is a human
+   *  sentence (never a raw server token) for the button tooltip/status line. */
+  | { kind: 'retry'; reason: string }
   | { kind: 'run-now' }
   | { kind: 'view-run' }
   | { kind: 'none'; note?: string };

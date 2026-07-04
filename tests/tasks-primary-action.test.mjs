@@ -26,6 +26,8 @@ function task(over = {}) {
     rawStatus: over.rawStatus,
     priority: over.priority,
     claimedBy: over.claimedBy,
+    attempts: over.attempts,
+    maxAttempts: over.maxAttempts,
   };
 }
 
@@ -96,12 +98,24 @@ test('typebuild claimed by someone else → none + note', () => {
   assert.match(a.note, /claimed by other@x/);
 });
 
-test('typebuild blocked → reopen', () => {
+// task-457dd1cc6c8b — blocked now yields the composite 'retry' action (reopen
+// → claim → launch), not a bare 'reopen', and carries a human reason.
+test('typebuild blocked → retry (composite reopen→claim→launch)', () => {
   const a = primaryActionFor(
     task({ source: 'typebuild', rawStatus: 'blocked' }),
     { tbReady: READY },
   );
-  assert.equal(a.kind, 'reopen');
+  assert.equal(a.kind, 'retry');
+  assert.match(a.reason, /reopen and relaunch/);
+});
+
+test('typebuild blocked with attempts/maxAttempts → reason includes N/N', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'blocked', attempts: 2, maxAttempts: 3 }),
+    { tbReady: READY },
+  );
+  assert.equal(a.kind, 'retry');
+  assert.match(a.reason, /Blocked after 2\/3 attempts/);
 });
 
 test('typebuild done/partial → none (lives in DONE)', () => {

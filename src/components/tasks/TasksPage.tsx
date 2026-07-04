@@ -47,6 +47,7 @@ import type { AgentRow } from './sections.mjs';
 import { primaryActionFor } from './primaryAction.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
 import { useTaskActions } from './useTaskActions';
+import { useStartAction } from './useStartAction';
 import { useRunningSessions } from './useRunningSessions';
 import { TaskRow, TaskRowHeader } from './TaskRow';
 import { TaskDetailPanel } from './TaskDetailPanel';
@@ -67,6 +68,12 @@ function nextWeekday(targetDow: number): string {
 function TasksPageInner() {
   const { state, dispatch } = useStore();
   const actions = useTaskActions();
+  // task-457dd1cc6c8b — the never-silent wrapper for Retry's composite
+  // reopen→claim→launch chain (keyed by task id; guards a double-click from
+  // double-launching). Retry's own success/failure is also reported via the
+  // status bar (useTaskActions.retry already calls say()); this additionally
+  // guarantees the click can never no-op.
+  const retryAction = useStartAction();
   const { byId: sourcesById } = useTaskSources();
   const tbReady = useTypebuildReadiness();
   const myEmail = (tbReady as { email?: string | null }).email ?? null;
@@ -360,6 +367,14 @@ function TasksPageInner() {
         // local → pending; typebuild blocked → source reopen verb.
         if (task.source === 'typebuild') void actions.sourceAction(task, 'reopen');
         else void actions.setStatus(task, 'pending');
+        break;
+      case 'retry':
+        // task-457dd1cc6c8b — reopen→claim→launch, routed through the
+        // never-silent wrapper (guards a double-click from double-launching).
+        void retryAction.run(task.id, {
+          kind: 'start',
+          run: () => actions.retry(task),
+        });
         break;
       case 'start':
       case 'run-now':

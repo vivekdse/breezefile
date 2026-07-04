@@ -128,6 +128,10 @@ export function formatSourceReason(
     }
     case 'in_progress_elsewhere':
       return 'Someone is working on this right now';
+    // task-457dd1cc6c8b — the raw token a blocked/failed task's reopen-or-claim
+    // can come back with; never show this bare in the UI.
+    case 'not_claimable':
+      return "This task can't be claimed right now — try Retry again in a moment";
     case 'not_owner':
       return "Only the task's creator can do that";
     case 'last_admin':

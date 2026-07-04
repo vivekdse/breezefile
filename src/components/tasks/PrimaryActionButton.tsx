@@ -48,6 +48,21 @@ export function PrimaryActionButton({
           {isRow ? '↺' : '↺ Reopen'}
         </button>
       );
+    // task-457dd1cc6c8b — a blocked TypeBuild task. One click runs the
+    // composite reopen→claim→launch chain through the never-silent wrapper;
+    // `action.reason` is the human sentence (never a raw server token).
+    case 'retry':
+      return (
+        <button
+          type="button"
+          className={`${base} tasks__primary tasks__primary--reopen`}
+          onClick={() => onInvoke(action)}
+          title={action.reason}
+          aria-label="Retry"
+        >
+          {isRow ? '↺' : '↺ Retry'}
+        </button>
+      );
     case 'start':
       return (
         <button
