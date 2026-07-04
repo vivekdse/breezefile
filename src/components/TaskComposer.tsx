@@ -1825,19 +1825,28 @@ export function TaskComposer(props: Props) {
   }, [fillMode, templateFieldQIds, advancedOpen, mainQuestions, advancedQuestions]);
 
   // task-f5a318566148 — the collapsed header reads "Advanced options (N set)"
-  // where N counts the advanced fields left non-default: priority set,
-  // defer/start set, agent chosen, status ≠ pending, each ON launch flag,
-  // due/schedule set, pinned, and (local only) a working folder changed from its
-  // default. N===0 → just "Advanced options". Recomputed live as fields change.
+  // where N counts the advanced fields the user has actually configured away
+  // from their NEUTRAL default: priority set, a real future deferral, agent
+  // chosen, status ≠ pending, each ON launch flag, a real due-date/schedule,
+  // pinned, and (local only) a working folder changed from its default.
+  // N===0 → just "Advanced options". Recomputed live as fields change.
+  //
+  // Neutral defaults must NOT count, or a pristine new task reads "2 set":
+  //  - defer/start: a fresh create defaults to 'today' and an existing task
+  //    with no defer reads 'none' — both mean "available now", so only a
+  //    deferral into the FUTURE ('tomorrow'/'pick-start') counts.
+  //  - when: an agent task's default is 'on-demand' (runs when picked, no
+  //    schedule) and a manual task's is 'none' (no due) — neither is a real
+  //    schedule, so both are neutral.
   const initialFolder = initial?.folder ?? (props.mode === 'create' ? props.defaultFolder : '');
   const advancedSetCount = useMemo(() => {
     let n = 0;
     if (isTypebuild && priority !== '') n += 1;
-    if (startId !== 'none') n += 1;
+    if (startId === 'tomorrow' || startId === 'pick-start') n += 1;
     if (isTypebuild && agentId !== '') n += 1;
     if (status !== 'pending') n += 1;
     if (executor === 'claude') n += FLAG_OPTIONS.filter((o) => flags.has(o.id)).length;
-    if (whenId !== 'none') n += 1;
+    if (whenId !== 'none' && whenId !== 'on-demand') n += 1;
     if (pinned) n += 1;
     if (!isTypebuild && folder.trim() !== '' && folder !== initialFolder) n += 1;
     return n;
