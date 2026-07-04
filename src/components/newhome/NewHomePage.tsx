@@ -37,6 +37,7 @@ import { RosterTable } from './RosterTable';
 import { TaskDetailDialog } from './TaskDetailDialog';
 import { OutcomesPanel } from './OutcomesPanel';
 import { useTaskActions } from '../tasks/useTaskActions';
+import type { StartOutcome } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import './NewHomePage.css';
 
@@ -140,10 +141,19 @@ export function NewHomePage() {
     }
     setOpenTaskId(id);
   }
-  function startTask(id: string) {
+  // task-c141c7765aa4 — returns the StartOutcome (never throws) so callers
+  // that need to KNOW whether a session actually spawned (auto-continue) can
+  // react; the manual ▶ Start / Retry callers ignore the resolved value
+  // exactly as before (actions.start already surfaces failures via the
+  // status line, and now also releases an orphaned claim on launch failure).
+  async function startTask(id: string): Promise<StartOutcome> {
     const t = tasks.find((x) => x.id === id);
-    if (!t) return;
-    void actions.start(t.raw).finally(() => void refresh());
+    if (!t) return { ok: false, spawned: false, message: 'task not found', released: false };
+    try {
+      return await actions.start(t.raw);
+    } finally {
+      void refresh();
+    }
   }
   // task-ef961d60dc1b — "+ New Task" opens the CANONICAL Task form (the
   // globally-mounted TaskComposer, via fm:openTask — the same form the task

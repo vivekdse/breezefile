@@ -40,7 +40,12 @@ function isTerminal(task) {
 // claimedBy: a claim can be held while idle (legit Resume), but an in_progress
 // row means a session is live somewhere — possibly on another machine — and we
 // must not dangle a second/competing Start.
-function isInProgress(task) {
+// Exported (task-c141c7765aa4) — the pipeline roster's step chip reuses this
+// EXACT predicate to decide "is this step's child actually running right
+// now", so a claimed/in_progress step reads as RUNNING promptly instead of
+// waiting on output values to land (taskDefStatus alone has no notion of
+// claim/in_progress — see pipelineRoster.mjs's stepDisplayStatus).
+export function isInProgress(task) {
   return task.rawStatus === 'in_progress' || task.status === 'in_progress';
 }
 

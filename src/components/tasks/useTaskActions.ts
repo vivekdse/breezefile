@@ -58,6 +58,18 @@ export type StartResult =
   | { ok: true; ptyId?: number }
   | { ok: false; reason?: string; claimedBy?: string | null };
 
+// task-c141c7765aa4 — the outcome `start()` now resolves with (never throws
+// for a launch failure — the mint/no-window error is caught and folded into
+// this same shape). `spawned` is true ONLY when a session actually came up
+// (a ptyId was returned); a caller that needs to KNOW a real session exists
+// before treating a claim as "in flight" (e.g. chain auto-continue) must gate
+// on `spawned`, not just the absence of a thrown error. `released` tells the
+// caller whether we already best-effort released an orphaned claim so it
+// doesn't need to release it again.
+export type StartOutcome =
+  | { ok: true; spawned: true; ptyId?: number }
+  | { ok: false; spawned: false; message: string; released: boolean };
+
 export type TaskActions = {
   caps: (t: Task) => TaskSourceCapabilities | undefined;
   patch: (task: Task, patch: TaskUpdate, label?: string) => Promise<void>;
@@ -78,8 +90,11 @@ export type TaskActions = {
     task: Task,
     action: 'release' | 'reopen' | 'complete' | 'cancel',
   ) => Promise<void>;
-  /** Start = claim-then-launch for TypeBuild; run-now for local auto. */
-  start: (task: Task) => Promise<void>;
+  /** Start = claim-then-launch for TypeBuild; run-now for local auto. Always
+   *  resolves (never rejects) with a StartOutcome describing whether a
+   *  session actually spawned; also reports the same status-line text `say()`
+   *  already shows, so most callers can ignore the return value entirely. */
+  start: (task: Task) => Promise<StartOutcome>;
 };
 
 // Apply a management patch to ONE task using the RIGHT transport for its
@@ -321,32 +336,56 @@ export function useTaskActions(): TaskActions {
   );
 
   const start = useCallback(
-    async (task: Task) => {
+    async (task: Task): Promise<StartOutcome> => {
       try {
         // fm-b5at.5 — Start = claim-then-launch (TypeBuild) or run-now (local
         // auto). runTaskNow now returns a result object; for TypeBuild a
         // {ok:false} means a contested claim — surface it inline, not as a
-        // throw (which is reserved for the mint gate failing).
+        // throw (which is reserved for the mint gate / launch failing).
         const res = (await runTaskNow(task.id, task.source)) as StartResult | undefined;
         if (res && res.ok === false) {
           // fm-alfz (S1) — friendly reason text (claimed by X / not visible …).
-          say(
-            `couldn’t start · ${formatSourceReason(res.reason ?? 'already claimed', {
-              claimedBy: res.claimedBy,
-            })}`,
-          );
-          return;
+          const message = formatSourceReason(res.reason ?? 'already claimed', {
+            claimedBy: res.claimedBy,
+          });
+          say(`couldn’t start · ${message}`);
+          // A contested claim was never ours to release — nothing to clean up.
+          return { ok: false, spawned: false, message, released: false };
         }
         say(
           task.source === 'typebuild'
             ? 'starting TypeBuild session…'
             : 'running…',
         );
+        return { ok: true, spawned: true, ptyId: res && 'ptyId' in res ? res.ptyId : undefined };
       } catch (e) {
-        // The MCP-token mint GATES the spawn: on failure NO terminal opens and
-        // runNow throws a typed error. Map the three codes to exact messages.
+        // task-c141c7765aa4 (ROOT CAUSE) — runNow CLAIMS first, then launches.
+        // The launch half (electron/agents/interactive.ts runTaskInteractive)
+        // can fail SILENTLY-TO-THE-CLAIM: when there's no focused/open
+        // BrowserWindow (true for a reactive auto-continue firing with no user
+        // gesture), it returns `{launched:false}` with NO exception of its
+        // own; electron/sources/typebuild.ts launchSession turns that into a
+        // thrown Error, and runNow's catch broadcasts 'typebuild:releasePrompt'
+        // — but NOTHING in the renderer listens for that event, so the claim
+        // was never actually released. The task became stalled-claimed:
+        // claimed, no session, invisible, blocked from manual Start until the
+        // 2h TTL. Fix: on ANY post-claim launch failure for a typebuild task,
+        // best-effort release the claim ourselves, right here, so the step is
+        // re-runnable instead of stranded.
         const msg = mintErrorMessage(e);
-        say(msg ?? formatOpError('start', e));
+        const message = msg ?? formatOpError('start', e);
+        let released = false;
+        if (task.source === 'typebuild') {
+          try {
+            await taskSourceAction(task.source, task.id, 'release');
+            released = true;
+          } catch {
+            // Best-effort: the release itself failing (offline, already
+            // released, 404) must never mask the original launch error.
+          }
+        }
+        say(released ? `${message} · claim released, ready to start` : message);
+        return { ok: false, spawned: false, message, released };
       }
     },
     [say],

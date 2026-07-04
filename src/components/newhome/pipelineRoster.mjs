@@ -250,3 +250,26 @@ export function nextAutoContinueChildId(taskDefs, valuesByRef, childIdByDefId) {
   if (!stepId) return null;
   return (childIdByDefId ?? {})[stepId] ?? null;
 }
+
+/**
+ * task-c141c7765aa4 (chip staleness, 3rd sighting) — `taskDefStatus` derives a
+ * step's status PURELY from output field values, with no notion of the
+ * underlying child task's claim/run state. That's correct for "is the step's
+ * work done" but means a step whose child was JUST claimed/started (no output
+ * has landed yet — the common case right after auto-continue fires) still
+ * reads 'pending' ("queued") for as long as it takes the agent to produce its
+ * first required output. This helper layers the child's live run state on
+ * top: when the child is in_progress/claimed-and-running, the step displays
+ * as 'active' ("running") regardless of what its outputs say — a claimed step
+ * is never invisible. A 'done'/'skip' base status is never downgraded (a
+ * step that already finished stays done even if the child row hasn't caught
+ * up to a terminal status yet).
+ *
+ * @param {ReturnType<typeof taskDefStatus>} baseStatus  the pure output-derived status
+ * @param {boolean} childInProgress  isInProgress(child) from primaryAction.mjs
+ * @returns {ReturnType<typeof taskDefStatus>}
+ */
+export function stepDisplayStatus(baseStatus, childInProgress) {
+  if (baseStatus === 'done' || baseStatus === 'skip') return baseStatus;
+  return childInProgress ? 'active' : baseStatus;
+}

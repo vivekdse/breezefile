@@ -465,6 +465,33 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* task-c141c7765aa4 (#3) — "running headless" watch affordance: a
+   claimed/in_progress step must never look like a bare "queued" chip, even
+   before its first output lands and even with no visible tab (auto-continue
+   may have launched with no attached window). A quiet pulse dot + label. */
+.nh-pipe__step-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-2xs);
+  color: var(--nh-progress);
+  animation: nh-pipe-pulse 1.6s ease-in-out infinite;
+}
+@keyframes nh-pipe-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+/* task-c141c7765aa4 (#1) — visible failure when auto-continue's launch
+   didn't spawn a session. Replaces silence with an explicit "start manually"
+   nudge; the claim was already released so the ▶ next to it is live. */
+.nh-pipe__step-error {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--nh-failed);
+  cursor: help;
+}
 .nh-pipe__field-th {
   border-left: 1px solid var(--border-1);
   white-space: nowrap;

@@ -11,6 +11,7 @@ import {
   rewriteTaskFieldsBlock,
   runnableStepId,
   nextAutoContinueChildId,
+  stepDisplayStatus,
 } from '../src/components/newhome/pipelineRoster.mjs';
 import {
   buildTaskFieldsBlock,
@@ -306,4 +307,28 @@ test('nextAutoContinueChildId returns null when the runnable step has no child y
   ];
   // Def exists but its child hasn't been resolved/created yet.
   assert.equal(nextAutoContinueChildId(taskDefs, {}, {}), null);
+});
+
+// ── stepDisplayStatus (task-c141c7765aa4, chip staleness — 3rd sighting) ────
+
+test('stepDisplayStatus upgrades a pending step to active when its child is in_progress', () => {
+  assert.equal(stepDisplayStatus('pending', true), 'active');
+});
+
+test('stepDisplayStatus upgrades an active (partial-output) step to active (stays active) when in_progress', () => {
+  assert.equal(stepDisplayStatus('active', true), 'active');
+});
+
+test('stepDisplayStatus leaves pending alone when the child is NOT in_progress', () => {
+  assert.equal(stepDisplayStatus('pending', false), 'pending');
+});
+
+test('stepDisplayStatus never downgrades a done step, even if the child row lags', () => {
+  assert.equal(stepDisplayStatus('done', true), 'done');
+  assert.equal(stepDisplayStatus('done', false), 'done');
+});
+
+test('stepDisplayStatus never promotes a skipped step', () => {
+  assert.equal(stepDisplayStatus('skip', true), 'skip');
+  assert.equal(stepDisplayStatus('skip', false), 'skip');
 });

@@ -3,6 +3,7 @@
 // See docs/task-templates-design.md for the roster contract this mirrors.
 
 import type { TaskDef, TaskDefCondition } from './types';
+import type { TaskDefRenderStatus } from './taskSchema';
 
 export type PartitionedJobs = {
   /** Ids of rows with no parent (jobs + standalone tasks). */
@@ -62,3 +63,8 @@ export function nextAutoContinueChildId(
   valuesByRef: Record<string, string | number>,
   childIdByDefId: Record<string, string> | null | undefined,
 ): string | null;
+
+export function stepDisplayStatus(
+  baseStatus: TaskDefRenderStatus,
+  childInProgress: boolean,
+): TaskDefRenderStatus;

@@ -22,7 +22,13 @@ import type { NewHomeStatus, NewHomeTask } from './types';
 import type { Task } from '../../types';
 import { claimFreshness } from '../tasks/lifecycle.mjs';
 import { evalCondition, fieldRef, metaStatus, taskDefStatus } from './taskSchema.mjs';
-import { nextAutoContinueChildId, pipelineColumns, partitionJobs, runnableStepId } from './pipelineRoster.mjs';
+import {
+  nextAutoContinueChildId,
+  pipelineColumns,
+  partitionJobs,
+  runnableStepId,
+  stepDisplayStatus,
+} from './pipelineRoster.mjs';
 import { isAutoContinueOn, setAutoContinue } from './chainAutoContinuePrefs';
 import type { PipelineColumn, PipelineGroup } from './pipelineRoster.mjs';
 import { useChainedRoster } from './useNewHomeData';
@@ -33,8 +39,9 @@ import type { ChainedJobResolution } from './useNewHomeData';
 // the same claim-then-launch IPC the old play button fires. No new launch path.
 import { useTasks, useTypebuildReadiness } from '../../tasks';
 import { useTaskActions } from '../tasks/useTaskActions';
+import type { StartOutcome } from '../tasks/useTaskActions';
 import { useRunningSessions } from '../tasks/useRunningSessions';
-import { primaryActionFor } from '../tasks/primaryAction.mjs';
+import { primaryActionFor, isInProgress } from '../tasks/primaryAction.mjs';
 import { isDone } from '../tasks/sections.mjs';
 import './RosterTable.css';
 
@@ -210,6 +217,8 @@ function StepChip({
   runnable,
   startAction,
   onStart,
+  running,
+  autoStartError,
 }: {
   status: ReturnType<typeof taskDefStatus>;
   runnable: boolean;
@@ -217,12 +226,33 @@ function StepChip({
    *  offer 'start' for it (e.g. claimed by someone else, already running). */
   startAction: { enabled: boolean; tooltip?: string } | null;
   onStart: () => void;
+  /** task-c141c7765aa4 (#3) — true when the child is claimed/in_progress
+   *  RIGHT NOW (isInProgress), regardless of whether any output has landed
+   *  yet. Drives a "running headless" watch affordance so a claimed step is
+   *  never just a silent "queued" chip while a session is (or should be)
+   *  live somewhere. Ties to task-c14137435369 (session-start visibility) —
+   *  this is only the minimal "it's running, here's where to look" surface,
+   *  not that task's full solution. */
+  running?: boolean;
+  /** task-c141c7765aa4 (#1) — set when THIS step's auto-continue attempt just
+   *  failed to spawn a session. Rendered inline so the failure is visible on
+   *  the roster, not just a status-bar line that scrolls away. */
+  autoStartError?: string | null;
 }) {
   return (
     <span className="nh-pipe__step-chip-wrap">
       <span className={`nh-pipe__step-chip nh-pipe__step-chip--${status}`}>
         {STEP_CHIP_LABEL[status]}
       </span>
+      {running && (
+        <span
+          className="nh-pipe__step-running"
+          role="status"
+          title="A session is running for this step (headless — no visible tab yet)"
+        >
+          {'● running'}
+        </span>
+      )}
       {runnable && startAction && (
         <button
           type="button"
@@ -236,6 +266,11 @@ function StepChip({
         >
           {'▶'}
         </button>
+      )}
+      {autoStartError && (
+        <span className="nh-pipe__step-error" role="alert" title={autoStartError}>
+          {'⚠ auto-start failed — start manually'}
+        </span>
       )}
     </span>
   );
@@ -451,7 +486,10 @@ function ChainedJobSubtable({
    *  primaryActionFor (start-eligibility must never be guessed from the
    *  view-model alone). */
   allTasksById: Map<string, Task>;
-  onStartChild: (childId: string) => void;
+  /** task-c141c7765aa4 — returns the StartOutcome (never throws) so the
+   *  auto-continue effect can verify a session actually spawned instead of
+   *  firing-and-forgetting the launch. */
+  onStartChild: (childId: string) => Promise<StartOutcome>;
 }) {
   const { valuesByRef, childIdByDefId, childrenLoading, defs } = resolution;
   const tbReady = useTypebuildReadiness();
@@ -488,20 +526,32 @@ function ChainedJobSubtable({
     () => nextAutoContinueChildId(defs, valuesByRef, childIdByDefId),
     [defs, valuesByRef, childIdByDefId],
   );
-  // Guard against double-start: track the LAST child id we fired auto-start
-  // for so a re-render (or the fast poll's next tick, before the child's own
-  // status has caught up) never calls onStart twice for the same step. This
-  // is a belt-and-suspenders UI-level guard — the REAL double-start defense
-  // is primaryActionFor + the server's claim (a claimed/in_progress child's
-  // primaryActionFor is never 'start', so runTaskNow simply isn't invoked;
-  // and even if it somehow were, the server's claim rejects a contested
-  // start with {ok:false}, which useTaskActions().start already treats as a
-  // calm no-op status line, never a crash or a second session).
-  const autoStartedForRef = useRef<string | null>(null);
+  // Guard against double-start WHILE A LAUNCH IS IN FLIGHT: track the child id
+  // we're currently awaiting a start for so a re-render (or the fast poll's
+  // next tick, before the child's own status has caught up) never calls start
+  // twice concurrently for the same step. This is belt-and-suspenders on top
+  // of primaryActionFor + the server's claim (a claimed/in_progress child's
+  // primaryActionFor is never 'start', so a second start simply isn't
+  // attempted; and even if it raced through, the server's claim rejects a
+  // contested start with {ok:false}).
+  //
+  // task-c141c7765aa4 (ROOT CAUSE FIX #1) — this guard used to be a
+  // fire-and-forget PERMANENT mark (autoStartedForRef never cleared), so once
+  // onStartChild's underlying claim-then-launch succeeded at the CLAIM half
+  // but failed at the LAUNCH half (no focused/open window — the common case
+  // for a background auto-continue tick with no user gesture), the effect
+  // never tried again: the step sat claimed with no session and no retry,
+  // invisible until the 2h TTL. Now we AWAIT the full outcome; only a
+  // genuinely SPAWNED session (outcome.spawned) keeps the guard set. Any
+  // failure clears the guard (so the effect retries once the step is
+  // re-runnable — e.g. after the claim-release below) and records a visible
+  // per-step error the chip renders inline instead of a silent stall.
+  const autoStartInFlightRef = useRef<string | null>(null);
+  const [autoStartErrors, setAutoStartErrors] = useState<Record<string, string>>({});
   useEffect(() => {
     if (!autoOn || !agentRun || !nextChildId) return;
     if (childrenLoading) return; // don't act on a partially-loaded job
-    if (autoStartedForRef.current === nextChildId) return; // already fired
+    if (autoStartInFlightRef.current === nextChildId) return; // already in flight
     const child = allTasksById.get(nextChildId);
     if (!child) return;
     const pa = primaryActionFor(child, {
@@ -514,8 +564,29 @@ function ChainedJobSubtable({
     // child is start-eligible right now — never claimed/in_progress/done
     // (those all resolve to a non-'start' kind, see primaryAction.mjs).
     if (pa.kind !== 'start' || !pa.enabled) return;
-    autoStartedForRef.current = nextChildId;
-    onStartChild(nextChildId);
+    autoStartInFlightRef.current = nextChildId;
+    // Clear any stale error for this child the moment we retry it.
+    setAutoStartErrors((prev) => {
+      if (!(nextChildId in prev)) return prev;
+      const next = { ...prev };
+      delete next[nextChildId];
+      return next;
+    });
+    void onStartChild(nextChildId).then((outcome: StartOutcome) => {
+      if (outcome.ok && outcome.spawned) {
+        // A real session came up — keep the guard set so we never double-fire
+        // for this same child while it runs.
+        return;
+      }
+      // Launch failed (or, defensively, resolved without a spawned session).
+      // useTaskActions().start already released an orphaned claim on a
+      // typebuild launch failure (task-c141c7765aa4 fix) — clear our guard so
+      // the step is retried the next time it's runnable, and surface the
+      // failure inline so a human sees "ready ▶" instead of a silent stall.
+      autoStartInFlightRef.current = null;
+      const message = outcome.ok ? 'auto-start did not spawn a session' : outcome.message;
+      setAutoStartErrors((prev) => ({ ...prev, [nextChildId]: message }));
+    });
   }, [autoOn, agentRun, nextChildId, childrenLoading, allTasksById, actions, tbReady, sessions, onStartChild]);
 
   return (
@@ -538,9 +609,15 @@ function ChainedJobSubtable({
         <tr>
           {groups.map((g) => {
             const def = defs.find((d) => d.id === g.taskDefId);
-            const status = def ? taskDefStatus(def, valuesByRef) : 'pending';
+            const baseStatus = def ? taskDefStatus(def, valuesByRef) : 'pending';
             const childId = childIdByDefId[g.taskDefId];
             const child = childId ? allTasksById.get(childId) : undefined;
+            // task-c141c7765aa4 (#2, chip staleness) — layer the child's LIVE
+            // claim/run state on top of the pure output-derived status so a
+            // just-claimed step reads RUNNING immediately, not "queued" for
+            // however long it takes the agent to produce its first output.
+            const childRunning = !!child && isInProgress(child);
+            const status = stepDisplayStatus(baseStatus, childRunning);
             const runnable = g.taskDefId === runnableId;
             // task-4045bcee23cb (U3a) — same actionsFor eligibility rule as the
             // row-level ▶ Start and the parent's Start-chain: never invent a
@@ -564,6 +641,8 @@ function ChainedJobSubtable({
                   runnable={runnable}
                   startAction={startAction ?? null}
                   onStart={() => childId && onStartChild(childId)}
+                  running={childRunning}
+                  autoStartError={childId ? autoStartErrors[childId] : null}
                 />
               </th>
             );
@@ -641,8 +720,12 @@ export function RosterTable({
   onRetry: (id: string) => void;
   /** Launch a start-eligible task. Threaded from NewHomePage, which owns the
    *  useTaskActions().start (→ runTaskNow) call and the post-action roster
-   *  refresh — the SAME mechanism the old Tasks page's play button uses. */
-  onStart: (id: string) => void;
+   *  refresh — the SAME mechanism the old Tasks page's play button uses.
+   *  Resolves with the StartOutcome (never throws) so the chained subtable's
+   *  auto-continue effect can verify a session actually spawned before it
+   *  treats the step as "handled" (task-c141c7765aa4). Manual callers (the
+   *  row ▶ Start / Retry buttons) ignore the resolved value. */
+  onStart: (id: string) => Promise<StartOutcome>;
   /** Optional — NewHomePage today drives filtering via HeroStats cards and
    *  pre-filters `tasks` before passing them down, so this pill bar is not
    *  yet wired to a live callback from the shell. Kept optional so this

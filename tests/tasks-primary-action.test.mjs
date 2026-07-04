@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { primaryActionFor } from '../src/components/tasks/primaryAction.mjs';
+import { primaryActionFor, isInProgress } from '../src/components/tasks/primaryAction.mjs';
 
 function task(over = {}) {
   return {
@@ -211,4 +211,21 @@ test('typebuild claimed by me + idle (open) → start (resume, not suppressed)',
   );
   assert.equal(a.kind, 'start');
   assert.equal(a.enabled, true);
+});
+
+// ── isInProgress (task-c141c7765aa4) — the exact predicate the pipeline
+// roster's step chip reuses (via stepDisplayStatus) so a claimed/in_progress
+// step displays RUNNING promptly instead of waiting on output values.
+
+test('isInProgress: true when rawStatus is in_progress', () => {
+  assert.equal(isInProgress(task({ rawStatus: 'in_progress' })), true);
+});
+
+test('isInProgress: true when normalized status is in_progress (no rawStatus)', () => {
+  assert.equal(isInProgress(task({ status: 'in_progress' })), true);
+});
+
+test('isInProgress: false for an idle/open/done task', () => {
+  assert.equal(isInProgress(task({ rawStatus: 'open', status: 'pending' })), false);
+  assert.equal(isInProgress(task({ status: 'done' })), false);
 });

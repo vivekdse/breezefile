@@ -30,3 +30,7 @@ export type PrimaryAction =
   | { kind: 'none'; note?: string };
 
 export function primaryActionFor(task: Task, ctx: PrimaryActionCtx): PrimaryAction;
+
+/** task-c141c7765aa4 — true when the server (or normalized status) says a
+ *  session is currently running for this task. */
+export function isInProgress(task: Task): boolean;
