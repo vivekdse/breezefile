@@ -147,7 +147,6 @@ type QuestionId =
   | 'title'
   | 'folder'
   | 'project'
-  | 'template'
   | 'chain'
   // task-2fd63b922beb correction — the PLAIN task form's own optional
   // input/output fields (single def, id 'task'). No neededWhen (chain-only).
@@ -1293,20 +1292,9 @@ export function TaskComposer(props: Props) {
     // effect below still falls back to 'blank' if the target can't chain.
     props.mode === 'create' && props.initialKind === 'chain' ? 'chain' : 'blank',
   );
-  const [templateHighlight, setTemplateHighlight] = useState(0);
-  // "Task" (today's flow) always first and always the default — picking it
-  // is a NON-REGRESSION no-op.
-  const TEMPLATE_OPTIONS = useMemo<{ id: TemplateChoiceId; label: string; hint?: string }[]>(
-    () => [
-      { id: 'blank', label: 'Task', hint: "today's flow — one task" },
-      { id: 'chain', label: 'Chained task', hint: 'define a multi-step chain' },
-    ],
-    [],
-  );
-  useEffect(() => {
-    const i = TEMPLATE_OPTIONS.findIndex((o) => o.id === templateChoice);
-    setTemplateHighlight(i >= 0 ? i : 0);
-  }, [TEMPLATE_OPTIONS, templateChoice]);
+  // task-15a948e6e1bf — the in-composer "Task vs Chained task" chooser is gone;
+  // chaining now has a dedicated entry button (initialKind === 'chain'). A plain
+  // create leaves templateChoice at 'blank'; the chain button pre-sets 'chain'.
   // A target switch that drops the chain option falls back to "Task" so the
   // flow never strands on an option that's no longer offered.
   useEffect(() => {
@@ -1799,7 +1787,7 @@ export function TaskComposer(props: Props) {
     // VALUES: the per-step input value questions are NOT spliced in. Values
     // arrive later via the from-template flow or the drawer/roster inline edit.
     if (templateChoice === 'chain') {
-      return [...before, 'template', 'chain', 'outputs'];
+      return [...before, 'chain', 'outputs'];
     }
 
     // task-2fd63b922beb correction (Part A) — a plain task keeps today's full
@@ -1809,8 +1797,7 @@ export function TaskComposer(props: Props) {
     // splices in a value question per input; any outputs still add the
     // read-only summary step. Values are filled later (from-template, the
     // drawer's Inputs editor, or the "Press F to fill inputs now" escape hatch).
-    const after = baseQuestions.slice(pIdx + 1);
-    const withTemplate: QuestionId[] = [...before, 'template', ...after];
+    const withTemplate: QuestionId[] = baseQuestions;
     const nIdx = withTemplate.indexOf('notes');
     const head = withTemplate.slice(0, nIdx + 1);
     const tail = withTemplate.slice(nIdx + 1);
@@ -2092,18 +2079,6 @@ export function TaskComposer(props: Props) {
     enterCommitPhase();
   }
 
-  // task-2fd63b922beb (R2) — Task-kind pick. Choosing "Task" (the default)
-  // leaves templateChoice untouched-equivalent (it already IS the default) —
-  // non-regression; choosing "Chained task" dynamically inserts the chain
-  // builder + its aggregated field + outputs questions right after this one
-  // (see QUESTIONS).
-  function chooseTemplate(i: number) {
-    const o = TEMPLATE_OPTIONS[i];
-    if (!o) return;
-    setTemplateChoice(o.id);
-    setTemplateHighlight(i);
-    goNext();
-  }
   // One aggregated select/bool INPUT field pick, keyed by fieldRef.
   function chooseFieldOption(ref: string, options: { value: string; label: string }[], i: number) {
     const o = options[i];
@@ -2220,11 +2195,6 @@ export function TaskComposer(props: Props) {
     // index regardless of which concrete question comes next, so these
     // compose transparently with the hardcoded 'project'/'who' transitions
     // above.
-    if (active === 'template') {
-      if (templateHighlight >= TEMPLATE_OPTIONS.length - 1) goNext();
-      else setTemplateHighlight((i) => i + 1);
-      return;
-    }
     if (active === 'chain') {
       tryAdvanceChain();
       return;
@@ -2332,11 +2302,6 @@ export function TaskComposer(props: Props) {
       return;
     }
     // task-2fd63b922beb (R2) — mirrors the moveDown additions above.
-    if (active === 'template') {
-      if (templateHighlight === 0) goBack();
-      else setTemplateHighlight((i) => i - 1);
-      return;
-    }
     if (active === 'chain') {
       goBack();
       return;
@@ -3131,21 +3096,6 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
-    // task-2fd63b922beb (R2) — Task-kind pick.
-    if (active === 'template') {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        chooseTemplate(templateHighlight);
-        return;
-      }
-      const n = parseInt(e.key, 10);
-      if (!Number.isNaN(n) && n >= 1 && n <= TEMPLATE_OPTIONS.length) {
-        e.preventDefault();
-        chooseTemplate(n - 1);
-        return;
-      }
-      return;
-    }
     // The chain builder is a rich sub-form (buttons/inputs, not a
     // digit-select option list) — Enter reaching here means focus is on the
     // section wrapper itself (inText() already returned above for any
@@ -3283,7 +3233,6 @@ export function TaskComposer(props: Props) {
     if (q === 'agent') return agentSummary();
     if (q === 'pin') return pinSummary();
     if (q === 'notes') return notesSummary();
-    if (q === 'template') return templateSummary();
     if (q === 'chain') return chainSummary();
     if (q === 'fields') return fieldsSummary();
     if (q === 'outputs') return outputsSummary();
@@ -3291,10 +3240,7 @@ export function TaskComposer(props: Props) {
     return '';
   }
 
-  // task-2fd63b922beb (R2) — Task-kind/chain/field/outputs summaries.
-  function templateSummary(): string {
-    return TEMPLATE_OPTIONS.find((o) => o.id === templateChoice)?.label ?? 'Task';
-  }
+  // task-2fd63b922beb (R2) — chain/field/outputs summaries.
   function chainSummary(): string {
     const named = chainDefs.filter((d) => d.name.trim());
     if (named.length === 0) return 'No steps defined yet';
@@ -3344,7 +3290,6 @@ export function TaskComposer(props: Props) {
     if (q === 'agent') return 'agent';
     if (q === 'pin') return 'pin';
     if (q === 'notes') return 'notes';
-    if (q === 'template') return 'kind';
     if (q === 'chain') return 'chain';
     if (q === 'fields') return 'fields';
     if (q === 'outputs') return 'outputs';
@@ -3373,7 +3318,6 @@ export function TaskComposer(props: Props) {
         : 'Any notes?';
     }
     // task-2fd63b922beb (R2)
-    if (q === 'template') return 'Task or chained task?';
     if (q === 'chain') return 'Define the chain';
     if (q === 'fields') return 'Inputs & outputs? (optional)';
     if (q === 'outputs') return 'What the agent will produce';
@@ -4177,52 +4121,6 @@ export function TaskComposer(props: Props) {
                 </div>
               ) : (
                 renderInert('project')
-              )}
-            </section>
-          )}
-
-          {/* Task-kind pick — task-2fd63b922beb (R2). Only for a fresh
-              TypeBuild create. "Task" is the default and reproduces today's
-              flow exactly — NON-REGRESSION. */}
-          {hasChainOption && (
-            <section
-              ref={sectionRefFor('template')}
-              className={sectionClasses('template')}
-              onClick={() => setActiveIdx(QUESTIONS.indexOf('template'))}
-            >
-              {isActiveSection('template') ? (
-                <div className="composer__q-active-body">
-                  <FieldLabel id="template" />
-                  <div className="composer__q-prompt">{promptFor('template')}</div>
-                  <ul className="composer__options" role="listbox">
-                    {TEMPLATE_OPTIONS.map((o, i) => (
-                      <li key={o.id}>
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={i === templateHighlight}
-                          className={
-                            'composer__option' +
-                            (i === templateHighlight ? ' composer__option--active' : '')
-                          }
-                          onMouseEnter={() => setTemplateHighlight(i)}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            chooseTemplate(i);
-                          }}
-                        >
-                          <kbd className="composer__option-key">{i + 1}</kbd>
-                          <span className="composer__option-label">{o.label}</span>
-                          {o.hint && (
-                            <span className="composer__option-hint">{o.hint}</span>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                renderInert('template')
               )}
             </section>
           )}
