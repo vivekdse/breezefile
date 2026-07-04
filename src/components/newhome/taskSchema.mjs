@@ -78,6 +78,22 @@ export function parseTaskFieldsBlock(body) {
   return { templateId: parsed.templateId, taskDefId: parsed.taskDefId, values };
 }
 
+// task-4a8d2c98f667 — the drawer's Inputs section EDIT path for a LEGACY task
+// (one that carries its input values inline via ```task-fields, rather than
+// the server-side `data` bag). Rewrites the block IN PLACE (same
+// templateId/taskDefId, new `values`) so the rest of the body is untouched;
+// if the body has no ```task-fields block yet, appends a freshly-built one.
+// Pure string surgery — the caller is responsible for sending the resulting
+// body to the server (task PATCH `task` field) and never persisting it
+// locally (PHI, same discipline as the body itself).
+export function replaceTaskFieldsBlock(body, templateId, taskDefId, values) {
+  const src = typeof body === 'string' ? body : '';
+  const block = buildTaskFieldsBlock(templateId, taskDefId, values);
+  const re = /```task-fields\r?\n[\s\S]*?```/m;
+  if (re.test(src)) return src.replace(re, block);
+  return src ? `${src}\n\n${block}` : block;
+}
+
 // ── task-outputs (child task body: the OUTPUT field DEFINITIONS, non-PHI) ─
 
 function isTaskDefFieldLike(v) {

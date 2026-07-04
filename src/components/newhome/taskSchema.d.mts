@@ -48,6 +48,12 @@ export function buildTaskFieldsBlock(
   taskDefId: string,
   values: Record<string, unknown>,
 ): string;
+export function replaceTaskFieldsBlock(
+  body: unknown,
+  templateId: string,
+  taskDefId: string,
+  values: Record<string, unknown>,
+): string;
 export function buildTaskOutputsBlock(taskDef: TaskDef): string;
 export function buildTaskTemplateBlock(name: string, defs: TaskDef[]): string;
 

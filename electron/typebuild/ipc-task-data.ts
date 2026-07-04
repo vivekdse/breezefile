@@ -19,7 +19,7 @@
 // electron/main.ts (sibling to registerTypebuildVaultIpc). Idempotent.
 
 import { ipcMain } from 'electron';
-import { resolveTaskDataRef } from './task-data';
+import { resolveTaskDataRef, patchTaskData } from './task-data';
 
 let registered = false;
 
@@ -39,6 +39,35 @@ export function registerTypebuildTaskDataIpc(): void {
         // (which could echo the ref but never a value) to the renderer as a
         // thrown rejection that a display read has to special-case.
         return null;
+      }
+    },
+  );
+
+  // task-4a8d2c98f667 — the drawer's Inputs section EDIT/ADD path. Unlike
+  // resolve (best-effort, degrades to null), a patch failure IS surfaced to
+  // the renderer as a structured result (not a throw) so the Inputs editor
+  // can show a clear save error / permission message instead of silently
+  // no-op'ing. See task-data.ts patchTaskData for the resolve-merge-replace
+  // mechanics and why this must happen in ONE main-process call.
+  ipcMain.handle(
+    'typebuild:data:patch',
+    async (
+      _e,
+      taskId: string,
+      upsert: Record<string, string>,
+      deleteKeys: string[],
+      knownSiblingKeys: string[],
+    ): Promise<{ ok: true; droppedKeys: string[] } | { ok: false; status?: number; error: string }> => {
+      if (!taskId) return { ok: false, error: 'taskId required' };
+      try {
+        return await patchTaskData(
+          taskId,
+          upsert && typeof upsert === 'object' ? upsert : {},
+          Array.isArray(deleteKeys) ? deleteKeys : [],
+          Array.isArray(knownSiblingKeys) ? knownSiblingKeys : [],
+        );
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
       }
     },
   );

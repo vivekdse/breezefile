@@ -855,6 +855,23 @@ const fm = {
     taskData: {
       resolve: (taskId: string, ref: string) =>
         ipcRenderer.invoke('typebuild:data:resolve', taskId, ref) as Promise<string | null>,
+      // task-4a8d2c98f667 — Inputs section edit/add. See ipc-task-data.ts
+      // registerTypebuildTaskDataIpc for the resolve-merge-replace mechanics.
+      patch: (
+        taskId: string,
+        upsert: Record<string, string>,
+        deleteKeys: string[],
+        knownSiblingKeys: string[],
+      ) =>
+        ipcRenderer.invoke(
+          'typebuild:data:patch',
+          taskId,
+          upsert,
+          deleteKeys,
+          knownSiblingKeys,
+        ) as Promise<
+          { ok: true; droppedKeys: string[] } | { ok: false; status?: number; error: string }
+        >,
     },
     // task-ab1d7955e23f — TypeBuild Projects: named task containers with
     // optional instructions + owned folders. NON-PHI; server-backed via the
@@ -900,6 +917,25 @@ const fm = {
         ipcRenderer.invoke('typebuild:projects:archive', id) as Promise<Project>,
       unarchive: (id: string) =>
         ipcRenderer.invoke('typebuild:projects:unarchive', id) as Promise<Project>,
+      // task-a9841cfc0e1b — project CRUD UI. Structured result (same shape as
+      // patch) so the confirm dialog can show "this project has tasks —
+      // archive instead?" on a 409 rather than crashing.
+      delete: (id: string) =>
+        ipcRenderer.invoke('typebuild:projects:delete', id) as Promise<
+          { ok: true } | { ok: false; reason: string; status: number }
+        >,
+      addFolder: (id: string, folder: string) =>
+        ipcRenderer.invoke(
+          'typebuild:projects:addFolder',
+          id,
+          folder,
+        ) as Promise<Project>,
+      removeFolder: (id: string, folder: string) =>
+        ipcRenderer.invoke(
+          'typebuild:projects:removeFolder',
+          id,
+          folder,
+        ) as Promise<Project>,
     },
     // task-896f3f7f5e75 — TypeBuild Agents: the registry the composer's agent
     // picker lists. NON-PHI; server-backed via the TypeBuild source. Mirrors

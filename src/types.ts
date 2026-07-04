@@ -324,6 +324,13 @@ export type Task = {
     options?: string[];
     required?: boolean;
   }[];
+  // task-4a8d2c98f667 — the drawer's Inputs section: the NON-PHI list of key
+  // names in this task's `data` bag (docs/typebuild-data-field-contract.md
+  // §4, `data_keys`). Values never ride this field — only opaque key names.
+  // OPTIONAL/defensive: a server that doesn't yet expose `data_keys` on the
+  // detail simply omits it, and the Inputs section falls back to whatever
+  // keys the user has referenced this session (see TaskDataInputs.tsx).
+  dataKeys?: string[];
 };
 
 // fm-b5at.1 — per-source capability flags. The UI gates row affordances

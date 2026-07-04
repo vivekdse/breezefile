@@ -167,6 +167,81 @@ async function fetchDataValue(reqUrl: string, ref: string): Promise<string> {
   return body.value;
 }
 
+// ─── write side (task-4a8d2c98f667 — drawer Inputs section) ────────────────
+//
+// The server's PATCH /chromeext/<id> accepts `data` as a FULL-BAG REPLACE
+// (docs/typebuild-data-field-contract.md §2, and already implemented on the
+// read/manage path — electron/sources/typebuild.ts patchFields' `data`
+// branch). There is no server-side per-key upsert/delete verb today, so an
+// edit or an added key from the drawer's Inputs section must merge CLIENT
+// (main-process) SIDE: resolve every OTHER known key's current value, splice
+// in the caller's upsert/delete, and send the merged bag as one full-replace
+// PATCH — all inside this one call, so the merged plaintext bag exists only
+// transiently on the stack here and is NEVER handed to the renderer, cached,
+// or logged. This mirrors the resolve path's one-shot, memory-only discipline
+// one level up (a merge instead of a single ref).
+//
+// Caller contract: `upsert` sets/overwrites keys; `deleteKeys` removes keys.
+// `knownKeys` is the caller's current view of `data_keys` (the non-PHI key
+// list) MINUS the ones being upserted/deleted — i.e. the sibling keys whose
+// values must be preserved across the full-bag replace. A caller with no
+// `data_keys` (server predates that field) can only pass the keys it already
+// resolved this session; anything else is unknowable client-side and — by
+// design — would be dropped by a full-bag replace. Best-effort: any sibling
+// key that fails to resolve (404/network) is DROPPED from the merged bag
+// rather than aborting the whole save, since a stuck sibling must not block
+// an otherwise-valid edit; the caller surfaces which keys were skipped via
+// the returned `droppedKeys`.
+export async function patchTaskData(
+  taskId: string,
+  upsert: Record<string, string>,
+  deleteKeys: string[],
+  knownSiblingKeys: string[],
+): Promise<{ ok: true; droppedKeys: string[] } | { ok: false; status?: number; error: string }> {
+  if (!taskId) return { ok: false, error: 'taskId required' };
+
+  const deleteSet = new Set(deleteKeys.filter((k) => typeof k === 'string' && k));
+  const upsertKeys = new Set(Object.keys(upsert));
+  const siblings = Array.from(
+    new Set(knownSiblingKeys.filter((k) => typeof k === 'string' && k)),
+  ).filter((k) => !deleteSet.has(k) && !upsertKeys.has(k));
+
+  // Resolve every sibling's CURRENT value so the full-bag replace doesn't wipe
+  // it. Sequential, one ref per call (same discipline as every other resolve
+  // here) — this is an infrequent, human-triggered save, not a hot path.
+  const merged: Record<string, string> = { ...upsert };
+  const droppedKeys: string[] = [];
+  for (const key of siblings) {
+    try {
+      merged[key] = await fetchDataValue(
+        `${API_BASE}/chromeext/${encodeURIComponent(taskId)}/data?ref=${encodeURIComponent(key)}`,
+        key,
+      );
+    } catch {
+      // Couldn't resolve this sibling (404/network/auth) — drop it rather
+      // than aborting the save. Reported back so the UI can warn the user
+      // that key silently fell out of the bag.
+      droppedKeys.push(key);
+    }
+  }
+
+  const res = await typebuildFetch(`${API_BASE}/chromeext/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: merged }),
+  });
+  if (res.status === 403) {
+    return { ok: false, status: 403, error: 'not permitted to edit this task\'s data' };
+  }
+  if (res.status === 404) {
+    return { ok: false, status: 404, error: 'task not visible' };
+  }
+  if (!res.ok) {
+    return { ok: false, status: res.status, error: `patch failed (${res.status})` };
+  }
+  return { ok: true, droppedKeys };
+}
+
 // The entity-resolver's not-resolved payload. Only NON-secret field names ever
 // appear here (available/candidates); ambiguous_secret discloses nothing.
 type ResolveResponse =

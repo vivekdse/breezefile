@@ -56,10 +56,12 @@ import {
   parseTaskFieldsBlock,
   parseTaskOutputsBlock,
   parseTaskTemplateBlock,
+  replaceTaskFieldsBlock,
   resultFields,
   taskDefStatus,
   fieldRef,
 } from '../newhome/taskSchema.mjs';
+import { TaskDataInputs } from './TaskDataInputs';
 import {
   runnableStepId,
   mergeChildStatus,
@@ -427,6 +429,28 @@ export function TaskDetailDrawer({
   const requiredSubmittedCount = useMemo(
     () => requiredOutputs.filter((f) => hasValue(submittedByKey[f.key])).length,
     [requiredOutputs, submittedByKey],
+  );
+
+  // task-4a8d2c98f667 — this task's OWN legacy ```task-fields block (input
+  // VALUES inline in the body), distinct from templateBlock/childByDefId
+  // below which parse CHILDREN's blocks for the pipeline rollup. Feeds the
+  // Inputs section's legacy path (spec item 4) — a task with no such block
+  // (the common case: server-side `data` bag, or no inputs at all) parses to
+  // null and the Inputs section falls through to the data_keys/resolve path.
+  const ownFieldsBlock = useMemo(() => parseTaskFieldsBlock(body ?? null), [body]);
+  const saveLegacyFields = useCallback(
+    async (values: Record<string, unknown>) => {
+      if (!ownFieldsBlock || !task.source) return;
+      const nextBody = replaceTaskFieldsBlock(
+        body ?? '',
+        ownFieldsBlock.templateId,
+        ownFieldsBlock.taskDefId,
+        values,
+      );
+      await taskSourceAction(task.source, task.id, 'patch', { task: nextBody });
+      refreshBody();
+    },
+    [ownFieldsBlock, body, task.source, task.id, refreshBody],
   );
 
   // Meta-parent PIPELINE rollup — needs the roster snapshot to resolve children.
@@ -1156,6 +1180,27 @@ export function TaskDetailDrawer({
                 claimedBy={claimedBy}
                 claimedByMe={claimedByMe}
               />
+              {/* task-4a8d2c98f667 — the task `data` bag Inputs section: LIST
+                  (data_keys), RESOLVE-on-demand, EDIT/ADD, gated on claim/
+                  creator. Shown for every TypeBuild task (not gated on
+                  data_keys being non-empty) so: (a) a server that hasn't
+                  shipped data_keys yet still lets the user discover/add a key
+                  — the ONLY way a viewer can find an input the reporting bug
+                  hid entirely; (b) a task with zero inputs today can still
+                  gain one via "Add". A local/non-typebuild task has no `data`
+                  bag at all, so it's excluded (NON-REGRESSION there). */}
+              {isTypebuild && (
+                <TaskDataInputs
+                  taskId={task.id}
+                  dataKeys={task.dataKeys}
+                  claimedBy={claimedBy}
+                  createdBy={task.createdBy}
+                  viewerEmail={myEmail}
+                  legacyFields={ownFieldsBlock}
+                  onLegacyFieldsSave={saveLegacyFields}
+                  onSaved={refreshBody}
+                />
+              )}
               {/* task-69651204e222 — ported from the New-Home dialog: this
                   task's own OUTPUT fields (definitions + submitted values) and,
                   for a meta-parent, the PIPELINE rollup over its children.

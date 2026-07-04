@@ -309,6 +309,12 @@ type DetailRow = ListRow & {
   // mapOutputSchema so a malformed entry is dropped rather than rejecting the
   // whole array (NON-REGRESSION).
   output_schema?: unknown;
+  // task-4a8d2c98f667 — the drawer's Inputs section: NON-PHI key names for
+  // this task's `data` bag (docs/typebuild-data-field-contract.md §4). Typed
+  // loose/optional: a server that predates this simply omits it, and the
+  // client falls back to session-known keys (see mapDetail's dataKeys below
+  // and TaskDataInputs.tsx). NEVER carries values — only key strings.
+  data_keys?: unknown;
 };
 
 // ─── Projects (task-ab1d7955e23f) ─────────────────────────────────────────
@@ -531,6 +537,16 @@ function isOutputSchemaFieldLike(v: unknown): v is OutputSchemaField {
 function mapOutputSchema(raw: unknown): OutputSchemaField[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out = raw.filter(isOutputSchemaFieldLike);
+  return out.length ? out : undefined;
+}
+
+// task-4a8d2c98f667 — normalize the wire `data_keys` into string[] | undefined.
+// NON-PHI: key NAMES only, never values. Defensive: a non-array or an array
+// of non-strings drops to undefined/filters out the bad entries rather than
+// rejecting the whole task, matching mapOutputSchema's fail-soft rule.
+function mapDataKeys(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter((k): k is string => typeof k === 'string' && k.length > 0);
   return out.length ? out : undefined;
 }
 
@@ -1113,6 +1129,11 @@ export class TypeBuildTaskSource implements TaskSource {
       // single-task (non-chained) jobs. NON-PHI (definitions only); see
       // mapOutputSchema + the DetailRow.output_schema comment.
       outputSchema: mapOutputSchema(detail.output_schema),
+      // task-4a8d2c98f667 — Inputs section key list (NON-PHI names only).
+      // Defensive: drop non-string entries rather than rejecting the whole
+      // array, same fail-soft convention as mapOutputSchema; absent/malformed
+      // → undefined so a task with no data_keys renders exactly as before.
+      dataKeys: mapDataKeys(detail.data_keys),
     };
   }
 
@@ -1768,6 +1789,98 @@ export class TypeBuildTaskSource implements TaskSource {
   /** Unarchive a project (restore it to the default list). */
   unarchiveProject(id: string): Promise<Project> {
     return this.setArchived(id, false);
+  }
+
+  // ─── delete project (task-a9841cfc0e1b — project CRUD UI) ─────────────────
+  // DELETE /chromeext/projects/{id}. Mirrors the task-delete structured-error
+  // contract above: the server refuses to delete a project that still has
+  // tasks (the UI should offer archive instead), or one the caller doesn't
+  // own. NON-PHI; body never logged.
+  //
+  // Server contract (mirrors deleteTask's verified shape):
+  //   - 200/204 → deleted.
+  //   - 403 { reason:'not_owner' } — not the project's owner.
+  //   - 409 { reason:'has_tasks' } (or similar) — project is non-empty; the
+  //     caller should archive instead.
+  //   - 404 — not visible / already gone.
+  // Surfaced as STRUCTURED { ok:false, reason } (never throw on these expected
+  // codes) so the confirm dialog can show "this project has tasks — archive
+  // it instead?" rather than crashing.
+  async deleteProject(
+    id: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const res = await this.request(
+      'DELETE',
+      `/chromeext/projects/${encodeURIComponent(id)}`,
+    );
+    if (res.status === 200 || res.status === 204) {
+      await res.json().catch(() => ({}));
+      return { ok: true };
+    }
+    if (res.status === 403 || res.status === 404 || res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 403
+          ? 'not_owner'
+          : res.status === 409
+            ? 'has_tasks'
+            : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    throw new Error(`typebuild: delete project failed (${res.status})`);
+  }
+
+  // ─── project folders (task-a9841cfc0e1b — project CRUD UI) ────────────────
+  // POST /chromeext/projects/{id}/folders (add) and DELETE .../folders (remove,
+  // folder in the body) — mirrors the archive/unarchive single-purpose-verb
+  // pattern rather than routing through the generic PATCH (which a sibling
+  // task owns for name/description/instructions). Returns the updated project
+  // when the server echoes one; otherwise re-fetches it, same fallback
+  // setArchived already uses. NON-PHI (a folder path is not patient data);
+  // body never logged.
+  private async patchFolder(
+    id: string,
+    folder: string,
+    op: 'add' | 'remove',
+  ): Promise<Project> {
+    const method = op === 'add' ? 'POST' : 'DELETE';
+    const res = await this.request(
+      method,
+      `/chromeext/projects/${encodeURIComponent(id)}/folders`,
+      { folder },
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      const detail = data.reason ?? data.error ?? '';
+      throw new Error(
+        `typebuild: ${op} project folder failed (${res.status})${
+          detail ? `: ${detail}` : ''
+        }`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      project?: ProjectRow;
+    };
+    if (data.project && data.project.id) {
+      return this.mapProjectRow(data.project);
+    }
+    const fetched = await this.getProject(id);
+    if (fetched) return fetched;
+    throw new Error(`typebuild: ${op} project folder — project not found after update`);
+  }
+
+  /** Attach a folder to a project (server: add_project_folder). */
+  addProjectFolder(id: string, folder: string): Promise<Project> {
+    return this.patchFolder(id, folder, 'add');
+  }
+
+  /** Detach a folder from a project (server: remove_project_folder). */
+  removeProjectFolder(id: string, folder: string): Promise<Project> {
+    return this.patchFolder(id, folder, 'remove');
   }
 
   // ─── users registry (fm-j7w0/S4) ─────────────────────────────────────────

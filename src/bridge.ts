@@ -581,6 +581,16 @@ type Fm = {
     // on this hop. See docs/typebuild-data-field-contract.md.
     taskData: {
       resolve: (taskId: string, ref: string) => Promise<string | null>;
+      // task-4a8d2c98f667 — Inputs section edit/add (full-bag resolve-merge-
+      // replace happens in main; see electron/typebuild/task-data.ts).
+      patch: (
+        taskId: string,
+        upsert: Record<string, string>,
+        deleteKeys: string[],
+        knownSiblingKeys: string[],
+      ) => Promise<
+        { ok: true; droppedKeys: string[] } | { ok: false; status?: number; error: string }
+      >;
     };
     // task-ab1d7955e23f — TypeBuild Projects: named task containers with
     // optional instructions + owned folders. NON-PHI. `resolve` is the
@@ -608,6 +618,15 @@ type Fm = {
       // task-2c5448be520a — archive/unarchive (hide from the default list).
       archive: (id: string) => Promise<Project>;
       unarchive: (id: string) => Promise<Project>;
+      // task-a9841cfc0e1b — project CRUD UI. delete is DESTRUCTIVE and
+      // server-guarded (empty projects only); structured result so the UI can
+      // offer "archive instead?" on a 409 rather than crashing.
+      delete: (
+        id: string,
+      ) => Promise<{ ok: true } | { ok: false; reason: string; status: number }>;
+      // Attach/detach a folder (server: add_project_folder / remove_project_folder).
+      addFolder: (id: string, folder: string) => Promise<Project>;
+      removeFolder: (id: string, folder: string) => Promise<Project>;
     };
     // task-896f3f7f5e75 — TypeBuild Agents: the registry the composer's agent
     // picker lists. NON-PHI (name/tools/launch_mode). `list` mirrors
