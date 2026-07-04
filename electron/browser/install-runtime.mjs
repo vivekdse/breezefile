@@ -53,13 +53,22 @@ function sourceRoot() {
 }
 
 // Small helper files (relative to the source/dest root) — re-copied each launch.
+// MUST be the full relative-import CLOSURE of the entry points (breeze-tools.mjs
+// and cli.mjs): a module imported but not listed here installs a runtime that
+// dies with ERR_MODULE_NOT_FOUND at the destination. tests/
+// install-runtime-closure.test.mjs walks the imports and fails when this list
+// drifts — add new modules HERE, not just in the import statement.
 const HELPERS = [
   ['bin', 'breeze-tools.mjs'],
   ['electron', 'browser', 'cli.mjs'],
   ['electron', 'browser', 'connect.mjs'],
+  ['electron', 'browser', 'net.mjs'],
   ['electron', 'browser', 'scrub.mjs'],
-  ['electron', 'browser', 'tools', 'registry.mjs'],
+  ['electron', 'browser', 'tools', 'api-spec.mjs'],
   ['electron', 'browser', 'tools', 'memory.mjs'],
+  ['electron', 'browser', 'tools', 'param-bindings.mjs'],
+  ['electron', 'browser', 'tools', 'promote.mjs'],
+  ['electron', 'browser', 'tools', 'registry.mjs'],
 ];
 
 // Heavy deps — copied once (skipped when the destination already exists).
