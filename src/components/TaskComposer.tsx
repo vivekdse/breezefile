@@ -13,6 +13,11 @@
 // - Digit keys (1-N) pick the corresponding option and advance.
 // - Enter on the active option = pick + advance (or save on the last Q).
 // - ⌘↵ saves at any time. Esc Esc cancels.
+// - A toggles the collapsible ADVANCED options section (task-f5a318566148);
+//   its questions (priority, defer/start, agent, status, launch flags,
+//   due/schedule, pin, working folder) are only walked into when expanded.
+//   Launch flags are a multi-select option question — digits / Enter toggle a
+//   flag on/off (they don't advance); ↓ off the last flag advances.
 //
 // The window keydown handler is registered ONCE via a ref that always
 // points at the freshest closure — without that, the brief render gap
@@ -155,6 +160,9 @@ type QuestionId =
   | 'who'
   | 'when'
   | 'status'
+  // task-f5a318566148 — agent launch flags as a multi-select option question
+  // (Claude tasks only), inside the ADVANCED block.
+  | 'flags'
   | 'start'
   | 'priority'
   | 'agent'
@@ -170,22 +178,28 @@ type QuestionId =
 // target (folder anchoring doesn't apply there; priority does). The active
 // question list is computed per-target via composerQuestions() so keyboard
 // navigation, activeIdx, and the past/future render all stay consistent.
-const QUESTIONS_LOCAL: QuestionId[] = [
-  'title', 'folder', 'who', 'notes',
-  'start', 'when',
-  'status', 'pin',
-];
+// task-f5a318566148 — the composer form is split into an always-visible MAIN
+// walk and a collapsible ADVANCED block (collapsed by default) that is only
+// walked into when expanded. MAIN holds the questions that matter for most
+// tasks (what is it, who runs it, its fields, its body); everything else —
+// priority, defer/start, agent, status, launch flags, due/schedule, pin and
+// (local) working folder — lives under ADVANCED. composerQuestions() returns
+// the two ordered lists per target; QUESTIONS concatenates them when Advanced
+// is expanded (see the mainQuestions/advancedQuestions/QUESTIONS memos).
 // task-ab1d7955e23f — `project` sits right after the title for the TypeBuild
 // target: a task's project is teaching context (it carries the project's
 // folders + instructions), so it reads as part of "what is this", before who
-// runs it. Folder-anchored creates auto-attach the owning project here; the
-// user can still override or pick "None".
-const QUESTIONS_TYPEBUILD: QuestionId[] = [
-  'title', 'project', 'who', 'notes',
-  'start', 'when', 'priority', 'agent',
-  'status', 'pin',
-];
-function composerQuestions(target: string): QuestionId[] {
+// runs it.
+type ComposerQuestionSplit = { main: QuestionId[]; advanced: QuestionId[] };
+const QUESTIONS_LOCAL: ComposerQuestionSplit = {
+  main: ['title', 'who', 'notes'],
+  advanced: ['start', 'status', 'flags', 'when', 'pin', 'folder'],
+};
+const QUESTIONS_TYPEBUILD: ComposerQuestionSplit = {
+  main: ['title', 'project', 'who', 'notes'],
+  advanced: ['priority', 'start', 'agent', 'status', 'flags', 'when', 'pin'],
+};
+function composerQuestions(target: string): ComposerQuestionSplit {
   return target === TYPEBUILD_SOURCE ? QUESTIONS_TYPEBUILD : QUESTIONS_LOCAL;
 }
 
@@ -863,7 +877,7 @@ export function TaskComposer(props: Props) {
   // down (after `attachedProject`), once the chain-related state they depend
   // on (hasChainOption, templateChoice, templateFieldEntries) exists. Nothing
   // between here and there reads them.
-  const baseQuestions = useMemo(() => composerQuestions(target), [target]);
+  const questionSplit = useMemo(() => composerQuestions(target), [target]);
 
   const [title, setTitle] = useState(
     initial?.title ?? (props.mode === 'create' ? props.initialTitle : undefined) ?? '',
@@ -1084,6 +1098,10 @@ export function TaskComposer(props: Props) {
   });
   const [agentHighlight, setAgentHighlight] = useState(0);
   const [pinHighlight, setPinHighlight] = useState(() => (pinned ? 1 : 0));
+  // task-f5a318566148 — the collapsible ADVANCED options section (collapsed by
+  // default) and the multi-select cursor for the launch-flags question.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [flagsHighlight, setFlagsHighlight] = useState(0);
 
   // fm-m2s4 (S5) — priority is a flat option list ("Unset" + 0..10) so it
   // matches the other option questions' keyboard model. Index 0 is "Unset".
@@ -1762,49 +1780,68 @@ export function TaskComposer(props: Props) {
     };
   }
 
-  // Dynamically extend the question flow: 'template' (the Task/Chained-task
-  // choice) is always spliced in right after 'project'; choosing "Chained
-  // task" additionally splices in 'chain' (the builder), its aggregated field
-  // questions, and a read-only 'outputs' summary. The local target or edit
-  // mode never add any of these — QUESTIONS is then `baseQuestions` unchanged
-  // (byte-for-byte QUESTIONS_LOCAL/QUESTIONS_TYPEBUILD).
+  // task-f5a318566148 — the always-visible MAIN walk. For a fresh TypeBuild
+  // create the plain-task 'fields' step (+ optional read-only 'outputs' summary)
+  // splices in right after 'who', BEFORE the body/notes; a chained create
+  // instead replaces the tail with the chain builder + outputs (a thin
+  // container — no who/notes/advanced). Edit and local creates get the base
+  // main list unchanged.
+  const mainQuestions = useMemo<QuestionId[]>(() => {
+    const main = questionSplit.main;
+    if (!hasChainOption) return main;
+    // task-2fd63b922beb correction (Part B) — a "Chained task" is a THIN
+    // container: name (title) + project + the chain + a read-only outputs
+    // summary. The task-form questions (who/notes/advanced) are DROPPED.
+    if (templateChoice === 'chain') {
+      const pIdx = main.indexOf('project');
+      return [...main.slice(0, pIdx + 1), 'chain', 'outputs'];
+    }
+    // task-2fd63b922beb correction (Part A) — a plain task's OWN optional
+    // input/output fields. task-0d63c7b0ebdb — the 'fields' step DEFINES the
+    // fields; values are filled later. Any outputs still add the read-only
+    // summary step.
+    const wIdx = main.indexOf('who');
+    const extra: QuestionId[] = ['fields'];
+    if (definedOutputsCount > 0) extra.push('outputs');
+    return [...main.slice(0, wIdx + 1), ...extra, ...main.slice(wIdx + 1)];
+  }, [questionSplit, hasChainOption, templateChoice, definedOutputsCount]);
+
+  // task-f5a318566148 — the ADVANCED block, only walked into when the section
+  // is expanded. 'flags' is relevant only to Claude tasks (hidden when manual).
+  // A chained create has no advanced block (it's a thin container).
+  const advancedQuestions = useMemo<QuestionId[]>(() => {
+    if (isMinimalChain) return [];
+    return questionSplit.advanced.filter((q) => q !== 'flags' || executor === 'claude');
+  }, [questionSplit, isMinimalChain, executor]);
+
   const QUESTIONS = useMemo<QuestionId[]>(() => {
     // task-0d63c7b0ebdb — the escape hatch's values-only walk: after a plain
     // create, the flow is JUST the defined inputs' value questions, keyed onto
-    // the already-created task (see saveFillValues). Creation itself never
-    // includes these.
+    // the already-created task (see saveFillValues).
     if (fillMode) return templateFieldQIds;
-    if (!hasChainOption) return baseQuestions;
-    const pIdx = baseQuestions.indexOf('project');
-    const before = baseQuestions.slice(0, pIdx + 1); // title, project
+    // When collapsed, ↓ past the last MAIN question / Enter goes straight to
+    // commit — the hidden advanced questions are NOT part of the walk.
+    return advancedOpen ? [...mainQuestions, ...advancedQuestions] : mainQuestions;
+  }, [fillMode, templateFieldQIds, advancedOpen, mainQuestions, advancedQuestions]);
 
-    // task-2fd63b922beb correction (Part B) — a "Chained task" is a THIN
-    // container: name (title) + project + the chain + a read-only outputs
-    // summary. The task-form questions (who/notes/start/when/priority/agent/
-    // status/pin) are DROPPED — the chain is not a full task.
-    //
-    // task-0d63c7b0ebdb — creation DEFINES step fields but never asks for their
-    // VALUES: the per-step input value questions are NOT spliced in. Values
-    // arrive later via the from-template flow or the drawer/roster inline edit.
-    if (templateChoice === 'chain') {
-      return [...before, 'chain', 'outputs'];
-    }
-
-    // task-2fd63b922beb correction (Part A) — a plain task keeps today's full
-    // flow, with 'template' after project and an optional 'fields' step right
-    // after 'notes' (the task's own inputs/outputs). task-0d63c7b0ebdb — the
-    // 'fields' step DEFINES the input/output fields but the walk no longer
-    // splices in a value question per input; any outputs still add the
-    // read-only summary step. Values are filled later (from-template, the
-    // drawer's Inputs editor, or the "Press F to fill inputs now" escape hatch).
-    const withTemplate: QuestionId[] = baseQuestions;
-    const nIdx = withTemplate.indexOf('notes');
-    const head = withTemplate.slice(0, nIdx + 1);
-    const tail = withTemplate.slice(nIdx + 1);
-    const extra: QuestionId[] = ['fields'];
-    if (definedOutputsCount > 0) extra.push('outputs');
-    return [...head, ...extra, ...tail];
-  }, [fillMode, baseQuestions, hasChainOption, templateChoice, templateFieldQIds, definedOutputsCount]);
+  // task-f5a318566148 — the collapsed header reads "Advanced options (N set)"
+  // where N counts the advanced fields left non-default: priority set,
+  // defer/start set, agent chosen, status ≠ pending, each ON launch flag,
+  // due/schedule set, pinned, and (local only) a working folder changed from its
+  // default. N===0 → just "Advanced options". Recomputed live as fields change.
+  const initialFolder = initial?.folder ?? (props.mode === 'create' ? props.defaultFolder : '');
+  const advancedSetCount = useMemo(() => {
+    let n = 0;
+    if (isTypebuild && priority !== '') n += 1;
+    if (startId !== 'none') n += 1;
+    if (isTypebuild && agentId !== '') n += 1;
+    if (status !== 'pending') n += 1;
+    if (executor === 'claude') n += FLAG_OPTIONS.filter((o) => flags.has(o.id)).length;
+    if (whenId !== 'none') n += 1;
+    if (pinned) n += 1;
+    if (!isTypebuild && folder.trim() !== '' && folder !== initialFolder) n += 1;
+    return n;
+  }, [isTypebuild, priority, startId, agentId, status, executor, flags, whenId, pinned, folder, initialFolder]);
 
   const [activeIdx, setActiveIdx] = useState(0);
   // Clamp the active index when the question list shrinks/grows on a target
@@ -1812,6 +1849,30 @@ export function TaskComposer(props: Props) {
   // (adds/removes field + outputs questions), so we never index past the end
   // and strand the keyboard cursor.
   const active = QUESTIONS[Math.min(activeIdx, QUESTIONS.length - 1)];
+
+  // task-f5a318566148 — when a question becomes active, sync its option-list
+  // highlight to the currently-chosen value so Enter picks the current
+  // selection. With the MAIN/ADVANCED split (and optional fields/outputs/flags)
+  // a question's neighbors are now dynamic, so the walk no longer hard-codes
+  // each transition's next-highlight — this single effect keeps them correct.
+  // Free-entry / textarea questions have no highlight; the field-value
+  // questions manage their own; 'flags' is multi-select (cursor resets to top).
+  useEffect(() => {
+    switch (active) {
+      case 'who': setWhoHighlight(Math.max(0, WHO_OPTIONS.findIndex((o) => o.id === executor))); break;
+      case 'project': setProjectHighlight(Math.max(0, PROJECT_OPTIONS.findIndex((o) => o.value === projectId))); break;
+      case 'folder': setFolderHighlight(Math.max(0, visibleFolderPresets.findIndex((p) => p.v === folder))); break;
+      case 'start': setStartHighlight(Math.max(0, START_OPTIONS.findIndex((s) => s.id === startId))); break;
+      case 'when': setWhenHighlight(Math.max(0, visibleWhenOptions.findIndex((w) => w.id === whenId))); break;
+      case 'priority': setPriorityHighlight(Math.max(0, PRIORITY_OPTIONS.findIndex((o) => o.value === priority))); break;
+      case 'agent': setAgentHighlight(Math.max(0, AGENT_OPTIONS.findIndex((o) => o.value === agentId))); break;
+      case 'status': setStatusHighlight(Math.max(0, STATUS_OPTIONS.findIndex((s) => s.id === status))); break;
+      case 'pin': setPinHighlight(pinned ? 1 : 0); break;
+      case 'flags': setFlagsHighlight(0); break;
+      default: break;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   // If executor changes and the current When pick is hidden, reset.
   useEffect(() => {
@@ -1900,8 +1961,23 @@ export function TaskComposer(props: Props) {
   function goBack() {
     if (activeIdx > 0) setActiveIdx(activeIdx - 1);
   }
+  // task-f5a318566148 — advancing off the LAST question hops to the commit
+  // footer. With the collapsible ADVANCED block the "last question" is dynamic
+  // (the body/notes when collapsed; pin/folder when expanded), so every ↓/↵
+  // that walks forward funnels through here.
   function goNext() {
-    if (activeIdx < QUESTIONS.length - 1) setActiveIdx(activeIdx + 1);
+    if (activeIdx >= QUESTIONS.length - 1) enterCommitPhase();
+    else setActiveIdx(activeIdx + 1);
+  }
+  // task-f5a318566148 — expand/collapse the ADVANCED options section (the 'A'
+  // shortcut / header click). Collapsing clamps the cursor back into the main
+  // walk so it never strands on a now-hidden advanced question.
+  function toggleAdvanced() {
+    setAdvancedOpen((open) => {
+      const next = !open;
+      if (!next) setActiveIdx((i) => Math.min(i, mainQuestions.length - 1));
+      return next;
+    });
   }
   // task-0d63c7b0ebdb — advancing off the LAST question hops to the commit
   // footer. Used by the field-value questions (only ever present in the escape
@@ -2076,7 +2152,18 @@ export function TaskComposer(props: Props) {
     if (!o) return;
     setPinned(o.id === 'yes');
     setPinHighlight(i);
-    enterCommitPhase();
+    // task-f5a318566148 — pin is no longer always the last question (the local
+    // advanced block ends with 'folder'), so advance rather than commit.
+    goNext();
+  }
+  // task-f5a318566148 — one launch flag toggled (multi-select). Unlike the
+  // single-select pickers this does NOT advance — it flips the flag on/off and
+  // stays put, mirroring a checkbox list; ↓ off the last flag advances.
+  function chooseFlag(i: number) {
+    const o = FLAG_OPTIONS[i];
+    if (!o) return;
+    setFlagsHighlight(i);
+    toggleFlag(o.id);
   }
 
   // One aggregated select/bool INPUT field pick, keyed by fieldRef.
@@ -2109,92 +2196,75 @@ export function TaskComposer(props: Props) {
     setActiveIdx(0);
   }
 
-  // ↓ flow: title → folder → who → notes → start → when → status → pin → commit
+  // task-f5a318566148 — ↓ flow. Each option question moves its own highlight
+  // and, off the last option, advances (goNext hops to commit at the end of the
+  // list). The neighbor's highlight is synced by the [active] effect, so the
+  // walk is order-agnostic — it works for the MAIN walk, the appended ADVANCED
+  // block, and the thin chain container alike.
   function moveDown() {
     if (active === 'title') {
       if (title.trim()) goNext();
       return;
     }
     if (active === 'folder') {
-      if (folderHighlight >= visibleFolderPresets.length - 1) {
-        setWhoHighlight(0);
-        goNext();
-      } else setFolderHighlight((i) => i + 1);
+      if (folderHighlight >= visibleFolderPresets.length - 1) goNext();
+      else setFolderHighlight((i) => i + 1);
       return;
     }
     if (active === 'project') {
-      // task-ab1d7955e23f — Project → Who.
-      if (projectHighlight >= PROJECT_OPTIONS.length - 1) {
-        setWhoHighlight(0);
-        goNext();
-      } else setProjectHighlight((i) => i + 1);
+      if (projectHighlight >= PROJECT_OPTIONS.length - 1) goNext();
+      else setProjectHighlight((i) => i + 1);
       return;
     }
     if (active === 'who') {
-      // Who → Notes (Notes has no option list; it's a textarea).
       if (whoHighlight >= WHO_OPTIONS.length - 1) goNext();
       else setWhoHighlight((i) => i + 1);
       return;
     }
+    // Notes is a textarea (no option list) — ↓ outside it advances.
     if (active === 'notes') {
-      // Notes → Start. ↓ outside the textarea advances to scheduling.
-      setStartHighlight(START_OPTIONS.findIndex((s) => s.id === startId));
       goNext();
       return;
     }
     if (active === 'start') {
-      if (startHighlight >= START_OPTIONS.length - 1) {
-        setWhenHighlight(visibleWhenOptions.findIndex((w) => w.id === whenId));
-        goNext();
-      } else setStartHighlight((i) => i + 1);
+      if (startHighlight >= START_OPTIONS.length - 1) goNext();
+      else setStartHighlight((i) => i + 1);
       return;
     }
     if (active === 'when') {
-      if (whenHighlight < visibleWhenOptions.length - 1) {
-        setWhenHighlight((i) => i + 1);
-      } else {
-        // fm-m2s4 (S5) — When → Priority (TypeBuild) or → Status (local).
-        if (isTypebuild) setPriorityHighlight(priorityHighlight);
-        else setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
-        goNext();
-      }
+      if (whenHighlight >= visibleWhenOptions.length - 1) goNext();
+      else setWhenHighlight((i) => i + 1);
       return;
     }
     if (active === 'priority') {
-      // task-896f3f7f5e75 — Priority → Agent (TypeBuild; the agent question
-      // sits right after priority in QUESTIONS_TYPEBUILD).
-      if (priorityHighlight >= PRIORITY_OPTIONS.length - 1) {
-        setAgentHighlight(Math.max(0, AGENT_OPTIONS.findIndex((o) => o.value === agentId)));
-        goNext();
-      } else setPriorityHighlight((i) => i + 1);
+      if (priorityHighlight >= PRIORITY_OPTIONS.length - 1) goNext();
+      else setPriorityHighlight((i) => i + 1);
       return;
     }
     if (active === 'agent') {
-      // task-896f3f7f5e75 — Agent → Status.
-      if (agentHighlight >= AGENT_OPTIONS.length - 1) {
-        setStatusHighlight(STATUS_OPTIONS.findIndex((s) => s.id === status));
-        goNext();
-      } else setAgentHighlight((i) => i + 1);
+      if (agentHighlight >= AGENT_OPTIONS.length - 1) goNext();
+      else setAgentHighlight((i) => i + 1);
       return;
     }
     if (active === 'status') {
-      if (statusHighlight >= STATUS_OPTIONS.length - 1) {
-        setPinHighlight(pinned ? 1 : 0);
-        goNext();
-      } else setStatusHighlight((i) => i + 1);
+      if (statusHighlight >= STATUS_OPTIONS.length - 1) goNext();
+      else setStatusHighlight((i) => i + 1);
+      return;
+    }
+    // task-f5a318566148 — launch flags (multi-select). ↓ moves the cursor;
+    // off the last flag it advances (toggling is Enter/digits, not ↓).
+    if (active === 'flags') {
+      if (flagsHighlight >= FLAG_OPTIONS.length - 1) goNext();
+      else setFlagsHighlight((i) => i + 1);
       return;
     }
     if (active === 'pin') {
-      // Pin is the last question — ↓ off the end goes to commit.
-      if (pinHighlight >= PIN_OPTIONS.length - 1) enterCommitPhase();
+      if (pinHighlight >= PIN_OPTIONS.length - 1) goNext();
       else setPinHighlight((i) => i + 1);
       return;
     }
-    // task-2fd63b922beb (R2) — Task-kind pick + the chain builder + its
-    // aggregated fields + read-only outputs summary. goNext() advances the
-    // index regardless of which concrete question comes next, so these
-    // compose transparently with the hardcoded 'project'/'who' transitions
-    // above.
+    // task-2fd63b922beb (R2) — the chain builder + its read-only outputs
+    // summary. goNext() advances (or commits at the end) transparently.
     if (active === 'chain') {
       tryAdvanceChain();
       return;
@@ -2205,10 +2275,7 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'outputs') {
-      // In the minimal chain flow 'outputs' is the LAST question — ↓ off its
-      // end hops to commit; in the plain flow more questions follow.
-      if (QUESTIONS.indexOf('outputs') >= QUESTIONS.length - 1) enterCommitPhase();
-      else goNext();
+      goNext();
       return;
     }
     if (isFieldQuestion(active)) {
@@ -2233,71 +2300,52 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'project') {
-      // task-ab1d7955e23f — Project ↑ → back to Title.
       if (projectHighlight === 0) goBack();
       else setProjectHighlight((i) => i - 1);
       return;
     }
     if (active === 'who') {
-      if (whoHighlight === 0) {
-        // task-ab1d7955e23f — the question before Who is Project (TypeBuild)
-        // or Folder (local).
-        if (isTypebuild) setProjectHighlight(PROJECT_OPTIONS.length - 1);
-        else setFolderHighlight(visibleFolderPresets.length - 1);
-        goBack();
-      } else setWhoHighlight((i) => i - 1);
+      if (whoHighlight === 0) goBack();
+      else setWhoHighlight((i) => i - 1);
       return;
     }
     if (active === 'start') {
-      // Start ↑ → back into Notes (the textarea regains focus via the
-      // [active] effect).
       if (startHighlight === 0) goBack();
       else setStartHighlight((i) => i - 1);
       return;
     }
     if (active === 'when') {
-      if (whenHighlight === 0) {
-        setStartHighlight(START_OPTIONS.length - 1);
-        goBack();
-      } else setWhenHighlight((i) => i - 1);
+      if (whenHighlight === 0) goBack();
+      else setWhenHighlight((i) => i - 1);
       return;
     }
     if (active === 'priority') {
-      // fm-m2s4 (S5) — Priority ↑ → back to When.
-      if (priorityHighlight === 0) {
-        setWhenHighlight(visibleWhenOptions.length - 1);
-        goBack();
-      } else setPriorityHighlight((i) => i - 1);
+      if (priorityHighlight === 0) goBack();
+      else setPriorityHighlight((i) => i - 1);
       return;
     }
     if (active === 'agent') {
-      // task-896f3f7f5e75 — Agent ↑ → back to Priority.
-      if (agentHighlight === 0) {
-        setPriorityHighlight(priorityHighlight);
-        goBack();
-      } else setAgentHighlight((i) => i - 1);
+      if (agentHighlight === 0) goBack();
+      else setAgentHighlight((i) => i - 1);
       return;
     }
     if (active === 'status') {
-      if (statusHighlight === 0) {
-        // fm-m2s4 (S5) — Status ↑ → Agent (TypeBuild) or → When (local).
-        // task-896f3f7f5e75 — the question before Status is Agent in TB mode.
-        if (isTypebuild) setAgentHighlight(Math.max(0, AGENT_OPTIONS.findIndex((o) => o.value === agentId)));
-        else setWhenHighlight(visibleWhenOptions.length - 1);
-        goBack();
-      } else setStatusHighlight((i) => i - 1);
+      if (statusHighlight === 0) goBack();
+      else setStatusHighlight((i) => i - 1);
+      return;
+    }
+    if (active === 'flags') {
+      if (flagsHighlight === 0) goBack();
+      else setFlagsHighlight((i) => i - 1);
       return;
     }
     if (active === 'pin') {
-      if (pinHighlight === 0) {
-        setStatusHighlight(STATUS_OPTIONS.length - 1);
-        goBack();
-      } else setPinHighlight((i) => i - 1);
+      if (pinHighlight === 0) goBack();
+      else setPinHighlight((i) => i - 1);
       return;
     }
+    // Notes is a textarea (no option list) — ↑ walks straight back.
     if (active === 'notes') {
-      // Notes ↑ → back to Who.
-      setWhoHighlight(WHO_OPTIONS.length - 1);
       goBack();
       return;
     }
@@ -2954,6 +3002,16 @@ export function TaskComposer(props: Props) {
     if (e.key === 'ArrowDown') { e.preventDefault(); moveDown(); return; }
     if (e.key === 'ArrowUp')   { e.preventDefault(); moveUp();   return; }
 
+    // task-f5a318566148 — 'A' expands/collapses the ADVANCED options section.
+    // Safe as a bare letter here: title/text inputs already returned via the
+    // guards above, and no option question binds a letter shortcut (the When
+    // quick-picks are W/F/M). Mirrors the commit-phase C/E letter convention.
+    if ((e.key === 'a' || e.key === 'A') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      toggleAdvanced();
+      return;
+    }
+
     if (active === 'folder') {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -3096,6 +3154,23 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
+    // task-f5a318566148 — launch flags (multi-select). Enter toggles the
+    // highlighted flag; digits 1..N toggle by index. Neither advances (↓ off
+    // the last flag advances) — the multi-select analog of the option pickers.
+    if (active === 'flags') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        chooseFlag(flagsHighlight);
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= FLAG_OPTIONS.length) {
+        e.preventDefault();
+        chooseFlag(n - 1);
+        return;
+      }
+      return;
+    }
     // The chain builder is a rich sub-form (buttons/inputs, not a
     // digit-select option list) — Enter reaching here means focus is on the
     // section wrapper itself (inText() already returned above for any
@@ -3214,6 +3289,11 @@ export function TaskComposer(props: Props) {
   function pinSummary(): string {
     return pinned ? 'Pinned' : 'Not pinned';
   }
+  // task-f5a318566148 — the ON launch flags, by label, or "None".
+  function flagsSummary(): string {
+    const on = FLAG_OPTIONS.filter((o) => flags.has(o.id)).map((o) => o.label);
+    return on.length ? on.join(', ') : 'None';
+  }
   function notesSummary(): string {
     const t = notes.trim();
     if (!t) return executor === 'claude' ? 'No prompt yet' : 'No notes';
@@ -3232,6 +3312,7 @@ export function TaskComposer(props: Props) {
     if (q === 'priority') return prioritySummary();
     if (q === 'agent') return agentSummary();
     if (q === 'pin') return pinSummary();
+    if (q === 'flags') return flagsSummary();
     if (q === 'notes') return notesSummary();
     if (q === 'chain') return chainSummary();
     if (q === 'fields') return fieldsSummary();
@@ -3289,6 +3370,7 @@ export function TaskComposer(props: Props) {
     if (q === 'priority') return 'priority';
     if (q === 'agent') return 'agent';
     if (q === 'pin') return 'pin';
+    if (q === 'flags') return 'flags';
     if (q === 'notes') return 'notes';
     if (q === 'chain') return 'chain';
     if (q === 'fields') return 'fields';
@@ -3312,6 +3394,7 @@ export function TaskComposer(props: Props) {
     if (q === 'priority') return 'Priority?';
     if (q === 'agent') return 'Which agent?';
     if (q === 'pin') return 'Pin this task?';
+    if (q === 'flags') return 'Launch flags?';
     if (q === 'notes') {
       return executor === 'claude'
         ? "What should the agent do? (this becomes the prompt)"
@@ -3473,7 +3556,12 @@ export function TaskComposer(props: Props) {
   // the same effect confirming that field via keyboard would have. No-op in
   // edit mode's rendering (which always shows answers), but harmless there.
   function advanceTo(q: QuestionId) {
-    setActiveIdx((i) => Math.max(i, QUESTIONS.indexOf(q) + 1));
+    // task-f5a318566148 — a copilot-set advanced field (status/priority/agent)
+    // expands the ADVANCED section so the walk can reach it; index off the full
+    // list so the pointer lands correctly on the same render.
+    const full = advancedOpen ? QUESTIONS : [...mainQuestions, ...advancedQuestions];
+    if (advancedQuestions.includes(q)) setAdvancedOpen(true);
+    setActiveIdx((i) => Math.max(i, full.indexOf(q) + 1));
   }
 
   // task-257bb4870c6c — "New from Template" renders as its own minimal
@@ -3926,68 +4014,6 @@ export function TaskComposer(props: Props) {
             )}
           </section>
 
-          {/* Q2 — Folder. fm-m2s4 (S5) — hidden for the TypeBuild target:
-              folder anchoring doesn't apply there (it's also absent from
-              QUESTIONS_TYPEBUILD, so keyboard navigation skips it). */}
-          {!isTypebuild && (
-          <section
-            ref={sectionRefFor('folder')}
-            className={sectionClasses('folder')}
-            onClick={() => setActiveIdx(QUESTIONS.indexOf('folder'))}
-          >
-            {isActiveSection('folder') ? (
-              <div className="composer__q-active-body">
-                <FieldLabel id="folder" />
-                <div className="composer__q-prompt">{promptFor('folder')}</div>
-                <ul className="composer__options" role="listbox">
-                  {visibleFolderPresets.map((p, i) => (
-                    <li key={p.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={i === folderHighlight}
-                        className={
-                          'composer__option' +
-                          (i === folderHighlight ? ' composer__option--active' : '')
-                        }
-                        onMouseEnter={() => setFolderHighlight(i)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          chooseFolderPreset(i);
-                        }}
-                      >
-                        <kbd className="composer__option-key">{i + 1}</kbd>
-                        <span className="composer__option-label">{p.label}</span>
-                        {p.hint && (
-                          <span className="composer__option-hint">{p.hint}</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <div className="composer__or">or type a path</div>
-                <input
-                  ref={folderInputRef}
-                  className="composer__path-input"
-                  type="text"
-                  placeholder="/Users/you/projects/…"
-                  value={folder}
-                  onChange={(e) => setFolder(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-                      e.preventDefault();
-                      goNext();
-                    }
-                  }}
-                  spellCheck={false}
-                  autoComplete="off"
-                />
-              </div>
-            ) : (
-              renderInert('folder')
-            )}
-          </section>
-          )}
 
           {/* Project — task-ab1d7955e23f. TypeBuild only. "None" + one option
               per project. Opening from a folder auto-attaches that folder's
@@ -4461,104 +4487,6 @@ export function TaskComposer(props: Props) {
           </section>
           )}
 
-          {/* Notes — sits right after Who: what / where / who / notes are
-              the fields that matter; scheduling lives below. Dropped from the
-              minimal chained flow (each step carries its own notes). */}
-          {!isMinimalChain && (
-          <section
-            ref={sectionRefFor('notes')}
-            className={sectionClasses('notes')}
-            onClick={() => {
-              setActiveIdx(QUESTIONS.indexOf('notes'));
-              setTimeout(() => notesRef.current?.focus(), 0);
-            }}
-          >
-            {isActiveSection('notes') ? (
-              <div className="composer__q-active-body">
-                <FieldLabel id="notes" />
-                <div className="composer__q-prompt">{promptFor('notes')}</div>
-                <textarea
-                  ref={notesRef}
-                  className="composer__notes-input"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Plain Enter inserts a newline (default — leave it).
-                    // ⌘/Ctrl+Enter inside notes advances to the next field
-                    // (Start) rather than submitting; stop the event so the
-                    // window-level handler doesn't fire save().
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      notesRef.current?.blur();
-                      setStartHighlight(
-                        START_OPTIONS.findIndex((s) => s.id === startId),
-                      );
-                      goNext();
-                    }
-                  }}
-                  placeholder={
-                    executor === 'claude'
-                      ? 'Describe the work for the agent. This text becomes its prompt.'
-                      : 'Anything you want to remember about this task.'
-                  }
-                  rows={4}
-                  spellCheck
-                />
-                {executor === 'claude' && (
-                  <div className="composer__notes-help">
-                    Sent to Claude as the task’s context — TypeBuild wraps the title, folder, and due date around what you write here.
-                  </div>
-                )}
-                {proseSuggestionVisible && (
-                  <div className="composer__prose-suggestion" onClick={(e) => e.stopPropagation()}>
-                    <div className="composer__prose-suggestion-text">
-                      Structure these fields?{' '}
-                      {proseSuggestion.inputs.length > 0 && (
-                        <span>
-                          Input{proseSuggestion.inputs.length > 1 ? 's' : ''}:{' '}
-                          {proseSuggestion.inputs.map((f) => f.label).join(', ')}
-                        </span>
-                      )}
-                      {proseSuggestion.inputs.length > 0 && proseSuggestion.outputs.length > 0 ? ' — ' : ''}
-                      {proseSuggestion.outputs.length > 0 && (
-                        <span>
-                          Output{proseSuggestion.outputs.length > 1 ? 's' : ''}:{' '}
-                          {proseSuggestion.outputs.map((f) => f.label).join(', ')}
-                        </span>
-                      )}
-                    </div>
-                    <div className="composer__prose-suggestion-actions">
-                      <button
-                        type="button"
-                        className="composer__prose-suggestion-accept"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          acceptProseSuggestion();
-                        }}
-                      >
-                        Structure these fields
-                      </button>
-                      <button
-                        type="button"
-                        className="composer__prose-suggestion-dismiss"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dismissProseSuggestion();
-                        }}
-                      >
-                        Keep as text
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              renderInert('notes')
-            )}
-          </section>
-          )}
-
           {/* Plain-task fields — task-2fd63b922beb correction (Part A). The
               TASK form owns its OWN optional input/output fields (single def,
               id 'task'); no neededWhen (chain-only). Same shared editors as the
@@ -4657,6 +4585,183 @@ export function TaskComposer(props: Props) {
             </section>
           )}
 
+          {/* Notes — sits right after Who: what / where / who / notes are
+              the fields that matter; scheduling lives below. Dropped from the
+              minimal chained flow (each step carries its own notes). */}
+          {!isMinimalChain && (
+          <section
+            ref={sectionRefFor('notes')}
+            className={sectionClasses('notes')}
+            onClick={() => {
+              setActiveIdx(QUESTIONS.indexOf('notes'));
+              setTimeout(() => notesRef.current?.focus(), 0);
+            }}
+          >
+            {isActiveSection('notes') ? (
+              <div className="composer__q-active-body">
+                <FieldLabel id="notes" />
+                <div className="composer__q-prompt">{promptFor('notes')}</div>
+                <textarea
+                  ref={notesRef}
+                  className="composer__notes-input"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Plain Enter inserts a newline (default — leave it).
+                    // ⌘/Ctrl+Enter inside notes advances to the next field
+                    // (Start) rather than submitting; stop the event so the
+                    // window-level handler doesn't fire save().
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      notesRef.current?.blur();
+                      setStartHighlight(
+                        START_OPTIONS.findIndex((s) => s.id === startId),
+                      );
+                      goNext();
+                    }
+                  }}
+                  placeholder={
+                    executor === 'claude'
+                      ? 'Describe the work for the agent. This text becomes its prompt.'
+                      : 'Anything you want to remember about this task.'
+                  }
+                  rows={4}
+                  spellCheck
+                />
+                {executor === 'claude' && (
+                  <div className="composer__notes-help">
+                    Sent to Claude as the task’s context — TypeBuild wraps the title, folder, and due date around what you write here.
+                  </div>
+                )}
+                {proseSuggestionVisible && (
+                  <div className="composer__prose-suggestion" onClick={(e) => e.stopPropagation()}>
+                    <div className="composer__prose-suggestion-text">
+                      Structure these fields?{' '}
+                      {proseSuggestion.inputs.length > 0 && (
+                        <span>
+                          Input{proseSuggestion.inputs.length > 1 ? 's' : ''}:{' '}
+                          {proseSuggestion.inputs.map((f) => f.label).join(', ')}
+                        </span>
+                      )}
+                      {proseSuggestion.inputs.length > 0 && proseSuggestion.outputs.length > 0 ? ' — ' : ''}
+                      {proseSuggestion.outputs.length > 0 && (
+                        <span>
+                          Output{proseSuggestion.outputs.length > 1 ? 's' : ''}:{' '}
+                          {proseSuggestion.outputs.map((f) => f.label).join(', ')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="composer__prose-suggestion-actions">
+                      <button
+                        type="button"
+                        className="composer__prose-suggestion-accept"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          acceptProseSuggestion();
+                        }}
+                      >
+                        Structure these fields
+                      </button>
+                      <button
+                        type="button"
+                        className="composer__prose-suggestion-dismiss"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismissProseSuggestion();
+                        }}
+                      >
+                        Keep as text
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              renderInert('notes')
+            )}
+          </section>
+          )}
+
+          {/* task-f5a318566148 — ADVANCED OPTIONS: a collapsible section,
+              COLLAPSED by default. The header reads "Advanced options (N set)"
+              when collapsed (N = advanced fields left non-default); 'A' or a
+              click on the header toggles it. Contains priority, defer/start,
+              agent, status, launch flags, due/schedule, pin and (local) the
+              working folder. When collapsed these questions are NOT part of the
+              walk (see the QUESTIONS memo), so ↓/Enter off the last main
+              question goes straight to commit. */}
+          {!isMinimalChain && (
+          <div className="composer__advanced">
+            <button
+              type="button"
+              className={
+                'composer__advanced-toggle' +
+                (advancedOpen ? ' composer__advanced-toggle--open' : '')
+              }
+              aria-expanded={advancedOpen}
+              onClick={() => toggleAdvanced()}
+            >
+              <span className="composer__advanced-caret" aria-hidden="true">
+                {advancedOpen ? '▾' : '▸'}
+              </span>
+              <span className="composer__advanced-title">
+                Advanced options
+                {!advancedOpen && advancedSetCount > 0
+                  ? ` (${advancedSetCount} set)`
+                  : ''}
+              </span>
+              <kbd className="composer__advanced-kbd">A</kbd>
+            </button>
+            {advancedOpen && (
+            <div className="composer__advanced-body">
+          {/* Priority — fm-m2s4 (S5). TypeBuild only; a flat option list
+              ("Unset" + 0–10). Sits between When and Status, mirroring the
+              QUESTIONS_TYPEBUILD order. Arrow + Enter to pick (digits are
+              ambiguous against the 0–10 labels). Dropped from the minimal
+              chained flow (task-2fd63b922beb correction, Part B). */}
+          {isTypebuild && !isMinimalChain && (
+            <section
+              ref={sectionRefFor('priority')}
+              className={sectionClasses('priority')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('priority'))}
+            >
+              {isActiveSection('priority') ? (
+                <div className="composer__q-active-body">
+                  <FieldLabel id="priority" />
+                  <div className="composer__q-prompt">{promptFor('priority')}</div>
+                  <ul className="composer__options composer__options--wrap" role="listbox">
+                    {PRIORITY_OPTIONS.map((o, i) => (
+                      <li key={o.value || 'unset'}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === priorityHighlight}
+                          className={
+                            'composer__option composer__option--compact' +
+                            (i === priorityHighlight ? ' composer__option--active' : '')
+                          }
+                          onMouseEnter={() => setPriorityHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            choosePriority(i);
+                          }}
+                        >
+                          <span className="composer__option-label">{o.label}</span>
+                          {o.hint && (
+                            <span className="composer__option-hint">{o.hint}</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                renderInert('priority')
+              )}
+            </section>
+          )}
+
           {/* Start. Dropped from the minimal chained flow. */}
           {!isMinimalChain && (
           <section
@@ -4722,160 +4827,6 @@ export function TaskComposer(props: Props) {
               renderInert('start')
             )}
           </section>
-          )}
-
-          {/* When (due / schedule). Dropped from the minimal chained flow. */}
-          {!isMinimalChain && (
-          <section
-            ref={sectionRefFor('when')}
-            className={sectionClasses('when')}
-            onClick={() => setActiveIdx(QUESTIONS.indexOf('when'))}
-          >
-            {isActiveSection('when') ? (
-              <div className="composer__q-active-body">
-                <FieldLabel id="when" />
-                <div className="composer__q-prompt">{promptFor('when')}</div>
-                <ul className="composer__options" role="listbox">
-                  {visibleWhenOptions.map((w, i) => (
-                    <li key={w.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={i === whenHighlight}
-                        className={
-                          'composer__option' +
-                          (i === whenHighlight ? ' composer__option--active' : '')
-                        }
-                        onMouseEnter={() => setWhenHighlight(i)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          chooseWhen(i);
-                        }}
-                      >
-                        <kbd className="composer__option-key">{i + 1}</kbd>
-                        <span className="composer__option-label">{w.label}</span>
-                        {w.hint && (
-                          <span className="composer__option-hint">{w.hint}</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                {executor === 'manual' && (
-                  <div className="composer__quickpicks">
-                    <span className="composer__quickpicks-label">quick due:</span>
-                    {DUE_QUICK_PICKS.map((qp) => (
-                      <button
-                        key={qp.id}
-                        type="button"
-                        className="composer__quickpick"
-                        title={`Due ${formatDateNice(qp.iso(todayISO()))}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          chooseDueQuickPick(qp);
-                        }}
-                      >
-                        <kbd className="composer__option-key">{qp.key}</kbd>
-                        <span className="composer__quickpick-label">{qp.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {whenId === 'pick-date' && (
-                  <div className="composer__date-row">
-                    <input
-                      ref={dateInputRef}
-                      type="date"
-                      className="composer__date-input"
-                      value={pickedDate}
-                      onChange={(e) => setPickedDate(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-                          e.preventDefault();
-                          if (pickedDate) void save();
-                        }
-                      }}
-                    />
-                    <span className="composer__date-hint">
-                      {pickedDate ? formatDateNice(pickedDate) : 'choose a day'}
-                    </span>
-                  </div>
-                )}
-                {whenId === 'custom-cron' && (
-                  <div className="composer__date-row">
-                    <input
-                      ref={cronInputRef}
-                      type="text"
-                      className="composer__path-input"
-                      placeholder="m h dom mon dow  e.g. 0 9 * * 1-5"
-                      value={customCron}
-                      onChange={(e) => setCustomCron(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-                          e.preventDefault();
-                          if (customCron.trim().split(/\s+/).length === 5) {
-                            cronInputRef.current?.blur();
-                            enterCommitPhase();
-                          }
-                        }
-                      }}
-                      spellCheck={false}
-                      autoComplete="off"
-                    />
-                  </div>
-                )}
-              </div>
-            ) : (
-              renderInert('when')
-            )}
-          </section>
-          )}
-
-          {/* Priority — fm-m2s4 (S5). TypeBuild only; a flat option list
-              ("Unset" + 0–10). Sits between When and Status, mirroring the
-              QUESTIONS_TYPEBUILD order. Arrow + Enter to pick (digits are
-              ambiguous against the 0–10 labels). Dropped from the minimal
-              chained flow (task-2fd63b922beb correction, Part B). */}
-          {isTypebuild && !isMinimalChain && (
-            <section
-              ref={sectionRefFor('priority')}
-              className={sectionClasses('priority')}
-              onClick={() => setActiveIdx(QUESTIONS.indexOf('priority'))}
-            >
-              {isActiveSection('priority') ? (
-                <div className="composer__q-active-body">
-                  <FieldLabel id="priority" />
-                  <div className="composer__q-prompt">{promptFor('priority')}</div>
-                  <ul className="composer__options composer__options--wrap" role="listbox">
-                    {PRIORITY_OPTIONS.map((o, i) => (
-                      <li key={o.value || 'unset'}>
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={i === priorityHighlight}
-                          className={
-                            'composer__option composer__option--compact' +
-                            (i === priorityHighlight ? ' composer__option--active' : '')
-                          }
-                          onMouseEnter={() => setPriorityHighlight(i)}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            choosePriority(i);
-                          }}
-                        >
-                          <span className="composer__option-label">{o.label}</span>
-                          {o.hint && (
-                            <span className="composer__option-hint">{o.hint}</span>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : (
-                renderInert('priority')
-              )}
-            </section>
           )}
 
           {/* Agent — task-896f3f7f5e75. TypeBuild only; a flat option list
@@ -4971,6 +4922,171 @@ export function TaskComposer(props: Props) {
           </section>
           )}
 
+          {/* task-f5a318566148 — launch flags as a MULTI-SELECT option
+              question (Claude tasks only — hidden when manual). Digits / Enter
+              toggle a flag on/off; ↓ off the last flag advances. The [active]
+              effect + walk treat it like the other option lists. */}
+          {executor === 'claude' && (
+          <section
+            ref={sectionRefFor('flags')}
+            className={sectionClasses('flags')}
+            onClick={() => setActiveIdx(QUESTIONS.indexOf('flags'))}
+          >
+            {isActiveSection('flags') ? (
+              <div className="composer__q-active-body">
+                <FieldLabel id="flags" />
+                <div className="composer__q-prompt">{promptFor('flags')}</div>
+                <ul
+                  className="composer__options"
+                  role="listbox"
+                  aria-multiselectable="true"
+                >
+                  {FLAG_OPTIONS.map((o, i) => {
+                    const on = flags.has(o.id);
+                    return (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={on}
+                          className={
+                            'composer__option composer__flag-option' +
+                            (i === flagsHighlight ? ' composer__option--active' : '') +
+                            (on ? ' composer__flag-option--on' : '')
+                          }
+                          onMouseEnter={() => setFlagsHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            chooseFlag(i);
+                          }}
+                        >
+                          <kbd className="composer__option-key">{i + 1}</kbd>
+                          <span className="composer__flag-check" aria-hidden="true">
+                            {on ? '☑' : '☐'}
+                          </span>
+                          <span className="composer__option-label">{o.label}</span>
+                          {o.hint && (
+                            <span className="composer__option-hint">{o.hint}</span>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : (
+              renderInert('flags')
+            )}
+          </section>
+          )}
+
+          {/* When (due / schedule). Dropped from the minimal chained flow. */}
+          {!isMinimalChain && (
+          <section
+            ref={sectionRefFor('when')}
+            className={sectionClasses('when')}
+            onClick={() => setActiveIdx(QUESTIONS.indexOf('when'))}
+          >
+            {isActiveSection('when') ? (
+              <div className="composer__q-active-body">
+                <FieldLabel id="when" />
+                <div className="composer__q-prompt">{promptFor('when')}</div>
+                <ul className="composer__options" role="listbox">
+                  {visibleWhenOptions.map((w, i) => (
+                    <li key={w.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={i === whenHighlight}
+                        className={
+                          'composer__option' +
+                          (i === whenHighlight ? ' composer__option--active' : '')
+                        }
+                        onMouseEnter={() => setWhenHighlight(i)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chooseWhen(i);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{i + 1}</kbd>
+                        <span className="composer__option-label">{w.label}</span>
+                        {w.hint && (
+                          <span className="composer__option-hint">{w.hint}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {executor === 'manual' && (
+                  <div className="composer__quickpicks">
+                    <span className="composer__quickpicks-label">quick due:</span>
+                    {DUE_QUICK_PICKS.map((qp) => (
+                      <button
+                        key={qp.id}
+                        type="button"
+                        className="composer__quickpick"
+                        title={`Due ${formatDateNice(qp.iso(todayISO()))}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chooseDueQuickPick(qp);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{qp.key}</kbd>
+                        <span className="composer__quickpick-label">{qp.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {whenId === 'pick-date' && (
+                  <div className="composer__date-row">
+                    <input
+                      ref={dateInputRef}
+                      type="date"
+                      className="composer__date-input"
+                      value={pickedDate}
+                      onChange={(e) => setPickedDate(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                          e.preventDefault();
+                          if (pickedDate) void save();
+                        }
+                      }}
+                    />
+                    <span className="composer__date-hint">
+                      {pickedDate ? formatDateNice(pickedDate) : 'choose a day'}
+                    </span>
+                  </div>
+                )}
+                {whenId === 'custom-cron' && (
+                  <div className="composer__date-row">
+                    <input
+                      ref={cronInputRef}
+                      type="text"
+                      className="composer__path-input"
+                      placeholder="m h dom mon dow  e.g. 0 9 * * 1-5"
+                      value={customCron}
+                      onChange={(e) => setCustomCron(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                          e.preventDefault();
+                          if (customCron.trim().split(/\s+/).length === 5) {
+                            cronInputRef.current?.blur();
+                            goNext();
+                          }
+                        }
+                      }}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              renderInert('when')
+            )}
+          </section>
+          )}
+
           {/* Pin. Dropped from the minimal chained flow. */}
           {!isMinimalChain && (
           <section
@@ -5015,26 +5131,74 @@ export function TaskComposer(props: Props) {
           </section>
           )}
 
-        </main>
-
-        {/* fm-b5at.7 — agent flags. Only shown for Claude tasks; toggles
-            map 1:1 to the task `flags` array. 'interactive' opens the run
-            in a new tab with an embedded claude session instead of running
-            headless. */}
-        {executor === 'claude' && !created && !isMinimalChain && (
-          <div className="composer__flags" role="group" aria-label="Agent flags">
-            {FLAG_OPTIONS.map((o) => (
-              <label key={o.id} className="composer__flag" title={o.hint}>
+          {/* Q2 — Folder. fm-m2s4 (S5) — hidden for the TypeBuild target:
+              folder anchoring doesn't apply there (it's also absent from
+              QUESTIONS_TYPEBUILD, so keyboard navigation skips it). */}
+          {!isTypebuild && (
+          <section
+            ref={sectionRefFor('folder')}
+            className={sectionClasses('folder')}
+            onClick={() => setActiveIdx(QUESTIONS.indexOf('folder'))}
+          >
+            {isActiveSection('folder') ? (
+              <div className="composer__q-active-body">
+                <FieldLabel id="folder" />
+                <div className="composer__q-prompt">{promptFor('folder')}</div>
+                <ul className="composer__options" role="listbox">
+                  {visibleFolderPresets.map((p, i) => (
+                    <li key={p.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={i === folderHighlight}
+                        className={
+                          'composer__option' +
+                          (i === folderHighlight ? ' composer__option--active' : '')
+                        }
+                        onMouseEnter={() => setFolderHighlight(i)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chooseFolderPreset(i);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{i + 1}</kbd>
+                        <span className="composer__option-label">{p.label}</span>
+                        {p.hint && (
+                          <span className="composer__option-hint">{p.hint}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <div className="composer__or">or type a path</div>
                 <input
-                  type="checkbox"
-                  checked={flags.has(o.id)}
-                  onChange={() => toggleFlag(o.id)}
+                  ref={folderInputRef}
+                  className="composer__path-input"
+                  type="text"
+                  placeholder="/Users/you/projects/…"
+                  value={folder}
+                  onChange={(e) => setFolder(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                      e.preventDefault();
+                      goNext();
+                    }
+                  }}
+                  spellCheck={false}
+                  autoComplete="off"
                 />
-                <span>{o.label}</span>
-              </label>
-            ))}
+              </div>
+            ) : (
+              renderInert('folder')
+            )}
+          </section>
+          )}
+            </div>
+            )}
           </div>
-        )}
+          )}
+
+        </main>
 
         <footer
           className={

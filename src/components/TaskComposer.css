@@ -639,6 +639,66 @@
   cursor: pointer;
 }
 
+/* task-f5a318566148 — Advanced options: a collapsible section, collapsed by
+   default. The header (click or the 'A' shortcut) toggles it; when collapsed it
+   reads "Advanced options (N set)". Its body indents the advanced questions so
+   they read as a grouped block distinct from the always-visible main form. */
+.composer__advanced {
+  margin-top: 6px;
+}
+.composer__advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.2));
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: left;
+}
+.composer__advanced-toggle:hover {
+  color: var(--fg, inherit);
+}
+.composer__advanced-caret {
+  display: inline-block;
+  width: 1em;
+  color: var(--muted);
+}
+.composer__advanced-title {
+  flex: 1 1 auto;
+}
+.composer__advanced-toggle--open .composer__advanced-title {
+  color: var(--fg, inherit);
+}
+.composer__advanced-kbd {
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+  border-radius: 4px;
+  opacity: 0.7;
+}
+.composer__advanced-body {
+  border-left: 2px solid var(--border, rgba(128, 128, 128, 0.2));
+}
+
+/* task-f5a318566148 — launch flags rendered as a multi-select option question:
+   a checkbox glyph replaces the single-select pick, and --on marks a set flag. */
+.composer__flag-check {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  opacity: 0.85;
+}
+.composer__flag-option--on .composer__option-label {
+  font-weight: 600;
+}
+
 /* fm-m2s4 (S5) — save-target picker (Breeze / TypeBuild). Compact segmented
    control in the header, right-aligned opposite the crumb. Only rendered when
    more than one source can create. */
