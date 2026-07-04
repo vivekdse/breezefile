@@ -355,7 +355,10 @@ function toNewHomeTask(
   };
 }
 
-export function useNewHomeData(projectId?: string | null): {
+export function useNewHomeData(
+  projectId?: string | null,
+  opts?: { includeArchived?: boolean },
+): {
   tasks: NewHomeTask[];
   counts: Record<NewHomeStatus, number>;
   approvals: NewHomeTask[];
@@ -364,6 +367,7 @@ export function useNewHomeData(projectId?: string | null): {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  refreshProjects: () => Promise<void>;
 } {
   const { tasks: rawTasks, loading, error, refresh } = useTasks({ includeDone: true });
   const [projects, setProjects] = useState<Project[]>([]);
@@ -373,17 +377,34 @@ export function useNewHomeData(projectId?: string | null): {
   // task-1af4f59428eb (Item 2) — best-effort per-task audit overlay for
   // authoritative who/lastAction (see useLatestAuditByTask below).
   const auditByTask = useLatestAuditByTask(rawTasks);
+  const includeArchived = !!opts?.includeArchived;
+
+  // task-a9841cfc0e1b — project CRUD UI needs to re-pull the registry right
+  // after a create/update/archive/delete so the picker + hero update IN
+  // PLACE (no full-page reload, no NewHomePage remount — which would also
+  // trip the task-fd5b93809b1b selection-persistence remount path). Pulled
+  // out of the mount-only effect below so callers can invoke it on demand;
+  // the mount effect below just calls it once. Re-created when the "show
+  // archived" toggle flips so a caller's refreshProjects() always reflects
+  // the CURRENT toggle state, not a stale closure.
+  const loadProjects = useCallback(async () => {
+    try {
+      const list = await fm.typebuild.projects.list(includeArchived);
+      setProjects(list);
+    } catch {
+      setProjects([]);
+    }
+  }, [includeArchived]);
+
+  // Re-fetches whenever the "show archived" toggle flips, in addition to
+  // mount — loadProjects' own identity changes with includeArchived (see
+  // above), so this stays in sync without a separate flag.
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   useEffect(() => {
     let cancelled = false;
-    void fm.typebuild.projects
-      .list()
-      .then((list) => {
-        if (!cancelled) setProjects(list);
-      })
-      .catch(() => {
-        if (!cancelled) setProjects([]);
-      });
     void fm.typebuild.agents
       .list()
       .then((list) => {
@@ -419,7 +440,17 @@ export function useNewHomeData(projectId?: string | null): {
     [tasks],
   );
 
-  return { tasks, counts, approvals, projects, agents, loading, error, refresh };
+  return {
+    tasks,
+    counts,
+    approvals,
+    projects,
+    agents,
+    loading,
+    error,
+    refresh,
+    refreshProjects: loadProjects,
+  };
 }
 
 // ─── chained roster: lazy per-job own-body + child resolution ──────────────

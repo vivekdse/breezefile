@@ -62,6 +62,35 @@ function isFilterValue(v: string): v is FilterValue {
   return (FILTER_VALUES as readonly string[]).includes(v);
 }
 
+// task-a9841cfc0e1b — shared name-or-id resolution for the project CRUD
+// actions below, mirroring select_home_project's own resolution (exact id →
+// exact name → unambiguous substring) so "archive the Aetna project" and
+// "select the Aetna project" behave consistently. Returns a structured
+// result rather than throwing so each action can phrase its own error.
+function resolveProjectRef(
+  ref: string,
+  list: { id: string; name: string }[],
+): { ok: true; id: string; name: string } | { ok: false; error: string } {
+  const raw = (ref ?? '').trim();
+  if (!raw) return { ok: false, error: 'Failed: a project name or id is required.' };
+  const ql = raw.toLowerCase();
+  const subs = list.filter((p) => p.name.toLowerCase().includes(ql));
+  const match =
+    list.find((p) => p.id === raw) ??
+    list.find((p) => p.name.toLowerCase() === ql) ??
+    (subs.length === 1 ? subs[0] : null);
+  if (!match) {
+    if (subs.length > 1) {
+      return { ok: false, error: `"${ref}" is ambiguous — matches ${subs.map((p) => p.name).join(', ')}. Be more specific.` };
+    }
+    return {
+      ok: false,
+      error: `Failed: no project matches "${ref}". Available: ${list.map((p) => p.name).join(', ') || '(none loaded)'}.`,
+    };
+  }
+  return { ok: true, id: match.id, name: match.name };
+}
+
 /** Mount once inside the CopilotKit provider (CopilotDock.tsx). Registers
  *  every action available app-wide plus the grounding readable. */
 export function CopilotActions() {
@@ -151,6 +180,192 @@ export function CopilotActions() {
         return `Created project "${project.name}" (id: ${project.id}).`;
       } catch (e) {
         return `Failed to create project: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  // task-a9841cfc0e1b — project CRUD parity: the same fm.typebuild.projects.*
+  // bridge the New Home UI's ProjectDialog/hero actions call (see
+  // src/components/newhome/NewHomePage.tsx / ProjectDialog.tsx), so the
+  // copilot and the UI share one mutation path, never a second
+  // implementation. update/add_folder/remove_folder are reversible
+  // (immediateAction); archive/unarchive are reversible too but still
+  // confirmed since they change what's visible in the picker; delete is
+  // confirmedAction + destructive (irreversible, and only for empty
+  // projects — the server enforces that and a 409 surfaces as a clear
+  // failure string here rather than a silent no-op).
+  immediateAction({
+    name: 'update_project',
+    description:
+      'Rename a project and/or edit its description or agent instructions (the teaching context an agent reads before working a task in it). Pass the project by name or id; only the fields given are changed.',
+    parameters: z.object({
+      project: z.string().describe('Project name or id (resolved against availableProjects).'),
+      name: z.string().optional().describe('New name.'),
+      description: z.string().optional().describe('New description.'),
+      instructions: z.string().optional().describe('New agent instructions.'),
+    }),
+    perform: async ({ project, name, description, instructions }) => {
+      const resolved = resolveProjectRef(project, nhRef.current.availableProjects);
+      if (!resolved.ok) return resolved.error;
+      if (name === undefined && description === undefined && instructions === undefined) {
+        return 'Failed: nothing to change — set at least one of name, description, or instructions.';
+      }
+      try {
+        const res = await fm.typebuild.projects.patch(resolved.id, {
+          name: name?.trim() || undefined,
+          description,
+          instructions,
+        });
+        if (!res.ok) {
+          if (res.reason === 'not_owner') return "Failed: you don't own this project.";
+          if (res.reason === 'phi_rejected') {
+            return 'Failed: that text looks like it may contain patient information.';
+          }
+          return `Failed to update project: ${res.reason}`;
+        }
+        return `Updated "${res.project.name}".`;
+      } catch (e) {
+        return `Failed to update project: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  confirmedAction({
+    name: 'archive_project',
+    description:
+      'Archive a project — hides it from the Home picker (reversible via unarchive_project). Pass the project by name or id.',
+    parameters: z.object({
+      project: z.string().describe('Project name or id (resolved against availableProjects).'),
+    }),
+    title: 'Archive project?',
+    validate: ({ project }) => {
+      const r = resolveProjectRef(project, nhRef.current.availableProjects);
+      return r.ok ? null : r.error;
+    },
+    summary: ({ project }) => {
+      const r = resolveProjectRef(project, nhRef.current.availableProjects);
+      return (
+        <>
+          Archive <strong>{r.ok ? r.name : project}</strong>? It will be hidden from the picker
+          until unarchived.
+        </>
+      );
+    },
+    confirmLabel: 'Archive',
+    rejectLabel: 'Cancel',
+    rejectedMessage: 'Cancelled — the project was not archived.',
+    perform: async ({ project }) => {
+      const resolved = resolveProjectRef(project, nhRef.current.availableProjects);
+      if (!resolved.ok) return resolved.error;
+      try {
+        const updated = await fm.typebuild.projects.archive(resolved.id);
+        return `Archived "${updated.name}".`;
+      } catch (e) {
+        return `Failed to archive project: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  immediateAction({
+    name: 'unarchive_project',
+    description:
+      'Restore a previously archived project so it shows in the Home picker again. Pass the project by name or id — the id/name must come from an archived-projects lookup, since availableProjects only lists non-archived projects.',
+    parameters: z.object({
+      projectId: z.string().describe('The archived project\'s id.'),
+    }),
+    perform: async ({ projectId }) => {
+      if (!projectId?.trim()) return 'Failed: a project id is required.';
+      try {
+        const updated = await fm.typebuild.projects.unarchive(projectId.trim());
+        return `Unarchived "${updated.name}".`;
+      } catch (e) {
+        return `Failed to unarchive project: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  confirmedAction({
+    name: 'delete_project',
+    description:
+      'Permanently delete a project. Only works on an EMPTY project (no tasks) — the server refuses otherwise and this reports that a project with tasks should be archived instead. Irreversible; requires human approval.',
+    parameters: z.object({
+      project: z.string().describe('Project name or id (resolved against availableProjects).'),
+    }),
+    title: 'Delete project?',
+    destructive: true,
+    validate: ({ project }) => {
+      const r = resolveProjectRef(project, nhRef.current.availableProjects);
+      return r.ok ? null : r.error;
+    },
+    summary: ({ project }) => {
+      const r = resolveProjectRef(project, nhRef.current.availableProjects);
+      return (
+        <>
+          Permanently delete <strong>{r.ok ? r.name : project}</strong>? Only allowed if it has no
+          tasks. This can't be undone.
+        </>
+      );
+    },
+    confirmLabel: 'Delete',
+    rejectLabel: 'Keep',
+    rejectedMessage: 'Cancelled — the project was not deleted.',
+    perform: async ({ project }) => {
+      const resolved = resolveProjectRef(project, nhRef.current.availableProjects);
+      if (!resolved.ok) return resolved.error;
+      try {
+        const res = await fm.typebuild.projects.delete(resolved.id);
+        if (!res.ok) {
+          if (res.reason === 'has_tasks') {
+            return `"${resolved.name}" still has tasks — archive it instead of deleting.`;
+          }
+          if (res.reason === 'not_owner') return "Failed: you don't own this project.";
+          return `Failed to delete project: ${res.reason}`;
+        }
+        return `Deleted "${resolved.name}".`;
+      } catch (e) {
+        return `Failed to delete project: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  immediateAction({
+    name: 'add_project_folder',
+    description: 'Attach a folder path to a project. Pass the project by name or id.',
+    parameters: z.object({
+      project: z.string().describe('Project name or id (resolved against availableProjects).'),
+      folder: z.string().describe('Absolute folder path to attach.'),
+    }),
+    perform: async ({ project, folder }) => {
+      const resolved = resolveProjectRef(project, nhRef.current.availableProjects);
+      if (!resolved.ok) return resolved.error;
+      const path = (folder ?? '').trim();
+      if (!path) return 'Failed: a folder path is required.';
+      try {
+        const updated = await fm.typebuild.projects.addFolder(resolved.id, path);
+        return `Attached "${path}" to "${updated.name}".`;
+      } catch (e) {
+        return `Failed to attach folder: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  immediateAction({
+    name: 'remove_project_folder',
+    description: 'Detach a folder path from a project. Pass the project by name or id.',
+    parameters: z.object({
+      project: z.string().describe('Project name or id (resolved against availableProjects).'),
+      folder: z.string().describe('The exact folder path to detach.'),
+    }),
+    perform: async ({ project, folder }) => {
+      const resolved = resolveProjectRef(project, nhRef.current.availableProjects);
+      if (!resolved.ok) return resolved.error;
+      const path = (folder ?? '').trim();
+      if (!path) return 'Failed: a folder path is required.';
+      try {
+        const updated = await fm.typebuild.projects.removeFolder(resolved.id, path);
+        return `Detached "${path}" from "${updated.name}".`;
+      } catch (e) {
+        return `Failed to detach folder: ${e instanceof Error ? e.message : String(e)}`;
       }
     },
   });

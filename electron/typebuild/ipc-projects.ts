@@ -10,6 +10,9 @@
 //   typebuild:tasks:note          (taskId, note)     -> { ok, reason? }
 //   typebuild:projects:archive    (id)               -> Project   (task-2c5448be520a)
 //   typebuild:projects:unarchive  (id)               -> Project
+//   typebuild:projects:delete     (id)               -> { ok, reason? }  (task-a9841cfc0e1b)
+//   typebuild:projects:addFolder  (id, folder)       -> Project
+//   typebuild:projects:removeFolder (id, folder)     -> Project
 //
 // task-fdf3dc6b3c5c — projects:patch + tasks:note bridge the teach-in-the-moment
 // write-back: PROJECT scope → projects:patch (PATCH instructions; owner-only/
@@ -122,5 +125,23 @@ export function registerTypebuildProjectsIpc(): void {
   ipcMain.handle(
     'typebuild:projects:unarchive',
     (_e, id: string): Promise<Project> => source().unarchiveProject(id),
+  );
+  // task-a9841cfc0e1b — project CRUD UI: delete (empty projects only — the
+  // server enforces this and returns a structured 409 { reason:'has_tasks' }
+  // otherwise, which the renderer turns into "archive instead?") + folder
+  // attach/detach (server: add_project_folder / remove_project_folder).
+  ipcMain.handle(
+    'typebuild:projects:delete',
+    (_e, id: string) => source().deleteProject(id),
+  );
+  ipcMain.handle(
+    'typebuild:projects:addFolder',
+    (_e, id: string, folder: string): Promise<Project> =>
+      source().addProjectFolder(id, folder),
+  );
+  ipcMain.handle(
+    'typebuild:projects:removeFolder',
+    (_e, id: string, folder: string): Promise<Project> =>
+      source().removeProjectFolder(id, folder),
   );
 }

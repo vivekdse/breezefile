@@ -1,0 +1,103 @@
+/* task-a9841cfc0e1b — ProjectDialog form chrome. Layers ON TOP of the shared
+   nh-dialog/nh-dialog-backdrop shell (TaskDetailDialog.css) — only the bits
+   specific to a labeled-field form live here (labels, text inputs, the parent
+   <select>, the folder list). */
+
+.nh-pdlg__label {
+  display: block;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--muted-on-panel);
+  margin-bottom: var(--sp-2);
+}
+
+.nh-pdlg__optional {
+  text-transform: none;
+  font-weight: 400;
+  letter-spacing: normal;
+  opacity: 0.75;
+}
+
+.nh-pdlg__hint {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  margin-bottom: var(--sp-2);
+  line-height: 1.4;
+}
+
+.nh-pdlg__input,
+.nh-pdlg__select {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  background: var(--bg-0);
+  color: var(--text-on-panel);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+}
+
+.nh-pdlg__folder-list {
+  list-style: none;
+  margin: 0 0 var(--sp-2);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nh-pdlg__folder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  font-size: var(--fs-xs);
+}
+
+.nh-pdlg__folder-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-on-panel);
+}
+
+.nh-pdlg__folder-remove {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--muted-on-panel);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.nh-pdlg__folder-remove:hover {
+  color: var(--nh-failed);
+  background: var(--nh-failed-soft);
+}
+
+.nh-pdlg__folder-add {
+  display: flex;
+  gap: var(--sp-2);
+}
+.nh-pdlg__folder-add .nh-pdlg__input {
+  flex: 1;
+}
+
+.nh-pdlg__foot {
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--border-1);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}

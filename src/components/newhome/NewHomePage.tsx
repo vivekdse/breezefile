@@ -36,9 +36,14 @@ import { HeroStats } from './HeroStats';
 import { RosterTable } from './RosterTable';
 import { TaskDetailDialog } from './TaskDetailDialog';
 import { OutcomesPanel } from './OutcomesPanel';
+import { ProjectDialog } from './ProjectDialog';
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
+import { fm } from '../../bridge';
+import type { Project } from '../../types';
+import { buildProjectTree } from '../../projects/index.mjs';
+import { nextSelectionAfterArchive, nextSelectionAfterDelete, projectDeleteDecision } from './projectCrud.mjs';
 import {
   loadSelectedProjectId,
   saveSelectedProjectId,
@@ -124,8 +129,38 @@ export function NewHomePage() {
   // status filter. Empty string = no text filter (status filter still applies).
   const [search, setSearch] = useState('');
 
-  const { tasks, counts, projects, loading, refresh } =
-    useNewHomeData(selectedProjectId);
+  // task-a9841cfc0e1b (spec §3) — "Show archived" reveals archived projects
+  // in the picker (with an Unarchive action) so an archive is recoverable
+  // from the same surface, not a one-way door into a settings page.
+  const [showArchived, setShowArchived] = useState(false);
+  const { tasks, counts, projects, loading, refresh, refreshProjects } = useNewHomeData(
+    selectedProjectId,
+    { includeArchived: showArchived },
+  );
+  // task-a9841cfc0e1b — project CRUD UI state: which dialog (create vs edit)
+  // is open, if any. Edit passes the project being edited; create passes
+  // `undefined` (ProjectDialog's own isEdit check).
+  const [projectDialog, setProjectDialog] = useState<
+    { mode: 'create' } | { mode: 'edit'; project: Project } | null
+  >(null);
+  const [projectActionError, setProjectActionError] = useState<string | null>(null);
+  const [projectActionBusy, setProjectActionBusy] = useState(false);
+  // Nesting (spec §4): a project's indent in the picker reflects its depth in
+  // the parent/child forest — the SAME pure, tested tree builder the
+  // Projects attention rollup uses (src/projects/tree.mjs), not a re-derived
+  // heuristic.
+  const projectTree = useMemo(() => buildProjectTree(projects), [projects]);
+  const flatProjectOptions = useMemo(() => {
+    const out: { project: Project; depth: number }[] = [];
+    const walk = (nodes: ReturnType<typeof buildProjectTree>) => {
+      for (const n of nodes) {
+        out.push({ project: n.project, depth: n.depth });
+        walk(n.children);
+      }
+    };
+    walk(projectTree);
+    return out;
+  }, [projectTree]);
   // task — the roster's ▶ Start button. Launches via the SAME mechanism the old
   // Tasks page's play button uses (useTaskActions().start → runTaskNow), then
   // refreshes the roster the SAME way onRetry does — this shell owns the action
@@ -192,6 +227,124 @@ export function NewHomePage() {
       }),
     );
     window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
+  }
+
+  // task-a9841cfc0e1b — project CRUD. ProjectDialog performs the actual
+  // create/patch/folder mutations itself (via fm.typebuild.projects.*, the
+  // SAME bridge the copilot actions call); this callback just refreshes the
+  // registry so the picker/hero update IN PLACE, and — for a fresh create —
+  // selects the new project. Editing an already-selected project keeps the
+  // selection untouched (same project, new fields).
+  function onProjectSaved(project: Project, wasCreate: boolean) {
+    void refreshProjects();
+    if (wasCreate) setSelectedProjectId(project.id);
+  }
+
+  async function archiveSelectedProject() {
+    if (!selectedProject) return;
+    setProjectActionBusy(true);
+    setProjectActionError(null);
+    try {
+      await fm.typebuild.projects.archive(selectedProject.id);
+      await refreshProjects();
+      // task-fd5b93809b1b — never let a CRUD op silently reset an UNRELATED
+      // selection; only fall back to "All projects" when the archived
+      // project WAS the current selection.
+      setSelectedProjectId(nextSelectionAfterArchive(selectedProjectId, selectedProject.id));
+    } catch (e) {
+      setProjectActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProjectActionBusy(false);
+    }
+  }
+
+  async function unarchiveProject(id: string) {
+    setProjectActionBusy(true);
+    setProjectActionError(null);
+    try {
+      await fm.typebuild.projects.unarchive(id);
+      await refreshProjects();
+    } catch (e) {
+      setProjectActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProjectActionBusy(false);
+    }
+  }
+
+  // Delete only ever runs for an EMPTY project (see projectDeleteDecision) —
+  // the affordance that calls this checks the roster count first and offers
+  // archive instead when the project has tasks. The server also enforces
+  // this (a 409 { reason:'has_tasks' } surfaces here as a message rather than
+  // a silent no-op) so a stale client-side count can't force a bad delete.
+  async function deleteSelectedProject() {
+    if (!selectedProject) return;
+    setProjectActionBusy(true);
+    setProjectActionError(null);
+    try {
+      const res = await fm.typebuild.projects.delete(selectedProject.id);
+      if (!res.ok) {
+        setProjectActionError(
+          res.reason === 'has_tasks'
+            ? 'This project still has tasks — archive it instead of deleting.'
+            : res.reason === 'not_owner'
+              ? "You don't own this project."
+              : `Failed: ${res.reason}`,
+        );
+        return;
+      }
+      await refreshProjects();
+      setSelectedProjectId(nextSelectionAfterDelete(selectedProjectId, selectedProject.id));
+    } catch (e) {
+      setProjectActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProjectActionBusy(false);
+    }
+  }
+
+  function confirmArchive() {
+    if (!selectedProject) return;
+    window.dispatchEvent(
+      new CustomEvent('fm:confirm', {
+        detail: {
+          title: `Archive ${selectedProject.name}?`,
+          body: 'Archived projects are hidden from the picker. You can unarchive them later from "Show archived".',
+          confirmLabel: 'Archive',
+          destructive: false,
+          onConfirm: () => void archiveSelectedProject(),
+        },
+      }),
+    );
+  }
+
+  function confirmDelete() {
+    if (!selectedProject) return;
+    const ownTaskCount = tasks.filter((t) => t.projectId === selectedProject.id).length;
+    const decision = projectDeleteDecision(ownTaskCount);
+    if (!decision.canDelete) {
+      window.dispatchEvent(
+        new CustomEvent('fm:confirm', {
+          detail: {
+            title: `${selectedProject.name} has tasks`,
+            body: 'A project with tasks can only be archived, not deleted. Archive it instead?',
+            confirmLabel: 'Archive instead',
+            destructive: false,
+            onConfirm: () => void archiveSelectedProject(),
+          },
+        }),
+      );
+      return;
+    }
+    window.dispatchEvent(
+      new CustomEvent('fm:confirm', {
+        detail: {
+          title: `Delete ${selectedProject.name}?`,
+          body: 'This project has no tasks and will be permanently deleted. This cannot be undone.',
+          confirmLabel: 'Delete',
+          destructive: true,
+          onConfirm: () => void deleteSelectedProject(),
+        },
+      }),
+    );
   }
 
   // Copilot action bridge (task-ce125a047c70): set_roster_filter and
@@ -279,7 +432,12 @@ export function NewHomePage() {
     setNewHomeContext({
       surface: 'new-home',
       project: selectedProject ? { id: selectedProject.id, name: selectedProject.name } : null,
-      availableProjects: projects.map((p) => ({ id: p.id, name: p.name })),
+      // task-a9841cfc0e1b — archived projects can be included in `projects`
+      // when "Show archived" is on; keep the copilot's grounding scoped to
+      // non-archived ones (matching its docstring: "the FULL list the picker
+      // offers"'s intent — a project a human hid shouldn't casually surface
+      // as a copilot select_home_project/update_project/etc. target).
+      availableProjects: projects.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name })),
       counts,
       needsYou: tasks
         .filter((t) => t.status === 'needs')
@@ -300,12 +458,46 @@ export function NewHomePage() {
             onChange={(e) => setSelectedProjectId(e.target.value || null)}
           >
             <option value="">All projects</option>
-            {projects.map((p) => (
+            {/* task-a9841cfc0e1b (spec §4) — indent reflects each project's
+                depth in the parent/child forest (buildProjectTree), so
+                nesting is visible right in the picker without a separate
+                breadcrumb UI. Non-breaking-space repeated per depth level
+                keeps the indent inside a <select>'s plain-text options. */}
+            {flatProjectOptions.map(({ project: p, depth }) => (
               <option key={p.id} value={p.id}>
+                {'  '.repeat(depth)}
+                {depth > 0 ? '↳ ' : ''}
                 {p.name}
+                {p.archived ? ' (archived)' : ''}
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            className="nh__btn"
+            onClick={() => setProjectDialog({ mode: 'create' })}
+            title="Create a new project — a named category for tasks"
+          >
+            + New project
+          </button>
+          <label className="nh__show-archived">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+            />
+            Show archived
+          </label>
+          {showArchived && selectedProject?.archived && (
+            <button
+              type="button"
+              className="nh__btn"
+              onClick={() => void unarchiveProject(selectedProject.id)}
+              disabled={projectActionBusy}
+            >
+              Unarchive
+            </button>
+          )}
         </div>
         <div className="nh__topbar-right">
           <button
@@ -328,17 +520,73 @@ export function NewHomePage() {
 
       <div className="nh__content">
         <div className="nh__hero">
-          <div className="nh__hero-title">
-            {selectedProject ? selectedProject.name : 'New Home'}
+          <div>
+            <div className="nh__hero-title">
+              {selectedProject ? selectedProject.name : 'New Home'}
+            </div>
+            <div className="nh__hero-sub">
+              {loading
+                ? 'Loading…'
+                : selectedProject
+                  ? selectedProject.description || 'Agent work monitor for this project'
+                  : 'Agent work monitor — every project, ranked by what needs you'}
+            </div>
+            {selectedProject?.instructions && (
+              <div className="nh__hero-instructions" title="Agent instructions">
+                <span className="nh__hero-instructions-label">Agent instructions:</span>{' '}
+                {selectedProject.instructions}
+              </div>
+            )}
           </div>
-          <div className="nh__hero-sub">
-            {loading
-              ? 'Loading…'
-              : selectedProject
-                ? selectedProject.description || 'Agent work monitor for this project'
-                : 'Agent work monitor — every project, ranked by what needs you'}
-          </div>
+          {/* task-a9841cfc0e1b (spec §2/§3) — edit/archive/delete live on the
+              selected project's hero, not a separate settings page: rename,
+              edit description/instructions/folders, or archive/delete it,
+              all without leaving New Home. */}
+          {selectedProject && (
+            <div className="nh__hero-actions">
+              <button
+                type="button"
+                className="nh__btn"
+                onClick={() => setProjectDialog({ mode: 'edit', project: selectedProject })}
+                disabled={projectActionBusy}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="nh__btn"
+                onClick={confirmArchive}
+                disabled={projectActionBusy}
+                title="Hide this project from the picker (reversible)"
+              >
+                Archive
+              </button>
+              <button
+                type="button"
+                className="nh__btn nh__btn--danger"
+                onClick={confirmDelete}
+                disabled={projectActionBusy}
+                title="Permanently delete this project (only if it has no tasks)"
+              >
+                Delete
+              </button>
+            </div>
+          )}
         </div>
+
+        {projectActionError && (
+          <div className="nh__project-action-error">
+            {projectActionError}
+            <button
+              type="button"
+              className="nh-filter-chip__x"
+              aria-label="Dismiss"
+              onClick={() => setProjectActionError(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         <HeroStats counts={counts} activeFilter={filter} onFilter={setFilter} />
 
@@ -437,6 +685,15 @@ export function NewHomePage() {
             void refresh();
             setOpenTaskId(null);
           }}
+        />
+      )}
+
+      {projectDialog && (
+        <ProjectDialog
+          project={projectDialog.mode === 'edit' ? projectDialog.project : null}
+          projects={projects}
+          onClose={() => setProjectDialog(null)}
+          onSaved={(project) => onProjectSaved(project, projectDialog.mode === 'create')}
         />
       )}
 
