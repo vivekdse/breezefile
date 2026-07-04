@@ -388,6 +388,20 @@
 .nh-dialog__pipeline-pill--active { background: var(--nh-progress-soft); color: var(--nh-progress); }
 .nh-dialog__pipeline-pill--pending { background: var(--nh-queued-soft); color: var(--nh-queued); }
 .nh-dialog__pipeline-pill--skip { background: var(--bg-2); color: var(--muted-on-panel); }
+/* task-f26e7745eda6 — cancelled (grey + strikethrough, ≠ n/a) / failed. */
+.nh-dialog__pipeline-pill--cancelled {
+  background: var(--bg-2);
+  color: var(--muted-on-panel);
+  text-decoration: line-through;
+}
+.nh-dialog__pipeline-pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
+/* task-48cd46a0e2da — per-step start error, inline (never a silent no-op). */
+.nh-dialog__pipeline-error {
+  color: var(--nh-failed);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: help;
+}
 .nh-dialog__pipeline-outcome {
   color: var(--muted-on-panel);
   font-size: var(--fs-xs);

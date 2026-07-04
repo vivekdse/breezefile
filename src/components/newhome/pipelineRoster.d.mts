@@ -3,7 +3,10 @@
 // See docs/task-templates-design.md for the roster contract this mirrors.
 
 import type { TaskDef, TaskDefCondition } from './types';
-import type { TaskDefRenderStatus } from './taskSchema';
+import type { TaskDefRenderStatus, MergedStepStatus } from './taskSchema';
+
+/** Minimal shape of a child task for status-merge (a raw Task satisfies it). */
+export type ChildStatusLike = { status?: string; rawStatus?: string };
 
 export type PartitionedJobs = {
   /** Ids of rows with no parent (jobs + standalone tasks). */
@@ -56,15 +59,50 @@ export function rewriteTaskFieldsBlock(
 export function runnableStepId(
   taskDefs: TaskDef[] | null | undefined,
   valuesByRef: Record<string, string | number>,
+  childByDefId?: Record<string, ChildStatusLike | null | undefined>,
 ): string | null;
 
 export function nextAutoContinueChildId(
   taskDefs: TaskDef[] | null | undefined,
   valuesByRef: Record<string, string | number>,
   childIdByDefId: Record<string, string> | null | undefined,
+  childByDefId?: Record<string, ChildStatusLike | null | undefined>,
 ): string | null;
+
+export function chainStartTarget(
+  taskDefs: TaskDef[] | null | undefined,
+  valuesByRef: Record<string, string | number>,
+  childIdByDefId: Record<string, string> | null | undefined,
+  childByDefId?: Record<string, ChildStatusLike | null | undefined>,
+):
+  | { childId: string; stepId: string; stepName: string }
+  | { childId: null; reason: string };
 
 export function stepDisplayStatus(
   baseStatus: TaskDefRenderStatus,
   childInProgress: boolean,
 ): TaskDefRenderStatus;
+
+/** task-f26e7745eda6 — child server-status → chip override, or null. */
+export function childStatusOverride(
+  child: ChildStatusLike | null | undefined,
+): 'cancelled' | 'failed' | 'active' | null;
+
+/** task-f26e7745eda6 — project a raw Task down to { status, rawStatus }. */
+export function toChildStatus(
+  task: ChildStatusLike | null | undefined,
+): ChildStatusLike | null;
+
+/** task-f26e7745eda6 — build a def-id → child-status map from [defId, ref]
+ *  entries + a resolver from ref → raw Task. */
+export function childStatusMap<Ref>(
+  entries: Iterable<[string, Ref]>,
+  resolve: (ref: Ref) => ChildStatusLike | null | undefined,
+): Record<string, ChildStatusLike>;
+
+/** task-f26e7745eda6 — merge the child task's server status onto the pure
+ *  output-derived base status (adds 'cancelled' + 'failed'). */
+export function mergeChildStatus(
+  baseStatus: TaskDefRenderStatus,
+  child: ChildStatusLike | null | undefined,
+): MergedStepStatus;

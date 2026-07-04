@@ -12,6 +12,11 @@ import {
   runnableStepId,
   nextAutoContinueChildId,
   stepDisplayStatus,
+  mergeChildStatus,
+  childStatusOverride,
+  chainStartTarget,
+  toChildStatus,
+  childStatusMap,
 } from '../src/components/newhome/pipelineRoster.mjs';
 import {
   buildTaskFieldsBlock,
@@ -331,4 +336,163 @@ test('stepDisplayStatus never downgrades a done step, even if the child row lags
 test('stepDisplayStatus never promotes a skipped step', () => {
   assert.equal(stepDisplayStatus('skip', true), 'skip');
   assert.equal(stepDisplayStatus('skip', false), 'skip');
+});
+
+// ── task-f26e7745eda6: child server-status merge ────────────────────────────
+
+test('childStatusOverride maps the high-signal server states', () => {
+  assert.equal(childStatusOverride({ status: 'cancelled' }), 'cancelled');
+  assert.equal(childStatusOverride({ rawStatus: 'cancelled' }), 'cancelled');
+  assert.equal(childStatusOverride({ rawStatus: 'failed' }), 'failed');
+  assert.equal(childStatusOverride({ rawStatus: 'blocked' }), 'failed');
+  assert.equal(childStatusOverride({ rawStatus: 'in_progress' }), 'active');
+  assert.equal(childStatusOverride({ status: 'in_progress' }), 'active');
+  // open/pending/done carry no override — output-derived status stands.
+  assert.equal(childStatusOverride({ rawStatus: 'open' }), null);
+  assert.equal(childStatusOverride({ status: 'pending' }), null);
+  assert.equal(childStatusOverride(null), null);
+});
+
+test('mergeChildStatus: a cancelled child → cancelled chip (not queued)', () => {
+  assert.equal(mergeChildStatus('pending', { rawStatus: 'cancelled' }), 'cancelled');
+});
+
+test('mergeChildStatus: a blocked/failed child → failed chip', () => {
+  assert.equal(mergeChildStatus('pending', { rawStatus: 'failed' }), 'failed');
+  assert.equal(mergeChildStatus('pending', { rawStatus: 'blocked' }), 'failed');
+});
+
+test('mergeChildStatus: an in_progress child → active', () => {
+  assert.equal(mergeChildStatus('pending', { rawStatus: 'in_progress' }), 'active');
+});
+
+test('mergeChildStatus: a skipped (n/a) step is NEVER overridden by child status', () => {
+  assert.equal(mergeChildStatus('skip', { rawStatus: 'cancelled' }), 'skip');
+  assert.equal(mergeChildStatus('skip', { rawStatus: 'failed' }), 'skip');
+});
+
+test('mergeChildStatus: a done step stays done (a late cancel never un-completes it)', () => {
+  assert.equal(mergeChildStatus('done', { rawStatus: 'cancelled' }), 'done');
+});
+
+test('mergeChildStatus: no child / no override → the output-derived base stands', () => {
+  assert.equal(mergeChildStatus('pending', null), 'pending');
+  assert.equal(mergeChildStatus('active', { rawStatus: 'open' }), 'active');
+});
+
+// ── task-f26e7745eda6 + 48cd46a0e2da: runnable selection skips cancelled ─────
+
+const CHAIN_DEFS = [
+  { id: 'intake', name: 'Intake', inputs: [], outputs: [{ key: 'ok', required: true }] },
+  { id: 'deliver', name: 'Deliver', inputs: [], outputs: [{ key: 'sent', required: true }] },
+];
+
+test('runnableStepId (no child status) picks the first not-done step — legacy behavior', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' }; // intake done, deliver pending
+  assert.equal(runnableStepId(CHAIN_DEFS, values), 'deliver');
+});
+
+test('runnableStepId SKIPS a cancelled child and returns null when nothing else runnable', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' }; // intake done
+  // deliver is server-cancelled → not runnable → nothing left.
+  const childByDefId = { deliver: { rawStatus: 'cancelled' } };
+  assert.equal(runnableStepId(CHAIN_DEFS, values, childByDefId), null);
+});
+
+test('runnableStepId picks the RIGHT step after a cancelled child is REOPENED', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' };
+  // deliver was cancelled, then reopened server-side → rawStatus back to 'open'.
+  const childByDefId = { deliver: { rawStatus: 'open' } };
+  assert.equal(runnableStepId(CHAIN_DEFS, values, childByDefId), 'deliver');
+});
+
+test('runnableStepId: a FAILED child is still runnable (retry lands on it)', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' };
+  const childByDefId = { deliver: { rawStatus: 'failed' } };
+  assert.equal(runnableStepId(CHAIN_DEFS, values, childByDefId), 'deliver');
+});
+
+test('nextAutoContinueChildId SKIPS a cancelled child (auto-continue never starts it)', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' };
+  const childIdByDefId = { intake: 'c-intake', deliver: 'c-deliver' };
+  const childByDefId = { deliver: { rawStatus: 'cancelled' } };
+  assert.equal(
+    nextAutoContinueChildId(CHAIN_DEFS, values, childIdByDefId, childByDefId),
+    null,
+  );
+});
+
+// ── task-48cd46a0e2da: chainStartTarget never returns a silent null ──────────
+
+test('chainStartTarget returns the runnable child id when one exists', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' };
+  const childIdByDefId = { intake: 'c-intake', deliver: 'c-deliver' };
+  const t = chainStartTarget(CHAIN_DEFS, values, childIdByDefId, { deliver: { rawStatus: 'open' } });
+  assert.equal(t.childId, 'c-deliver');
+  assert.equal(t.stepId, 'deliver');
+});
+
+test('chainStartTarget yields a REASON (never a bare null) when the remaining step is cancelled', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' };
+  const childIdByDefId = { intake: 'c-intake', deliver: 'c-deliver' };
+  const t = chainStartTarget(CHAIN_DEFS, values, childIdByDefId, { deliver: { rawStatus: 'cancelled' } });
+  assert.equal(t.childId, null);
+  assert.match(t.reason, /cancelled/i);
+});
+
+test('chainStartTarget yields a "complete" reason when the whole chain is done', () => {
+  const values = {
+    [fieldRef('intake', 'ok')]: 'yes',
+    [fieldRef('deliver', 'sent')]: 'yes',
+  };
+  const childIdByDefId = { intake: 'c-intake', deliver: 'c-deliver' };
+  const t = chainStartTarget(CHAIN_DEFS, values, childIdByDefId, {});
+  assert.equal(t.childId, null);
+  assert.match(t.reason, /complete/i);
+});
+
+test('chainStartTarget yields a "loading" reason when the runnable step has no child yet', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' };
+  // deliver runnable but no child id resolved yet.
+  const t = chainStartTarget(CHAIN_DEFS, values, { intake: 'c-intake' }, {});
+  assert.equal(t.childId, null);
+  assert.match(t.reason, /loading|no task/i);
+});
+
+// ── task-f26e7745eda6 (reviewer Angle-D): shared status-map helpers ─────────
+
+test('toChildStatus projects a raw task to {status, rawStatus} (null for none)', () => {
+  assert.deepEqual(toChildStatus({ status: 'pending', rawStatus: 'open', title: 'x' }), {
+    status: 'pending',
+    rawStatus: 'open',
+  });
+  assert.equal(toChildStatus(null), null);
+  assert.equal(toChildStatus(undefined), null);
+});
+
+test('childStatusMap builds a def→status map from entries + a resolver', () => {
+  const byId = { 'c-intake': { status: 'done', rawStatus: 'done' }, 'c-deliver': { status: 'pending', rawStatus: 'cancelled' } };
+  const entries = Object.entries({ intake: 'c-intake', deliver: 'c-deliver' });
+  const map = childStatusMap(entries, (id) => byId[id]);
+  assert.deepEqual(map, {
+    intake: { status: 'done', rawStatus: 'done' },
+    deliver: { status: 'pending', rawStatus: 'cancelled' },
+  });
+});
+
+test('childStatusMap skips defs whose child does not resolve', () => {
+  const entries = Object.entries({ intake: 'c-intake', ghost: 'c-missing' });
+  const map = childStatusMap(entries, (id) => (id === 'c-intake' ? { status: 'done' } : undefined));
+  assert.deepEqual(map, { intake: { status: 'done', rawStatus: undefined } });
+  assert.equal('ghost' in map, false);
+});
+
+test('childStatusMap feeds runnableStepId end-to-end (cancelled deliver → not runnable)', () => {
+  const values = { [fieldRef('intake', 'ok')]: 'yes' };
+  const byId = { 'c-intake': { rawStatus: 'done' }, 'c-deliver': { rawStatus: 'cancelled' } };
+  const childByDefId = childStatusMap(
+    Object.entries({ intake: 'c-intake', deliver: 'c-deliver' }),
+    (id) => byId[id],
+  );
+  assert.equal(runnableStepId(CHAIN_DEFS, values, childByDefId), null);
 });

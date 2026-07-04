@@ -42,6 +42,7 @@ import {
 import { useOpenResumeInTab } from '../../openResumeInTab';
 import { useRunningSessions } from './useRunningSessions';
 import { useTaskActions } from './useTaskActions';
+import { useStartAction } from './useStartAction';
 import { primaryActionFor } from './primaryAction.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
 import { PrimaryActionButton } from './PrimaryActionButton';
@@ -59,7 +60,9 @@ import {
   taskDefStatus,
   fieldRef,
 } from '../newhome/taskSchema.mjs';
-import { runnableStepId } from '../newhome/pipelineRoster.mjs';
+import { runnableStepId, mergeChildStatus, childStatusMap, toChildStatus } from '../newhome/pipelineRoster.mjs';
+import type { ChildStatusLike } from '../newhome/pipelineRoster.mjs';
+import type { MergedStepStatus } from '../newhome/taskSchema.mjs';
 import type { TaskDef } from '../newhome/types';
 import '../TasksPage.css';
 import { resolveEffectiveInstructions } from '../../projects/index.mjs';
@@ -115,11 +118,14 @@ function hasValue(v: unknown): boolean {
 // the roster's own status vocabulary (STATUS_LABEL/META_PILL in RosterTable.tsx)
 // so a step never says "Pending" in one place and "Queued" in another for the
 // identical not-yet-started state.
-const DEF_STATUS_LABEL: Record<ReturnType<typeof taskDefStatus>, string> = {
+const DEF_STATUS_LABEL: Record<MergedStepStatus, string> = {
   done: 'Done',
   active: 'In progress',
   pending: 'Queued',
   skip: 'Not needed',
+  // task-f26e7745eda6 — merged-in from the child's server status.
+  cancelled: 'Cancelled',
+  failed: 'Failed',
 };
 
 // A live-status descriptor: the ONE colored signal per the design language
@@ -215,6 +221,8 @@ export function TaskDetailDrawer({
   const { exit, state } = useOverlayExit(onClose);
   const { dispatch } = useStore();
   const actions = useTaskActions();
+  // task-48cd46a0e2da — shared start wrapper for the Pipeline rollup's ▶.
+  const stepStartAction = useStartAction();
   const { byId: sourcesById } = useTaskSources();
   const tbReady = useTypebuildReadiness();
   const myEmail = (tbReady as { email?: string | null }).email ?? null;
@@ -385,12 +393,18 @@ export function TaskDetailDrawer({
     return out;
   }, [childTasks]);
   const pipelineDefs = useMemo<TaskDef[]>(() => templateBlock?.defs ?? [], [templateBlock]);
+  // task-f26e7745eda6 — def id → the child's LIVE server status, consulted by
+  // the runnable walk + step chips (cancelled excluded/shown; failed shown).
+  const pipelineChildStatus = useMemo<Record<string, ChildStatusLike>>(
+    () => childStatusMap(childByDefId.entries(), (c) => c),
+    [childByDefId],
+  );
   // task-4045bcee23cb (U3a #3) — the SAME "which step is runnable next" rule
   // the roster's group-header chips and parent Start-chain use, so this
   // rollup's ▶ never drifts from the roster's.
   const pipelineRunnableId = useMemo(
-    () => runnableStepId(pipelineDefs, pipelineValuesByRef),
-    [pipelineDefs, pipelineValuesByRef],
+    () => runnableStepId(pipelineDefs, pipelineValuesByRef, pipelineChildStatus),
+    [pipelineDefs, pipelineValuesByRef, pipelineChildStatus],
   );
 
   // ── effective instruction set (foundation resolver) ───────────────────────
@@ -1073,8 +1087,13 @@ export function TaskDetailDrawer({
                   <div className="tdd__sect-h">Pipeline</div>
                   <ol className="tdd__pipeline">
                     {pipelineDefs.map((def, i) => {
-                      const defStatus = taskDefStatus(def, pipelineValuesByRef);
                       const child = childByDefId.get(def.id);
+                      // task-f26e7745eda6 — merge child server status (cancelled
+                      // → grey; failed/blocked → 'Failed'; not "Queued").
+                      const defStatus: MergedStepStatus = mergeChildStatus(
+                        taskDefStatus(def, pipelineValuesByRef),
+                        toChildStatus(child),
+                      );
                       const firstOutput = def.outputs.find((f) =>
                         hasValue(pipelineValuesByRef[fieldRef(def.id, f.key)]),
                       );
@@ -1115,19 +1134,33 @@ export function TaskDetailDrawer({
                             {DEF_STATUS_LABEL[defStatus]}
                           </span>
                           <span className="tdd__pipeline-outcome">{outcome ?? '—'}</span>
-                          {stepStart && (
+                          {stepStart && child && (
                             <button
                               type="button"
                               className="tdd__pipeline-start"
-                              disabled={!stepStart.enabled}
+                              disabled={!stepStart.enabled || stepStartAction.pendingFor(child.id)}
                               title={stepStart.tooltip ?? 'Start this step'}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void actions.start(child!);
+                                // task-48cd46a0e2da — pending + inline error,
+                                // never a silent no-op.
+                                void stepStartAction.run(child.id, {
+                                  kind: 'start',
+                                  run: () => actions.start(child),
+                                });
                               }}
                             >
-                              {'▶ Start'}
+                              {stepStartAction.pendingFor(child.id) ? 'Starting…' : '▶ Start'}
                             </button>
+                          )}
+                          {child && stepStartAction.errorFor(child.id) && (
+                            <span
+                              className="tdd__pipeline-error"
+                              role="alert"
+                              title={stepStartAction.errorFor(child.id) ?? undefined}
+                            >
+                              {`⚠ ${stepStartAction.errorFor(child.id)}`}
+                            </span>
                           )}
                         </li>
                       );

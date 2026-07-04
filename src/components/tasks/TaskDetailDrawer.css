@@ -603,6 +603,20 @@
 .tdd__pipeline-idx { color: var(--fg-2); font-size: var(--fs-xs); }
 .tdd__pipeline-name { flex: 1 1 auto; }
 .tdd__pipeline-outcome { color: var(--fg-2); font-size: var(--fs-sm); }
+/* task-f26e7745eda6 — per-step status pill (incl. merged child server status).
+   cancelled: grey + strikethrough (dead-but-real, ≠ n/a); failed: failed hue. */
+.tdd__pipeline-pill {
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.tdd__pipeline-pill--cancelled { color: var(--fg-2); text-decoration: line-through; }
+.tdd__pipeline-pill--failed { color: var(--nh-failed, #c0392b); }
+/* task-48cd46a0e2da — per-step start error, inline (never a silent no-op). */
+.tdd__pipeline-error { color: var(--nh-failed, #c0392b); font-size: var(--fs-xs); font-weight: 600; cursor: help; }
 .tdd__pipeline-start {
   appearance: none;
   border: 1px solid var(--accent);

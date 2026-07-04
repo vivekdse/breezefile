@@ -34,7 +34,11 @@ export type ParsedTaskTemplate = ParsedTaskTemplateV2 | ParsedTaskTemplateLegacy
  *  use that known id instead. */
 export type ParsedResultFields = { taskDefId: string | null; fields: Record<string, string | number | boolean> };
 
+// task-f26e7745eda6 — 'cancelled' + 'failed' are MERGED-IN from the child
+// task's server status (see pipelineRoster.mergeChildStatus); the pure
+// output-derived taskDefStatus never returns them itself.
 export type TaskDefRenderStatus = 'done' | 'active' | 'pending' | 'skip';
+export type MergedStepStatus = TaskDefRenderStatus | 'cancelled' | 'failed';
 export type MetaStatus = 'done' | 'active' | 'pending';
 
 export function fieldRef(taskDefId: string, key: string): string;

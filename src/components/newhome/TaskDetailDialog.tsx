@@ -36,6 +36,7 @@ import {
 import { fm } from '../../bridge';
 import { useStore } from '../../store';
 import { useTaskActions } from '../tasks/useTaskActions';
+import { useStartAction } from '../tasks/useStartAction';
 import { useRunningSessions } from '../tasks/useRunningSessions';
 // task — the "▶ Start" footer button reuses the OLD Tasks page's exact launch
 // path: primaryActionFor decides eligibility, useTaskActions().start (→
@@ -58,7 +59,9 @@ import {
   taskDefStatus,
   fieldRef,
 } from './taskSchema.mjs';
-import { runnableStepId } from './pipelineRoster.mjs';
+import { runnableStepId, mergeChildStatus, childStatusMap, toChildStatus } from './pipelineRoster.mjs';
+import type { ChildStatusLike } from './pipelineRoster.mjs';
+import type { MergedStepStatus } from './taskSchema.mjs';
 import './TaskDetailDialog.css';
 
 // ─── small formatting helpers (local — no shared-file dependency) ──────────
@@ -148,11 +151,13 @@ const MARKER: Record<EvidenceEntry['kind'], string> = {
 // the roster's own status vocabulary (STATUS_LABEL/META_PILL in RosterTable.tsx)
 // so a step never says "Pending" in one place and "Queued" in another for the
 // identical not-yet-started state.
-const DEF_STATUS_LABEL: Record<ReturnType<typeof taskDefStatus>, string> = {
+const DEF_STATUS_LABEL: Record<MergedStepStatus, string> = {
   done: 'Done',
   active: 'In progress',
   pending: 'Queued',
   skip: 'Not needed',
+  cancelled: 'Cancelled',
+  failed: 'Failed',
 };
 
 function hasValue(v: unknown): boolean {
@@ -209,6 +214,9 @@ export function TaskDetailDialog({
   const raw = task?.raw;
   const { dispatch } = useStore();
   const actions = useTaskActions();
+  // task-48cd46a0e2da — the shared start wrapper so the Pipeline rollup's per-
+  // step ▶ shows pending/error instead of a silent no-op.
+  const stepStartAction = useStartAction();
   const sessions = useRunningSessions();
   const session = sessions.get(taskId);
 
@@ -490,12 +498,19 @@ export function TaskDetailDialog({
   // that no longer exists (removed R3) — it degrades to no pipeline section
   // rather than trying to resolve anything.
   const pipelineDefs = useMemo<TaskDef[]>(() => templateBlock?.defs ?? [], [templateBlock]);
+  // task-f26e7745eda6 — def id → the child's LIVE server status, so the runnable
+  // walk and the step chips consult it (a cancelled child is excluded from
+  // runnable and shown as 'Cancelled', never 'Queued').
+  const pipelineChildStatus = useMemo<Record<string, ChildStatusLike>>(
+    () => childStatusMap(childByDefId.entries(), (c) => c.raw),
+    [childByDefId],
+  );
   // task-4045bcee23cb (U3a #3) — the SAME "which step is runnable next" rule
   // the roster's group-header chips and parent Start-chain use, so this
   // rollup's ▶ never drifts from the roster's.
   const pipelineRunnableId = useMemo(
-    () => runnableStepId(pipelineDefs, pipelineValuesByRef),
-    [pipelineDefs, pipelineValuesByRef],
+    () => runnableStepId(pipelineDefs, pipelineValuesByRef, pipelineChildStatus),
+    [pipelineDefs, pipelineValuesByRef, pipelineChildStatus],
   );
 
   // ── evidence log: merge runs + messages + pending question + notes/flags ──
@@ -767,8 +782,14 @@ export function TaskDetailDialog({
               <div className="nh-dialog__section-title">Pipeline</div>
               <ol className="nh-dialog__pipeline">
                 {pipelineDefs.map((def, i) => {
-                  const defStatus = taskDefStatus(def, pipelineValuesByRef);
                   const child = childByDefId.get(def.id);
+                  // task-f26e7745eda6 — merge the child's SERVER status so a
+                  // cancelled child reads "Cancelled" (grey) and a failed/blocked
+                  // one reads "Failed", not "Queued".
+                  const defStatus: MergedStepStatus = mergeChildStatus(
+                    taskDefStatus(def, pipelineValuesByRef),
+                    toChildStatus(child?.raw),
+                  );
                   const firstOutput = def.outputs.find((f) =>
                     hasValue(pipelineValuesByRef[fieldRef(def.id, f.key)]),
                   );
@@ -809,19 +830,33 @@ export function TaskDetailDialog({
                         {DEF_STATUS_LABEL[defStatus]}
                       </span>
                       <span className="nh-dialog__pipeline-outcome">{outcome ?? '—'}</span>
-                      {stepStart && (
+                      {stepStart && child && (
                         <button
                           type="button"
                           className="nh-dialog__pipeline-start"
-                          disabled={!stepStart.enabled}
+                          disabled={!stepStart.enabled || stepStartAction.pendingFor(child.id)}
                           title={stepStart.tooltip ?? 'Start this step'}
                           onClick={(e) => {
                             e.stopPropagation();
-                            void actions.start(child!.raw);
+                            // task-48cd46a0e2da — routed through the shared
+                            // wrapper: pending + inline error, never silent.
+                            void stepStartAction.run(child.id, {
+                              kind: 'start',
+                              run: () => actions.start(child.raw),
+                            });
                           }}
                         >
-                          {'▶ Start'}
+                          {stepStartAction.pendingFor(child.id) ? 'Starting…' : '▶ Start'}
                         </button>
+                      )}
+                      {child && stepStartAction.errorFor(child.id) && (
+                        <span
+                          className="nh-dialog__pipeline-error"
+                          role="alert"
+                          title={stepStartAction.errorFor(child.id) ?? undefined}
+                        >
+                          {`⚠ ${stepStartAction.errorFor(child.id)}`}
+                        </span>
                       )}
                     </li>
                   );

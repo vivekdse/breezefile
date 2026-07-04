@@ -295,6 +295,25 @@
 .nh-roster__action-empty {
   color: var(--muted-on-panel);
 }
+/* task-48cd46a0e2da — the shared start wrapper's inline feedback: a start
+   click is never silent, so the action cell can carry a button + an error line
+   ("no runnable step: …", "launch failed: …"). */
+.nh-roster__action-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.nh-roster__action-error {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--nh-failed);
+  cursor: help;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .nh-roster__row--skeleton td {
   padding: var(--sp-2) var(--sp-3);
@@ -412,6 +431,15 @@
 .nh-pipe__step-chip--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-pipe__step-chip--active { background: var(--nh-progress-soft); color: var(--nh-progress); }
 .nh-pipe__step-chip--pending { background: var(--nh-queued-soft); color: var(--nh-queued); }
+/* task-f26e7745eda6 — a server-CANCELLED child: neutral grey, VISUALLY DISTINCT
+   from n/a (skip) — cancelled is a dead-but-real step (reopen to continue), skip
+   is "not needed for this job". failed/blocked: the failed palette (retry). */
+.nh-pipe__step-chip--cancelled {
+  background: var(--bg-2);
+  color: var(--muted-on-panel);
+  text-decoration: line-through;
+}
+.nh-pipe__step-chip--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
 
 /* task-6a14190fb2f7 — the small bar above a chained job's subtable: the
    auto-continue toggle while the chain is running, or a quiet terminal

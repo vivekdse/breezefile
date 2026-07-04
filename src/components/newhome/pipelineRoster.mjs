@@ -198,28 +198,135 @@ export function rewriteTaskFieldsBlock(body, templateId, taskDefId, values) {
 }
 
 /**
+ * task-f26e7745eda6 — map a CHILD TASK's server status to the chip-status
+ * OVERRIDE it forces on its step, or null when the child's status carries no
+ * override and the pure output-derived status should stand.
+ *
+ * The shared root cause of tasks f26e7745eda6 + 48cd46a0e2da: step status was
+ * derived PURELY from output-value presence + neededWhen — it never consulted
+ * the child TASK's actual server status. So a server-CANCELLED child rendered
+ * as "queued" and got picked as the next runnable step (silent no-op on Start).
+ *
+ * Status vocabulary (electron/sources/typebuild.ts mapStatus/rawStatusOf):
+ *   rawStatus ∈ open | in_progress | done | partial | cancelled | failed | blocked
+ *   status    ∈ pending | in_progress | done | cancelled
+ *
+ * Overrides (highest-signal server states only; everything else → null so the
+ * output-derived status wins):
+ *   - cancelled            → 'cancelled'  (grey, EXCLUDED from runnable, ≠ n/a)
+ *   - failed | blocked     → 'failed'     (retry affordance)
+ *   - in_progress          → 'active'     (running — see stepDisplayStatus)
+ *
+ * @param {{ status?: string, rawStatus?: string } | null | undefined} child
+ * @returns {('cancelled'|'failed'|'active'|null)}
+ */
+export function childStatusOverride(child) {
+  if (!child) return null;
+  const raw = child.rawStatus;
+  const norm = child.status;
+  if (raw === 'cancelled' || norm === 'cancelled') return 'cancelled';
+  if (raw === 'failed' || raw === 'blocked') return 'failed';
+  if (raw === 'in_progress' || norm === 'in_progress') return 'active';
+  return null;
+}
+
+/**
+ * task-f26e7745eda6 (reviewer Angle-D) — project a raw Task down to the minimal
+ * { status, rawStatus } the status-merge needs, in ONE place so the four
+ * surfaces that build a def-id→child-status map (roster subtable, roster
+ * chain-start, both detail rollups) can't drift as the merge inputs grow.
+ * Accepts any object with optional status/rawStatus (a raw Task, or a
+ * NewHomeTask's `.raw`); returns null for a missing child.
+ *
+ * @param {{ status?: string, rawStatus?: string } | null | undefined} task
+ * @returns {{ status?: string, rawStatus?: string } | null}
+ */
+export function toChildStatus(task) {
+  if (!task) return null;
+  return { status: task.status, rawStatus: task.rawStatus };
+}
+
+/**
+ * task-f26e7745eda6 (reviewer Angle-D) — build a def-id → child-status map from
+ * an ITERABLE of [defId, childRef] entries (pass `Object.entries(record)` for a
+ * plain object, or `map.entries()` for a Map). `resolve` turns each childRef
+ * into its raw Task (an id-lookup, or identity when the entry already holds the
+ * task). Centralizes the projection the four surfaces did by hand.
+ *
+ * @param {Iterable<[string, any]>} entries
+ * @param {(childRef: any) => ({ status?: string, rawStatus?: string } | null | undefined)} resolve
+ * @returns {Record<string, { status?: string, rawStatus?: string }>}
+ */
+export function childStatusMap(entries, resolve) {
+  const map = {};
+  for (const [defId, childRef] of entries ?? []) {
+    const status = toChildStatus(resolve(childRef));
+    if (status) map[defId] = status;
+  }
+  return map;
+}
+
+/**
+ * task-f26e7745eda6 — the merged step status shown on every chip/rollup:
+ * layer the child TASK's server status on top of the pure output-derived
+ * status. This SUPERSEDES stepDisplayStatus (kept as a thin wrapper for
+ * existing callers): it additionally surfaces 'cancelled' and 'failed'.
+ *
+ * Precedence:
+ *   - a genuinely 'done' step stays done (a late-arriving cancelled/failed row
+ *     never un-completes finished work), EXCEPT the child is authoritative for
+ *     'cancelled' only when the step isn't already done.
+ *   - a 'skip' step (neededWhen unmet — "n/a") stays skip and is visually
+ *     distinct from 'cancelled'.
+ *   - otherwise the child's server override (cancelled/failed/active) wins over
+ *     the output-derived base; with no override, the base stands.
+ *
+ * @param {ReturnType<typeof taskDefStatus>} baseStatus
+ * @param {{ status?: string, rawStatus?: string } | null | undefined} child
+ * @returns {('done'|'active'|'pending'|'skip'|'cancelled'|'failed')}
+ */
+export function mergeChildStatus(baseStatus, child) {
+  if (baseStatus === 'skip') return 'skip';
+  const override = childStatusOverride(child);
+  if (baseStatus === 'done') {
+    // Finished work stays done; only an explicit server cancellation of a
+    // not-yet-fully-submitted step matters, and a done step by definition has
+    // its outputs, so we keep 'done'.
+    return 'done';
+  }
+  return override ?? baseStatus;
+}
+
+/**
  * task-4045bcee23cb (U3a) — the single "which step is runnable next" rule,
  * shared by the parent-row "▶ Start chain" action, the subtable group-header
  * chips, and the detail Pipeline rollup so all three surfaces always agree.
  *
  * "Runnable" = the FIRST task-def, in chain (dependency) order, that is not
- * `skip` (its `neededWhen` gate is unmet) and not `done`. This mirrors
- * `metaStatus`'s own walk order — chain order IS the dependency order for a
- * v2 task-template block (docs/task-templates-design.md) — so this doesn't
- * invent a new ordering model, it just stops at the first not-done step.
+ * `skip` (its `neededWhen` gate is unmet), not `done`, and — task-f26e7745eda6
+ * — not CANCELLED (a server-cancelled child is a dead end: selecting it made
+ * Start-chain silently no-op). Pass `childByDefId` (def id → child task with
+ * `.status`/`.rawStatus`) so the walk consults LIVE child status; omit it for
+ * the legacy output-only behavior (still used where child status isn't handy).
  *
- * Returns null when every def is done or skipped (nothing left to run) or
- * `taskDefs` is empty.
+ * Returns null when every def is done/skipped/cancelled (nothing left to run)
+ * or `taskDefs` is empty.
  *
  * @param {import('./types').TaskDef[]} taskDefs
  * @param {Record<string, string|number>} valuesByRef
+ * @param {Record<string, { status?: string, rawStatus?: string }>} [childByDefId]
  * @returns {string|null} the runnable task-def's id, or null
  */
-export function runnableStepId(taskDefs, valuesByRef) {
+export function runnableStepId(taskDefs, valuesByRef, childByDefId) {
   for (const def of taskDefs ?? []) {
     if (!def || typeof def.id !== 'string') continue;
-    const status = taskDefStatus(def, valuesByRef);
-    if (status === 'skip' || status === 'done') continue;
+    const merged = mergeChildStatus(
+      taskDefStatus(def, valuesByRef),
+      childByDefId ? childByDefId[def.id] : null,
+    );
+    // Skip a step that's done, conditionally-skipped, or CANCELLED. A 'failed'
+    // step is NOT skipped — it's the runnable one (retry lands on it).
+    if (merged === 'skip' || merged === 'done' || merged === 'cancelled') continue;
     return def.id;
   }
   return null;
@@ -229,43 +336,76 @@ export function runnableStepId(taskDefs, valuesByRef) {
  * task-6a14190fb2f7 — chain continuation. Given the SAME inputs
  * runnableStepId already resolves the next step from, plus the job's
  * def-id → child-id index, resolve the CHILD TASK ID auto-continue should
- * start next — or null when there's nothing to start (every def done/skipped,
- * or the runnable def has no child yet — e.g. its detail hasn't loaded).
+ * start next — or null when there's nothing to start (every def done/skipped/
+ * cancelled, or the runnable def has no child yet — e.g. its detail hasn't
+ * loaded).
  *
  * This is deliberately just runnableStepId + one lookup — never a second
- * "what's next" rule. Eligibility (is that child actually startable right
- * now — not already claimed/in_progress/done) is NOT this function's job;
- * callers must still run the child through primaryActionFor (the one true
- * start-eligibility gate) before calling start on it — this only answers
- * "which child is the chain's next step". The claim-safety check is a
- * separate, orthogonal concern (see RosterTable's auto-continue effect).
+ * "what's next" rule. task-f26e7745eda6 — pass `childByDefId` so a CANCELLED
+ * child is skipped here too (auto-continue must never try to start it).
+ * Eligibility (is that child actually startable right now — not already
+ * claimed/in_progress/done) is still NOT this function's job; callers must
+ * run the child through primaryActionFor before starting it.
  *
  * @param {import('./types').TaskDef[]} taskDefs
  * @param {Record<string, string|number>} valuesByRef
  * @param {Record<string, string>} childIdByDefId
+ * @param {Record<string, { status?: string, rawStatus?: string }>} [childByDefId]
  * @returns {string|null} the next child task id to start, or null
  */
-export function nextAutoContinueChildId(taskDefs, valuesByRef, childIdByDefId) {
-  const stepId = runnableStepId(taskDefs, valuesByRef);
+export function nextAutoContinueChildId(taskDefs, valuesByRef, childIdByDefId, childByDefId) {
+  const stepId = runnableStepId(taskDefs, valuesByRef, childByDefId);
   if (!stepId) return null;
   return (childIdByDefId ?? {})[stepId] ?? null;
 }
 
 /**
- * task-c141c7765aa4 (chip staleness, 3rd sighting) — `taskDefStatus` derives a
- * step's status PURELY from output field values, with no notion of the
- * underlying child task's claim/run state. That's correct for "is the step's
- * work done" but means a step whose child was JUST claimed/started (no output
- * has landed yet — the common case right after auto-continue fires) still
- * reads 'pending' ("queued") for as long as it takes the agent to produce its
- * first required output. This helper layers the child's live run state on
- * top: when the child is in_progress/claimed-and-running, the step displays
- * as 'active' ("running") regardless of what its outputs say — a claimed step
- * is never invisible. A 'done'/'skip' base status is never downgraded (a
- * step that already finished stays done even if the child row hasn't caught
- * up to a terminal status yet).
+ * task-48cd46a0e2da — resolve the parent "▶ Start chain" target AND, when
+ * there's nothing to start, an EXPLICIT REASON so the click is never silent.
+ * This is `runnableStepId` + the child-id lookup, but instead of collapsing
+ * "nothing runnable" and "runnable but no child" into a bare null, it reports
+ * WHY, so the shared start wrapper can surface "no runnable step: all steps are
+ * done/cancelled" rather than a dead click (the round-8 regression).
  *
- * @param {ReturnType<typeof taskDefStatus>} baseStatus  the pure output-derived status
+ * @param {import('./types').TaskDef[]} taskDefs
+ * @param {Record<string, string|number>} valuesByRef
+ * @param {Record<string, string>} childIdByDefId
+ * @param {Record<string, { status?: string, rawStatus?: string }>} [childByDefId]
+ * @returns {{ childId: string, stepId: string, stepName: string }
+ *          | { childId: null, reason: string }}
+ */
+export function chainStartTarget(taskDefs, valuesByRef, childIdByDefId, childByDefId) {
+  const stepId = runnableStepId(taskDefs, valuesByRef, childByDefId);
+  if (!stepId) {
+    // Distinguish "everything finished" from "everything cancelled/blocked-out"
+    // so the surfaced reason is meaningful.
+    const anyCancelled = (taskDefs ?? []).some(
+      (d) => d && childStatusOverride(childByDefId?.[d.id]) === 'cancelled',
+    );
+    return {
+      childId: null,
+      reason: anyCancelled
+        ? 'no runnable step — remaining steps are cancelled (reopen one to continue)'
+        : 'no runnable step — the chain is complete',
+    };
+  }
+  const childId = (childIdByDefId ?? {})[stepId] ?? null;
+  const def = (taskDefs ?? []).find((d) => d && d.id === stepId);
+  const stepName = (def && def.name) || stepId;
+  if (!childId) {
+    return { childId: null, reason: `step "${stepName}" has no task yet — still loading` };
+  }
+  return { childId, stepId, stepName };
+}
+
+/**
+ * task-c141c7765aa4 (chip staleness, 3rd sighting) — thin wrapper kept for
+ * back-compat: layer only the child's live RUN state (in_progress → 'active')
+ * on the output-derived base. New callers should prefer mergeChildStatus,
+ * which also surfaces cancelled/failed. A 'done'/'skip' base is never
+ * downgraded.
+ *
+ * @param {ReturnType<typeof taskDefStatus>} baseStatus
  * @param {boolean} childInProgress  isInProgress(child) from primaryAction.mjs
  * @returns {ReturnType<typeof taskDefStatus>}
  */

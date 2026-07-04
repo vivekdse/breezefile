@@ -22,15 +22,19 @@ import type { NewHomeStatus, NewHomeTask } from './types';
 import type { Task } from '../../types';
 import { claimFreshness } from '../tasks/lifecycle.mjs';
 import { evalCondition, fieldRef, metaStatus, taskDefStatus } from './taskSchema.mjs';
+import type { MergedStepStatus } from './taskSchema.mjs';
 import {
   nextAutoContinueChildId,
   pipelineColumns,
   partitionJobs,
   runnableStepId,
-  stepDisplayStatus,
+  mergeChildStatus,
+  chainStartTarget,
+  childStatusMap,
+  toChildStatus,
 } from './pipelineRoster.mjs';
 import { isAutoContinueOn, setAutoContinue } from './chainAutoContinuePrefs';
-import type { PipelineColumn, PipelineGroup } from './pipelineRoster.mjs';
+import type { PipelineColumn, PipelineGroup, ChildStatusLike } from './pipelineRoster.mjs';
 import { useChainedRoster } from './useNewHomeData';
 import type { ChainedJobResolution } from './useNewHomeData';
 // task — the "▶ Start" row action reuses the OLD Tasks page's exact launch
@@ -40,6 +44,7 @@ import type { ChainedJobResolution } from './useNewHomeData';
 import { useTasks, useTypebuildReadiness } from '../../tasks';
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
+import { useStartAction } from '../tasks/useStartAction';
 import { useRunningSessions } from '../tasks/useRunningSessions';
 import { primaryActionFor, isInProgress } from '../tasks/primaryAction.mjs';
 import { isDone } from '../tasks/sections.mjs';
@@ -86,8 +91,11 @@ function RowAction({
   onOpenTask,
   onRetry,
   onStart,
-  startAction,
+  startEligible,
   chainStart,
+  onChainStart,
+  pending,
+  error,
 }: {
   task: NewHomeTask;
   onOpenTask: (id: string) => void;
@@ -96,16 +104,20 @@ function RowAction({
   /** When non-null, this row is start-eligible per primaryActionFor (the OLD
    *  Tasks page's state machine). `enabled` gates on TypeBuild readiness;
    *  `tooltip` is the same hover text the old play button shows. */
-  startAction: { enabled: boolean; tooltip?: string } | null;
-  /** task-4045bcee23cb (U3a #1) — set ONLY for a chained-job parent row whose
-   *  own primaryActionFor is 'none' (fm-bq86: a parent with open children can't
-   *  itself be "started" — the container has nothing to run). This is a
-   *  DIFFERENT action: launch the first RUNNABLE CHILD in chain order, so a
-   *  chain becomes startable from the summary row instead of only via
-   *  cell → child drawer → Start. Eligibility still comes from primaryActionFor
-   *  run against that CHILD (see startActionFor in the parent component) — this
-   *  is not a new eligibility rule, just a new entry point to the same one. */
-  chainStart: { childId: string; enabled: boolean; tooltip?: string } | null;
+  startEligible: { enabled: boolean; tooltip?: string } | null;
+  /** task-4045bcee23cb (U3a #1) / task-48cd46a0e2da — the parent-row chain
+   *  action. `{childId,...}` → an eligible ▶ Start chain; `{disabled,reason}` →
+   *  render a DISABLED ▶ Start chain with the reason as tooltip (never a bare —
+   *  with no explanation — the round-8 silent no-op); null → not a chain row. */
+  chainStart:
+    | { childId: string; enabled: boolean; tooltip?: string }
+    | { disabled: true; reason: string }
+    | null;
+  /** Route the chain-start click through the shared wrapper (owns pending/error). */
+  onChainStart: (childId: string) => void;
+  /** task-48cd46a0e2da — the shared wrapper's pending/error for THIS row's id. */
+  pending: boolean;
+  error: string | null;
 }) {
   if (task.status === 'needs') {
     return (
@@ -123,16 +135,19 @@ function RowAction({
   }
   if (task.status === 'failed') {
     return (
-      <button
-        type="button"
-        className="nh-roster__action nh-roster__action--retry"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRetry(task.id);
-        }}
-      >
-        Retry
-      </button>
+      <span className="nh-roster__action-wrap">
+        <button
+          type="button"
+          className="nh-roster__action nh-roster__action--retry"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry(task.id);
+          }}
+        >
+          Retry
+        </button>
+        {error && <span className="nh-roster__action-error" role="alert" title={error}>{`⚠ ${error}`}</span>}
+      </span>
     );
   }
   // ▶ Start — the SAME claim-then-launch path the old Tasks page's play button
@@ -141,39 +156,59 @@ function RowAction({
   // unclaimed-or-mine-and-idle) — never a claimed-by-other, in-progress, blocked,
   // terminal, or parent-with-open-children row. stopPropagation so the click
   // launches instead of opening the detail dialog (mirrors Answer/Retry).
-  if (startAction) {
+  // task-48cd46a0e2da — a pending state ("starting…") and an inline error make
+  // the click's outcome always visible.
+  if (startEligible) {
     return (
-      <button
-        type="button"
-        className="nh-roster__action nh-roster__action--start"
-        disabled={!startAction.enabled}
-        title={startAction.tooltip}
-        onClick={(e) => {
-          e.stopPropagation();
-          onStart(task.id);
-        }}
-      >
-        {'▶ Start'}
-      </button>
+      <span className="nh-roster__action-wrap">
+        <button
+          type="button"
+          className="nh-roster__action nh-roster__action--start"
+          disabled={!startEligible.enabled || pending}
+          title={startEligible.tooltip}
+          onClick={(e) => {
+            e.stopPropagation();
+            onStart(task.id);
+          }}
+        >
+          {pending ? 'Starting…' : '▶ Start'}
+        </button>
+        {error && <span className="nh-roster__action-error" role="alert" title={error}>{`⚠ ${error}`}</span>}
+      </span>
     );
   }
-  // ▶ Start chain — task-4045bcee23cb (U3a #1). The parent itself has nothing
-  // startable (it's a container with open children — fm-bq86), but the CHAIN
-  // does: launch the first runnable child, same mechanism as any row Start.
+  // ▶ Start chain — task-4045bcee23cb (U3a #1) / task-48cd46a0e2da. The parent
+  // itself has nothing startable (a container with open children — fm-bq86),
+  // but the CHAIN may: launch the first runnable child. When the chain has
+  // nothing runnable (all done/cancelled) or the next step isn't eligible, we
+  // render a DISABLED button with the REASON as tooltip + inline — never a
+  // silent — (the round-8 regression).
   if (chainStart) {
+    const isDisabled = 'disabled' in chainStart;
+    // Narrow explicitly so we never read `.enabled`/`.childId` off the disabled
+    // arm (or `.reason` off the enabled arm).
+    const reason = 'disabled' in chainStart ? chainStart.reason : undefined;
+    const btnDisabled = isDisabled || ('enabled' in chainStart && !chainStart.enabled) || pending;
     return (
-      <button
-        type="button"
-        className="nh-roster__action nh-roster__action--start"
-        disabled={!chainStart.enabled}
-        title={chainStart.tooltip}
-        onClick={(e) => {
-          e.stopPropagation();
-          onStart(chainStart.childId);
-        }}
-      >
-        {'▶ Start chain'}
-      </button>
+      <span className="nh-roster__action-wrap">
+        <button
+          type="button"
+          className="nh-roster__action nh-roster__action--start"
+          disabled={btnDisabled}
+          title={'disabled' in chainStart ? chainStart.reason : chainStart.tooltip}
+          onClick={(e) => {
+            e.stopPropagation();
+            if ('childId' in chainStart) onChainStart(chainStart.childId);
+          }}
+        >
+          {pending ? 'Starting…' : '▶ Start chain'}
+        </button>
+        {(error || reason) && (
+          <span className="nh-roster__action-error" role="alert" title={error ?? reason}>
+            {`⚠ ${error ?? reason}`}
+          </span>
+        )}
+      </span>
     );
   }
   return <span className="nh-roster__action-empty">{'—'}</span>;
@@ -199,11 +234,15 @@ const META_PILL: Record<ReturnType<typeof metaStatus>, { cls: NewHomeStatus; lab
 // task-4045bcee23cb (U3a) — per-step status chip label, rendered on a
 // subtable GROUP HEADER (one per task-def). 'queued' — not 'pending' — to
 // match the unified vocabulary above; 'n/a' for a conditionally-skipped step.
-const STEP_CHIP_LABEL: Record<ReturnType<typeof taskDefStatus>, string> = {
+// task-f26e7745eda6 — 'cancelled' (grey, ≠ n/a) and 'failed' (retry) are the
+// MERGED-in child server statuses.
+const STEP_CHIP_LABEL: Record<MergedStepStatus, string> = {
   done: 'done',
   active: 'running',
   pending: 'queued',
   skip: 'n/a',
+  cancelled: 'cancelled',
+  failed: 'failed',
 };
 
 /** One subtable group-header's status chip — "done"/"running"/"queued"/"n/a",
@@ -219,13 +258,17 @@ function StepChip({
   onStart,
   running,
   autoStartError,
+  pending,
 }: {
-  status: ReturnType<typeof taskDefStatus>;
+  status: MergedStepStatus;
   runnable: boolean;
   /** null when there's no child to start yet, or primaryActionFor doesn't
    *  offer 'start' for it (e.g. claimed by someone else, already running). */
   startAction: { enabled: boolean; tooltip?: string } | null;
   onStart: () => void;
+  /** task-48cd46a0e2da (A#3) — a manual per-step ▶ is in flight; show
+   *  "Starting…" and disable so the click's outcome is visible, never silent. */
+  pending?: boolean;
   /** task-c141c7765aa4 (#3) — true when the child is claimed/in_progress
    *  RIGHT NOW (isInProgress), regardless of whether any output has landed
    *  yet. Drives a "running headless" watch affordance so a claimed step is
@@ -246,7 +289,7 @@ function StepChip({
   // for up to one system-poll interval. Force the running indicator off and
   // show the failure + ▶ instead, so the UI never says RUNNING while the
   // server says OPEN.
-  const showRunning = !!running && !autoStartError;
+  const showRunning = !!running && !autoStartError && status === 'active';
   return (
     <span className="nh-pipe__step-chip-wrap">
       {/* task-3f0c6a6abe41 (#4) — the pill ALREADY reads "running" for an
@@ -271,14 +314,14 @@ function StepChip({
         <button
           type="button"
           className="nh-pipe__step-start"
-          disabled={!startAction.enabled}
+          disabled={!startAction.enabled || !!pending}
           title={startAction.tooltip ?? 'Start this step'}
           onClick={(e) => {
             e.stopPropagation();
             onStart();
           }}
         >
-          {'▶'}
+          {pending ? '…' : '▶'}
         </button>
       )}
       {autoStartError && (
@@ -508,8 +551,23 @@ function ChainedJobSubtable({
   const { valuesByRef, childIdByDefId, childrenLoading, defs } = resolution;
   const tbReady = useTypebuildReadiness();
   const actions = useTaskActions();
+  // task-48cd46a0e2da (A#3) — the per-step ▶ Start also routes through the
+  // shared wrapper so a MANUAL step start shows pending/error, never a silent
+  // no-op (the auto-continue path keeps its own back-off error state below).
+  const manualStart = useStartAction();
   const sessions = useRunningSessions();
-  const runnableId = useMemo(() => runnableStepId(defs, valuesByRef), [defs, valuesByRef]);
+  // task-f26e7745eda6 — def id → the child's LIVE server status (from the
+  // full-roster raw Task, which is NOT stale — it tracks the system poll). The
+  // pure status-derivation now consults this so a cancelled child is excluded
+  // from runnable/next-step and rendered as 'cancelled', never 'queued'.
+  const childByDefId = useMemo<Record<string, ChildStatusLike>>(
+    () => childStatusMap(Object.entries(childIdByDefId), (id) => allTasksById.get(id)),
+    [childIdByDefId, allTasksById],
+  );
+  const runnableId = useMemo(
+    () => runnableStepId(defs, valuesByRef, childByDefId),
+    [defs, valuesByRef, childByDefId],
+  );
 
   // task-6a14190fb2f7 (#3) — terminal state. The SERVER already flips the
   // parent to 'done' once every child resolves (the chain "reads done" per
@@ -537,8 +595,8 @@ function ChainedJobSubtable({
   };
 
   const nextChildId = useMemo(
-    () => nextAutoContinueChildId(defs, valuesByRef, childIdByDefId),
-    [defs, valuesByRef, childIdByDefId],
+    () => nextAutoContinueChildId(defs, valuesByRef, childIdByDefId, childByDefId),
+    [defs, valuesByRef, childIdByDefId, childByDefId],
   );
   // Guard against double-start WHILE A LAUNCH IS IN FLIGHT: track the child id
   // we're currently awaiting a start for so a re-render (or the fast poll's
@@ -573,9 +631,9 @@ function ChainedJobSubtable({
     prevAutoOnRef.current = autoOn;
   }, [autoOn]);
 
-  // Manual ▶ from a step chip should also clear that child's back-off error
-  // (an explicit human retry). Wrap onStartChild so the button path resets the
-  // error before launching; the auto effect uses the raw callback.
+  // Manual ▶ from a step chip: clear the auto-continue back-off error for that
+  // child (an explicit human retry) AND route through the shared wrapper so the
+  // click shows pending/error and can never be silent (task-48cd46a0e2da A#3).
   const startChildManually = (childId: string) => {
     setAutoStartErrors((prev) => {
       if (!(childId in prev)) return prev;
@@ -583,7 +641,7 @@ function ChainedJobSubtable({
       delete next[childId];
       return next;
     });
-    void onStartChild(childId);
+    void manualStart.run(childId, { kind: 'start', run: () => onStartChild(childId) });
   };
 
   useEffect(() => {
@@ -661,22 +719,43 @@ function ChainedJobSubtable({
             const baseStatus = def ? taskDefStatus(def, valuesByRef) : 'pending';
             const childId = childIdByDefId[g.taskDefId];
             const child = childId ? allTasksById.get(childId) : undefined;
-            const stepError = childId ? autoStartErrors[childId] : null;
+            // task-48cd46a0e2da (A#3) — surface EITHER the auto-continue
+            // back-off error OR the manual per-step wrapper error (whichever is
+            // set) so a failed manual ▶ is never silent.
+            const stepError = childId
+              ? autoStartErrors[childId] ?? manualStart.errorFor(childId)
+              : null;
+            const stepPending = childId ? manualStart.pendingFor(childId) : false;
             const liveSession = child ? sessions.get(child.id) : undefined;
-            // task-c141c7765aa4 (#2) / task-3f0c6a6abe41 (#2) /
-            // task-6fc9e503623e (#3) — RUNNING is RE-DERIVED FROM SERVER TRUTH
-            // every render (isInProgress reads the polled server status), so it
-            // clears on its own once the server flips the child back to open.
-            // The rule: show RUNNING only when the server claim is effectively
-            // held (isInProgress) OR we hold a live local session for it — AND
-            // there's no recorded early-exit/launch failure. The `!stepError`
-            // gate is the immediate optimistic rollback: the instant the launch
-            // rejects (or the child exits within the liveness window), the
-            // recorded error forces RUNNING off, so the chip never lies RUNNING
-            // while the server says OPEN — even before the next poll lands.
+            // task-c141c7765aa4 / task-3f0c6a6abe41 / task-6fc9e503623e —
+            // "Is this step's session actually live right now?" RE-DERIVED FROM
+            // SERVER TRUTH every render: server says in_progress OR we hold a
+            // live local session — AND no recorded auto-start failure. The
+            // `!stepError` gate is the optimistic rollback: the instant a launch
+            // rejects/early-exits, this goes false so the chip never lies
+            // RUNNING while the server says OPEN, even before the next poll.
             const childRunning =
               !stepError && !!child && (isInProgress(child) || !!liveSession);
-            const status = stepDisplayStatus(baseStatus, childRunning);
+            // task-f26e7745eda6 — merge the child's AUTHORITATIVE server status:
+            // cancelled → grey 'cancelled' (excluded from runnable); failed/
+            // blocked → 'failed'; in_progress → 'active'. A cancelled/failed
+            // child reads that way regardless of output values or run signal.
+            const merged = mergeChildStatus(baseStatus, toChildStatus(child));
+            // The chip's final status. Only a still-runnable step (pending or
+            // output-partial 'active') reflects the LIVE run signal: shown as
+            // 'active' when childRunning, else demoted to the pure output-
+            // derived base (so a step with a recorded failure or no live session
+            // reads its real output progress — 'pending'/'active' — not a stale
+            // server 'in_progress'). Terminal/frozen states (done/skip/
+            // cancelled/failed) are authoritative and pass through untouched —
+            // listed POSITIVELY so a future status can't silently fall into the
+            // run-signal branch (reviewer Angle-E #3).
+            const status: MergedStepStatus =
+              merged === 'pending' || merged === 'active'
+                ? childRunning
+                  ? 'active'
+                  : baseStatus
+                : merged;
             const runnable = g.taskDefId === runnableId;
             // task-4045bcee23cb (U3a) — same actionsFor eligibility rule as the
             // row-level ▶ Start and the parent's Start-chain: never invent a
@@ -702,6 +781,7 @@ function ChainedJobSubtable({
                   onStart={() => childId && startChildManually(childId)}
                   running={childRunning}
                   autoStartError={stepError}
+                  pending={stepPending}
                 />
               </th>
             );
@@ -776,7 +856,10 @@ export function RosterTable({
   /** Parse error to show when queryMode === 'invalid'. */
   queryError?: string;
   onOpenTask: (id: string) => void;
-  onRetry: (id: string) => void;
+  /** task-48cd46a0e2da — Retry now resolves the StartOutcome too (NewHomePage's
+   *  startTask feeds both), so the shared start wrapper can show pending/error
+   *  for a Retry click instead of a silent no-op (QA round 2). */
+  onRetry: (id: string) => Promise<StartOutcome>;
   /** Launch a start-eligible task. Threaded from NewHomePage, which owns the
    *  useTaskActions().start (→ runTaskNow) call and the post-action roster
    *  refresh — the SAME mechanism the old Tasks page's play button uses.
@@ -822,6 +905,11 @@ export function RosterTable({
   const tbReady = useTypebuildReadiness();
   const sessions = useRunningSessions();
   const actions = useTaskActions();
+  // task-48cd46a0e2da — the SHARED start wrapper: EVERY start affordance in
+  // this component (row ▶ Start, parent ▶ Start-chain, per-step ▶, Retry)
+  // routes through it, so none can be silent. It owns pending/error UI keyed by
+  // the row/parent id; the RowAction renders errorFor(id) inline.
+  const startAction = useStartAction();
   const { tasks: allTasks } = useTasks({ includeDone: true });
   const openChildParentIds = useMemo(() => {
     const set = new Set<string>();
@@ -847,29 +935,71 @@ export function RosterTable({
     return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
   };
 
-  // task-4045bcee23cb (U3a #1) — "▶ Start chain": for a chained-job parent row
-  // (whose OWN primaryActionFor is 'none' per fm-bq86 — a container can't be
-  // Started while it has open children), resolve the first RUNNABLE child (in
-  // chain/dependency order, via runnableStepId — the same walk metaStatus
-  // already does) and run THAT child through primaryActionFor. Reuses the
-  // exact eligibility rule the row/step-chip Start buttons use; this is only a
-  // new entry point (parent row), never a new rule.
+  // task-f26e7745eda6 — def id → the runnable child's LIVE server status, so
+  // the chain-start walk (chainStartTarget) skips a cancelled child instead of
+  // targeting it (the round-8 silent no-op).
+  const childStatusMapFor = (
+    chainedRes: Extract<ChainedJobResolution, { status: 'chained' }>,
+  ): Record<string, ChildStatusLike> =>
+    childStatusMap(Object.entries(chainedRes.childIdByDefId), (id) => allTasksById.get(id));
+
+  // task-4045bcee23cb (U3a #1) / task-48cd46a0e2da — "▶ Start chain": for a
+  // chained-job parent row, resolve the first RUNNABLE child (chainStartTarget,
+  // which now SKIPS cancelled steps and, when nothing is runnable, returns an
+  // explicit REASON so the click is never silent). Returns one of:
+  //   - { childId, enabled, tooltip }         → a real, eligible start
+  //   - { disabled:true, reason }             → nothing to start / not eligible,
+  //                                             with a human reason to surface
+  //   - null                                  → not a chain-start row at all
+  //                                             (the parent's own Start applies)
   const chainStartFor = (
     chainedRes: Extract<ChainedJobResolution, { status: 'chained' }>,
-  ): { childId: string; enabled: boolean; tooltip?: string } | null => {
-    const stepId = runnableStepId(chainedRes.defs, chainedRes.valuesByRef);
-    if (!stepId) return null;
-    const childId = chainedRes.childIdByDefId[stepId];
-    if (!childId) return null;
-    const child = allTasksById.get(childId);
-    if (!child) return null;
+  ):
+    | { childId: string; enabled: boolean; tooltip?: string }
+    | { disabled: true; reason: string }
+    | null => {
+    const childStatus = childStatusMapFor(chainedRes);
+    const target = chainStartTarget(
+      chainedRes.defs,
+      chainedRes.valuesByRef,
+      chainedRes.childIdByDefId,
+      childStatus,
+    );
+    if (target.childId === null) {
+      // A genuinely COMPLETE chain is the calm terminal state — show no action
+      // (—), not a disabled button + warning on every finished row. But a chain
+      // that's stuck because its remaining step is CANCELLED (or still loading)
+      // IS actionable news: surface the disabled button + reason so the click
+      // isn't silent and the user knows to reopen the step.
+      if (/complete/i.test(target.reason)) return null;
+      return { disabled: true, reason: target.reason };
+    }
+    const child = allTasksById.get(target.childId);
+    if (!child) return { disabled: true, reason: 'the next step is still loading' };
     const pa = primaryActionFor(child, {
       caps: actions.caps(child),
       tbReady,
       myEmail: tbReady.email,
-      session: sessions.get(childId),
+      session: sessions.get(target.childId),
     });
-    return pa.kind === 'start' ? { childId, enabled: pa.enabled, tooltip: pa.tooltip } : null;
+    if (pa.kind === 'start') {
+      return { childId: target.childId, enabled: pa.enabled, tooltip: pa.tooltip };
+    }
+    // The runnable child exists but isn't a fresh Start right now. If it's
+    // already RUNNING/claimed (open-session, or an in-progress note), that's the
+    // normal in-flight state — the subtable's own step chip conveys it, so the
+    // parent row stays calm (no button).
+    if (pa.kind === 'open-session') return null;
+    // task-48cd46a0e2da (A#1) — a BLOCKED next step resolves to 'reopen', not
+    // 'start'. That's actionable: tell the user to open the step and reopen it,
+    // rather than the generic (and wrong) "can't be started right now".
+    if (pa.kind === 'reopen') {
+      return { disabled: true, reason: `${target.stepName} is blocked — open it to reopen/continue` };
+    }
+    const note = pa.kind === 'none' ? pa.note ?? '' : '';
+    if (/in progress|claimed/i.test(note)) return null;
+    const reason = note ? `${target.stepName}: ${note}` : `${target.stepName}: can’t be started right now`;
+    return { disabled: true, reason };
   };
 
   // ── chained-job detection (task-b1fa5098da3e, R3) ─────────────────────────
@@ -1108,10 +1238,24 @@ export function RosterTable({
                       <RowAction
                         task={t}
                         onOpenTask={onOpenTask}
-                        onRetry={onRetry}
-                        onStart={onStart}
-                        startAction={startActionFor(t)}
+                        onRetry={(id) => {
+                          // Route Retry through the shared wrapper too — a Retry
+                          // that silently no-ops was QA round-2's defect.
+                          void startAction.run(id, { kind: 'start', run: () => onRetry(id) });
+                        }}
+                        onStart={(id) => {
+                          void startAction.run(id, { kind: 'start', run: () => onStart(id) });
+                        }}
+                        startEligible={startActionFor(t)}
                         chainStart={chainedRes ? chainStartFor(chainedRes) : null}
+                        onChainStart={(childId) => {
+                          // Key the pending/error on the PARENT row id (t.id),
+                          // but launch the CHILD — so the parent row shows the
+                          // pending/error for its own ▶ Start chain click.
+                          void startAction.run(t.id, { kind: 'start', run: () => onStart(childId) });
+                        }}
+                        pending={startAction.pendingFor(t.id)}
+                        error={startAction.errorFor(t.id)}
                       />
                     </td>
                   </tr>
