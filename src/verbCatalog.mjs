@@ -69,6 +69,7 @@ export const VERB_CATALOG = [
   { id: 'create', label: 'Create', category: 'Files', inMenu: false, help: 'new folder / new file' },
   { id: 'note', label: 'New note', category: 'Files', menuLabel: 'New Note', help: 'new date-named markdown note in the breeze notes folder' },
   { id: 'notes', label: 'Notes folder', category: 'Files', menuLabel: 'Notes Folder', help: 'jump to the breeze notes folder' },
+  { id: 'screenshots', label: 'Screenshots folder', category: 'Files', menuLabel: 'Screenshots Folder', help: 'jump to the folder where full-page screenshot PDFs are saved' },
   { id: 'compress', label: 'Compress', category: 'Files', menuLabel: 'Compress…', help: 'zip a selection' },
   { id: 'extract', label: 'Extract', category: 'Files', help: 'expand an archive' },
 

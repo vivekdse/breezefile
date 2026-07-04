@@ -188,7 +188,8 @@ type Verb =
   | 'sidebyside'
   | 'settings'
   | 'note'
-  | 'notes';
+  | 'notes'
+  | 'screenshots';
 
 type Option = {
   id: string;
@@ -2333,6 +2334,30 @@ export const VERBS: VerbDef[] = [
       }
     },
   },
+  // task-4e22942023cb — `:screenshots` opens ~/.breezefile/screenshots (where the
+  // full-page-screenshot→PDF button drops its PDFs) as a file-manager tab, so the
+  // user browses them without knowing the on-disk path. Mirrors `:notes`.
+  {
+    id: 'screenshots',
+    availableInTaskMode: true,
+    label: 'Screenshots folder',
+    aliases: ['screenshots', 'screenshot folder', 'browse screenshots', 'goto screenshots', 'show screenshots', 'open screenshots', 'pdfs'],
+    icon: '🖼',
+    describe: () => 'Open the screenshots (PDF) folder',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: async (c, _picks, api) => {
+      try {
+        const dir = await ensureScreenshotsDir(c.homedir);
+        api.navigateTo(dir);
+      } catch (err) {
+        api.dispatch({
+          type: 'setStatus',
+          msg: `open screenshots failed: ${(err as Error).message ?? String(err)}`,
+        });
+      }
+    },
+  },
   {
     id: 'showHidden',
     availableInTaskMode: false,
@@ -3365,6 +3390,41 @@ export function notesDirFor(home: string): string {
 
 export function isDefaultNoteName(name: string): boolean {
   return /^\d{4}-\d{2}-\d{2}-\d+\.md$/.test(name);
+}
+
+// task-4e22942023cb — the full-page-screenshot→PDF button in BrowserSurface
+// writes into ~/.breezefile/screenshots (see electron/browser/screenshot-pdf.ts,
+// SCREENSHOTS_DIR = os.homedir()/.breezefile/screenshots). The `:screenshots`
+// verb opens that same folder as a file-manager tab so the user never needs to
+// know the on-disk path. Keep this subdir in sync with SCREENSHOTS_DIR there.
+export const SCREENSHOTS_SUBDIR = '.breezefile/screenshots';
+
+export function screenshotsDirFor(home: string): string {
+  return `${home}/${SCREENSHOTS_SUBDIR}`;
+}
+
+async function ensureScreenshotsDir(home: string): Promise<string> {
+  const dir = screenshotsDirFor(home);
+  try {
+    const st = await fm.stat(dir);
+    if (st.isDir) return dir;
+  } catch {
+    // not present — fall through and create it
+  }
+  try {
+    await fm.mkdir(dir);
+  } catch (err) {
+    // Race / pre-existing: re-stat resolves the ambiguity (mirrors
+    // ensureNotesDir). If it's there now, proceed; otherwise surface the error.
+    try {
+      const st = await fm.stat(dir);
+      if (st.isDir) return dir;
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+  return dir;
 }
 
 async function ensureNotesDir(home: string): Promise<string> {

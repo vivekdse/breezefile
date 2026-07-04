@@ -151,6 +151,7 @@ const SLIDES: Slide[] = [
       { name: 'create', chord: 'F7 or :touch', what: 'new folder / new file' },
       { name: 'note', chord: ':note', what: 'new date-named markdown note in ~/.breezefile/breeze notes — first `# heading` becomes the filename on save' },
       { name: 'notes', chord: ':notes', what: 'jump to the breeze notes folder' },
+      { name: 'screenshots', chord: ':screenshots', what: 'open the ~/.breezefile/screenshots folder — where the full-page screenshot→PDF button (next to Record) saves its PDFs — as a file-manager tab' },
       { name: 'duplicate', what: 'right-click → Duplicate' },
     ],
     // Registry-backed Selection verbs. The curated rows above already cover
@@ -192,7 +193,7 @@ const SLIDES: Slide[] = [
       covers: [
         'open', 'open-with', 'edit', 'open-editor', 'editor-save',
         'editor-revert', 'editor-close', 'reveal', 'rename', 'create',
-        'note', 'notes', 'compress', 'extract',
+        'note', 'notes', 'screenshots', 'compress', 'extract',
       ],
     },
   },
