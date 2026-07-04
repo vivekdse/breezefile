@@ -17,6 +17,9 @@ import {
   taskDefStatus,
   metaStatus,
   aggregateInputs,
+  normalizeFieldKey,
+  isValidFieldKey,
+  effectiveFieldKey,
 } from '../src/components/newhome/taskSchema.mjs';
 
 // ── fieldRef ───────────────────────────────────────────────────────────────
@@ -490,4 +493,102 @@ test('aggregateInputs skips task-defs with no inputs and handles an empty/undefi
   );
   assert.deepEqual(aggregateInputs([]), []);
   assert.deepEqual(aggregateInputs(undefined), []);
+});
+
+// ── field key normalization (task-f9a723379aa8) ─────────────────────────────
+// USER REPRO: a composer input field labeled "News site url" with a typed
+// value ("test") produced a created task with data_keys: [] — the input
+// VALUE never reached the server data bag, even though output_schema landed
+// fine. Root cause: the composer's save-assembly used the field's raw,
+// un-normalized `key` (which can contain spaces/uppercase straight from a
+// label-derived or user-typed string) to key the `data` map, with no
+// validation catching a malformed key before send. These tests guard the
+// normalization contract the fix relies on.
+
+test('normalizeFieldKey lowercases, trims, and collapses invalid runs to underscores', () => {
+  assert.equal(normalizeFieldKey('News site url'), 'news_site_url');
+  assert.equal(normalizeFieldKey('  Customer Name  '), 'customer_name');
+  assert.equal(normalizeFieldKey('patient.ssn'), 'patient.ssn');
+  assert.equal(normalizeFieldKey('already-valid_key.1'), 'already-valid_key.1');
+  assert.equal(normalizeFieldKey(''), '');
+  assert.equal(normalizeFieldKey(undefined), '');
+  assert.equal(normalizeFieldKey(null), '');
+  // all-invalid-character input (e.g. just punctuation/emoji) trims to ''
+  assert.equal(normalizeFieldKey('!!!'), '');
+});
+
+test('isValidFieldKey normalizes-then-checks (mirrors taskDataInputs.mjs), and rejects all-invalid input', () => {
+  assert.equal(isValidFieldKey('news_site_url'), true);
+  assert.equal(isValidFieldKey('patient.ssn'), true);
+  // "News site url" normalizes to 'news_site_url', which IS well-formed —
+  // isValidFieldKey checks the NORMALIZED shape, same contract as
+  // normalizeDataKey/isValidDataKey in taskDataInputs.mjs.
+  assert.equal(isValidFieldKey('News site url'), true);
+  assert.equal(isValidFieldKey(''), false);
+  assert.equal(isValidFieldKey('!!!'), false); // nothing survives normalization
+});
+
+test('effectiveFieldKey normalizes a typed key when present', () => {
+  const field = { key: 'News site url', label: 'News site URL', type: 'text' };
+  assert.equal(effectiveFieldKey(field), 'news_site_url');
+});
+
+test('effectiveFieldKey derives from label when key is blank', () => {
+  const field = { key: '', label: 'News site url', type: 'text' };
+  assert.equal(effectiveFieldKey(field), 'news_site_url');
+});
+
+test('effectiveFieldKey is "" when neither key nor label yields anything valid', () => {
+  assert.equal(effectiveFieldKey({ key: '', label: '', type: 'text' }), '');
+  assert.equal(effectiveFieldKey({ key: '   ', label: '!!!', type: 'text' }), '');
+  assert.equal(effectiveFieldKey(null), '');
+  assert.equal(effectiveFieldKey(undefined), '');
+});
+
+// ── composer save-assembly regression guard ────────────────────────────────
+// Reconstructs TaskComposer.tsx's dataForSave-building loop (the fix) from
+// field defs + typed answers, without importing React. Proves the exact
+// repro shape — a spaces/uppercase label field with a filled value — now
+// lands in the assembled `data` map under the normalized key, matching what
+// get_task's data_keys / resolve should show server-side.
+function buildDataForSave(taskInputs, templateValues) {
+  const inputVals = {};
+  for (const f of taskInputs) {
+    const key = effectiveFieldKey(f);
+    if (!key) continue;
+    const v = templateValues[fieldRef('task', f.key)] ?? '';
+    if (v !== '') inputVals[key] = v;
+  }
+  return Object.keys(inputVals).length > 0 ? inputVals : undefined;
+}
+
+test('composer save-assembly: "News site url" input with a value populates data under the normalized key (task-f9a723379aa8 regression guard)', () => {
+  const taskInputs = [
+    { key: 'News site url', label: 'News site url', type: 'text' },
+    { key: 'Headline count', label: 'Headline count', type: 'number' },
+  ];
+  const templateValues = {
+    [fieldRef('task', 'News site url')]: 'FAKE_VALUE_not_a_real_url',
+    [fieldRef('task', 'Headline count')]: '2',
+  };
+  const data = buildDataForSave(taskInputs, templateValues);
+  assert.deepEqual(data, {
+    news_site_url: 'FAKE_VALUE_not_a_real_url',
+    headline_count: '2',
+  });
+  // Never silently drop: both fields' keys land, not an empty bag.
+  assert.equal(Object.keys(data).length, 2);
+});
+
+test('composer save-assembly: a key-blank, label-only field still saves under the label-derived key', () => {
+  const taskInputs = [{ key: '', label: 'News site url', type: 'text' }];
+  const templateValues = { [fieldRef('task', '')]: 'FAKE_VALUE' };
+  const data = buildDataForSave(taskInputs, templateValues);
+  assert.deepEqual(data, { news_site_url: 'FAKE_VALUE' });
+});
+
+test('composer save-assembly: an empty field (no key, no label, no value) contributes nothing', () => {
+  const taskInputs = [{ key: '', label: '', type: 'text' }];
+  const templateValues = {};
+  assert.equal(buildDataForSave(taskInputs, templateValues), undefined);
 });

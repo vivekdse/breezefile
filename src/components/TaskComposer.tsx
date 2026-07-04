@@ -60,6 +60,7 @@ import type { TaskDef, TaskDefCondition, TaskDefField } from './newhome/types';
 import { instantiateTemplate } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
+  effectiveFieldKey,
   fieldRef,
   parseTaskTemplateBlock,
 } from './newhome/taskSchema.mjs';
@@ -2096,6 +2097,23 @@ export function TaskComposer(props: Props) {
       setTimeout(() => startDateRef.current?.focus(), 0);
       return { ok: false, error: msg };
     }
+    // task-f9a723379aa8 — a plain task's input field can have a typed VALUE
+    // but no key that normalizes to the server's [a-z0-9._-]+ convention (e.g.
+    // both key and label left as "News site url" — no letters/digits survive
+    // a bad normalization). NEVER silently drop a filled value: block save
+    // and send the user back to the offending field instead of creating a
+    // task whose data bag is silently missing it.
+    if (hasChainOption && templateChoice === 'blank') {
+      for (const f of taskInputs) {
+        const v = templateValues[fieldRef('task', f.key)] ?? '';
+        if (v !== '' && !effectiveFieldKey(f)) {
+          const msg = `"${f.label || f.key || 'this input'}" needs a valid key (letters, numbers, ., _, or - only) before it can be saved.`;
+          setError(msg);
+          setActiveIdx(QUESTIONS.indexOf(fieldQId('task', f.key)));
+          return { ok: false, error: msg };
+        }
+      }
+    }
     setBusy(true);
     setError(null);
     try {
@@ -2162,15 +2180,29 @@ export function TaskComposer(props: Props) {
       if (hasChainOption && templateChoice === 'blank') {
         const inputVals: Record<string, string> = {};
         for (const f of taskInputs) {
-          if (!f.key) continue;
+          // task-f9a723379aa8 — key the VALUE by the same normalized key the
+          // field is defined under (effectiveFieldKey: the typed key,
+          // normalized, falling back to a normalized label). The pre-save
+          // validation above already blocks any filled-but-unkeyable field,
+          // so an empty effectiveFieldKey here only happens for an EMPTY
+          // field (no key, no label, no value) — safe to skip.
+          const key = effectiveFieldKey(f);
+          if (!key) continue;
           const v = templateValues[fieldRef('task', f.key)] ?? '';
-          if (v !== '') inputVals[f.key] = v;
+          if (v !== '') inputVals[key] = v;
         }
         if (Object.keys(inputVals).length > 0) {
           dataForSave = inputVals;
         }
         if (taskOutputs.length > 0) {
-          outputSchemaForSave = taskOutputs;
+          // Output field keys ride output_schema verbatim (they're NON-PHI
+          // config the agent's submit_task_result matches against, not data-
+          // bag keys), but normalize them the same way so a malformed output
+          // key can't silently mismatch what the agent submits either.
+          outputSchemaForSave = taskOutputs.map((f) => ({
+            ...f,
+            key: effectiveFieldKey(f) || f.key,
+          }));
         }
       }
       const startOpt = START_OPTIONS.find((s) => s.id === startId);

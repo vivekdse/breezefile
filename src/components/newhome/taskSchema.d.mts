@@ -43,6 +43,14 @@ export type MetaStatus = 'done' | 'active' | 'pending';
 
 export function fieldRef(taskDefId: string, key: string): string;
 
+// task-f9a723379aa8 — field-key normalization (see taskSchema.mjs for the
+// full contract). `effectiveFieldKey` is what the composer's save path and
+// field-definition editor must BOTH use so a value's key always matches its
+// field's key.
+export function normalizeFieldKey(raw: unknown): string;
+export function isValidFieldKey(raw: unknown): boolean;
+export function effectiveFieldKey(field: Pick<TaskDefField, 'key' | 'label'> | null | undefined): string;
+
 export function buildTaskFieldsBlock(
   templateId: string,
   taskDefId: string,

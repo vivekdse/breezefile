@@ -35,6 +35,52 @@ export function fieldRef(taskDefId, key) {
   return `${taskDefId}.${key}`;
 }
 
+// task-f9a723379aa8 — server data-bag key convention (same one enforced by
+// src/components/tasks/taskDataInputs.mjs's KEY_RE): dotted lowercase,
+// [a-z0-9._-]+. A composer field's `key` is free-typed by the user (or left
+// blank, deriving from `label`); it MUST be normalized to this shape before
+// it's used to write into the server's `data` map, or a label like "News
+// site url" silently produces an unkeyable field and the typed VALUE is
+// dropped at save (task-f9a723379aa8's repro). Centralized here so the
+// field-definition editor (what key a field is SAVED under) and the
+// value-assembly save path (what key a VALUE is written under) can never
+// drift apart.
+const FIELD_KEY_RE = /^[a-z0-9._-]+$/;
+
+/** Slugify a free-typed field key OR label into the server's dotted-lowercase
+ *  key convention: lowercase, spaces/invalid runs collapsed to single
+ *  underscores, leading/trailing underscores trimmed. Never throws; empty or
+ *  all-invalid input normalizes to ''. NON-PHI (field key/label are
+ *  configuration, not values). */
+export function normalizeFieldKey(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+/** Whether a (already-normalized-or-not) field key is well-formed per the
+ *  server's convention. Empty string is never valid. */
+export function isValidFieldKey(raw) {
+  const key = normalizeFieldKey(raw);
+  return key.length > 0 && FIELD_KEY_RE.test(key);
+}
+
+/** The key a field definition should actually be SAVED/keyed under: the
+ *  field's own `key` if the user typed one (normalized), otherwise derived
+ *  from its `label` (normalized) so leaving the tiny "key" box blank — easy
+ *  to do, since the question flow shows the LABEL, not the key — still
+ *  produces a well-formed, deterministic key instead of silently dropping
+ *  the field's value at save. Returns '' if neither yields a valid key. */
+export function effectiveFieldKey(field) {
+  if (!field) return '';
+  const fromKey = normalizeFieldKey(field.key);
+  if (fromKey) return fromKey;
+  return normalizeFieldKey(field.label);
+}
+
 // ── Fenced-block find/parse plumbing ─────────────────────────────────────
 
 /** Find the first ```<tag> ... ``` fenced block in `body` and JSON.parse its
