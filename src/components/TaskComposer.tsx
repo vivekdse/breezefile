@@ -62,6 +62,7 @@ import {
   aggregateInputs,
   effectiveFieldKey,
   fieldRef,
+  inferFieldsFromProse,
   parseTaskTemplateBlock,
 } from './newhome/taskSchema.mjs';
 import './TaskComposer.css';
@@ -81,6 +82,15 @@ export type TaskComposerRequest =
        *  still reviews/edits/submits through this same form. */
       initialTitle?: string;
       initialNotes?: string;
+      /** task-fe8c822c3838 — copilot parity: when the copilot already
+       *  parsed input/output intent out of the conversational prose (via
+       *  inferFieldsFromProse, the SAME parser the composer's own
+       *  "Structure these fields?" banner uses), pre-fill the plain task's
+       *  field-definition step with them so the human doesn't have to
+       *  re-type what they already said in chat. Still just a prefill — the
+       *  human reviews/edits/removes through the normal fields step. */
+      initialInputs?: TaskDefField[];
+      initialOutputs?: TaskDefField[];
       /** Open directly as a CHAINED task (the "+ New Chained Task" entry
        *  point) — pre-picks the Task/Chained-task question so the chain
        *  builder is the next step. Same form either way; the user can still
@@ -1649,8 +1659,12 @@ export function TaskComposer(props: Props) {
   // task-def with the literal id 'task'. No neededWhen here (that's chain-
   // only). Definitions (key/label/type/options/required) are NON-PHI; the
   // later typed VALUES ride templateValues (PHI, body-only, same as a chain).
-  const [taskInputs, setTaskInputs] = useState<TaskDefField[]>([]);
-  const [taskOutputs, setTaskOutputs] = useState<TaskDefField[]>([]);
+  const [taskInputs, setTaskInputs] = useState<TaskDefField[]>(
+    (props.mode === 'create' && props.initialInputs) || [],
+  );
+  const [taskOutputs, setTaskOutputs] = useState<TaskDefField[]>(
+    (props.mode === 'create' && props.initialOutputs) || [],
+  );
   function taskFieldSetter(kind: 'inputs' | 'outputs') {
     return kind === 'inputs' ? setTaskInputs : setTaskOutputs;
   }
@@ -1669,6 +1683,41 @@ export function TaskComposer(props: Props) {
     () => ({ id: 'task', name: title.trim() || 'Task', inputs: taskInputs, outputs: taskOutputs }),
     [title, taskInputs, taskOutputs],
   );
+
+  // task-fe8c822c3838 — a user typing "Input: X / Output: Y" as PROSE in
+  // notes gets NO structured fields today (data_keys:[]/output_schema:[]),
+  // so an agent working the task has nothing to read and no output
+  // contract — it stalls (task-22fdf07763ee). Lift that prose into a
+  // one-tap, NON-DESTRUCTIVE suggestion: never rewrites notes, only offers
+  // to also populate the plain task's own input/output field definitions
+  // (taskInputs/taskOutputs above) from what was parsed. Only offered for a
+  // fresh TypeBuild plain-task create with no fields defined yet — an edit,
+  // a chain, or a task that already has fields never sees it (nothing to
+  // usefully suggest, or the human already structured it deliberately).
+  const proseSuggestion = useMemo(
+    () => inferFieldsFromProse(notes),
+    [notes],
+  );
+  const showProseSuggestion =
+    hasChainOption &&
+    templateChoice === 'blank' &&
+    taskInputs.length === 0 &&
+    taskOutputs.length === 0 &&
+    (proseSuggestion.inputs.length > 0 || proseSuggestion.outputs.length > 0);
+  const [dismissedProseSuggestionFor, setDismissedProseSuggestionFor] = useState<string | null>(null);
+  const proseSuggestionVisible = showProseSuggestion && dismissedProseSuggestionFor !== notes;
+  function acceptProseSuggestion() {
+    if (proseSuggestion.inputs.length > 0) {
+      setTaskInputs((prev) => [...prev, ...proseSuggestion.inputs]);
+    }
+    if (proseSuggestion.outputs.length > 0) {
+      setTaskOutputs((prev) => [...prev, ...proseSuggestion.outputs]);
+    }
+    setDismissedProseSuggestionFor(notes);
+  }
+  function dismissProseSuggestion() {
+    setDismissedProseSuggestionFor(notes);
+  }
 
   // Whichever defs currently drive the aggregated field/outputs questions: the
   // chain when "Chained task" is picked, else the single plain-task def.
@@ -4546,6 +4595,48 @@ export function TaskComposer(props: Props) {
                 {executor === 'claude' && (
                   <div className="composer__notes-help">
                     Sent to Claude as the task’s context — TypeBuild wraps the title, folder, and due date around what you write here.
+                  </div>
+                )}
+                {proseSuggestionVisible && (
+                  <div className="composer__prose-suggestion" onClick={(e) => e.stopPropagation()}>
+                    <div className="composer__prose-suggestion-text">
+                      Structure these fields?{' '}
+                      {proseSuggestion.inputs.length > 0 && (
+                        <span>
+                          Input{proseSuggestion.inputs.length > 1 ? 's' : ''}:{' '}
+                          {proseSuggestion.inputs.map((f) => f.label).join(', ')}
+                        </span>
+                      )}
+                      {proseSuggestion.inputs.length > 0 && proseSuggestion.outputs.length > 0 ? ' — ' : ''}
+                      {proseSuggestion.outputs.length > 0 && (
+                        <span>
+                          Output{proseSuggestion.outputs.length > 1 ? 's' : ''}:{' '}
+                          {proseSuggestion.outputs.map((f) => f.label).join(', ')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="composer__prose-suggestion-actions">
+                      <button
+                        type="button"
+                        className="composer__prose-suggestion-accept"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          acceptProseSuggestion();
+                        }}
+                      >
+                        Structure these fields
+                      </button>
+                      <button
+                        type="button"
+                        className="composer__prose-suggestion-dismiss"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismissProseSuggestion();
+                        }}
+                      >
+                        Keep as text
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

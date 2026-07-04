@@ -431,6 +431,46 @@
   margin-top: -4px;
 }
 
+/* task-fe8c822c3838 — "Structure these fields?" one-tap suggestion, offered
+   when prose in notes reads like it declares input/output intent (e.g.
+   "Input: X / Output: Y") but the task has no fields defined yet. Never
+   auto-applied — Accept/Keep-as-text are equally weighted actions. */
+.composer__prose-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-soft, rgba(127, 212, 199, 0.35));
+  background: var(--accent-soft, rgba(127, 212, 199, 0.08));
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.composer__prose-suggestion-text { color: var(--fg); }
+.composer__prose-suggestion-actions {
+  display: flex;
+  gap: 8px;
+}
+.composer__prose-suggestion-accept,
+.composer__prose-suggestion-dismiss {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.composer__prose-suggestion-accept {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast, #04201c);
+  font-weight: 600;
+}
+.composer__prose-suggestion-dismiss {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+
 /* ── Footer ────────────────────────────────────────────────────────── */
 
 .composer__footer {

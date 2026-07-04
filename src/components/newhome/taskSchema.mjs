@@ -81,6 +81,133 @@ export function effectiveFieldKey(field) {
   return normalizeFieldKey(field.label);
 }
 
+// ── Prose → structured fields (task-fe8c822c3838) ────────────────────────
+//
+// task-fe8c822c3838 — a user typing "Input: Site name (or URL) / Output:
+// First headline from the site" as PLAIN PROSE in the task body/notes gets
+// NO structured fields (data_keys:[], output_schema:[]) today, so an agent
+// working the task has no input to read and no output contract to fill —
+// it stalls. This function LIFTS that prose into candidate field
+// definitions so the composer/copilot can OFFER to structure them (a
+// suggestion, never a silent rewrite — the caller decides whether to accept
+// and the original prose is left untouched either way).
+//
+// Recognized per-line patterns (case-insensitive, leading list markers like
+// "- "/"* "/"1. " stripped first):
+//   Input: <label>        Inputs: <label>
+//   Output: <label>       Outputs: <label>
+//   needs <label>         (verb form — "needs a site name")
+//   produces <label>      (verb form — "produces a headline")
+// One field per matched line. A line may also pack an Input and an Output
+// together separated by " / " (tolerated defensively, even though the
+// task-22fdf07763ee repro already has each on its own line) — see
+// splitProseLines. Comma-separated multi-field lines (e.g. "Inputs: A, B")
+// are treated as a SINGLE field with that combined label — out of scope for
+// this pass; each field on its own line is the supported/expected form.
+//
+// Each match becomes a field DEFINITION (key/label/type) — NON-PHI
+// configuration, same discipline as the rest of this module. `key` comes
+// from normalizeFieldKey(label) (via effectiveFieldKey at call sites).
+// `type` is always 'text' — the ONLY types a TaskDefField may carry are
+// 'text'|'number'|'date'|'select'|'bool' (types.ts, isTaskDefFieldLike); a
+// URL is still free text to the schema, so a URL-flavored label (mentions
+// "url"/"link"/"website") is surfaced via `urlHint: true` instead of an
+// invalid 'url' type — callers may use that hint for a nicer placeholder/
+// validation, but the field's `type` itself always round-trips through the
+// composer's existing text-field machinery unchanged. Malformed/empty
+// matches are dropped; if nothing usable is found for a side, that side
+// comes back as an empty array — never throws, never returns a partially-
+// garbage field.
+
+const INPUT_LABEL_RE = /^(?:inputs?|needs?)\s*:?\s+(.*)$/i;
+const OUTPUT_LABEL_RE = /^(?:outputs?|produces?)\s*:?\s+(.*)$/i;
+const LEADING_MARKER_RE = /^\s*(?:[-*•]|\d+[.)])\s+/;
+const URL_HINT_RE = /\b(url|link|website|site)\b/i;
+
+/** Split a raw prose line into candidate label segments: primarily by real
+ *  newlines (the caller already does this via .split), but also tolerate a
+ *  " / " separator some users type on one line to pack "Input: X / Output:
+ *  Y" together (verbatim task-22fdf07763ee style, tolerated defensively even
+ *  though that repro's body already has each on its own line). */
+function splitProseLines(body) {
+  return body
+    .split(/\r?\n/)
+    .flatMap((line) => line.split(/\s+\/\s+(?=(?:input|output)s?\s*:)/i));
+}
+
+// Keys are derived from a SHORTENED form of the label — parentheticals
+// dropped ("Site name (or URL)" → "Site name") and capped to the first few
+// words ("First headline from the site" → "First headline") — so a verbose
+// label still yields a short, stable key. The label itself (shown to the
+// user) is kept in full.
+const PARENTHETICAL_RE = /\s*\([^)]*\)/g;
+const KEY_SOURCE_WORD_CAP = 2;
+const KEY_STOPWORDS = new Set(['from', 'the', 'of', 'on', 'in', 'a', 'an', 'to', 'for']);
+
+function keySourceFromLabel(label) {
+  const stripped = label.replace(PARENTHETICAL_RE, '').trim();
+  const words = stripped.split(/\s+/).filter((w) => w && !KEY_STOPWORDS.has(w.toLowerCase()));
+  return words.slice(0, KEY_SOURCE_WORD_CAP).join(' ') || stripped;
+}
+
+/** Build one field definition from a matched label, or null if the label is
+ *  empty/garbage (whitespace-only, or normalizes to no usable key). `type`
+ *  is always 'text' (the only schema-valid type free-typed prose can imply);
+ *  a URL-flavored label additionally sets `urlHint: true` for callers that
+ *  want to tailor the input UI, without inventing an invalid field type. */
+function fieldFromLabel(label) {
+  const trimmed = (label ?? '').trim().replace(/[.;]+$/, '');
+  if (!trimmed) return null;
+  const key = normalizeFieldKey(keySourceFromLabel(trimmed));
+  if (!key) return null;
+  const field = { key, label: trimmed, type: 'text' };
+  if (URL_HINT_RE.test(trimmed)) field.urlHint = true;
+  return field;
+}
+
+/** Parse free-text task prose for input/output intent and return candidate
+ *  field DEFINITIONS — never values. Pure, fail-soft: any input that isn't a
+ *  non-empty string, or that yields no usable fields on either side, returns
+ *  `{ inputs: [], outputs: [] }` (never throws; never offers an empty/no-op
+ *  structuring on its own — callers should treat both-empty as "no
+ *  suggestion"). Keys are normalized (normalizeFieldKey) and deduped by key,
+ *  first occurrence wins, within each side independently. */
+export function inferFieldsFromProse(body) {
+  const empty = { inputs: [], outputs: [] };
+  if (typeof body !== 'string' || !body.trim()) return empty;
+
+  const inputs = [];
+  const outputs = [];
+  const seenInputKeys = new Set();
+  const seenOutputKeys = new Set();
+
+  for (const rawLine of splitProseLines(body)) {
+    const line = rawLine.replace(LEADING_MARKER_RE, '').trim();
+    if (!line) continue;
+
+    const inputMatch = INPUT_LABEL_RE.exec(line);
+    if (inputMatch) {
+      const field = fieldFromLabel(inputMatch[1]);
+      if (field && !seenInputKeys.has(field.key)) {
+        seenInputKeys.add(field.key);
+        inputs.push(field);
+      }
+      continue;
+    }
+
+    const outputMatch = OUTPUT_LABEL_RE.exec(line);
+    if (outputMatch) {
+      const field = fieldFromLabel(outputMatch[1]);
+      if (field && !seenOutputKeys.has(field.key)) {
+        seenOutputKeys.add(field.key);
+        outputs.push(field);
+      }
+    }
+  }
+
+  return { inputs, outputs };
+}
+
 // ── Fenced-block find/parse plumbing ─────────────────────────────────────
 
 /** Find the first ```<tag> ... ``` fenced block in `body` and JSON.parse its

@@ -20,6 +20,7 @@ import {
   normalizeFieldKey,
   isValidFieldKey,
   effectiveFieldKey,
+  inferFieldsFromProse,
 } from '../src/components/newhome/taskSchema.mjs';
 
 // ── fieldRef ───────────────────────────────────────────────────────────────
@@ -591,4 +592,98 @@ test('composer save-assembly: an empty field (no key, no label, no value) contri
   const taskInputs = [{ key: '', label: '', type: 'text' }];
   const templateValues = {};
   assert.equal(buildDataForSave(taskInputs, templateValues), undefined);
+});
+
+// ── inferFieldsFromProse (task-fe8c822c3838) ──────────────────────────────
+
+test('inferFieldsFromProse: task-22fdf07763ee acceptance case — "Input:"/"Output:" on their own lines', () => {
+  const body = 'Input: Site name (or URL)\nOutput: First headline from the site';
+  const { inputs, outputs } = inferFieldsFromProse(body);
+  assert.equal(inputs.length, 1);
+  assert.equal(outputs.length, 1);
+  assert.equal(inputs[0].key, 'site_name');
+  assert.equal(inputs[0].label, 'Site name (or URL)');
+  assert.equal(inputs[0].type, 'text');
+  assert.equal(inputs[0].urlHint, true);
+  assert.equal(outputs[0].key, 'first_headline');
+  assert.equal(outputs[0].label, 'First headline from the site');
+});
+
+test('inferFieldsFromProse: plural "Inputs:"/"Outputs:" headers are recognized', () => {
+  const { inputs, outputs } = inferFieldsFromProse('Inputs: Customer name\nOutputs: Summary of the call');
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].key, 'customer_name');
+  assert.equal(outputs.length, 1);
+  assert.equal(outputs[0].label, 'Summary of the call');
+});
+
+test('inferFieldsFromProse: bulleted "- Input: X" lines are recognized (leading marker stripped)', () => {
+  const { inputs } = inferFieldsFromProse('- Input: Company website\n* Input: Contact email\n1. Input: Region');
+  assert.equal(inputs.length, 3);
+  assert.deepEqual(inputs.map((f) => f.key), ['company_website', 'contact_email', 'region']);
+});
+
+test('inferFieldsFromProse: verb forms "needs ..." / "produces ..." are recognized (line-leading)', () => {
+  const { inputs, outputs } = inferFieldsFromProse(
+    'needs a customer email address.\nproduces a summary of the call.',
+  );
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].label, 'a customer email address');
+  assert.equal(outputs.length, 1);
+  assert.equal(outputs[0].label, 'a summary of the call');
+});
+
+test('inferFieldsFromProse: a slash-packed single line ("Input: X / Output: Y") is split into both sides', () => {
+  const { inputs, outputs } = inferFieldsFromProse('Input: Site name / Output: First headline');
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].key, 'site_name');
+  assert.equal(outputs.length, 1);
+  assert.equal(outputs[0].key, 'first_headline');
+});
+
+test('inferFieldsFromProse: URL-flavored label stays type "text" (only schema-valid type) but sets urlHint', () => {
+  const { inputs } = inferFieldsFromProse('Input: Company website URL');
+  assert.equal(inputs[0].type, 'text');
+  assert.equal(inputs[0].urlHint, true);
+});
+
+test('inferFieldsFromProse: plain (non-URL) label defaults to type "text" with no urlHint', () => {
+  const { inputs } = inferFieldsFromProse('Input: Customer name');
+  assert.equal(inputs[0].type, 'text');
+  assert.equal(inputs[0].urlHint, undefined);
+});
+
+test('inferFieldsFromProse: dedupes repeated inputs by normalized key, first occurrence wins', () => {
+  const { inputs } = inferFieldsFromProse('Input: Customer Name\nInput: customer name\nInput: Customer  Name!!');
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0].key, 'customer_name');
+  assert.equal(inputs[0].label, 'Customer Name');
+});
+
+test('inferFieldsFromProse: plain prose with no input/output intent yields no suggestion', () => {
+  assert.deepEqual(inferFieldsFromProse('Just some notes about this task, nothing structured here.'), {
+    inputs: [],
+    outputs: [],
+  });
+});
+
+test('inferFieldsFromProse: empty/whitespace-only/non-string body yields no suggestion (never throws)', () => {
+  assert.deepEqual(inferFieldsFromProse(''), { inputs: [], outputs: [] });
+  assert.deepEqual(inferFieldsFromProse('   \n  '), { inputs: [], outputs: [] });
+  assert.deepEqual(inferFieldsFromProse(null), { inputs: [], outputs: [] });
+  assert.deepEqual(inferFieldsFromProse(undefined), { inputs: [], outputs: [] });
+  assert.deepEqual(inferFieldsFromProse(42), { inputs: [], outputs: [] });
+});
+
+test('inferFieldsFromProse: garbage label ("Input: " with nothing after it) contributes nothing', () => {
+  assert.deepEqual(inferFieldsFromProse('Input: \nOutput:   '), { inputs: [], outputs: [] });
+});
+
+test('inferFieldsFromProse: every returned field satisfies the TaskDefField shape used by isTaskDefFieldLike', () => {
+  const { inputs, outputs } = inferFieldsFromProse('Input: Site name (or URL)\nOutput: First headline from the site');
+  for (const f of [...inputs, ...outputs]) {
+    assert.equal(typeof f.key, 'string');
+    assert.equal(typeof f.label, 'string');
+    assert.ok(['text', 'number', 'date', 'select', 'bool'].includes(f.type));
+  }
 });

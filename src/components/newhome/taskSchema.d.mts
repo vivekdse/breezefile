@@ -51,6 +51,16 @@ export function normalizeFieldKey(raw: unknown): string;
 export function isValidFieldKey(raw: unknown): boolean;
 export function effectiveFieldKey(field: Pick<TaskDefField, 'key' | 'label'> | null | undefined): string;
 
+// task-fe8c822c3838 — lift input/output intent out of free-text task prose
+// into candidate field DEFINITIONS (non-PHI) for the composer/copilot to
+// OFFER as a one-tap "structure these fields?" suggestion. Never mutates the
+// prose itself; empty/garbage input yields `{ inputs: [], outputs: [] }`.
+// `type` is always 'text' (the only schema-valid type free prose can imply);
+// `urlHint: true` is set when the label mentions a URL/link/website, for
+// callers that want to tailor the input UI without an invalid field type.
+export type InferredFieldDef = TaskDefField & { urlHint?: boolean };
+export function inferFieldsFromProse(body: unknown): { inputs: InferredFieldDef[]; outputs: InferredFieldDef[] };
+
 export function buildTaskFieldsBlock(
   templateId: string,
   taskDefId: string,

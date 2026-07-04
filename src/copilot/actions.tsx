@@ -24,7 +24,8 @@ import { z } from 'zod';
 import { fm } from '../bridge';
 import { compileTaskQuery, TASK_QUERY_FIELDS } from '../components/newhome/taskQuery';
 import { useTasks } from '../tasks';
-import { parseTaskTemplateBlock } from '../components/newhome/taskSchema.mjs';
+import { inferFieldsFromProse, parseTaskTemplateBlock } from '../components/newhome/taskSchema.mjs';
+import type { TaskDefField } from '../components/newhome/types';
 import { useNewHomeContext } from './newHomeContext';
 import { confirmedAction, immediateAction } from './actionKit';
 
@@ -44,7 +45,13 @@ const SELECT_PROJECT_EVENT = 'fm:newhome:selectProject';
 // TaskComposer.tsx) keeps the chat aware of the form's live field values.
 const OPEN_TASK_COMPOSER_EVENT = 'fm:openTask';
 
-function openTaskComposer(prefill: { title: string; notes?: string; projectId?: string }): string {
+function openTaskComposer(prefill: {
+  title: string;
+  notes?: string;
+  projectId?: string;
+  initialInputs?: TaskDefField[];
+  initialOutputs?: TaskDefField[];
+}): string {
   window.dispatchEvent(
     new CustomEvent(OPEN_TASK_COMPOSER_EVENT, {
       detail: {
@@ -53,10 +60,16 @@ function openTaskComposer(prefill: { title: string; notes?: string; projectId?: 
         projectId: prefill.projectId,
         initialTitle: prefill.title,
         initialNotes: prefill.notes,
+        initialInputs: prefill.initialInputs,
+        initialOutputs: prefill.initialOutputs,
       },
     }),
   );
-  return `Opened the New Task form pre-filled with "${prefill.title}" for the human to review and submit.`;
+  const fieldNote =
+    (prefill.initialInputs?.length ?? 0) > 0 || (prefill.initialOutputs?.length ?? 0) > 0
+      ? ' with the input/output fields it mentioned pre-filled'
+      : '';
+  return `Opened the New Task form pre-filled with "${prefill.title}"${fieldNote} for the human to review and submit.`;
 }
 
 const FILTER_VALUES = ['all', 'done', 'progress', 'queued', 'needs', 'failed'] as const;
@@ -120,7 +133,14 @@ export function CopilotActions() {
   confirmedAction({
     name: 'create_task',
     description:
-      'Create a new task. On approval this opens the New Task form pre-filled with the title/notes so the human can review and start it. Project-scoped when projectId is given (or omitted to use the currently selected Home project from context).',
+      'Create a new task. On approval this opens the New Task form pre-filled with the title/notes so the human can review and start it. Project-scoped when projectId is given (or omitted to use the currently selected Home project from context). ' +
+      // task-fe8c822c3838 — if `notes` reads like it declares input/output intent (e.g. "Input: site name / Output: first headline",
+      // or "needs a customer email" / "produces a summary"), this extracts those into structured fields automatically — the New
+      // Task form opens with them pre-filled instead of leaving the task as unstructured prose (which otherwise leaves an agent
+      // working the task with no input to read and no output contract, task-22fdf07763ee). Before calling this, if the user's
+      // request mentions doing something WITH a value (a site, an email, a name, etc.) but doesn't say what that value actually
+      // IS yet, ask for it conversationally first ("what site?") rather than creating the task with an empty input.
+      'Prefer create_task_from_template instead when the request plausibly matches a prior fielded/chained task type.',
     parameters: z.object({
       title: z.string().describe('Short task title.'),
       notes: z.string().optional().describe('Optional task notes/body.'),
@@ -134,6 +154,7 @@ export function CopilotActions() {
     title: 'Create task?',
     summary: ({ title, notes, projectId }) => {
       const resolved = projectId || nh.project?.id;
+      const parsed = inferFieldsFromProse(notes ?? '');
       return (
         <>
           Open the New Task form to create{' '}
@@ -145,6 +166,15 @@ export function CopilotActions() {
           ) : null}
           ?
           {notes?.trim() ? <div className="ck-confirm-note">{notes.trim()}</div> : null}
+          {(parsed.inputs.length > 0 || parsed.outputs.length > 0) && (
+            <div className="ck-confirm-note">
+              Structured fields detected —{' '}
+              {parsed.inputs.length > 0 && <>input: {parsed.inputs.map((f) => f.label).join(', ')}</>}
+              {parsed.inputs.length > 0 && parsed.outputs.length > 0 ? '; ' : ''}
+              {parsed.outputs.length > 0 && <>output: {parsed.outputs.map((f) => f.label).join(', ')}</>}
+              . These will be pre-filled as fields on the form.
+            </div>
+          )}
         </>
       );
     },
@@ -158,10 +188,18 @@ export function CopilotActions() {
     perform: ({ title, notes, projectId }) => {
       const trimmed = (title ?? '').trim();
       const resolvedProjectId = projectId || nh.project?.id;
+      const trimmedNotes = notes?.trim() || undefined;
+      // task-fe8c822c3838 — reuse the SAME parser the composer's own
+      // "Structure these fields?" banner uses (inferFieldsFromProse in
+      // taskSchema.mjs) so conversational creation and the composer's own
+      // suggestion agree on what counts as structurable intent.
+      const parsed = inferFieldsFromProse(trimmedNotes ?? '');
       return openTaskComposer({
         title: trimmed,
-        notes: notes?.trim() || undefined,
+        notes: trimmedNotes,
         projectId: resolvedProjectId || undefined,
+        initialInputs: parsed.inputs.length > 0 ? parsed.inputs : undefined,
+        initialOutputs: parsed.outputs.length > 0 ? parsed.outputs : undefined,
       });
     },
   });
