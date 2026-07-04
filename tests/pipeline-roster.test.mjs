@@ -708,6 +708,98 @@ test('classifyJob: childless, no template, no fielded fields → plain', () => {
   );
 });
 
+// ── TaskDetailDrawer's own schema/result resolution (task-9ab05f87eda3, p9
+// REOPENED, round-19) ─────────────────────────────────────────────────────
+// The drawer is opened from a LIST/roster row (fm:openTaskDetail carries the
+// in-memory row verbatim — never a freshly-fetched detail), the same
+// schema-less shape mapListRow hands the roster. The drawer ALSO fetches the
+// full detail (for `body`/notes, via getTask) but used to keep only
+// `full.notes` and read outputSchema/result off the STALE list-row `task`
+// prop — so `fieldedJob` always resolved null for a task opened this way.
+// Fixed by reusing fieldedSchemaSource (this module) for the schema — same
+// preference rule the roster's resolveJob uses — and adding an equivalent
+// preference for `result` (fetched detail's result first, else the props
+// task's own). These reconstruct the drawer's EXACT composition
+// (resolvedOutputSchema = fieldedSchemaSource(...), resolvedResult =
+// detailResult ?? task.result, then resolveFieldedJob(...)) so a regression
+// in that wiring fails here, not just live in the app.
+function drawerFieldedResolution(listRowTask, detail) {
+  const resolvedOutputSchema = fieldedSchemaSource(
+    { outputSchema: detail?.outputSchema ?? null },
+    { outputSchema: listRowTask.outputSchema },
+  );
+  const resolvedResult = detail?.result ?? listRowTask.result ?? null;
+  return resolveFieldedJob({
+    id: listRowTask.id,
+    name: listRowTask.title,
+    outputSchema: resolvedOutputSchema,
+    notes: detail?.notes ?? listRowTask.notes ?? null,
+    result: resolvedResult,
+  });
+}
+
+test('drawer resolution: task-0255271c3433 — schema-less list row + fetched detail with 3 output fields + submitted flat result', () => {
+  const listRowTask = { id: 'task-0255271c3433', title: 'Three-field fixture' }; // no outputSchema (mapListRow shape)
+  const schema = [
+    { key: 'summary', label: 'Summary', type: 'text', required: true },
+    { key: 'confidence', label: 'Confidence', type: 'number', required: false },
+    { key: 'flagged', label: 'Flagged', type: 'boolean', required: false },
+  ];
+  const detail = {
+    notes: null,
+    outputSchema: schema,
+    result: { type: 'fields', payload: { summary: 'All good', confidence: 92, flagged: false } },
+  };
+  const resolved = drawerFieldedResolution(listRowTask, detail);
+  assert.ok(resolved, 'must resolve fielded, not fall through to plain/empty');
+  const def = resolved.defs[0];
+  assert.equal(def.outputs.length, 3);
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'summary')], 'All good');
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'confidence')], 92);
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'flagged')], 'false');
+});
+
+test('drawer resolution: task-7d65e61fb581 — schema + legacy NESTED result shape resolves the same fields', () => {
+  const listRowTask = { id: 'task-7d65e61fb581', title: 'Nested-result fixture' };
+  const schema = [
+    { key: 'a', label: 'A', type: 'text' },
+    { key: 'b', label: 'B', type: 'text' },
+    { key: 'c', label: 'C', type: 'text' },
+  ];
+  const detail = {
+    notes: null,
+    outputSchema: schema,
+    // legacy nested shape: {taskDefId, fields} instead of a flat payload
+    result: { type: 'fields', payload: { taskDefId: 'whatever', fields: { a: '1', b: '2', c: '3' } } },
+  };
+  const resolved = drawerFieldedResolution(listRowTask, detail);
+  assert.ok(resolved, 'must resolve fielded for the nested-result shape too');
+  const def = resolved.defs[0];
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'a')], '1');
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'b')], '2');
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'c')], '3');
+});
+
+test('drawer resolution: task-73384d8e26e1 — widgets=42 without expanding anything (single required field)', () => {
+  const listRowTask = { id: 'task-73384d8e26e1', title: 'Widgets fixture' };
+  const detail = {
+    notes: null,
+    outputSchema: [{ key: 'widgets', label: 'Widgets', type: 'number', required: true }],
+    result: { type: 'fields', payload: { widgets: 42 } },
+  };
+  const resolved = drawerFieldedResolution(listRowTask, detail);
+  assert.ok(resolved);
+  const def = resolved.defs[0];
+  assert.equal(def.outputs.length, 1);
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'widgets')], 42);
+});
+
+test('drawer resolution: no detail fetched yet (still loading) → falls back to the list row alone (never throws)', () => {
+  const listRowTask = { id: 'task-x', title: 'Loading fixture', outputSchema: null, result: null };
+  const resolved = drawerFieldedResolution(listRowTask, null);
+  assert.equal(resolved, null); // no schema anywhere yet — plain until the detail resolves
+});
+
 test('chain child is excluded from the top-level / candidate set', () => {
   // RosterTable derives candidateJobIds from partitionJobs(...).topLevelIds.
   // A chain child (carries parentTaskId) is NOT top-level, so it can never be a

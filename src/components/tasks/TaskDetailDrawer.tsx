@@ -66,6 +66,7 @@ import {
   childStatusMap,
   toChildStatus,
   resolveFieldedJob,
+  fieldedSchemaSource,
 } from '../newhome/pipelineRoster.mjs';
 import type { ChildStatusLike } from '../newhome/pipelineRoster.mjs';
 import type { MergedStepStatus } from '../newhome/taskSchema.mjs';
@@ -308,35 +309,79 @@ export function TaskDetailDrawer({
 
   // ── PHI body (lazy, memory-only) ──────────────────────────────────────────
   const [body, setBody] = useState<string | null>(task.notes ?? null);
+  // task-9ab05f87eda3 (p9 REOPENED, round-19) — the drawer is opened from a
+  // LIST/roster row (via the `fm:openTaskDetail` event — App.tsx, NewHomePage,
+  // TasksPage, ProjectsPage, copilot taskActions all pass the in-memory row
+  // verbatim, never a freshly-fetched detail). `mapListRow` (electron/sources/
+  // typebuild.ts) never populates `outputSchema`/`result` — only `mapDetail`
+  // does. This drawer ALREADY fetches the full detail below (for `body`) but
+  // used to keep only `full.notes` and throw away `full.outputSchema` /
+  // `full.result` — so `fieldedJob` kept reading the stale, always-undefined
+  // `task.outputSchema` from props. Same wire-threading gap the roster hit
+  // (task-ce4b4c8ca955 round-18, fixed via `fieldedSchemaSource(detail,
+  // listRow)`); fixed here the same way — reusing that SAME helper rather than
+  // inventing a second schema-preference rule — plus threading `result` too.
+  const [detailSchema, setDetailSchema] = useState<Task['outputSchema'] | null>(null);
+  const [detailResult, setDetailResult] = useState<Task['result'] | null>(null);
   const reqRef = useRef(0);
   // task-b30e546672db — re-pull the decrypted body after an embedded-editor save
   // so the read-only surfaces (and the next edit's prefill) reflect the change.
   const refreshBody = useCallback(() => {
     if (!isTypebuild) {
       setBody(task.notes ?? null);
+      setDetailSchema(null);
+      setDetailResult(null);
       return;
     }
     const myReq = ++reqRef.current;
     void getTask(task.id, 'typebuild')
       .then((full) => {
-        if (reqRef.current === myReq) setBody(full?.notes ?? null);
+        if (reqRef.current !== myReq) return;
+        setBody(full?.notes ?? null);
+        setDetailSchema(full?.outputSchema ?? null);
+        setDetailResult(full?.result ?? null);
       })
       .catch(() => {
-        if (reqRef.current === myReq) setBody(null);
+        if (reqRef.current === myReq) {
+          setBody(null);
+          setDetailSchema(null);
+          setDetailResult(null);
+        }
       });
   }, [isTypebuild, task.id, task.notes]);
   useEffect(() => {
     if (!isTypebuild) {
       setBody(task.notes ?? null);
+      setDetailSchema(null);
+      setDetailResult(null);
       return;
     }
     setBody(null);
+    setDetailSchema(null);
+    setDetailResult(null);
     refreshBody();
     return () => {
       // Drop the decrypted body the instant we leave this task.
       setBody(null);
+      setDetailSchema(null);
+      setDetailResult(null);
     };
   }, [task.id, isTypebuild, task.notes, refreshBody]);
+
+  // The resolved output_schema SOURCE: the fetched detail first (reuses
+  // fieldedSchemaSource verbatim — the SAME preference rule the roster uses),
+  // the list-row's own outputSchema as a harmless fallback (undefined today
+  // for a list row, per mapListRow, but still correct if a future list ever
+  // carries it).
+  const resolvedOutputSchema = useMemo(
+    () => fieldedSchemaSource({ outputSchema: detailSchema }, { outputSchema: task.outputSchema }),
+    [detailSchema, task.outputSchema],
+  );
+  // The resolved RESULT: prefer the freshly-fetched detail's result (a
+  // list/roster row never carries one — same gap as outputSchema above); fall
+  // back to whatever the props-level task already had (e.g. a task opened
+  // from a surface that DID pass a full detail).
+  const resolvedResult = detailResult ?? task.result ?? null;
 
   // ── task-69651204e222: ported task-template state (depends on decrypted body)
   // All fail-soft & conditional: a task with none of this data renders exactly
@@ -355,11 +400,11 @@ export function TaskDetailDrawer({
       resolveFieldedJob({
         id: task.id,
         name: task.title,
-        outputSchema: task.outputSchema ?? null,
+        outputSchema: resolvedOutputSchema,
         notes: body ?? null,
-        result: task.result ?? null,
+        result: resolvedResult,
       }),
-    [task.id, task.title, task.outputSchema, body, task.result],
+    [task.id, task.title, resolvedOutputSchema, body, resolvedResult],
   );
   const outputsBlock = useMemo(
     () => (fieldedJob ? { taskDefId: fieldedJob.defs[0].id, fields: fieldedJob.defs[0].outputs } : null),
@@ -1027,11 +1072,11 @@ export function TaskDetailDrawer({
                   EITHER the task is terminal OR a result already exists;
                   TaskResultView itself no-ops (renders null) for a malformed/
                   absent result, so this never shows a fake success block. */}
-              {(isTerminal || !!task.result) && (
+              {(isTerminal || !!resolvedResult) && (
                 <section className="tdd__sect tdd__outcome-sect">
                   <div className="tdd__sect-h">Result</div>
-                  <TaskResultView result={task.result} />
-                  {!task.result && (
+                  <TaskResultView result={resolvedResult} />
+                  {!resolvedResult && (
                     <p className="tdd__muted">No structured result recorded.</p>
                   )}
                 </section>

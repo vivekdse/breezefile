@@ -8,6 +8,41 @@
   place-items: stretch stretch;
 }
 
+/* task-18f05cb3440e — with the copilot chat sidebar open, the drawer's
+   `.overlay` is `position: fixed; inset: 0` (App.css .overlay), so it still
+   spans the FULL viewport width underneath CopilotKit's own `position: fixed`
+   sidebar (copilot-theme.css / CopilotKit v2's <aside data-testid=
+   "copilot-sidebar">, z-index 1200 — above this overlay's var(--z-overlay)).
+   CopilotKit already pushes the rest of the app out of the sidebar's way by
+   setting `document.body.style.marginInlineEnd` to the sidebar's width when
+   open (react-core v2 CopilotSidebarViewInternal) — but a `position: fixed`
+   element is laid out against the VIEWPORT, not the body's margin box, so
+   that push never reaches this overlay. The result: `.tdd`'s centered 1100px
+   column keeps centering on the FULL viewport, so its right edge (incl. the
+   footer's Save/Cancel buttons and the title's ↵ affordance) lands underneath
+   the sidebar, with dead space opening up on the left instead.
+   Fix: gate on the SAME `:has()` sidebar-open selector copilot-theme.css
+   already uses (`body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)`)
+   and pull the overlay's right edge in by the sidebar's width, so `.tdd`
+   centers in the space actually left of the chat — never overlaid, never
+   clipped. The literal 480px mirrors CopilotKit's own
+   `DEFAULT_SIDEBAR_WIDTH`/`--sidebar-width` (react-core v2); there's no CSS
+   custom property CopilotKit exposes for it on `:root`/`body` to reference
+   instead, so this is a matched-constant fallback, not a guess. */
+body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
+  right: var(--sidebar-width, 480px);
+}
+@media (max-width: 767px) {
+  /* CopilotKit only reserves body margin (and renders the sidebar as a fixed
+     width panel rather than a full-screen cover) at >= 768px — see
+     `window.matchMedia('(min-width: 768px)')` in CopilotSidebarViewInternal.
+     Below that the sidebar covers the whole screen itself, so don't also
+     shrink the drawer underneath it. */
+  body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
+    right: 0;
+  }
+}
+
 .tdd {
   /* full-height, but capped WIDTH (task-9ab05f87eda3, U2 layout fix): at wide
      (e.g. 2400px) viewports the surface used to stay full-bleed with only its
