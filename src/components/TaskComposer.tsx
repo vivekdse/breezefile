@@ -76,6 +76,11 @@ export type TaskComposerRequest =
        *  still reviews/edits/submits through this same form. */
       initialTitle?: string;
       initialNotes?: string;
+      /** Open directly as a CHAINED task (the "+ New Chained Task" entry
+       *  point) — pre-picks the Task/Chained-task question so the chain
+       *  builder is the next step. Same form either way; the user can still
+       *  flip back to a plain task on that question. */
+      initialKind?: 'chain';
     }
   | { mode: 'edit'; task: Task };
 
@@ -1105,7 +1110,11 @@ export function TaskComposer(props: Props) {
   const hasChainOption = props.mode === 'create' && isTypebuild;
 
   type TemplateChoiceId = 'blank' | 'chain';
-  const [templateChoice, setTemplateChoice] = useState<TemplateChoiceId>('blank');
+  const [templateChoice, setTemplateChoice] = useState<TemplateChoiceId>(
+    // "+ New Chained Task" opens with the chain flow pre-picked; the guard
+    // effect below still falls back to 'blank' if the target can't chain.
+    props.mode === 'create' && props.initialKind === 'chain' ? 'chain' : 'blank',
+  );
   const [templateHighlight, setTemplateHighlight] = useState(0);
   // "Task" (today's flow) always first and always the default — picking it
   // is a NON-REGRESSION no-op.

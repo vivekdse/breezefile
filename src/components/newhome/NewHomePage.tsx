@@ -99,11 +99,16 @@ export function NewHomePage() {
   // the human can fill it by hand or drive it conversationally — including
   // "New Chained Task" (docs/task-templates-design.md), which defines a chain
   // inline, right there, rather than through a project-level template.
-  function openNewTask() {
+  function openNewTask(kind?: 'chain') {
     setOpenTaskId(null);
     window.dispatchEvent(
       new CustomEvent('fm:openTask', {
-        detail: { mode: 'create', defaultFolder: '', projectId: selectedProjectId ?? undefined },
+        detail: {
+          mode: 'create',
+          defaultFolder: '',
+          projectId: selectedProjectId ?? undefined,
+          initialKind: kind,
+        },
       }),
     );
     window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
@@ -211,8 +216,16 @@ export function NewHomePage() {
         <div className="nh__topbar-right">
           <button
             type="button"
+            className="nh__btn"
+            onClick={() => openNewTask('chain')}
+            title="Create a multi-step chained task — steps, inputs, and evidence defined inline"
+          >
+            + New Chained Task
+          </button>
+          <button
+            type="button"
             className="nh__btn nh__btn--primary"
-            onClick={openNewTask}
+            onClick={() => openNewTask()}
           >
             + New Task
           </button>
