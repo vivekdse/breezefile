@@ -297,6 +297,18 @@ type DetailRow = ListRow & {
   // mapped defensively via mapResolvedAgent so a malformed block is dropped and
   // the detail line is simply omitted (NON-REGRESSION).
   agent?: unknown;
+  // task-ce4b4c8ca955 — the server's first-class OUTPUT FIELD SCHEMA (S2): a
+  // flat array of TaskDefField-shaped entries ({key,label,type,options?,
+  // required?}), the same shape the client's own ```task-outputs block
+  // carries (parseTaskOutputsBlock/TaskDefField, src/components/newhome/
+  // types.ts) but declared server-side instead of parsed out of the body —
+  // this is what lets a PLAIN (non-chained) task still declare required
+  // outputs. NON-PHI: field DEFINITIONS only (keys/labels/types/options), NEVER
+  // values — values ride `result.payload` as always. Typed loose/optional (a
+  // server that predates it simply omits it); mapped defensively via
+  // mapOutputSchema so a malformed entry is dropped rather than rejecting the
+  // whole array (NON-REGRESSION).
+  output_schema?: unknown;
 };
 
 // ─── Projects (task-ab1d7955e23f) ─────────────────────────────────────────
@@ -481,6 +493,45 @@ function mapResult(
   if (!r || typeof r !== 'object') return undefined;
   if (typeof r.type !== 'string' || !r.type) return undefined;
   return { type: r.type, payload: r.payload ?? null };
+}
+
+// task-ce4b4c8ca955 — the field-def shape output_schema entries must match
+// (mirrors TaskDefField, src/components/newhome/types.ts, and
+// parseTaskOutputsBlock's isTaskDefFieldLike, src/components/newhome/
+// taskSchema.mjs — keep the three in sync). NON-PHI: definitions only.
+type OutputSchemaField = {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'select' | 'bool';
+  options?: string[];
+  required?: boolean;
+};
+
+const OUTPUT_FIELD_TYPES = new Set(['text', 'number', 'date', 'select', 'bool']);
+
+function isOutputSchemaFieldLike(v: unknown): v is OutputSchemaField {
+  if (!v || typeof v !== 'object') return false;
+  const f = v as Record<string, unknown>;
+  if (typeof f.key !== 'string' || !f.key) return false;
+  if (typeof f.label !== 'string' || !f.label) return false;
+  if (typeof f.type !== 'string' || !OUTPUT_FIELD_TYPES.has(f.type)) return false;
+  if (f.options !== undefined && !Array.isArray(f.options)) return false;
+  if (f.required !== undefined && typeof f.required !== 'boolean') return false;
+  return true;
+}
+
+// task-ce4b4c8ca955 — map the server's `output_schema` (a flat array of
+// TaskDefField-shaped entries — see the DetailRow.output_schema comment) into
+// the client's SourcedTask.outputSchema. Defensive: drop malformed entries
+// rather than rejecting the whole array (same fail-soft convention as
+// mapMessages/mapPendingQuestion); absent/empty/malformed → undefined so a
+// task with no server schema renders exactly as today (NON-REGRESSION).
+// NON-PHI: field DEFINITIONS only (key/label/type/options/required) — never
+// values, which ride `result.payload` as always.
+function mapOutputSchema(raw: unknown): OutputSchemaField[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter(isOutputSchemaFieldLike);
+  return out.length ? out : undefined;
 }
 
 // task-da23979fd907 — normalize the wire `messages` value into the client's
@@ -1058,6 +1109,10 @@ export class TypeBuildTaskSource implements TaskSource {
       // NON-PHI (an agent identity). The scalar agentId already came through
       // mapListRow (via base) above.
       agent: mapResolvedAgent(detail.agent),
+      // task-ce4b4c8ca955 — server-declared output field schema (S2), for
+      // single-task (non-chained) jobs. NON-PHI (definitions only); see
+      // mapOutputSchema + the DetailRow.output_schema comment.
+      outputSchema: mapOutputSchema(detail.output_schema),
     };
   }
 

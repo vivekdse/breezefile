@@ -169,6 +169,64 @@ export function buildJobValuesByRef(children) {
   return { valuesByRef, childIdByDefId };
 }
 
+// task-ce4b4c8ca955 — the synthetic single-def id a "fielded" (single-task,
+// non-chained) job's output def is minted under. Never a real task-def id
+// from any template — this def has no upstream chain to key into — but
+// stable across renders so valuesByRef/childIdByDefId lookups agree with the
+// TaskDef this module hands back from the same resolution.
+const FIELDED_DEF_ID = '__fielded__';
+
+/**
+ * task-ce4b4c8ca955 — resolve a TOP-LEVEL, NON-chained task's own declared
+ * output fields + result into the SAME one-group shape the chained subtable
+ * machinery (ChainedJobSubtable/pipelineColumns) already renders, so a
+ * "single-task" job (no ```task-template block, no children) still gets an
+ * output column instead of rendering as a bare plain row.
+ *
+ * Field-definition source, in preference order:
+ *   1. `outputSchema` — the server's first-class output field schema
+ *      (TypeBuild S2; TaskDefField-shaped array), when present.
+ *   2. the job's own legacy ```task-outputs body block (parseTaskOutputsBlock),
+ *      for tasks predating the server schema.
+ * Returns null when NEITHER source yields fields — the caller's 'plain'
+ * fallback applies (NON-REGRESSION: a task with no schema source renders
+ * exactly as before).
+ *
+ * Values come from the job's OWN `{type:'fields'}` result (resultFields —
+ * already accepts both flat `{k:v}` and legacy nested `{taskDefId,fields}`
+ * per task-2638eeedd9ef) — there's only one def here, so any result fields
+ * are unambiguously this def's, regardless of which shape they arrived in.
+ * `childIdByDefId` points the one def at the JOB ITSELF (not a child) — a
+ * cell click therefore opens the task, matching "cell-click opens the task
+ * itself".
+ *
+ * @param {{ id: string, name: string, outputSchema?: import('./types').TaskDefField[] | null, notes?: string|null, result?: unknown }} job
+ * @returns {{ name: string, defs: import('./types').TaskDef[], valuesByRef: Record<string, string|number>, childIdByDefId: Record<string, string> } | null}
+ */
+export function resolveFieldedJob(job) {
+  if (!job || typeof job.id !== 'string') return null;
+  const schemaFields = Array.isArray(job.outputSchema) && job.outputSchema.length > 0 ? job.outputSchema : null;
+  const legacy = schemaFields ? null : parseTaskOutputsBlock(job.notes ?? null);
+  const fields = schemaFields ?? legacy?.fields ?? null;
+  if (!fields || fields.length === 0) return null;
+
+  const def = { id: FIELDED_DEF_ID, name: job.name ?? job.id, inputs: [], outputs: fields };
+  const valuesByRef = {};
+  const rf = resultFields(job.result ?? null);
+  if (rf) {
+    for (const [k, v] of Object.entries(rf.fields)) {
+      const cv = coerceValue(v);
+      if (cv !== undefined) valuesByRef[fieldRef(FIELDED_DEF_ID, k)] = cv;
+    }
+  }
+  return {
+    name: def.name,
+    defs: [def],
+    valuesByRef,
+    childIdByDefId: { [FIELDED_DEF_ID]: job.id },
+  };
+}
+
 // Matches the WHOLE ```task-fields fenced block (fences included), non-greedy so
 // it never swallows a following ```task-outputs block. Mirrors the fence shape
 // taskSchema.mjs's parseFencedJsonBlock reads.

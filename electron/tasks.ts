@@ -95,6 +95,26 @@ export type Task = {
     asked_by?: string;
     asked_at?: string;
   } | null;
+  // task-ce4b4c8ca955 — the server's first-class OUTPUT FIELD SCHEMA (S2): the
+  // declared output fields for a task that isn't part of a v2 task-template
+  // chain (a "single-task" job) — same TaskDefField shape the client's own
+  // ```task-outputs block carries (src/components/newhome/types.ts
+  // TaskDefField), just declared server-side instead of parsed out of a task
+  // body. This is what lets a PLAIN top-level task (no children, no
+  // ```task-template block) still surface an output column in the New Home
+  // roster + a one-line summary in OutcomesPanel — see useNewHomeData
+  // resolveJob's `status:'fielded'` case. Populated by a remote source
+  // (TypeBuild) from the get_task endpoint; local rows omit it, so it's
+  // OPTIONAL across the seam (a task without a schema renders exactly as
+  // today — NON-REGRESSION). NON-PHI: field DEFINITIONS only (key/label/type/
+  // options/required), NEVER values — values ride `result.payload` as always.
+  outputSchema?: {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'select' | 'bool';
+    options?: string[];
+    required?: boolean;
+  }[];
 };
 
 export type TaskCreate = {

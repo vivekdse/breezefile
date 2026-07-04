@@ -8,6 +8,7 @@ import {
   partitionJobs,
   pipelineColumns,
   buildJobValuesByRef,
+  resolveFieldedJob,
   rewriteTaskFieldsBlock,
   runnableStepId,
   nextAutoContinueChildId,
@@ -495,4 +496,101 @@ test('childStatusMap feeds runnableStepId end-to-end (cancelled deliver → not 
     (id) => byId[id],
   );
   assert.equal(runnableStepId(CHAIN_DEFS, values, childByDefId), null);
+});
+
+// ── resolveFieldedJob (task-ce4b4c8ca955) ───────────────────────────────────
+// Single-task (non-chained) output fields: fixture parity with
+// task-73384d8e26e1 (flat result, server output_schema) and task-7d65e61fb581
+// (legacy nested result, server output_schema).
+
+test('resolveFieldedJob: server output_schema + flat result → one def, values populated', () => {
+  const job = {
+    id: 'task-73384d8e26e1',
+    name: 'FIXTURE: done task with fields result',
+    outputSchema: [{ key: 'widgets', label: 'Widgets counted', type: 'number', required: true }],
+    notes: null,
+    result: { type: 'fields', payload: { widgets: 42 } },
+  };
+  const resolved = resolveFieldedJob(job);
+  assert.ok(resolved);
+  assert.equal(resolved.defs.length, 1);
+  const def = resolved.defs[0];
+  assert.deepEqual(def.outputs, [{ key: 'widgets', label: 'Widgets counted', type: 'number', required: true }]);
+  assert.deepEqual(def.inputs, []);
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'widgets')], 42);
+  // Cell-click opens the task itself: the one def's child id IS the job id.
+  assert.deepEqual(resolved.childIdByDefId, { [def.id]: 'task-73384d8e26e1' });
+});
+
+test('resolveFieldedJob: server output_schema + legacy nested result → all fields populated', () => {
+  const job = {
+    id: 'task-7d65e61fb581',
+    name: 'Check time spent on devices',
+    outputSchema: [
+      { key: 'date', label: 'Date', type: 'date', required: true },
+      { key: 'uma_time', label: 'Uma screen time', type: 'number', required: true },
+      { key: 'kira_time', label: 'Kira screen time', type: 'number', required: true },
+    ],
+    notes: null,
+    result: {
+      type: 'fields',
+      payload: { taskDefId: 'task', fields: { date: '2026-07-04', uma_time: 331, kira_time: 99 } },
+    },
+  };
+  const resolved = resolveFieldedJob(job);
+  assert.ok(resolved);
+  const def = resolved.defs[0];
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'date')], '2026-07-04');
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'uma_time')], 331);
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'kira_time')], 99);
+});
+
+test('resolveFieldedJob: falls back to a legacy ```task-outputs body block when no server schema', () => {
+  const taskDef = { id: 'legacy', name: 'Legacy', inputs: [], outputs: [{ key: 'n', label: 'N', type: 'number' }] };
+  const notes = buildTaskOutputsBlock(taskDef);
+  const job = { id: 'j1', name: 'Legacy job', outputSchema: null, notes, result: { type: 'fields', payload: { n: 7 } } };
+  const resolved = resolveFieldedJob(job);
+  assert.ok(resolved);
+  assert.equal(resolved.defs[0].outputs[0].key, 'n');
+  assert.equal(resolved.valuesByRef[fieldRef(resolved.defs[0].id, 'n')], 7);
+});
+
+test('resolveFieldedJob: server schema wins over a legacy body block when both present', () => {
+  const legacyDef = { id: 'legacy', name: 'Legacy', inputs: [], outputs: [{ key: 'old', label: 'Old', type: 'text' }] };
+  const notes = buildTaskOutputsBlock(legacyDef);
+  const job = {
+    id: 'j2',
+    name: 'Both',
+    outputSchema: [{ key: 'widgets', label: 'Widgets', type: 'number' }],
+    notes,
+    result: null,
+  };
+  const resolved = resolveFieldedJob(job);
+  assert.deepEqual(resolved.defs[0].outputs, [{ key: 'widgets', label: 'Widgets', type: 'number' }]);
+});
+
+test('resolveFieldedJob: no schema source at all → null (stays a plain row, no regression)', () => {
+  assert.equal(resolveFieldedJob({ id: 'j3', name: 'Plain', outputSchema: null, notes: null, result: null }), null);
+  assert.equal(
+    resolveFieldedJob({ id: 'j4', name: 'Plain notes', outputSchema: undefined, notes: 'just some human notes', result: null }),
+    null,
+  );
+});
+
+test('resolveFieldedJob: schema present but no result yet → def with empty values (mid-flight, not null)', () => {
+  const job = {
+    id: 'j5',
+    name: 'Awaiting result',
+    outputSchema: [{ key: 'widgets', label: 'Widgets', type: 'number', required: true }],
+    notes: null,
+    result: null,
+  };
+  const resolved = resolveFieldedJob(job);
+  assert.ok(resolved);
+  assert.deepEqual(resolved.valuesByRef, {});
+});
+
+test('resolveFieldedJob: invalid job (no id) → null', () => {
+  assert.equal(resolveFieldedJob(null), null);
+  assert.equal(resolveFieldedJob({ outputSchema: [{ key: 'a', label: 'A', type: 'text' }] }), null);
 });

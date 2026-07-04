@@ -56,7 +56,7 @@ import { useRunningSessions } from '../tasks/useRunningSessions';
 import type { Agent, Project, Task, TaskAuditEvent } from '../../types';
 import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
 import { metaStatus as metaStatusOf, parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
-import { buildJobValuesByRef, partitionJobs, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
+import { buildJobValuesByRef, partitionJobs, resolveFieldedJob, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
 
 // task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
 // "is this task an active agent" is never computed two different ways. classify()
@@ -466,13 +466,33 @@ const CHAIN_ACTIVE_POLL_MS = 5_000;
  *    don't yet know whether it's chained. Callers should render it as a
  *    plain row until this resolves (no flash of an empty subtable).
  *  - `status: 'plain'` — the job's own body carries no v2 task-template block
- *    (or a v1-legacy one, or none) — not a chained task; render a plain row.
+ *    (or a v1-legacy one, or none), AND it has no server output_schema / legacy
+ *    ```task-outputs block either — genuinely nothing to show; render a plain
+ *    row.
+ *  - `status: 'fielded'` (task-ce4b4c8ca955) — a TOP-LEVEL, NON-chained task
+ *    (no v2 task-template block) that nonetheless declares output fields —
+ *    either the server's first-class `output_schema` (preferred) or its own
+ *    legacy ```task-outputs body block — and has a result to show for them.
+ *    Rendered as a ONE-DEF subtable (reusing the exact chained-subtable
+ *    machinery: `defs` has exactly one synthetic TaskDef, `childIdByDefId`
+ *    points the def at the JOB ITSELF so a cell click opens the task, not a
+ *    child). This is the "single-task output fields" case
+ *    (task-73384d8e26e1/task-7d65e61fb581) that previously fell through to
+ *    'plain' and rendered no output column at all.
  *  - `status: 'chained'` — `defs`/`groups` are non-empty; render a subtable.
  *  `childrenLoading` stays true until every child's detail has been fetched
  *  (cells show an em-dash placeholder until then). */
 export type ChainedJobResolution =
   | { status: 'loading' }
   | { status: 'plain' }
+  | {
+      status: 'fielded';
+      name: string;
+      defs: TaskDef[];
+      valuesByRef: Record<string, string | number>;
+      childIdByDefId: Record<string, string>;
+      childrenLoading: false;
+    }
   | {
       status: 'chained';
       name: string;
@@ -713,7 +733,26 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
       const jobDetail = details.get(jobId);
       if (!jobDetail) return { status: 'loading' };
       const parsed = parseTaskTemplateBlock(jobDetail.notes ?? null);
-      if (!parsed?.defs || parsed.defs.length === 0) return { status: 'plain' };
+      if (!parsed?.defs || parsed.defs.length === 0) {
+        // task-ce4b4c8ca955 — not a chained job (no v2 task-template block).
+        // Before falling all the way to 'plain', check whether this task
+        // still declares its OWN output fields — either the server's
+        // first-class output_schema or a legacy ```task-outputs block — and
+        // has a result to show for them. This is the "single-task output
+        // fields never show in the roster" fix: a DONE top-level task with
+        // a schema + a {type:'fields'} result previously discarded its body
+        // here and rendered as a bare plain row.
+        const job = byIdTask.get(jobId);
+        const fielded = resolveFieldedJob({
+          id: jobId,
+          name: job?.title ?? jobId,
+          outputSchema: job?.outputSchema ?? null,
+          notes: jobDetail.notes,
+          result: jobDetail.result,
+        });
+        if (!fielded) return { status: 'plain' };
+        return { status: 'fielded', childrenLoading: false, ...fielded };
+      }
 
       const children = childrenByParent.get(jobId) ?? [];
       // Prefer the fetched detail (real notes/result); fall back to whatever
@@ -734,7 +773,7 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
         childrenLoading,
       };
     },
-    [childrenByParent, details],
+    [childrenByParent, details, byIdTask],
   );
 
   const saveInput = useCallback(

@@ -535,7 +535,15 @@ function ChainedJobSubtable({
    *  user's will, regardless of the per-job pref. */
   agentRun: boolean;
   groups: PipelineGroup[];
-  resolution: Extract<ChainedJobResolution, { status: 'chained' }>;
+  /** task-ce4b4c8ca955 — also accepts 'fielded' (a single-task job with its
+   *  own output fields/result, one synthetic def, no real children): the
+   *  SAME grouped-subtable shape a chained job resolves to, just with
+   *  `childIdByDefId` pointing the one def at the job itself. Reused as-is —
+   *  no parallel renderer — because a 'fielded' job's auto-continue/
+   *  start-chain machinery is naturally inert: `runnableStepId` returns null
+   *  once the def is done, and a non-done job is never `primaryActionFor`
+   *  kind:'start' while claimed/in_progress, so this never self-relaunches. */
+  resolution: Extract<ChainedJobResolution, { status: 'chained' | 'fielded' }>;
   onOpenTask: (id: string) => void;
   onSaveInput: (childId: string, key: string, value: string) => void;
   /** task-4045bcee23cb (U3a #2) — full-roster id→Task lookup, so the runnable
@@ -1003,13 +1011,15 @@ export function RosterTable({
   };
 
   // ── chained-job detection (task-b1fa5098da3e, R3) ─────────────────────────
-  // Candidate jobs: top-level rows (no parentTaskId) with at least one child
-  // — the only rows that could possibly be a chained task (a childless task
-  // has nothing to aggregate). useChainedRoster resolves each candidate's OWN
-  // body lazily to learn whether it's actually chained (v2 task-template
-  // block) and, if so, its per-def values.
+  // Candidate jobs: EVERY top-level row (no parentTaskId) — not just those
+  // with children. A row with children could be a chained task; a childless
+  // top-level row can't be chained but MAY still be a "fielded" single-task
+  // job (task-ce4b4c8ca955: its own server output_schema / legacy
+  // ```task-outputs block + result, with no chain at all) — useChainedRoster
+  // resolves each candidate's own body lazily to learn which of
+  // plain/fielded/chained it is.
   const candidateJobIds = useMemo(
-    () => partitionJobs(rows.map((t) => ({ id: t.id, parentTaskId: t.raw.parentTaskId ?? null }))).jobIds,
+    () => partitionJobs(rows.map((t) => ({ id: t.id, parentTaskId: t.raw.parentTaskId ?? null }))).topLevelIds,
     [rows],
   );
   const chained = useChainedRoster({ jobIds: candidateJobIds });
@@ -1183,10 +1193,18 @@ export function RosterTable({
             )}
             {visibleRows.map((t) => {
               const resolution = resolutions.get(t.id);
+              // task-ce4b4c8ca955 — 'fielded' (single-task output fields) reuses
+              // the exact same subtable render as 'chained'; only the
+              // Start-chain row action (chainStartFor below) stays chain-only,
+              // since a fielded job has no separate child step to start.
+              const subtableRes =
+                resolution && (resolution.status === 'chained' || resolution.status === 'fielded')
+                  ? resolution
+                  : null;
               const chainedRes = resolution && resolution.status === 'chained' ? resolution : null;
-              const isChained = !!chainedRes;
-              const groups = chainedRes ? pipelineColumns(chainedRes.defs) : [];
-              const meta = chainedRes ? META_PILL[metaStatus(chainedRes.defs, chainedRes.valuesByRef)] : null;
+              const isChained = !!subtableRes;
+              const groups = subtableRes ? pipelineColumns(subtableRes.defs) : [];
+              const meta = subtableRes ? META_PILL[metaStatus(subtableRes.defs, subtableRes.valuesByRef)] : null;
               const rowTint =
                 t.status === 'needs'
                   ? 'nh-roster__row--needs'
@@ -1259,7 +1277,7 @@ export function RosterTable({
                       />
                     </td>
                   </tr>
-                  {isChained && chainedRes && (
+                  {isChained && subtableRes && (
                     <tr className="nh-roster__subrow">
                       <td colSpan={BASE_COLUMN_COUNT} className="nh-roster__subrow-cell">
                         <ChainedJobSubtable
@@ -1273,7 +1291,7 @@ export function RosterTable({
                           // chain the human is actively driving/waiting on".
                           agentRun={t.who !== 'human'}
                           groups={groups}
-                          resolution={chainedRes}
+                          resolution={subtableRes}
                           onOpenTask={onOpenTask}
                           onSaveInput={(childId, key, value) => {
                             void chained.saveInput(childId, key, value);

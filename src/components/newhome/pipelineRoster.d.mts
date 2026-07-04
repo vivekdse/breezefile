@@ -2,7 +2,7 @@
 // (runtime is plain ESM so `node --test` imports it without a transpile step).
 // See docs/task-templates-design.md for the roster contract this mirrors.
 
-import type { TaskDef, TaskDefCondition } from './types';
+import type { TaskDef, TaskDefField, TaskDefCondition } from './types';
 import type { TaskDefRenderStatus, MergedStepStatus } from './taskSchema';
 
 /** Minimal shape of a child task for status-merge (a raw Task satisfies it). */
@@ -48,6 +48,18 @@ export function pipelineColumns(taskDefs: TaskDef[] | null | undefined): Pipelin
 export function buildJobValuesByRef(
   children: { id: string; notes?: string | null; result?: unknown }[],
 ): JobValues;
+
+/** task-ce4b4c8ca955 — resolve a single (non-chained) task's own output
+ *  fields (server output_schema, else legacy ```task-outputs body block) +
+ *  result into a one-def job-values shape, or null when neither field source
+ *  yields any fields. */
+export function resolveFieldedJob(job: {
+  id: string;
+  name: string;
+  outputSchema?: TaskDefField[] | null;
+  notes?: string | null;
+  result?: unknown;
+}): { name: string; defs: TaskDef[]; valuesByRef: Record<string, string | number>; childIdByDefId: Record<string, string> } | null;
 
 export function rewriteTaskFieldsBlock(
   body: string | null | undefined,

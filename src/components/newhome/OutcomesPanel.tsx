@@ -16,6 +16,7 @@
 import { useMemo, useState } from 'react';
 import type { NewHomeTask } from './types';
 import { normalizeTablePayload, coerceCell } from '../tasks/taskResult.mjs';
+import { resultFields } from './taskSchema.mjs';
 import './OutcomesPanel.css';
 
 const WHO_GLYPH: Record<NewHomeTask['who'], string> = {
@@ -47,6 +48,22 @@ function summarizeOutcome(task: NewHomeTask): string {
         return table.headers.join(' · ');
       }
     }
+  }
+  // task-ce4b4c8ca955 — a `{type:'fields'}` result (single-task output fields
+  // OR a chained task-def's outputs) previously fell straight through to
+  // lastAction, leaving the one-liner blank/generic even for a DONE task with
+  // real output values. resultFields already accepts BOTH the canonical FLAT
+  // `{k:v}` payload and the LEGACY NESTED `{taskDefId,fields:{k:v}}` shape
+  // (task-2638eeedd9ef) — reuse it rather than re-parsing here. Prefer the
+  // server's output_schema label for a key when present (task-ce4b4c8ca955
+  // wire threading); fall back to the raw key so an unlabeled/legacy field
+  // still renders something readable.
+  const fields = resultFields(result ?? null);
+  if (fields && Object.keys(fields.fields).length > 0) {
+    const labelByKey = new Map((task.raw?.outputSchema ?? []).map((f) => [f.key, f.label]));
+    return Object.entries(fields.fields)
+      .map(([k, v]) => `${labelByKey.get(k) ?? k}=${String(v)}`)
+      .join(' · ');
   }
   return task.lastAction || 'No summary available';
 }
