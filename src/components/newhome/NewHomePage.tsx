@@ -338,7 +338,7 @@ export function NewHomePage() {
           onOpenTask={openTaskDetail}
           onFilter={setFilter}
           onSearch={setSearch}
-          onRetry={() => void refresh()}
+          onRetry={startTask}
           onStart={startTask}
         />
 
