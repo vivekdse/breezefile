@@ -48,7 +48,12 @@ import {
   loadSelectedProjectId,
   saveSelectedProjectId,
   isStaleProjectSelection,
-} from './selectedProjectPrefs';
+  // Explicit `.ts` extension: a sibling `selectedProjectPrefs.mjs` (pure
+  // helpers only) shadows this wrapper on Vite/esbuild's extensionless
+  // resolution, so an unqualified import loads the .mjs — which lacks
+  // load/save and blanks the whole app at runtime. Same discipline as the
+  // fileTypes.ts / launcherPrefs.ts imports elsewhere.
+} from './selectedProjectPrefs.ts';
 import './NewHomePage.css';
 
 // task-69651204e222 — CONVERGENCE FLAG. When true, New Home's task-open path
