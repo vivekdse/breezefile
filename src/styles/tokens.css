@@ -535,7 +535,17 @@
    legible on the dark chrome while --ink stays dark-on-light. */
 :root[data-theme='plum'] {
   --bg: #faeff2;
-  --bg-2: #f1e0e6;
+  /* Legacy elevated-panel surface. Plum is a DARK theme (dark --panel chrome)
+     with a LIGHT blush --bg canvas — its lightness is inverted. Components read
+     --bg-2 as an elevated PANEL surface (buttons/stat tiles/roster rows/dialog
+     chips) and pair it with --text-on-panel / --muted-on-panel, which in plum
+     resolve to the LIGHT --panel-ink / --panel-muted (tuned for the dark
+     chrome). A light --bg-2 therefore rendered light text on a light-pink
+     surface — invisible (New Home toolbar buttons, OUTPUTS sub-headers, active
+     stat tiles). Fixed to a dark plum value, harmonizing with --panel and the
+     inherited dark --bg-1/--bg-3, so panel-family text reads. (Mirrors how the
+     other dark theme, dusk, overrides --bg-2 dark for the same reason.) */
+  --bg-2: #241830;
   --panel: #2a1a30;
   --panel-2: #3a2440;
   --panel-ink: #f1ddea;
