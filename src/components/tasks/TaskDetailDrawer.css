@@ -9,21 +9,27 @@
 }
 
 .tdd {
-  /* full-screen: occupy the entire viewport */
+  /* full-height, but capped WIDTH (task-9ab05f87eda3, U2 layout fix): at wide
+     (e.g. 2400px) viewports the surface used to stay full-bleed with only its
+     INNER blocks capped at 900px and centered, which left a huge unbounded
+     empty background on both sides that read as a broken/half-loaded layout
+     rather than an intentional reading column. Capping the SURFACE itself
+     (not just its children) and centering it in the overlay gives a real
+     bounded card with no dead space outside it. */
   width: 100%;
+  max-width: 1100px;
   height: 100%;
+  margin-inline: auto;
   background: var(--bg-2);
   box-shadow: var(--shadow-2);
   display: flex;
   flex-direction: column;
-  /* generous, but cap content width so long text stays readable; the inner
-     blocks are centered in the full-bleed surface */
-  padding: var(--sp-5) clamp(var(--sp-4), 6vw, 96px);
+  padding: var(--sp-5) clamp(var(--sp-4), 4vw, 64px);
   gap: var(--sp-3);
   overflow: hidden;
   animation: tddFadeIn var(--motion-slide);
 }
-/* keep the readable column centered while the surface itself is full-bleed */
+/* keep the readable column centered within the (now-capped) surface */
 .tdd__head,
 .tdd__title,
 .tdd__actionrow,

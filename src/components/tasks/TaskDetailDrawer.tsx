@@ -60,7 +60,13 @@ import {
   taskDefStatus,
   fieldRef,
 } from '../newhome/taskSchema.mjs';
-import { runnableStepId, mergeChildStatus, childStatusMap, toChildStatus } from '../newhome/pipelineRoster.mjs';
+import {
+  runnableStepId,
+  mergeChildStatus,
+  childStatusMap,
+  toChildStatus,
+  resolveFieldedJob,
+} from '../newhome/pipelineRoster.mjs';
 import type { ChildStatusLike } from '../newhome/pipelineRoster.mjs';
 import type { MergedStepStatus } from '../newhome/taskSchema.mjs';
 import type { TaskDef } from '../newhome/types';
@@ -337,13 +343,38 @@ export function TaskDetailDrawer({
   // as before. `body` is the decrypted, memory-only task text.
 
   // Outputs (this task's own output DEFINITIONS + submitted VALUES).
-  const outputsBlock = useMemo(() => parseTaskOutputsBlock(body ?? null), [body]);
-  const submittedOutputs = useMemo(() => resultFields(task.result ?? null), [task.result]);
+  // task-9ab05f87eda3 (U2) — field-definition source preference, PER
+  // resolveFieldedJob (task-ce4b4c8ca955): the server's first-class
+  // `Task.outputSchema` FIRST, the legacy ```task-outputs body block only when
+  // there's no schema. Reused verbatim (not reimplemented) so this drawer never
+  // drifts from the New-Home roster's own single-task output resolution —
+  // fixture parity: task-73384d8e26e1 (schema + flat result, widgets=42) and
+  // task-7d65e61fb581 (schema + legacy-nested result, 3 fields).
+  const fieldedJob = useMemo(
+    () =>
+      resolveFieldedJob({
+        id: task.id,
+        name: task.title,
+        outputSchema: task.outputSchema ?? null,
+        notes: body ?? null,
+        result: task.result ?? null,
+      }),
+    [task.id, task.title, task.outputSchema, body, task.result],
+  );
+  const outputsBlock = useMemo(
+    () => (fieldedJob ? { taskDefId: fieldedJob.defs[0].id, fields: fieldedJob.defs[0].outputs } : null),
+    [fieldedJob],
+  );
   const submittedByKey = useMemo(() => {
-    if (!outputsBlock || !submittedOutputs) return {} as Record<string, string | number | boolean>;
-    if (submittedOutputs.taskDefId !== outputsBlock.taskDefId) return {};
-    return submittedOutputs.fields;
-  }, [outputsBlock, submittedOutputs]);
+    if (!fieldedJob) return {} as Record<string, string | number | boolean>;
+    const defId = fieldedJob.defs[0].id;
+    const out: Record<string, string | number | boolean> = {};
+    for (const f of fieldedJob.defs[0].outputs) {
+      const v = fieldedJob.valuesByRef[fieldRef(defId, f.key)];
+      if (v !== undefined) out[f.key] = v;
+    }
+    return out;
+  }, [fieldedJob]);
   const requiredOutputs = useMemo(
     () => (outputsBlock?.fields ?? []).filter((f) => f.required),
     [outputsBlock],
@@ -989,9 +1020,16 @@ export function TaskDetailDrawer({
                   </div>
                 </section>
               )}
-              {isTerminal && (
+              {/* task-9ab05f87eda3 (U2) — "what came out" shouldn't wait for
+                  terminal status: an in-progress task can already carry a
+                  submitted structured result (e.g. a fielded step that reported
+                  before the parent chain finished). Show the section whenever
+                  EITHER the task is terminal OR a result already exists;
+                  TaskResultView itself no-ops (renders null) for a malformed/
+                  absent result, so this never shows a fake success block. */}
+              {(isTerminal || !!task.result) && (
                 <section className="tdd__sect tdd__outcome-sect">
-                  <div className="tdd__sect-h">Outcome</div>
+                  <div className="tdd__sect-h">Result</div>
                   <TaskResultView result={task.result} />
                   {!task.result && (
                     <p className="tdd__muted">No structured result recorded.</p>
@@ -1256,14 +1294,13 @@ export function TaskDetailDrawer({
             </button>
           )}
           <span className="tdd__foot-spacer" />
+          {/* task-9ab05f87eda3 (U2) — the old "1/2 tabs" hint read as an
+              unlabeled pager (as if page 1 of 2 content), not a keyboard-shortcut
+              legend. Each tab already shows its own <kbd> digit in the nav
+              above; this footer hint now names what the digits DO instead of
+              repeating them ambiguously. */}
           <span className="tdd__hint">
-            {visibleTabs.map((_, i) => (
-              <span key={i}>
-                {i > 0 && '/'}
-                <kbd>{i + 1}</kbd>
-              </span>
-            ))}{' '}
-            tabs · <kbd>Esc</kbd> close
+            <kbd>1</kbd>-<kbd>{visibleTabs.length}</kbd> to switch tabs · <kbd>Esc</kbd> close
           </span>
         </footer>
       </aside>
@@ -1596,7 +1633,12 @@ function DetailsMeta({
           transitions), folded from the per-task audit trail. */}
       {task.source === 'typebuild' && (
         <section className="tdd__sect">
-          <TaskTimeline task={task} />
+          {/* task-9ab05f87eda3 (U2) — expanded by default here (unlike the
+              detail PANEL's collapsed default): lifecycle activity is part of
+              the "what happened" story this drawer exists to surface, so it
+              shouldn't need a click to see. Renders "No lifecycle events yet"
+              harmlessly when there's nothing (NON-REGRESSION for empty tasks). */}
+          <TaskTimeline task={task} defaultOpen />
         </section>
       )}
 

@@ -47,14 +47,21 @@ function absoluteTime(iso: string | null): string | undefined {
 export function TaskTimeline({
   task,
   preloadedEvents,
+  defaultOpen = false,
 }: {
   task: Task;
   // task-80be320f06b3 — the detail panel's vitals block already fetched the
   // audit; pass it in so we don't fetch twice. undefined = not provided (fetch
   // on expand as before); null/[] = provided-but-empty (don't fetch).
   preloadedEvents?: TaskAuditEvent[] | null;
+  // task-9ab05f87eda3 (U2) — the unified drawer wants the timeline EXPANDED by
+  // default so the lifecycle activity is visible without a click; the detail
+  // PANEL keeps the original collapsed-by-default behavior (its own callers
+  // never asked for auto-expand). Defaulting to false preserves that caller
+  // exactly (NON-REGRESSION).
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [events, setEvents] = useState<TaskAuditEvent[] | null>(
     preloadedEvents ?? null,
   );
@@ -66,9 +73,10 @@ export function TaskTimeline({
   // Collapse-reset on task change so a newly-selected task doesn't show the
   // prior task's trace.
   useEffect(() => {
-    setOpen(false);
+    setOpen(defaultOpen);
     setEvents(preloadedEvents ?? null);
     setError(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id, preloadedEvents]);
 
   const load = useCallback(() => {
@@ -89,6 +97,13 @@ export function TaskTimeline({
         if (reqRef.current === myReq) setLoading(false);
       });
   }, [task.id]);
+
+  // When mounted (or reset) already open with nothing preloaded, fetch once —
+  // mirrors the toggle()'s own fetch-on-expand condition.
+  useEffect(() => {
+    if (open && !hasPreload && events === null && !loading) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, task.id]);
 
   const toggle = () => {
     const next = !open;

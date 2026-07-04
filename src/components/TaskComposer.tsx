@@ -1565,8 +1565,14 @@ export function TaskComposer(props: Props) {
   // input.
   useEffect(() => {
     if (active === 'title') {
+      // task-9ab05f87eda3 — embedded (the drawer's "Task details" tab edits an
+      // EXISTING task) must not auto-select the title text on open: it read as
+      // a visual glitch (title looks "highlighted") with no user action behind
+      // it. Auto-select is only useful for the blank new-task wizard, where
+      // there's nothing to select yet anyway (still harmless there), so gate
+      // it on !embedded rather than dropping it for every mode.
       titleRef.current?.focus();
-      titleRef.current?.select();
+      if (!props.embedded) titleRef.current?.select();
     } else if (active === 'notes') {
       notesRef.current?.focus();
     } else if (isFieldQuestion(active) && !isFieldOptionType(fieldEntryFor(active)?.field ?? { key: '', label: '', type: 'text' })) {
