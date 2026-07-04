@@ -231,3 +231,15 @@ export function resolveStartUrl(
   if (!trimmed || isPlaceholderStartUrl(trimmed)) return splashDataUrl(theme);
   return trimmed;
 }
+
+/** Start URL for a GENERAL, human-opened browser tab (Ctrl+B) — one with no
+ *  task and no agent about to navigate. Here the "starting your task" splash is
+ *  wrong, so an empty/missing (or example.com-placeholder) url resolves to a
+ *  plain blank new-tab page instead of the splash. A real url still passes
+ *  through (trimmed). Distinct from resolveStartUrl, which is for the
+ *  task/operator session that DOES wait on the agent's first navigation. */
+export function resolveGeneralStartUrl(url: string | undefined | null): string {
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  if (!trimmed || isPlaceholderStartUrl(trimmed)) return 'about:blank';
+  return trimmed;
+}

@@ -178,7 +178,10 @@ export function Tabbar() {
       : isTasksOverview
       ? 'All tasks'
       : isBrowser
-        ? 'Browser'
+        ? // task-7eb4b6cdae0f — label the browser tab with the current page's
+          // title (streamed via 'browser:state'); fall back to the generic
+          // "Browser" when it's empty (e.g. about:blank / a blank new tab).
+          t.browserTitle?.trim() || 'Browser'
         : isEdit
           ? editName || 'Untitled'
           : isTask

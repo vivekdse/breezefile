@@ -63,6 +63,12 @@ export type Tab = {
   /** SPIKE (spike/playwright-cdp) — when kind === 'browser', the URL the
    *  embedded WebContentsView loads. */
   browserUrl?: string;
+  /** task-7eb4b6cdae0f — when kind === 'browser', the current page's title
+   *  (streamed from wc.getTitle() over the 'browser:state' IPC). Drives the
+   *  tab-bar label so the browser tab reads as the page it's showing instead of
+   *  a generic "Browser". Empty/blank (e.g. about:blank) falls back to that
+   *  generic label. */
+  browserTitle?: string;
   /** fm-mp1 — filter-tab (a "smart folder"). When set, this folder tab does
    *  NOT list a directory; instead it lists the entries under `scopePath`
    *  (recursively, via fm.walkScope) that MATCH this tagDsl selector,

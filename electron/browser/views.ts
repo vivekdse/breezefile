@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { BrowserWindow, WebContentsView } from 'electron';
 import { currentRecording as currentBrowserRecording } from './record.ts';
 import { wireCredentialCapture } from './credential-capture';
-import { resolveStartUrl } from './start-splash';
+import { resolveStartUrl, resolveGeneralStartUrl } from './start-splash';
 import { recordVisit } from './history-store';
 
 // This chunk is bundled into dist-electron/ (same dir as the built preloads),
@@ -141,10 +141,19 @@ export function createBrowserView(
     void wc.loadURL(url);
     return { action: 'deny' };
   });
-  // THE chokepoint: empty/missing OR a stale example.com placeholder both
-  // resolve to the themed splash — example.com must never load on task start
-  // (task-d85d23f3aea4). A real url passes through.
-  void wc.loadURL(resolveStartUrl(opts.url));
+  // Start URL. The themed "task starting" splash is correct ONLY for a
+  // task/operator session (fill:'rect'), which opens the page BEFORE the agent
+  // issues its first real navigation — the splash tells the human "your task is
+  // starting". A general, human-opened browser tab (fill:'edge', e.g. Ctrl+B)
+  // has no agent about to navigate, so a "starting your task" splash is wrong:
+  // it lands on a plain blank page instead. In both cases a real url (or a
+  // stale example.com placeholder, which resolveStartUrl neutralizes) passes
+  // through unchanged (task-7eb4b6cdae0f / task-d85d23f3aea4).
+  const startUrl =
+    opts.fill === 'edge'
+      ? resolveGeneralStartUrl(opts.url)
+      : resolveStartUrl(opts.url);
+  void wc.loadURL(startUrl);
   browserViews.set(id, { view, win, emit, fill: opts.fill });
   return id;
 }

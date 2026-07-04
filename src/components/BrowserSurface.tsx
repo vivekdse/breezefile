@@ -53,6 +53,7 @@ export function BrowserSurface({
   url,
   viewId,
   toolbarExtra,
+  onTitle,
 }: {
   tabId?: string;
   url?: string;
@@ -61,6 +62,9 @@ export function BrowserSurface({
   // hidden behind the native page view). The operator session passes its
   // collapsed-state Show/Close buttons here.
   toolbarExtra?: ReactNode;
+  // task-7eb4b6cdae0f — the current page's title, streamed from 'browser:state'.
+  // The in-app tab uses this to label its tab with the page title (BrowserPane).
+  onTitle?: (title: string) => void;
 }) {
   // Operator mode binds to a pre-created view; tab mode attaches its own.
   const operatorMode = viewId != null;
@@ -167,6 +171,9 @@ export function BrowserSurface({
       if (s.id !== idRef.current) return;
       if (!addrFocused.current) setAddr(s.url);
       setNav({ canGoBack: s.canGoBack, canGoForward: s.canGoForward });
+      // Surface the streamed page title so the owning tab can label itself with
+      // it (task-7eb4b6cdae0f). onTitle is a no-op in operator mode (no prop).
+      onTitle?.(s.title ?? '');
       // Return-visit autofill: SILENTLY note whether this origin has a saved
       // login so the toolbar key button can appear (task-4b786c018d78). We do
       // NOT pop a dialog — the user fills explicitly via that button. Origins
