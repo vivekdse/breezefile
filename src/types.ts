@@ -416,6 +416,11 @@ export type TaskCreate = {
   // one agent per task). The local source ignores it; TypeBuild maps it to the
   // server's `agent_id` on create. Omitted / '' = no agent.
   agentId?: string;
+  // task-fd1be6f6b22d — optional HUMAN assignee (email/principal, NON-PHI). Set
+  // when "Who runs this?" picks a group member (a manual task assigned to them);
+  // the local source ignores it, TypeBuild maps it to the server's `assigned_to`
+  // on create. Omitted / '' = unassigned.
+  assignedTo?: string | null;
   // task-83a30b3c8804 — optional TypeBuild chain/linking fields (opaque ids,
   // NON-PHI). The local source ignores both; TypeBuild maps parentTaskId →
   // `parent_task_id` and dependsOn → `depends_on` on create, giving New Home's
@@ -480,6 +485,16 @@ export type Agent = {
   group: string | null;
   tools: string[];
   launchMode: string;
+};
+
+// task-fd1be6f6b22d — a TypeBuild group member as the renderer sees it
+// (camelCase; mirrors electron/sources/typebuild.ts `GroupMember`). NON-PHI: a
+// user identity (email/principal + optional display name/role), not patient
+// data. Listed by the composer's "Who runs this?" picker.
+export type GroupMember = {
+  principal: string;
+  displayName: string | null;
+  role: string | null;
 };
 
 export type TaskUpdate = Partial<{

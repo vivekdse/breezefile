@@ -415,6 +415,46 @@ function mapResolvedAgent(raw: unknown): Agent | null {
   return mapAgentRow(raw as AgentRow | null | undefined);
 }
 
+// ─── Group members (task-fd1be6f6b22d) ───────────────────────────────────
+// The HUMAN principals the composer's "Who runs this?" picker offers (alongside
+// Claude Code) — every active member across the caller's groups, plus self.
+// NON-PHI: user identities (email/principal + optional display name/role), not
+// patient data. Two possible server shapes, handled by listGroupMembers below.
+type GroupMemberRow = {
+  principal?: string;
+  role?: string | null;
+  display_name?: string | null;
+  status?: string;
+};
+/** A group member as the renderer sees it (camelCase). NON-PHI. */
+export type GroupMember = {
+  principal: string;
+  displayName: string | null;
+  role: string | null;
+};
+// Dedupe by principal + map to the client shape. Defensive (mirrors
+// mapAgentRow): rows without a principal are dropped; blank display_name/role
+// collapse to null.
+function dedupeMembers(rows: GroupMemberRow[]): GroupMember[] {
+  const seen = new Set<string>();
+  const out: GroupMember[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue;
+    const principal = typeof r.principal === 'string' ? r.principal.trim() : '';
+    if (!principal || seen.has(principal)) continue;
+    seen.add(principal);
+    out.push({
+      principal,
+      displayName:
+        typeof r.display_name === 'string' && r.display_name.trim()
+          ? r.display_name.trim()
+          : null,
+      role: typeof r.role === 'string' && r.role ? r.role : null,
+    });
+  }
+  return out;
+}
+
 // ─── Templates (task-e112d60a3b7c) ────────────────────────────────────────
 // A first-class TypeBuild TEMPLATE (server /chromeext/templates): a named,
 // reusable job definition carrying INPUT `variables` (the human fills these at
@@ -1224,6 +1264,10 @@ export class TypeBuildTaskSource implements TaskSource {
     // Omit when unset so a create that doesn't care leaves the server default
     // (no agent). An unknown agent_id → the server 400s (surfaced below).
     if (input.agentId) payload.agent_id = input.agentId;
+    // task-fd1be6f6b22d — optional assignee (server `assigned_to`, an email/
+    // principal — NON-PHI). A manual task assigned to a group member rides here;
+    // omit when unset so an unassigned create leaves the server default.
+    if (input.assignedTo) payload.assigned_to = input.assignedTo;
     // task-83a30b3c8804 — optional structural chain linking (opaque ids,
     // non-PHI). See TaskCreate.parentTaskId/dependsOn (src/types.ts).
     if (input.parentTaskId) payload.parent_task_id = input.parentTaskId;
@@ -1285,6 +1329,9 @@ export class TypeBuildTaskSource implements TaskSource {
       // shows its assignment immediately; the resolved `agent` block arrives on
       // the next detail fetch. Non-PHI.
       agent_id: input.agentId ?? null,
+      // task-fd1be6f6b22d — seed assigned_to so a just-created manual task
+      // shows its assignee immediately (NON-PHI email/principal).
+      assigned_to: input.assignedTo ?? null,
       // task-83a30b3c8804 — seed parent_task_id so the just-created row
       // reflects chain-container membership immediately, without waiting on a
       // detail re-fetch. `depends_on` is a DetailRow-only field (ListRow has
@@ -1458,6 +1505,42 @@ export class TypeBuildTaskSource implements TaskSource {
       if (a) out.push(a);
     }
     return out;
+  }
+
+  // ─── group members (task-fd1be6f6b22d) ──────────────────────────────────
+  // The human principals the composer's "Who runs this?" picker lists next to
+  // Claude Code. Prefer GET /chromeext/groups/members (deduped ACTIVE members +
+  // self, mirroring the agents endpoint: { members: [...] }). If that route
+  // isn't deployed yet (404), FALL BACK to GET /chromeext/groups → { groups:
+  // [{ members: [{ principal, role, status }] }] } and dedupe status==='active'
+  // client-side. Any other failure throws → the caller catches → empty list →
+  // the picker degrades to the plain Manual/Claude fallback (NON-REGRESSION).
+  async listGroupMembers(): Promise<GroupMember[]> {
+    const primary = await this.request('GET', '/chromeext/groups/members');
+    if (primary.ok) {
+      const data = (await primary.json().catch(() => ({}))) as {
+        members?: GroupMemberRow[];
+      };
+      return dedupeMembers(Array.isArray(data.members) ? data.members : []);
+    }
+    if (primary.status === 404) {
+      const res = await this.request('GET', '/chromeext/groups');
+      if (!res.ok) {
+        throw new Error(`typebuild: list groups failed (${res.status})`);
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        groups?: { members?: GroupMemberRow[] }[];
+      };
+      const rows: GroupMemberRow[] = [];
+      for (const g of Array.isArray(data.groups) ? data.groups : []) {
+        for (const m of Array.isArray(g.members) ? g.members : []) {
+          // status absent → treat as active (be lenient); otherwise require it.
+          if (m && (m.status === undefined || m.status === 'active')) rows.push(m);
+        }
+      }
+      return dedupeMembers(rows);
+    }
+    throw new Error(`typebuild: list group members failed (${primary.status})`);
   }
 
   // ─── templates (task-e112d60a3b7c) ───────────────────────────────────────

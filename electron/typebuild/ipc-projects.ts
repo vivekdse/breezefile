@@ -30,7 +30,7 @@
 
 import { ipcMain } from 'electron';
 import { getTaskSource } from '../sources/registry';
-import type { Agent, Project, TypeBuildTaskSource } from '../sources/typebuild';
+import type { Agent, GroupMember, Project, TypeBuildTaskSource } from '../sources/typebuild';
 
 let registered = false;
 
@@ -58,6 +58,14 @@ export function registerTypebuildProjectsIpc(): void {
   ipcMain.handle(
     'typebuild:agents:list',
     (_e): Promise<Agent[]> => source().listAgents(),
+  );
+  // task-fd1be6f6b22d — the human group members the composer's "Who runs this?"
+  // picker lists next to Claude Code. NON-PHI (email/principal + display name).
+  // Mirrors agents:list; the source degrades to [] so the picker falls back to
+  // the plain Manual/Claude options rather than crashing.
+  ipcMain.handle(
+    'typebuild:groups:members',
+    (_e): Promise<GroupMember[]> => source().listGroupMembers(),
   );
   ipcMain.handle(
     'typebuild:projects:get',

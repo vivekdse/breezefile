@@ -151,6 +151,11 @@ export type TaskCreate = {
   // one agent per task). The local store ignores it; the TypeBuild source maps
   // it to the server's `agent_id` on create. Omitted / '' = no agent.
   agentId?: string;
+  // task-fd1be6f6b22d — optional HUMAN assignee (email/principal, NON-PHI). Set
+  // when "Who runs this?" picks a group member. The local store ignores it; the
+  // TypeBuild source maps it to the server's `assigned_to` on create. Omitted /
+  // '' = unassigned.
+  assignedTo?: string | null;
   // task-83a30b3c8804 — optional TypeBuild chain/linking fields (opaque ids,
   // NON-PHI). The local store ignores both; the TypeBuild source maps
   // parentTaskId → `parent_task_id` and dependsOn → `depends_on` on create.

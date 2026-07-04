@@ -30,6 +30,15 @@ type Agent = {
   launchMode: string;
 };
 
+// task-fd1be6f6b22d — a TypeBuild group member as it crosses the bridge
+// (camelCase; mirrors src/types.ts `GroupMember`). Inlined like Agent. NON-PHI:
+// a user identity (email/principal + optional display name/role).
+type GroupMember = {
+  principal: string;
+  displayName: string | null;
+  role: string | null;
+};
+
 // One credential-vault entry as it crosses the bridge (NAMES only — never a
 // value). `key` is the "me."-prefixed field; `secret` marks write-only fields
 // (ssn/dob/bank_account) the server's resolver refuses to reveal. Inlined here
@@ -971,6 +980,14 @@ const fm = {
     agents: {
       list: () =>
         ipcRenderer.invoke('typebuild:agents:list') as Promise<Agent[]>,
+    },
+    // task-fd1be6f6b22d — the human group members the composer's "Who runs
+    // this?" picker lists next to Claude Code. NON-PHI; server-backed via the
+    // TypeBuild source. Mirrors agents.list — [] so the picker degrades to the
+    // plain Manual/Claude fallback.
+    groups: {
+      members: () =>
+        ipcRenderer.invoke('typebuild:groups:members') as Promise<GroupMember[]>,
     },
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
     // structured-result contract as projects.patch.

@@ -56,7 +56,7 @@ import {
   buildCronFromForm,
   defaultRecurrenceForm,
 } from '../recurrence';
-import type { Agent, Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
+import type { Agent, GroupMember, Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
 // task-896f3f7f5e75 — pure agent display helpers (launch-mode caption for the
 // picker option hint). Shared with the detail panel + unit-tested in isolation.
 import { agentOptionHint } from './tasks/agent.mjs';
@@ -299,10 +299,18 @@ const WHEN_OPTIONS: WhenOption[] = [
   },
 ];
 
-const WHO_OPTIONS: { id: ExecutorId; label: string; hint?: string }[] = [
-  { id: 'manual', label: 'Manual', hint: 'you do it' },
-  { id: 'claude', label: 'Claude Code', hint: 'an AI agent does it' },
-];
+// task-fd1be6f6b22d — "Who runs this?" is now the UNION of {every human in the
+// signed-in user's TypeBuild groups} + {Claude Code}, replacing the old binary
+// Manual | Claude Code. A 'human' pick makes a MANUAL task assigned to them
+// (executor 'manual', assigned_to = email); 'claude' is the existing auto path
+// (executor 'claude'); 'manual' is a fallback (no members / non-TypeBuild
+// target) that preserves today's unassigned-manual behavior.
+type WhoOption =
+  | { kind: 'human'; email: string; label: string; hint?: string }
+  | { kind: 'claude'; label: string; hint?: string }
+  | { kind: 'manual'; label: string; hint?: string };
+const WHO_CLAUDE: WhoOption = { kind: 'claude', label: 'Claude Code', hint: 'an AI agent does it' };
+const WHO_MANUAL_FALLBACK: WhoOption = { kind: 'manual', label: 'Manual', hint: 'you do it' };
 
 // fm-b5at.7 — agent flags vocabulary (mirrors electron/agents/flags.ts).
 const FLAG_OPTIONS: { id: string; label: string; hint: string }[] = [
@@ -1115,9 +1123,53 @@ export function TaskComposer(props: Props) {
   const [executor, setExecutor] = useState<ExecutorId>(
     initial?.auto_mode ? 'claude' : 'manual',
   );
+  // task-fd1be6f6b22d — the HUMAN assignee (email/principal) when "Who runs
+  // this?" picks a group member; '' = unassigned / Claude Code. Edits prefill
+  // from the task's assigned_to; a Claude pick clears it. Rides the create as
+  // TaskCreate.assignedTo and the TypeBuild edit as the `assigned_to` patch.
+  const [assignedTo, setAssignedTo] = useState<string>(initial?.assignedTo ?? '');
+  // The signed-in user's TypeBuild group members (self + everyone in their
+  // groups). Loaded like `agents`; empty until loaded / on failure → the picker
+  // falls back to plain Manual/Claude (NON-REGRESSION).
+  const [groupMembers, setGroupMembers] = useState<GroupMember[]>([]);
   // Once the user explicitly picks "who runs this" we stop auto-defaulting it
   // (mirrors targetTouched). Edits start pinned to the saved value.
   const [executorTouched, setExecutorTouched] = useState(props.mode === 'edit');
+
+  // task-fd1be6f6b22d — the "Who runs this?" option list: one row per group
+  // member human (label = display name or email) then Claude Code. Only the
+  // TypeBuild target lists members (assignment is a TypeBuild concept); the
+  // local target — or a member list that hasn't loaded / failed — falls back to
+  // the plain Manual + Claude Code pair so today's local behavior is unchanged.
+  const whoOptions = useMemo<WhoOption[]>(() => {
+    if (isTypebuild && groupMembers.length > 0) {
+      const humans: WhoOption[] = groupMembers.map((m) => {
+        const label = m.displayName?.trim() || m.principal;
+        return {
+          kind: 'human',
+          email: m.principal,
+          label,
+          hint: label !== m.principal ? m.principal : 'assign to them',
+        };
+      });
+      return [...humans, WHO_CLAUDE];
+    }
+    return [WHO_MANUAL_FALLBACK, WHO_CLAUDE];
+  }, [isTypebuild, groupMembers]);
+  // The index of the option matching the current selection (executor +
+  // assignee), used to sync the keyboard highlight on entry and prefill on edit.
+  function whoSelectionIndex(): number {
+    if (executor === 'claude') {
+      const i = whoOptions.findIndex((o) => o.kind === 'claude');
+      return i >= 0 ? i : 0;
+    }
+    if (assignedTo) {
+      const i = whoOptions.findIndex((o) => o.kind === 'human' && o.email === assignedTo);
+      if (i >= 0) return i;
+    }
+    const i = whoOptions.findIndex((o) => o.kind !== 'claude');
+    return i >= 0 ? i : 0;
+  }
   // fm-b5at.7 — agent flags (chrome/auto/interactive). Only meaningful for
   // Claude tasks; a Set keyed by flag name, persisted as the flags array.
   const [flags, setFlags] = useState<Set<string>>(
@@ -1285,17 +1337,17 @@ export function TaskComposer(props: Props) {
   const [whenHighlight, setWhenHighlight] = useState(() =>
     Math.max(0, visibleWhenOptions.findIndex((w) => w.id === whenId)),
   );
-  const [whoHighlight, setWhoHighlight] = useState(() =>
-    Math.max(0, WHO_OPTIONS.findIndex((w) => w.id === executor)),
-  );
+  // task-fd1be6f6b22d — highlight is synced to the current selection whenever
+  // the 'who' question activates (see the [active] effect), so a plain 0 init is
+  // fine here; whoOptions may not even be built yet at first render.
+  const [whoHighlight, setWhoHighlight] = useState(0);
   // Auto-default the executor by target: a TypeBuild task is run by the
   // default agent (Claude Code) via Start, so default "who" to Claude there;
-  // local tasks default to Manual. Stops once the user picks explicitly.
+  // local tasks default to Manual. Stops once the user picks explicitly. The
+  // highlight follows on entry via the [active] sync effect (whoSelectionIndex).
   useEffect(() => {
     if (props.mode === 'edit' || executorTouched) return;
-    const next: ExecutorId = isTypebuild ? 'claude' : 'manual';
-    setExecutor(next);
-    setWhoHighlight(Math.max(0, WHO_OPTIONS.findIndex((w) => w.id === next)));
+    setExecutor(isTypebuild ? 'claude' : 'manual');
   }, [isTypebuild, executorTouched, props.mode]);
   const [folderHighlight, setFolderHighlight] = useState(() => {
     const i = visibleFolderPresets.findIndex((p) => p.v === folder);
@@ -1466,6 +1518,26 @@ export function TaskComposer(props: Props) {
       })
       .catch(() => {
         /* agents stay empty → only the "None" option is offered */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isTypebuild, tbSignedIn]);
+
+  // task-fd1be6f6b22d — load the signed-in user's group members once TypeBuild
+  // is the target. NON-PHI (email/principal + display name). On any failure the
+  // list stays empty → "Who runs this?" degrades to the plain Manual/Claude
+  // fallback (NON-REGRESSION).
+  useEffect(() => {
+    if (!isTypebuild || !tbSignedIn) return;
+    let alive = true;
+    fm.typebuild.groups
+      .members()
+      .then((list) => {
+        if (alive) setGroupMembers(list);
+      })
+      .catch(() => {
+        /* members stay empty → Manual/Claude fallback */
       });
     return () => {
       alive = false;
@@ -2084,7 +2156,7 @@ export function TaskComposer(props: Props) {
   // questions manage their own; 'flags' is multi-select (cursor resets to top).
   useEffect(() => {
     switch (active) {
-      case 'who': setWhoHighlight(Math.max(0, WHO_OPTIONS.findIndex((o) => o.id === executor))); break;
+      case 'who': setWhoHighlight(whoSelectionIndex()); break;
       case 'project': setProjectHighlight(Math.max(0, PROJECT_OPTIONS.findIndex((o) => o.value === projectId))); break;
       case 'folder': setFolderHighlight(Math.max(0, visibleFolderPresets.findIndex((p) => p.v === folder))); break;
       case 'start': setStartHighlight(Math.max(0, START_OPTIONS.findIndex((s) => s.id === startId))); break;
@@ -2257,10 +2329,22 @@ export function TaskComposer(props: Props) {
     goNext();
   }
 
+  // task-fd1be6f6b22d — a 'human' pick assigns a MANUAL task to that person
+  // (executor 'manual', assignedTo = email); 'claude' is the existing auto path
+  // (executor 'claude', assignee cleared); 'manual' is the unassigned fallback.
   function chooseWho(i: number) {
-    const o = WHO_OPTIONS[i];
+    const o = whoOptions[i];
     if (!o) return;
-    setExecutor(o.id);
+    if (o.kind === 'claude') {
+      setExecutor('claude');
+      setAssignedTo('');
+    } else if (o.kind === 'human') {
+      setExecutor('manual');
+      setAssignedTo(o.email);
+    } else {
+      setExecutor('manual');
+      setAssignedTo('');
+    }
     setExecutorTouched(true);
     setWhoHighlight(i);
     setStartHighlight(START_OPTIONS.findIndex((s) => s.id === startId));
@@ -2450,7 +2534,7 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'who') {
-      if (whoHighlight >= WHO_OPTIONS.length - 1) goNext();
+      if (whoHighlight >= whoOptions.length - 1) goNext();
       else setWhoHighlight((i) => i + 1);
       return;
     }
@@ -2842,6 +2926,10 @@ export function TaskComposer(props: Props) {
               // `agent_id`). '' (None) → omit the key so a create that doesn't
               // care leaves the server default (no agent). Non-PHI.
               ...(agentId ? { agentId } : {}),
+              // task-fd1be6f6b22d — a human "Who runs this?" pick assigns the
+              // manual task to that member (server `assigned_to`). '' (Claude
+              // Code / unassigned) omits the key so the server default holds.
+              ...(assignedTo ? { assignedTo } : {}),
               // task-a7214605a998 (S6) — structured output schema (NON-PHI) +
               // data map (PHI) built above, in place of the fenced blocks this
               // composer used to splice into `notes`. Omitted when the plain
@@ -2896,6 +2984,12 @@ export function TaskComposer(props: Props) {
         // the scalar agentId; only send a real change.
         if (agentId !== (initial?.agent?.id ?? initial?.agentId ?? '')) {
           patch.agent_id = agentId;
+        }
+        // task-fd1be6f6b22d — human assignee (server `assigned_to`). '' clears
+        // it (Claude Code / unassigned); only send a real change. The patch
+        // whitelist in the TypeBuild source already accepts assigned_to.
+        if (assignedTo !== (initial?.assignedTo ?? '')) {
+          patch.assigned_to = assignedTo;
         }
         // status — the PATCH verb accepts it; only send a real change.
         if (status !== (initial?.status ?? 'pending')) {
@@ -3284,7 +3378,7 @@ export function TaskComposer(props: Props) {
         return;
       }
       const n = parseInt(e.key, 10);
-      if (!Number.isNaN(n) && n >= 1 && n <= WHO_OPTIONS.length) {
+      if (!Number.isNaN(n) && n >= 1 && n <= whoOptions.length) {
         e.preventDefault();
         chooseWho(n - 1);
         return;
@@ -3492,7 +3586,14 @@ export function TaskComposer(props: Props) {
     return prettyFolder(folder, home);
   }
   function whoSummary(): string {
-    return WHO_OPTIONS.find((w) => w.id === executor)?.label ?? 'Manual';
+    if (executor === 'claude') return WHO_CLAUDE.label;
+    // task-fd1be6f6b22d — show the assignee even if they're not in the loaded
+    // member list (e.g. editing a task whose assignee left the group).
+    if (assignedTo) {
+      const opt = whoOptions.find((o) => o.kind === 'human' && o.email === assignedTo);
+      return opt?.label ?? assignedTo;
+    }
+    return whoOptions[whoSelectionIndex()]?.label ?? 'Manual';
   }
 
   function statusSummary(): string {
@@ -4683,8 +4784,8 @@ export function TaskComposer(props: Props) {
                 <FieldLabel id="who" />
                 <div className="composer__q-prompt">{promptFor('who')}</div>
                 <ul className="composer__options" role="listbox">
-                  {WHO_OPTIONS.map((o, i) => (
-                    <li key={o.id}>
+                  {whoOptions.map((o, i) => (
+                    <li key={o.kind === 'human' ? `human:${o.email}` : o.kind}>
                       <button
                         type="button"
                         role="option"

@@ -1,4 +1,4 @@
-import type { Agent, Entry, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Agent, Entry, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 import type { TaskDefField } from './components/newhome/types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
@@ -670,6 +670,13 @@ type Fm = {
     // projects.list — [] on a parse miss so the picker degrades to None-only.
     agents: {
       list: () => Promise<Agent[]>;
+    };
+    // task-fd1be6f6b22d — TypeBuild group members: the human principals the
+    // composer's "Who runs this?" picker lists next to Claude Code. NON-PHI
+    // (email/principal + optional display name). `members` mirrors agents.list —
+    // [] on a failure so the picker degrades to the Manual/Claude fallback.
+    groups: {
+      members: () => Promise<GroupMember[]>;
     };
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (
