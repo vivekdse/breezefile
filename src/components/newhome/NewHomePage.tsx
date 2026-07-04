@@ -47,6 +47,15 @@ function isFilterState(v: unknown): v is FilterState {
   return typeof v === 'string' && (FILTER_STATES as string[]).includes(v);
 }
 
+// Human-readable label per status bucket for the active-filter chip.
+const FILTER_LABELS: Record<Exclude<FilterState, 'all'>, string> = {
+  done: 'Done',
+  progress: 'In Progress',
+  queued: 'Queued',
+  needs: 'Needs You',
+  failed: 'Failed',
+};
+
 // Heuristic: does this input look like a STRUCTURED query (vs. plain words)?
 // True when it contains a comparison operator or a DSL keyword — used to decide
 // whether a compile failure is a real query error worth surfacing, or just
@@ -258,6 +267,66 @@ export function NewHomePage() {
         </div>
 
         <HeroStats counts={counts} activeFilter={filter} onFilter={setFilter} />
+
+        {(filter !== 'all' || search.trim()) && (
+          <div className="nh-filter-chip-bar">
+            <span className="nh-filter-chip-bar__label">Filtering:</span>
+            {filter !== 'all' && (
+              <span className="nh-filter-chip">
+                <span className="nh-filter-chip__text">{FILTER_LABELS[filter]}</span>
+                <button
+                  type="button"
+                  className="nh-filter-chip__x"
+                  aria-label="Clear status filter"
+                  title="Clear status filter"
+                  onClick={() => setFilter('all')}
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            {search.trim() && (
+              <span
+                className={
+                  'nh-filter-chip' +
+                  (queryState.kind === 'query' ? ' nh-filter-chip--query' : '') +
+                  (queryState.kind === 'invalid' ? ' nh-filter-chip--invalid' : '')
+                }
+                title={
+                  queryState.kind === 'invalid'
+                    ? `Invalid query: ${queryState.error}`
+                    : queryState.kind === 'query'
+                      ? 'Structured query'
+                      : 'Text search'
+                }
+              >
+                <span className="nh-filter-chip__kind">
+                  {queryState.kind === 'query' ? '⚡' : queryState.kind === 'invalid' ? '⚠' : '🔍'}
+                </span>
+                <span className="nh-filter-chip__text">{search.trim()}</span>
+                <button
+                  type="button"
+                  className="nh-filter-chip__x"
+                  aria-label="Clear search / query"
+                  title="Clear search / query"
+                  onClick={() => setSearch('')}
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            <button
+              type="button"
+              className="nh-filter-chip-bar__clear-all"
+              onClick={() => {
+                setFilter('all');
+                setSearch('');
+              }}
+            >
+              Clear all
+            </button>
+          </div>
+        )}
 
         <RosterTable
           tasks={filteredTasks}

@@ -130,3 +130,82 @@
 /* [data-theme="light"] needs no overrides here — every value above routes
    through theme-safe composite tokens (--text-on-canvas, --bg-*, --border-*)
    that already resolve correctly per theme (see tokens.css). */
+
+/* task-4127919670d4 — active-filter chip bar. Renders the SAME roster state
+   (status bucket + free-text/DSL query) NewHomePage owns and the search box /
+   copilot query_roster write, so the human always sees what's filtering the
+   roster and can clear it with the ✕. Sits just above RosterTable. Reuses the
+   theme-safe --nh-* / composite tokens, matching the roster's own chrome. */
+.nh-filter-chip-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.nh-filter-chip-bar__label {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--muted-on-canvas);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.nh-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 4px 3px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  color: var(--text-on-canvas);
+}
+.nh-filter-chip--query {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.nh-filter-chip--invalid {
+  border-color: var(--nh-failed);
+  color: var(--nh-failed);
+}
+.nh-filter-chip__kind {
+  font-size: var(--fs-2xs);
+}
+.nh-filter-chip__text {
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.nh-filter-chip__x {
+  appearance: none;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+.nh-filter-chip__x:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+.nh-filter-chip-bar__clear-all {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 4px;
+  text-decoration: underline;
+}
