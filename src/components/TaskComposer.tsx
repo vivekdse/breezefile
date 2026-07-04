@@ -18,6 +18,11 @@
 //   due/schedule, pin, working folder) are only walked into when expanded.
 //   Launch flags are a multi-select option question — digits / Enter toggle a
 //   flag on/off (they don't advance); ↓ off the last flag advances.
+// - The Inputs & outputs step (and the chain builder's per-step field lists)
+//   are keyboard-driven (task-330b2e31e9d3): with the editor focused,
+//   i = add input, o = add output, ↑/↓ walk the rows, Enter edits the cursor
+//   row's key, 1–5 set its type, r toggles an output's evidence flag, and
+//   ⌘/Ctrl+⌫ removes it. See FieldEditors.
 //
 // The window keydown handler is registered ONCE via a ref that always
 // points at the freshest closure — without that, the brief render gap
@@ -26,6 +31,7 @@
 // doesn't advance").
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject } from 'react';
 import { useAgentContext } from '@copilotkit/react-core/v2';
 import { z } from 'zod';
 import { useCopilotInfo } from '../copilot/useCopilotInfo';
@@ -663,26 +669,53 @@ function isFieldOptionType(field: TaskDefField): boolean {
   return field.type === 'select' || field.type === 'bool';
 }
 
+// task-330b2e31e9d3 — the field-definition types, in the order digit shortcuts
+// 1–5 pick them (mirrors how the value option-lists are digit-picked). Kept at
+// module scope so both the row editor and the keyboard handler agree.
+type FieldKind = 'inputs' | 'outputs';
+const FIELD_TYPE_OPTIONS: TaskDefField['type'][] = [
+  'text', 'number', 'date', 'select', 'bool',
+];
+
 // task-2fd63b922beb correction (Part A.4) — the field-definition editor, ONE
 // implementation shared by BOTH the chain builder's per-step input/output
 // lists AND the plain Task form's single-def input/output lists. Field
 // DEFINITIONS (key/label/type/options/required) are NON-PHI; these editors
 // never touch field VALUES. `showRequired` = this is an OUTPUT list, whose
 // `required` flag marks the field as the step's evidence.
+//
+// task-330b2e31e9d3 — the row carries data-fe-* attributes (so the group's
+// keyboard handler can resolve which list/row an event came from), a ref to its
+// key input (so add/nav can focus it), and an `active` highlight for the
+// keyboard row cursor.
 function FieldRowEditor({
   field,
+  list,
+  rowIdx,
   showRequired,
+  active,
+  keyInputRef,
   onUpdate,
   onRemove,
 }: {
   field: TaskDefField;
+  list: FieldKind;
+  rowIdx: number;
   showRequired: boolean;
+  active: boolean;
+  keyInputRef?: (el: HTMLInputElement | null) => void;
   onUpdate: (patch: Partial<TaskDefField>) => void;
   onRemove: () => void;
 }) {
   return (
-    <div className="composer__chain-field-row">
+    <div
+      className={'composer__chain-field-row' + (active ? ' composer__chain-field-row--active' : '')}
+      data-fe-row=""
+      data-fe-list={list}
+      data-fe-row-idx={rowIdx}
+    >
       <input
+        ref={keyInputRef}
         className="composer__chain-field-key"
         type="text"
         placeholder="key"
@@ -736,7 +769,7 @@ function FieldRowEditor({
       <button
         type="button"
         className="composer__chain-icon-btn composer__chain-icon-btn--danger"
-        title={showRequired ? 'Remove output' : 'Remove input'}
+        title={showRequired ? 'Remove output (⌘/Ctrl+⌫)' : 'Remove input (⌘/Ctrl+⌫)'}
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
@@ -748,45 +781,228 @@ function FieldRowEditor({
   );
 }
 
-// A labeled add/remove list of field-definition rows (Inputs or Outputs).
-function FieldListEditor({
-  kind,
-  fields,
+// task-330b2e31e9d3 — Inputs + Outputs field-definition editor with a
+// hand-rolled, keyboard-first model (NO hotkey lib) matching the composer's
+// question-walk idiom. One instance owns BOTH lists so the add-input /
+// add-output shortcuts work from anywhere inside it. Two focus modes:
+//
+//   LIST-NAV  (the container div is focused): i = add input · o = add output ·
+//             ↑/↓ move the row cursor (at the ends, onExitUp/onExitDown hand
+//             back to the composer walk) · Enter edits the cursor row (focuses
+//             its key input) · 1–5 set the cursor row's type · r toggles an
+//             output's required/evidence flag · Backspace/Delete removes the
+//             cursor row.
+//   EDIT      (a control inside a row is focused): normal typing · Tab moves
+//             between the key/label/type/options/required/remove controls ·
+//             Enter or Escape returns to LIST-NAV · ⌘/Ctrl+⌫ removes the row.
+//
+// ⌘/Ctrl+⌫ removes in either mode (so you can delete a row mid-edit) WITHOUT
+// hijacking plain Backspace inside a text input. Handled keys stopPropagation
+// so the window-level walk (which would otherwise advance the question on
+// ↑/↓/Enter) doesn't also fire; this also makes the whole thing work in the
+// embedded drawer, which never registers the window handler.
+function FieldEditors({
+  inputs,
+  outputs,
   onAdd,
   onUpdate,
   onRemove,
+  onExitUp,
+  onExitDown,
+  containerRef,
 }: {
-  kind: 'inputs' | 'outputs';
-  fields: TaskDefField[];
-  onAdd: () => void;
-  onUpdate: (fieldIdx: number, patch: Partial<TaskDefField>) => void;
-  onRemove: (fieldIdx: number) => void;
+  inputs: TaskDefField[];
+  outputs: TaskDefField[];
+  onAdd: (kind: FieldKind) => void;
+  onUpdate: (kind: FieldKind, fieldIdx: number, patch: Partial<TaskDefField>) => void;
+  onRemove: (kind: FieldKind, fieldIdx: number) => void;
+  onExitUp?: () => void;
+  onExitDown?: () => void;
+  containerRef?: MutableRefObject<HTMLDivElement | null>;
 }) {
-  const showRequired = kind === 'outputs';
+  const localRef = useRef<HTMLDivElement | null>(null);
+  const setContainer = (el: HTMLDivElement | null) => {
+    localRef.current = el;
+    if (containerRef) containerRef.current = el;
+  };
+  const keyRefs = useRef(new Map<string, HTMLInputElement>());
+  const setKeyRef = (k: string) => (el: HTMLInputElement | null) => {
+    if (el) keyRefs.current.set(k, el);
+    else keyRefs.current.delete(k);
+  };
+  const pendingFocus = useRef<{ kind: FieldKind; idx: number } | null>(null);
+  const [cursor, setCursor] = useState(0);
+
+  // Combined [inputs…, outputs…] row order the cursor walks.
+  const rows = useMemo(
+    () => [
+      ...inputs.map((field, idx) => ({ kind: 'inputs' as FieldKind, idx, field })),
+      ...outputs.map((field, idx) => ({ kind: 'outputs' as FieldKind, idx, field })),
+    ],
+    [inputs, outputs],
+  );
+  const total = rows.length;
+  const cur = total === 0 ? -1 : Math.min(cursor, total - 1);
+
+  // Focus a freshly-added row's key input on the render that first shows it.
+  useEffect(() => {
+    const pf = pendingFocus.current;
+    if (!pf) return;
+    pendingFocus.current = null;
+    keyRefs.current.get(`${pf.kind}:${pf.idx}`)?.focus();
+  });
+
+  function combinedIndex(kind: FieldKind, idx: number): number {
+    return kind === 'inputs' ? idx : inputs.length + idx;
+  }
+  function focusKey(kind: FieldKind, idx: number) {
+    keyRefs.current.get(`${kind}:${idx}`)?.focus();
+  }
+  function addAndFocus(kind: FieldKind) {
+    const newIdx = kind === 'inputs' ? inputs.length : outputs.length;
+    pendingFocus.current = { kind, idx: newIdx };
+    setCursor(kind === 'inputs' ? inputs.length : inputs.length + outputs.length);
+    onAdd(kind);
+  }
+  function isTextTarget(t: EventTarget | null): boolean {
+    const el = t as HTMLElement | null;
+    if (!el) return false;
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName === 'INPUT') {
+      const type = (el as HTMLInputElement).type;
+      return type === 'text' || type === 'number' || type === 'date' || type === 'search' || type === '';
+    }
+    return false;
+  }
+  function rowFromTarget(t: EventTarget | null): { kind: FieldKind; idx: number } | null {
+    const el = (t as HTMLElement | null)?.closest?.('[data-fe-row]') as HTMLElement | null;
+    if (!el) return null;
+    const kind = el.getAttribute('data-fe-list') as FieldKind | null;
+    const idx = parseInt(el.getAttribute('data-fe-row-idx') ?? '', 10);
+    if ((kind !== 'inputs' && kind !== 'outputs') || Number.isNaN(idx)) return null;
+    return { kind, idx };
+  }
+
+  function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    // Remove works in either mode; the modifier keeps plain Backspace typing.
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Backspace') {
+      const row = e.target === localRef.current ? rows[cur] : rowFromTarget(e.target);
+      if (row) {
+        e.preventDefault();
+        e.stopPropagation();
+        onRemove(row.kind, row.idx);
+        localRef.current?.focus();
+      }
+      return;
+    }
+
+    const inList = e.target === localRef.current;
+    if (inList) {
+      if (e.key === 'i' || e.key === 'I') { e.preventDefault(); e.stopPropagation(); addAndFocus('inputs'); return; }
+      if (e.key === 'o' || e.key === 'O') { e.preventDefault(); e.stopPropagation(); addAndFocus('outputs'); return; }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation();
+        if (cur < 0 || cur >= total - 1) onExitDown?.();
+        else setCursor(cur + 1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault(); e.stopPropagation();
+        if (cur <= 0) onExitUp?.();
+        else setCursor(cur - 1);
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault(); e.stopPropagation();
+        const row = rows[cur];
+        if (row) focusKey(row.kind, row.idx);
+        else onExitDown?.();
+        return;
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        const row = rows[cur];
+        if (row) { e.preventDefault(); e.stopPropagation(); onRemove(row.kind, row.idx); }
+        return;
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        const row = rows[cur];
+        if (row && row.kind === 'outputs') {
+          e.preventDefault(); e.stopPropagation();
+          onUpdate('outputs', row.idx, { required: !row.field.required });
+        }
+        return;
+      }
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= FIELD_TYPE_OPTIONS.length) {
+        const row = rows[cur];
+        if (row) {
+          e.preventDefault(); e.stopPropagation();
+          onUpdate(row.kind, row.idx, { type: FIELD_TYPE_OPTIONS[n - 1] });
+        }
+        return;
+      }
+      return;
+    }
+
+    // EDIT mode (focus inside a row).
+    if (e.key === 'Escape' || (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && isTextTarget(e.target))) {
+      e.preventDefault();
+      e.stopPropagation();
+      const row = rowFromTarget(e.target);
+      if (row) setCursor(combinedIndex(row.kind, row.idx));
+      localRef.current?.focus();
+      return;
+    }
+    // everything else stays native (typing, Tab between controls, <select>
+    // arrows, checkbox space).
+  }
+
+  const groups: { kind: FieldKind; fields: TaskDefField[] }[] = [
+    { kind: 'inputs', fields: inputs },
+    { kind: 'outputs', fields: outputs },
+  ];
+
   return (
-    <div className="composer__chain-fieldgroup">
-      <div className="composer__chain-fieldgroup-head">
-        <span>{kind === 'inputs' ? 'Inputs' : 'Outputs'}</span>
-        <button
-          type="button"
-          className="composer__chain-add-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAdd();
-          }}
-        >
-          + {kind === 'inputs' ? 'input' : 'output'}
-        </button>
-      </div>
-      {fields.map((f, fi) => (
-        <FieldRowEditor
-          key={fi}
-          field={f}
-          showRequired={showRequired}
-          onUpdate={(patch) => onUpdate(fi, patch)}
-          onRemove={() => onRemove(fi)}
-        />
+    <div
+      ref={setContainer}
+      className="composer__field-editors"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+    >
+      {groups.map(({ kind, fields }) => (
+        <div key={kind} className="composer__chain-fieldgroup">
+          <div className="composer__chain-fieldgroup-head">
+            <span>{kind === 'inputs' ? 'Inputs' : 'Outputs'}</span>
+            <button
+              type="button"
+              className="composer__chain-add-btn"
+              title={kind === 'inputs' ? 'Add input (i)' : 'Add output (o)'}
+              onClick={(e) => {
+                e.stopPropagation();
+                addAndFocus(kind);
+              }}
+            >
+              + {kind === 'inputs' ? 'input' : 'output'}
+            </button>
+          </div>
+          {fields.map((f, fi) => (
+            <FieldRowEditor
+              key={fi}
+              field={f}
+              list={kind}
+              rowIdx={fi}
+              showRequired={kind === 'outputs'}
+              active={cur >= 0 && rows[cur]?.kind === kind && rows[cur]?.idx === fi}
+              keyInputRef={setKeyRef(`${kind}:${fi}`)}
+              onUpdate={(patch) => onUpdate(kind, fi, patch)}
+              onRemove={() => onRemove(kind, fi)}
+            />
+          ))}
+        </div>
       ))}
+      <div className="composer__field-editors-hint" aria-hidden="true">
+        i input · o output · ↑↓ rows · 1–5 type · r evidence · ⌘/Ctrl+⌫ remove
+      </div>
     </div>
   );
 }
@@ -1915,6 +2131,10 @@ export function TaskComposer(props: Props) {
   const createBtnRef = useRef<HTMLButtonElement>(null);
   const startDateRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
+  // task-330b2e31e9d3 — the plain-task 'fields' step's FieldEditors container,
+  // focused when the question activates so its i/o/↑↓/type/remove keyboard
+  // model is live immediately (LIST-NAV mode).
+  const taskFieldsRef = useRef<HTMLDivElement | null>(null);
 
   // Stand down the global keyboard handler while composer is open.
   useEffect(() => {
@@ -1938,6 +2158,10 @@ export function TaskComposer(props: Props) {
       if (!props.embedded) titleRef.current?.select();
     } else if (active === 'notes') {
       notesRef.current?.focus();
+    } else if (active === 'fields') {
+      // task-330b2e31e9d3 — land in the FieldEditors container (LIST-NAV) so
+      // i/o add, ↑/↓ row nav and the type/remove shortcuts work at once.
+      taskFieldsRef.current?.focus();
     } else if (isFieldQuestion(active) && !isFieldOptionType(fieldEntryFor(active)?.field ?? { key: '', label: '', type: 'text' })) {
       // task-04ea172532c0 — a free-entry (text/number/date) template field
       // focuses its own input, same as title/notes; select/bool fields fall
@@ -4261,22 +4485,17 @@ export function TaskComposer(props: Props) {
                         />
 
                         {/* task-2fd63b922beb correction (Part A.4) — shared
-                            field-list editors (same components the plain Task
-                            form uses). */}
-                        <FieldListEditor
-                          kind="inputs"
-                          fields={def.inputs ?? []}
-                          onAdd={() => addChainField(defIdx, 'inputs')}
-                          onUpdate={(fi, patch) => updateChainField(defIdx, 'inputs', fi, patch)}
-                          onRemove={(fi) => removeChainField(defIdx, 'inputs', fi)}
-                        />
-
-                        <FieldListEditor
-                          kind="outputs"
-                          fields={def.outputs ?? []}
-                          onAdd={() => addChainField(defIdx, 'outputs')}
-                          onUpdate={(fi, patch) => updateChainField(defIdx, 'outputs', fi, patch)}
-                          onRemove={(fi) => removeChainField(defIdx, 'outputs', fi)}
+                            field-definition editor (same component the plain
+                            Task form uses). task-330b2e31e9d3 — keyboard-driven
+                            (i/o add, ↑↓ rows, 1–5 type, r evidence, ⌘/Ctrl+⌫
+                            remove) once focus is inside it; reached via Tab or
+                            click within the step. */}
+                        <FieldEditors
+                          inputs={def.inputs ?? []}
+                          outputs={def.outputs ?? []}
+                          onAdd={(kind) => addChainField(defIdx, kind)}
+                          onUpdate={(kind, fi, patch) => updateChainField(defIdx, kind, fi, patch)}
+                          onRemove={(kind, fi) => removeChainField(defIdx, kind, fi)}
                         />
 
                         {defIdx > 0 && (
@@ -4512,19 +4731,15 @@ export function TaskComposer(props: Props) {
                   <FieldLabel id="fields" />
                   <div className="composer__q-prompt">{promptFor('fields')}</div>
                   <div className="composer__task-fields">
-                    <FieldListEditor
-                      kind="inputs"
-                      fields={taskInputs}
-                      onAdd={() => addTaskField('inputs')}
-                      onUpdate={(fi, patch) => updateTaskField('inputs', fi, patch)}
-                      onRemove={(fi) => removeTaskField('inputs', fi)}
-                    />
-                    <FieldListEditor
-                      kind="outputs"
-                      fields={taskOutputs}
-                      onAdd={() => addTaskField('outputs')}
-                      onUpdate={(fi, patch) => updateTaskField('outputs', fi, patch)}
-                      onRemove={(fi) => removeTaskField('outputs', fi)}
+                    <FieldEditors
+                      inputs={taskInputs}
+                      outputs={taskOutputs}
+                      onAdd={(kind) => addTaskField(kind)}
+                      onUpdate={(kind, fi, patch) => updateTaskField(kind, fi, patch)}
+                      onRemove={(kind, fi) => removeTaskField(kind, fi)}
+                      onExitUp={() => goBack()}
+                      onExitDown={() => goNext()}
+                      containerRef={taskFieldsRef}
                     />
                     <div className="composer__chain-footer">
                       <span />

@@ -946,10 +946,33 @@
   color: var(--accent);
   border-color: var(--accent);
 }
+/* task-330b2e31e9d3 — keyboard-driven Inputs+Outputs editor. The container is
+   focusable (LIST-NAV mode); a subtle ring marks it, and the row cursor is
+   highlighted so keyboard edits (type/remove/evidence) have a visible target. */
+.composer__field-editors {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  outline: none;
+}
+.composer__field-editors:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent, #4a90d9);
+  border-radius: 8px;
+}
+.composer__field-editors-hint {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+}
 .composer__chain-field-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  border-radius: 6px;
+}
+.composer__chain-field-row--active {
+  box-shadow: 0 0 0 2px var(--accent, #4a90d9);
 }
 .composer__chain-field-key {
   width: 110px;
