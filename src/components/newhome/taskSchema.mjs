@@ -258,19 +258,55 @@ export function resultFields(result) {
 
 // ── Condition evaluation ──────────────────────────────────────────────────
 
+// task-f8ae99553691 — words a boolean-ish condition value can take, mapped to
+// the canonical boolean they mean. Case-insensitive; matched after trimming.
+const BOOL_ISH_TRUE = new Set(['true', 'yes']);
+const BOOL_ISH_FALSE = new Set(['false', 'no']);
+
+/** True when `v` is a boolean, or a string that spells one of `true`/`false`/
+ *  `yes`/`no` (any case). Used to decide whether an `==`/`!=` comparison
+ *  should go through boolean normalization instead of raw stringification. */
+function isBoolIsh(v) {
+  if (typeof v === 'boolean') return true;
+  if (typeof v !== 'string') return false;
+  const s = v.trim().toLowerCase();
+  return BOOL_ISH_TRUE.has(s) || BOOL_ISH_FALSE.has(s);
+}
+
+/** Normalize a boolean-ish value (real boolean, or 'true'/'false'/'yes'/'no'
+ *  in any case) to a real boolean. Assumes `isBoolIsh(v)` is already true. */
+function toBoolIsh(v) {
+  if (typeof v === 'boolean') return v;
+  return BOOL_ISH_TRUE.has(v.trim().toLowerCase());
+}
+
 /** Evaluate a TaskDef's `neededWhen` condition against the job's merged
  *  values (`valuesByRef`, keyed by `fieldRef`). An unknown/undefined upstream
  *  value always evaluates to false (conservative: a step whose gate can't yet
- *  be evaluated is NOT treated as needed until the upstream value arrives). */
+ *  be evaluated is NOT treated as needed until the upstream value arrives).
+ *
+ *  task-f8ae99553691: for `==`/`!=`, when EITHER side is boolean-ish (a real
+ *  boolean, or one of the strings true/false/yes/no, case-insensitive), both
+ *  sides are normalized to real booleans before comparing — so a bool output
+ *  `true` matches a chain-builder condition value typed as `'Yes'` (and
+ *  `false` matches `'No'`), symmetric regardless of which side is the literal
+ *  boolean. Plain string/number equality (neither side boolean-ish, e.g.
+ *  `'Yes' === 'Yes'`, `3 === 3`) is unaffected. */
 export function evalCondition(cond, valuesByRef) {
   if (!cond) return true;
   const actual = valuesByRef ? valuesByRef[cond.ref] : undefined;
   if (actual === undefined || actual === null) return false;
   switch (cond.op) {
     case '==':
-      return String(actual) === String(cond.value);
-    case '!=':
-      return String(actual) !== String(cond.value);
+    case '!=': {
+      let eq;
+      if (isBoolIsh(actual) && isBoolIsh(cond.value)) {
+        eq = toBoolIsh(actual) === toBoolIsh(cond.value);
+      } else {
+        eq = String(actual) === String(cond.value);
+      }
+      return cond.op === '==' ? eq : !eq;
+    }
     case '<':
       return Number(actual) < Number(cond.value);
     case '>':

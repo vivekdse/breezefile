@@ -275,6 +275,89 @@ test('evalCondition: unknown op → false', () => {
   assert.equal(evalCondition({ ref: 'a.b', op: '~=', value: 'x' }, { 'a.b': 'x' }), false);
 });
 
+// task-f8ae99553691 — LIVE E2E repro: an agent's flat `{ok: true}` submit
+// (a real boolean) must satisfy a chain-builder condition value typed as the
+// string 'Yes' (what the composer UI historically stored before the
+// type-constrained input landed) — the bug was `String(true) === 'Yes'` →
+// false, silently inverting the gate. Boolean/string-boolean comparisons must
+// be normalized on BOTH sides, regardless of which side is the literal bool.
+test('evalCondition: boolean actual vs "Yes"/"No" string condition (bug repro)', () => {
+  assert.equal(evalCondition({ ref: 'intake.ok', op: '==', value: 'Yes' }, { 'intake.ok': true }), true);
+  assert.equal(evalCondition({ ref: 'intake.ok', op: '==', value: 'Yes' }, { 'intake.ok': false }), false);
+  assert.equal(evalCondition({ ref: 'intake.ok', op: '==', value: 'No' }, { 'intake.ok': false }), true);
+  assert.equal(evalCondition({ ref: 'intake.ok', op: '==', value: 'No' }, { 'intake.ok': true }), false);
+  // != mirrors ==.
+  assert.equal(evalCondition({ ref: 'intake.ok', op: '!=', value: 'Yes' }, { 'intake.ok': false }), true);
+  assert.equal(evalCondition({ ref: 'intake.ok', op: '!=', value: 'Yes' }, { 'intake.ok': true }), false);
+});
+
+test('evalCondition: boolean normalization is case-insensitive and symmetric', () => {
+  // condition value spelled various cases; actual is a real boolean.
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: 'yes' }, { 'a.b': true }), true);
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: 'TRUE' }, { 'a.b': true }), true);
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: 'False' }, { 'a.b': false }), true);
+  // Reversed: actual is a boolean-ish STRING, condition value is a real boolean
+  // (the type-constrained composer input now stores a real boolean; this
+  // covers a hand-authored/legacy condition storing the reverse shape).
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: true }, { 'a.b': 'Yes' }), true);
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: false }, { 'a.b': 'no' }), true);
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: true }, { 'a.b': 'No' }), false);
+});
+
+test('evalCondition: plain string/number equality is unaffected by bool normalization', () => {
+  // Neither side is boolean-ish — falls through to the original stringified
+  // comparison, unchanged.
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: 'blue' }, { 'a.b': 'blue' }), true);
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: 'blue' }, { 'a.b': 'red' }), false);
+  assert.equal(evalCondition({ ref: 'a.n', op: '==', value: 3 }, { 'a.n': 3 }), true);
+  // A select field whose OPTIONS happen to include 'Yes'/'No' as a business
+  // choice (not a bool) still normalizes if the actual matches — this is a
+  // known, accepted tradeoff: 'yes'/'no'/'true'/'false' are reserved
+  // spellings across select AND bool fields.
+  assert.equal(evalCondition({ ref: 'a.b', op: '==', value: 'Yes' }, { 'a.b': 'Yes' }), true);
+});
+
+// task-f8ae99553691 — bool/number/select condition round-trips through
+// instantiate (valuesByRef merge) → agent-flat-submit (resultFields) →
+// evalCondition, mirroring how RosterTable/taskDefStatus actually consume a
+// child job's merged values.
+test('evalCondition: bool output round-trips through resultFields → valuesByRef', () => {
+  const submitted = resultFields({ type: 'fields', payload: { ok: true } });
+  assert.deepEqual(submitted, { taskDefId: null, fields: { ok: true } });
+  const valuesByRef = { [fieldRef('intake', 'ok')]: submitted.fields.ok };
+  assert.equal(
+    evalCondition({ ref: 'intake.ok', op: '==', value: 'Yes' }, valuesByRef),
+    true,
+  );
+  assert.equal(
+    taskDefStatus(
+      {
+        id: 'deliver',
+        name: 'Deliver',
+        inputs: [],
+        outputs: [{ key: 'sent', label: 'Sent?', type: 'bool', required: true }],
+        neededWhen: { ref: 'intake.ok', op: '==', value: 'Yes' },
+      },
+      valuesByRef,
+    ),
+    'pending', // gate met (not 'skip'); no output filled yet → pending, not n/a.
+  );
+});
+
+test('evalCondition: number condition round-trip through resultFields → valuesByRef', () => {
+  const submitted = resultFields({ type: 'fields', payload: { count: 12 } });
+  const valuesByRef = { [fieldRef('intake', 'count')]: submitted.fields.count };
+  assert.equal(evalCondition({ ref: 'intake.count', op: '>', value: 10 }, valuesByRef), true);
+  assert.equal(evalCondition({ ref: 'intake.count', op: '<', value: 10 }, valuesByRef), false);
+});
+
+test('evalCondition: select condition round-trip through resultFields → valuesByRef', () => {
+  const submitted = resultFields({ type: 'fields', payload: { grade: 'B' } });
+  const valuesByRef = { [fieldRef('intake', 'grade')]: submitted.fields.grade };
+  assert.equal(evalCondition({ ref: 'intake.grade', op: '==', value: 'B' }, valuesByRef), true);
+  assert.equal(evalCondition({ ref: 'intake.grade', op: '==', value: 'A' }, valuesByRef), false);
+});
+
 // ── taskDefStatus ──────────────────────────────────────────────────────────
 const gatedDef = {
   id: 'stain',

@@ -1345,14 +1345,21 @@ export function TaskComposer(props: Props) {
     setChainDefs((prev) => prev.map((d, i) => (i === defIdx ? { ...d, neededWhen: cond } : d)));
   }
   // Candidate upstream OUTPUT refs a later step's `neededWhen` can gate on —
-  // every output field from every step BEFORE `defIdx`.
-  function upstreamOutputRefs(defIdx: number): { ref: string; label: string }[] {
-    const out: { ref: string; label: string }[] = [];
+  // every output field from every step BEFORE `defIdx`. Carries the field
+  // itself (task-f8ae99553691) so the condition-value input below can be
+  // constrained by the referenced output's TYPE (bool → Yes/No, number →
+  // numeric, select → its own options, text → free text).
+  function upstreamOutputRefs(defIdx: number): { ref: string; label: string; field: TaskDefField }[] {
+    const out: { ref: string; label: string; field: TaskDefField }[] = [];
     for (let i = 0; i < defIdx; i++) {
       const d = chainDefs[i];
       for (const f of d.outputs ?? []) {
         if (!f.key) continue;
-        out.push({ ref: fieldRef(d.id, f.key), label: `${d.name || `Step ${i + 1}`} · ${f.label || f.key}` });
+        out.push({
+          ref: fieldRef(d.id, f.key),
+          label: `${d.name || `Step ${i + 1}`} · ${f.label || f.key}`,
+          field: f,
+        });
       }
     }
     return out;
@@ -3439,7 +3446,7 @@ export function TaskComposer(props: Props) {
                                     setChainNeededWhen(defIdx, {
                                       ref: first?.ref ?? '',
                                       op: '==',
-                                      value: '',
+                                      value: first?.field.type === 'bool' ? false : '',
                                     });
                                   } else {
                                     setChainNeededWhen(defIdx, null);
@@ -3448,47 +3455,114 @@ export function TaskComposer(props: Props) {
                               />
                               only needed when…
                             </label>
-                            {def.neededWhen && (
-                              <div className="composer__chain-neededwhen-row">
-                                <select
-                                  className="composer__chain-field-type"
-                                  value={def.neededWhen.ref}
-                                  onChange={(e) =>
-                                    setChainNeededWhen(defIdx, { ...def.neededWhen!, ref: e.target.value })
-                                  }
-                                >
-                                  {upstreamOutputRefs(defIdx).map((r) => (
-                                    <option key={r.ref} value={r.ref}>
-                                      {r.label}
-                                    </option>
-                                  ))}
-                                </select>
-                                <select
-                                  className="composer__chain-field-type"
-                                  value={def.neededWhen.op}
-                                  onChange={(e) =>
-                                    setChainNeededWhen(defIdx, {
-                                      ...def.neededWhen!,
-                                      op: e.target.value as TaskDefCondition['op'],
-                                    })
-                                  }
-                                >
-                                  <option value="==">==</option>
-                                  <option value="!=">!=</option>
-                                  <option value="<">&lt;</option>
-                                  <option value=">">&gt;</option>
-                                </select>
-                                <input
-                                  className="composer__chain-field-label"
-                                  type="text"
-                                  placeholder="value"
-                                  value={String(def.neededWhen.value ?? '')}
-                                  onChange={(e) =>
-                                    setChainNeededWhen(defIdx, { ...def.neededWhen!, value: e.target.value })
-                                  }
-                                />
-                              </div>
-                            )}
+                            {def.neededWhen && (() => {
+                              const candidates = upstreamOutputRefs(defIdx);
+                              const refField = candidates.find((r) => r.ref === def.neededWhen!.ref)?.field;
+                              return (
+                                <div className="composer__chain-neededwhen-row">
+                                  <select
+                                    className="composer__chain-field-type"
+                                    value={def.neededWhen.ref}
+                                    onChange={(e) => {
+                                      // task-f8ae99553691: switching the referenced
+                                      // output resets `value` — a stale value typed
+                                      // for a different field's type (e.g. a number
+                                      // typed while pointed at a bool field) must not
+                                      // silently carry over.
+                                      const nextField = candidates.find((r) => r.ref === e.target.value)?.field;
+                                      setChainNeededWhen(defIdx, {
+                                        ...def.neededWhen!,
+                                        ref: e.target.value,
+                                        value: nextField?.type === 'bool' ? false : '',
+                                      });
+                                    }}
+                                  >
+                                    {candidates.map((r) => (
+                                      <option key={r.ref} value={r.ref}>
+                                        {r.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    className="composer__chain-field-type"
+                                    value={def.neededWhen.op}
+                                    onChange={(e) =>
+                                      setChainNeededWhen(defIdx, {
+                                        ...def.neededWhen!,
+                                        op: e.target.value as TaskDefCondition['op'],
+                                      })
+                                    }
+                                  >
+                                    <option value="==">==</option>
+                                    <option value="!=">!=</option>
+                                    <option value="<">&lt;</option>
+                                    <option value=">">&gt;</option>
+                                  </select>
+                                  {/* task-f8ae99553691: the value input is
+                                      constrained by the referenced output field's
+                                      TYPE — bool renders as a Yes/No toggle STORED
+                                      as a real boolean (never the string "Yes"),
+                                      number as a numeric input, select as a
+                                      dropdown of that field's own options, and
+                                      free text otherwise. */}
+                                  {refField?.type === 'bool' ? (
+                                    <select
+                                      className="composer__chain-field-type"
+                                      value={def.neededWhen.value === true ? 'true' : 'false'}
+                                      onChange={(e) =>
+                                        setChainNeededWhen(defIdx, {
+                                          ...def.neededWhen!,
+                                          value: e.target.value === 'true',
+                                        })
+                                      }
+                                    >
+                                      <option value="true">Yes</option>
+                                      <option value="false">No</option>
+                                    </select>
+                                  ) : refField?.type === 'select' ? (
+                                    <select
+                                      className="composer__chain-field-type"
+                                      value={String(def.neededWhen.value ?? '')}
+                                      onChange={(e) =>
+                                        setChainNeededWhen(defIdx, { ...def.neededWhen!, value: e.target.value })
+                                      }
+                                    >
+                                      <option value="" disabled>
+                                        choose…
+                                      </option>
+                                      {(refField.options ?? []).map((o) => (
+                                        <option key={o} value={o}>
+                                          {o}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : refField?.type === 'number' ? (
+                                    <input
+                                      className="composer__chain-field-label"
+                                      type="number"
+                                      placeholder="value"
+                                      value={String(def.neededWhen.value ?? '')}
+                                      onChange={(e) =>
+                                        setChainNeededWhen(defIdx, {
+                                          ...def.neededWhen!,
+                                          value: e.target.value === '' ? '' : Number(e.target.value),
+                                        })
+                                      }
+                                    />
+                                  ) : (
+                                    <input
+                                      className="composer__chain-field-label"
+                                      type="text"
+                                      placeholder="value"
+                                      value={String(def.neededWhen.value ?? '')}
+                                      onChange={(e) =>
+                                        setChainNeededWhen(defIdx, { ...def.neededWhen!, value: e.target.value })
+                                      }
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </li>

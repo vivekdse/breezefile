@@ -92,7 +92,12 @@ export type TaskDefField = {
 export type TaskDefCondition = {
   ref: string; // "<taskDefId>.<outputKey>" of an UPSTREAM task-def
   op: '==' | '!=' | '<' | '>';
-  value: string | number;
+  // task-f8ae99553691: boolean added so the chain-builder UI can store a
+  // bool-typed output's gate value as a real boolean (e.g. `true`) instead of
+  // the string `'Yes'` a human would otherwise type — see evalCondition's
+  // boolean-ish normalization in taskSchema.mjs for the comparison side of
+  // this contract.
+  value: string | number | boolean;
 };
 
 /** task-8b694714b13c — the smallest primitive in a template: one step that
