@@ -25,6 +25,15 @@ import { pipelineColumns, partitionJobs } from './pipelineRoster.mjs';
 import type { PipelineColumn, PipelineGroup } from './pipelineRoster.mjs';
 import { useChainedRoster } from './useNewHomeData';
 import type { ChainedJobResolution } from './useNewHomeData';
+// task — the "▶ Start" row action reuses the OLD Tasks page's exact launch
+// path: primaryActionFor (the single source of truth for which primary action a
+// row offers) decides eligibility, and useTaskActions().start (→ runTaskNow) is
+// the same claim-then-launch IPC the old play button fires. No new launch path.
+import { useTasks, useTypebuildReadiness } from '../../tasks';
+import { useTaskActions } from '../tasks/useTaskActions';
+import { useRunningSessions } from '../tasks/useRunningSessions';
+import { primaryActionFor } from '../tasks/primaryAction.mjs';
+import { isDone } from '../tasks/sections.mjs';
 import './RosterTable.css';
 
 const FILTER_PILLS: { id: 'all' | NewHomeStatus; label: string }[] = [
@@ -67,10 +76,17 @@ function RowAction({
   task,
   onOpenTask,
   onRetry,
+  onStart,
+  startAction,
 }: {
   task: NewHomeTask;
   onOpenTask: (id: string) => void;
   onRetry: (id: string) => void;
+  onStart: (id: string) => void;
+  /** When non-null, this row is start-eligible per primaryActionFor (the OLD
+   *  Tasks page's state machine). `enabled` gates on TypeBuild readiness;
+   *  `tooltip` is the same hover text the old play button shows. */
+  startAction: { enabled: boolean; tooltip?: string } | null;
 }) {
   if (task.status === 'needs') {
     return (
@@ -97,6 +113,28 @@ function RowAction({
         }}
       >
         Retry
+      </button>
+    );
+  }
+  // ▶ Start — the SAME claim-then-launch path the old Tasks page's play button
+  // fires (onStart → NewHomePage → useTaskActions().start → runTaskNow). Shown
+  // only for rows primaryActionFor deems start-eligible (typebuild, open/queued,
+  // unclaimed-or-mine-and-idle) — never a claimed-by-other, in-progress, blocked,
+  // terminal, or parent-with-open-children row. stopPropagation so the click
+  // launches instead of opening the detail dialog (mirrors Answer/Retry).
+  if (startAction) {
+    return (
+      <button
+        type="button"
+        className="nh-roster__action nh-roster__action--start"
+        disabled={!startAction.enabled}
+        title={startAction.tooltip}
+        onClick={(e) => {
+          e.stopPropagation();
+          onStart(task.id);
+        }}
+      >
+        {'▶ Start'}
       </button>
     );
   }
@@ -359,6 +397,7 @@ export function RosterTable({
   queryError,
   onOpenTask,
   onRetry,
+  onStart,
   onFilter,
   onSearch,
   loading,
@@ -377,6 +416,10 @@ export function RosterTable({
   queryError?: string;
   onOpenTask: (id: string) => void;
   onRetry: (id: string) => void;
+  /** Launch a start-eligible task. Threaded from NewHomePage, which owns the
+   *  useTaskActions().start (→ runTaskNow) call and the post-action roster
+   *  refresh — the SAME mechanism the old Tasks page's play button uses. */
+  onStart: (id: string) => void;
   /** Optional — NewHomePage today drives filtering via HeroStats cards and
    *  pre-filters `tasks` before passing them down, so this pill bar is not
    *  yet wired to a live callback from the shell. Kept optional so this
@@ -400,6 +443,40 @@ export function RosterTable({
     () => (filter === 'all' ? tasks : tasks.filter((t) => t.status === filter)),
     [tasks, filter],
   );
+
+  // ── ▶ Start eligibility (reuses the OLD Tasks page's exact rule) ───────────
+  // primaryActionFor is the single source of truth for a row's primary action;
+  // we render Start exactly when it returns kind:'start'. Its ctx is the same
+  // the old page assembles: source capabilities, TypeBuild readiness + my email
+  // (claimed-by-me vs claimed-by-other), any live local session tab, and whether
+  // this row is a container parent with still-open children (a parent can't be
+  // Started until its children resolve — fm-bq86). `allTasks` is the FULL,
+  // UNFILTERED roster so a status filter that hides a parent's open children
+  // can't make it falsely look start-eligible. PHI: no task text is read here —
+  // only ids/status/claim/parent metadata.
+  const tbReady = useTypebuildReadiness();
+  const sessions = useRunningSessions();
+  const actions = useTaskActions();
+  const { tasks: allTasks } = useTasks({ includeDone: true });
+  const openChildParentIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of allTasks) {
+      if (t.parentTaskId && !isDone(t)) set.add(t.parentTaskId);
+    }
+    return set;
+  }, [allTasks]);
+  const startActionFor = (
+    t: NewHomeTask,
+  ): { enabled: boolean; tooltip?: string } | null => {
+    const pa = primaryActionFor(t.raw, {
+      caps: actions.caps(t.raw),
+      tbReady,
+      myEmail: tbReady.email,
+      session: sessions.get(t.id),
+      hasOpenChildren: openChildParentIds.has(t.id),
+    });
+    return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
+  };
 
   // ── chained-job detection (task-b1fa5098da3e, R3) ─────────────────────────
   // Candidate jobs: top-level rows (no parentTaskId) with at least one child
@@ -634,7 +711,13 @@ export function RosterTable({
                       {WHO_GLYPH[t.who]}
                     </td>
                     <td className="nh-roster__action-cell">
-                      <RowAction task={t} onOpenTask={onOpenTask} onRetry={onRetry} />
+                      <RowAction
+                        task={t}
+                        onOpenTask={onOpenTask}
+                        onRetry={onRetry}
+                        onStart={onStart}
+                        startAction={startActionFor(t)}
+                      />
                     </td>
                   </tr>
                   {isChained && chainedRes && (

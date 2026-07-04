@@ -495,3 +495,14 @@
   color: var(--text-on-accent);
   margin-left: auto;
 }
+.nh-dialog__btn--start {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+  margin-left: auto;
+}
+/* When Start sits alongside a right-aligned primary (e.g. "Close"), only the
+   first right-pushed button needs the auto margin; the sibling hugs it. */
+.nh-dialog__btn--start + .nh-dialog__btn--primary {
+  margin-left: var(--sp-2);
+}

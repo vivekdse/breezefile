@@ -284,6 +284,14 @@
 .nh-roster__action--retry {
   background: var(--nh-failed);
 }
+.nh-roster__action--start {
+  background: var(--accent);
+}
+.nh-roster__action--start:disabled {
+  opacity: 0.5;
+  cursor: default;
+  filter: none;
+}
 .nh-roster__action-empty {
   color: var(--muted-on-panel);
 }

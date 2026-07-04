@@ -31,11 +31,17 @@ import {
   postTaskMessage,
   formatMessageSendReason,
   injectMessageIntoSession,
+  useTypebuildReadiness,
 } from '../../tasks';
 import { fm } from '../../bridge';
 import { useStore } from '../../store';
 import { useTaskActions } from '../tasks/useTaskActions';
 import { useRunningSessions } from '../tasks/useRunningSessions';
+// task — the "▶ Start" footer button reuses the OLD Tasks page's exact launch
+// path: primaryActionFor decides eligibility, useTaskActions().start (→
+// runTaskNow) is the same claim-then-launch this dialog's Retry already calls.
+import { primaryActionFor } from '../tasks/primaryAction.mjs';
+import { isDone } from '../tasks/sections.mjs';
 import { useOpenResumeInTab } from '../../openResumeInTab';
 import {
   answerOptions,
@@ -368,6 +374,38 @@ export function TaskDetailDialog({
     if (!raw) return;
     void actions.start(raw);
   }
+
+  // ▶ Start — the SAME claim-then-launch path the old Tasks page's play button
+  // (and this dialog's Retry) uses: useTaskActions().start → runTaskNow. No new
+  // launch path.
+  function startTask() {
+    if (!raw) return;
+    void actions.start(raw);
+  }
+
+  // Start eligibility: reuse primaryActionFor — the OLD Tasks page's single
+  // source of truth — with the same ctx it assembles (source caps, TypeBuild
+  // readiness + my email, any live local session, and whether this is a
+  // container parent with still-open children, which can't be Started yet).
+  // hasOpenChildren is derived from the roster snapshot passed down (`tasks`),
+  // matching the parent-vs-child rule the roster already uses. PHI: only
+  // ids/status/claim/parent metadata are read — never task text.
+  const tbReady = useTypebuildReadiness();
+  const hasOpenChildren = useMemo(() => {
+    if (!raw || !tasks) return false;
+    return tasks.some((t) => t.raw.parentTaskId === taskId && !isDone(t.raw));
+  }, [raw, tasks, taskId]);
+  const startAction = useMemo(() => {
+    if (!raw) return null;
+    const pa = primaryActionFor(raw, {
+      caps: actions.caps(raw),
+      tbReady,
+      myEmail: tbReady.email,
+      session,
+      hasOpenChildren,
+    });
+    return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
+  }, [raw, actions, tbReady, session, hasOpenChildren]);
 
   // ── task-templates: this task's own output DEFINITIONS + submitted VALUES ─
   // A CHILD task's body carries `task-outputs` (definitions); once the agent
@@ -863,6 +901,21 @@ export function TaskDetailDialog({
           >
             Send Message
           </button>
+          {/* ▶ Start — shown for a start-eligible task that isn't the
+              answer/retry case (a 'failed' row already gets Retry, which is the
+              same start mechanism). Disabled + tooltip mirror the old play
+              button when TypeBuild isn't ready yet. */}
+          {startAction && status !== 'needs' && status !== 'failed' && (
+            <button
+              type="button"
+              className="nh-dialog__btn nh-dialog__btn--start"
+              disabled={!startAction.enabled}
+              title={startAction.tooltip}
+              onClick={startTask}
+            >
+              {'▶ Start'}
+            </button>
+          )}
           {status === 'needs' && pendingQuestion ? (
             <button
               type="button"

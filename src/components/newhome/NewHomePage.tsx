@@ -36,6 +36,7 @@ import { HeroStats } from './HeroStats';
 import { RosterTable } from './RosterTable';
 import { TaskDetailDialog } from './TaskDetailDialog';
 import { OutcomesPanel } from './OutcomesPanel';
+import { useTaskActions } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import './NewHomePage.css';
 
@@ -89,9 +90,19 @@ export function NewHomePage() {
 
   const { tasks, counts, projects, loading, refresh } =
     useNewHomeData(selectedProjectId);
+  // task — the roster's ▶ Start button. Launches via the SAME mechanism the old
+  // Tasks page's play button uses (useTaskActions().start → runTaskNow), then
+  // refreshes the roster the SAME way onRetry does — this shell owns the action
+  // + refresh so RosterTable stays presentational (mirrors the onRetry pattern).
+  const actions = useTaskActions();
 
   function openTaskDetail(id: string) {
     setOpenTaskId(id);
+  }
+  function startTask(id: string) {
+    const t = tasks.find((x) => x.id === id);
+    if (!t) return;
+    void actions.start(t.raw).finally(() => void refresh());
   }
   // task-ef961d60dc1b — "+ New Task" opens the CANONICAL Task form (the
   // globally-mounted TaskComposer, via fm:openTask — the same form the task
@@ -259,6 +270,7 @@ export function NewHomePage() {
           onFilter={setFilter}
           onSearch={setSearch}
           onRetry={() => void refresh()}
+          onStart={startTask}
         />
 
         <OutcomesPanel
