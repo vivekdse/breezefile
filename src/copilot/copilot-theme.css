@@ -423,3 +423,55 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
   padding: 1px 4px;
   border-radius: var(--r-sm);
 }
+
+/* ------------------------------------------------------------------ *
+ * 6. Tighten the input footprint (task-5adf18b913e4).                  *
+ *                                                                      *
+ * v2's default input layout leaves a lot of dead space around the      *
+ * "Type a message…" pill: the pill sits in a wide sidebar-scoped        *
+ * horizontal pad (cpk:[data-sidebar-chat]:px-8), and the disclaimer     *
+ * ("AI can make mistakes…") carries its own cpk:py-3 cpk:px-4 gap        *
+ * beneath it. Retune both via the STABLE class / data-testid seams so    *
+ * the pill footprint is compact and the transcript gets the room back.   *
+ * All spacing flows from the app's --sp-* tokens (src/styles/tokens.css) *
+ * — no hardcoded px. The scroll content reserves padding-bottom equal to *
+ * the measured input-overlay height, so a shorter overlay automatically  *
+ * hands the reclaimed space back to the message stream.                  *
+ * ------------------------------------------------------------------ */
+
+/* The wrapper div whose DIRECT child is the input pill: v2 pads it px-4 and,
+   under the sidebar (cpk:[data-sidebar-chat]:px-8), bumps to px-8 — far wider
+   than this narrow drawer needs. Pull it into the app's small gutter and drop
+   the vertical padding to zero (the pill's own inner grid supplies its height).
+   Also zero padding on the [data-copilotkit] input-default that contains the
+   pill, so no outer slack survives. */
+.copilot-dock [data-testid='copilot-input-overlay'] div:has(> [data-testid='copilot-chat-input']) {
+  padding-left: var(--sp-2) !important;
+  padding-right: var(--sp-2) !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+/* The disclaimer beneath the pill (v2 gives it no stable id): it is the LAST
+   child of the [data-copilotkit] input-default; the pill wrapper is the first,
+   excluded via :not(:has(...)). Collapse its py-3/px-4 to a tight, token-sized
+   gap so it hugs the input instead of floating below it. Anchored inside the
+   input-overlay so it can't match any other [data-copilotkit] surface. */
+.copilot-dock
+  [data-testid='copilot-input-overlay']
+  [data-copilotkit]
+  > div:last-child:not(:has([data-testid='copilot-chat-input'])) {
+  padding-top: var(--sp-1) !important;
+  padding-bottom: var(--sp-1) !important;
+  padding-left: var(--sp-2) !important;
+  padding-right: var(--sp-2) !important;
+}
+
+/* 2) The "+" attachment button (copilot-add-menu-button) is dead UI in our
+   Electron app — attachments are not wired to the main-process BuiltInAgent,
+   so the menu does nothing and only misleads. Hide it. Its grid cell is
+   auto-sized (cpk:col-start-1), so removing the button collapses the column
+   and reclaims its width for the textarea. */
+.copilot-dock [data-testid='copilot-add-menu-button'] {
+  display: none !important;
+}
