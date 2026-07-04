@@ -56,7 +56,7 @@ import { useRunningSessions } from '../tasks/useRunningSessions';
 import type { Agent, Project, Task, TaskAuditEvent } from '../../types';
 import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
 import { metaStatus as metaStatusOf, parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
-import { buildJobValuesByRef, classifyJob, partitionJobs, resolveFieldedJob, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
+import { buildJobValuesByRef, classifyJob, fieldedSchemaSource, partitionJobs, resolveFieldedJob, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
 
 // task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
 // "is this task an active agent" is never computed two different ways. classify()
@@ -502,7 +502,19 @@ export type ChainedJobResolution =
       childrenLoading: boolean;
     };
 
-type TaskDetail = { notes: string | null; result: unknown };
+// task-ce4b4c8ca955 (round-18 fix) — the fetched detail ALSO carries the
+// server's first-class `outputSchema`. The list-row mapping (mapListRow) never
+// sets outputSchema (the list has no body), so a top-level DONE single-task's
+// schema is ONLY available on the getTask/mapDetail path — exactly the detail
+// we already fetch here. resolveJob's 'fielded' case must read it from THIS
+// cache, not from the schema-less list row, or a server-schema'd task falls
+// through to 'plain' (the round-18 regression: all three fielded fixtures
+// rendered as plain rows). NON-PHI: field DEFINITIONS only, never values.
+type TaskDetail = {
+  notes: string | null;
+  result: unknown;
+  outputSchema?: import('../../types').Task['outputSchema'];
+};
 
 export function useChainedRoster(opts: { jobIds: string[] }): {
   resolveJob: (jobId: string) => ChainedJobResolution;
@@ -565,7 +577,13 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
           fetchedAtRef.current.set(t.id, t.updated_at);
           try {
             const full = await getTask(t.id, t.source);
-            results.push([t.id, full ? { notes: full.notes, result: full.result ?? null } : null]);
+            // task-ce4b4c8ca955 (round-18) — capture the server outputSchema
+            // from the DETAIL fetch (mapListRow never sets it) so resolveJob's
+            // 'fielded' case can read it. NON-PHI (field defs only).
+            results.push([
+              t.id,
+              full ? { notes: full.notes, result: full.result ?? null, outputSchema: full.outputSchema } : null,
+            ]);
           } catch {
             fetchedAtRef.current.delete(t.id);
             results.push([t.id, null]);
@@ -742,7 +760,13 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
           ? resolveFieldedJob({
               id: jobId,
               name: job?.title ?? jobId,
-              outputSchema: job?.outputSchema ?? null,
+              // ROUND-18 FIX: the server outputSchema lives on the DETAIL fetch
+              // (jobDetail), NOT the list row — mapListRow never sets it. Reading
+              // job?.outputSchema (the list row) was ALWAYS undefined, so a
+              // server-schema'd single task with no body block fell through to
+              // 'plain'. fieldedSchemaSource prefers the fetched detail's schema;
+              // the list row is a harmless (undefined today) fallback.
+              outputSchema: fieldedSchemaSource(jobDetail, job),
               notes: jobDetail.notes,
               result: jobDetail.result,
             })

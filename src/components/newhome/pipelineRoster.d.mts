@@ -61,6 +61,14 @@ export function resolveFieldedJob(job: {
   result?: unknown;
 }): { name: string; defs: TaskDef[]; valuesByRef: Record<string, string | number>; childIdByDefId: Record<string, string> } | null;
 
+/** task-ce4b4c8ca955 (round-18) — pick the server output_schema source for a
+ *  fielded resolution: prefer the FETCHED DETAIL's schema over the (schema-less)
+ *  list row. Returns the first non-empty schema array, else null. */
+export function fieldedSchemaSource(
+  detail: { outputSchema?: TaskDefField[] | null } | null | undefined,
+  listRow: { outputSchema?: TaskDefField[] | null } | null | undefined,
+): TaskDefField[] | null;
+
 /** Fielded resolution payload (childless single-task output fields). */
 export type FieldedResolution = {
   name: string;

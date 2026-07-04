@@ -228,6 +228,30 @@ export function resolveFieldedJob(job) {
 }
 
 /**
+ * task-ce4b4c8ca955 (ROUND-18 FIX) — pick the server output_schema SOURCE for a
+ * fielded resolution. The bug this guards: mapListRow (electron/sources/
+ * typebuild.ts) never sets `outputSchema` — the list/settled row has no body —
+ * so a top-level DONE single task's schema is available ONLY on the getTask/
+ * mapDetail path. resolveJob used to read the schema off the schema-less LIST
+ * ROW (`job?.outputSchema`), which was ALWAYS undefined, so a server-schema'd
+ * task with no legacy ```task-outputs body block fell through to 'plain' (all
+ * three round-18 fixtures rendered as plain rows). This prefers the FETCHED
+ * DETAIL's schema; the list row is a harmless fallback (undefined today, but a
+ * future list that carries it still works). NON-PHI: field definitions only.
+ *
+ * @param {{ outputSchema?: unknown } | null | undefined} detail  the FETCHED task detail (getTask/mapDetail)
+ * @param {{ outputSchema?: unknown } | null | undefined} listRow the roster LIST row (mapListRow — no schema today)
+ * @returns {unknown|null} the first non-empty schema array, else null
+ */
+export function fieldedSchemaSource(detail, listRow) {
+  const fromDetail = detail?.outputSchema;
+  if (Array.isArray(fromDetail) && fromDetail.length > 0) return fromDetail;
+  const fromList = listRow?.outputSchema;
+  if (Array.isArray(fromList) && fromList.length > 0) return fromList;
+  return null;
+}
+
+/**
  * REGRESSION FIX (chain grouping, this session) — the single, pure, testable
  * source of truth for a top-level candidate row's classification. Extracted
  * from useNewHomeData.resolveJob so all four outcomes can be proven in one

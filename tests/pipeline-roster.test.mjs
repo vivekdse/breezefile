@@ -9,6 +9,7 @@ import {
   pipelineColumns,
   buildJobValuesByRef,
   classifyJob,
+  fieldedSchemaSource,
   resolveFieldedJob,
   rewriteTaskFieldsBlock,
   runnableStepId,
@@ -594,6 +595,58 @@ test('resolveFieldedJob: schema present but no result yet → def with empty val
 test('resolveFieldedJob: invalid job (no id) → null', () => {
   assert.equal(resolveFieldedJob(null), null);
   assert.equal(resolveFieldedJob({ outputSchema: [{ key: 'a', label: 'A', type: 'text' }] }), null);
+});
+
+// ── fieldedSchemaSource (ROUND-18 wire/list-row threading gap) ───────────────
+// THE BUG the earlier tests missed: resolveFieldedJob itself worked when handed
+// a schema, but resolveJob sourced that schema from the schema-LESS LIST ROW
+// (mapListRow never sets outputSchema) instead of the FETCHED DETAIL — so all
+// three server-schema fixtures fell through to 'plain'. These pin the fix.
+const SCHEMA = [{ key: 'widgets', label: 'Widgets', type: 'number', required: true }];
+
+test('fieldedSchemaSource: schema on the DETAIL, ABSENT on the list row → uses the detail (the real fixture shape)', () => {
+  // Exactly the round-18 fixtures: DONE top-level task, server output_schema on
+  // the get_task detail, list row carries NO schema. Must NOT return null.
+  const detail = { notes: null, result: { type: 'fields', payload: { widgets: 42 } }, outputSchema: SCHEMA };
+  const listRow = { id: 'task-73384d8e26e1', title: 'Done widget task' }; // no outputSchema
+  assert.deepEqual(fieldedSchemaSource(detail, listRow), SCHEMA);
+});
+
+test('fieldedSchemaSource: neither detail nor list row has a schema → null (plain, no regression)', () => {
+  assert.equal(fieldedSchemaSource({ notes: null, result: null }, { id: 'x' }), null);
+  assert.equal(fieldedSchemaSource(null, null), null);
+  assert.equal(fieldedSchemaSource({ outputSchema: [] }, { outputSchema: [] }), null); // empty ≠ present
+});
+
+test('fieldedSchemaSource: list row carries a schema (future list), detail lacks it → falls back to list', () => {
+  assert.deepEqual(fieldedSchemaSource({ notes: null }, { outputSchema: SCHEMA }), SCHEMA);
+});
+
+test('END-TO-END: detail-sourced server schema (no body block, list row schema-less) resolves fielded with columns + values', () => {
+  // Reconstructs the EXACT call resolveJob makes after the fix: schema from the
+  // fetched DETAIL via fieldedSchemaSource, notes/result from the detail. Proves
+  // a server-schema'd DONE single task yields field columns + values — the
+  // acceptance the three fixtures need. (Before the fix, outputSchema was read
+  // off the list row → undefined → resolveFieldedJob returned null → 'plain'.)
+  const detail = {
+    notes: null, // NO legacy ```task-outputs body block — server schema only
+    result: { type: 'fields', payload: { widgets: 42 } },
+    outputSchema: SCHEMA,
+  };
+  const listRow = { id: 'task-73384d8e26e1', title: 'FIXTURE done widget task' }; // schema-less
+  const resolved = resolveFieldedJob({
+    id: 'task-73384d8e26e1',
+    name: listRow.title,
+    outputSchema: fieldedSchemaSource(detail, listRow),
+    notes: detail.notes,
+    result: detail.result,
+  });
+  assert.ok(resolved, 'must resolve fielded (not null → plain)');
+  assert.equal(resolved.defs.length, 1);
+  const def = resolved.defs[0];
+  assert.deepEqual(def.outputs, SCHEMA);
+  assert.equal(resolved.valuesByRef[fieldRef(def.id, 'widgets')], 42);
+  assert.deepEqual(resolved.childIdByDefId, { [def.id]: 'task-73384d8e26e1' });
 });
 
 // ── classifyJob (chain-grouping regression guard) ────────────────────────────
