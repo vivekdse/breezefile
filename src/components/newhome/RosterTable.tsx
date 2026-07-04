@@ -22,7 +22,8 @@ import type { NewHomeStatus, NewHomeTask } from './types';
 import type { Task } from '../../types';
 import { claimFreshness } from '../tasks/lifecycle.mjs';
 import { evalCondition, fieldRef, metaStatus, taskDefStatus } from './taskSchema.mjs';
-import { pipelineColumns, partitionJobs, runnableStepId } from './pipelineRoster.mjs';
+import { nextAutoContinueChildId, pipelineColumns, partitionJobs, runnableStepId } from './pipelineRoster.mjs';
+import { isAutoContinueOn, setAutoContinue } from './chainAutoContinuePrefs';
 import type { PipelineColumn, PipelineGroup } from './pipelineRoster.mjs';
 import { useChainedRoster } from './useNewHomeData';
 import type { ChainedJobResolution } from './useNewHomeData';
@@ -424,6 +425,8 @@ function PipelineCell({
  *  aggregated valuesByRef, with its own header (built from that job's own
  *  defs, so heterogeneous chains across jobs render independently). */
 function ChainedJobSubtable({
+  jobId,
+  agentRun,
   groups,
   resolution,
   onOpenTask,
@@ -431,6 +434,14 @@ function ChainedJobSubtable({
   allTasksById,
   onStartChild,
 }: {
+  /** task-6a14190fb2f7 — the job's own top-level task id. Auto-continue's
+   *  localStorage pref and its claim-guard bookkeeping are keyed off this. */
+  jobId: string;
+  /** task-6a14190fb2f7 — "is this chain agent-run" (the parent row's `who` is
+   *  not purely human). Auto-continue's DEFAULT-ON only ever applies to an
+   *  agent-run chain — a human-run chain is never force-advanced against the
+   *  user's will, regardless of the per-job pref. */
+  agentRun: boolean;
   groups: PipelineGroup[];
   resolution: Extract<ChainedJobResolution, { status: 'chained' }>;
   onOpenTask: (id: string) => void;
@@ -447,8 +458,82 @@ function ChainedJobSubtable({
   const actions = useTaskActions();
   const sessions = useRunningSessions();
   const runnableId = useMemo(() => runnableStepId(defs, valuesByRef), [defs, valuesByRef]);
+
+  // task-6a14190fb2f7 (#3) — terminal state. The SERVER already flips the
+  // parent to 'done' once every child resolves (the chain "reads done" per
+  // the live E2E report) — metaStatus here just mirrors that in the UI; this
+  // component never double-writes the parent's status itself.
+  const meta = useMemo(() => metaStatus(defs, valuesByRef), [defs, valuesByRef]);
+  const justCompletedRef = useRef(false);
+  const wasDoneRef = useRef(meta === 'done');
+  if (meta === 'done' && !wasDoneRef.current) justCompletedRef.current = true;
+  wasDoneRef.current = meta === 'done';
+
+  // ── auto-continue (#2) ────────────────────────────────────────────────────
+  // A per-job toggle (chainAutoContinuePrefs, default ON for an agent-run
+  // chain) that automatically starts the next runnable child the instant it
+  // becomes runnable, instead of waiting for a human to notice the "ready ▶"
+  // chip and click it. Durable home for this is server-side dispatch/breezed
+  // (the client shouldn't need to be open for a chain to advance) — this is
+  // the client-side implementation until that lands.
+  const [autoOn, setAutoOnState] = useState(() => isAutoContinueOn(jobId));
+  useEffect(() => setAutoOnState(isAutoContinueOn(jobId)), [jobId]);
+  const toggleAuto = () => {
+    const next = !autoOn;
+    setAutoOnState(next);
+    setAutoContinue(jobId, next);
+  };
+
+  const nextChildId = useMemo(
+    () => nextAutoContinueChildId(defs, valuesByRef, childIdByDefId),
+    [defs, valuesByRef, childIdByDefId],
+  );
+  // Guard against double-start: track the LAST child id we fired auto-start
+  // for so a re-render (or the fast poll's next tick, before the child's own
+  // status has caught up) never calls onStart twice for the same step. This
+  // is a belt-and-suspenders UI-level guard — the REAL double-start defense
+  // is primaryActionFor + the server's claim (a claimed/in_progress child's
+  // primaryActionFor is never 'start', so runTaskNow simply isn't invoked;
+  // and even if it somehow were, the server's claim rejects a contested
+  // start with {ok:false}, which useTaskActions().start already treats as a
+  // calm no-op status line, never a crash or a second session).
+  const autoStartedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoOn || !agentRun || !nextChildId) return;
+    if (childrenLoading) return; // don't act on a partially-loaded job
+    if (autoStartedForRef.current === nextChildId) return; // already fired
+    const child = allTasksById.get(nextChildId);
+    if (!child) return;
+    const pa = primaryActionFor(child, {
+      caps: actions.caps(child),
+      tbReady,
+      myEmail: tbReady.email,
+      session: sessions.get(nextChildId),
+    });
+    // Only ever auto-start when primaryActionFor itself says this exact
+    // child is start-eligible right now — never claimed/in_progress/done
+    // (those all resolve to a non-'start' kind, see primaryAction.mjs).
+    if (pa.kind !== 'start' || !pa.enabled) return;
+    autoStartedForRef.current = nextChildId;
+    onStartChild(nextChildId);
+  }, [autoOn, agentRun, nextChildId, childrenLoading, allTasksById, actions, tbReady, sessions, onStartChild]);
+
   return (
-    <table className="nh-pipe__table nh-pipe__subtable">
+    <>
+      <div className="nh-pipe__chain-bar">
+        {meta === 'done' ? (
+          <span className="nh-pipe__chain-celebration" role="status">
+            {'✓ Chain complete'}
+            {justCompletedRef.current && <span className="nh-pipe__chain-celebration-badge">just now</span>}
+          </span>
+        ) : (
+          <label className="nh-pipe__auto-continue" title="Automatically start the next step when the previous one finishes">
+            <input type="checkbox" checked={autoOn} onChange={toggleAuto} />
+            <span>Auto-continue</span>
+          </label>
+        )}
+      </div>
+      <table className="nh-pipe__table nh-pipe__subtable">
       <thead>
         <tr>
           {groups.map((g) => {
@@ -522,7 +607,8 @@ function ChainedJobSubtable({
           })}
         </tr>
       </tbody>
-    </table>
+      </table>
+    </>
   );
 }
 
@@ -891,6 +977,15 @@ export function RosterTable({
                     <tr className="nh-roster__subrow">
                       <td colSpan={BASE_COLUMN_COUNT} className="nh-roster__subrow-cell">
                         <ChainedJobSubtable
+                          jobId={t.id}
+                          // task-6a14190fb2f7 — "agent-run chain" gate for
+                          // auto-continue's default-ON: t.who is never purely
+                          // 'human' for a row whose ball a human currently
+                          // holds (deriveWho routes any open pending_question
+                          // to 'human' — see useNewHomeData.ts), so excluding
+                          // 'human' here is exactly "don't force-advance a
+                          // chain the human is actively driving/waiting on".
+                          agentRun={t.who !== 'human'}
                           groups={groups}
                           resolution={chainedRes}
                           onOpenTask={onOpenTask}

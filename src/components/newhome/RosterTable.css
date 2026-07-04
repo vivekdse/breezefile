@@ -412,6 +412,41 @@
 .nh-pipe__step-chip--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-pipe__step-chip--active { background: var(--nh-progress-soft); color: var(--nh-progress); }
 .nh-pipe__step-chip--pending { background: var(--nh-queued-soft); color: var(--nh-queued); }
+
+/* task-6a14190fb2f7 — the small bar above a chained job's subtable: the
+   auto-continue toggle while the chain is running, or a quiet terminal
+   celebration once metaStatus flips to 'done' (the server's own parent
+   resolution — this is a read of that state, never a second write). */
+.nh-pipe__chain-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 2px 4px 4px;
+  font-size: var(--fs-2xs);
+}
+.nh-pipe__auto-continue {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-on-panel);
+  cursor: pointer;
+  user-select: none;
+}
+.nh-pipe__auto-continue input {
+  cursor: pointer;
+}
+.nh-pipe__chain-celebration {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--nh-done);
+  font-weight: 600;
+}
+.nh-pipe__chain-celebration-badge {
+  font-weight: 400;
+  font-style: italic;
+  opacity: 0.75;
+}
 .nh-pipe__step-chip--skip { background: var(--bg-2); color: var(--muted-on-panel); }
 .nh-pipe__step-start {
   border: none;

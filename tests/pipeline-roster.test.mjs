@@ -10,6 +10,7 @@ import {
   buildJobValuesByRef,
   rewriteTaskFieldsBlock,
   runnableStepId,
+  nextAutoContinueChildId,
 } from '../src/components/newhome/pipelineRoster.mjs';
 import {
   buildTaskFieldsBlock,
@@ -257,4 +258,52 @@ test('runnableStepId skips a conditionally-gated (n/a) def and lands on the next
 test('runnableStepId returns null for an empty def list', () => {
   assert.equal(runnableStepId([], {}), null);
   assert.equal(runnableStepId(undefined, {}), null);
+});
+
+// ── nextAutoContinueChildId (task-6a14190fb2f7) ─────────────────────────────
+// Chain continuation: given child N done, resolve child N+1's task id (never
+// re-derive "what's next" — just runnableStepId + one lookup).
+test('nextAutoContinueChildId: given child N done, returns child N+1', () => {
+  const taskDefs = [
+    {
+      id: 'intake',
+      name: 'Intake',
+      inputs: [],
+      outputs: [{ key: 'has_stains', label: 'Stains?', type: 'bool', required: true }],
+    },
+    {
+      id: 'deliver',
+      name: 'Deliver',
+      inputs: [],
+      outputs: [{ key: 'delivered_at', label: 'Delivered at', type: 'date', required: true }],
+    },
+  ];
+  const childIdByDefId = { intake: 'child-1', deliver: 'child-2' };
+  // Nothing done yet → step 1's child.
+  assert.equal(nextAutoContinueChildId(taskDefs, {}, childIdByDefId), 'child-1');
+  // intake (step 1) done → step 2's child.
+  const values = { [fieldRef('intake', 'has_stains')]: 'Yes' };
+  assert.equal(nextAutoContinueChildId(taskDefs, values, childIdByDefId), 'child-2');
+});
+
+test('nextAutoContinueChildId stops (returns null) at terminal — every def done', () => {
+  const taskDefs = [
+    {
+      id: 'intake',
+      name: 'Intake',
+      inputs: [],
+      outputs: [{ key: 'has_stains', label: 'Stains?', type: 'bool', required: true }],
+    },
+  ];
+  const childIdByDefId = { intake: 'child-1' };
+  const values = { [fieldRef('intake', 'has_stains')]: 'Yes' };
+  assert.equal(nextAutoContinueChildId(taskDefs, values, childIdByDefId), null);
+});
+
+test('nextAutoContinueChildId returns null when the runnable step has no child yet', () => {
+  const taskDefs = [
+    { id: 'intake', name: 'Intake', inputs: [], outputs: [] },
+  ];
+  // Def exists but its child hasn't been resolved/created yet.
+  assert.equal(nextAutoContinueChildId(taskDefs, {}, {}), null);
 });

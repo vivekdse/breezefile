@@ -224,3 +224,29 @@ export function runnableStepId(taskDefs, valuesByRef) {
   }
   return null;
 }
+
+/**
+ * task-6a14190fb2f7 — chain continuation. Given the SAME inputs
+ * runnableStepId already resolves the next step from, plus the job's
+ * def-id → child-id index, resolve the CHILD TASK ID auto-continue should
+ * start next — or null when there's nothing to start (every def done/skipped,
+ * or the runnable def has no child yet — e.g. its detail hasn't loaded).
+ *
+ * This is deliberately just runnableStepId + one lookup — never a second
+ * "what's next" rule. Eligibility (is that child actually startable right
+ * now — not already claimed/in_progress/done) is NOT this function's job;
+ * callers must still run the child through primaryActionFor (the one true
+ * start-eligibility gate) before calling start on it — this only answers
+ * "which child is the chain's next step". The claim-safety check is a
+ * separate, orthogonal concern (see RosterTable's auto-continue effect).
+ *
+ * @param {import('./types').TaskDef[]} taskDefs
+ * @param {Record<string, string|number>} valuesByRef
+ * @param {Record<string, string>} childIdByDefId
+ * @returns {string|null} the next child task id to start, or null
+ */
+export function nextAutoContinueChildId(taskDefs, valuesByRef, childIdByDefId) {
+  const stepId = runnableStepId(taskDefs, valuesByRef);
+  if (!stepId) return null;
+  return (childIdByDefId ?? {})[stepId] ?? null;
+}

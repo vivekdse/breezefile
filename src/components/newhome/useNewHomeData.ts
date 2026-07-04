@@ -55,7 +55,7 @@ import { classify, todayKey } from '../../projects/index.mjs';
 import { useRunningSessions } from '../tasks/useRunningSessions';
 import type { Agent, Project, Task, TaskAuditEvent } from '../../types';
 import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
-import { parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
+import { metaStatus as metaStatusOf, parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
 import { buildJobValuesByRef, partitionJobs, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
 
 // task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
@@ -454,6 +454,12 @@ export function useNewHomeData(projectId?: string | null): {
 // (memory only), never logged or persisted, and cleared when the component
 // unmounts. Same discipline as useLatestAuditByTask.
 const PIPELINE_FETCH_CONCURRENCY = 4;
+// task-6a14190fb2f7 — how often to force-refetch an ACTIVE chained job's
+// children (see the "root cause" comment on the poll effect below). Short
+// enough that a completed step's chip/auto-continue surfaces promptly
+// without waiting on the 30s system TypeBuild poll; long enough that it
+// isn't a meaningfully heavier request load than that poll already is.
+const CHAIN_ACTIVE_POLL_MS = 5_000;
 
 /** One candidate job's resolved chain data.
  *  - `status: 'loading'` — the job's OWN body hasn't been fetched yet, so we
@@ -635,6 +641,72 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
       cancelled = true;
     };
   }, [childKey, visibleChildren]);
+
+  // task-6a14190fb2f7 — ROOT CAUSE of "chain stops, nothing surfaces": the
+  // child-detail refetch above is keyed ONLY off the list row's `updated_at`,
+  // which only moves once useTasks re-pulls the list — and that re-pull is
+  // driven by the TypeBuild source's 30s background poll (electron/sources/
+  // typebuild.ts POLL_INTERVAL_MS) or an explicit user action's `refresh()`.
+  // So right after a step completes server-side, the roster can sit on stale
+  // valuesByRef for up to ~30s with NOTHING to prompt a re-check — the exact
+  // "nothing starts or offers step 2" symptom. Rather than shortening the
+  // whole-app system poll (a much bigger blast radius), this hook runs its
+  // OWN short poll scoped to just the children that matter: while a chained
+  // job is still non-terminal, periodically force-refetch its children's
+  // details directly (bypassing the updated_at gate, since the LIST row's
+  // updated_at is exactly what's lagging). A terminal job stops being polled
+  // — no unbounded background chatter once a chain finishes.
+  const anyChainActive = useMemo(() => {
+    for (const jobId of chainedJobIdKey ? chainedJobIdKey.split(',') : []) {
+      const jobDetail = details.get(jobId);
+      if (!jobDetail) continue;
+      const parsed = parseTaskTemplateBlock(jobDetail.notes ?? null);
+      if (!parsed?.defs || parsed.defs.length === 0) continue;
+      const children = childrenByParent.get(jobId) ?? [];
+      const merged = children.map((c) => {
+        const d = details.get(c.id);
+        return { id: c.id, notes: d?.notes ?? c.notes ?? null, result: d?.result ?? c.result ?? null };
+      });
+      const { valuesByRef } = buildJobValuesByRef(merged);
+      if (metaStatusOf(parsed.defs, valuesByRef) !== 'done') return true;
+    }
+    return false;
+  }, [chainedJobIdKey, details, childrenByParent]);
+
+  useEffect(() => {
+    if (!anyChainActive || visibleChildren.length === 0) return;
+    const timer = setInterval(() => {
+      void (async () => {
+        const targets = visibleChildren;
+        const results: Array<[string, TaskDetail | null]> = [];
+        let idx = 0;
+        async function worker() {
+          while (idx < targets.length) {
+            const c = targets[idx++];
+            try {
+              const full = await getTask(c.id, c.source);
+              results.push([c.id, full ? { notes: full.notes, result: full.result ?? null } : null]);
+            } catch {
+              // Best-effort fast poll — leave the child at its last-known
+              // state and retry on the next tick.
+            }
+          }
+        }
+        await Promise.all(
+          Array.from({ length: Math.min(PIPELINE_FETCH_CONCURRENCY, targets.length) }, () => worker()),
+        );
+        if (results.length === 0) return;
+        setDetails((prev) => {
+          const next = new Map(prev);
+          for (const [id, detail] of results) {
+            if (detail) next.set(id, detail);
+          }
+          return next;
+        });
+      })();
+    }, CHAIN_ACTIVE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [anyChainActive, visibleChildren]);
 
   const resolveJob = useCallback(
     (jobId: string): ChainedJobResolution => {

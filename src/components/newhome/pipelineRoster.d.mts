@@ -56,3 +56,9 @@ export function runnableStepId(
   taskDefs: TaskDef[] | null | undefined,
   valuesByRef: Record<string, string | number>,
 ): string | null;
+
+export function nextAutoContinueChildId(
+  taskDefs: TaskDef[] | null | undefined,
+  valuesByRef: Record<string, string | number>,
+  childIdByDefId: Record<string, string> | null | undefined,
+): string | null;
