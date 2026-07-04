@@ -61,6 +61,29 @@ export function resolveFieldedJob(job: {
   result?: unknown;
 }): { name: string; defs: TaskDef[]; valuesByRef: Record<string, string | number>; childIdByDefId: Record<string, string> } | null;
 
+/** Fielded resolution payload (childless single-task output fields). */
+export type FieldedResolution = {
+  name: string;
+  defs: TaskDef[];
+  valuesByRef: Record<string, string | number>;
+  childIdByDefId: Record<string, string>;
+};
+
+/** Pure four-way classification of a top-level candidate row. Decision order:
+ *  loading → chained → (has children ⇒ plain container) → fielded → plain.
+ *  A row with children is NEVER 'fielded' — that is the chain-grouping
+ *  regression guard (see pipelineRoster.mjs). */
+export function classifyJob(input: {
+  hasDetail: boolean;
+  parsedDefs: TaskDef[] | null | undefined;
+  childCount: number;
+  fielded: FieldedResolution | null;
+}):
+  | { status: 'loading' }
+  | { status: 'plain' }
+  | { status: 'chained' }
+  | ({ status: 'fielded' } & FieldedResolution);
+
 export function rewriteTaskFieldsBlock(
   body: string | null | undefined,
   templateId: string,

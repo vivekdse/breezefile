@@ -8,6 +8,7 @@ import {
   partitionJobs,
   pipelineColumns,
   buildJobValuesByRef,
+  classifyJob,
   resolveFieldedJob,
   rewriteTaskFieldsBlock,
   runnableStepId,
@@ -593,4 +594,80 @@ test('resolveFieldedJob: schema present but no result yet → def with empty val
 test('resolveFieldedJob: invalid job (no id) → null', () => {
   assert.equal(resolveFieldedJob(null), null);
   assert.equal(resolveFieldedJob({ outputSchema: [{ key: 'a', label: 'A', type: 'text' }] }), null);
+});
+
+// ── classifyJob (chain-grouping regression guard) ────────────────────────────
+// The single pure source of truth for a top-level candidate's classification.
+// These four cases pin the invariant the d443423 candidate-set widening broke:
+// a chain PARENT resolves 'chained' (children folded/hidden), its CHILDREN are
+// never top-level, a CHILDLESS schema'd task is 'fielded', a plain task stays
+// 'plain' — all simultaneously.
+const FIELDED_FIXTURE = {
+  name: 'Single task',
+  defs: [{ id: '__fielded__', name: 'Single task', inputs: [], outputs: [{ key: 'ok', label: 'OK', type: 'text' }] }],
+  valuesByRef: { '__fielded__.ok': 'yes' },
+  childIdByDefId: { __fielded__: 'j1' },
+};
+
+test('classifyJob: detail not fetched yet → loading', () => {
+  assert.deepEqual(
+    classifyJob({ hasDetail: false, parsedDefs: null, childCount: 0, fielded: null }),
+    { status: 'loading' },
+  );
+});
+
+test('classifyJob: chain PARENT (template block, defs>0) → chained', () => {
+  const defs = [{ id: 'intake', name: 'Intake', inputs: [], outputs: [] }];
+  // Even with children present, a parsed template makes it chained (subtable);
+  // children get folded in + hidden by the caller.
+  assert.deepEqual(
+    classifyJob({ hasDetail: true, parsedDefs: defs, childCount: 2, fielded: null }),
+    { status: 'chained' },
+  );
+});
+
+test('classifyJob: CONTAINER (children, no parseable template) → plain, NEVER fielded', () => {
+  // THE REGRESSION GUARD: a task with children must never be 'fielded', or its
+  // children leak out as top-level rows and the parent renders a bogus one-def
+  // subtable over its own outputSchema. Even when a fielded resolution exists
+  // (the parent carries an outputSchema), the child-count guard wins.
+  assert.deepEqual(
+    classifyJob({ hasDetail: true, parsedDefs: null, childCount: 2, fielded: FIELDED_FIXTURE }),
+    { status: 'plain' },
+  );
+  assert.deepEqual(
+    classifyJob({ hasDetail: true, parsedDefs: [], childCount: 1, fielded: FIELDED_FIXTURE }),
+    { status: 'plain' },
+  );
+});
+
+test('classifyJob: CHILDLESS schema-only task → fielded (task-ce4b4c8ca955, not regressed)', () => {
+  const out = classifyJob({ hasDetail: true, parsedDefs: null, childCount: 0, fielded: FIELDED_FIXTURE });
+  assert.equal(out.status, 'fielded');
+  assert.deepEqual(out.defs, FIELDED_FIXTURE.defs);
+  assert.deepEqual(out.childIdByDefId, FIELDED_FIXTURE.childIdByDefId);
+});
+
+test('classifyJob: childless, no template, no fielded fields → plain', () => {
+  assert.deepEqual(
+    classifyJob({ hasDetail: true, parsedDefs: null, childCount: 0, fielded: null }),
+    { status: 'plain' },
+  );
+});
+
+test('chain child is excluded from the top-level / candidate set', () => {
+  // RosterTable derives candidateJobIds from partitionJobs(...).topLevelIds.
+  // A chain child (carries parentTaskId) is NOT top-level, so it can never be a
+  // candidate and can never render as its own row — it only ever appears folded
+  // under its parent's subtable.
+  const rows = [
+    { id: 'parent', parentTaskId: null },
+    { id: 'intake', parentTaskId: 'parent' },
+    { id: 'deliver', parentTaskId: 'parent' },
+  ];
+  const { topLevelIds, childrenByParent } = partitionJobs(rows);
+  assert.deepEqual(topLevelIds, ['parent']);
+  assert.ok(!topLevelIds.includes('intake'));
+  assert.ok(!topLevelIds.includes('deliver'));
+  assert.deepEqual(childrenByParent, { parent: ['intake', 'deliver'] });
 });

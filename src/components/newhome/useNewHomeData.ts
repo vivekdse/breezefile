@@ -56,7 +56,7 @@ import { useRunningSessions } from '../tasks/useRunningSessions';
 import type { Agent, Project, Task, TaskAuditEvent } from '../../types';
 import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
 import { metaStatus as metaStatusOf, parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
-import { buildJobValuesByRef, partitionJobs, resolveFieldedJob, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
+import { buildJobValuesByRef, classifyJob, partitionJobs, resolveFieldedJob, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
 
 // task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
 // "is this task an active agent" is never computed two different ways. classify()
@@ -731,30 +731,38 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
   const resolveJob = useCallback(
     (jobId: string): ChainedJobResolution => {
       const jobDetail = details.get(jobId);
-      if (!jobDetail) return { status: 'loading' };
-      const parsed = parseTaskTemplateBlock(jobDetail.notes ?? null);
-      if (!parsed?.defs || parsed.defs.length === 0) {
-        // task-ce4b4c8ca955 — not a chained job (no v2 task-template block).
-        // Before falling all the way to 'plain', check whether this task
-        // still declares its OWN output fields — either the server's
-        // first-class output_schema or a legacy ```task-outputs block — and
-        // has a result to show for them. This is the "single-task output
-        // fields never show in the roster" fix: a DONE top-level task with
-        // a schema + a {type:'fields'} result previously discarded its body
-        // here and rendered as a bare plain row.
-        const job = byIdTask.get(jobId);
-        const fielded = resolveFieldedJob({
-          id: jobId,
-          name: job?.title ?? jobId,
-          outputSchema: job?.outputSchema ?? null,
-          notes: jobDetail.notes,
-          result: jobDetail.result,
-        });
-        if (!fielded) return { status: 'plain' };
-        return { status: 'fielded', childrenLoading: false, ...fielded };
-      }
+      const jobChildren = childrenByParent.get(jobId) ?? [];
+      const parsed = parseTaskTemplateBlock(jobDetail?.notes ?? null);
+      const job = byIdTask.get(jobId);
+      // 'fielded' is a CHILDLESS single-task case — synthesize it only when
+      // the task has no children grouped under it (classifyJob enforces the
+      // same guard, but we skip the work when it can't apply). task-ce4b4c8ca955.
+      const fielded =
+        jobDetail && jobChildren.length === 0
+          ? resolveFieldedJob({
+              id: jobId,
+              name: job?.title ?? jobId,
+              outputSchema: job?.outputSchema ?? null,
+              notes: jobDetail.notes,
+              result: jobDetail.result,
+            })
+          : null;
 
-      const children = childrenByParent.get(jobId) ?? [];
+      // Single pure source of truth for the four-way classification. The order
+      // (loading → chained → container-is-plain → fielded → plain) is what keeps
+      // a chain parent from ever being mis-classified 'fielded' (the d443423
+      // regression) and its children from leaking out as top-level rows.
+      const cls = classifyJob({
+        hasDetail: !!jobDetail,
+        parsedDefs: parsed?.defs ?? null,
+        childCount: jobChildren.length,
+        fielded,
+      });
+      if (cls.status === 'loading' || cls.status === 'plain') return cls;
+      if (cls.status === 'fielded') return { ...cls, childrenLoading: false };
+
+      // 'chained' — fold this parent's (real) children into one valuesByRef.
+      const children = jobChildren;
       // Prefer the fetched detail (real notes/result); fall back to whatever
       // the list row carries (today always null) so an unfetched child simply
       // contributes nothing.
@@ -766,8 +774,8 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
       const childrenLoading = children.some((c) => !details.has(c.id));
       return {
         status: 'chained',
-        name: parsed.name ?? jobId,
-        defs: parsed.defs,
+        name: parsed?.name ?? jobId,
+        defs: parsed?.defs ?? [],
         valuesByRef,
         childIdByDefId,
         childrenLoading,

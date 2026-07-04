@@ -227,6 +227,62 @@ export function resolveFieldedJob(job) {
   };
 }
 
+/**
+ * REGRESSION FIX (chain grouping, this session) — the single, pure, testable
+ * source of truth for a top-level candidate row's classification. Extracted
+ * from useNewHomeData.resolveJob so all four outcomes can be proven in one
+ * unit test and can never drift from the async hook's plumbing.
+ *
+ * Decision order (each guard is load-bearing; do NOT reorder):
+ *   1. detail not yet fetched            → 'loading'
+ *   2. own body parses a v2 task-template block (defs>0)
+ *                                        → 'chained' (render subtable; its
+ *                                          children are folded in + hidden)
+ *   3. HAS children grouped under it     → 'plain' (a container — either a
+ *      (childCount > 0)                    chain whose template isn't loaded
+ *                                          here, or a plain parent with
+ *                                          sub-rows). Crucially NOT 'fielded':
+ *                                          'fielded' points its synthetic def
+ *                                          at the JOB ITSELF and folds in no
+ *                                          children, so a container classified
+ *                                          'fielded' would (a) render a bogus
+ *                                          one-def subtable over the parent's
+ *                                          own outputSchema and (b) leak its
+ *                                          children out as top-level rows,
+ *                                          since children are only hidden when
+ *                                          the parent is 'chained'. This is the
+ *                                          exact regression d443423 opened by
+ *                                          widening the candidate set to every
+ *                                          top-level row.
+ *   4. CHILDLESS + declares output fields → 'fielded' (task-ce4b4c8ca955)
+ *   5. otherwise                          → 'plain'
+ *
+ * Pure: takes already-resolved inputs (parsed template, child count, a fielded
+ * resolution), returns a discriminated tag + payload. No fetching, no React.
+ * PHI: `fielded.valuesByRef` may hold field VALUES — this function only passes
+ * the object through; it never logs or persists it (callers keep the discipline).
+ *
+ * @param {{
+ *   hasDetail: boolean,
+ *   parsedDefs: import('./types').TaskDef[] | null | undefined,
+ *   childCount: number,
+ *   fielded: { name: string, defs: import('./types').TaskDef[], valuesByRef: Record<string, string|number>, childIdByDefId: Record<string, string> } | null,
+ * }} input
+ * @returns {{ status: 'loading' }
+ *   | { status: 'plain' }
+ *   | { status: 'chained' }
+ *   | { status: 'fielded', name: string, defs: import('./types').TaskDef[], valuesByRef: Record<string, string|number>, childIdByDefId: Record<string, string> }}
+ */
+export function classifyJob(input) {
+  const { hasDetail, parsedDefs, childCount, fielded } = input ?? {};
+  if (!hasDetail) return { status: 'loading' };
+  if (parsedDefs && parsedDefs.length > 0) return { status: 'chained' };
+  // A container (has children) is never a single-task 'fielded' job.
+  if ((childCount ?? 0) > 0) return { status: 'plain' };
+  if (!fielded) return { status: 'plain' };
+  return { status: 'fielded', ...fielded };
+}
+
 // Matches the WHOLE ```task-fields fenced block (fences included), non-greedy so
 // it never swallows a following ```task-outputs block. Mirrors the fence shape
 // taskSchema.mjs's parseFencedJsonBlock reads.
