@@ -191,7 +191,7 @@
   padding: 1px 5px;
   border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
   border-radius: 4px;
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--bg-3);
 }
 
 /* ── Title input ───────────────────────────────────────────────────── */
@@ -494,7 +494,7 @@
 .composer__prose-suggestion-accept {
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: var(--accent-contrast, #04201c);
+  color: var(--accent-ink, #04201c);
   font-weight: 600;
 }
 .composer__prose-suggestion-dismiss {
@@ -522,7 +522,7 @@
 }
 .composer__error {
   font-size: 12px;
-  color: var(--danger, #c0392b);
+  color: var(--err, #c0392b);
   flex: 1 1 auto;
 }
 .composer__flash {
@@ -596,8 +596,8 @@
   border-color: var(--ink);
 }
 .composer__cancel-btn--armed {
-  color: var(--danger, #c0392b);
-  border-color: var(--danger, #c0392b);
+  color: var(--err, #c0392b);
+  border-color: var(--err, #c0392b);
 }
 
 .composer__create-btn {
@@ -930,8 +930,8 @@
   cursor: default;
 }
 .composer__chain-icon-btn--danger:hover:not(:disabled) {
-  color: #d64545;
-  border-color: #d64545;
+  color: var(--err);
+  border-color: var(--err);
 }
 .composer__chain-step-notes {
   font-size: 13px;

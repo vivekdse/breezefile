@@ -332,7 +332,7 @@ button.sidebar__link:hover .sidebar__unpin {
   padding: 0 5px;
   border-radius: 8px;
   background: var(--accent);
-  color: var(--accent-fg, #fff);
+  color: var(--accent-ink, #fff);
   border: 1px solid var(--accent);
   font-size: 10px;
   font-weight: 700;

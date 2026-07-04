@@ -233,7 +233,7 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
 .tdd__action-error {
   font-size: var(--fs-xs);
   font-weight: 600;
-  color: var(--nh-failed, #c0392b);
+  color: var(--err, #c0392b);
   cursor: help;
 }
 
@@ -665,9 +665,9 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   border-radius: 999px;
 }
 .tdd__pipeline-pill--cancelled { color: var(--fg-2); text-decoration: line-through; }
-.tdd__pipeline-pill--failed { color: var(--nh-failed, #c0392b); }
+.tdd__pipeline-pill--failed { color: var(--err, #c0392b); }
 /* task-48cd46a0e2da — per-step start error, inline (never a silent no-op). */
-.tdd__pipeline-error { color: var(--nh-failed, #c0392b); font-size: var(--fs-xs); font-weight: 600; cursor: help; }
+.tdd__pipeline-error { color: var(--err, #c0392b); font-size: var(--fs-xs); font-weight: 600; cursor: help; }
 .tdd__pipeline-start {
   appearance: none;
   border: 1px solid var(--accent);
@@ -707,7 +707,7 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   height: 18px;
   border-radius: 50%;
   background: var(--warn);
-  color: var(--on-accent, #fff);
+  color: var(--accent-ink, #fff);
   font-weight: 700;
   font-size: 12px;
   flex-shrink: 0;

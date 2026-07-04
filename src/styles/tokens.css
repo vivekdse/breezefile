@@ -473,6 +473,63 @@
   --accent-ink: #fff5ef;
 }
 
+/* ============================================================
+   Legacy scale for the paper-family LIGHT themes.
+   ------------------------------------------------------------
+   The 8 paper-family light themes (paper/pastel/peony/clay/moss/
+   linen/rose/dawn) override the editorial tokens (--bg/--panel/
+   --ink/--accent/…) but historically defined only --bg-2 of the
+   legacy --bg-0..--fg-dim scale. Content surfaces that still read
+   the legacy scale (NewHomePage, RosterTable, TaskDetailDrawer, …)
+   therefore inherited the DARK :root values — dark chrome + dark
+   text on a light theme (invisible stat tiles, dark-on-dark titles).
+
+   This shared rule ALIASES the missing legacy tokens onto the
+   light editorial tokens each of these themes already defines, so
+   the legacy scale resolves to coherent LIGHT values:
+     --bg-0 (page)      → --panel     (bright chrome plate)
+     --bg-1 (chrome/bar)→ --bg        (recessed canvas)
+     --bg-2 (cards)     → per-theme   (already defined; left as-is)
+     --bg-3 (hover)     → --panel-2
+     --bg-4 (pressed)   → --rule
+     --fg-1/2/3, -dim   → --ink/--ink-2/--muted/--muted
+     --border-1/2       → --rule/--rule-soft
+   Plus light-appropriate status colors (mirrors the alpine `light`
+   block) so --ok/--warn/--err (and the color-mix soft tints that
+   derive from them) stop resolving to the dark alpine values.
+
+   Scoped ONLY to the 8 light-theme attribute selectors — the bare
+   :root, dusk, and plum dark blocks are untouched. --bg-2 is NOT
+   listed here (each theme defines its own). --warn-soft/--err-soft
+   are inherited from :root as color-mix(var(--warn)…) and recompute
+   automatically against the light --warn/--err set below. */
+:root[data-theme='paper'],
+:root[data-theme='pastel'],
+:root[data-theme='peony'],
+:root[data-theme='clay'],
+:root[data-theme='moss'],
+:root[data-theme='linen'],
+:root[data-theme='rose'],
+:root[data-theme='dawn'] {
+  --bg-0: var(--panel);
+  --bg-1: var(--bg);
+  --bg-3: var(--panel-2);
+  --bg-4: var(--rule);
+
+  --fg-1: var(--ink);
+  --fg-2: var(--ink-2);
+  --fg-3: var(--muted);
+  --fg-dim: var(--muted);
+
+  --border-1: var(--rule);
+  --border-2: var(--rule-soft);
+
+  /* Light status colors — match the alpine `light` theme block. */
+  --ok: #2e8f5e;
+  --warn: #b8862e;
+  --err: #c44;
+}
+
 /* Feminism Night — inverted lightness: chrome goes dark plum so the
    blush canvas pops forward. --panel-ink / --panel-muted keep text
    legible on the dark chrome while --ink stays dark-on-light. */

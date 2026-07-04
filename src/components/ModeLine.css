@@ -21,7 +21,7 @@
 }
 
 .modeline__status--error {
-  color: var(--danger, #e5484d);
+  color: var(--err, #e5484d);
   /* errors can be long (stack-ish) — let them wrap + be selectable */
   white-space: pre-wrap;
   user-select: text;

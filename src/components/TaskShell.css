@@ -136,12 +136,12 @@
    run is in flight. Muted by default so it doesn't compete with the
    primary action; lights up red on hover to signal "this stops work". */
 .taskshell__btn--danger {
-  border-color: var(--danger, #c0392b);
-  color: var(--danger, #c0392b);
+  border-color: var(--err, #c0392b);
+  color: var(--err, #c0392b);
 }
 .taskshell__btn--danger:hover {
-  background: var(--danger, #c0392b);
-  color: #ffffff;
+  background: var(--err, #c0392b);
+  color: var(--accent-ink);
 }
 
 /* ---- meta row (status pill + due chip + start + pin) --------------- */
@@ -189,8 +189,8 @@
   background: transparent;
 }
 .taskshell__due--overdue {
-  color: var(--danger, #c0392b);
-  border-color: var(--danger, #c0392b);
+  color: var(--err, #c0392b);
+  border-color: var(--err, #c0392b);
 }
 .taskshell__due--today {
   color: var(--accent);
@@ -281,7 +281,7 @@
   padding: 1px 6px;
   border-radius: 999px;
   background: var(--accent, #4c8bf5);
-  color: var(--accent-fg, #fff);
+  color: var(--accent-ink, #fff);
   vertical-align: middle;
 }
 

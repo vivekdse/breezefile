@@ -41,15 +41,15 @@
 .run-progress__cancel {
   font-size: 11px;
   padding: 4px 10px;
-  border: 1px solid var(--danger, #c0392b);
+  border: 1px solid var(--err, #c0392b);
   background: transparent;
-  color: var(--danger, #c0392b);
+  color: var(--err, #c0392b);
   border-radius: 12px;
   cursor: pointer;
   letter-spacing: 0.02em;
 }
 .run-progress__cancel:hover:not(:disabled) {
-  background: var(--danger, #c0392b);
+  background: var(--err, #c0392b);
   color: #ffffff;
 }
 .run-progress__cancel:disabled {

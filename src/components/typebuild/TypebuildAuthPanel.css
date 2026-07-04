@@ -58,7 +58,7 @@
 }
 
 .tb-auth__error {
-  color: var(--danger, #ff6b6b);
+  color: var(--err, #ff6b6b);
   font-size: var(--fs-sm);
 }
 
@@ -84,7 +84,7 @@
 .tb-auth__btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent-fg, #fff);
+  color: var(--accent-ink, #fff);
 }
 
 .tb-auth__btn--primary:hover:not(:disabled) {

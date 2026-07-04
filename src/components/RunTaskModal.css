@@ -181,7 +181,7 @@
 
 .run-task__error {
   font-size: 12px;
-  color: var(--danger, #c0392b);
+  color: var(--err, #c0392b);
 }
 
 .run-task__shortcuts {

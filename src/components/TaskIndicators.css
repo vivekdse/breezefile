@@ -98,7 +98,7 @@
 .task-dot--stalled {
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.15) inset,
-    0 0 0 2px var(--danger, #dc322f);
+    0 0 0 2px var(--err, #dc322f);
 }
 .task-dot--lapsed {
   box-shadow:

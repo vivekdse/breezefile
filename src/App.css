@@ -272,10 +272,10 @@
    recording session is live — an icon-only button, sized like its siblings. */
 .browser-pane__btn--recording {
   color: #fff;
-  background: var(--danger, #d9483b);
+  background: var(--err, #d9483b);
 }
 .browser-pane__btn--recording:hover:not(:disabled) {
-  background: var(--danger, #c23e32);
+  background: var(--err, #c23e32);
 }
 /* Full-page screenshot → PDF: pulse the download icon while capturing. */
 .browser-pane__btn-icon--busy {
@@ -524,13 +524,13 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .overlay__input--error {
-  border-color: var(--danger, #d94a4a);
+  border-color: var(--err, #d94a4a);
   box-shadow: 0 0 0 3px rgba(217, 74, 74, 0.22);
 }
 /* Inline validation message under the overlay input — used when mkdir /
    touch / rename fail so the user sees why without losing what they typed. */
 .overlay__error {
-  color: var(--danger, #d94a4a);
+  color: var(--err, #d94a4a);
   font-size: var(--fs-xs);
   line-height: 1.35;
   margin-top: calc(-1 * var(--sp-1));
