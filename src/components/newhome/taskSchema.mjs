@@ -565,6 +565,28 @@ export function aggregateInputs(taskDefs) {
   return out;
 }
 
+// task-e112d60a3b7c — map a first-class Template (server /chromeext/templates)
+// into the ordered value-question set the "New from Template" picker walks
+// through: one entry per input `variable`, in declaration order, each carrying
+// the flat `ref` (`<templateId>.<key>`) used to key its typed value and the raw
+// field def the field-question renderer consumes. Pure + defensive: a
+// null/malformed template, or a variable that is not an object or lacks a usable
+// `key`, is skipped (never throws). NON-PHI — field DEFINITIONS only (the typed
+// VALUE never rides here; it's collected into the instantiate call separately).
+export function templateFillEntries(template) {
+  if (!template || typeof template !== 'object') return [];
+  const id = typeof template.id === 'string' && template.id ? template.id : 'template';
+  const vars = Array.isArray(template.variables) ? template.variables : [];
+  const out = [];
+  for (const field of vars) {
+    if (!field || typeof field !== 'object') continue;
+    const key = typeof field.key === 'string' ? field.key : '';
+    if (!key) continue;
+    out.push({ taskDefId: id, field, ref: fieldRef(id, key) });
+  }
+  return out;
+}
+
 // task-2150d862a3d9 — "+ New from Template" candidate derivation
 // (TaskComposer.tsx templateCandidates). A template is a top-level TypeBuild
 // task that's either a CHAIN (```task-template v2 body block) or a single

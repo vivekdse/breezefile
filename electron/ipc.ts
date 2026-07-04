@@ -3273,6 +3273,35 @@ end tell`;
       return src.runFormLogic(id, values ?? {}, changed ?? null);
     },
   );
+  // task-e112d60a3b7c — first-class Task Templates (/chromeext/templates). The
+  // "New from Template" picker `list`s templates (NON-PHI: names + field defs,
+  // no prompt body), optionally `get`s the full template (decrypted `notes`,
+  // PHI — memory-only), and `instantiate`s one into a real task server-side.
+  // `list`/`get` return []/null signed-out so the picker degrades; `instantiate`
+  // throws signed-out (the composer surfaces the error). `values` MAY be PHI —
+  // never logged on this hop.
+  ipcMain.handle('typebuild:templates:list', (_e, projectId?: string) => {
+    const src = typebuildSource();
+    return src ? src.listTemplates(projectId) : [];
+  });
+  ipcMain.handle('typebuild:templates:get', (_e, id: string) => {
+    const src = typebuildSource();
+    return src ? src.getTemplate(id) : null;
+  });
+  ipcMain.handle(
+    'typebuild:templates:instantiate',
+    (
+      _e,
+      templateId: string,
+      values: Record<string, string>,
+      titleOverride?: string,
+      projectId?: string,
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.instantiateTemplate(templateId, values ?? {}, titleOverride, projectId);
+    },
+  );
   // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. Lets a
   // time-gated remote (TypeBuild) task fire on the local cron. Rows carry
   // ONLY opaque ids + a cron string — never titles/bodies. setSchedule

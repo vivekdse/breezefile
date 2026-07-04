@@ -30,7 +30,6 @@ import { usePlatform } from '../platform';
 import { fm } from '../bridge';
 import {
   createTask,
-  getTask,
   runTaskNow,
   shiftISO,
   taskSourceAction,
@@ -61,12 +60,15 @@ import type { TaskDef, TaskDefCondition, TaskDefField } from './newhome/types';
 import { instantiateTemplate } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
-  deriveTemplateEntry,
   effectiveFieldKey,
   fieldRef,
   inferFieldsFromProse,
   parseTaskTemplateBlock,
+  templateFillEntries,
 } from './newhome/taskSchema.mjs';
+// task-e112d60a3b7c — the first-class Template type the "New from Template"
+// picker lists (server-backed via fm.typebuild.templates.*).
+import type { Template } from '../bridge';
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
@@ -1411,95 +1413,25 @@ export function TaskComposer(props: Props) {
   // title, if not already typed) + `defs` — VALUES are never copied.
   const { tasks: allTasksForChainCopy } = useTasks({ includeDone: true });
 
-  // task-2150d862a3d9 — LIST rows (allTasksForChainCopy, from mapListRow) carry
-  // NONE of notes/dataKeys/outputSchema: GET /chromeext/tasks?titles=1 is a
-  // titles-only endpoint (no decrypted body, no server field schema) — see
-  // ListRow vs DetailRow in electron/sources/typebuild.ts. Both `priorChains`
-  // (chain notes) and `templateCandidates` (dataKeys/outputSchema) below read
-  // those fields off the LIST row, so BOTH were structurally always empty —
-  // the exact "no template" regression. Rather than wait on a server change to
-  // add these NON-PHI fields to the list endpoint, mirror useChainedRoster's
-  // pattern (useNewHomeData.ts): a small bounded, cached detail-fetch resolver
-  // that fills in each candidate's fielded-ness lazily, keyed by id+updated_at
-  // so it never re-fetches an unchanged task. Scoped to top-level TypeBuild
-  // rows only (the same universe priorChains/templateCandidates iterate), and
-  // only while the template picker is actually relevant (hasChainOption).
-  const templateDetailFetchedAtRef = useRef<Map<string, number>>(new Map());
-  const [templateDetails, setTemplateDetails] = useState<Map<string, Task>>(new Map());
-  const templateDetailCandidates = useMemo(
-    () =>
-      hasChainOption
-        ? allTasksForChainCopy.filter((t) => t.source === TYPEBUILD_SOURCE && !t.parentTaskId)
-        : [],
-    [allTasksForChainCopy, hasChainOption],
-  );
-  const templateDetailKey = useMemo(
-    () => templateDetailCandidates.map((t) => `${t.id}:${t.updated_at}`).join(','),
-    [templateDetailCandidates],
-  );
-  useEffect(() => {
-    let cancelled = false;
-    const due = templateDetailCandidates.filter(
-      (t) => templateDetailFetchedAtRef.current.get(t.id) !== t.updated_at,
-    );
-    if (due.length === 0) return;
-    void (async () => {
-      const TEMPLATE_DETAIL_FETCH_CONCURRENCY = 4;
-      let idx = 0;
-      const results: Array<[string, Task | null]> = [];
-      async function worker() {
-        while (idx < due.length) {
-          const t = due[idx++];
-          templateDetailFetchedAtRef.current.set(t.id, t.updated_at);
-          try {
-            const full = await getTask(t.id, t.source);
-            results.push([t.id, full]);
-          } catch {
-            templateDetailFetchedAtRef.current.delete(t.id);
-            results.push([t.id, null]);
-          }
-        }
-      }
-      await Promise.all(
-        Array.from(
-          { length: Math.min(TEMPLATE_DETAIL_FETCH_CONCURRENCY, due.length) },
-          () => worker(),
-        ),
-      );
-      if (cancelled) return;
-      setTemplateDetails((prev) => {
-        const next = new Map(prev);
-        for (const [id, detail] of results) {
-          if (detail) next.set(id, detail);
-        }
-        return next;
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [templateDetailKey, templateDetailCandidates]);
-  // Whether any candidate's detail is still outstanding — drives the picker's
-  // "resolving…" affordance without blocking it (candidates populate as their
-  // detail lands, same as useChainedRoster's cells).
-  const templateDetailsResolving = useMemo(
-    () => templateDetailCandidates.some((t) => !templateDetails.has(t.id)),
-    [templateDetailCandidates, templateDetails],
-  );
-
+  // task-e112d60a3b7c — the chained-task "copy from existing chained task" flow
+  // stays exactly as it was: it scans prior TypeBuild tasks whose BODY carries a
+  // v2 ```task-template block (parseTaskTemplateBlock reads `t.notes`). This is
+  // deliberately NOT unified with the first-class Template API below: the
+  // Template API path (the from-template picker) is for SINGLE fielded
+  // templates; chained/multi-step task templates keep this v2-block
+  // copy-from-existing-chained-task flow.
   const priorChains = useMemo(() => {
     if (!hasChainOption) return [];
     const out: { taskId: string; name: string; defs: TaskDef[]; updatedAt: number }[] = [];
     for (const t of allTasksForChainCopy) {
       if (t.source !== TYPEBUILD_SOURCE || t.parentTaskId) continue;
-      const notes = templateDetails.get(t.id)?.notes ?? t.notes ?? null;
-      const parsed = parseTaskTemplateBlock(notes);
+      const parsed = parseTaskTemplateBlock(t.notes ?? null);
       if (!parsed || parsed.defs === null) continue;
       out.push({ taskId: t.id, name: parsed.name, defs: parsed.defs, updatedAt: t.updated_at ?? 0 });
     }
     out.sort((a, b) => b.updatedAt - a.updatedAt);
     return out.slice(0, 25);
-  }, [allTasksForChainCopy, hasChainOption, templateDetails]);
+  }, [allTasksForChainCopy, hasChainOption]);
   function copyChainFrom(entry: { name: string; defs: TaskDef[] }) {
     const cloned = entry.defs.map((d) => ({
       ...d,
@@ -1511,65 +1443,73 @@ export function TaskComposer(props: Props) {
     if (!title.trim()) setTitle(entry.name);
   }
 
-  // ── task-257bb4870c6c — "New from Template" (first-class, separate from
-  // plain create) ───────────────────────────────────────────────────────────
-  // A "template" is any prior top-level TypeBuild task that carries field
-  // DEFINITIONS: either a CHAIN (a ```task-template v2 block — same source as
-  // priorChains above) or a single FIELDED task (server outputSchema, from
-  // task-0d63c7b0ebdb's "creation defines fields" contract). Both are
-  // reduced to the SAME shape — `defs: TaskDef[]` — so the rest of this flow
-  // (aggregateInputs, renderFieldQuestion, instantiateTemplate) doesn't care
-  // which kind was picked. `entryProjectId`/`entryOutputSchema` carry what a
-  // single-task template inherits silently (project, output schema); a chain
-  // template's project rides its own instantiateTemplate call the same way
-  // saveTemplateJob's does.
-  type TemplateEntry = {
-    taskId: string;
-    name: string;
-    defs: TaskDef[];
-    kind: 'chain' | 'single';
-    projectId?: string;
-    updatedAt: number;
-  };
-  const templateCandidates = useMemo<TemplateEntry[]>(() => {
-    if (!hasChainOption) return [];
-    const out: TemplateEntry[] = [];
-    for (const t of allTasksForChainCopy) {
-      if (t.source !== TYPEBUILD_SOURCE || t.parentTaskId) continue;
-      // task-2150d862a3d9 — the list row (t) never carries notes/dataKeys/
-      // outputSchema (GET /chromeext/tasks?titles=1 has no decrypted body and
-      // no server field schema — see the templateDetails comment above).
-      // deriveTemplateEntry (taskSchema.mjs) prefers the resolved detail
-      // fetched by the cache above; falls back to the list row's own fields
-      // so this keeps working unchanged if a future server ever does thread
-      // them onto the list endpoint.
-      const entry = deriveTemplateEntry(t, templateDetails.get(t.id) ?? null);
-      if (entry) out.push(entry);
-    }
-    out.sort((a, b) => b.updatedAt - a.updatedAt);
-    return out;
-  }, [allTasksForChainCopy, hasChainOption, templateDetails]);
-
+  // ── task-e112d60a3b7c — "New from Template" (first-class, server-backed) ────
+  // A template is now a FIRST-CLASS server object (GET /chromeext/templates),
+  // not a scan over prior tasks: the server auto-registers/dedupes a template
+  // whenever a task is created with input field definitions / output_schema, so
+  // the picker just LISTS them. The list is NON-PHI (names + `variables` field
+  // defs; the prompt body `notes` is NOT included). On pick we prefill a title,
+  // ask one question per `variable`, then POST /templates/{id}/instantiate — the
+  // server creates the real task. NOTE: this path is for SINGLE fielded
+  // templates; chained/multi-step templates keep the v2-block chain-copy flow
+  // above (priorChains) — these are intentionally NOT unified yet.
   const isFromTemplateMode = props.mode === 'create' && props.initialKind === 'template';
+
+  // The server-backed template list, fetched EXACTLY ONCE on entering
+  // from-template mode (re-fetched only when the project context changes). NON-
+  // PHI (names + field defs) so it's fine to cache in memory. `templatesLoading`
+  // drives the picker's loading state; `templatesError` surfaces a fetch failure.
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const templateListProjectId = projectId || initialProjectId || '';
+  useEffect(() => {
+    if (!isFromTemplateMode) return;
+    let cancelled = false;
+    setTemplatesLoading(true);
+    setTemplatesError(null);
+    void (async () => {
+      try {
+        const rows = await fm.typebuild.templates.list(templateListProjectId || undefined);
+        if (cancelled) return;
+        setTemplates(Array.isArray(rows) ? rows : []);
+      } catch (e) {
+        if (cancelled) return;
+        setTemplates([]);
+        setTemplatesError(humanizeError(e).message);
+      } finally {
+        if (!cancelled) setTemplatesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Fetch once per from-template entry + project switch — NOT per keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFromTemplateMode, templateListProjectId]);
+
   // Picker step: 'pick' (searchable list), 'title' (prefilled, Enter to
-  // accept), 'values' (one question per input value, grouped by step for a
-  // chain), then Ctrl+Enter creates. `templateEditDetails` is the "edit
-  // details" escape hatch — flips into the full flow (same composer, same
-  // class) with the chosen template's defs pre-loaded as chainDefs/
-  // taskInputs/taskOutputs so everything (project/notes/schema/agent/flags/
-  // priority) becomes editable instead of silently inherited.
+  // accept), 'values' (one question per input variable), then Ctrl+Enter
+  // creates. `templateEditDetails` is the "edit details" escape hatch — flips
+  // into the full flow (same composer, same class) with the chosen template's
+  // variables/outputSchema pre-loaded as taskInputs/taskOutputs so everything
+  // (project/notes/schema/agent/flags/priority) becomes editable instead of
+  // silently inherited.
   type TemplatePickPhase = 'pick' | 'title' | 'values';
   const [templatePickPhase, setTemplatePickPhase] = useState<TemplatePickPhase>('pick');
   const [templatePickQuery, setTemplatePickQuery] = useState('');
   const [templatePickHighlight, setTemplatePickHighlight] = useState(0);
-  const [templateEntry, setTemplateEntry] = useState<TemplateEntry | null>(null);
+  const [templateEntry, setTemplateEntry] = useState<Template | null>(null);
   const [templateEditDetails, setTemplateEditDetails] = useState(false);
 
+  // Typeahead filter on the template NAME (same substring-match pattern the
+  // composer's other pickers use). Runs over the already-fetched list — no
+  // per-keystroke network.
   const filteredTemplateCandidates = useMemo(() => {
     const q = templatePickQuery.trim().toLowerCase();
-    if (!q) return templateCandidates;
-    return templateCandidates.filter((c) => c.name.toLowerCase().includes(q));
-  }, [templateCandidates, templatePickQuery]);
+    if (!q) return templates;
+    return templates.filter((c) => c.name.toLowerCase().includes(q));
+  }, [templates, templatePickQuery]);
 
   // copilot parity / row-shortcut: a pre-selected template id (props.templateTaskId)
   // skips straight past the picker into the title step.
@@ -1578,23 +1518,24 @@ export function TaskComposer(props: Props) {
     if (templateEntry) return;
     const preselectId = props.mode === 'create' ? props.templateTaskId : undefined;
     if (!preselectId) return;
-    const found = templateCandidates.find((c) => c.taskId === preselectId);
+    const found = templates.find((c) => c.id === preselectId);
     if (found) chooseTemplateEntry(found);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFromTemplateMode, templateCandidates, templateEntry]);
+  }, [isFromTemplateMode, templates, templateEntry]);
 
-  function chooseTemplateEntry(entry: TemplateEntry) {
+  function chooseTemplateEntry(entry: Template) {
     setTemplateEntry(entry);
     setTitle(entry.name);
+    setTemplateFillActiveIdx(0);
     setTemplatePickPhase('title');
   }
 
-  // The picked template's aggregated input-VALUE questions — the only
-  // questions this flow ever asks beyond title. Grouped by step (task-def)
-  // implicitly via aggregateInputs' def-order-then-field-order, same as the
-  // plain/chain flows.
+  // The picked template's input-VALUE questions — one per `variable`, in
+  // declaration order. Pure/testable derivation (templateFillEntries) so the
+  // picker walk + a unit test share one contract. Each carries the flat `ref`
+  // used to key its typed value.
   const templateEntryFieldEntries = useMemo(
-    () => (templateEntry ? aggregateInputs(templateEntry.defs) : []),
+    () => (templateEntry ? templateFillEntries(templateEntry) : []),
     [templateEntry],
   );
   const [templateFillValues, setTemplateFillValues] = useState<Record<string, string>>({});
@@ -1602,108 +1543,96 @@ export function TaskComposer(props: Props) {
   const [templateFillActiveIdx, setTemplateFillActiveIdx] = useState(0);
   const templateFillActiveRef =
     templateEntryFieldEntries[Math.min(templateFillActiveIdx, templateEntryFieldEntries.length - 1)];
+  // Re-entry guard for the single instantiate call: the title <input>'s own
+  // onKeyDown AND the window keydown handler can both fire acceptTemplateTitle →
+  // saveFromTemplate for one Enter press (and a zero-input template instantiates
+  // straight from the title). A synchronous `busy` state flip is too slow to
+  // stop the second call in the same tick, so a ref gate prevents a double
+  // create. Reset on error so the human can retry.
+  const instantiatingRef = useRef(false);
 
   function acceptTemplateTitle() {
     if (!title.trim()) return;
+    // task-e112d60a3b7c — a template with NO input variables (e.g. an
+    // output-only "Get top 5 headlines") is a one-click instantiate: skip the
+    // (empty) values step entirely and create straight from the title, rather
+    // than parking on a "no inputs" dead-end. The server accepts an empty
+    // values map and just creates the task with no data bag.
+    if (templateEntryFieldEntries.length === 0) {
+      void saveFromTemplate();
+      return;
+    }
     setTemplateFillActiveIdx(0);
     setTemplatePickPhase('values');
   }
 
-  // "edit details" escape hatch: load the template's defs into the SAME state
-  // the full flow reads (chainDefs for a chain, taskInputs/taskOutputs for a
-  // single task) and drop into the ordinary create walk at 'template'/'fields'
-  // so every question (project/notes/output schema/agent/flags/priority)
-  // becomes editable instead of silently inherited.
+  // "edit details" escape hatch: load the template's variables/outputSchema
+  // into the SAME state the plain (single-task) full flow reads (taskInputs/
+  // taskOutputs) and drop into the ordinary create walk so every question
+  // (project/notes/output schema/agent/flags/priority) becomes editable instead
+  // of silently inherited. (Templates from this picker are always single fielded
+  // templates — chained templates use the separate chain-copy flow above.)
   function editTemplateDetails() {
     if (!templateEntry) return;
     setTemplateEditDetails(true);
-    if (templateEntry.kind === 'chain') {
-      const cloned = templateEntry.defs.map((d) => ({
-        ...d,
-        inputs: (d.inputs ?? []).map((f) => ({ ...f })),
-        outputs: (d.outputs ?? []).map((f) => ({ ...f })),
-        ...(d.neededWhen ? { neededWhen: { ...d.neededWhen } } : {}),
-      }));
-      setChainDefs(cloned.length > 0 ? cloned : [blankChainDef()]);
-      setTemplateChoice('chain');
-    } else {
-      const def = templateEntry.defs[0];
-      setTaskInputs((def?.inputs ?? []).map((f) => ({ ...f })));
-      setTaskOutputs((def?.outputs ?? []).map((f) => ({ ...f })));
-      setTemplateChoice('blank');
-    }
+    setTaskInputs((templateEntry.variables ?? []).map((f) => ({ ...f })));
+    setTaskOutputs((templateEntry.outputSchema ?? []).map((f) => ({ ...f })));
+    setTemplateChoice('blank');
     if (templateEntry.projectId) {
       setProjectId(templateEntry.projectId);
       setProjectTouched(true);
     }
   }
-  function templateFillValueFor(taskDefId: string, key: string): string {
-    return templateFillValues[fieldRef(taskDefId, key)] ?? '';
-  }
   function setTemplateFillValue(ref: string, v: string) {
     setTemplateFillValues((prev) => ({ ...prev, [ref]: v }));
   }
 
-  // Ctrl+Enter (or the final field's Enter) creates: a chain template
-  // instantiates parent+children via instantiateTemplate (SAME seam
-  // saveTemplateJob uses) with the COLLECTED values (not empty, unlike a
-  // fresh create); a single-task template creates ONE task directly via
-  // createTask with outputSchema inherited verbatim and `data` populated from
-  // the collected values (normalized the same way save() does, reusing
-  // effectiveFieldKey so a value never silently drops).
+  // Ctrl+Enter (or the final field's Enter) instantiates the template: POST
+  // /chromeext/templates/{id}/instantiate with the collected `values` (keyed by
+  // each variable's effective server key). This is the ONLY task-creation call
+  // in this path — the SERVER creates the task (data bag from values,
+  // output_schema copied, project/agent/flags inherited); the client never
+  // fabricates it locally. `values` MAY be PHI — carried only in transient state
+  // and the encrypted request body, never logged. On success: flash + refresh
+  // roster (same mechanism as the plain create-success path), then exit.
   async function saveFromTemplate(): Promise<{ ok: boolean; taskId?: string; error?: string }> {
     if (!templateEntry) return { ok: false, error: 'Pick a template first.' };
     if (!title.trim()) {
       setTemplatePickPhase('title');
       return { ok: false, error: 'Add a title.' };
     }
+    if (instantiatingRef.current) return { ok: false, error: 'Already creating…' };
+    instantiatingRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      if (templateEntry.kind === 'chain') {
-        const result = await instantiateTemplate({
-          name: title.trim(),
-          projectId: templateEntry.projectId || undefined,
-          defs: templateEntry.defs,
-          values: templateFillValues,
-          createTask: createTaskForTemplateJob,
-        });
-        (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.parentId;
-        (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
-        window.dispatchEvent(new CustomEvent('fm:taskFlash', { detail: { taskId: result.parentId } }));
-        setCreated(true);
-        setTimeout(() => exit(), 900);
-        return { ok: true, taskId: result.parentId };
-      }
-      const def = templateEntry.defs[0];
-      const data: Record<string, string> = {};
-      for (const f of def.inputs ?? []) {
+      // Collect the typed values keyed by each variable's server key
+      // (effectiveFieldKey, same normalization save() uses so a value never
+      // silently drops). The ref used in state is `<templateId>.<field.key>`.
+      const values: Record<string, string> = {};
+      for (const f of templateEntry.variables ?? []) {
         const key = effectiveFieldKey(f);
         if (!key) continue;
-        data[key] = templateFillValueFor(def.id, f.key);
+        values[key] = templateFillValues[fieldRef(templateEntry.id, f.key)] ?? '';
       }
-      const payload: TaskCreate = {
-        title: title.trim(),
-        folder: '',
-        notes: null,
-        auto_mode: false,
-        auto_agent: null,
-        auto_prompt: null,
-        ...(templateEntry.projectId ? { projectId: templateEntry.projectId } : {}),
-        ...((def.outputs ?? []).length > 0 ? { outputSchema: def.outputs } : {}),
-        ...(Object.keys(data).length > 0 ? { data } : {}),
-      };
-      const t = await createTask(payload, target);
-      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = t.id;
+      const result = await fm.typebuild.templates.instantiate(
+        templateEntry.id,
+        values,
+        title.trim(),
+        templateEntry.projectId || undefined,
+      );
+      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.id;
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
-      window.dispatchEvent(new CustomEvent('fm:taskFlash', { detail: { taskId: t.id } }));
+      window.dispatchEvent(new CustomEvent('fm:taskFlash', { detail: { taskId: result.id } }));
       setCreated(true);
+      props.onSaved?.();
       setTimeout(() => exit(), 900);
-      return { ok: true, taskId: t.id };
+      return { ok: true, taskId: result.id };
     } catch (e) {
       const msg = humanizeError(e).message;
       setError(msg);
       setBusy(false);
+      instantiatingRef.current = false;
       return { ok: false, error: msg };
     }
   }
@@ -2952,7 +2881,7 @@ export function TaskComposer(props: Props) {
       if (inText()) return;
       const activeEntry = templateFillActiveRef;
       if (!activeEntry) return;
-      const ref = fieldRef(activeEntry.taskDef.id, activeEntry.field.key);
+      const ref = activeEntry.ref;
       const optionType = isFieldOptionType(activeEntry.field);
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -3618,17 +3547,23 @@ export function TaskComposer(props: Props) {
                   spellCheck={false}
                   autoComplete="off"
                 />
-                {templateCandidates.length === 0 ? (
+                {templatesLoading ? (
                   <div className="composer__q-prompt" style={{ marginTop: 12 }}>
-                    {templateDetailsResolving
-                      ? 'Resolving templates…'
-                      : 'No prior tasks define fields yet — create a task with inputs/outputs ' +
-                        '(or a chained task) first, then it shows up here.'}
+                    Loading templates…
+                  </div>
+                ) : templatesError ? (
+                  <div className="composer__error" role="alert" style={{ marginTop: 12 }}>
+                    {templatesError}
+                  </div>
+                ) : templates.length === 0 ? (
+                  <div className="composer__q-prompt" style={{ marginTop: 12 }}>
+                    No templates yet — create a task with input fields and it's saved as a
+                    template automatically.
                   </div>
                 ) : (
                   <ul className="composer__options" role="listbox">
                     {filteredTemplateCandidates.map((c, i) => (
-                      <li key={c.taskId}>
+                      <li key={c.id}>
                         <button
                           type="button"
                           role="option"
@@ -3645,7 +3580,9 @@ export function TaskComposer(props: Props) {
                         >
                           <span className="composer__option-label">{c.name}</span>
                           <span className="composer__option-hint">
-                            {c.kind === 'chain' ? `chain · ${c.defs.length} steps` : 'task'}
+                            {c.variables.length === 1
+                              ? '1 field'
+                              : `${c.variables.length} fields`}
                           </span>
                         </button>
                       </li>
@@ -3654,11 +3591,6 @@ export function TaskComposer(props: Props) {
                       <li className="composer__q-prompt">No templates match "{templatePickQuery}".</li>
                     )}
                   </ul>
-                )}
-                {templateCandidates.length > 0 && templateDetailsResolving && (
-                  <div className="composer__q-prompt" style={{ marginTop: 8, opacity: 0.7 }}>
-                    Resolving more templates…
-                  </div>
                 )}
               </div>
             )}
@@ -3692,6 +3624,11 @@ export function TaskComposer(props: Props) {
                           ↵
                         </span>
                       </div>
+                      {templateEntryFieldEntries.length === 0 && (
+                        <div className="composer__q-prompt" style={{ marginTop: 8, opacity: 0.7 }}>
+                          This template has no inputs — it'll be created ready to run.
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="composer__q-inert">
@@ -3705,8 +3642,7 @@ export function TaskComposer(props: Props) {
                       This template has no input fields — press {submitKbd} to create.
                     </div>
                   ) : (
-                    templateEntryFieldEntries.map(({ taskDef, field }, i) => {
-                      const ref = fieldRef(taskDef.id, field.key);
+                    templateEntryFieldEntries.map(({ field, ref }, i) => {
                       const optionType = isFieldOptionType(field);
                       const opts = optionType ? fieldOptionList(field) : [];
                       const highlight = templateFillHighlight[ref] ?? 0;
@@ -3723,7 +3659,6 @@ export function TaskComposer(props: Props) {
                           {isActive ? (
                             <div className="composer__q-active-body">
                               <div className="composer__q-prompt">
-                                {templateEntry.kind === 'chain' ? `${taskDef.name} · ` : ''}
                                 {field.label || field.key}
                               </div>
                               {optionType ? (

@@ -409,6 +409,53 @@ function mapResolvedAgent(raw: unknown): Agent | null {
   return mapAgentRow(raw as AgentRow | null | undefined);
 }
 
+// ─── Templates (task-e112d60a3b7c) ────────────────────────────────────────
+// A first-class TypeBuild TEMPLATE (server /chromeext/templates): a named,
+// reusable job definition carrying INPUT `variables` (the human fills these at
+// instantiate time) + an `output_schema` (copied onto the created task), plus
+// inherited project/agent/flags. The list response is NON-PHI (names + field
+// DEFINITIONS only — never values, never the `notes` prompt body); the detail
+// (GET /chromeext/templates/{id}) additionally decrypts `notes` (PHI). Both
+// `variables` and `output_schema` are the same flat TaskDefField shape the rest
+// of the client uses (see OutputSchemaField above / TaskDefField, src/components/
+// newhome/types.ts) — we reuse OutputSchemaField + mapOutputSchema rather than
+// redefining a parallel field shape.
+type TemplateRow = {
+  id?: string;
+  name?: string;
+  project_id?: string | null;
+  variables?: unknown;
+  output_schema?: unknown;
+  agent_id?: string | null;
+  flags?: string[] | null;
+  created_by?: string | null;
+  group_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  // detail-only (GET /chromeext/templates/{id}) — the decrypted prompt body.
+  notes?: string | null;
+};
+
+/** A TypeBuild Template as the renderer sees it (camelCase). NON-PHI except
+ *  `notes` (the decrypted prompt body, present only on the detail fetch —
+ *  memory-only, never persisted/logged). `variables`/`outputSchema` carry field
+ *  DEFINITIONS only (key/label/type/options/required), never values. */
+export type Template = {
+  id: string;
+  name: string;
+  projectId: string | null;
+  variables: OutputSchemaField[];
+  outputSchema: OutputSchemaField[];
+  agentId?: string | null;
+  flags?: string[];
+  createdBy?: string | null;
+  groupId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  /** Decrypted prompt body — detail fetch only. PHI: memory-only. */
+  notes?: string | null;
+};
+
 // ─── Status mapping ──────────────────────────────────────────────────────
 // Map the server's status into the local TaskStatus enum. `rawStatus` ALWAYS
 // carries the server's raw status so the UI badge shows failed/partial/blocked
@@ -1398,6 +1445,136 @@ export class TypeBuildTaskSource implements TaskSource {
       if (a) out.push(a);
     }
     return out;
+  }
+
+  // ─── templates (task-e112d60a3b7c) ───────────────────────────────────────
+  // The first-class Template API (/chromeext/templates), superseding the old
+  // client-side task-scanning "template" derivation. NON-PHI on the list; the
+  // detail decrypts `notes` (memory-only). We never log request/response bodies.
+
+  // Map a raw server template row → the camelCase client `Template`. Defensive:
+  // a row missing an id yields null (dropped) so a malformed entry never reaches
+  // the picker. variables/output_schema reuse mapOutputSchema (fail-soft: bad
+  // entries dropped) and default to [] when absent/empty.
+  private mapTemplateRow(raw: TemplateRow | null | undefined): Template | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = typeof raw.id === 'string' ? raw.id : '';
+    if (!id) return null;
+    const template: Template = {
+      id,
+      name: typeof raw.name === 'string' ? raw.name : id,
+      projectId: raw.project_id ?? null,
+      variables: mapOutputSchema(raw.variables) ?? [],
+      outputSchema: mapOutputSchema(raw.output_schema) ?? [],
+      agentId: raw.agent_id ?? null,
+      flags: Array.isArray(raw.flags)
+        ? raw.flags.filter((f): f is string => typeof f === 'string')
+        : [],
+      createdBy: raw.created_by ?? null,
+      groupId: raw.group_id ?? null,
+      createdAt: raw.created_at ?? null,
+      updatedAt: raw.updated_at ?? null,
+    };
+    // notes is present only on the detail fetch (PHI, memory-only).
+    if (typeof raw.notes === 'string') template.notes = raw.notes;
+    return template;
+  }
+
+  // GET /chromeext/templates?project_id=<id>&include_global=true&include_archived=false
+  // → { templates: [...] }. NON-PHI list (no `notes`). `projectId` is optional
+  // (omit the param when absent); include_global is always on so shared/global
+  // templates show alongside a project's own. Malformed rows are dropped.
+  async listTemplates(projectId?: string): Promise<Template[]> {
+    const params = new URLSearchParams({
+      include_global: 'true',
+      include_archived: 'false',
+    });
+    if (projectId) params.set('project_id', projectId);
+    const res = await this.request('GET', `/chromeext/templates?${params}`);
+    if (!res.ok) {
+      throw new Error(`typebuild: list templates failed (${res.status})`);
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      templates?: TemplateRow[];
+    };
+    const rows = Array.isArray(data.templates) ? data.templates : [];
+    const out: Template[] = [];
+    for (const r of rows) {
+      const t = this.mapTemplateRow(r);
+      if (t) out.push(t);
+    }
+    return out;
+  }
+
+  // GET /chromeext/templates/{id} → the full template including the decrypted
+  // `notes` prompt body (PHI — memory-only, never logged/persisted). 404 → null.
+  async getTemplate(id: string): Promise<Template | null> {
+    const res = await this.request(
+      'GET',
+      `/chromeext/templates/${encodeURIComponent(id)}`,
+    );
+    if (res.status === 404) {
+      await res.json().catch(() => ({}));
+      return null;
+    }
+    if (!res.ok) {
+      throw new Error(`typebuild: get template failed (${res.status})`);
+    }
+    const raw = (await res.json().catch(() => ({}))) as
+      | TemplateRow
+      | { template?: TemplateRow };
+    // Accept either the bare row or a { template } envelope.
+    const row =
+      raw && typeof raw === 'object' && 'template' in raw && raw.template
+        ? (raw as { template: TemplateRow }).template
+        : (raw as TemplateRow);
+    return this.mapTemplateRow(row);
+  }
+
+  // POST /chromeext/templates/{id}/instantiate { values, title_override?,
+  // project_id? } → { ok, id, status:'open' } — the server creates a REAL task
+  // (data bag from `values`, output_schema copied, project/agent/flags
+  // inherited) and returns its id. `values` MAY be PHI (typed field values) —
+  // they ride the encrypted request body only, never logged. On success we
+  // refresh + broadcast so the new task appears without waiting for the poll.
+  async instantiateTemplate(
+    templateId: string,
+    values: Record<string, string>,
+    titleOverride?: string,
+    projectId?: string,
+  ): Promise<{ id: string; status: string }> {
+    const payload: Record<string, unknown> = { values: values ?? {} };
+    if (titleOverride && titleOverride.trim()) {
+      payload.title_override = titleOverride.trim();
+    }
+    if (projectId) payload.project_id = projectId;
+    const res = await this.request(
+      'POST',
+      `/chromeext/templates/${encodeURIComponent(templateId)}/instantiate`,
+      payload,
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      throw new Error(
+        `typebuild: instantiate failed (${res.status})${
+          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
+        }`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      status?: string;
+    };
+    const id = data.id ?? '';
+    if (!id) throw new Error('typebuild: instantiate returned no id');
+    // A new task exists server-side — surface it locally without waiting on the
+    // 30s poll (same pattern as createTask/deleteTask).
+    breezeHost().onTasksChanged();
+    void this.refreshAndBroadcast();
+    return { id, status: data.status ?? 'open' };
   }
 
   // GET /chromeext/projects/{id}(?effective=1). 404 (not found / not visible)

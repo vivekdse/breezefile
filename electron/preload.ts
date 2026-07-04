@@ -96,6 +96,34 @@ type FormExtension = {
   groupId: string | null;
 };
 
+// task-e112d60a3b7c — a Task Template as it crosses the bridge (camelCase).
+// Inlined like Project/Agent (preload carries no shared-type imports); mirrors
+// `Template` in electron/sources/typebuild.ts. `variables`/`outputSchema` are
+// the flat TaskDefField shape (key/label/type/options/required) — field
+// DEFINITIONS only, NON-PHI. `notes` (present only on `get`) is the decrypted
+// prompt body (PHI, memory-only, never logged/persisted).
+type TemplateField = {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'select' | 'bool';
+  options?: string[];
+  required?: boolean;
+};
+type Template = {
+  id: string;
+  name: string;
+  projectId: string | null;
+  variables: TemplateField[];
+  outputSchema: TemplateField[];
+  agentId?: string | null;
+  flags?: string[];
+  createdBy?: string | null;
+  groupId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  notes?: string | null;
+};
+
 const fm = {
   platform: process.platform,
   versions: process.versions,
@@ -1098,6 +1126,33 @@ const fm = {
         ipcRenderer.invoke('typebuild:datasources:list') as Promise<
           Array<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>
         >,
+    },
+    // task-e112d60a3b7c — first-class Task Templates (the "New from Template"
+    // picker). `list` enumerates project + global templates (NON-PHI: names +
+    // field defs, no prompt body — [] signed-out so the picker degrades);
+    // `get` fetches one full template incl. the decrypted `notes` (PHI,
+    // memory-only); `instantiate` creates a real task server-side from the
+    // filled-in `values` (MAY be PHI — never logged; server encrypts) and
+    // returns its id. Templates are auto-registered server-side on task-create;
+    // the client never creates one itself. See docs/task-templates-design.md.
+    templates: {
+      list: (projectId?: string) =>
+        ipcRenderer.invoke('typebuild:templates:list', projectId) as Promise<Template[]>,
+      get: (id: string) =>
+        ipcRenderer.invoke('typebuild:templates:get', id) as Promise<Template | null>,
+      instantiate: (
+        templateId: string,
+        values: Record<string, string>,
+        titleOverride?: string,
+        projectId?: string,
+      ) =>
+        ipcRenderer.invoke(
+          'typebuild:templates:instantiate',
+          templateId,
+          values,
+          titleOverride,
+          projectId,
+        ) as Promise<{ id: string; status: string }>,
     },
   },
   // ─── TypeBuild side-by-side layout (fm-b5at.6) ────────────────────────

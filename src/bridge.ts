@@ -1,4 +1,5 @@
 import type { Agent, Entry, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { TaskDefField } from './components/newhome/types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
 export type Capabilities = {
@@ -33,6 +34,27 @@ export type FormExtensionRecord = {
   limits: Record<string, unknown>;
   projectId: string | null;
   groupId: string | null;
+};
+
+// task-e112d60a3b7c — a first-class Task Template as it crosses the bridge
+// (camelCase; mirrors `Template` in electron/sources/typebuild.ts). The "New
+// from Template" picker lists these. `variables` are the INPUT fields the human
+// fills at instantiate time; `outputSchema` is copied onto the created task.
+// Both are the flat `TaskDefField` shape — field DEFINITIONS only, NON-PHI.
+// `notes` (present only on `get`) is the decrypted prompt body (PHI, memory-only).
+export type Template = {
+  id: string;
+  name: string;
+  projectId: string | null;
+  variables: TaskDefField[];
+  outputSchema: TaskDefField[];
+  agentId?: string | null;
+  flags?: string[];
+  createdBy?: string | null;
+  groupId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  notes?: string | null;
 };
 
 type Fm = {
@@ -545,6 +567,21 @@ type Fm = {
       list: () => Promise<
         Array<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>
       >;
+    };
+    // task-e112d60a3b7c — first-class Task Templates (the "New from Template"
+    // picker). `list` enumerates project + global templates (NON-PHI; []
+    // signed-out); `get` fetches one full template incl. decrypted `notes`
+    // (PHI, memory-only); `instantiate` creates a real task server-side from
+    // the filled `values` (MAY be PHI — never logged) and returns its id.
+    templates: {
+      list: (projectId?: string) => Promise<Template[]>;
+      get: (id: string) => Promise<Template | null>;
+      instantiate: (
+        templateId: string,
+        values: Record<string, string>,
+        titleOverride?: string,
+        projectId?: string,
+      ) => Promise<{ id: string; status: string }>;
     };
     // Credential vault — the user's OWN identifiers (NPI, Tax ID, login IDs),
     // NOT patient PHI. Values are encrypted on TypeBuild, scoped to the user,

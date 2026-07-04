@@ -100,6 +100,18 @@ export function aggregateInputs(
   taskDefs: TaskDef[] | null | undefined,
 ): { taskDef: TaskDef; field: TaskDefField }[];
 
+// task-e112d60a3b7c — map a first-class Template (server /chromeext/templates)
+// into the ordered value-question set the "New from Template" picker walks
+// through: one entry per input `variable`, each carrying the flat `ref`
+// (`<templateId>.<key>`) used to key its typed value. Pure + defensive
+// (null/malformed template or a variable lacking a usable `key` is skipped).
+export function templateFillEntries(
+  template:
+    | { id?: string; variables?: TaskDefField[] | null | undefined }
+    | null
+    | undefined,
+): { taskDefId: string; field: TaskDefField; ref: string }[];
+
 // task-2150d862a3d9 — "+ New from Template" candidate derivation. `task` is
 // whatever the caller's list-row-shaped object is (must carry id/title/
 // updated_at/notes?/dataKeys?/outputSchema?/projectId?); `detail` is the
