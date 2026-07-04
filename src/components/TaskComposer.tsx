@@ -30,6 +30,7 @@ import { usePlatform } from '../platform';
 import { fm } from '../bridge';
 import {
   createTask,
+  getTask,
   runTaskNow,
   shiftISO,
   taskSourceAction,
@@ -60,6 +61,7 @@ import type { TaskDef, TaskDefCondition, TaskDefField } from './newhome/types';
 import { instantiateTemplate } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
+  deriveTemplateEntry,
   effectiveFieldKey,
   fieldRef,
   inferFieldsFromProse,
@@ -1408,18 +1410,96 @@ export function TaskComposer(props: Props) {
   // fetch mechanism. Selecting one pre-fills the chain's name (the composer's
   // title, if not already typed) + `defs` — VALUES are never copied.
   const { tasks: allTasksForChainCopy } = useTasks({ includeDone: true });
+
+  // task-2150d862a3d9 — LIST rows (allTasksForChainCopy, from mapListRow) carry
+  // NONE of notes/dataKeys/outputSchema: GET /chromeext/tasks?titles=1 is a
+  // titles-only endpoint (no decrypted body, no server field schema) — see
+  // ListRow vs DetailRow in electron/sources/typebuild.ts. Both `priorChains`
+  // (chain notes) and `templateCandidates` (dataKeys/outputSchema) below read
+  // those fields off the LIST row, so BOTH were structurally always empty —
+  // the exact "no template" regression. Rather than wait on a server change to
+  // add these NON-PHI fields to the list endpoint, mirror useChainedRoster's
+  // pattern (useNewHomeData.ts): a small bounded, cached detail-fetch resolver
+  // that fills in each candidate's fielded-ness lazily, keyed by id+updated_at
+  // so it never re-fetches an unchanged task. Scoped to top-level TypeBuild
+  // rows only (the same universe priorChains/templateCandidates iterate), and
+  // only while the template picker is actually relevant (hasChainOption).
+  const templateDetailFetchedAtRef = useRef<Map<string, number>>(new Map());
+  const [templateDetails, setTemplateDetails] = useState<Map<string, Task>>(new Map());
+  const templateDetailCandidates = useMemo(
+    () =>
+      hasChainOption
+        ? allTasksForChainCopy.filter((t) => t.source === TYPEBUILD_SOURCE && !t.parentTaskId)
+        : [],
+    [allTasksForChainCopy, hasChainOption],
+  );
+  const templateDetailKey = useMemo(
+    () => templateDetailCandidates.map((t) => `${t.id}:${t.updated_at}`).join(','),
+    [templateDetailCandidates],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const due = templateDetailCandidates.filter(
+      (t) => templateDetailFetchedAtRef.current.get(t.id) !== t.updated_at,
+    );
+    if (due.length === 0) return;
+    void (async () => {
+      const TEMPLATE_DETAIL_FETCH_CONCURRENCY = 4;
+      let idx = 0;
+      const results: Array<[string, Task | null]> = [];
+      async function worker() {
+        while (idx < due.length) {
+          const t = due[idx++];
+          templateDetailFetchedAtRef.current.set(t.id, t.updated_at);
+          try {
+            const full = await getTask(t.id, t.source);
+            results.push([t.id, full]);
+          } catch {
+            templateDetailFetchedAtRef.current.delete(t.id);
+            results.push([t.id, null]);
+          }
+        }
+      }
+      await Promise.all(
+        Array.from(
+          { length: Math.min(TEMPLATE_DETAIL_FETCH_CONCURRENCY, due.length) },
+          () => worker(),
+        ),
+      );
+      if (cancelled) return;
+      setTemplateDetails((prev) => {
+        const next = new Map(prev);
+        for (const [id, detail] of results) {
+          if (detail) next.set(id, detail);
+        }
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [templateDetailKey, templateDetailCandidates]);
+  // Whether any candidate's detail is still outstanding — drives the picker's
+  // "resolving…" affordance without blocking it (candidates populate as their
+  // detail lands, same as useChainedRoster's cells).
+  const templateDetailsResolving = useMemo(
+    () => templateDetailCandidates.some((t) => !templateDetails.has(t.id)),
+    [templateDetailCandidates, templateDetails],
+  );
+
   const priorChains = useMemo(() => {
     if (!hasChainOption) return [];
     const out: { taskId: string; name: string; defs: TaskDef[]; updatedAt: number }[] = [];
     for (const t of allTasksForChainCopy) {
       if (t.source !== TYPEBUILD_SOURCE || t.parentTaskId) continue;
-      const parsed = parseTaskTemplateBlock(t.notes ?? null);
+      const notes = templateDetails.get(t.id)?.notes ?? t.notes ?? null;
+      const parsed = parseTaskTemplateBlock(notes);
       if (!parsed || parsed.defs === null) continue;
       out.push({ taskId: t.id, name: parsed.name, defs: parsed.defs, updatedAt: t.updated_at ?? 0 });
     }
     out.sort((a, b) => b.updatedAt - a.updatedAt);
     return out.slice(0, 25);
-  }, [allTasksForChainCopy, hasChainOption]);
+  }, [allTasksForChainCopy, hasChainOption, templateDetails]);
   function copyChainFrom(entry: { name: string; defs: TaskDef[] }) {
     const cloned = entry.defs.map((d) => ({
       ...d,
@@ -1456,45 +1536,19 @@ export function TaskComposer(props: Props) {
     const out: TemplateEntry[] = [];
     for (const t of allTasksForChainCopy) {
       if (t.source !== TYPEBUILD_SOURCE || t.parentTaskId) continue;
-      const parsedChain = parseTaskTemplateBlock(t.notes ?? null);
-      if (parsedChain && parsedChain.defs !== null) {
-        out.push({
-          taskId: t.id,
-          name: parsedChain.name,
-          defs: parsedChain.defs,
-          kind: 'chain',
-          projectId: t.projectId ?? undefined,
-          updatedAt: t.updated_at ?? 0,
-        });
-        continue;
-      }
-      // A single fielded task: any input keys (dataKeys) or an output schema
-      // it defined at create time (task-0d63c7b0ebdb). Reconstruct ONE
-      // synthetic TaskDef, id 'task' (mirrors taskFieldsDef), from whatever
-      // the list row exposes — inputs come from dataKeys (values are never on
-      // the list row; keys only, non-PHI), outputs from outputSchema verbatim.
-      const inputKeys = t.dataKeys ?? [];
-      const outputs = t.outputSchema ?? [];
-      if (inputKeys.length === 0 && outputs.length === 0) continue;
-      out.push({
-        taskId: t.id,
-        name: t.title,
-        defs: [
-          {
-            id: 'task',
-            name: t.title,
-            inputs: inputKeys.map((k) => ({ key: k, label: k, type: 'text' as const })),
-            outputs,
-          },
-        ],
-        kind: 'single',
-        projectId: t.projectId ?? undefined,
-        updatedAt: t.updated_at ?? 0,
-      });
+      // task-2150d862a3d9 — the list row (t) never carries notes/dataKeys/
+      // outputSchema (GET /chromeext/tasks?titles=1 has no decrypted body and
+      // no server field schema — see the templateDetails comment above).
+      // deriveTemplateEntry (taskSchema.mjs) prefers the resolved detail
+      // fetched by the cache above; falls back to the list row's own fields
+      // so this keeps working unchanged if a future server ever does thread
+      // them onto the list endpoint.
+      const entry = deriveTemplateEntry(t, templateDetails.get(t.id) ?? null);
+      if (entry) out.push(entry);
     }
     out.sort((a, b) => b.updatedAt - a.updatedAt);
     return out;
-  }, [allTasksForChainCopy, hasChainOption]);
+  }, [allTasksForChainCopy, hasChainOption, templateDetails]);
 
   const isFromTemplateMode = props.mode === 'create' && props.initialKind === 'template';
   // Picker step: 'pick' (searchable list), 'title' (prefilled, Enter to
@@ -3566,8 +3620,10 @@ export function TaskComposer(props: Props) {
                 />
                 {templateCandidates.length === 0 ? (
                   <div className="composer__q-prompt" style={{ marginTop: 12 }}>
-                    No prior tasks define fields yet — create a task with inputs/outputs
-                    (or a chained task) first, then it shows up here.
+                    {templateDetailsResolving
+                      ? 'Resolving templates…'
+                      : 'No prior tasks define fields yet — create a task with inputs/outputs ' +
+                        '(or a chained task) first, then it shows up here.'}
                   </div>
                 ) : (
                   <ul className="composer__options" role="listbox">
@@ -3598,6 +3654,11 @@ export function TaskComposer(props: Props) {
                       <li className="composer__q-prompt">No templates match "{templatePickQuery}".</li>
                     )}
                   </ul>
+                )}
+                {templateCandidates.length > 0 && templateDetailsResolving && (
+                  <div className="composer__q-prompt" style={{ marginTop: 8, opacity: 0.7 }}>
+                    Resolving more templates…
+                  </div>
                 )}
               </div>
             )}

@@ -564,3 +564,56 @@ export function aggregateInputs(taskDefs) {
   }
   return out;
 }
+
+// task-2150d862a3d9 — "+ New from Template" candidate derivation
+// (TaskComposer.tsx templateCandidates). A template is a top-level TypeBuild
+// task that's either a CHAIN (```task-template v2 body block) or a single
+// FIELDED task (dataKeys and/or outputSchema declared at create time,
+// task-0d63c7b0ebdb). Both `notes` (the chain block lives in the task body)
+// and `dataKeys`/`outputSchema` are DETAIL-ONLY fields — the list endpoint
+// (GET /chromeext/tasks?titles=1) never carries them, so a caller iterating
+// list rows must resolve each candidate's detail first (see TaskComposer's
+// templateDetails cache, which mirrors useChainedRoster's fetch-and-cache
+// pattern) and pass it here as `detail`. `detail` is optional/nullable so a
+// row whose detail hasn't resolved yet simply yields null (never throws) —
+// exactly the "regression" bug this fixes: reading these fields off a
+// schema-less list row always produced `null` here, so no candidate ever
+// appeared. NON-PHI: dataKeys carries key names only (never values);
+// outputSchema carries field DEFINITIONS only (never values); notes is only
+// ever consulted to detect+name a chain block, never surfaced raw.
+//
+// Returns a TemplateEntry-shaped object ({taskId, name, defs, kind,
+// projectId, updatedAt}) or null when `task` (merged with `detail`) defines
+// no fields at all — a "plain" task with nothing to templatize.
+export function deriveTemplateEntry(task, detail) {
+  const notes = (detail && detail.notes) ?? task.notes ?? null;
+  const parsedChain = parseTaskTemplateBlock(notes);
+  if (parsedChain && parsedChain.defs !== null) {
+    return {
+      taskId: task.id,
+      name: parsedChain.name,
+      defs: parsedChain.defs,
+      kind: 'chain',
+      projectId: task.projectId ?? undefined,
+      updatedAt: task.updated_at ?? 0,
+    };
+  }
+  const inputKeys = (detail && detail.dataKeys) ?? task.dataKeys ?? [];
+  const outputs = (detail && detail.outputSchema) ?? task.outputSchema ?? [];
+  if (inputKeys.length === 0 && outputs.length === 0) return null;
+  return {
+    taskId: task.id,
+    name: task.title,
+    defs: [
+      {
+        id: 'task',
+        name: task.title,
+        inputs: inputKeys.map((k) => ({ key: k, label: k, type: 'text' })),
+        outputs,
+      },
+    ],
+    kind: 'single',
+    projectId: task.projectId ?? undefined,
+    updatedAt: task.updated_at ?? 0,
+  };
+}

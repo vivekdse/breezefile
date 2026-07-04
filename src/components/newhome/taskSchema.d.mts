@@ -99,3 +99,35 @@ export function metaStatus(
 export function aggregateInputs(
   taskDefs: TaskDef[] | null | undefined,
 ): { taskDef: TaskDef; field: TaskDefField }[];
+
+// task-2150d862a3d9 — "+ New from Template" candidate derivation. `task` is
+// whatever the caller's list-row-shaped object is (must carry id/title/
+// updated_at/notes?/dataKeys?/outputSchema?/projectId?); `detail` is the
+// resolved DETAIL fetch (notes/dataKeys/outputSchema), preferred over the
+// list row's own (usually absent) fields when present. Returns null when
+// neither source defines any fields (a "plain" task with nothing to
+// templatize).
+export type TemplateEntry = {
+  taskId: string;
+  name: string;
+  defs: TaskDef[];
+  kind: 'chain' | 'single';
+  projectId?: string;
+  updatedAt: number;
+};
+export function deriveTemplateEntry(
+  task: {
+    id: string;
+    title: string;
+    updated_at?: number;
+    notes?: string | null;
+    dataKeys?: string[];
+    outputSchema?: TaskDefField[];
+    projectId?: string | null;
+  },
+  detail?: {
+    notes?: string | null;
+    dataKeys?: string[];
+    outputSchema?: TaskDefField[];
+  } | null,
+): TemplateEntry | null;
