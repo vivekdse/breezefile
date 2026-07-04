@@ -154,6 +154,21 @@ export type TaskCreate = {
   // unit d|w|m). The local store ignores it; the TypeBuild source maps it to the
   // server's `recurrence` on create so a "repeatable task" repeats from birth.
   recurrence?: string | null;
+  // task-a7214605a998 (S6) — optional STRUCTURED output field schema (NON-PHI
+  // definitions) + data map (PHI form-fill values), first-class on the server
+  // (S2 output_schema, S1 data) instead of the composer's old ```task-outputs/
+  // ```task-fields fenced blocks. The local store ignores both; the TypeBuild
+  // source maps them onto the server's `output_schema`/`data` create fields.
+  // Declared here (mirroring src/types.ts TaskCreate) only so the shared shape
+  // type-checks across the source seam.
+  outputSchema?: {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'select' | 'bool';
+    options?: string[];
+    required?: boolean;
+  }[];
+  data?: Record<string, string>;
 };
 
 export type TaskUpdate = Partial<{

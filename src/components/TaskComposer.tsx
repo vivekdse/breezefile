@@ -60,8 +60,6 @@ import type { TaskDef, TaskDefCondition, TaskDefField } from './newhome/types';
 import { instantiateTemplate } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
-  buildTaskFieldsBlock,
-  buildTaskOutputsBlock,
   fieldRef,
   parseTaskTemplateBlock,
 } from './newhome/taskSchema.mjs';
@@ -2145,15 +2143,22 @@ export function TaskComposer(props: Props) {
       }
 
       const trimmedNotes = notes.trim();
-      // task-2fd63b922beb correction (Part A) — a PLAIN task that defined its
-      // own input/output fields carries them in its body via the same fenced
-      // transport blocks a chain child uses: a ```task-fields block (taskDefId
-      // is the literal 'task') when input VALUES were entered, and a
-      // ```task-outputs block when outputs were defined. PHI: the input values
-      // live ONLY in the task body, never logged. No fields defined → no blocks
-      // → the created task is byte-identical to a plain task today
-      // (NON-REGRESSION).
-      let notesForSave = trimmedNotes;
+      // task-a7214605a998 (S6) — a PLAIN task that defines its own input/output
+      // fields now writes them STRUCTURED (server S1 data map + S2
+      // output_schema) instead of embedding ```task-fields/```task-outputs
+      // fenced blocks in the body. This branch only ever runs for a TypeBuild
+      // CREATE (hasChainOption implies mode==='create' && isTypebuild — see
+      // hasChainOption's definition), so there is no local-source or edit-path
+      // fallback to preserve here: reading OLD fenced-block tasks is still
+      // handled everywhere else (taskSchema.mjs's parsers are unchanged) — this
+      // is a write-side-only migration. PHI: input VALUES ride `dataForSave`
+      // (the create payload's `data` map, encrypted at rest server-side, never
+      // logged); `outputSchemaForSave` is NON-PHI field definitions only. No
+      // fields defined → both stay empty → the created task is byte-identical
+      // to a plain task today (NON-REGRESSION).
+      const notesForSave = trimmedNotes;
+      let outputSchemaForSave: TaskDefField[] | undefined;
+      let dataForSave: Record<string, string> | undefined;
       if (hasChainOption && templateChoice === 'blank') {
         const inputVals: Record<string, string> = {};
         for (const f of taskInputs) {
@@ -2161,23 +2166,11 @@ export function TaskComposer(props: Props) {
           const v = templateValues[fieldRef('task', f.key)] ?? '';
           if (v !== '') inputVals[f.key] = v;
         }
-        const blocks: string[] = [];
         if (Object.keys(inputVals).length > 0) {
-          blocks.push(buildTaskFieldsBlock('', 'task', inputVals));
+          dataForSave = inputVals;
         }
         if (taskOutputs.length > 0) {
-          blocks.push(
-            buildTaskOutputsBlock({
-              id: 'task',
-              name: title.trim(),
-              notes: '',
-              inputs: taskInputs,
-              outputs: taskOutputs,
-            }),
-          );
-        }
-        if (blocks.length > 0) {
-          notesForSave = [trimmedNotes, ...blocks].filter((p) => p.length > 0).join('\n\n');
+          outputSchemaForSave = taskOutputs;
         }
       }
       const startOpt = START_OPTIONS.find((s) => s.id === startId);
@@ -2240,6 +2233,13 @@ export function TaskComposer(props: Props) {
               // `agent_id`). '' (None) → omit the key so a create that doesn't
               // care leaves the server default (no agent). Non-PHI.
               ...(agentId ? { agentId } : {}),
+              // task-a7214605a998 (S6) — structured output schema (NON-PHI) +
+              // data map (PHI) built above, in place of the fenced blocks this
+              // composer used to splice into `notes`. Omitted when the plain
+              // task defines no fields, same as the fenced-block path before it
+              // (NON-REGRESSION).
+              ...(outputSchemaForSave ? { outputSchema: outputSchemaForSave } : {}),
+              ...(dataForSave ? { data: dataForSave } : {}),
             }
           : isTypebuild
             ? { ...basePayload, folder: '' }

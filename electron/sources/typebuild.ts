@@ -1151,6 +1151,21 @@ export class TypeBuildTaskSource implements TaskSource {
     // server validates + persists it on create; a done submit then spawns the
     // next deferred occurrence. Omit when unset so plain creates are unchanged.
     if (input.recurrence) payload.recurrence = input.recurrence;
+    // task-a7214605a998 (S6) — structured output field schema (S2, NON-PHI:
+    // key/label/type/options/required only) + data map (S1, PHI form-fill
+    // value bag). Both ride the create payload as first-class fields under
+    // the server's own names (output_schema/data) instead of the composer
+    // embedding ```task-outputs/```task-fields fenced blocks in the body. Omit
+    // when unset/empty so a create that doesn't use them is unchanged
+    // (NON-REGRESSION) — mirrors the server's own create-path semantics (an
+    // empty output_schema array is accepted and stored verbatim, so we still
+    // only send it when non-empty to avoid a no-op payload key).
+    if (Array.isArray(input.outputSchema) && input.outputSchema.length > 0) {
+      payload.output_schema = input.outputSchema;
+    }
+    if (input.data && typeof input.data === 'object' && Object.keys(input.data).length > 0) {
+      payload.data = input.data;
+    }
 
     const res = await this.request('POST', '/chromeext/tasks', payload);
     if (!res.ok) {
@@ -3037,6 +3052,29 @@ export class TypeBuildTaskSource implements TaskSource {
       const s = typeof v === 'string' ? v : '';
       body.agent_id = s;
       cachePatch.agentId = s === '' ? null : s;
+    }
+    // task-a7214605a998 (S6) — structured output field schema edit (NON-PHI).
+    // `null`/`[]` clears it server-side (the PATCH handler normalizes both to
+    // `None`); we forward whatever shape the composer built (already filtered
+    // to well-shaped entries) and mirror it into the cache so the drawer's
+    // outputSchema reflects the edit without waiting for the next detail
+    // fetch.
+    if ('output_schema' in input) {
+      const v = input.output_schema;
+      const schema = Array.isArray(v) ? v : null;
+      body.output_schema = schema;
+      cachePatch.outputSchema = schema && schema.length > 0
+        ? (schema as SourcedTask['outputSchema'])
+        : undefined;
+    }
+    // task-a7214605a998 (S6) — structured data map edit (PHI values; full-bag
+    // replace server-side — omitting this key entirely leaves existing data
+    // untouched, per the PATCH contract). We do NOT mirror data into the
+    // cache: SourcedTask carries no `data` field (values are never cached —
+    // same discipline as every other PHI field here).
+    if ('data' in input) {
+      const v = input.data;
+      body.data = v && typeof v === 'object' ? v : {};
     }
 
     // Nothing recognized — a no-op rather than a wasted round-trip.

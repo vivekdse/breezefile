@@ -415,6 +415,23 @@ export type TaskCreate = {
   // task_manager_api recurrence-on-create change), so a "repeatable task"
   // repeats from birth: a done submit spawns the next deferred occurrence.
   recurrence?: string | null;
+  // task-a7214605a998 (S6) — optional STRUCTURED output field schema + data
+  // map, first-class on the server (S2 output_schema, S1 data) instead of the
+  // ```task-outputs/```task-fields fenced blocks the composer used to embed in
+  // the body. `outputSchema` is NON-PHI (field definitions only); `data` is the
+  // PHI form-fill value bag (`{key: value}`, string→string) — it rides this
+  // create payload the same way `title`/`notes` do (encrypted at rest
+  // server-side; never persisted locally). The local source ignores both; only
+  // the TypeBuild source maps them onto the server's `output_schema`/`data`
+  // fields. Omitted = same as before (NON-REGRESSION).
+  outputSchema?: {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'select' | 'bool';
+    options?: string[];
+    required?: boolean;
+  }[];
+  data?: Record<string, string>;
 };
 
 // task-ab1d7955e23f — a TypeBuild Project as the renderer sees it (camelCase,
