@@ -2560,6 +2560,11 @@ export class TypeBuildTaskSource implements TaskSource {
       // reference, NOT the secret.
       extraArgs: [
         '--settings', settingsPath,
+        // Browser tasks run on Sonnet (claude-sonnet-5): fast/cheap enough for
+        // portal driving, capable enough for the operator playbook. Explicit
+        // per-launch override so the user's global default model isn't burned
+        // on routine browser work.
+        '--model', 'claude-sonnet-5',
         '--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG,
         // task-7bc1f1dfc202 — the GLOBAL server-hosted operator instructions,
         // layered on as a system-prompt addendum. Omitted entirely when the doc
