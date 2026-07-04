@@ -34,6 +34,11 @@ import {
   toChildStatus,
 } from './pipelineRoster.mjs';
 import { isAutoContinueOn, setAutoContinue } from './chainAutoContinuePrefs';
+import {
+  buildChainAggregateResult,
+  parentStatusFromChildren,
+  shouldResolveParent,
+} from './chainParentResolve.mjs';
 import type { PipelineColumn, PipelineGroup, ChildStatusLike } from './pipelineRoster.mjs';
 import { useChainedRoster } from './useNewHomeData';
 import type { ChainedJobResolution } from './useNewHomeData';
@@ -41,7 +46,7 @@ import type { ChainedJobResolution } from './useNewHomeData';
 // path: primaryActionFor (the single source of truth for which primary action a
 // row offers) decides eligibility, and useTaskActions().start (→ runTaskNow) is
 // the same claim-then-launch IPC the old play button fires. No new launch path.
-import { useTasks, useTypebuildReadiness } from '../../tasks';
+import { taskSourceAction, useTasks, useTypebuildReadiness } from '../../tasks';
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { useStartAction } from '../tasks/useStartAction';
@@ -702,6 +707,84 @@ function ChainedJobSubtable({
     sessions,
     onStartChild,
     autoStartErrors,
+  ]);
+
+  // ── chain-parent resolution (client-side interim) ─────────────────────────
+  // When the LAST non-skipped child of a REAL chain reaches a terminal state,
+  // resolve the PARENT container server-side. Today the "✓ Chain complete"
+  // above is display-only: metaStatus mirrors the children in the UI but the
+  // parent stays open/unclaimed, so claim_next can hand out a completed empty
+  // container and the roster raw-status still reads "Queued". We use the
+  // EXISTING source verb (`complete` → PATCH {status:'done'}); the source layer
+  // has no result-carrying submit action, so the aggregate is built for the
+  // payload (and to prove the evidence exists) but the interim submit only
+  // moves status. See chainParentResolve.mjs for the pure logic.
+  //
+  // A 'fielded' single-task job is NOT a chain (its one synthetic def points at
+  // the job itself) — it must never be resolved here, or we'd double-submit a
+  // single task against its own completion. Guard on resolution.status.
+  //
+  // IDEMPOTENT + SAFE: shouldResolveParent gates on the parent's CURRENT server
+  // rawStatus, so an already-terminal parent — whether we submitted it a moment
+  // ago OR the server resolved it on its own — is NEVER resubmitted. The
+  // in-flight ref stops a concurrent double-fire within one terminal transition.
+  const parentResolveInFlightRef = useRef(false);
+  useEffect(() => {
+    if (resolution.status !== 'chained') return; // fielded/other → not a chain
+    if (childrenLoading) return; // don't act on a partially-loaded job
+    if (parentResolveInFlightRef.current) return;
+
+    // Per-step child terminal states, in step order, over the NON-skipped defs
+    // that actually have a child row. A skipped (n/a) def contributes nothing;
+    // a non-skipped def whose child hasn't been created yet makes the chain
+    // NOT-yet-terminal (rawStatus:null), so parentStatusFromChildren returns
+    // null and we do nothing.
+    const childStates: { rawStatus?: string | null }[] = [];
+    for (const def of defs) {
+      if (taskDefStatus(def, valuesByRef) === 'skip') continue;
+      const childId = childIdByDefId[def.id];
+      const child = childId ? allTasksById.get(childId) : undefined;
+      childStates.push({ rawStatus: child?.rawStatus ?? null });
+    }
+
+    const resolutionStatus = parentStatusFromChildren(childStates);
+    const parent = allTasksById.get(jobId);
+    if (!shouldResolveParent(parent?.rawStatus ?? null, resolutionStatus)) return;
+    if (!resolutionStatus) return; // (shouldResolveParent already ensures this)
+
+    // Build the aggregate chain evidence for the parent's submission. Held in
+    // memory ONLY for the payload — never logged/persisted (PHI). The source
+    // `complete` verb currently carries no result, so this is prepared for the
+    // moment a result-carrying submit action lands; we do not log its values.
+    const aggregate = buildChainAggregateResult({ defs, valuesByRef });
+    void aggregate; // consumed by a result-carrying submit when the source supports it
+
+    const parentSource = parent?.source ?? 'typebuild';
+    parentResolveInFlightRef.current = true;
+    // 'done' → complete; 'partial' → cancel is the closest terminal the source
+    // layer exposes (there is no `partial` verb). Either way the container stops
+    // being handed out by claim_next and the roster stops reading "Queued".
+    const verb = resolutionStatus.status === 'done' ? 'complete' : 'cancel';
+    void taskSourceAction(parentSource, jobId, verb)
+      .then(() => {
+        // Leave the guard SET on success: the parent is now terminal, and the
+        // next render's shouldResolveParent sees the terminal rawStatus and
+        // short-circuits — a belt-and-suspenders second layer of idempotency.
+      })
+      .catch(() => {
+        // Failed to resolve (offline / contested) — clear the guard so a later
+        // render retries once. Never log the reason with values (PHI); this
+        // path carries none anyway.
+        parentResolveInFlightRef.current = false;
+      });
+  }, [
+    resolution.status,
+    childrenLoading,
+    defs,
+    valuesByRef,
+    childIdByDefId,
+    allTasksById,
+    jobId,
   ]);
 
   return (
