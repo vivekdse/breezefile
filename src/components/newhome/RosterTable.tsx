@@ -239,20 +239,34 @@ function StepChip({
    *  the roster, not just a status-bar line that scrolls away. */
   autoStartError?: string | null;
 }) {
+  // task-3f0c6a6abe41 (#2) — OPTIMISTIC ROLLBACK. A recorded auto-start
+  // failure for this step MUST win over any lingering "running" signal: the
+  // launch promise rejected (or the claim was released), so the step is NOT
+  // running regardless of a stale in_progress the source cache may still hold
+  // for up to one system-poll interval. Force the running indicator off and
+  // show the failure + ▶ instead, so the UI never says RUNNING while the
+  // server says OPEN.
+  const showRunning = !!running && !autoStartError;
   return (
     <span className="nh-pipe__step-chip-wrap">
-      <span className={`nh-pipe__step-chip nh-pipe__step-chip--${status}`}>
+      {/* task-3f0c6a6abe41 (#4) — the pill ALREADY reads "running" for an
+          active step (STEP_CHIP_LABEL.active === 'running'); the live-session
+          signal is just a pulsing dot ON the pill, not a second "running"
+          word (which rendered the duplicated "RUNNING ● RUNNING"). */}
+      <span
+        className={
+          `nh-pipe__step-chip nh-pipe__step-chip--${status}` +
+          (showRunning ? ' nh-pipe__step-chip--live' : '')
+        }
+        title={
+          showRunning
+            ? 'A session is running for this step (headless — no visible tab yet)'
+            : undefined
+        }
+      >
+        {showRunning && <span className="nh-pipe__step-live-dot" aria-hidden="true" />}
         {STEP_CHIP_LABEL[status]}
       </span>
-      {running && (
-        <span
-          className="nh-pipe__step-running"
-          role="status"
-          title="A session is running for this step (headless — no visible tab yet)"
-        >
-          {'● running'}
-        </span>
-      )}
       {runnable && startAction && (
         <button
           type="button"
@@ -269,7 +283,7 @@ function StepChip({
       )}
       {autoStartError && (
         <span className="nh-pipe__step-error" role="alert" title={autoStartError}>
-          {'⚠ auto-start failed — start manually'}
+          {`⚠ ${autoStartError}`}
         </span>
       )}
     </span>
@@ -612,11 +626,18 @@ function ChainedJobSubtable({
             const baseStatus = def ? taskDefStatus(def, valuesByRef) : 'pending';
             const childId = childIdByDefId[g.taskDefId];
             const child = childId ? allTasksById.get(childId) : undefined;
+            const stepError = childId ? autoStartErrors[childId] : null;
             // task-c141c7765aa4 (#2, chip staleness) — layer the child's LIVE
             // claim/run state on top of the pure output-derived status so a
             // just-claimed step reads RUNNING immediately, not "queued" for
             // however long it takes the agent to produce its first output.
-            const childRunning = !!child && isInProgress(child);
+            // task-3f0c6a6abe41 (#2, optimistic rollback) — but a recorded
+            // auto-start FAILURE overrides any lingering in_progress: the
+            // launch rejected + the claim was released, so the step is not
+            // running even if the source cache hasn't re-polled the child's
+            // status back to open yet. This makes the pill revert from
+            // "running" to "queued" the instant the promise rejects.
+            const childRunning = !stepError && !!child && isInProgress(child);
             const status = stepDisplayStatus(baseStatus, childRunning);
             const runnable = g.taskDefId === runnableId;
             // task-4045bcee23cb (U3a) — same actionsFor eligibility rule as the
@@ -642,7 +663,7 @@ function ChainedJobSubtable({
                   startAction={startAction ?? null}
                   onStart={() => childId && onStartChild(childId)}
                   running={childRunning}
-                  autoStartError={childId ? autoStartErrors[childId] : null}
+                  autoStartError={stepError}
                 />
               </th>
             );

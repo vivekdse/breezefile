@@ -70,6 +70,40 @@ export function getBrowserWindow(): BrowserWindow | null {
   return browserWin && !browserWin.isDestroyed() ? browserWin : null;
 }
 
+/**
+ * task-3f0c6a6abe41 — the MAIN app window to host an interactive session tab,
+ * i.e. a live window that is NOT the operator window. runTaskInteractive used
+ * to fall back to `getAllWindows().find(w => !w.isDestroyed())` when there was
+ * no focused window — the case for a gesture-less auto-continue tick right
+ * after the previous step's operator window closed. That find could pick the
+ * OPERATOR window (or one mid-teardown), and binding the new pty to its
+ * webContents (or reading `.id` on a dead one) threw BEFORE the spawn, so the
+ * claim was held but no claude process ever started. Handing the launcher a
+ * deterministic, live MAIN window removes that race. Returns null only when
+ * the app genuinely has no non-operator window with a live webContents.
+ */
+export function getPrimaryHostWindow(): BrowserWindow | null {
+  const operator = browserWin;
+  const alive = (w: BrowserWindow): boolean => {
+    if (w.isDestroyed()) return false;
+    try {
+      const wc = w.webContents;
+      return !!wc && !wc.isDestroyed() && !wc.isCrashed();
+    } catch {
+      return false;
+    }
+  };
+  // Prefer a live window that is NOT the operator window; fall back to any
+  // live window (covers a headless/operator-only edge, though the launcher
+  // then hosts the tab there rather than failing outright).
+  const windows = BrowserWindow.getAllWindows();
+  return (
+    windows.find((w) => w !== operator && alive(w)) ??
+    windows.find((w) => alive(w)) ??
+    null
+  );
+}
+
 /** The id of the browser view living in the operator window's left pane —
  *  the page an external agent (Claude Code, curl) drives over CDP. Lets
  *  `/app/browser/*` HTTP routes default to "the agent's own browser" when no

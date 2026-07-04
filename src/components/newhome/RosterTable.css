@@ -465,25 +465,31 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
-/* task-c141c7765aa4 (#3) — "running headless" watch affordance: a
-   claimed/in_progress step must never look like a bare "queued" chip, even
-   before its first output lands and even with no visible tab (auto-continue
-   may have launched with no attached window). A quiet pulse dot + label. */
-.nh-pipe__step-running {
+/* task-c141c7765aa4 (#3) / task-3f0c6a6abe41 (#4) — "running headless" watch
+   affordance. The pill ALREADY reads "running" for an active step; the live
+   signal is just a pulsing dot INSIDE the pill (never a second "running"
+   word — that produced the duplicated "RUNNING ● RUNNING"). */
+.nh-pipe__step-chip--live {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: var(--fs-2xs);
-  color: var(--nh-progress);
+  gap: 4px;
+}
+.nh-pipe__step-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
   animation: nh-pipe-pulse 1.6s ease-in-out infinite;
 }
 @keyframes nh-pipe-pulse {
-  0%, 100% { opacity: 0.55; }
+  0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
 }
-/* task-c141c7765aa4 (#1) — visible failure when auto-continue's launch
-   didn't spawn a session. Replaces silence with an explicit "start manually"
-   nudge; the claim was already released so the ▶ next to it is live. */
+/* task-c141c7765aa4 (#1) / task-3f0c6a6abe41 (#1) — visible failure when
+   auto-continue's launch didn't spawn a session. Replaces silence with the
+   REAL reason inline ("no open Breeze window …"); the claim was already
+   released so the ▶ next to it is live for a manual retry. */
 .nh-pipe__step-error {
   display: inline-flex;
   align-items: center;

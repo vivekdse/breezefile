@@ -2337,20 +2337,22 @@ export class TypeBuildTaskSource implements TaskSource {
     // session pre-claimed so it does NOT re-claim.
     try {
       const res = await this.launchSession(id, { resume: false, preclaimed: true });
+      // task-3f0c6a6abe41 — launchSession only returns after res.launched was
+      // verified true and a real ptyId was assigned; a 0/absent ptyId here
+      // would mean "claimed but no session", the exact phantom we must never
+      // return as ok. Guard it explicitly.
+      if (!res.ptyId) {
+        throw new Error('[typebuild-launch:no-pty] launch returned no session id');
+      }
       return { ok: true, ptyId: res.ptyId };
     } catch (err) {
-      // The mint/spawn threw AFTER we just claimed in THIS call — the claim is
-      // now orphaned (no live session backs it). Fire the same Release prompt
-      // the PTY-exit path uses (typebuild.ts onSessionExit) so the user can
-      // release it, then rethrow so the renderer maps the typed mint error.
-      // PHI-free: the broadcast carries only the opaque task id.
-      if (!alreadyMine) {
-        for (const w of browserWindows()) {
-          if (!w.isDestroyed()) {
-            w.webContents.send('typebuild:releasePrompt', { taskId: id });
-          }
-        }
-      }
+      // task-3f0c6a6abe41 — the mint/spawn threw AFTER we just claimed in THIS
+      // call. LOG the real, token-free reason (afffda8's renderer-side catch
+      // used to swallow it) so the actual launch failure is diagnosable, then
+      // rethrow so the renderer maps the typed reason onto the row. PHI-free:
+      // the error carries only the opaque task id + a machine reason code.
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[typebuild] launch failed for task ${id}: ${reason}`);
       throw err;
     }
   }
@@ -2458,6 +2460,16 @@ export class TypeBuildTaskSource implements TaskSource {
     );
 
     const { runTaskInteractive } = await import('../agents/interactive');
+    // task-3f0c6a6abe41 — hand the launcher a DETERMINISTIC, live MAIN window
+    // (never the operator window, never a window mid-teardown). Without this,
+    // a gesture-less auto-continue tick — which fires right after the previous
+    // step's operator window closed, so there's no focused window — let
+    // runTaskInteractive fall back to `getAllWindows().find()`, which could
+    // pick a dead/operator webContents; binding the pty to it threw before the
+    // spawn (claim held, no claude process). null here → runTaskInteractive's
+    // own hostable-window fallback still runs (and fails loudly, not silently).
+    const { getPrimaryHostWindow } = await import('../browser/window');
+    const hostWindow = getPrimaryHostWindow() ?? undefined;
     const synthetic: Task = this.syntheticTask(id, flags);
 
     // App-owned workspace + permission grant (see ensureTasksWorkspace). The
@@ -2543,6 +2555,9 @@ export class TypeBuildTaskSource implements TaskSource {
     let ptyId = 0;
     const res = await runTaskInteractive(synthetic, {
       agentId: 'claude',
+      // task-3f0c6a6abe41 — the resolved live MAIN window (see above). undefined
+      // falls through to runTaskInteractive's own hostable-window resolution.
+      window: hostWindow,
       // ONLY the opaque task id — never a title/body (PHI).
       prompt,
       // On resume, suppress the positional prompt so --continue resumes the
@@ -2608,8 +2623,12 @@ export class TypeBuildTaskSource implements TaskSource {
     });
 
     if (!res.launched) {
-      // No GUI window to host the tab — interactive Start needs the app open.
-      throw new Error('typebuild: Start needs an open Breeze window');
+      // No GUI window to host the tab — interactive Start needs the app open
+      // (with a live window). task-3f0c6a6abe41 — tag the reason so the
+      // renderer can show the REAL cause on the row instead of a generic
+      // "start failed". IPC strips custom Error props, so it rides in the
+      // message with a stable, machine-parsable prefix (mirrors mint-token.ts).
+      throw new Error('[typebuild-launch:no-window] Start needs an open Breeze window');
     }
     ptyId = res.ptyId;
 

@@ -18,23 +18,14 @@ import {
   useTaskSources,
 } from '../../tasks';
 import { formatOpError, formatSourceReason } from '../../errorMessages';
+import { launchErrorReason, mintErrorReason, spawnedOutcome } from './startOutcome.mjs';
 import type { Task, TaskSourceCapabilities, TaskStatus, TaskUpdate } from '../../types';
 
-// fm-b5at.9 — map a thrown TypeBuild MCP-token mint failure to the bead's
-// three exact in-app messages (the typed code rides in the error message as
-// "[typebuild-mint:<code>]"; IPC strips custom Error props). Returns null for
-// anything that isn't a mint error so the caller falls back to its formatter.
-const MINT_MESSAGES: Record<string, string> = {
-  'signed-out': 'Please sign in again',
-  unreachable: "Can't reach TypeBuild right now",
-  'access-denied': 'Your access has changed, contact your admin',
-};
-function mintErrorMessage(err: unknown): string | null {
-  const raw = err instanceof Error ? err.message : String(err);
-  const m = /\[typebuild-mint:([a-z-]+)\]/.exec(raw);
-  if (!m) return null;
-  return MINT_MESSAGES[m[1]] ?? null;
-}
+// fm-b5at.9 / task-3f0c6a6abe41 — the mint + launch failure reason mappers
+// and the "did a real session spawn?" decision live in the pure, unit-tested
+// startOutcome.mjs (mintErrorReason / launchErrorReason / spawnedOutcome),
+// imported above. This hook is not itself unit-testable under `node --test`,
+// so the correctness-critical logic is factored out where it can be asserted.
 
 // fm-iwlc (S6) — the typebuild source throws a `[typebuild-delete:<reason>]`
 // tagged Error on a rejected delete (IPC strips custom Error props, so the
@@ -352,28 +343,38 @@ export function useTaskActions(): TaskActions {
           // A contested claim was never ours to release — nothing to clean up.
           return { ok: false, spawned: false, message, released: false };
         }
+        // task-3f0c6a6abe41 — a typebuild "start" is only genuinely SPAWNED
+        // when runNow returns a real ptyId (spawnedOutcome enforces this). A
+        // truthy-but-ptyId-less {ok:true} is exactly the phantom claim we must
+        // never report as success, so treat it as a launch failure and fall
+        // into the release-and-surface path below.
+        const { ptyId, needsPtyThrow } = spawnedOutcome(task.source, res);
+        if (needsPtyThrow) {
+          throw new Error('[typebuild-launch:no-pty] start returned no session id');
+        }
+        // Past the guard, a session genuinely spawned (typebuild: a real pty
+        // id; local: a resolved run).
         say(
           task.source === 'typebuild'
             ? 'starting TypeBuild session…'
             : 'running…',
         );
-        return { ok: true, spawned: true, ptyId: res && 'ptyId' in res ? res.ptyId : undefined };
+        return { ok: true, spawned: true, ptyId };
       } catch (e) {
-        // task-c141c7765aa4 (ROOT CAUSE) — runNow CLAIMS first, then launches.
-        // The launch half (electron/agents/interactive.ts runTaskInteractive)
-        // can fail SILENTLY-TO-THE-CLAIM: when there's no focused/open
-        // BrowserWindow (true for a reactive auto-continue firing with no user
-        // gesture), it returns `{launched:false}` with NO exception of its
-        // own; electron/sources/typebuild.ts launchSession turns that into a
-        // thrown Error, and runNow's catch broadcasts 'typebuild:releasePrompt'
-        // — but NOTHING in the renderer listens for that event, so the claim
-        // was never actually released. The task became stalled-claimed:
-        // claimed, no session, invisible, blocked from manual Start until the
-        // 2h TTL. Fix: on ANY post-claim launch failure for a typebuild task,
-        // best-effort release the claim ourselves, right here, so the step is
-        // re-runnable instead of stranded.
-        const msg = mintErrorMessage(e);
-        const message = msg ?? formatOpError('start', e);
+        // task-c141c7765aa4 / task-3f0c6a6abe41 — runNow CLAIMS first, then
+        // launches. The launch half can fail AFTER the claim (no hostable
+        // window at the gesture-less auto-continue moment; a pty that never
+        // spawned). afffda8 released the orphaned claim but SWALLOWED the real
+        // reason and the UI kept lying "RUNNING". Now we: (1) extract the REAL
+        // launch reason (typed [typebuild-launch:*] / [typebuild-mint:*]),
+        // (2) LOG it token-free for diagnosis, (3) release the orphaned claim,
+        // and (4) return the reason so the caller surfaces it on the row and
+        // rolls the optimistic RUNNING state back — never a silent release.
+        const reason = launchErrorReason(e) ?? mintErrorReason(e);
+        const message = reason ?? formatOpError('start', e);
+        console.warn(
+          `[useTaskActions] start failed for ${task.source ?? 'local'} task: ${message}`,
+        );
         let released = false;
         if (task.source === 'typebuild') {
           try {
@@ -384,7 +385,11 @@ export function useTaskActions(): TaskActions {
             // released, 404) must never mask the original launch error.
           }
         }
-        say(released ? `${message} · claim released, ready to start` : message);
+        say(
+          released
+            ? `auto-start failed: ${message} — start manually (claim released)`
+            : `couldn’t start · ${message}`,
+        );
         return { ok: false, spawned: false, message, released };
       }
     },

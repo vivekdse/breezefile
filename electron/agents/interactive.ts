@@ -100,14 +100,42 @@ export async function runTaskInteractive(
   task: Task,
   opts: InteractiveRunOptions = {},
 ): Promise<InteractiveRunResult> {
+  // task-3f0c6a6abe41 — ROOT CAUSE of "auto-continue claims but never spawns".
+  // The manual ▶ fires from a user gesture, so getFocusedWindow() returns the
+  // live main Breeze window. The auto-continue effect fires from a
+  // refresh/timer tick right AFTER the previous step's session exited — at that
+  // instant there is often NO focused window (focus was just lost with the
+  // closing operator window), so we fell through to
+  // `getAllWindows().find(w => !w.isDestroyed())`. That find can return a
+  // window that is not-yet-`isDestroyed()` but whose `webContents` is already
+  // gone/tearing down (the just-closed operator window). Binding the pty's
+  // `senderId` to a dead webContents — or merely reading `win.webContents.id`
+  // on it — throws BEFORE spawnManagedPty runs, so no claude process is ever
+  // created; the claim is held but nothing launched. We now require a window
+  // whose webContents is ALIVE (not destroyed, not crashed), preferring the
+  // focused one, then any window that can actually host a tab.
+  const hostable = (w: BrowserWindow | null | undefined): w is BrowserWindow => {
+    if (!w || w.isDestroyed()) return false;
+    try {
+      const wc = w.webContents;
+      return !!wc && !wc.isDestroyed() && !wc.isCrashed();
+    } catch {
+      return false;
+    }
+  };
+  const focused = BrowserWindow.getFocusedWindow();
   const win =
-    opts.window ??
-    BrowserWindow.getFocusedWindow() ??
-    BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ??
+    (hostable(opts.window) ? opts.window : null) ??
+    (hostable(focused) ? focused : null) ??
+    BrowserWindow.getAllWindows().find((w) => hostable(w)) ??
     null;
-  if (!win || win.isDestroyed()) {
-    // No GUI window to host the tab — caller decides whether to fall back
-    // to headless. We don't create a run row in that case.
+  if (!hostable(win)) {
+    // No GUI window with a live webContents to host the tab — caller decides
+    // whether to fall back to headless or surface the reason. We don't create
+    // a run row in that case.
+    console.warn(
+      `[interactive] no hostable window for task ${task.id} — cannot spawn interactive session`,
+    );
     return { run: null, ptyId: 0, launched: false };
   }
 
