@@ -184,6 +184,7 @@ type Verb =
   | 'new-home'
   | 'files'
   | 'new-task'
+  | 'new-from-template'
   | 'new-project'
   | 'sidebyside'
   | 'settings'
@@ -1951,6 +1952,32 @@ export const VERBS: VerbDef[] = [
       requestAnimationFrame(() =>
         window.dispatchEvent(new CustomEvent('fm:projects:newtask')),
       );
+    },
+  },
+  {
+    // task-257bb4870c6c — "New from Template": a first-class entry SEPARATE
+    // from plain create — searchable picker over prior fielded tasks/chains,
+    // then ONLY their input value questions (title prefilled, everything
+    // else — project/notes/output schema/agent/flags/priority — inherited
+    // silently). Opens the SAME globally-mounted TaskComposer as "+ New
+    // Task" (fm:openTask), just with initialKind: 'template'.
+    id: 'new-from-template',
+    label: 'New from template',
+    aliases: ['new from template', 'nft', 'from template', 'template', 'new-from-template'],
+    icon: '＋',
+    category: 'Tasks',
+    describe: () => 'Pick a prior fielded task/chain and fill just its input values',
+    isAvailable: () => ({ ok: true }),
+    tabKinds: ['home', 'projects'],
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(
+        new CustomEvent('fm:openTask', {
+          detail: { mode: 'create', defaultFolder: '', initialKind: 'template' },
+        }),
+      );
+      window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
     },
   },
   {

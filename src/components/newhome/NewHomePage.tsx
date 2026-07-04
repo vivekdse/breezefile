@@ -219,7 +219,7 @@ export function NewHomePage() {
   // the human can fill it by hand or drive it conversationally — including
   // "New Chained Task" (docs/task-templates-design.md), which defines a chain
   // inline, right there, rather than through a project-level template.
-  function openNewTask(kind?: 'chain') {
+  function openNewTask(kind?: 'chain' | 'template') {
     setOpenTaskId(null);
     window.dispatchEvent(
       new CustomEvent('fm:openTask', {
@@ -505,6 +505,14 @@ export function NewHomePage() {
           )}
         </div>
         <div className="nh__topbar-right">
+          <button
+            type="button"
+            className="nh__btn"
+            onClick={() => openNewTask('template')}
+            title="Pick a prior fielded task or chain and fill just its input values — everything else (project, notes, output schema, agent) is inherited"
+          >
+            + New from Template
+          </button>
           <button
             type="button"
             className="nh__btn"

@@ -23,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
+import { effectiveFieldKey, aggregateInputs } from '../src/components/newhome/taskSchema.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const srcPath = path.join(here, '..', 'src', 'components', 'newhome', 'newHomePrefs.ts');
@@ -289,4 +290,139 @@ test('instantiateTemplate with no taskDefs still creates the meta parent with an
   assert.deepEqual(result.childIds, []);
   assert.equal(calls.length, 1);
   assert.match(calls[0].input.notes, /Job created from chain "Empty job": 0 tasks\./);
+});
+
+// ── task-257bb4870c6c — "New from Template" assembly contract ─────────────
+//
+// The from-template flow is a SEPARATE first-class entry from plain create
+// (task-0d63c7b0ebdb), but reuses the exact same seams: aggregateInputs to
+// walk a template's input fields, effectiveFieldKey to normalize a value's
+// key (so a template whose field key was left blank/typed messily still
+// lands the value under a valid key — the fix from task-f9a723379aa8), and
+// instantiateTemplate for a CHAINED template (same call saveTemplateJob
+// makes, just with the human's COLLECTED values instead of an empty map).
+// These tests prove: given a template's field DEFS + collected VALUES, the
+// resulting create payload has data_keys populated (normalized) and the
+// inherited output_schema, with ZERO other questions consumed to assemble it
+// (project/notes/agent/etc. are simply copied off the template entry, never
+// derived from a walked question).
+
+// ── single fielded-task template (task-0d63c7b0ebdb "definitions-only" shape:
+// one synthetic TaskDef, id 'task', inputs seeded from dataKeys, outputs
+// verbatim from outputSchema — mirrors TaskComposer.tsx's templateCandidates
+// derivation for a non-chain template row) ─────────────────────────────────
+
+function makeSingleTaskTemplateDef() {
+  // What the composer reconstructs from a template task's LIST row: dataKeys
+  // (key names only, values are never on a list row — non-PHI) become input
+  // field defs; outputSchema rides through untouched (also non-PHI defs).
+  return {
+    id: 'task',
+    name: 'Get second headline',
+    inputs: [{ key: 'news_site_url', label: 'news_site_url', type: 'text' }],
+    outputs: [{ key: 'headline', label: 'Second headline', type: 'text', required: true }],
+  };
+}
+
+/** Pure re-implementation of TaskComposer.tsx's saveFromTemplate() single-
+ *  task branch's payload assembly (outputSchema/data only — the rest of the
+ *  TaskCreate is static passthrough already covered by createTaskForTemplateJob-
+ *  style tests elsewhere) so the CONTRACT is exercised without mounting React.
+ *  Mirrors the real function line for line: effectiveFieldKey normalizes
+ *  each input's key before writing its collected value into `data`. */
+function assembleSingleTemplateData(def, values) {
+  const data = {};
+  for (const f of def.inputs ?? []) {
+    const key = effectiveFieldKey(f);
+    if (!key) continue;
+    data[key] = values[`${def.id}.${f.key}`] ?? '';
+  }
+  return {
+    ...((def.outputs ?? []).length > 0 ? { outputSchema: def.outputs } : {}),
+    ...(Object.keys(data).length > 0 ? { data } : {}),
+  };
+}
+
+test('from-template single task: one input value collected -> data_keys populated (normalized) + inherited output_schema, zero other fields asked', () => {
+  const def = makeSingleTaskTemplateDef();
+  // Exactly what acceptance describes: pick template, accept prefilled
+  // title, type ONE input value (a URL) — nothing else.
+  const collected = { 'task.news_site_url': 'https://cnn.com' };
+
+  const entries = aggregateInputs([def]);
+  assert.equal(entries.length, 1, 'exactly one value question — the single input field');
+
+  const payload = assembleSingleTemplateData(def, collected);
+  assert.deepEqual(payload.data, { news_site_url: 'https://cnn.com' });
+  assert.deepEqual(payload.outputSchema, [
+    { key: 'headline', label: 'Second headline', type: 'text', required: true },
+  ]);
+});
+
+test('from-template single task: a messy/blank field key still normalizes via effectiveFieldKey, never silently dropping the typed value', () => {
+  const def = {
+    id: 'task',
+    name: 'Headline check',
+    inputs: [{ key: '', label: 'News site URL', type: 'text' }], // blank key, label only
+    outputs: [],
+  };
+  const collected = { 'task.': 'https://cnn.com' };
+  const payload = assembleSingleTemplateData(def, collected);
+  // effectiveFieldKey falls back to the normalized LABEL when key is blank.
+  assert.deepEqual(payload.data, { news_site_url: 'https://cnn.com' });
+  assert.ok(!('outputSchema' in payload), 'no outputs defined -> outputSchema omitted, not empty-arrayed');
+});
+
+test('from-template single task: no input fields at all -> no data key, still fine (zero questions asked)', () => {
+  const def = { id: 'task', name: 'No-input task', inputs: [], outputs: [] };
+  const entries = aggregateInputs([def]);
+  assert.equal(entries.length, 0);
+  const payload = assembleSingleTemplateData(def, {});
+  assert.ok(!('data' in payload));
+  assert.ok(!('outputSchema' in payload));
+});
+
+// ── chained template: instantiateTemplate with COLLECTED (non-empty) values ─
+// (contrast with the task-0d63c7b0ebdb tests above, which instantiate with
+// an EMPTY values map at plain-create time — the from-template flow is the
+// one path that fills them in at creation, via the exact same seam.)
+
+test('from-template chain: instantiateTemplate with collected values populates every childs task-fields block, inherits project, asks nothing else', async () => {
+  const calls = [];
+  const createTask = stubCreateTask(calls);
+  const collectedValues = {
+    'intake.customer': 'Acme Cleaners',
+    'stain.method': 'enzymatic',
+  };
+
+  const result = await instantiateTemplate({
+    name: 'Order #99', // the prefilled title, accepted as-is
+    projectId: 'proj-inherited', // inherited SILENTLY from the template, never asked
+    defs: makeDefs(),
+    values: collectedValues,
+    createTask,
+  });
+
+  assert.equal(calls.length, 4);
+  assert.equal(result.parentId, 't1');
+
+  // project inherited on every task, not just the parent.
+  for (const { input } of calls) {
+    assert.equal(input.projectId, 'proj-inherited');
+  }
+
+  const intakeFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(calls[1].input.notes)[1].trim());
+  assert.deepEqual(intakeFields.values, { customer: 'Acme Cleaners' });
+
+  const stainFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(calls[2].input.notes)[1].trim());
+  assert.deepEqual(stainFields.values, { method: 'enzymatic' });
+
+  // wash step got no typed value (none collected for it) — present but empty,
+  // same "never silently drop a key" contract as the plain-create path.
+  const washFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(calls[3].input.notes)[1].trim());
+  assert.deepEqual(washFields.values, {});
+
+  // outputs (evidence contract) still ride every child, inherited verbatim.
+  const intakeOutputs = JSON.parse(/```task-outputs\n([\s\S]*?)```/.exec(calls[1].input.notes)[1].trim());
+  assert.deepEqual(intakeOutputs.fields, [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }]);
 });

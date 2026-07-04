@@ -127,6 +127,7 @@ export const VERB_CATALOG = [
   { id: 'projects', label: 'Home', category: 'Tools', inMenu: false, help: 'open Home — your tasks ranked by what needs you, projects as folders' },
   { id: 'new-home', label: 'New Home', category: 'Tools', inMenu: false, help: 'agent work monitor — approvals, roster, outcomes' },
   { id: 'new-task', label: 'New task', category: 'Tools', inMenu: false, keybinding: 'n', help: 'create a task scoped to the project in view on Home (or unscoped)' },
+  { id: 'new-from-template', label: 'New from template', category: 'Tools', inMenu: false, help: 'pick a prior fielded task/chain and fill just its input values — project, notes, output schema, agent inherit silently' },
   { id: 'new-project', label: 'New project', category: 'Tools', inMenu: false, help: 'create a project / sub-project via TypeBuild' },
   { id: 'settings', label: 'Settings', category: 'Tools', help: 'view & rebind keys · per-launcher settings · notifications' },
   { id: 'secrets', label: 'Secrets', category: 'Tools', inMenu: false, help: 'manage saved credentials the agent fills into forms' },

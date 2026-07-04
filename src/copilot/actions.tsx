@@ -23,8 +23,12 @@ import { useAgentContext } from '@copilotkit/react-core/v2';
 import { z } from 'zod';
 import { fm } from '../bridge';
 import { compileTaskQuery, TASK_QUERY_FIELDS } from '../components/newhome/taskQuery';
+import { useTasks } from '../tasks';
+import { parseTaskTemplateBlock } from '../components/newhome/taskSchema.mjs';
 import { useNewHomeContext } from './newHomeContext';
 import { confirmedAction, immediateAction } from './actionKit';
+
+const TYPEBUILD_SOURCE = 'typebuild';
 
 const FILTER_EVENT = 'fm:newhome:filter';
 const OPEN_TASK_EVENT = 'fm:newhome:openTask';
@@ -159,6 +163,91 @@ export function CopilotActions() {
         notes: notes?.trim() || undefined,
         projectId: resolvedProjectId || undefined,
       });
+    },
+  });
+
+  // task-257bb4870c6c — COPILOT PARITY for "New from Template": an utterance
+  // like "new headline check for cnn.com" should match a prior FIELDED task
+  // (or chained-task parent) by title and open the SAME "New from Template"
+  // composer flow (fm:openTask, initialKind:'template') pre-selected onto
+  // that template, rather than reinventing task creation here. Mirrors the
+  // composer's OWN templateCandidates derivation (TaskComposer.tsx) exactly:
+  // a chain is any top-level TypeBuild task carrying a ```task-template v2
+  // block; a single fielded task is any top-level task exposing dataKeys or
+  // an outputSchema. Fuzzy match = case-insensitive substring on title,
+  // same resolution style as resolveProjectRef above. Opens the composer
+  // for human review/fill (never instantiates headlessly) — same design
+  // bias create_task documents at the top of this file.
+  const allTasksForTemplateMatch = useTasks({ includeDone: true }).tasks;
+  function findTaskTemplate(query: string):
+    | { ok: true; taskId: string; title: string }
+    | { ok: false; error: string } {
+    const q = (query ?? '').trim().toLowerCase();
+    if (!q) return { ok: false, error: 'Failed: a template name/title is required.' };
+    const candidates: { taskId: string; title: string }[] = [];
+    for (const t of allTasksForTemplateMatch) {
+      if (t.source !== TYPEBUILD_SOURCE || t.parentTaskId) continue;
+      const isChain = !!parseTaskTemplateBlock(t.notes ?? null)?.defs;
+      const isFielded = (t.dataKeys?.length ?? 0) > 0 || (t.outputSchema?.length ?? 0) > 0;
+      if (isChain || isFielded) candidates.push({ taskId: t.id, title: t.title });
+    }
+    const subs = candidates.filter((c) => c.title.toLowerCase().includes(q));
+    const match =
+      candidates.find((c) => c.title.toLowerCase() === q) ??
+      (subs.length === 1 ? subs[0] : null);
+    if (!match) {
+      if (subs.length > 1) {
+        return {
+          ok: false,
+          error: `"${query}" matches multiple templates — ${subs.map((c) => c.title).join(', ')}. Be more specific.`,
+        };
+      }
+      return {
+        ok: false,
+        error: `Failed: no template matches "${query}". Templates are prior tasks that define input/output fields — create one first (or a chained task), or ask to list what's available.`,
+      };
+    }
+    return { ok: true, taskId: match.taskId, title: match.title };
+  }
+
+  confirmedAction({
+    name: 'create_task_from_template',
+    description:
+      'Create a task FROM AN EXISTING TEMPLATE (a prior task/chain that already defines input/output fields) — e.g. "new headline check for cnn.com" matches a template titled "Get second headline" and asks only for the URL. On approval this opens the "New from Template" form pre-selected onto the matched template: project/notes/output schema/agent all inherit silently from it, so the human only fills the input values. Use this INSTEAD of create_task whenever the request plausibly refers to a repeatable/fielded task type rather than a one-off.',
+    parameters: z.object({
+      template: z.string().describe('The template task\'s title, or a fragment of it, to match against.'),
+    }),
+    title: 'Create from template?',
+    summary: ({ template }) => {
+      const found = findTaskTemplate(template ?? '');
+      return (
+        <>
+          Open "New from Template" pre-selected onto{' '}
+          <strong>{found.ok ? found.title : (template ?? '').trim() || '(unspecified)'}</strong>?
+        </>
+      );
+    },
+    confirmLabel: 'Open New from Template form',
+    rejectLabel: 'Cancel',
+    rejectedMessage: 'Template task creation cancelled.',
+    validate: ({ template }) => {
+      const found = findTaskTemplate(template ?? '');
+      return found.ok ? null : found.error;
+    },
+    perform: ({ template }) => {
+      const found = findTaskTemplate(template ?? '');
+      if (!found.ok) return found.error;
+      window.dispatchEvent(
+        new CustomEvent('fm:openTask', {
+          detail: {
+            mode: 'create',
+            defaultFolder: '',
+            initialKind: 'template',
+            templateTaskId: found.taskId,
+          },
+        }),
+      );
+      return `Opened "New from Template" pre-selected onto "${found.title}" for the human to fill in the input values.`;
     },
   });
 

@@ -84,8 +84,19 @@ export type TaskComposerRequest =
       /** Open directly as a CHAINED task (the "+ New Chained Task" entry
        *  point) — pre-picks the Task/Chained-task question so the chain
        *  builder is the next step. Same form either way; the user can still
-       *  flip back to a plain task on that question. */
-      initialKind?: 'chain';
+       *  flip back to a plain task on that question.
+       *
+       *  task-257bb4870c6c — 'template' opens the "New from Template" entry
+       *  point instead: a searchable picker over prior fielded tasks/chains,
+       *  then ONLY their input VALUE questions (title prefilled, everything
+       *  else inherited silently). See the templatePick* state below. */
+      initialKind?: 'chain' | 'template';
+      /** task-257bb4870c6c — copilot parity: pre-select a template by task id
+       *  (skips step [1] SELECT TEMPLATE straight into title/values) when the
+       *  caller already resolved which template to use (e.g. a fuzzy title
+       *  match from a copilot utterance). Ignored unless initialKind is
+       *  'template'. */
+      templateTaskId?: string;
     }
   | { mode: 'edit'; task: Task };
 
@@ -1410,6 +1421,229 @@ export function TaskComposer(props: Props) {
     if (!title.trim()) setTitle(entry.name);
   }
 
+  // ── task-257bb4870c6c — "New from Template" (first-class, separate from
+  // plain create) ───────────────────────────────────────────────────────────
+  // A "template" is any prior top-level TypeBuild task that carries field
+  // DEFINITIONS: either a CHAIN (a ```task-template v2 block — same source as
+  // priorChains above) or a single FIELDED task (server outputSchema, from
+  // task-0d63c7b0ebdb's "creation defines fields" contract). Both are
+  // reduced to the SAME shape — `defs: TaskDef[]` — so the rest of this flow
+  // (aggregateInputs, renderFieldQuestion, instantiateTemplate) doesn't care
+  // which kind was picked. `entryProjectId`/`entryOutputSchema` carry what a
+  // single-task template inherits silently (project, output schema); a chain
+  // template's project rides its own instantiateTemplate call the same way
+  // saveTemplateJob's does.
+  type TemplateEntry = {
+    taskId: string;
+    name: string;
+    defs: TaskDef[];
+    kind: 'chain' | 'single';
+    projectId?: string;
+    updatedAt: number;
+  };
+  const templateCandidates = useMemo<TemplateEntry[]>(() => {
+    if (!hasChainOption) return [];
+    const out: TemplateEntry[] = [];
+    for (const t of allTasksForChainCopy) {
+      if (t.source !== TYPEBUILD_SOURCE || t.parentTaskId) continue;
+      const parsedChain = parseTaskTemplateBlock(t.notes ?? null);
+      if (parsedChain && parsedChain.defs !== null) {
+        out.push({
+          taskId: t.id,
+          name: parsedChain.name,
+          defs: parsedChain.defs,
+          kind: 'chain',
+          projectId: t.projectId ?? undefined,
+          updatedAt: t.updated_at ?? 0,
+        });
+        continue;
+      }
+      // A single fielded task: any input keys (dataKeys) or an output schema
+      // it defined at create time (task-0d63c7b0ebdb). Reconstruct ONE
+      // synthetic TaskDef, id 'task' (mirrors taskFieldsDef), from whatever
+      // the list row exposes — inputs come from dataKeys (values are never on
+      // the list row; keys only, non-PHI), outputs from outputSchema verbatim.
+      const inputKeys = t.dataKeys ?? [];
+      const outputs = t.outputSchema ?? [];
+      if (inputKeys.length === 0 && outputs.length === 0) continue;
+      out.push({
+        taskId: t.id,
+        name: t.title,
+        defs: [
+          {
+            id: 'task',
+            name: t.title,
+            inputs: inputKeys.map((k) => ({ key: k, label: k, type: 'text' as const })),
+            outputs,
+          },
+        ],
+        kind: 'single',
+        projectId: t.projectId ?? undefined,
+        updatedAt: t.updated_at ?? 0,
+      });
+    }
+    out.sort((a, b) => b.updatedAt - a.updatedAt);
+    return out;
+  }, [allTasksForChainCopy, hasChainOption]);
+
+  const isFromTemplateMode = props.mode === 'create' && props.initialKind === 'template';
+  // Picker step: 'pick' (searchable list), 'title' (prefilled, Enter to
+  // accept), 'values' (one question per input value, grouped by step for a
+  // chain), then Ctrl+Enter creates. `templateEditDetails` is the "edit
+  // details" escape hatch — flips into the full flow (same composer, same
+  // class) with the chosen template's defs pre-loaded as chainDefs/
+  // taskInputs/taskOutputs so everything (project/notes/schema/agent/flags/
+  // priority) becomes editable instead of silently inherited.
+  type TemplatePickPhase = 'pick' | 'title' | 'values';
+  const [templatePickPhase, setTemplatePickPhase] = useState<TemplatePickPhase>('pick');
+  const [templatePickQuery, setTemplatePickQuery] = useState('');
+  const [templatePickHighlight, setTemplatePickHighlight] = useState(0);
+  const [templateEntry, setTemplateEntry] = useState<TemplateEntry | null>(null);
+  const [templateEditDetails, setTemplateEditDetails] = useState(false);
+
+  const filteredTemplateCandidates = useMemo(() => {
+    const q = templatePickQuery.trim().toLowerCase();
+    if (!q) return templateCandidates;
+    return templateCandidates.filter((c) => c.name.toLowerCase().includes(q));
+  }, [templateCandidates, templatePickQuery]);
+
+  // copilot parity / row-shortcut: a pre-selected template id (props.templateTaskId)
+  // skips straight past the picker into the title step.
+  useEffect(() => {
+    if (!isFromTemplateMode) return;
+    if (templateEntry) return;
+    const preselectId = props.mode === 'create' ? props.templateTaskId : undefined;
+    if (!preselectId) return;
+    const found = templateCandidates.find((c) => c.taskId === preselectId);
+    if (found) chooseTemplateEntry(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFromTemplateMode, templateCandidates, templateEntry]);
+
+  function chooseTemplateEntry(entry: TemplateEntry) {
+    setTemplateEntry(entry);
+    setTitle(entry.name);
+    setTemplatePickPhase('title');
+  }
+
+  // The picked template's aggregated input-VALUE questions — the only
+  // questions this flow ever asks beyond title. Grouped by step (task-def)
+  // implicitly via aggregateInputs' def-order-then-field-order, same as the
+  // plain/chain flows.
+  const templateEntryFieldEntries = useMemo(
+    () => (templateEntry ? aggregateInputs(templateEntry.defs) : []),
+    [templateEntry],
+  );
+  const [templateFillValues, setTemplateFillValues] = useState<Record<string, string>>({});
+  const [templateFillHighlight, setTemplateFillHighlight] = useState<Record<string, number>>({});
+  const [templateFillActiveIdx, setTemplateFillActiveIdx] = useState(0);
+  const templateFillActiveRef =
+    templateEntryFieldEntries[Math.min(templateFillActiveIdx, templateEntryFieldEntries.length - 1)];
+
+  function acceptTemplateTitle() {
+    if (!title.trim()) return;
+    setTemplateFillActiveIdx(0);
+    setTemplatePickPhase('values');
+  }
+
+  // "edit details" escape hatch: load the template's defs into the SAME state
+  // the full flow reads (chainDefs for a chain, taskInputs/taskOutputs for a
+  // single task) and drop into the ordinary create walk at 'template'/'fields'
+  // so every question (project/notes/output schema/agent/flags/priority)
+  // becomes editable instead of silently inherited.
+  function editTemplateDetails() {
+    if (!templateEntry) return;
+    setTemplateEditDetails(true);
+    if (templateEntry.kind === 'chain') {
+      const cloned = templateEntry.defs.map((d) => ({
+        ...d,
+        inputs: (d.inputs ?? []).map((f) => ({ ...f })),
+        outputs: (d.outputs ?? []).map((f) => ({ ...f })),
+        ...(d.neededWhen ? { neededWhen: { ...d.neededWhen } } : {}),
+      }));
+      setChainDefs(cloned.length > 0 ? cloned : [blankChainDef()]);
+      setTemplateChoice('chain');
+    } else {
+      const def = templateEntry.defs[0];
+      setTaskInputs((def?.inputs ?? []).map((f) => ({ ...f })));
+      setTaskOutputs((def?.outputs ?? []).map((f) => ({ ...f })));
+      setTemplateChoice('blank');
+    }
+    if (templateEntry.projectId) {
+      setProjectId(templateEntry.projectId);
+      setProjectTouched(true);
+    }
+  }
+  function templateFillValueFor(taskDefId: string, key: string): string {
+    return templateFillValues[fieldRef(taskDefId, key)] ?? '';
+  }
+  function setTemplateFillValue(ref: string, v: string) {
+    setTemplateFillValues((prev) => ({ ...prev, [ref]: v }));
+  }
+
+  // Ctrl+Enter (or the final field's Enter) creates: a chain template
+  // instantiates parent+children via instantiateTemplate (SAME seam
+  // saveTemplateJob uses) with the COLLECTED values (not empty, unlike a
+  // fresh create); a single-task template creates ONE task directly via
+  // createTask with outputSchema inherited verbatim and `data` populated from
+  // the collected values (normalized the same way save() does, reusing
+  // effectiveFieldKey so a value never silently drops).
+  async function saveFromTemplate(): Promise<{ ok: boolean; taskId?: string; error?: string }> {
+    if (!templateEntry) return { ok: false, error: 'Pick a template first.' };
+    if (!title.trim()) {
+      setTemplatePickPhase('title');
+      return { ok: false, error: 'Add a title.' };
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      if (templateEntry.kind === 'chain') {
+        const result = await instantiateTemplate({
+          name: title.trim(),
+          projectId: templateEntry.projectId || undefined,
+          defs: templateEntry.defs,
+          values: templateFillValues,
+          createTask: createTaskForTemplateJob,
+        });
+        (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.parentId;
+        (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
+        window.dispatchEvent(new CustomEvent('fm:taskFlash', { detail: { taskId: result.parentId } }));
+        setCreated(true);
+        setTimeout(() => exit(), 900);
+        return { ok: true, taskId: result.parentId };
+      }
+      const def = templateEntry.defs[0];
+      const data: Record<string, string> = {};
+      for (const f of def.inputs ?? []) {
+        const key = effectiveFieldKey(f);
+        if (!key) continue;
+        data[key] = templateFillValueFor(def.id, f.key);
+      }
+      const payload: TaskCreate = {
+        title: title.trim(),
+        folder: '',
+        notes: null,
+        auto_mode: false,
+        auto_agent: null,
+        auto_prompt: null,
+        ...(templateEntry.projectId ? { projectId: templateEntry.projectId } : {}),
+        ...((def.outputs ?? []).length > 0 ? { outputSchema: def.outputs } : {}),
+        ...(Object.keys(data).length > 0 ? { data } : {}),
+      };
+      const t = await createTask(payload, target);
+      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = t.id;
+      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
+      window.dispatchEvent(new CustomEvent('fm:taskFlash', { detail: { taskId: t.id } }));
+      setCreated(true);
+      setTimeout(() => exit(), 900);
+      return { ok: true, taskId: t.id };
+    } catch (e) {
+      const msg = humanizeError(e).message;
+      setError(msg);
+      setBusy(false);
+      return { ok: false, error: msg };
+    }
+  }
+
   // ── Plain-task fields (task-2fd63b922beb correction, Part A) ─────────────
   // The PLAIN task form owns its OWN optional input/output fields — a single
   // task-def with the literal id 'task'. No neededWhen here (that's chain-
@@ -2573,6 +2807,82 @@ export function TaskComposer(props: Props) {
       setTimeout(() => setEscArmed(false), 1500);
     }
 
+    // task-257bb4870c6c — "New from Template" is a SEPARATE, self-contained
+    // keyboard walk (picker → title → values → Ctrl+Enter creates) — it never
+    // touches the main QUESTIONS/active machinery above, unless the human hit
+    // "edit details" (templateEditDetails), which falls through into the
+    // ordinary flow below so the rest of this handler applies as normal.
+    if (isFromTemplateMode && !templateEditDetails) {
+      if (e.key === 'Escape') { e.preventDefault(); tryCancel(); return; }
+      if (templatePickPhase === 'pick') {
+        if (inText()) {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setTemplatePickHighlight((h) => Math.min(h + 1, Math.max(0, filteredTemplateCandidates.length - 1)));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setTemplatePickHighlight((h) => Math.max(h - 1, 0));
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const entry = filteredTemplateCandidates[templatePickHighlight];
+            if (entry) chooseTemplateEntry(entry);
+          }
+        }
+        return;
+      }
+      if (templatePickPhase === 'title') {
+        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          acceptTemplateTitle();
+        } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          void saveFromTemplate();
+        }
+        return;
+      }
+      // 'values'
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        void saveFromTemplate();
+        return;
+      }
+      if (inText()) return;
+      const activeEntry = templateFillActiveRef;
+      if (!activeEntry) return;
+      const ref = fieldRef(activeEntry.taskDef.id, activeEntry.field.key);
+      const optionType = isFieldOptionType(activeEntry.field);
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (optionType) {
+          const opts = fieldOptionList(activeEntry.field);
+          const h = templateFillHighlight[ref] ?? 0;
+          if (h >= opts.length - 1) {
+            setTemplateFillActiveIdx((i) => Math.min(i + 1, templateEntryFieldEntries.length - 1));
+          } else {
+            setTemplateFillHighlight((prev) => ({ ...prev, [ref]: h + 1 }));
+          }
+        } else {
+          setTemplateFillActiveIdx((i) => Math.min(i + 1, templateEntryFieldEntries.length - 1));
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setTemplateFillActiveIdx((i) => Math.max(i - 1, 0));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (optionType) {
+          const opts = fieldOptionList(activeEntry.field);
+          const h = templateFillHighlight[ref] ?? 0;
+          setTemplateFillValue(ref, opts[h]?.value ?? '');
+        }
+        if (templateFillActiveIdx >= templateEntryFieldEntries.length - 1) {
+          void saveFromTemplate();
+        } else {
+          setTemplateFillActiveIdx((i) => i + 1);
+        }
+      }
+      return;
+    }
+
     // task-0d63c7b0ebdb — while the success flash is offering the escape hatch
     // (a plain create that defined inputs, not yet filling), F enters the
     // values-only fill walk and Esc finishes; swallow everything else so a
@@ -3169,6 +3479,238 @@ export function TaskComposer(props: Props) {
   // edit mode's rendering (which always shows answers), but harmless there.
   function advanceTo(q: QuestionId) {
     setActiveIdx((i) => Math.max(i, QUESTIONS.indexOf(q) + 1));
+  }
+
+  // task-257bb4870c6c — "New from Template" renders as its own minimal
+  // surface: SELECT TEMPLATE → TITLE → per-step VALUES → Ctrl+Enter creates.
+  // Project/notes/output schema/agent/flags/priority are inherited SILENTLY
+  // from the picked template — never asked here — unless "edit details" was
+  // pressed (templateEditDetails), in which case we fall through to the
+  // ordinary composer render below (same component, full flow, template's
+  // defs pre-loaded as chainDefs/taskInputs/taskOutputs by editTemplateDetails).
+  if (isFromTemplateMode && !templateEditDetails) {
+    return (
+      <div
+        className={'composer-pane' + (props.embedded ? ' composer-pane--embedded' : '')}
+        data-state={state}
+      >
+        <div className="composer" role="region" aria-label="New from template" ref={sectionRef} tabIndex={-1}>
+          <header className="composer__header">
+            <div className="composer__crumb" id="composer-title">New from template</div>
+          </header>
+          <main className="composer__main">
+            {templatePickPhase === 'pick' && (
+              <div className="composer__q-active-body">
+                <div className="composer__q-prompt">Pick a template</div>
+                <input
+                  className="composer__path-input"
+                  type="text"
+                  placeholder="Search templates by title…"
+                  value={templatePickQuery}
+                  autoFocus
+                  onChange={(e) => {
+                    setTemplatePickQuery(e.target.value);
+                    setTemplatePickHighlight(0);
+                  }}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                {templateCandidates.length === 0 ? (
+                  <div className="composer__q-prompt" style={{ marginTop: 12 }}>
+                    No prior tasks define fields yet — create a task with inputs/outputs
+                    (or a chained task) first, then it shows up here.
+                  </div>
+                ) : (
+                  <ul className="composer__options" role="listbox">
+                    {filteredTemplateCandidates.map((c, i) => (
+                      <li key={c.taskId}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={i === templatePickHighlight}
+                          className={
+                            'composer__option' +
+                            (i === templatePickHighlight ? ' composer__option--active' : '')
+                          }
+                          onMouseEnter={() => setTemplatePickHighlight(i)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            chooseTemplateEntry(c);
+                          }}
+                        >
+                          <span className="composer__option-label">{c.name}</span>
+                          <span className="composer__option-hint">
+                            {c.kind === 'chain' ? `chain · ${c.defs.length} steps` : 'task'}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                    {filteredTemplateCandidates.length === 0 && (
+                      <li className="composer__q-prompt">No templates match "{templatePickQuery}".</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+            {templatePickPhase !== 'pick' && templateEntry && (
+              <>
+                <section className={sectionClasses('title')} onClick={() => setTemplatePickPhase('title')}>
+                  {templatePickPhase === 'title' ? (
+                    <div className="composer__q-active-body">
+                      <div className="composer__q-prompt">Title</div>
+                      <div className="composer__title-row">
+                        <input
+                          ref={titleRef}
+                          className="composer__title-input"
+                          type="text"
+                          value={title}
+                          autoFocus
+                          onChange={(e) => setTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                              e.preventDefault();
+                              acceptTemplateTitle();
+                            }
+                          }}
+                          spellCheck={false}
+                          autoComplete="off"
+                        />
+                        <span
+                          className={'composer__title-enter' + (title.trim() ? ' composer__title-enter--ready' : '')}
+                          aria-hidden="true"
+                        >
+                          ↵
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="composer__q-inert">
+                      <div className="composer__q-answer">{title}</div>
+                    </div>
+                  )}
+                </section>
+                {templatePickPhase === 'values' &&
+                  (templateEntryFieldEntries.length === 0 ? (
+                    <div className="composer__q-prompt">
+                      This template has no input fields — press {submitKbd} to create.
+                    </div>
+                  ) : (
+                    templateEntryFieldEntries.map(({ taskDef, field }, i) => {
+                      const ref = fieldRef(taskDef.id, field.key);
+                      const optionType = isFieldOptionType(field);
+                      const opts = optionType ? fieldOptionList(field) : [];
+                      const highlight = templateFillHighlight[ref] ?? 0;
+                      const value = templateFillValues[ref] ?? '';
+                      const isActive = i === templateFillActiveIdx;
+                      return (
+                        <section
+                          key={ref}
+                          className={
+                            'composer__q' + (isActive ? ' composer__q--active' : ' composer__q--inert')
+                          }
+                          onClick={() => setTemplateFillActiveIdx(i)}
+                        >
+                          {isActive ? (
+                            <div className="composer__q-active-body">
+                              <div className="composer__q-prompt">
+                                {templateEntry.kind === 'chain' ? `${taskDef.name} · ` : ''}
+                                {field.label || field.key}
+                              </div>
+                              {optionType ? (
+                                <ul className="composer__options" role="listbox">
+                                  {opts.map((o, oi) => (
+                                    <li key={o.value}>
+                                      <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={oi === highlight}
+                                        className={
+                                          'composer__option' +
+                                          (oi === highlight ? ' composer__option--active' : '')
+                                        }
+                                        onMouseEnter={() =>
+                                          setTemplateFillHighlight((prev) => ({ ...prev, [ref]: oi }))
+                                        }
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setTemplateFillValue(ref, o.value);
+                                          setTemplateFillActiveIdx((n) => Math.min(n + 1, templateEntryFieldEntries.length - 1));
+                                        }}
+                                      >
+                                        <kbd className="composer__option-key">{oi + 1}</kbd>
+                                        <span className="composer__option-label">{o.label}</span>
+                                      </button>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <input
+                                  className="composer__path-input"
+                                  type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                                  value={value}
+                                  autoFocus
+                                  onChange={(e) => setTemplateFillValue(ref, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                                      e.preventDefault();
+                                      if (i >= templateEntryFieldEntries.length - 1) void saveFromTemplate();
+                                      else setTemplateFillActiveIdx(i + 1);
+                                    }
+                                  }}
+                                  spellCheck={false}
+                                  autoComplete="off"
+                                />
+                              )}
+                            </div>
+                          ) : (
+                            <div className="composer__q-inert">
+                              <div className="composer__q-answer">
+                                {value || <span className="composer__q-prompt">{field.label || field.key}</span>}
+                              </div>
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })
+                  ))}
+                {templatePickPhase === 'values' && !templateEditDetails && (
+                  <button type="button" className="composer__cancel-btn" onClick={editTemplateDetails}>
+                    Edit details…
+                  </button>
+                )}
+              </>
+            )}
+          </main>
+          <footer
+            className={'composer__footer' + (templatePickPhase === 'values' ? ' composer__footer--active' : '')}
+          >
+            {created ? (
+              <div className="composer__flash" role="status">✓ Task created</div>
+            ) : (
+              <>
+                {error && <div className="composer__error" role="alert">{error}</div>}
+                <button type="button" className="composer__cancel-btn" onClick={() => exit()}>
+                  Cancel
+                  <span className="composer__btn-kbd">esc</span>
+                </button>
+                {templatePickPhase !== 'pick' && (
+                  <button
+                    ref={createBtnRef}
+                    type="button"
+                    className="composer__create-btn composer__create-btn--ready"
+                    onClick={() => void saveFromTemplate()}
+                    disabled={busy || !templateEntry}
+                  >
+                    {busy ? 'Creating…' : 'Create task'}
+                    <span className="composer__btn-kbd">{submitKbd}</span>
+                  </button>
+                )}
+              </>
+            )}
+          </footer>
+        </div>
+      </div>
+    );
   }
 
   // task-0d63c7b0ebdb — the "fill inputs now" escape hatch renders as its own
