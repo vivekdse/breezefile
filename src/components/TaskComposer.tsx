@@ -954,6 +954,17 @@ export function TaskComposer(props: Props) {
   // moved to Create/Cancel and the band has hopped onto the footer.
   const [phase, setPhase] = useState<'editing' | 'commit'>('editing');
 
+  // task-0d63c7b0ebdb — CREATE & FILL NOW escape hatch. Creation DEFINES input
+  // fields but never asks for their VALUES (values belong to the from-template
+  // flow and the drawer's Inputs editor). As a convenience, after a plain
+  // create that DEFINED >=1 input field the success flash offers "Press F to
+  // fill inputs now"; F enters a values-only walk over just those fields and
+  // writes them through the SAME data-bag path the drawer uses
+  // (fm.typebuild.taskData.patch) — never a new write path. `createdTaskId` is
+  // the just-created task the fill writes onto; `fillMode` gates the walk.
+  const [fillMode, setFillMode] = useState(false);
+  const [createdTaskId, setCreatedTaskId] = useState<string | null>(null);
+
   const [startId, setStartId] = useState<string>(
     pickStartIdFromTask(initial, todayISO()),
   );
@@ -1485,32 +1496,43 @@ export function TaskComposer(props: Props) {
   // mode never add any of these — QUESTIONS is then `baseQuestions` unchanged
   // (byte-for-byte QUESTIONS_LOCAL/QUESTIONS_TYPEBUILD).
   const QUESTIONS = useMemo<QuestionId[]>(() => {
+    // task-0d63c7b0ebdb — the escape hatch's values-only walk: after a plain
+    // create, the flow is JUST the defined inputs' value questions, keyed onto
+    // the already-created task (see saveFillValues). Creation itself never
+    // includes these.
+    if (fillMode) return templateFieldQIds;
     if (!hasChainOption) return baseQuestions;
     const pIdx = baseQuestions.indexOf('project');
     const before = baseQuestions.slice(0, pIdx + 1); // title, project
 
     // task-2fd63b922beb correction (Part B) — a "Chained task" is a THIN
-    // container: name (title) + project + the chain + its aggregated input
-    // values + a read-only outputs summary. The task-form questions
-    // (who/notes/start/when/priority/agent/status/pin) are DROPPED — the chain
-    // is not a full task.
+    // container: name (title) + project + the chain + a read-only outputs
+    // summary. The task-form questions (who/notes/start/when/priority/agent/
+    // status/pin) are DROPPED — the chain is not a full task.
+    //
+    // task-0d63c7b0ebdb — creation DEFINES step fields but never asks for their
+    // VALUES: the per-step input value questions are NOT spliced in. Values
+    // arrive later via the from-template flow or the drawer/roster inline edit.
     if (templateChoice === 'chain') {
-      return [...before, 'template', 'chain', ...templateFieldQIds, 'outputs'];
+      return [...before, 'template', 'chain', 'outputs'];
     }
 
     // task-2fd63b922beb correction (Part A) — a plain task keeps today's full
     // flow, with 'template' after project and an optional 'fields' step right
-    // after 'notes' (the task's own inputs/outputs). Defined inputs splice in
-    // one value question each; any outputs add the read-only summary step.
+    // after 'notes' (the task's own inputs/outputs). task-0d63c7b0ebdb — the
+    // 'fields' step DEFINES the input/output fields but the walk no longer
+    // splices in a value question per input; any outputs still add the
+    // read-only summary step. Values are filled later (from-template, the
+    // drawer's Inputs editor, or the "Press F to fill inputs now" escape hatch).
     const after = baseQuestions.slice(pIdx + 1);
     const withTemplate: QuestionId[] = [...before, 'template', ...after];
     const nIdx = withTemplate.indexOf('notes');
     const head = withTemplate.slice(0, nIdx + 1);
     const tail = withTemplate.slice(nIdx + 1);
-    const extra: QuestionId[] = ['fields', ...templateFieldQIds];
+    const extra: QuestionId[] = ['fields'];
     if (definedOutputsCount > 0) extra.push('outputs');
     return [...head, ...extra, ...tail];
-  }, [baseQuestions, hasChainOption, templateChoice, templateFieldQIds, definedOutputsCount]);
+  }, [fillMode, baseQuestions, hasChainOption, templateChoice, templateFieldQIds, definedOutputsCount]);
 
   const [activeIdx, setActiveIdx] = useState(0);
   // Clamp the active index when the question list shrinks/grows on a target
@@ -1608,6 +1630,13 @@ export function TaskComposer(props: Props) {
   }
   function goNext() {
     if (activeIdx < QUESTIONS.length - 1) setActiveIdx(activeIdx + 1);
+  }
+  // task-0d63c7b0ebdb — advancing off the LAST question hops to the commit
+  // footer. Used by the field-value questions (only ever present in the escape
+  // hatch's fill walk, where the last field's ↵/↓ should reach "Save inputs").
+  function fieldAdvance() {
+    if (activeIdx >= QUESTIONS.length - 1) enterCommitPhase();
+    else goNext();
   }
 
   // task-2fd63b922beb (R2) — the chain builder only advances once at least
@@ -1796,7 +1825,7 @@ export function TaskComposer(props: Props) {
     if (!o) return;
     setTemplateValue(ref, o.value);
     setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }));
-    goNext();
+    fieldAdvance();
   }
 
   function enterCommitPhase() {
@@ -1808,6 +1837,16 @@ export function TaskComposer(props: Props) {
     // focus to its section.
     setPhase('editing');
     setActiveIdx(QUESTIONS.length - 1);
+  }
+  // task-0d63c7b0ebdb — enter the escape hatch's values-only walk for the
+  // just-created plain task. QUESTIONS becomes the defined inputs' value
+  // questions; saveFillValues writes them via the drawer's data-bag path.
+  function enterFillMode() {
+    setFillMode(true);
+    setCreated(false);
+    setError(null);
+    setPhase('editing');
+    setActiveIdx(0);
   }
 
   // ↓ flow: title → folder → who → notes → start → when → status → pin → commit
@@ -1923,10 +1962,10 @@ export function TaskComposer(props: Props) {
         const ref = fieldRef(entry.taskDef.id, entry.field.key);
         const opts = fieldOptionList(entry.field);
         const h = templateFieldHighlight[ref] ?? 0;
-        if (h >= opts.length - 1) goNext();
+        if (h >= opts.length - 1) fieldAdvance();
         else setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: h + 1 }));
       } else {
-        goNext();
+        fieldAdvance();
       }
       return;
     }
@@ -2178,21 +2217,28 @@ export function TaskComposer(props: Props) {
       let outputSchemaForSave: TaskDefField[] | undefined;
       let dataForSave: Record<string, string> | undefined;
       if (hasChainOption && templateChoice === 'blank') {
-        const inputVals: Record<string, string> = {};
+        // task-0d63c7b0ebdb — creation DEFINES the input fields but never asks
+        // for their VALUES here. So we write each defined input KEY with an
+        // EMPTY-STRING value: that carries the definition names onto the task's
+        // `data`/`data_keys` (non-PHI keys, empty values) so the from-template
+        // flow, the drawer's Inputs editor, and the "Press F to fill inputs
+        // now" escape hatch (saveFillValues) have keys to populate later. Keys
+        // are author-specified in the field editor (the FieldRowEditor `key`
+        // input) — no label→key derivation step exists in this composer, so we
+        // transport them verbatim, dropping only unnamed rows.
+        const inputKeys: Record<string, string> = {};
         for (const f of taskInputs) {
-          // task-f9a723379aa8 — key the VALUE by the same normalized key the
-          // field is defined under (effectiveFieldKey: the typed key,
-          // normalized, falling back to a normalized label). The pre-save
-          // validation above already blocks any filled-but-unkeyable field,
-          // so an empty effectiveFieldKey here only happens for an EMPTY
-          // field (no key, no label, no value) — safe to skip.
+          // task-f9a723379aa8 + task-0d63c7b0ebdb merged: normalize the key
+          // exactly the way the values fix does (effectiveFieldKey: typed key
+          // normalized, label fallback — so 'News site url' becomes a usable
+          // key instead of silently dropping) — but write an EMPTY value:
+          // creation DEFINES fields, never fills them.
           const key = effectiveFieldKey(f);
           if (!key) continue;
-          const v = templateValues[fieldRef('task', f.key)] ?? '';
-          if (v !== '') inputVals[key] = v;
+          inputKeys[key] = '';
         }
-        if (Object.keys(inputVals).length > 0) {
-          dataForSave = inputVals;
+        if (Object.keys(inputKeys).length > 0) {
+          dataForSave = inputKeys;
         }
         if (taskOutputs.length > 0) {
           // Output field keys ride output_schema verbatim (they're NON-PHI
@@ -2361,6 +2407,15 @@ export function TaskComposer(props: Props) {
         new CustomEvent('fm:taskFlash', { detail: { taskId: savedId } }),
       );
       setCreated(true);
+      // task-0d63c7b0ebdb — a plain create that DEFINED input fields (but,
+      // by design, collected no values) can offer the "fill inputs now" escape
+      // hatch: hold the success flash open (no auto-exit) so the human can
+      // press F to fill the values onto this task now, or Esc to finish.
+      const canFillNow =
+        props.mode === 'create' &&
+        hasChainOption &&
+        templateChoice === 'blank' &&
+        taskInputs.some((f) => f.key.trim().length > 0);
       if (props.embedded) {
         // task-b30e546672db — stay mounted inside the dialog: flash "saved",
         // let the host refresh, then clear the flash so the form is editable
@@ -2368,6 +2423,9 @@ export function TaskComposer(props: Props) {
         props.onSaved?.();
         setBusy(false);
         setTimeout(() => setCreated(false), 1400);
+      } else if (canFillNow) {
+        setCreatedTaskId(savedId);
+        setBusy(false);
       } else {
         setTimeout(() => exit(), 900);
       }
@@ -2430,7 +2488,11 @@ export function TaskComposer(props: Props) {
         name: title.trim(),
         projectId: projectId || undefined,
         defs: chainDefs,
-        values: templateValues,
+        // task-0d63c7b0ebdb — creation DEFINES the chain's step fields but never
+        // collects their VALUES, so instantiate with an EMPTY values map. Each
+        // step's inputs are filled later via the from-template flow or the
+        // drawer/roster inline edit.
+        values: {},
         createTask: createTaskForTemplateJob,
       });
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.parentId;
@@ -2455,6 +2517,46 @@ export function TaskComposer(props: Props) {
     }
   }
 
+  // task-0d63c7b0ebdb — save path for the "fill inputs now" escape hatch: write
+  // the values the human just entered in the fill walk onto the ALREADY-CREATED
+  // plain task, through the EXACT data-bag path the drawer's Inputs editor uses
+  // (fm.typebuild.taskData.patch → resolve-merge-replace in main) — not a new
+  // write path. The defined input KEYS were seeded (empty) at create time, so
+  // we upsert every defined key with its current value ('' left as-is) and pass
+  // them all as the known sibling keys so the merge preserves the full bag. PHI:
+  // the values ride the encrypted patch, never logged.
+  async function saveFillValues(): Promise<{ ok: boolean; taskId?: string; error?: string }> {
+    if (busy) return { ok: false, error: 'Already saving.' };
+    if (!createdTaskId) return { ok: false, error: 'No task to fill.' };
+    setBusy(true);
+    setError(null);
+    try {
+      const upsert: Record<string, string> = {};
+      const keys: string[] = [];
+      for (const f of taskInputs) {
+        const key = f.key.trim();
+        if (!key) continue;
+        keys.push(key);
+        upsert[key] = templateValues[fieldRef('task', key)] ?? '';
+      }
+      const res = await fm.typebuild.taskData.patch(createdTaskId, upsert, [], keys);
+      if (!res.ok) {
+        const msg = res.error || 'Could not save the inputs.';
+        setError(msg);
+        setBusy(false);
+        return { ok: false, error: msg };
+      }
+      setCreated(true);
+      setTimeout(() => exit(), 900);
+      return { ok: true, taskId: createdTaskId };
+    } catch (e) {
+      const msg = humanizeError(e).message;
+      setError(msg);
+      setBusy(false);
+      return { ok: false, error: msg };
+    }
+  }
+
   // Stable keydown listener that delegates to a ref-stored handler so
   // we never run a stale closure from before the latest state change.
   const handlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -2471,10 +2573,24 @@ export function TaskComposer(props: Props) {
       setTimeout(() => setEscArmed(false), 1500);
     }
 
+    // task-0d63c7b0ebdb — while the success flash is offering the escape hatch
+    // (a plain create that defined inputs, not yet filling), F enters the
+    // values-only fill walk and Esc finishes; swallow everything else so a
+    // stray key doesn't fall through into the (now stale) question flow.
+    if (created && createdTaskId && !fillMode) {
+      if (e.key === 'f' || e.key === 'F') { e.preventDefault(); enterFillMode(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); exit(); return; }
+      return;
+    }
+
+    // task-0d63c7b0ebdb — in the fill walk the accelerator/commit save the
+    // input VALUES onto the created task (saveFillValues), not create a task.
+    const submitNow = () => void (fillMode ? saveFillValues() : save());
+
     if (e.key === 'Escape') { e.preventDefault(); tryCancel(); return; }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      void save();
+      submitNow();
       return;
     }
 
@@ -2490,12 +2606,12 @@ export function TaskComposer(props: Props) {
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        void save();
+        submitNow();
         return;
       }
       if (e.key === 'c' || e.key === 'C') {
         e.preventDefault();
-        void save();
+        submitNow();
         return;
       }
       if (e.key === 'e' || e.key === 'E') {
@@ -2969,6 +3085,80 @@ export function TaskComposer(props: Props) {
     );
   }
 
+  // task-0d63c7b0ebdb — one input field's VALUE question. Rendered only in the
+  // escape hatch's fill walk (creation never asks these). text/number/date are
+  // free entry; select/bool are option questions (digits/↵). Grouped/labeled by
+  // owning def ("Task · Customer") via FieldLabel/promptFor.
+  function renderFieldQuestion(taskDef: TaskDef, field: TaskDefField) {
+    const ref = fieldRef(taskDef.id, field.key);
+    const qid = fieldQId(taskDef.id, field.key);
+    const optionType = isFieldOptionType(field);
+    const opts = optionType ? fieldOptionList(field) : [];
+    const highlight = templateFieldHighlight[ref] ?? 0;
+    const value = templateValues[ref] ?? '';
+    return (
+      <section
+        key={qid}
+        ref={sectionRefFor(qid)}
+        className={sectionClasses(qid)}
+        onClick={() => setActiveIdx(QUESTIONS.indexOf(qid))}
+      >
+        {isActiveSection(qid) ? (
+          <div className="composer__q-active-body">
+            <FieldLabel id={qid} />
+            <div className="composer__q-prompt">{promptFor(qid)}</div>
+            {optionType ? (
+              <ul className="composer__options" role="listbox">
+                {opts.map((o, i) => (
+                  <li key={o.value}>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={i === highlight}
+                      className={
+                        'composer__option' +
+                        (i === highlight ? ' composer__option--active' : '')
+                      }
+                      onMouseEnter={() =>
+                        setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }))
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        chooseFieldOption(ref, opts, i);
+                      }}
+                    >
+                      <kbd className="composer__option-key">{i + 1}</kbd>
+                      <span className="composer__option-label">{o.label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <input
+                ref={setFieldInputRef(ref)}
+                className="composer__path-input"
+                type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                value={value}
+                onChange={(e) => setTemplateValue(ref, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                    fieldAdvance();
+                  }
+                }}
+                spellCheck={false}
+                autoComplete="off"
+              />
+            )}
+          </div>
+        ) : (
+          renderInert(qid)
+        )}
+      </section>
+    );
+  }
+
   // task-24ea35660cd0 — in CREATE mode, renderInert only shows a question's
   // ANSWER once activeIdx has stepped past it (see isPast above); a question
   // not yet reached always shows its generic prompt, no matter what the
@@ -2979,6 +3169,84 @@ export function TaskComposer(props: Props) {
   // edit mode's rendering (which always shows answers), but harmless there.
   function advanceTo(q: QuestionId) {
     setActiveIdx((i) => Math.max(i, QUESTIONS.indexOf(q) + 1));
+  }
+
+  // task-0d63c7b0ebdb — the "fill inputs now" escape hatch renders as its own
+  // focused surface (not the full create wizard): a values-only walk over the
+  // just-created task's defined inputs, reusing the SAME field-question render,
+  // keyboard flow, and commit footer. Saving writes the values via the drawer's
+  // data-bag path (saveFillValues). The window keydown handler + [active] focus
+  // effect run regardless of which JSX we return, so navigation just works.
+  if (fillMode) {
+    return (
+      <div
+        className={'composer-pane' + (props.embedded ? ' composer-pane--embedded' : '')}
+        data-state={state}
+      >
+        <div
+          className="composer"
+          role="region"
+          aria-label="Fill inputs"
+          ref={sectionRef}
+          tabIndex={-1}
+        >
+          <header className="composer__header">
+            <div className="composer__crumb" id="composer-title">Fill inputs</div>
+          </header>
+          <main className="composer__main">
+            <div className="composer__fill-intro">
+              Enter the values for the inputs you just defined, or press{' '}
+              <kbd>{submitKbd}</kbd> to save at any time.
+            </div>
+            {templateFieldEntries.map(({ taskDef, field }) =>
+              renderFieldQuestion(taskDef, field),
+            )}
+          </main>
+          <footer
+            className={
+              'composer__footer' +
+              (phase === 'commit' && !created ? ' composer__footer--active' : '')
+            }
+          >
+            {created ? (
+              <div className="composer__flash" role="status">✓ Inputs saved</div>
+            ) : (
+              <>
+                {error && (
+                  <div className="composer__error" role="alert">{error}</div>
+                )}
+                <button
+                  type="button"
+                  className="composer__cancel-btn"
+                  onClick={() => exit()}
+                  title="Finish without filling"
+                >
+                  Skip
+                  <span className="composer__btn-kbd">
+                    {phase === 'commit' ? 'E' : 'esc'}
+                  </span>
+                </button>
+                <button
+                  ref={createBtnRef}
+                  type="button"
+                  className={
+                    'composer__create-btn' +
+                    (phase === 'commit' ? ' composer__create-btn--ready' : '')
+                  }
+                  onClick={() => void saveFillValues()}
+                  disabled={busy}
+                >
+                  {busy ? 'Saving…' : 'Save inputs'}
+                  <span className="composer__btn-kbd">
+                    {phase === 'commit' ? 'C' : submitKbd}
+                  </span>
+                </button>
+              </>
+            )}
+          </footer>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -3796,81 +4064,11 @@ export function TaskComposer(props: Props) {
             </section>
           )}
 
-          {/* Aggregated field-VALUE questions — task-2fd63b922beb. One question
-              per input field of whichever defs drive the flow (the chain's, or
-              the plain task's single def), grouped/labeled by owning def
-              ("Intake · Customer" / "Task · Customer"). text/number/date are
-              free entry; select/bool are option questions. Empty when no inputs
-              are defined. */}
-          {hasChainOption && templateFieldEntries.map(({ taskDef, field }) => {
-            const ref = fieldRef(taskDef.id, field.key);
-            const qid = fieldQId(taskDef.id, field.key);
-            const optionType = isFieldOptionType(field);
-            const opts = optionType ? fieldOptionList(field) : [];
-            const highlight = templateFieldHighlight[ref] ?? 0;
-            const value = templateValues[ref] ?? '';
-            return (
-              <section
-                key={qid}
-                ref={sectionRefFor(qid)}
-                className={sectionClasses(qid)}
-                onClick={() => setActiveIdx(QUESTIONS.indexOf(qid))}
-              >
-                {isActiveSection(qid) ? (
-                  <div className="composer__q-active-body">
-                    <FieldLabel id={qid} />
-                    <div className="composer__q-prompt">{promptFor(qid)}</div>
-                    {optionType ? (
-                      <ul className="composer__options" role="listbox">
-                        {opts.map((o, i) => (
-                          <li key={o.value}>
-                            <button
-                              type="button"
-                              role="option"
-                              aria-selected={i === highlight}
-                              className={
-                                'composer__option' +
-                                (i === highlight ? ' composer__option--active' : '')
-                              }
-                              onMouseEnter={() =>
-                                setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }))
-                              }
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                chooseFieldOption(ref, opts, i);
-                              }}
-                            >
-                              <kbd className="composer__option-key">{i + 1}</kbd>
-                              <span className="composer__option-label">{o.label}</span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <input
-                        ref={setFieldInputRef(ref)}
-                        className="composer__path-input"
-                        type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-                        value={value}
-                        onChange={(e) => setTemplateValue(ref, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-                            e.preventDefault();
-                            (e.target as HTMLInputElement).blur();
-                            goNext();
-                          }
-                        }}
-                        spellCheck={false}
-                        autoComplete="off"
-                      />
-                    )}
-                  </div>
-                ) : (
-                  renderInert(qid)
-                )}
-              </section>
-            );
-          })}
+          {/* task-0d63c7b0ebdb — input VALUE questions are NOT part of the
+              creation walk. Creation DEFINES fields (the 'fields' step above);
+              values are collected later by the from-template flow, the drawer's
+              Inputs editor, or the "Press F to fill inputs now" escape hatch
+              (the fill overlay, which reuses renderFieldQuestion). */}
 
           {/* Outputs summary — task-2fd63b922beb. Read-only: per def, the output
               fields the agent will produce, `required` marked as evidence. Shows
@@ -4301,6 +4499,21 @@ export function TaskComposer(props: Props) {
           {created ? (
             <div className="composer__flash" role="status">
               ✓ Task {props.mode === 'edit' ? 'saved' : 'created'}
+              {/* task-0d63c7b0ebdb — offer to fill the just-defined inputs' values
+                  now (writes via the drawer's data-bag path); Esc finishes. */}
+              {createdTaskId && !fillMode && (
+                <span className="composer__flash-hint">
+                  {' — '}
+                  <button
+                    type="button"
+                    className="composer__flash-fill"
+                    onClick={() => enterFillMode()}
+                  >
+                    Press <kbd>F</kbd> to fill inputs now
+                  </button>
+                  <span className="composer__flash-dim"> · Esc to finish</span>
+                </span>
+              )}
             </div>
           ) : (
             <>

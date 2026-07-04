@@ -237,8 +237,30 @@ chain has two paths, and there is no third:
    "reuse a chain" works now: there is no saved template registry to browse,
    only past chained tasks.
 
-New-job form = input questions grouped by owning task-def; outputs shown
-read-only ("the agent will produce: …, required") — same UX invariant as R0.
+New-job form = the chain-definition builder (steps, their input/output field
+DEFINITIONS, optional `neededWhen`); outputs shown read-only ("the agent will
+produce: …, required").
+
+**Creation defines fields; it does NOT ask for their VALUES**
+(task-0d63c7b0ebdb). The composer is where a task/chain's input FIELDS are
+*defined* (keys/labels/types — non-PHI). It never walks the human through
+value questions at create time. Values are supplied later, by exactly three
+surfaces:
+
+1. the **from-template flow** (instantiating a saved/copied chain with values),
+2. the **drawer's Inputs editor** (`TaskDataInputs`, the per-key data-bag
+   `fm.typebuild.taskData.patch` path) / the roster's inline input cells, and
+3. the composer's **"Create & fill now" escape hatch** — a one-keystroke
+   convenience offered on the success flash of a plain create that defined
+   inputs ("Press F to fill inputs now"). F opens a values-only walk over just
+   those fields and writes them onto the already-created task through the SAME
+   data-bag path the drawer uses. It is *not* a fourth write path and it is not
+   part of the creation walk — it operates on a task that already exists.
+
+Transport of the DEFINITIONS at create time: a plain task writes each defined
+input KEY into its `data` map with an **empty-string value**, so the task's
+`data_keys` carries the definition names for (1)–(3) to populate. A chained job
+instantiates with an **empty values map** — each step's inputs are filled later.
 
 The parallel workstream reworking `TaskComposer.tsx` properly (chain-def
 UI, copy-from-existing picker) lands right after this doc's R1; R1 itself
@@ -290,8 +312,11 @@ unmet requirement reads "awaiting agent — owes N required output(s)".
 
 ## UX invariants (from the approved prototype, unchanged by the correction)
 
-- New-job form = **TaskComposer extended**: input questions grouped by owning
-  task-def; outputs shown read-only ("the agent will produce: …, required").
+- New-job form = **TaskComposer extended**: the chain/field DEFINITION builder,
+  grouped by owning task-def; outputs shown read-only ("the agent will produce:
+  …, required"). Creation defines fields only — input VALUES are filled later
+  (from-template flow, the drawer's Inputs editor, or the composer's "Create &
+  fill now" escape hatch), never during the creation walk (task-0d63c7b0ebdb).
 - Roster: grouped headers per task-def; **inputs editable inline, outputs
   read-only**; conditional-skip cells render hatched `n/a` (distinct from
   empty/pending); **clicking a cell opens that child task**, clicking the

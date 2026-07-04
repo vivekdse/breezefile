@@ -178,6 +178,41 @@ test('instantiateTemplate splits fieldRef-keyed values per task-def and re-keys 
   assert.deepEqual(washFields.values, {}); // no matching values for wash
 });
 
+// task-0d63c7b0ebdb — creation DEFINES step fields but never collects their
+// VALUES, so the composer now instantiates a chain with an EMPTY values map.
+// Every child must still carry its (empty) task-fields block + its full
+// task-outputs definitions, so later fills (roster/drawer/from-template) have
+// keys to populate.
+test('instantiateTemplate with an empty values map gives every child an empty task-fields values block but keeps its outputs', async () => {
+  const calls = [];
+  const createTask = stubCreateTask(calls);
+
+  await instantiateTemplate({
+    name: 'Order',
+    defs: makeDefs(),
+    values: {}, // creation defines fields, collects no values
+    createTask,
+  });
+
+  // children are calls[1..3]; each carries an empty values block
+  for (const call of calls.slice(1)) {
+    const fields = JSON.parse(
+      /```task-fields\n([\s\S]*?)```/.exec(call.input.notes)[1].trim(),
+    );
+    assert.deepEqual(fields.values, {}, `${call.input.title} has no seeded values`);
+  }
+
+  // intake still declares its OUTPUT field definitions (evidence contract).
+  const intakeOutputs = JSON.parse(
+    /```task-outputs\n([\s\S]*?)```/.exec(calls[1].input.notes)[1].trim(),
+  );
+  assert.equal(intakeOutputs.taskDefId, 'intake');
+  assert.deepEqual(
+    intakeOutputs.fields,
+    [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }],
+  );
+});
+
 // ── no projectId ────────────────────────────────────────────────────────────
 
 test('instantiateTemplate omits projectId entirely when none is given', async () => {

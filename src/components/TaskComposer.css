@@ -466,6 +466,38 @@
   to   { opacity: 1; transform: none; }
 }
 
+/* task-0d63c7b0ebdb — "fill inputs now" escape hatch affordances. */
+.composer__flash-hint {
+  font-weight: 400;
+}
+.composer__flash-fill {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.composer__flash-fill kbd {
+  font: inherit;
+  font-weight: 600;
+}
+.composer__flash-dim {
+  color: var(--muted);
+}
+.composer__fill-intro {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 4px 2px 12px;
+}
+.composer__fill-intro kbd {
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--fg, inherit);
+}
+
 .composer__cancel-btn,
 .composer__create-btn {
   display: inline-flex;
