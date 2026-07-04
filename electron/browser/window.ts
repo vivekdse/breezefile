@@ -64,6 +64,11 @@ let pendingUrl = splashDataUrl(splashTheme);
 // down TOO (task-c4064f8a4994), routing through the existing onSessionExit /
 // release / keep-alive flow. null for the no-agent open-browser verb.
 let operatorPtyId: number | null = null;
+// task-6fc9e503623e — a per-current-window box holding the pty THAT window's
+// close handler is allowed to kill. Distinct from `operatorPtyId` (which the
+// NEXT launch reassigns before the OLD window closes); see the close-handler
+// comment in openBrowserWindow. Re-pointed on window reuse.
+let ownedPtyRef: { current: number | null } = { current: null };
 
 /** The live operator/browser window, or null if none is open. */
 export function getBrowserWindow(): BrowserWindow | null {
@@ -140,6 +145,10 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
     // the SAME view id so the browser pane stays untouched; only the Claude
     // terminal re-attaches.
     if (ptyId != null && ptyId !== prevPtyId) {
+      // task-6fc9e503623e — re-point the REUSED window's owned-pty box to the
+      // new session so its close handler kills the current pty, not the prior
+      // one (and never the successor).
+      ownedPtyRef.current = ptyId;
       loadOperatorChrome(existing, ptyId, operatorViewId);
     }
     return;
@@ -162,6 +171,19 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
     },
   });
   browserWin = win;
+  // task-6fc9e503623e — the pty THIS window currently hosts, captured per
+  // window (a closure ref), NOT read from the mutable module-level
+  // `operatorPtyId`. ROOT-CAUSE FIX for the auto-continue instant-exit race:
+  // the close handler below used to kill `operatorPtyId`, which by the time an
+  // OLD operator window finally fired its 'close' had ALREADY been reassigned
+  // (openBrowserWindow line ~130) to the NEXT step's freshly-spawned pty — so
+  // closing the just-finished window killed the NEW session milliseconds after
+  // it spawned (pty id returned, no claude process survived). Scoping the kill
+  // to the pty this window actually owns means a closing window can never take
+  // down its successor's session. `updateOperatorOwnedPty` re-points this on
+  // reuse.
+  ownedPtyRef = { current: ptyId ?? null };
+  const myOwned = ownedPtyRef;
   // ONE elegant close (task-c4064f8a4994): whichever way the window goes away —
   // the in-chrome CLOSE button (operator:close → win.close()) or the OS window
   // chrome — tear the agent PTY down TOO so both halves end as one action.
@@ -169,9 +191,10 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
   // onSessionExit (stopKeepAlive + the "release this task?" prompt). Idempotent:
   // if the renderer already killed the PTY first, killManagedPty is a no-op.
   win.on('close', () => {
-    if (operatorPtyId != null) {
+    const owned = myOwned.current;
+    if (owned != null) {
       try {
-        killManagedPty(operatorPtyId);
+        killManagedPty(owned);
       } catch {
         /* already gone */
       }

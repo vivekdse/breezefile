@@ -45,6 +45,10 @@ import {
 import { getAuthState, getIdToken } from '../typebuild/auth';
 import { mintMcpToken } from '../typebuild/mcp-token';
 import { clearSession, registerSession } from '../typebuild/sessions';
+// task-6fc9e503623e — the pure, unit-tested liveness classifier (shared .mjs).
+// Keeping the runtime on the SAME helper the tests assert means the exit-code
+// tagged error + recorded note can never drift from the tested contract.
+import { classifyLiveness } from '../../src/components/tasks/startOutcome.mjs';
 import {
   browserCliAllowRules,
   browserPlaybookMarkdown,
@@ -2568,6 +2572,11 @@ export class TypeBuildTaskSource implements TaskSource {
       cwd: runCwd,
       // No local run row: FK to tasks(id) would fail for a remote id.
       recordRun: false,
+      // task-6fc9e503623e — LIVENESS GATE. Don't return "started" until the
+      // claude child has proven it stays up (survives ~5s or prints first
+      // output). An instantly-dying auto-continue session is caught below and
+      // turned into a loud, recorded failure instead of a phantom running row.
+      awaitLiveness: { minAliveMs: 5000 },
       // PHI: generic, content-free tab label.
       label: `TypeBuild task ${shortId(id)}`,
       source: this.id,
@@ -2629,6 +2638,43 @@ export class TypeBuildTaskSource implements TaskSource {
       // "start failed". IPC strips custom Error props, so it rides in the
       // message with a stable, machine-parsable prefix (mirrors mint-token.ts).
       throw new Error('[typebuild-launch:no-window] Start needs an open Breeze window');
+    }
+
+    // task-6fc9e503623e — LIVENESS. The pty spawned, but did the claude child
+    // STAY alive? An immediate exit (bad arg, missing token, invalid cwd) is
+    // the "got a pty id but no process" bug. When the verdict is not-alive,
+    // RECORD the exit code + output tail to the task's activity history (so the
+    // failure is self-diagnosing — nothing recorded this before), then throw a
+    // tagged error carrying the exit code so the renderer surfaces it on the
+    // row. The tail is token-free (claude is spawned with no PHI in argv/output
+    // at this stage) but we still keep it terse and never log the MCP token.
+    if (res.liveness) {
+      const verdict = classifyLiveness({
+        alive: res.liveness.alive,
+        exitCode: res.liveness.exitCode,
+        signal: res.liveness.signal,
+        // Cap the tail we carry into the recorded note.
+        tail: res.liveness.tail ? res.liveness.tail.slice(-800) : '',
+      });
+      if (!verdict.alive) {
+        // Kill any lingering pty (defensive; it already exited to get here) and
+        // clear its expiry registration.
+        clearSession(res.ptyId);
+        // Persist WHY it died so the next failure is diagnosable. Best-effort:
+        // never let a note-post failure mask the launch failure.
+        try {
+          await this.recordLaunchFailure(id, verdict.note);
+        } catch {
+          /* activity-history record is best-effort */
+        }
+        console.warn(
+          `[typebuild] task ${id}: claude child exited immediately ` +
+            `(exit ${verdict.exitCode ?? 'null'})`,
+        );
+        // Tagged error carries the exit code so the renderer surfaces it on the
+        // row (startOutcome.launchErrorReason pulls the "(exit N)" clause out).
+        throw new Error(verdict.taggedError);
+      }
     }
     ptyId = res.ptyId;
 
@@ -2745,6 +2791,23 @@ export class TypeBuildTaskSource implements TaskSource {
       // Resolve failed (network / not visible / parse) — fall back silently.
       // PHI-free: nothing about the task or project is logged.
       return {};
+    }
+  }
+
+  // task-6fc9e503623e — persist WHY an auto-start session died into the task's
+  // activity history, so an early-exit failure is self-diagnosing instead of a
+  // silent held-claim (the reason this class of bug took several generations).
+  // Uses the claim-gated /notes channel (we still hold the claim at call time)
+  // and is best-effort: a failure to record must never mask the launch failure.
+  // NON-PHI: the note carries only the exit code + a terse, token-free output
+  // tail (the MCP token is never in claude's stdout/argv at this stage).
+  private async recordLaunchFailure(id: string, note: string): Promise<void> {
+    // Guard against a server that PHI-rejects an unexpected-shape note (422):
+    // fall back to the shorter code-only line so we still record SOMETHING.
+    const res = await this.addTaskNote(id, note).catch(() => null);
+    if (res && res.ok === false && res.reason === 'phi_rejected') {
+      const codeOnly = note.split('\n')[0] ?? 'Auto-start session exited immediately';
+      await this.addTaskNote(id, codeOnly).catch(() => null);
     }
   }
 

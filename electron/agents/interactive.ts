@@ -21,7 +21,8 @@ import { defaultAgentId } from './registry';
 import { flagsToArgs } from './flags';
 import { openBrowserWindow, markSessionEnded } from '../browser/window';
 import { resolveClaudeBin } from './claude';
-import { spawnManagedPty, reservePtyId } from '../ipc';
+import { spawnManagedPty, reservePtyId, awaitPtyLiveness } from '../ipc';
+import type { PtyLivenessVerdict } from '../ipc';
 import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
 
 export type InteractiveRunOptions = {
@@ -64,6 +65,14 @@ export type InteractiveRunOptions = {
   /** Owning source id, threaded into the broadcast so the renderer can gate
    *  PHI-aware tab behavior. Omitted when not passed. */
   source?: string;
+  /** task-6fc9e503623e — when set, the launcher AWAITS a liveness verdict
+   *  before returning: the result's `liveness` says whether the claude child
+   *  stayed alive `minAliveMs` (or emitted first output) vs exited early. The
+   *  TypeBuild Start passes this so an instantly-dying auto-continue session is
+   *  caught (claim released + exit code/tail recorded) instead of reported as a
+   *  running session. Omitted → legacy fire-and-forget (returns as soon as the
+   *  pty is spawned). */
+  awaitLiveness?: { minAliveMs?: number };
 };
 
 export type InteractiveRunResult = {
@@ -73,6 +82,12 @@ export type InteractiveRunResult = {
   /** false when no window was available to host the tab (caller should fall
    *  back to a headless run). */
   launched: boolean;
+  /** task-6fc9e503623e — the liveness verdict. Present only when the caller
+   *  passed `awaitLiveness`. `alive:false` means the claude child spawned but
+   *  EXITED within the grace window — the caller must treat this as a launch
+   *  failure (release the claim + record the exitCode/tail), NOT a success.
+   *  Absent (undefined) when liveness wasn't awaited (the legacy behavior). */
+  liveness?: PtyLivenessVerdict;
 };
 
 export type InteractiveRunPayload = {
@@ -310,6 +325,19 @@ export async function runTaskInteractive(
   // 'https://example.com' here, which made task start flash that meaningless
   // placeholder instead of the splash — never do that.
   if (playwright) openBrowserWindow(undefined, ptyId);
+
+  // task-6fc9e503623e — LIVENESS GATE. When the caller asked, wait for the
+  // verdict: the child must stay alive (or emit first output) within the grace
+  // window to count as started. An early exit here is the exact "got a pty id
+  // but the child died instantly" bug — the caller (TypeBuild Start) inspects
+  // `liveness.alive` and, when false, releases the claim and records the exit
+  // code + tail instead of reporting a running session.
+  if (opts.awaitLiveness) {
+    const liveness = await awaitPtyLiveness(ptyId, {
+      minAliveMs: opts.awaitLiveness.minAliveMs,
+    });
+    return { run, ptyId, launched: true, liveness };
+  }
 
   return { run, ptyId, launched: true };
 }

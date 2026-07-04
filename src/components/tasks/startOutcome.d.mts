@@ -11,3 +11,15 @@ export function spawnedOutcome(
   source: string | undefined,
   res: { ok?: boolean; ptyId?: number } | null | undefined,
 ): { spawned: boolean; ptyId: number | undefined; needsPtyThrow: boolean };
+
+/** task-6fc9e503623e — classify a PTY liveness verdict into the Start
+ *  decision the source acts on (alive → started; early exit → release + record
+ *  with the exit-code tagged error + note). */
+export function classifyLiveness(
+  verdict: {
+    alive: boolean;
+    exitCode: number | null;
+    signal: number | null;
+    tail?: string;
+  },
+): { alive: true } | { alive: false; exitCode: number | null; taggedError: string; note: string };

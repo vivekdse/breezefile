@@ -16,6 +16,9 @@
 const LAUNCH_MESSAGES = {
   'no-window': 'no open Breeze window to host the session',
   'no-pty': 'the session process never started',
+  // task-6fc9e503623e — the child spawned but exited within the liveness
+  // grace window. The exit-code detail rides in the message tail (see below).
+  'early-exit': 'the session exited immediately',
 };
 
 /**
@@ -26,7 +29,13 @@ export function launchErrorReason(err) {
   const raw = err instanceof Error ? err.message : String(err);
   const m = /\[typebuild-launch:([a-z-]+)\]/.exec(raw);
   if (!m) return null;
-  return LAUNCH_MESSAGES[m[1]] ?? `launch failed (${m[1]})`;
+  const base = LAUNCH_MESSAGES[m[1]] ?? `launch failed (${m[1]})`;
+  // task-6fc9e503623e — preserve the "(exit N)" detail the source appended to
+  // an early-exit message so the row/status line names the exit code, not just
+  // "exited immediately". The rest of the message (after the tag) is the
+  // human-readable detail; pull an "(exit …)" clause if present.
+  const detail = /\(exit [^)]*\)/.exec(raw);
+  return detail ? `${base} ${detail[0]}` : base;
 }
 
 // fm-b5at.9 — the three MCP-token mint failure messages, keyed by the code
@@ -75,4 +84,35 @@ export function spawnedOutcome(source, res) {
   }
   // Local / other sources: a resolved (non-{ok:false}) result is a success.
   return { spawned: true, ptyId, needsPtyThrow: false };
+}
+
+/**
+ * task-6fc9e503623e — classify a PTY LIVENESS verdict (from the electron
+ * launcher's `awaitPtyLiveness`) into the Start decision the source acts on.
+ * This mirrors, in a pure/testable form, the gate electron/sources/typebuild.ts
+ * applies after runTaskInteractive returns:
+ *
+ *   - alive:true  → started. The session stayed up (or emitted first output).
+ *   - alive:false → EARLY EXIT. The child spawned but died within the grace
+ *                   window; the source must release the claim and record the
+ *                   exit code + tail. We build the machine-tagged reason string
+ *                   here so both the throw and the recorded note carry the same
+ *                   exit-code detail (`[typebuild-launch:early-exit] … (exit N)`).
+ *
+ * @param {{ alive: boolean, exitCode: number|null, signal: number|null, tail?: string }} verdict
+ * @returns {{ alive: true } | { alive: false, exitCode: number|null, taggedError: string, note: string }}
+ */
+export function classifyLiveness(verdict) {
+  if (verdict && verdict.alive) return { alive: true };
+  const exitCode = verdict && verdict.exitCode != null ? verdict.exitCode : null;
+  const codeLabel = exitCode == null ? 'null' : String(exitCode);
+  const tail = verdict && typeof verdict.tail === 'string' ? verdict.tail.trim() : '';
+  return {
+    alive: false,
+    exitCode,
+    taggedError: `[typebuild-launch:early-exit] claude exited immediately (exit ${codeLabel})`,
+    note:
+      `Auto-start session exited immediately (exit ${codeLabel})` +
+      (tail ? `\n---\n${tail}` : ''),
+  };
 }

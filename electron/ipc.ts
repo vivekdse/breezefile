@@ -658,6 +658,99 @@ function appendReplay(id: number, data: string): void {
   }
 }
 
+// ── PTY liveness gate (task-6fc9e503623e) ───────────────────────────────────
+// "Got a pty id" is NOT "the session started": a claude child can spawn and
+// EXIT IMMEDIATELY (bad arg, missing token, invalid cwd) and we'd still have
+// returned a pty id. A session counts as genuinely started only if it stays
+// alive for a grace window OR emits its first output within it. This registry
+// lets the launcher AWAIT that verdict, and captures the exit code + a stderr/
+// output TAIL on early exit so the failure is self-diagnosing (nothing recorded
+// why the child died before — the reason this took several generations).
+type LivenessWatch = {
+  gotData: boolean;
+  resolve: (v: PtyLivenessVerdict) => void;
+  timer: ReturnType<typeof setTimeout>;
+  settled: boolean;
+};
+export type PtyLivenessVerdict = {
+  /** True when the pty survived the grace window or emitted first output. */
+  alive: boolean;
+  /** Exit code if it exited within the window (else null). */
+  exitCode: number | null;
+  /** Exit signal if any. */
+  signal: number | null;
+  /** Tail of the pty's output (stdout+stderr are merged in a pty), token-free
+   *  by construction here (the launcher spawns claude with no PHI in argv). */
+  tail: string;
+};
+const livenessWatches = new Map<number, LivenessWatch>();
+
+// Exit info kept briefly AFTER a pty is removed from `ptys`, so a liveness
+// awaiter that races the exit can still read the code/signal + tail. Cleared
+// lazily (see the setTimeout in the pty onExit handler).
+const ptyExitInfo = new Map<
+  number,
+  { exitCode: number | null; signal: number | null; tail: string }
+>();
+
+/** The most recent ~4 KB of a pty's output — enough to carry an error/usage
+ *  line without dragging the whole 256 KB replay around. */
+function ptyTail(id: number, maxBytes = 4096): string {
+  const buf = ptyReplay.get(id);
+  if (!buf || buf.chunks.length === 0) return '';
+  const joined = buf.chunks.join('');
+  const sliced = joined.length > maxBytes ? joined.slice(-maxBytes) : joined;
+  // Strip ANSI escape sequences so the recorded tail is human-readable in the
+  // activity log (the live terminal keeps the colored version).
+  // eslint-disable-next-line no-control-regex
+  return sliced.replace(/\[[0-9;?]*[A-Za-z]/g, '').trim();
+}
+
+function settleLiveness(id: number, verdict: PtyLivenessVerdict): void {
+  const w = livenessWatches.get(id);
+  if (!w || w.settled) return;
+  w.settled = true;
+  clearTimeout(w.timer);
+  livenessWatches.delete(id);
+  w.resolve(verdict);
+}
+
+/**
+ * Await a verdict on whether pty `id` genuinely started. Resolves:
+ *   - { alive:true } if it emits first data OR survives `minAliveMs`.
+ *   - { alive:false, exitCode, signal, tail } if it exits within the window.
+ * Must be called right after spawnManagedPty(id). Safe to call once per pty.
+ */
+export function awaitPtyLiveness(
+  id: number,
+  opts?: { minAliveMs?: number; requireFirstData?: boolean },
+): Promise<PtyLivenessVerdict> {
+  const minAliveMs = opts?.minAliveMs ?? 5000;
+  const deadVerdict = (): PtyLivenessVerdict => {
+    const ei = ptyExitInfo.get(id);
+    return {
+      alive: false,
+      exitCode: ei?.exitCode ?? null,
+      signal: ei?.signal ?? null,
+      tail: ei?.tail ?? ptyTail(id),
+    };
+  };
+  // If the pty already vanished before we got here (it exited in the gap
+  // between spawn and this call), it's dead — read its stashed exit info.
+  if (!ptys.has(id)) return Promise.resolve(deadVerdict());
+  return new Promise<PtyLivenessVerdict>((resolve) => {
+    const timer = setTimeout(() => {
+      // Survived the grace window → alive.
+      settleLiveness(id, { alive: true, exitCode: null, signal: null, tail: '' });
+    }, minAliveMs);
+    livenessWatches.set(id, { gotData: false, resolve, timer, settled: false });
+    // Re-check for an exit that fired AFTER our ptys.has() check but BEFORE we
+    // registered the watcher (its settleLiveness would have no-op'd). Without
+    // this the timer would wrongly report alive for an already-dead pty.
+    if (!ptys.has(id)) settleLiveness(id, deadVerdict());
+  });
+}
+
 /** Fan a pty event out to the owning window + any registered mirrors. */
 function sendToPtyClients(
   id: number,
@@ -726,11 +819,33 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
     const sid = ptys.get(id)?.senderId ?? opts.senderId;
     // Buffer for late-joining mirrors (operator pane remount / re-show).
     appendReplay(id, data);
+    // task-6fc9e503623e — first output within the grace window counts as
+    // "alive" (a claude session that printed anything is up and running).
+    const w = livenessWatches.get(id);
+    if (w && !w.gotData) {
+      w.gotData = true;
+      settleLiveness(id, { alive: true, exitCode: null, signal: null, tail: '' });
+    }
     sendToPtyClients(id, sid, 'term:data', { id, data });
   });
   proc.onExit(({ exitCode, signal }) => {
     const sid = ptys.get(id)?.senderId ?? opts.senderId;
     sendToPtyClients(id, sid, 'term:exit', { id, code: exitCode, signal: signal ?? null });
+    // task-6fc9e503623e — an exit while a liveness gate is still open is an
+    // EARLY EXIT: settle it as dead, carrying the exit code + output tail so
+    // the launcher can release the claim and RECORD why the child died. Read
+    // the tail BEFORE clearing the replay buffer below.
+    const tail = ptyTail(id);
+    ptyExitInfo.set(id, { exitCode: exitCode ?? null, signal: signal ?? null, tail });
+    settleLiveness(id, {
+      alive: false,
+      exitCode: exitCode ?? null,
+      signal: signal ?? null,
+      tail,
+    });
+    // Drop the stashed exit info after a short grace so a late awaiter can
+    // still read it, without leaking unboundedly.
+    setTimeout(() => ptyExitInfo.delete(id), 30_000);
     ptys.delete(id);
     ptyMirrors.delete(id);
     ptyReplay.delete(id);

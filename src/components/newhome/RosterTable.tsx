@@ -562,10 +562,42 @@ function ChainedJobSubtable({
   // per-step error the chip renders inline instead of a silent stall.
   const autoStartInFlightRef = useRef<string | null>(null);
   const [autoStartErrors, setAutoStartErrors] = useState<Record<string, string>>({});
+
+  // task-6fc9e503623e — when auto-continue is toggled back ON, clear the
+  // back-off errors so a freshly re-enabled chain gets one clean attempt per
+  // step again (matches the tester's "uncheck to freeze, re-check to retry"
+  // workflow). Keyed off `autoOn` flipping true.
+  const prevAutoOnRef = useRef(autoOn);
+  useEffect(() => {
+    if (autoOn && !prevAutoOnRef.current) setAutoStartErrors({});
+    prevAutoOnRef.current = autoOn;
+  }, [autoOn]);
+
+  // Manual ▶ from a step chip should also clear that child's back-off error
+  // (an explicit human retry). Wrap onStartChild so the button path resets the
+  // error before launching; the auto effect uses the raw callback.
+  const startChildManually = (childId: string) => {
+    setAutoStartErrors((prev) => {
+      if (!(childId in prev)) return prev;
+      const next = { ...prev };
+      delete next[childId];
+      return next;
+    });
+    void onStartChild(childId);
+  };
+
   useEffect(() => {
     if (!autoOn || !agentRun || !nextChildId) return;
     if (childrenLoading) return; // don't act on a partially-loaded job
     if (autoStartInFlightRef.current === nextChildId) return; // already in flight
+    // task-6fc9e503623e (BACK-OFF) — do NOT re-attempt a step that just failed
+    // to STAY ALIVE. Without this, auto-continue re-claims the same step on
+    // every poll (claim → early-exit → release → runnable again → claim …),
+    // the observed churn loop. A recorded error freezes auto-retry for that
+    // child until it's manually retried (clears the error) or auto-continue is
+    // re-toggled (clears all). This is the regression guard: one auto attempt
+    // per step per enablement, never an infinite claim/release cycle.
+    if (autoStartErrors[nextChildId]) return;
     const child = allTasksById.get(nextChildId);
     if (!child) return;
     const pa = primaryActionFor(child, {
@@ -579,29 +611,32 @@ function ChainedJobSubtable({
     // (those all resolve to a non-'start' kind, see primaryAction.mjs).
     if (pa.kind !== 'start' || !pa.enabled) return;
     autoStartInFlightRef.current = nextChildId;
-    // Clear any stale error for this child the moment we retry it.
-    setAutoStartErrors((prev) => {
-      if (!(nextChildId in prev)) return prev;
-      const next = { ...prev };
-      delete next[nextChildId];
-      return next;
-    });
     void onStartChild(nextChildId).then((outcome: StartOutcome) => {
       if (outcome.ok && outcome.spawned) {
-        // A real session came up — keep the guard set so we never double-fire
-        // for this same child while it runs.
+        // A real, LIVE session came up (useTaskActions gates `spawned` on the
+        // liveness verdict now) — keep the guard set so we never double-fire.
         return;
       }
-      // Launch failed (or, defensively, resolved without a spawned session).
-      // useTaskActions().start already released an orphaned claim on a
-      // typebuild launch failure (task-c141c7765aa4 fix) — clear our guard so
-      // the step is retried the next time it's runnable, and surface the
-      // failure inline so a human sees "ready ▶" instead of a silent stall.
+      // Launch failed OR the child exited within the liveness window. The
+      // claim was already released by useTaskActions().start; record the
+      // reason (which now includes the exit code for an early exit) so the
+      // chip surfaces it AND the BACK-OFF above stops the churn loop.
       autoStartInFlightRef.current = null;
       const message = outcome.ok ? 'auto-start did not spawn a session' : outcome.message;
       setAutoStartErrors((prev) => ({ ...prev, [nextChildId]: message }));
     });
-  }, [autoOn, agentRun, nextChildId, childrenLoading, allTasksById, actions, tbReady, sessions, onStartChild]);
+  }, [
+    autoOn,
+    agentRun,
+    nextChildId,
+    childrenLoading,
+    allTasksById,
+    actions,
+    tbReady,
+    sessions,
+    onStartChild,
+    autoStartErrors,
+  ]);
 
   return (
     <>
@@ -627,17 +662,20 @@ function ChainedJobSubtable({
             const childId = childIdByDefId[g.taskDefId];
             const child = childId ? allTasksById.get(childId) : undefined;
             const stepError = childId ? autoStartErrors[childId] : null;
-            // task-c141c7765aa4 (#2, chip staleness) — layer the child's LIVE
-            // claim/run state on top of the pure output-derived status so a
-            // just-claimed step reads RUNNING immediately, not "queued" for
-            // however long it takes the agent to produce its first output.
-            // task-3f0c6a6abe41 (#2, optimistic rollback) — but a recorded
-            // auto-start FAILURE overrides any lingering in_progress: the
-            // launch rejected + the claim was released, so the step is not
-            // running even if the source cache hasn't re-polled the child's
-            // status back to open yet. This makes the pill revert from
-            // "running" to "queued" the instant the promise rejects.
-            const childRunning = !stepError && !!child && isInProgress(child);
+            const liveSession = child ? sessions.get(child.id) : undefined;
+            // task-c141c7765aa4 (#2) / task-3f0c6a6abe41 (#2) /
+            // task-6fc9e503623e (#3) — RUNNING is RE-DERIVED FROM SERVER TRUTH
+            // every render (isInProgress reads the polled server status), so it
+            // clears on its own once the server flips the child back to open.
+            // The rule: show RUNNING only when the server claim is effectively
+            // held (isInProgress) OR we hold a live local session for it — AND
+            // there's no recorded early-exit/launch failure. The `!stepError`
+            // gate is the immediate optimistic rollback: the instant the launch
+            // rejects (or the child exits within the liveness window), the
+            // recorded error forces RUNNING off, so the chip never lies RUNNING
+            // while the server says OPEN — even before the next poll lands.
+            const childRunning =
+              !stepError && !!child && (isInProgress(child) || !!liveSession);
             const status = stepDisplayStatus(baseStatus, childRunning);
             const runnable = g.taskDefId === runnableId;
             // task-4045bcee23cb (U3a) — same actionsFor eligibility rule as the
@@ -661,7 +699,7 @@ function ChainedJobSubtable({
                   status={status}
                   runnable={runnable}
                   startAction={startAction ?? null}
-                  onStart={() => childId && onStartChild(childId)}
+                  onStart={() => childId && startChildManually(childId)}
                   running={childRunning}
                   autoStartError={stepError}
                 />

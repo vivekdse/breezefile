@@ -9,6 +9,7 @@ import {
   spawnedOutcome,
   launchErrorReason,
   mintErrorReason,
+  classifyLiveness,
 } from '../src/components/tasks/startOutcome.mjs';
 
 // ── spawnedOutcome: the "did a real session spawn?" gate ─────────────────────
@@ -71,6 +72,57 @@ test('launchErrorReason: unknown launch code → generic (still non-null, not sw
 test('launchErrorReason: non-launch error → null (caller falls back)', () => {
   assert.equal(launchErrorReason(new Error('some other failure')), null);
   assert.equal(launchErrorReason('a string'), null);
+});
+
+test('launchErrorReason: [typebuild-launch:early-exit] → reason WITH the exit code', () => {
+  const err = new Error('[typebuild-launch:early-exit] claude exited immediately (exit 1)');
+  assert.equal(launchErrorReason(err), 'the session exited immediately (exit 1)');
+});
+
+test('launchErrorReason: early-exit with a null exit code still surfaces', () => {
+  const err = new Error('[typebuild-launch:early-exit] claude exited immediately (exit null)');
+  assert.equal(launchErrorReason(err), 'the session exited immediately (exit null)');
+});
+
+// ── classifyLiveness: the LIVENESS GATE (task-6fc9e503623e) ──────────────────
+// The regression guarantee: a started session must be ALIVE; an early exit must
+// become a released-claim + recorded-error carrying the exit code.
+
+test('classifyLiveness: alive verdict → started (no error, no note)', () => {
+  const v = classifyLiveness({ alive: true, exitCode: null, signal: null });
+  assert.deepEqual(v, { alive: true });
+});
+
+test('classifyLiveness: early exit → tagged error + note carry the exit code', () => {
+  const v = classifyLiveness({
+    alive: false,
+    exitCode: 1,
+    signal: null,
+    tail: 'error: unknown option --frobnicate',
+  });
+  assert.equal(v.alive, false);
+  assert.equal(v.exitCode, 1);
+  assert.match(v.taggedError, /\[typebuild-launch:early-exit\]/);
+  assert.match(v.taggedError, /\(exit 1\)/);
+  // The recorded note must include the exit code AND the captured tail so the
+  // failure is self-diagnosing in the task's activity history.
+  assert.match(v.note, /exit 1/);
+  assert.match(v.note, /unknown option --frobnicate|--frobnicate|--frobnicate/);
+});
+
+test('classifyLiveness: early exit with null exit code → still classified, "null" label', () => {
+  const v = classifyLiveness({ alive: false, exitCode: null, signal: 9, tail: '' });
+  assert.equal(v.alive, false);
+  assert.equal(v.exitCode, null);
+  assert.match(v.taggedError, /\(exit null\)/);
+  // No tail → note is just the code line (no trailing separator).
+  assert.equal(v.note, 'Auto-start session exited immediately (exit null)');
+});
+
+test('classifyLiveness end-to-end: the taggedError feeds launchErrorReason with the code', () => {
+  const v = classifyLiveness({ alive: false, exitCode: 137, signal: null, tail: 'OOM' });
+  const err = new Error(v.taggedError);
+  assert.equal(launchErrorReason(err), 'the session exited immediately (exit 137)');
 });
 
 // ── mintErrorReason: the three mint messages still map ───────────────────────
