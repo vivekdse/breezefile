@@ -17,8 +17,21 @@ import { useRef } from 'react';
 import { z } from 'zod';
 import { useTasks } from '../tasks';
 import { useTaskActions } from '../components/tasks/useTaskActions';
+import { useNewHomeData } from '../components/newhome/useNewHomeData';
+import {
+  compileTaskQuery,
+  runTaskQuery,
+  TASK_QUERY_FIELDS,
+} from '../components/newhome/taskQuery';
+import type { NewHomeTask } from '../components/newhome/types';
 import type { Task } from '../types';
 import { immediateAction, confirmedAction } from './actionKit';
+
+// Blast-radius cap for query-driven bulk updates: refuse (don't truncate) if a
+// single query would touch more than this many tasks, so an over-broad query
+// can't silently sweep the whole inventory. The model narrows the query to
+// proceed — same "page by narrowing" discipline query_data uses for reads.
+const MAX_BULK = 50;
 
 /** Mount once inside the CopilotKit provider (CopilotDock.tsx), alongside
  *  <CopilotActions/>. Registers the task-management actions. */
@@ -28,6 +41,11 @@ export function TaskActions() {
   // the current page (task-24ea35660cd0). Not scoped to the active project.
   const { tasks } = useTasks({ includeDone: true });
   const { setStatus, togglePin, setDue, bulkDelete, bulkPatch } = useTaskActions();
+  // The NewHomeTask roster the task DSL is built for (derived who/needs_answer/
+  // last_action/due fields live on these rows, not raw Task) — same source
+  // query_data reads for entity="tasks". Read through the live ref below so the
+  // once-registered bulk_update_tasks_by_query handler never sees a stale roster.
+  const home = useNewHomeData();
 
   // STALE-CLOSURE NOTE (see FormCopilotBridge): immediateAction/confirmedAction
   // register each handler ONCE, so a handler closing over `tasks`/actions
@@ -35,8 +53,8 @@ export function TaskActions() {
   // since tasks load async. That's exactly why "retrieve any task" failed.
   // Read through `live` (a ref refreshed each render) so handlers always see
   // the current task inventory + mutation fns.
-  const live = useRef({ tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch });
-  live.current = { tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch };
+  const live = useRef({ tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch, roster: home.tasks });
+  live.current = { tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch, roster: home.tasks };
 
   const find = (taskId: string): Task | undefined =>
     live.current.tasks.find((t) => t.id === taskId);
@@ -49,34 +67,88 @@ export function TaskActions() {
   immediateAction({
     name: 'find_tasks',
     description:
-      "Search ALL tasks — every project and status, not just the ones visible on the current page — by title text and/or status. Returns matches with their id, title, status, and project id so you can then open or update them. Use this whenever the user names a task that isn't already in view.",
+      "Search ALL tasks — every project and status, not just the ones visible on the current page. " +
+      "Three ways to narrow (all optional, combined as AND): `query` (case-insensitive title substring), " +
+      "`status` (exact status), and `filter` (a full STRUCTURED query over task fields — the SAME grammar/fields as query_data entity=\"tasks\": " +
+      "boolean and/or/not + parens; `field op value` (op ∈ = != > < >= <= ~ !~, ~/!~ regex); `field in (a,b,c)`; " +
+      "`field between lo and hi`; `field glob \"pat\"`; a bare bool field is a truthiness test; time fields accept now / now-2h / now+7d / ISO dates. " +
+      "Task fields: " +
+      TASK_QUERY_FIELDS.map((f) => `${f.name} (${f.kind})`).join(', ') +
+      "). Returns matches with their id, title, status, and project id so you can then open or update them. " +
+      "Results are PAGED: pass `offset` (default 0) and `limit` (default 15, max 50) and walk pages using the count in the header " +
+      "(e.g. `Showing 1-15 of 42 … call again with offset=15`). Use this whenever the user names a task that isn't already in view.",
     parameters: z.object({
       query: z
         .string()
-        .describe('Case-insensitive text to match against task titles. Omit or pass "" to list recent tasks.')
+        .describe('Case-insensitive text to match against task titles. Omit or pass "" to skip the title filter.')
         .optional(),
       status: z
         .enum(['pending', 'in_progress', 'done', 'cancelled'])
-        .describe('Optional status filter.')
+        .describe('Optional exact status filter.')
         .optional(),
-      limit: z.number().describe('Max results to return (default 15).').optional(),
+      filter: z
+        .string()
+        .describe(
+          'Optional full structured query over task fields (same grammar/fields as query_data entity="tasks"). ANDed with query/status.',
+        )
+        .optional(),
+      offset: z.number().describe('Zero-based index of the first result to return (default 0). Page with this.').optional(),
+      limit: z.number().describe('Max results per page (default 15, hard max 50).').optional(),
     }),
-    perform: ({ query, status, limit }) => {
+    perform: ({ query, status, filter, offset, limit }) => {
       const q = (query ?? '').trim().toLowerCase();
+      const dsl = (filter ?? '').trim();
+
+      // The DSL runs over the NewHomeTask roster (its derived who/needs_answer/
+      // last_action/due fields are what the grammar references) — not the raw
+      // Task[]. When a `filter` is given we start from the roster; otherwise we
+      // start from the raw inventory so query/status behave exactly as before.
+      // Both title + status filters apply to whichever base we pick.
+      let ids: Set<string> | null = null;
+      if (dsl) {
+        const compiled = compileTaskQuery(dsl, []);
+        if (!compiled.ok) {
+          return `Failed: invalid task query — ${compiled.error}. Fields: ${TASK_QUERY_FIELDS.map((f) => f.name).join(', ')}.`;
+        }
+        const matchedRows = runTaskQuery(live.current.roster, compiled.compiled, Date.now());
+        ids = new Set(matchedRows.map((r) => r.id));
+      }
+
       let matches = live.current.tasks;
+      if (ids) matches = matches.filter((t) => ids!.has(t.id));
       if (q) matches = matches.filter((t) => t.title.toLowerCase().includes(q));
       if (status) matches = matches.filter((t) => t.status === status);
-      const cap = Math.max(1, Math.min(limit ?? 15, 50));
-      const shown = matches.slice(0, cap);
-      if (!shown.length) {
-        return q ? `No tasks match "${query}"${status ? ` with status ${status}` : ''}.` : 'No tasks found.';
+
+      const total = matches.length;
+      if (total === 0) {
+        const crit = [
+          q ? `title ~ "${query}"` : '',
+          status ? `status ${status}` : '',
+          dsl ? `filter \`${dsl}\`` : '',
+        ]
+          .filter(Boolean)
+          .join(' and ');
+        return crit ? `No tasks match ${crit}.` : 'No tasks found.';
       }
+
+      const cap = Math.max(1, Math.min(limit ?? 15, 50));
+      const start = Math.max(0, Math.floor(offset ?? 0));
+      if (start >= total) {
+        return `No tasks at offset ${start} — only ${total} match. First page is offset=0.`;
+      }
+      const shown = matches.slice(start, start + cap);
+      const end = start + shown.length; // exclusive
       const lines = shown.map(
         (t) =>
           `- "${t.title}" [${t.status}] id=${t.id}${t.projectId ? ` project=${t.projectId}` : ''}`,
       );
-      const more = matches.length > shown.length ? `\n(+${matches.length - shown.length} more — narrow the query)` : '';
-      return `Found ${matches.length} task(s):\n${lines.join('\n')}${more}`;
+      // Deterministic, machine-readable window header the model pages against.
+      const nextHint =
+        end < total
+          ? ` To see more call find_tasks again with offset=${end}.`
+          : '';
+      const header = `Showing tasks ${start + 1}-${end} of ${total} (offset=${start}, limit=${cap}).${nextHint}`;
+      return `${header}\n${lines.join('\n')}`;
     },
   });
 
@@ -319,6 +391,145 @@ export function TaskActions() {
       const verb = verbBits.join(', ');
       await live.current.bulkPatch(tasks, patch as never, verb);
       return `Updated ${tasks.length} task${tasks.length === 1 ? '' : 's'} (${verb}).`;
+    },
+  });
+
+  // ─── Bulk update BY QUERY (task-fa9c5dea9037) ──────────────────────────
+  // The write half of the query capability: the query-driven sibling of
+  // bulk_update_tasks. Instead of explicit ids, the model passes the SAME task
+  // DSL query_data reads with (compileTaskQuery/runTaskQuery over the NewHome
+  // roster) plus the change, and this applies ONE change to EVERY matching
+  // task through the SAME bulkPatch — no reimplemented selection or mutation.
+  //
+  // Because the affected set is computed from live state, BOTH validate/summary
+  // (preview) AND perform (apply) recompute it from the roster in the live ref,
+  // so the human approves the CONCRETE set that will actually change — never a
+  // blind query. Over-broad queries are refused (MAX_BULK), never truncated.
+
+  /** Compile `query` and return the matched raw Tasks, or an error string. Pure
+   *  — reads only the live roster ref, used by validate/summary/perform alike. */
+  const selectByQuery = (
+    query: string,
+  ): { ok: true; rows: NewHomeTask[]; tasks: Task[] } | { ok: false; error: string } => {
+    const q = (query ?? '').trim();
+    if (!q) return { ok: false, error: 'Failed: empty query.' };
+    const compiled = compileTaskQuery(q, []);
+    if (!compiled.ok) {
+      return {
+        ok: false,
+        error: `Failed: invalid task query — ${compiled.error}. Fields: ${TASK_QUERY_FIELDS.map((f) => f.name).join(', ')}.`,
+      };
+    }
+    const rows = runTaskQuery(live.current.roster, compiled.compiled, Date.now());
+    return { ok: true, rows, tasks: rows.map((r) => r.raw) };
+  };
+
+  /** Human-readable list of the changes a spec encodes (shared by summary/verb). */
+  const describeChanges = (a: {
+    status?: string;
+    due?: string;
+    pinned?: boolean;
+  }): string[] => {
+    const changes: string[] = [];
+    if (a.status !== undefined) changes.push(`status → ${a.status}`);
+    if (a.due !== undefined) changes.push(a.due.trim() ? `due → ${a.due.trim()}` : 'clear due date');
+    if (a.pinned !== undefined) changes.push(a.pinned ? 'pin' : 'unpin');
+    return changes;
+  };
+
+  confirmedAction({
+    name: 'bulk_update_tasks_by_query',
+    description:
+      'Apply the SAME change (status, due date, and/or pin) to EVERY task matching a query — the write half of query_data. ' +
+      'Pass `query`: a STRUCTURED query over task fields (SAME grammar/fields as query_data entity="tasks") — ' +
+      'boolean and/or/not + parens; `field op value` (op ∈ = != > < >= <= ~ !~, ~/!~ regex); `field in (a,b,c)`; ' +
+      '`field between lo and hi`; `field glob "pat"`; a bare bool field is a truthiness test; time fields accept now / now-2h / now+7d / ISO dates. ' +
+      'Task fields: ' +
+      TASK_QUERY_FIELDS.map((f) => `${f.name} (${f.kind})`).join(', ') +
+      '. Provide at least one change field. Requires human approval, which shows the CONCRETE set of tasks that will change. ' +
+      `Refuses if the query matches more than ${MAX_BULK} tasks — narrow the query instead.`,
+    parameters: z.object({
+      query: z
+        .string()
+        .describe('Structured field query selecting the tasks to update (same grammar/fields as query_data entity="tasks").'),
+      status: z
+        .enum(['done', 'pending', 'in_progress', 'cancelled'])
+        .optional()
+        .describe('Set every matching task to this status (cancelled is destructive).'),
+      due: z
+        .string()
+        .optional()
+        .describe('Set every matching task\'s due date to this ISO date (e.g. 2026-07-15), or "" to clear it.'),
+      pinned: z.boolean().optional().describe('Pin (true) or unpin (false) every matching task.'),
+    }),
+    title: 'Update matching tasks?',
+    // Red-frame the card only when the sweep cancels tasks (the one
+    // irreversible-ish status in this set); other changes are recoverable.
+    destructive: false,
+    validate: ({ query, status, due, pinned }) => {
+      if (status === undefined && due === undefined && pinned === undefined) {
+        return 'Failed: nothing to change — set at least one of status, due, or pinned.';
+      }
+      const sel = selectByQuery(query);
+      if (!sel.ok) return sel.error;
+      if (sel.tasks.length === 0) return `No tasks match \`${(query ?? '').trim()}\` — nothing to update.`;
+      if (sel.tasks.length > MAX_BULK) {
+        return `Failed: query matches ${sel.tasks.length} tasks (max ${MAX_BULK}). Narrow the query — nothing was changed.`;
+      }
+      return null;
+    },
+    summary: ({ query, status, due, pinned }) => {
+      const sel = selectByQuery(query);
+      const changes = describeChanges({ status, due, pinned });
+      if (!sel.ok) return <>{sel.error}</>;
+      const rows = sel.rows;
+      const shown = rows.slice(0, 8);
+      const cancels = status === 'cancelled';
+      return (
+        <>
+          Apply <strong>{changes.join(', ')}</strong> to{' '}
+          <strong>{rows.length}</strong> task{rows.length === 1 ? '' : 's'} matching{' '}
+          <code>{(query ?? '').trim()}</code>
+          {cancels ? ' — this cancels them' : ''}?
+          <div className="ck-confirm-note">
+            {shown.map((t) => `${t.title} (${t.id})`).join(' · ')}
+            {rows.length > shown.length ? ` · +${rows.length - shown.length} more` : ''}
+          </div>
+        </>
+      );
+    },
+    confirmLabel: 'Apply to all',
+    rejectLabel: 'Cancel',
+    rejectedMessage: 'Cancelled — no tasks were changed.',
+    perform: async ({ query, status, due, pinned }) => {
+      // Recompute against CURRENT state at apply time (the roster may have moved
+      // since the card rendered) — and re-enforce the cap so an approve can't
+      // apply a now-oversized sweep.
+      const sel = selectByQuery(query);
+      if (!sel.ok) return sel.error;
+      if (sel.tasks.length === 0) return `No tasks match \`${(query ?? '').trim()}\` — nothing was changed.`;
+      if (sel.tasks.length > MAX_BULK) {
+        return `Failed: query now matches ${sel.tasks.length} tasks (max ${MAX_BULK}). Narrow the query — nothing was changed.`;
+      }
+      const patch: Record<string, unknown> = {};
+      const verbBits: string[] = [];
+      if (status !== undefined) {
+        patch.status = status;
+        verbBits.push(`set ${status}`);
+      }
+      if (due !== undefined) {
+        patch.due_at = due.trim() ? due.trim() : null;
+        verbBits.push(due.trim() ? `due ${due.trim()}` : 'cleared due');
+      }
+      if (pinned !== undefined) {
+        patch.pinned = pinned;
+        verbBits.push(pinned ? 'pinned' : 'unpinned');
+      }
+      const verb = verbBits.join(', ');
+      // bulkPatch partitions by source capability and tallies partial failures
+      // (e.g. TypeBuild pin attempts) itself — don't pre-filter.
+      await live.current.bulkPatch(sel.tasks, patch as never, verb);
+      return `Updated ${sel.tasks.length} task${sel.tasks.length === 1 ? '' : 's'} matching \`${(query ?? '').trim()}\` (${verb}).`;
     },
   });
 
