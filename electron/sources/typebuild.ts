@@ -2287,8 +2287,14 @@ export class TypeBuildTaskSource implements TaskSource {
   //        - --strict-mcp-config --mcp-config <inline JSON> referencing the
   //          env var (not the literal token). claude expands ${VAR} from the
   //          spawned env into the Authorization header → already authenticated.
-  //        - prompt: "Run /mcp__typebuild__work and claim task <id>"
-  //          (ONLY the opaque task id — no PHI).
+  //        - prompt: "Run /typebuild:typebuild-work and claim task <id>"
+  //          (ONLY the opaque task id — no PHI). task-8997b15a37d9: this is a
+  //          PLUGIN SKILL (typebuild-plugin repo, skills/typebuild-work/SKILL.md),
+  //          invoked by its fully-qualified `<plugin>:<skill-dir>` name — NOT an
+  //          MCP prompt. The old `/mcp__typebuild__work` reference errored
+  //          "Unknown skill" every launch because that double-underscore form is
+  //          MCP-prompt syntax, and the typebuild MCP server exposes no `work`
+  //          prompt; the actual `/work` entry point is this skill.
   //        - args derived from the server `flags` (chrome → --chrome, etc.).
   //        - cwd: the home directory (folder hints are a later follow-up).
   //   3. NO local task_runs row — task_runs.task_id FKs the local `tasks`
@@ -2517,8 +2523,8 @@ export class TypeBuildTaskSource implements TaskSource {
     // status=open and would 409 now). Tell the agent the task is already mine
     // and to run /work without claiming. ONLY the opaque task id — no PHI.
     const basePrompt = opts.preclaimed
-      ? `Task ${id} is already claimed by me. Run /mcp__typebuild__work for task ${id} — do not claim it again.`
-      : `Run /mcp__typebuild__work and claim task ${id}`;
+      ? `Task ${id} is already claimed by me. Run /typebuild:typebuild-work for task ${id} — do not claim it again.`
+      : `Run /typebuild:typebuild-work and claim task ${id}`;
     // Prepend the project's effective instructions (NON-PHI) as context so the
     // agent operates with the project's cascading guidance from the first turn.
     const withInstructions = projectCtx.instructions

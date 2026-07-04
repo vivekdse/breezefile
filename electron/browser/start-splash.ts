@@ -80,16 +80,22 @@ export function isSplashUrl(url: string | undefined): boolean {
 // can recognize our own splash regardless of theme.
 const SPLASH_SENTINEL = 'breeze-operator-splash';
 
-function splashHtml(theme: SplashTheme): string {
+// task-8997b15a37d9 — the splash must reflect REAL state, not spin forever.
+// `done: true` renders a static (no spinner, no pulsing glow) "session
+// finished, no browser used" card, shown when the agent's session ends
+// without ever issuing a real `goto` (see markSessionEnded in window.ts).
+// Same palette/layout as the starting card so the swap reads as a state
+// change, not a different screen.
+function splashHtml(theme: SplashTheme, done = false): string {
   const p = PALETTES[theme];
   // Fonts mirror tokens.css --font-serif / --font-sans heads, degrading to
   // system fonts (the page view has no access to the bundled webfonts).
   return `<!doctype html>
-<html lang="en" data-theme="${theme}" class="${SPLASH_SENTINEL}">
+<html lang="en" data-theme="${theme}" class="${SPLASH_SENTINEL}${done ? ' breeze-operator-splash--done' : ''}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Starting your task…</title>
+<title>${done ? 'Task finished' : 'Starting your task…'}</title>
 <style>
   :root {
     --panel: ${p.panel};
@@ -185,23 +191,45 @@ function splashHtml(theme: SplashTheme): string {
     .spinner { animation-duration: 2s; }
     .ring::before, .card, .dots::after { animation: none; }
   }
+  /* Done state: static check mark, no spinner/glow/dots. */
+  .check {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent);
+    font-size: 26px;
+    line-height: 1;
+  }
 </style>
 </head>
 <body>
   <main class="card" role="status" aria-live="polite">
-    <div class="ring"><div class="spinner"></div></div>
+    ${
+      done
+        ? `<div class="check" aria-hidden="true">&#10003;</div>
+    <h1 class="title">Task finished</h1>
+    <p class="sub">This session didn't use the browser.</p>`
+        : `<div class="ring"><div class="spinner"></div></div>
     <h1 class="title">Starting your task<span class="dots"></span></h1>
-    <p class="sub">Setting up the browser. This will begin in just a moment.</p>
+    <p class="sub">Setting up the browser. This will begin in just a moment.</p>`
+    }
   </main>
 </body>
 </html>`;
 }
 
-/** Build the `data:text/html` URL for the themed start splash. */
-export function splashDataUrl(theme: string | undefined): string {
+/** Build the `data:text/html` URL for the themed start splash. Pass
+ *  `done: true` for the static post-session variant (task-8997b15a37d9) shown
+ *  when the agent's session ended without the agent ever navigating the
+ *  browser — see markSessionEnded in window.ts. */
+export function splashDataUrl(theme: string | undefined, done = false): string {
   const resolved = resolveSplashTheme(theme);
   // encodeURIComponent keeps the data URL valid (the HTML has #, quotes, etc.).
-  return `data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(resolved))}`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(resolved, done))}`;
 }
 
 // The meaningless placeholder the browser surface USED to land on before the

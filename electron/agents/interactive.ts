@@ -19,7 +19,7 @@ import type { Task, TaskRun } from '../tasks';
 import { buildPrompt } from './execute';
 import { defaultAgentId } from './registry';
 import { flagsToArgs } from './flags';
-import { openBrowserWindow } from '../browser/window';
+import { openBrowserWindow, markSessionEnded } from '../browser/window';
 import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId } from '../ipc';
 import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
@@ -231,6 +231,17 @@ export async function runTaskInteractive(
           });
         } catch (e) {
           console.error('[interactive] finalize run:', e);
+        }
+      }
+      // task-8997b15a37d9 — the operator splash only clears on a real agent
+      // `goto`; a task that never touches the browser would otherwise show
+      // "Setting up the browser" for the entire session and after it ends.
+      // Swap it to the static "done" card if it's still showing.
+      if (playwright) {
+        try {
+          markSessionEnded(ptyId);
+        } catch (e) {
+          console.error('[interactive] markSessionEnded:', e);
         }
       }
       try {

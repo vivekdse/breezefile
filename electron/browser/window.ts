@@ -209,6 +209,21 @@ function fillScreen(bwin: BrowserWindow): void {
 // agent hasn't navigated yet), re-render it in that theme so the splash matches
 // the client. Once the agent issues a real `goto`, the page is no longer a
 // splash and we leave it alone. Idempotent: skip if the theme didn't change.
+// task-8997b15a37d9 — the splash otherwise NEVER clears for a task that never
+// touches the browser: it only swaps away on a real agent `goto` (isSplashUrl
+// check in browser/views.ts's navigation path). Called from the agent PTY's
+// exit handler (electron/agents/interactive.ts) so the operator pane reflects
+// real session state instead of spinning forever, including after the whole
+// session has already finished. No-ops if the page already navigated away
+// (isSplashUrl is false) or if this exit doesn't belong to the CURRENT
+// operator session (a stale/relaunched-away ptyId).
+export function markSessionEnded(ptyId: number): void {
+  if (ptyId !== operatorPtyId) return;
+  const wc = (operatorViewId != null ? getBrowserView(operatorViewId) : null)?.webContents;
+  if (!wc || wc.isDestroyed() || !isSplashUrl(wc.getURL())) return;
+  void wc.loadURL(splashDataUrl(splashTheme, /* done */ true));
+}
+
 ipcMain.on('operator:set-theme', (_e, theme: string) => {
   if (typeof theme !== 'string' || theme === splashTheme) return;
   splashTheme = theme;

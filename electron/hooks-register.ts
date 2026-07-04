@@ -28,6 +28,7 @@ import {
   chmodSync,
   unlinkSync,
 } from 'node:fs';
+import { withoutBreezeMatchers } from './hooks-register-core.mjs';
 
 type HookEntry = { type?: 'command'; command: string };
 type HookMatcher = { matcher?: string; hooks: HookEntry[] };
@@ -183,23 +184,10 @@ const WAITING_CMD = `sh "${SCRIPT}" waiting`;
 // the backstop path evolve independently.
 const STOPPED_CMD = `sh "${SCRIPT}" stopped`;
 
-// We own any hook entry whose command runs claude-hook.sh — re-register
-// replaces them rather than appending so idempotency holds even when we
-// evolve the command shape.
-function isBreezeHook(h: HookEntry): boolean {
-  if (typeof h.command !== 'string') return false;
-  return h.command.includes('claude-hook.sh');
-}
-
-function withoutBreezeMatchers(blocks: HookMatcher[] | undefined): HookMatcher[] {
-  if (!blocks) return [];
-  const cleaned: HookMatcher[] = [];
-  for (const b of blocks) {
-    const kept = (b.hooks ?? []).filter((h) => !isBreezeHook(h));
-    if (kept.length > 0) cleaned.push({ ...b, hooks: kept });
-  }
-  return cleaned;
-}
+// isBreezeHook / withoutBreezeMatchers live in hooks-register-core.mjs (a
+// plain-ESM sibling, no Electron/fs) so the task-8997b15a37d9 stale-hook
+// migration logic is unit-testable without a TS transpile step — same split
+// convention as claude-stop-backstop.mjs / credential-normalize.mjs.
 
 export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' | 'skipped' {
   // The hook bridge is a POSIX `sh` script invoked as `sh "${SCRIPT}" <arg>`.
@@ -220,9 +208,13 @@ export function registerBreezeHooks(): 'written' | 'unchanged' | 'error' | 'skip
 
   const oldHooks = settings.hooks ?? {};
   const nextHooks: Record<string, HookMatcher[]> = {};
-  // Preserve foreign hook events; strip + re-add ours.
+  // Preserve foreign hook events; strip + re-add ours. An event we don't own
+  // (e.g. the retired SessionStart `breeze prime` hook) that cleans out to
+  // empty is dropped entirely rather than left as a dangling `"Event": []` —
+  // mirrors unregisterBreezeHooks below.
   for (const event of Object.keys(oldHooks)) {
-    nextHooks[event] = withoutBreezeMatchers(oldHooks[event]);
+    const cleaned = withoutBreezeMatchers(oldHooks[event]);
+    if (cleaned.length > 0) nextHooks[event] = cleaned;
   }
   for (const event of [
     'UserPromptSubmit',
