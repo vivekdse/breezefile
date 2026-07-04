@@ -39,6 +39,11 @@ import { OutcomesPanel } from './OutcomesPanel';
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
+import {
+  loadSelectedProjectId,
+  saveSelectedProjectId,
+  isStaleProjectSelection,
+} from './selectedProjectPrefs';
 import './NewHomePage.css';
 
 // task-69651204e222 — CONVERGENCE FLAG. When true, New Home's task-open path
@@ -99,7 +104,20 @@ function applySearch(tasks: import('./types').NewHomeTask[], query: string): imp
 }
 
 export function NewHomePage() {
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  // task-fd5b93809b1b — seed from the persisted pick rather than always
+  // starting at null: the "+ New Task" / edit-and-save path swaps this whole
+  // component out for the TaskComposer in App.tsx and remounts it on close,
+  // so plain useState(null) reset the project picker to "All projects" every
+  // time. Every setter call below is mirrored to storage (see the effect)
+  // so the NEXT mount (post-save) rehydrates the same selection instead of
+  // losing it.
+  const [selectedProjectId, setSelectedProjectIdState] = useState<string | null>(
+    () => loadSelectedProjectId(),
+  );
+  function setSelectedProjectId(id: string | null) {
+    setSelectedProjectIdState(id);
+    saveSelectedProjectId(id);
+  }
   const [filter, setFilter] = useState<FilterState>('all');
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   // task-7bdb94445321 follow-up — free-text roster search, ANDed with the
@@ -235,6 +253,20 @@ export function NewHomePage() {
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
     : null;
+
+  // task-fd5b93809b1b — a persisted selection can outlive the project it
+  // points at (deleted/archived elsewhere, or a stale value from another
+  // machine). Once the registry has actually loaded, fall back to "All
+  // projects" rather than silently wedging the roster on a filter that can
+  // never match. isStaleProjectSelection treats an empty `projects` as
+  // "not yet loaded" (never stale), so this never fires against the initial
+  // pre-fetch render.
+  useEffect(() => {
+    if (isStaleProjectSelection(selectedProjectId, projects)) {
+      setSelectedProjectId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId, projects]);
 
   const openTask = openTaskId ? tasks.find((t) => t.id === openTaskId) : undefined;
 
