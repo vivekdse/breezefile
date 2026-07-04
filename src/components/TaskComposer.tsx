@@ -1527,6 +1527,17 @@ export function TaskComposer(props: Props) {
     setTemplateEntry(entry);
     setTitle(entry.name);
     setTemplateFillActiveIdx(0);
+    // task-e112d60a3b7c — a template with NO input variables (e.g. an
+    // output-only "Get top 5 headlines") is a pure one-click instantiate:
+    // picking it creates the task immediately, with no title/values step and
+    // no "no input fields" message to park on. We pass the entry + name
+    // EXPLICITLY because setTemplateEntry/setTitle above haven't flushed to
+    // state yet in this tick. Only templates WITH variables walk the
+    // title → values flow.
+    if (templateFillEntries(entry).length === 0) {
+      void saveFromTemplate(entry, entry.name);
+      return;
+    }
     setTemplatePickPhase('title');
   }
 
@@ -1595,9 +1606,17 @@ export function TaskComposer(props: Props) {
   // fabricates it locally. `values` MAY be PHI — carried only in transient state
   // and the encrypted request body, never logged. On success: flash + refresh
   // roster (same mechanism as the plain create-success path), then exit.
-  async function saveFromTemplate(): Promise<{ ok: boolean; taskId?: string; error?: string }> {
-    if (!templateEntry) return { ok: false, error: 'Pick a template first.' };
-    if (!title.trim()) {
+  async function saveFromTemplate(
+    entryArg?: Template,
+    titleArg?: string,
+  ): Promise<{ ok: boolean; taskId?: string; error?: string }> {
+    // entryArg/titleArg let a zero-input pick instantiate in the same tick,
+    // before setTemplateEntry/setTitle flush to state; the walk-driven calls
+    // pass nothing and read state as before.
+    const entry = entryArg ?? templateEntry;
+    const useTitle = (titleArg ?? title).trim();
+    if (!entry) return { ok: false, error: 'Pick a template first.' };
+    if (!useTitle) {
       setTemplatePickPhase('title');
       return { ok: false, error: 'Add a title.' };
     }
@@ -1610,16 +1629,16 @@ export function TaskComposer(props: Props) {
       // (effectiveFieldKey, same normalization save() uses so a value never
       // silently drops). The ref used in state is `<templateId>.<field.key>`.
       const values: Record<string, string> = {};
-      for (const f of templateEntry.variables ?? []) {
+      for (const f of entry.variables ?? []) {
         const key = effectiveFieldKey(f);
         if (!key) continue;
-        values[key] = templateFillValues[fieldRef(templateEntry.id, f.key)] ?? '';
+        values[key] = templateFillValues[fieldRef(entry.id, f.key)] ?? '';
       }
       const result = await fm.typebuild.templates.instantiate(
-        templateEntry.id,
+        entry.id,
         values,
-        title.trim(),
-        templateEntry.projectId || undefined,
+        useTitle,
+        entry.projectId || undefined,
       );
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.id;
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
