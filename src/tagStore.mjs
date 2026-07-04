@@ -134,9 +134,13 @@ async function writeAll(file, tags) {
 // A thin handle bound to one JSON file. Every op reads-then-writes the whole
 // file (the tag set is tiny); atomicity is per-write via writeAll above.
 export class TagStore {
-  /** @param {{ file?: string, dir?: string }} [opts] */
+  /** @param {{ file?: string, dir?: string, now?: () => string }} [opts]
+   *  `now` is an injectable clock (returns an ISO string) so tests can force a
+   *  strictly-later `updated_at` deterministically instead of racing wall-clock
+   *  millisecond granularity; defaults to the real clock. */
   constructor(opts = {}) {
     this.file = resolveTagsFile(opts);
+    this._now = typeof opts.now === 'function' ? opts.now : nowIso;
   }
 
   /** All tags, in stored order. */
@@ -161,7 +165,7 @@ export class TagStore {
    *  `input`: { name, selector, color?, mode?, snapshot? }. */
   async create(input) {
     const tags = await this.list();
-    const ts = nowIso();
+    const ts = this._now();
     const rec = normalizeTag({
       ...input,
       id: newId(),
@@ -184,7 +188,7 @@ export class TagStore {
     const merged = { ...prev, ...patch, id: prev.id, created_at: prev.created_at };
     if (patch && patch.snapshot === null) delete merged.snapshot;
     const rec = normalizeTag(merged);
-    rec.updated_at = nowIso();
+    rec.updated_at = this._now();
     tags[i] = rec;
     await writeAll(this.file, tags);
     return rec;

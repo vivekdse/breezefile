@@ -12,9 +12,18 @@ import path from 'node:path';
 import { TagStore, openTagStore, resolveTagsFile, _internal } from '../src/tagStore.mjs';
 import { parse } from '../src/tagDsl.mjs';
 
-async function freshStore() {
+async function freshStore(opts = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tagstore-test-'));
-  return { dir, store: new TagStore({ dir }), file: path.join(dir, 'tags.json') };
+  return { dir, store: new TagStore({ dir, ...opts }), file: path.join(dir, 'tags.json') };
+}
+
+// A monotonic ISO clock: each call returns a strictly-later timestamp than the
+// last, so update()'s updated_at is guaranteed to differ from created_at
+// WITHOUT racing wall-clock millisecond granularity or a real setTimeout. This
+// removes the sole timing-dependent assertion in this suite.
+function monotonicClock(startMs = Date.UTC(2026, 0, 1)) {
+  let t = startMs;
+  return () => new Date((t += 1000)).toISOString();
 }
 
 // ── create ──────────────────────────────────────────────────────────────────
@@ -86,9 +95,10 @@ test('getByName finds a tag and returns null when missing', async () => {
 
 // ── update ──────────────────────────────────────────────────────────────────
 test('update patches fields, bumps updated_at, preserves id + created_at', async () => {
-  const { store } = await freshStore();
+  // Deterministic clock: update()'s timestamp is guaranteed strictly later than
+  // create()'s (no real setTimeout, no wall-clock-granularity race).
+  const { store } = await freshStore({ now: monotonicClock() });
   const t = await store.create({ name: 'a', selector: 'is_dir' });
-  await new Promise((r) => setTimeout(r, 5)); // ensure a later timestamp
   const u = await store.update(t.id, { name: 'A!', selector: 'size > 2MB', color: '#f00' });
   assert.equal(u.id, t.id);
   assert.equal(u.created_at, t.created_at);
