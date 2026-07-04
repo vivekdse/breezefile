@@ -58,7 +58,13 @@ import { agentOptionHint } from './tasks/agent.mjs';
 // docs/task-templates-design.md.
 import type { TaskDef, TaskDefCondition, TaskDefField } from './newhome/types';
 import { instantiateTemplate } from './newhome/newHomePrefs';
-import { aggregateInputs, fieldRef, parseTaskTemplateBlock } from './newhome/taskSchema.mjs';
+import {
+  aggregateInputs,
+  buildTaskFieldsBlock,
+  buildTaskOutputsBlock,
+  fieldRef,
+  parseTaskTemplateBlock,
+} from './newhome/taskSchema.mjs';
 import './TaskComposer.css';
 
 export type TaskComposerRequest =
@@ -98,21 +104,30 @@ type Props = TaskComposerRequest & {
   onSaved?: () => void;
 };
 
-// task-2fd63b922beb (R2) — 'template' (the Task/Chained-task choice), 'chain'
-// (the inline chain-definition builder, only when "Chained task" is picked)
-// and 'outputs' (read-only summary) are inserted right after 'project'
-// (create + TypeBuild only); `field:<taskDefId>.<key>` ids are synthesized
-// per aggregated input field (see aggregateInputs) once a chain is defined.
-// All of these are additive: the local target, or edit mode, never produce
-// them — QUESTIONS is then byte-for-byte QUESTIONS_LOCAL/QUESTIONS_TYPEBUILD,
-// unchanged. Picking (and leaving) "Task" (the default) reproduces today's
-// flow exactly — NON-REGRESSION.
+// task-2fd63b922beb (R2) + correction — 'template' (the Task/Chained-task
+// choice), 'chain' (the inline chain-definition builder, only when "Chained
+// task" is picked), 'fields' (the PLAIN task's own optional input/output
+// editor) and 'outputs' (read-only summary) extend the flow (create +
+// TypeBuild only); `field:<taskDefId>.<key>` ids are synthesized per
+// aggregated input field (see aggregateInputs). All are additive: the local
+// target, or edit mode, never produce them — QUESTIONS is then byte-for-byte
+// QUESTIONS_LOCAL/QUESTIONS_TYPEBUILD, unchanged.
+//
+// Corrected abstraction: input/output fields belong to the TASK, not the
+// chain. A plain "Task" now gets an optional 'fields' step (+ its value
+// questions + outputs summary); leaving it empty saves a task byte-identical
+// to today (NON-REGRESSION). A "Chained task" is a THIN container — title +
+// project + the chain + its input values + outputs summary — and DROPS the
+// task-form questions (who/notes/start/when/priority/agent/status/pin).
 type QuestionId =
   | 'title'
   | 'folder'
   | 'project'
   | 'template'
   | 'chain'
+  // task-2fd63b922beb correction — the PLAIN task form's own optional
+  // input/output fields (single def, id 'task'). No neededWhen (chain-only).
+  | 'fields'
   | 'outputs'
   | 'who'
   | 'when'
@@ -609,6 +624,134 @@ function fieldOptionList(field: TaskDefField): { value: string; label: string }[
 }
 function isFieldOptionType(field: TaskDefField): boolean {
   return field.type === 'select' || field.type === 'bool';
+}
+
+// task-2fd63b922beb correction (Part A.4) — the field-definition editor, ONE
+// implementation shared by BOTH the chain builder's per-step input/output
+// lists AND the plain Task form's single-def input/output lists. Field
+// DEFINITIONS (key/label/type/options/required) are NON-PHI; these editors
+// never touch field VALUES. `showRequired` = this is an OUTPUT list, whose
+// `required` flag marks the field as the step's evidence.
+function FieldRowEditor({
+  field,
+  showRequired,
+  onUpdate,
+  onRemove,
+}: {
+  field: TaskDefField;
+  showRequired: boolean;
+  onUpdate: (patch: Partial<TaskDefField>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="composer__chain-field-row">
+      <input
+        className="composer__chain-field-key"
+        type="text"
+        placeholder="key"
+        value={field.key}
+        onChange={(e) => onUpdate({ key: e.target.value })}
+      />
+      <input
+        className="composer__chain-field-label"
+        type="text"
+        placeholder="label"
+        value={field.label}
+        onChange={(e) => onUpdate({ label: e.target.value })}
+      />
+      <select
+        className="composer__chain-field-type"
+        value={field.type}
+        onChange={(e) => onUpdate({ type: e.target.value as TaskDefField['type'] })}
+      >
+        <option value="text">text</option>
+        <option value="number">number</option>
+        <option value="date">date</option>
+        <option value="select">select</option>
+        <option value="bool">bool</option>
+      </select>
+      {field.type === 'select' && (
+        <input
+          className="composer__chain-field-options"
+          type="text"
+          placeholder="options, comma-separated"
+          value={(field.options ?? []).join(', ')}
+          onChange={(e) =>
+            onUpdate({
+              options: e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+        />
+      )}
+      {showRequired && (
+        <label className="composer__chain-field-required">
+          <input
+            type="checkbox"
+            checked={!!field.required}
+            onChange={(e) => onUpdate({ required: e.target.checked })}
+          />
+          evidence
+        </label>
+      )}
+      <button
+        type="button"
+        className="composer__chain-icon-btn composer__chain-icon-btn--danger"
+        title={showRequired ? 'Remove output' : 'Remove input'}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// A labeled add/remove list of field-definition rows (Inputs or Outputs).
+function FieldListEditor({
+  kind,
+  fields,
+  onAdd,
+  onUpdate,
+  onRemove,
+}: {
+  kind: 'inputs' | 'outputs';
+  fields: TaskDefField[];
+  onAdd: () => void;
+  onUpdate: (fieldIdx: number, patch: Partial<TaskDefField>) => void;
+  onRemove: (fieldIdx: number) => void;
+}) {
+  const showRequired = kind === 'outputs';
+  return (
+    <div className="composer__chain-fieldgroup">
+      <div className="composer__chain-fieldgroup-head">
+        <span>{kind === 'inputs' ? 'Inputs' : 'Outputs'}</span>
+        <button
+          type="button"
+          className="composer__chain-add-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd();
+          }}
+        >
+          + {kind === 'inputs' ? 'input' : 'output'}
+        </button>
+      </div>
+      {fields.map((f, fi) => (
+        <FieldRowEditor
+          key={fi}
+          field={f}
+          showRequired={showRequired}
+          onUpdate={(patch) => onUpdate(fi, patch)}
+          onRemove={() => onRemove(fi)}
+        />
+      ))}
+    </div>
+  );
 }
 
 function formatDateNice(iso: string): string {
@@ -1250,12 +1393,55 @@ export function TaskComposer(props: Props) {
     if (!title.trim()) setTitle(entry.name);
   }
 
-  // Every task-def's input fields, in aggregate/definition order (task-def
-  // order, then field order), ONLY when a chain is actually chosen — this is
-  // what dynamically extends the question flow.
+  // ── Plain-task fields (task-2fd63b922beb correction, Part A) ─────────────
+  // The PLAIN task form owns its OWN optional input/output fields — a single
+  // task-def with the literal id 'task'. No neededWhen here (that's chain-
+  // only). Definitions (key/label/type/options/required) are NON-PHI; the
+  // later typed VALUES ride templateValues (PHI, body-only, same as a chain).
+  const [taskInputs, setTaskInputs] = useState<TaskDefField[]>([]);
+  const [taskOutputs, setTaskOutputs] = useState<TaskDefField[]>([]);
+  function taskFieldSetter(kind: 'inputs' | 'outputs') {
+    return kind === 'inputs' ? setTaskInputs : setTaskOutputs;
+  }
+  function addTaskField(kind: 'inputs' | 'outputs') {
+    taskFieldSetter(kind)((prev) => [...prev, { key: '', label: '', type: 'text' as const }]);
+  }
+  function removeTaskField(kind: 'inputs' | 'outputs', fieldIdx: number) {
+    taskFieldSetter(kind)((prev) => prev.filter((_, i) => i !== fieldIdx));
+  }
+  function updateTaskField(kind: 'inputs' | 'outputs', fieldIdx: number, patch: Partial<TaskDefField>) {
+    taskFieldSetter(kind)((prev) => prev.map((f, i) => (i === fieldIdx ? { ...f, ...patch } : f)));
+  }
+  // The single synthetic task-def the plain form's fields aggregate through —
+  // reuses the exact same aggregateInputs / build*Block path as a chain.
+  const taskFieldsDef = useMemo<TaskDef>(
+    () => ({ id: 'task', name: title.trim() || 'Task', inputs: taskInputs, outputs: taskOutputs }),
+    [title, taskInputs, taskOutputs],
+  );
+
+  // Whichever defs currently drive the aggregated field/outputs questions: the
+  // chain when "Chained task" is picked, else the single plain-task def.
+  const fieldsDefs = useMemo<TaskDef[]>(
+    () => (templateChoice === 'chain' ? chainDefs : [taskFieldsDef]),
+    [templateChoice, chainDefs, taskFieldsDef],
+  );
+  const definedOutputsCount = useMemo(
+    () => fieldsDefs.reduce((n, d) => n + (d.outputs?.length ?? 0), 0),
+    [fieldsDefs],
+  );
+  // A chained job is a THIN container flow (name + chain, no task-form
+  // questions); a plain task keeps its full flow plus the optional fields step.
+  const isMinimalChain = hasChainOption && templateChoice === 'chain';
+  // The read-only outputs summary shows for any chain, or for a plain task that
+  // actually defined outputs.
+  const showOutputsStep = hasChainOption && (templateChoice === 'chain' || definedOutputsCount > 0);
+
+  // Every driving def's input fields, in aggregate/definition order (def order,
+  // then field order) — this is what dynamically extends the question flow.
+  // Empty (no inputs, or not a TypeBuild create) → no field questions.
   const templateFieldEntries = useMemo(
-    () => (hasChainOption && templateChoice === 'chain' ? aggregateInputs(chainDefs) : []),
-    [hasChainOption, templateChoice, chainDefs],
+    () => (hasChainOption ? aggregateInputs(fieldsDefs) : []),
+    [hasChainOption, fieldsDefs],
   );
   const templateFieldQIds = useMemo(
     () => templateFieldEntries.map((e) => fieldQId(e.taskDef.id, e.field.key)),
@@ -1294,17 +1480,31 @@ export function TaskComposer(props: Props) {
   // (byte-for-byte QUESTIONS_LOCAL/QUESTIONS_TYPEBUILD).
   const QUESTIONS = useMemo<QuestionId[]>(() => {
     if (!hasChainOption) return baseQuestions;
-    const idx = baseQuestions.indexOf('project');
-    const before = baseQuestions.slice(0, idx + 1);
-    const after = baseQuestions.slice(idx + 1);
-    const extra: QuestionId[] = ['template'];
+    const pIdx = baseQuestions.indexOf('project');
+    const before = baseQuestions.slice(0, pIdx + 1); // title, project
+
+    // task-2fd63b922beb correction (Part B) — a "Chained task" is a THIN
+    // container: name (title) + project + the chain + its aggregated input
+    // values + a read-only outputs summary. The task-form questions
+    // (who/notes/start/when/priority/agent/status/pin) are DROPPED — the chain
+    // is not a full task.
     if (templateChoice === 'chain') {
-      extra.push('chain');
-      extra.push(...templateFieldQIds);
-      extra.push('outputs');
+      return [...before, 'template', 'chain', ...templateFieldQIds, 'outputs'];
     }
-    return [...before, ...extra, ...after];
-  }, [baseQuestions, hasChainOption, templateChoice, templateFieldQIds]);
+
+    // task-2fd63b922beb correction (Part A) — a plain task keeps today's full
+    // flow, with 'template' after project and an optional 'fields' step right
+    // after 'notes' (the task's own inputs/outputs). Defined inputs splice in
+    // one value question each; any outputs add the read-only summary step.
+    const after = baseQuestions.slice(pIdx + 1);
+    const withTemplate: QuestionId[] = [...before, 'template', ...after];
+    const nIdx = withTemplate.indexOf('notes');
+    const head = withTemplate.slice(0, nIdx + 1);
+    const tail = withTemplate.slice(nIdx + 1);
+    const extra: QuestionId[] = ['fields', ...templateFieldQIds];
+    if (definedOutputsCount > 0) extra.push('outputs');
+    return [...head, ...extra, ...tail];
+  }, [baseQuestions, hasChainOption, templateChoice, templateFieldQIds, definedOutputsCount]);
 
   const [activeIdx, setActiveIdx] = useState(0);
   // Clamp the active index when the question list shrinks/grows on a target
@@ -1693,8 +1893,16 @@ export function TaskComposer(props: Props) {
       tryAdvanceChain();
       return;
     }
-    if (active === 'outputs') {
+    // The plain-task fields step is optional — ↓ just advances.
+    if (active === 'fields') {
       goNext();
+      return;
+    }
+    if (active === 'outputs') {
+      // In the minimal chain flow 'outputs' is the LAST question — ↓ off its
+      // end hops to commit; in the plain flow more questions follow.
+      if (QUESTIONS.indexOf('outputs') >= QUESTIONS.length - 1) enterCommitPhase();
+      else goNext();
       return;
     }
     if (isFieldQuestion(active)) {
@@ -1794,6 +2002,10 @@ export function TaskComposer(props: Props) {
       return;
     }
     if (active === 'chain') {
+      goBack();
+      return;
+    }
+    if (active === 'fields') {
       goBack();
       return;
     }
@@ -1920,6 +2132,41 @@ export function TaskComposer(props: Props) {
       }
 
       const trimmedNotes = notes.trim();
+      // task-2fd63b922beb correction (Part A) — a PLAIN task that defined its
+      // own input/output fields carries them in its body via the same fenced
+      // transport blocks a chain child uses: a ```task-fields block (taskDefId
+      // is the literal 'task') when input VALUES were entered, and a
+      // ```task-outputs block when outputs were defined. PHI: the input values
+      // live ONLY in the task body, never logged. No fields defined → no blocks
+      // → the created task is byte-identical to a plain task today
+      // (NON-REGRESSION).
+      let notesForSave = trimmedNotes;
+      if (hasChainOption && templateChoice === 'blank') {
+        const inputVals: Record<string, string> = {};
+        for (const f of taskInputs) {
+          if (!f.key) continue;
+          const v = templateValues[fieldRef('task', f.key)] ?? '';
+          if (v !== '') inputVals[f.key] = v;
+        }
+        const blocks: string[] = [];
+        if (Object.keys(inputVals).length > 0) {
+          blocks.push(buildTaskFieldsBlock('', 'task', inputVals));
+        }
+        if (taskOutputs.length > 0) {
+          blocks.push(
+            buildTaskOutputsBlock({
+              id: 'task',
+              name: title.trim(),
+              notes: '',
+              inputs: taskInputs,
+              outputs: taskOutputs,
+            }),
+          );
+        }
+        if (blocks.length > 0) {
+          notesForSave = [trimmedNotes, ...blocks].filter((p) => p.length > 0).join('\n\n');
+        }
+      }
       const startOpt = START_OPTIONS.find((s) => s.id === startId);
       let resolvedStart: string | null = null;
       if (startOpt) {
@@ -1940,7 +2187,7 @@ export function TaskComposer(props: Props) {
 
       const basePayload = {
         title: title.trim(),
-        notes: trimmedNotes ? trimmedNotes : null,
+        notes: notesForSave ? notesForSave : null,
         due_at: dueAt,
         status,
         pinned,
@@ -2093,10 +2340,14 @@ export function TaskComposer(props: Props) {
   // EXISTING TypeBuild create path (the same `createTask(payload, target)`
   // call `save()` makes above) so a template job's tasks are indistinguishable
   // from any other TypeBuild create — same source, same shape — just with
-  // parentTaskId/dependsOn threaded through. The job's own status/pinned/
-  // priority/agent picks apply uniformly to every task in the chain; the
-  // scheduling (when/start/cron) questions aren't consumed here — a chain's
-  // per-step timing isn't modeled by the composer's single When/Start pick.
+  // parentTaskId/dependsOn threaded through.
+  //
+  // task-2fd63b922beb correction (Part B) — the chain is a THIN container, not
+  // a full task. Its children carry ONLY structural fields (title/notes/project
+  // + parent/depends linking); the composer's task-form picks
+  // (status/priority/agent/pin) are NOT threaded onto them, so children get the
+  // server's defaults. The scheduling (when/start/cron) questions aren't
+  // consumed here either — the chained flow doesn't even ask them.
   async function createTaskForTemplateJob(input: {
     title: string;
     notes: string;
@@ -2104,19 +2355,14 @@ export function TaskComposer(props: Props) {
     parentTaskId?: string;
     dependsOn?: string[];
   }): Promise<{ id: string }> {
-    const parsedPriority = priority !== '' ? Number(priority) : undefined;
     const payload: TaskCreate = {
       title: input.title,
       folder: '',
       notes: input.notes,
-      status,
-      pinned,
       auto_mode: false,
       auto_agent: null,
       auto_prompt: null,
       ...(input.projectId ? { projectId: input.projectId } : {}),
-      ...(agentId ? { agentId } : {}),
-      ...(parsedPriority !== undefined ? { priority: parsedPriority } : {}),
       ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
       ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
     };
@@ -2390,11 +2636,23 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
-    // Outputs is a read-only summary — Enter/digits just advance like ↓.
-    if (active === 'outputs') {
+    // The plain-task fields step is a rich sub-form (like 'chain'); Enter on
+    // the section wrapper just advances (inputs/outputs are optional).
+    if (active === 'fields') {
       if (e.key === 'Enter') {
         e.preventDefault();
         goNext();
+        return;
+      }
+      return;
+    }
+    // Outputs is a read-only summary — Enter advances (or commits when it's the
+    // last question, i.e. the minimal chain flow).
+    if (active === 'outputs') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (QUESTIONS.indexOf('outputs') >= QUESTIONS.length - 1) enterCommitPhase();
+        else goNext();
         return;
       }
       return;
@@ -2505,6 +2763,7 @@ export function TaskComposer(props: Props) {
     if (q === 'notes') return notesSummary();
     if (q === 'template') return templateSummary();
     if (q === 'chain') return chainSummary();
+    if (q === 'fields') return fieldsSummary();
     if (q === 'outputs') return outputsSummary();
     if (isFieldQuestion(q)) return fieldAnswer(q);
     return '';
@@ -2519,10 +2778,24 @@ export function TaskComposer(props: Props) {
     if (named.length === 0) return 'No steps defined yet';
     return named.map((d) => d.name).join(' → ');
   }
+  // task-2fd63b922beb correction (Part A) — the plain task's own field counts.
+  function fieldsSummary(): string {
+    const ni = taskInputs.filter((f) => f.key.trim()).length;
+    const no = taskOutputs.filter((f) => f.key.trim()).length;
+    if (ni === 0 && no === 0) return 'None';
+    const parts: string[] = [];
+    if (ni > 0) parts.push(`${ni} input${ni === 1 ? '' : 's'}`);
+    if (no > 0) parts.push(`${no} output${no === 1 ? '' : 's'}`);
+    return parts.join(', ');
+  }
   function outputsSummary(): string {
-    const total = chainDefs.reduce((n, d) => n + (d.outputs?.length ?? 0), 0);
+    const total = definedOutputsCount;
     if (total === 0) return 'No outputs defined';
-    return `${total} output field${total === 1 ? '' : 's'} across ${chainDefs.length} step${chainDefs.length === 1 ? '' : 's'}`;
+    const across =
+      templateChoice === 'chain'
+        ? ` across ${fieldsDefs.length} step${fieldsDefs.length === 1 ? '' : 's'}`
+        : '';
+    return `${total} output field${total === 1 ? '' : 's'}${across}`;
   }
   function fieldAnswer(q: QuestionId): string {
     const entry = fieldEntryFor(q);
@@ -2551,6 +2824,7 @@ export function TaskComposer(props: Props) {
     if (q === 'notes') return 'notes';
     if (q === 'template') return 'kind';
     if (q === 'chain') return 'chain';
+    if (q === 'fields') return 'fields';
     if (q === 'outputs') return 'outputs';
     if (isFieldQuestion(q)) {
       const entry = fieldEntryFor(q);
@@ -2579,6 +2853,7 @@ export function TaskComposer(props: Props) {
     // task-2fd63b922beb (R2)
     if (q === 'template') return 'Task or chained task?';
     if (q === 'chain') return 'Define the chain';
+    if (q === 'fields') return 'Inputs & outputs? (optional)';
     if (q === 'outputs') return 'What the agent will produce';
     if (isFieldQuestion(q)) {
       const entry = fieldEntryFor(q);
@@ -3133,175 +3408,24 @@ export function TaskComposer(props: Props) {
                           onChange={(e) => updateChainDef(defIdx, { notes: e.target.value })}
                         />
 
-                        <div className="composer__chain-fieldgroup">
-                          <div className="composer__chain-fieldgroup-head">
-                            <span>Inputs</span>
-                            <button
-                              type="button"
-                              className="composer__chain-add-btn"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                addChainField(defIdx, 'inputs');
-                              }}
-                            >
-                              + input
-                            </button>
-                          </div>
-                          {(def.inputs ?? []).map((f, fi) => (
-                            <div key={fi} className="composer__chain-field-row">
-                              <input
-                                className="composer__chain-field-key"
-                                type="text"
-                                placeholder="key"
-                                value={f.key}
-                                onChange={(e) =>
-                                  updateChainField(defIdx, 'inputs', fi, { key: e.target.value })
-                                }
-                              />
-                              <input
-                                className="composer__chain-field-label"
-                                type="text"
-                                placeholder="label"
-                                value={f.label}
-                                onChange={(e) =>
-                                  updateChainField(defIdx, 'inputs', fi, { label: e.target.value })
-                                }
-                              />
-                              <select
-                                className="composer__chain-field-type"
-                                value={f.type}
-                                onChange={(e) =>
-                                  updateChainField(defIdx, 'inputs', fi, {
-                                    type: e.target.value as TaskDefField['type'],
-                                  })
-                                }
-                              >
-                                <option value="text">text</option>
-                                <option value="number">number</option>
-                                <option value="date">date</option>
-                                <option value="select">select</option>
-                                <option value="bool">bool</option>
-                              </select>
-                              {f.type === 'select' && (
-                                <input
-                                  className="composer__chain-field-options"
-                                  type="text"
-                                  placeholder="options, comma-separated"
-                                  value={(f.options ?? []).join(', ')}
-                                  onChange={(e) =>
-                                    updateChainField(defIdx, 'inputs', fi, {
-                                      options: e.target.value
-                                        .split(',')
-                                        .map((s) => s.trim())
-                                        .filter(Boolean),
-                                    })
-                                  }
-                                />
-                              )}
-                              <button
-                                type="button"
-                                className="composer__chain-icon-btn composer__chain-icon-btn--danger"
-                                title="Remove input"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeChainField(defIdx, 'inputs', fi);
-                                }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+                        {/* task-2fd63b922beb correction (Part A.4) — shared
+                            field-list editors (same components the plain Task
+                            form uses). */}
+                        <FieldListEditor
+                          kind="inputs"
+                          fields={def.inputs ?? []}
+                          onAdd={() => addChainField(defIdx, 'inputs')}
+                          onUpdate={(fi, patch) => updateChainField(defIdx, 'inputs', fi, patch)}
+                          onRemove={(fi) => removeChainField(defIdx, 'inputs', fi)}
+                        />
 
-                        <div className="composer__chain-fieldgroup">
-                          <div className="composer__chain-fieldgroup-head">
-                            <span>Outputs</span>
-                            <button
-                              type="button"
-                              className="composer__chain-add-btn"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                addChainField(defIdx, 'outputs');
-                              }}
-                            >
-                              + output
-                            </button>
-                          </div>
-                          {(def.outputs ?? []).map((f, fi) => (
-                            <div key={fi} className="composer__chain-field-row">
-                              <input
-                                className="composer__chain-field-key"
-                                type="text"
-                                placeholder="key"
-                                value={f.key}
-                                onChange={(e) =>
-                                  updateChainField(defIdx, 'outputs', fi, { key: e.target.value })
-                                }
-                              />
-                              <input
-                                className="composer__chain-field-label"
-                                type="text"
-                                placeholder="label"
-                                value={f.label}
-                                onChange={(e) =>
-                                  updateChainField(defIdx, 'outputs', fi, { label: e.target.value })
-                                }
-                              />
-                              <select
-                                className="composer__chain-field-type"
-                                value={f.type}
-                                onChange={(e) =>
-                                  updateChainField(defIdx, 'outputs', fi, {
-                                    type: e.target.value as TaskDefField['type'],
-                                  })
-                                }
-                              >
-                                <option value="text">text</option>
-                                <option value="number">number</option>
-                                <option value="date">date</option>
-                                <option value="select">select</option>
-                                <option value="bool">bool</option>
-                              </select>
-                              {f.type === 'select' && (
-                                <input
-                                  className="composer__chain-field-options"
-                                  type="text"
-                                  placeholder="options, comma-separated"
-                                  value={(f.options ?? []).join(', ')}
-                                  onChange={(e) =>
-                                    updateChainField(defIdx, 'outputs', fi, {
-                                      options: e.target.value
-                                        .split(',')
-                                        .map((s) => s.trim())
-                                        .filter(Boolean),
-                                    })
-                                  }
-                                />
-                              )}
-                              <label className="composer__chain-field-required">
-                                <input
-                                  type="checkbox"
-                                  checked={!!f.required}
-                                  onChange={(e) =>
-                                    updateChainField(defIdx, 'outputs', fi, { required: e.target.checked })
-                                  }
-                                />
-                                evidence
-                              </label>
-                              <button
-                                type="button"
-                                className="composer__chain-icon-btn composer__chain-icon-btn--danger"
-                                title="Remove output"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeChainField(defIdx, 'outputs', fi);
-                                }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+                        <FieldListEditor
+                          kind="outputs"
+                          fields={def.outputs ?? []}
+                          onAdd={() => addChainField(defIdx, 'outputs')}
+                          onUpdate={(fi, patch) => updateChainField(defIdx, 'outputs', fi, patch)}
+                          onRemove={(fi) => removeChainField(defIdx, 'outputs', fi)}
+                        />
 
                         {defIdx > 0 && (
                           <div className="composer__chain-neededwhen">
@@ -3400,12 +3524,173 @@ export function TaskComposer(props: Props) {
             </section>
           )}
 
-          {/* Chain input fields — task-2fd63b922beb (R2). One question per
-              aggregated task-def INPUT field (taskSchema.mjs aggregateInputs),
-              grouped/labeled by owning task-def ("Intake · Customer"). Only
-              rendered once a chain is chosen. text/number/date are free entry;
-              select/bool are option questions (same pattern as who/status/pin). */}
-          {hasChainOption && templateChoice === 'chain' && templateFieldEntries.map(({ taskDef, field }) => {
+          {/* task-2fd63b922beb correction — the aggregated field-value
+              questions and the read-only outputs summary now live AFTER 'notes'
+              (see below), so a plain task's optional fields read in walk order.
+              In the minimal chain flow the who/notes/etc questions between are
+              simply not rendered, so those steps still follow the chain
+              directly. */}
+
+          {/* Q3 — Who. task-2fd63b922beb correction (Part B): dropped entirely
+              from the minimal chained flow — a chain is a thin container, not a
+              task, so it doesn't ask who/notes/when/etc. */}
+          {!isMinimalChain && (
+          <section
+            ref={sectionRefFor('who')}
+            className={sectionClasses('who')}
+            onClick={() => setActiveIdx(QUESTIONS.indexOf('who'))}
+          >
+            {isActiveSection('who') ? (
+              <div className="composer__q-active-body">
+                <FieldLabel id="who" />
+                <div className="composer__q-prompt">{promptFor('who')}</div>
+                <ul className="composer__options" role="listbox">
+                  {WHO_OPTIONS.map((o, i) => (
+                    <li key={o.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={i === whoHighlight}
+                        className={
+                          'composer__option' +
+                          (i === whoHighlight ? ' composer__option--active' : '')
+                        }
+                        onMouseEnter={() => setWhoHighlight(i)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          chooseWho(i);
+                        }}
+                      >
+                        <kbd className="composer__option-key">{i + 1}</kbd>
+                        <span className="composer__option-label">{o.label}</span>
+                        {o.hint && (
+                          <span className="composer__option-hint">{o.hint}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              renderInert('who')
+            )}
+          </section>
+          )}
+
+          {/* Notes — sits right after Who: what / where / who / notes are
+              the fields that matter; scheduling lives below. Dropped from the
+              minimal chained flow (each step carries its own notes). */}
+          {!isMinimalChain && (
+          <section
+            ref={sectionRefFor('notes')}
+            className={sectionClasses('notes')}
+            onClick={() => {
+              setActiveIdx(QUESTIONS.indexOf('notes'));
+              setTimeout(() => notesRef.current?.focus(), 0);
+            }}
+          >
+            {isActiveSection('notes') ? (
+              <div className="composer__q-active-body">
+                <FieldLabel id="notes" />
+                <div className="composer__q-prompt">{promptFor('notes')}</div>
+                <textarea
+                  ref={notesRef}
+                  className="composer__notes-input"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Plain Enter inserts a newline (default — leave it).
+                    // ⌘/Ctrl+Enter inside notes advances to the next field
+                    // (Start) rather than submitting; stop the event so the
+                    // window-level handler doesn't fire save().
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      notesRef.current?.blur();
+                      setStartHighlight(
+                        START_OPTIONS.findIndex((s) => s.id === startId),
+                      );
+                      goNext();
+                    }
+                  }}
+                  placeholder={
+                    executor === 'claude'
+                      ? 'Describe the work for the agent. This text becomes its prompt.'
+                      : 'Anything you want to remember about this task.'
+                  }
+                  rows={4}
+                  spellCheck
+                />
+                {executor === 'claude' && (
+                  <div className="composer__notes-help">
+                    Sent to Claude as the task’s context — TypeBuild wraps the title, folder, and due date around what you write here.
+                  </div>
+                )}
+              </div>
+            ) : (
+              renderInert('notes')
+            )}
+          </section>
+          )}
+
+          {/* Plain-task fields — task-2fd63b922beb correction (Part A). The
+              TASK form owns its OWN optional input/output fields (single def,
+              id 'task'); no neededWhen (chain-only). Same shared editors as the
+              chain builder. Only for a plain (non-chained) TypeBuild create;
+              empty = a no-op, byte-identical to today (NON-REGRESSION). */}
+          {hasChainOption && templateChoice === 'blank' && (
+            <section
+              ref={sectionRefFor('fields')}
+              className={sectionClasses('fields')}
+              onClick={() => setActiveIdx(QUESTIONS.indexOf('fields'))}
+            >
+              {isActiveSection('fields') ? (
+                <div className="composer__q-active-body">
+                  <FieldLabel id="fields" />
+                  <div className="composer__q-prompt">{promptFor('fields')}</div>
+                  <div className="composer__task-fields">
+                    <FieldListEditor
+                      kind="inputs"
+                      fields={taskInputs}
+                      onAdd={() => addTaskField('inputs')}
+                      onUpdate={(fi, patch) => updateTaskField('inputs', fi, patch)}
+                      onRemove={(fi) => removeTaskField('inputs', fi)}
+                    />
+                    <FieldListEditor
+                      kind="outputs"
+                      fields={taskOutputs}
+                      onAdd={() => addTaskField('outputs')}
+                      onUpdate={(fi, patch) => updateTaskField('outputs', fi, patch)}
+                      onRemove={(fi) => removeTaskField('outputs', fi)}
+                    />
+                    <div className="composer__chain-footer">
+                      <span />
+                      <button
+                        type="button"
+                        className="composer__chain-continue-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          goNext();
+                        }}
+                      >
+                        Continue →
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                renderInert('fields')
+              )}
+            </section>
+          )}
+
+          {/* Aggregated field-VALUE questions — task-2fd63b922beb. One question
+              per input field of whichever defs drive the flow (the chain's, or
+              the plain task's single def), grouped/labeled by owning def
+              ("Intake · Customer" / "Task · Customer"). text/number/date are
+              free entry; select/bool are option questions. Empty when no inputs
+              are defined. */}
+          {hasChainOption && templateFieldEntries.map(({ taskDef, field }) => {
             const ref = fieldRef(taskDef.id, field.key);
             const qid = fieldQId(taskDef.id, field.key);
             const optionType = isFieldOptionType(field);
@@ -3475,10 +3760,10 @@ export function TaskComposer(props: Props) {
             );
           })}
 
-          {/* Outputs summary — task-2fd63b922beb (R2). Read-only: per
-              task-def, the output fields the agent will produce, `required`
-              marked as evidence. No input is collected here. */}
-          {hasChainOption && templateChoice === 'chain' && (
+          {/* Outputs summary — task-2fd63b922beb. Read-only: per def, the output
+              fields the agent will produce, `required` marked as evidence. Shows
+              for any chain, or for a plain task that defined outputs. */}
+          {showOutputsStep && (
             <section
               ref={sectionRefFor('outputs')}
               className={sectionClasses('outputs')}
@@ -3489,7 +3774,7 @@ export function TaskComposer(props: Props) {
                   <FieldLabel id="outputs" />
                   <div className="composer__q-prompt">{promptFor('outputs')}</div>
                   <ul className="composer__outputs-list">
-                    {chainDefs.map((def) => (
+                    {fieldsDefs.map((def) => (
                       <li key={def.id} className="composer__outputs-group">
                         <div className="composer__outputs-group-name">{def.name}</div>
                         {(def.outputs ?? []).length === 0 ? (
@@ -3516,102 +3801,8 @@ export function TaskComposer(props: Props) {
             </section>
           )}
 
-          {/* Q3 — Who */}
-          <section
-            ref={sectionRefFor('who')}
-            className={sectionClasses('who')}
-            onClick={() => setActiveIdx(QUESTIONS.indexOf('who'))}
-          >
-            {isActiveSection('who') ? (
-              <div className="composer__q-active-body">
-                <FieldLabel id="who" />
-                <div className="composer__q-prompt">{promptFor('who')}</div>
-                <ul className="composer__options" role="listbox">
-                  {WHO_OPTIONS.map((o, i) => (
-                    <li key={o.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={i === whoHighlight}
-                        className={
-                          'composer__option' +
-                          (i === whoHighlight ? ' composer__option--active' : '')
-                        }
-                        onMouseEnter={() => setWhoHighlight(i)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          chooseWho(i);
-                        }}
-                      >
-                        <kbd className="composer__option-key">{i + 1}</kbd>
-                        <span className="composer__option-label">{o.label}</span>
-                        {o.hint && (
-                          <span className="composer__option-hint">{o.hint}</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              renderInert('who')
-            )}
-          </section>
-
-          {/* Notes — sits right after Who: what / where / who / notes are
-              the fields that matter; scheduling lives below. */}
-          <section
-            ref={sectionRefFor('notes')}
-            className={sectionClasses('notes')}
-            onClick={() => {
-              setActiveIdx(QUESTIONS.indexOf('notes'));
-              setTimeout(() => notesRef.current?.focus(), 0);
-            }}
-          >
-            {isActiveSection('notes') ? (
-              <div className="composer__q-active-body">
-                <FieldLabel id="notes" />
-                <div className="composer__q-prompt">{promptFor('notes')}</div>
-                <textarea
-                  ref={notesRef}
-                  className="composer__notes-input"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Plain Enter inserts a newline (default — leave it).
-                    // ⌘/Ctrl+Enter inside notes advances to the next field
-                    // (Start) rather than submitting; stop the event so the
-                    // window-level handler doesn't fire save().
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      notesRef.current?.blur();
-                      setStartHighlight(
-                        START_OPTIONS.findIndex((s) => s.id === startId),
-                      );
-                      goNext();
-                    }
-                  }}
-                  placeholder={
-                    executor === 'claude'
-                      ? 'Describe the work for the agent. This text becomes its prompt.'
-                      : 'Anything you want to remember about this task.'
-                  }
-                  rows={4}
-                  spellCheck
-                />
-                {executor === 'claude' && (
-                  <div className="composer__notes-help">
-                    Sent to Claude as the task’s context — TypeBuild wraps the title, folder, and due date around what you write here.
-                  </div>
-                )}
-              </div>
-            ) : (
-              renderInert('notes')
-            )}
-          </section>
-
-          {/* Start */}
+          {/* Start. Dropped from the minimal chained flow. */}
+          {!isMinimalChain && (
           <section
             ref={sectionRefFor('start')}
             className={sectionClasses('start')}
@@ -3675,8 +3866,10 @@ export function TaskComposer(props: Props) {
               renderInert('start')
             )}
           </section>
+          )}
 
-          {/* When (due / schedule) */}
+          {/* When (due / schedule). Dropped from the minimal chained flow. */}
+          {!isMinimalChain && (
           <section
             ref={sectionRefFor('when')}
             className={sectionClasses('when')}
@@ -3780,12 +3973,14 @@ export function TaskComposer(props: Props) {
               renderInert('when')
             )}
           </section>
+          )}
 
           {/* Priority — fm-m2s4 (S5). TypeBuild only; a flat option list
               ("Unset" + 0–10). Sits between When and Status, mirroring the
               QUESTIONS_TYPEBUILD order. Arrow + Enter to pick (digits are
-              ambiguous against the 0–10 labels). */}
-          {isTypebuild && (
+              ambiguous against the 0–10 labels). Dropped from the minimal
+              chained flow (task-2fd63b922beb correction, Part B). */}
+          {isTypebuild && !isMinimalChain && (
             <section
               ref={sectionRefFor('priority')}
               className={sectionClasses('priority')}
@@ -3832,8 +4027,9 @@ export function TaskComposer(props: Props) {
               as the hint). Sits between Priority and Status, mirroring the
               QUESTIONS_TYPEBUILD order. Enter picks the highlight; digits 1..N
               pick (unambiguous names, unlike priority's 0–10). "None" clears the
-              assignment; group-optional agents still list. */}
-          {isTypebuild && (
+              assignment; group-optional agents still list. Dropped from the
+              minimal chained flow (task-2fd63b922beb correction, Part B). */}
+          {isTypebuild && !isMinimalChain && (
             <section
               ref={sectionRefFor('agent')}
               className={sectionClasses('agent')}
@@ -3875,7 +4071,8 @@ export function TaskComposer(props: Props) {
             </section>
           )}
 
-          {/* Q5 — Status */}
+          {/* Q5 — Status. Dropped from the minimal chained flow. */}
+          {!isMinimalChain && (
           <section
             ref={sectionRefFor('status')}
             className={sectionClasses('status')}
@@ -3916,8 +4113,10 @@ export function TaskComposer(props: Props) {
               renderInert('status')
             )}
           </section>
+          )}
 
-          {/* Pin */}
+          {/* Pin. Dropped from the minimal chained flow. */}
+          {!isMinimalChain && (
           <section
             ref={sectionRefFor('pin')}
             className={sectionClasses('pin')}
@@ -3958,6 +4157,7 @@ export function TaskComposer(props: Props) {
               renderInert('pin')
             )}
           </section>
+          )}
 
         </main>
 
@@ -3965,7 +4165,7 @@ export function TaskComposer(props: Props) {
             map 1:1 to the task `flags` array. 'interactive' opens the run
             in a new tab with an embedded claude session instead of running
             headless. */}
-        {executor === 'claude' && !created && (
+        {executor === 'claude' && !created && !isMinimalChain && (
           <div className="composer__flags" role="group" aria-label="Agent flags">
             {FLAG_OPTIONS.map((o) => (
               <label key={o.id} className="composer__flag" title={o.hint}>

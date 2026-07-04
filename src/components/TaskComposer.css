@@ -669,6 +669,14 @@
   font-weight: 500;
 }
 
+/* task-2fd63b922beb correction (Part A) — the plain Task form's own optional
+   input/output fields. Stacks the shared FieldListEditors + a Continue row. */
+.composer__task-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 /* task-2fd63b922beb (R2) — the inline chain builder. A structured sub-form
    (buttons/inputs, not the digit-select option pattern) for defining a
    chain's task-defs right in the composer: add/remove/reorder steps,
