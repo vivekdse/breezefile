@@ -651,6 +651,12 @@ type Fm = {
     credentials: {
       list: (origin?: string) => Promise<SavedCredential[]>;
       resolve: (origin: string, username: string) => Promise<string>;
+      // task-e550e3a1f512 — compare-before-prompt: verdict only, no stored value.
+      match: (
+        origin: string,
+        username: string,
+        password: string,
+      ) => Promise<'absent' | 'match' | 'differs'>;
       save: (cred: {
         origin: string;
         username: string;

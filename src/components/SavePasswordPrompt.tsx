@@ -17,7 +17,7 @@
  * path (the site-keyed credential vault, task-d60860fb4d7f).
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './SavePasswordPrompt.css';
 
 export interface CapturedCredential {
@@ -29,11 +29,16 @@ export interface CapturedCredential {
 
 export function SavePasswordPrompt({
   cred,
+  mode = 'save',
   onSave,
   onDismiss,
   onNever,
 }: {
   cred: CapturedCredential;
+  /** task-e550e3a1f512 — 'save' for a brand-new login; 'update' when a saved
+   *  password already exists for this {origin, username} but the captured one
+   *  differs (the headline + primary button read "Update"). */
+  mode?: 'save' | 'update';
   /** Persist the credential (origin, username, password). May reject; the prompt
    *  surfaces the error and stays open so the user can retry or dismiss. */
   onSave: (cred: CapturedCredential) => Promise<void>;
@@ -46,6 +51,15 @@ export function SavePasswordPrompt({
   const [revealed, setRevealed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // task-e550e3a1f512 — auto-dismiss after 30s so an ignored banner doesn't
+  // linger forever (the parent drops the password on dismiss). Cleared if the
+  // user starts interacting (saving) or the component unmounts.
+  useEffect(() => {
+    if (saving) return;
+    const t = setTimeout(onDismiss, 30_000);
+    return () => clearTimeout(t);
+  }, [saving, onDismiss]);
 
   // A friendly host label for the headline (strip the scheme); fall back to the
   // raw origin if it doesn't parse.
@@ -76,7 +90,9 @@ export function SavePasswordPrompt({
         <span className="save-pw__key" aria-hidden="true">
           🔑
         </span>
-        <span className="save-pw__title">Save password for {who}?</span>
+        <span className="save-pw__title">
+          {mode === 'update' ? 'Update password for' : 'Save password for'} {who}?
+        </span>
       </div>
 
       <div className="save-pw__creds">
@@ -113,7 +129,7 @@ export function SavePasswordPrompt({
           onClick={() => void save()}
           disabled={saving}
         >
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? 'Saving…' : mode === 'update' ? 'Update' : 'Save'}
         </button>
         <button
           type="button"

@@ -910,6 +910,12 @@ const fm = {
         >,
       resolve: (origin: string, username: string) =>
         ipcRenderer.invoke('typebuild:cred:resolve', origin, username) as Promise<string>,
+      // task-e550e3a1f512 — compare a captured login against the vault; only the
+      // verdict crosses back (no stored password).
+      match: (origin: string, username: string, password: string) =>
+        ipcRenderer.invoke('typebuild:cred:match', origin, username, password) as Promise<
+          'absent' | 'match' | 'differs'
+        >,
       save: (cred: { origin: string; username: string; password: string }) =>
         ipcRenderer.invoke('typebuild:cred:save', cred) as Promise<{
           origin: string;

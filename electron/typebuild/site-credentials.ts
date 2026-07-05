@@ -94,6 +94,41 @@ export async function resolveSiteCredential(
   return body.value;
 }
 
+/** task-e550e3a1f512 — compare a CAPTURED login against the saved vault entry,
+ *  WITHOUT ever returning a stored password to the caller. The comparison
+ *  happens here in main; the renderer only learns the verdict:
+ *    'absent'  — no saved password for this {origin, username} (offer "Save")
+ *    'match'   — the captured password equals the saved one (DON'T prompt)
+ *    'differs' — a saved password exists but the captured one differs
+ *                (offer "Update password?")
+ *  This is what lets the save-password prompt stop re-nagging on every login
+ *  with an unchanged password. Values are never logged. Any resolve error other
+ *  than 404 (transport/500) degrades to 'absent' so a lookup failure falls back
+ *  to the prior behaviour (prompt) rather than silently swallowing a real
+ *  new/changed credential. */
+export async function matchSiteCredential(
+  origin: string,
+  username: string,
+  password: string,
+): Promise<'absent' | 'match' | 'differs'> {
+  const o = reqString(origin, 'origin');
+  const u = typeof username === 'string' ? username : '';
+  const p = typeof password === 'string' ? password : '';
+  // An empty captured password can't meaningfully match; treat as absent so the
+  // prompt path decides (it already guards blank saves).
+  if (p === '') return 'absent';
+  let saved: string;
+  try {
+    saved = await resolveSiteCredential(o, u);
+  } catch (e) {
+    const status = (e as { status?: number })?.status;
+    if (status === 404) return 'absent';
+    // Transport / decrypt-refused / other — don't claim a match we can't prove.
+    return 'absent';
+  }
+  return saved === p ? 'match' : 'differs';
+}
+
 /** Save (create or replace) one login. The password is encrypted at rest
  *  server-side and is NEVER logged here. Returns the normalized {origin, username}
  *  the server stored (so the prompt/panel can refresh without echoing the value). */
