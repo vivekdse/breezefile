@@ -13,10 +13,13 @@
 // PHI: title / lastAction / result payload values may carry task content —
 // render in memory only, never persist/log (docs/typebuild-data-field-contract.md).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { Task } from '../../types';
 import type { NewHomeTask } from './types';
+import { getTask } from '../../tasks';
 import { normalizeTablePayload, coerceCell } from '../tasks/taskResult.mjs';
 import { resultFields } from './taskSchema.mjs';
+import { fieldedSchemaSource } from './pipelineRoster.mjs';
 import './OutcomesPanel.css';
 
 const WHO_GLYPH: Record<NewHomeTask['who'], string> = {
@@ -34,8 +37,15 @@ const GROUP_LABEL: Record<'done' | 'failed', string> = {
  *  (first row's cells, joined), fall back to the task's last-action text,
  *  and finally a generic placeholder. Mirrors TaskDetailDialog's outcome
  *  section (TaskResultView / task.raw.result, fallback to lastAction) but
- *  collapsed to a single line for the rollup row. */
-function summarizeOutcome(task: NewHomeTask): string {
+ *  collapsed to a single line for the rollup row.
+ *
+ * @param detailTask task-6b1136a8ff77 — the FETCHED detail for this row, when
+ *  available (mapListRow/mapListJob never populates `outputSchema` on the
+ *  list row — see fieldedSchemaSource's doc comment / task-ce4b4c8ca955
+ *  round-18). Reading `task.raw.outputSchema` alone reproduces that same
+ *  blank-out bug for a server-schema'd fielded task; combine both sources via
+ *  fieldedSchemaSource, exactly like TaskDetailDrawer's resolvedOutputSchema. */
+function summarizeOutcome(task: NewHomeTask, detailTask: Task | null | undefined): string {
   const result = task.raw?.result;
   if (result && typeof result === 'object' && (result as { type?: unknown }).type === 'table') {
     const table = normalizeTablePayload((result as { payload?: unknown }).payload);
@@ -60,7 +70,11 @@ function summarizeOutcome(task: NewHomeTask): string {
   // still renders something readable.
   const fields = resultFields(result ?? null);
   if (fields && Object.keys(fields.fields).length > 0) {
-    const labelByKey = new Map((task.raw?.outputSchema ?? []).map((f) => [f.key, f.label]));
+    const schema = fieldedSchemaSource(
+      { outputSchema: detailTask?.outputSchema },
+      { outputSchema: task.raw?.outputSchema },
+    );
+    const labelByKey = new Map((schema ?? []).map((f) => [f.key, f.label]));
     return Object.entries(fields.fields)
       .map(([k, v]) => `${labelByKey.get(k) ?? k}=${String(v)}`)
       .join(' · ');
@@ -71,10 +85,12 @@ function summarizeOutcome(task: NewHomeTask): string {
 function OutcomeGroup({
   status,
   tasks,
+  detailById,
   onOpenTask,
 }: {
   status: 'done' | 'failed';
   tasks: NewHomeTask[];
+  detailById: Map<string, Task>;
   onOpenTask: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -104,7 +120,7 @@ function OutcomeGroup({
               <button type="button" className="nh-outcomes__row" onClick={() => onOpenTask(t.id)}>
                 <span className={`nh-outcomes__pill nh-outcomes__pill--${t.status}`}>{GROUP_LABEL[status]}</span>
                 <span className="nh-outcomes__row-title">{t.title}</span>
-                <span className="nh-outcomes__summary">{summarizeOutcome(t)}</span>
+                <span className="nh-outcomes__summary">{summarizeOutcome(t, detailById.get(t.id))}</span>
                 <span className="nh-outcomes__who" title={t.who}>
                   {WHO_GLYPH[t.who]}
                 </span>
@@ -133,14 +149,53 @@ export function OutcomesPanel({
     [tasks],
   );
 
+  // task-6b1136a8ff77 — DETAIL for every finished row (getTask): the list row
+  // (task.raw) never carries `outputSchema` (mapListRow gap — see
+  // fieldedSchemaSource's doc comment), so a server-schema'd fielded task's
+  // one-liner would render blank/key-only without this. Same lazy/cached
+  // fetch-and-merge pattern TaskMatrix uses for its per-child detail map.
+  const idKey = useMemo(
+    () => [...done, ...failed].map((t) => t.id).sort().join(','),
+    [done, failed],
+  );
+  const [detailById, setDetailById] = useState<Map<string, Task>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    const ids = idKey ? idKey.split(',') : [];
+    const missing = ids.filter((id) => !detailById.has(id));
+    if (missing.length === 0) return;
+    void (async () => {
+      const fetched: [string, Task][] = [];
+      for (const id of missing) {
+        try {
+          const t = await getTask(id);
+          if (t) fetched.push([id, t]);
+        } catch {
+          // Offline / no access — leave undetailed; summary falls back to the list row.
+        }
+      }
+      if (cancelled || fetched.length === 0) return;
+      setDetailById((prev) => {
+        const next = new Map(prev);
+        for (const [id, t] of fetched) next.set(id, t);
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // idKey encodes the finished-task id set; re-run only when it moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idKey]);
+
   // Hide entirely when there's nothing finished yet — no empty-state shell.
   if (done.length === 0 && failed.length === 0) return null;
 
   return (
     <div className="nh-outcomes">
       <div className="nh-outcomes__title">Outcomes</div>
-      <OutcomeGroup status="failed" tasks={failed} onOpenTask={onOpenTask} />
-      <OutcomeGroup status="done" tasks={done} onOpenTask={onOpenTask} />
+      <OutcomeGroup status="failed" tasks={failed} detailById={detailById} onOpenTask={onOpenTask} />
+      <OutcomeGroup status="done" tasks={done} detailById={detailById} onOpenTask={onOpenTask} />
     </div>
   );
 }
