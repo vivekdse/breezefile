@@ -25,6 +25,7 @@ export default defineConfig({
               external: [
                 '@homebridge/node-pty-prebuilt-multiarch',
                 'better-sqlite3',
+                'better-sqlite3-multiple-ciphers',
                 'electron',
                 // Playwright must load from node_modules at runtime, not be
                 // bundled into the main ESM bundle: its coreBundle.js pulls in
