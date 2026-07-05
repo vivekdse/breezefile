@@ -589,6 +589,23 @@
   --term-bright-magenta: #f7b8d1;
   --term-bright-cyan:    #a0e0d4;
   --term-bright-white:   #f5e6f0;
+
+  /* task-c57baa310207 — canvas-level text (hero title/subtitle, TaskShell,
+     EditShell, WelcomeDemo, typography.css) renders directly on --bg-0/--bg-1,
+     which plum inherits UNCHANGED from the dark alpine :root (~#0a1018,
+     #0f1822) — plum never joins the paper-family light-alias block above,
+     since its own --bg/--panel is the inverted (dark chrome, light canvas)
+     scheme documented below. But --text-on-canvas defaults to var(--ink, …),
+     and plum's --ink (#2a1830) is tuned for the LIGHT --bg blush canvas, not
+     the dark --bg-0/--bg-1 legacy canvas. Result: near-black text on a
+     near-black bg (~1.16:1 contrast) — the hero title read as barely visible.
+     Fix: route canvas-level text through the same light panel-ink/panel-muted
+     pair already tuned for plum's dark --panel chrome (~13-15:1 against
+     --bg-0/--bg-1) rather than recoloring --bg-0/--bg-1 themselves, which
+     would risk regressing every other surface (buttons, cards, stat tiles,
+     roster rows) already legible against the dark canvas. */
+  --text-on-canvas: var(--panel-ink);
+  --muted-on-canvas: var(--panel-muted);
 }
 
 /* Dusk — dark mode. Invariant holds: center still darker than chrome. */
