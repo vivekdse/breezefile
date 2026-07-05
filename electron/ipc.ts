@@ -21,6 +21,7 @@ import * as tasks from './tasks';
 import type { TaskCreate, TaskFilter, TaskUpdate } from './tasks';
 import * as overlaySchedule from './schedule-overlay';
 import { platform } from './platform';
+import { timing as launchTiming } from './core/launch-timing';
 import {
   enterSideBySide,
   exitSideBySide,
@@ -827,6 +828,10 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
     const w = livenessWatches.get(id);
     if (w && !w.gotData) {
       w.gotData = true;
+      // task fix/launch-latency-debug — when did the child FIRST print? This
+      // pins claude cold-start separately from the main-process fetch wave.
+      // Flow epoch was started by interactive.ts (pty:<id>). No PHI: label only.
+      launchTiming(`pty:${id}`, 'first output');
       settleLiveness(id, { alive: true, exitCode: null, signal: null, tail: '' });
     }
     sendToPtyClients(id, sid, 'term:data', { id, data });
