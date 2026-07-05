@@ -400,6 +400,24 @@
   line-height: 1.3;
   word-break: break-word;
 }
+/* task-f523fcb5b474 — the global `body { user-select: none }` (base.css,
+   file-manager-chrome convention) made the detail panel's title/notes/
+   messages entirely uncopiable. Scope selection back ON for the actual task
+   text so it can be selected/copied; interactive chrome (buttons, the status
+   row, pin toggle, etc.) keeps the app's default non-selectable feel. */
+.tasks__detail-title,
+.tasks__detail-notes,
+.tasks__detail-meta dd,
+.tasks__message-text {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.tasks__detail-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
 .tasks__detail-meta {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -442,6 +460,11 @@
 }
 .tasks__detail-section--spaced {
   margin-top: var(--sp-2);
+}
+.tasks__detail-section--row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 .tasks__detail-notes {
   border-top: 1px solid var(--rule-on-panel);

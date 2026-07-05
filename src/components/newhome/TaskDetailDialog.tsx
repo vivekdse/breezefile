@@ -50,6 +50,7 @@ import {
   normalizeAnswer,
 } from '../tasks/taskAnswer.mjs';
 import { formatOpError, formatSourceReason } from '../../errorMessages';
+import { CopyButton } from '../CopyButton';
 import { TaskResultView } from '../tasks/TaskResult';
 import {
   parseTaskFieldsBlock,
@@ -650,8 +651,12 @@ export function TaskDetailDialog({
       >
         <div className="nh-dialog__head">
           <div>
-            <div id="nh-dialog-title" className="nh-dialog__title">
-              {task?.title ?? taskId}
+            <div className="nh-dialog__title-row">
+              <div id="nh-dialog-title" className="nh-dialog__title">
+                {task?.title ?? taskId}
+              </div>
+              <CopyButton getText={() => task?.title ?? null} title="Copy title" />
+              <CopyButton getText={() => taskId} label="Copy ID" title="Copy task ID" />
             </div>
             <div className="nh-dialog__sub">
               {[projectName, raw?.agent?.name].filter(Boolean).join(' · ') || 'No project/agent context'}
@@ -764,6 +769,13 @@ export function TaskDetailDialog({
                         className={`nh-dialog__output-v${submitted ? '' : ' nh-dialog__output-v--pending'}`}
                       >
                         {submitted ? String(v) : 'awaiting agent'}
+                        {submitted && (
+                          <CopyButton
+                            getText={() => String(v)}
+                            title={`Copy ${f.label}`}
+                            className="nh-dialog__output-copy"
+                          />
+                        )}
                       </div>
                     </div>
                   );

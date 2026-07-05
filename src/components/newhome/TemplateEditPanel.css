@@ -1,6 +1,6 @@
 /* task-57e1470fad6f — template-definition editor, shown as an overlay panel
-   above the Level-2 matrix. Uses the shared --nh-*/panel tokens so both themes
-   resolve correctly. */
+   above the Level-2 matrix. Uses the shared --nh- and --panel tokens so both
+   themes resolve correctly. */
 .tep {
   position: absolute;
   inset: 0;

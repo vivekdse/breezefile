@@ -56,6 +56,27 @@
   color: var(--text-on-panel);
 }
 
+/* task-f523fcb5b474 — the title sits alongside its copy affordances (title,
+   task id) so copying either is one click from the header. */
+.nh-dialog__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* task-f523fcb5b474 — the global `body { user-select: none }` (base.css,
+   file-manager-chrome convention) made this dialog's title and content
+   entirely uncopiable. Scope selection back ON for the title and the
+   scrolling body (evidence log, question/failure text, outputs, etc.) so the
+   user can select/copy task text; the interactive chrome (buttons, pills)
+   keeps the app's default non-selectable feel. */
+.nh-dialog__title,
+.nh-dialog__body {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .nh-dialog__sub {
   color: var(--muted-on-panel);
   font-size: var(--fs-xs);
@@ -330,11 +351,16 @@
   font-size: var(--fs-sm);
   color: var(--text-on-panel);
   word-break: break-word;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
 }
 .nh-dialog__output-v--pending {
   color: var(--muted-on-panel);
   font-style: italic;
 }
+.nh-dialog__output-copy { flex: 0 0 auto; }
 .nh-dialog__completion-line {
   margin-top: var(--sp-2);
   font-size: var(--fs-xs);

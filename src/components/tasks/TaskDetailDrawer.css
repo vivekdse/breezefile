@@ -182,6 +182,16 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   line-height: 1.3;
 }
 
+/* task-f523fcb5b474 — title row carries the title plus its copy affordances
+   (title, task id) inline so copying either never requires leaving the header. */
+.tdd__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.tdd__title-row .tdd__title { flex: 1 1 auto; min-width: 0; }
+
 /* task-1e312af5fae8 — the global `body { user-select: none }` (base.css) makes
    the detail content uncopyable. Scope selection back ON for the task's title
    and the scrolling content body so the user can select/copy task text. */
@@ -191,6 +201,10 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   -webkit-user-select: text;
   cursor: auto;
 }
+
+/* task-f523fcb5b474 — per-output-value copy, sits inline after the value. */
+.tdd__output-v { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.tdd__output-copy { flex: 0 0 auto; }
 
 /* ── live action row ── */
 .tdd__actionrow {

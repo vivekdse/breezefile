@@ -1,0 +1,32 @@
+/* task-f523fcb5b474 — shared copy-button affordance. Sized to sit inline next
+   to a title/label or as a small per-row action; adopts the app's existing
+   ghost-button look (border-less until hover, per ModeLine's .modeline__btn /
+   the detail surfaces' --ghost buttons) rather than inventing a new style. */
+.copy-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-sm, 12px);
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: var(--r-md, 6px);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  /* Never let this button's own affordance become "selectable text" — it's
+     interactive chrome, not task content. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.copy-btn:hover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+  color: var(--fg-1);
+}
+.copy-btn--copied {
+  color: var(--accent-strong, var(--accent));
+  border-color: var(--accent);
+}
