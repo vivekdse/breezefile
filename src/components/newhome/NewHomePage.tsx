@@ -28,7 +28,7 @@
 // PHI: task titles/custom-field values render in-app only; never persisted
 // to disk/logs (see docs/typebuild-data-field-contract.md).
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNewHomeData } from './useNewHomeData';
 import { compileTaskQuery, runTaskQuery } from './taskQuery';
 import type { NewHomeStatus } from './types';
@@ -131,6 +131,11 @@ export function NewHomePage() {
   }
   const [filter, setFilter] = useState<FilterState>('all');
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // task-7ea59baaea6c — tracks the project id as of the last run of the
+  // close-detail-pane effect below, so that effect can tell "the selection
+  // just changed" (real project switch — close the pane) apart from "this is
+  // the initial mount" (seeded from persisted prefs — don't close anything).
+  const prevProjectIdRef = useRef(selectedProjectId);
   // task-7bdb94445321 follow-up — free-text roster search, ANDed with the
   // status filter. Empty string = no text filter (status filter still applies).
   const [search, setSearch] = useState('');
@@ -465,6 +470,27 @@ export function NewHomePage() {
   }, [selectedProject, projects, counts, tasks, filter, search]);
 
   useEffect(() => clearNewHomeContext, []);
+
+  // task-7ea59baaea6c — switching the selected project must close any
+  // already-open task-detail pane. Without this, the header counts and
+  // Outcomes list update to the new project (both keyed off
+  // useNewHomeData(selectedProjectId)) while a still-mounted detail
+  // pane/drawer keeps showing the OLD project's task. This covers every path
+  // that changes selectedProjectId — the dropdown's onChange, the copilot's
+  // select_home_project bridge, and the stale-selection fallback — since they
+  // all funnel through this one piece of state.
+  //
+  // Closes both possible detail surfaces: the legacy local dialog
+  // (setOpenTaskId(null)) and — since USE_UNIFIED_DETAIL routes opens to the
+  // app-wide drawer in App.tsx — the fm:closeTaskDetail event that drawer
+  // listens for. Skips the very first render (prevProjectId ref starts
+  // unset) so mounting New Home doesn't spuriously fire a close.
+  useEffect(() => {
+    if (prevProjectIdRef.current === selectedProjectId) return;
+    prevProjectIdRef.current = selectedProjectId;
+    setOpenTaskId(null);
+    window.dispatchEvent(new CustomEvent('fm:closeTaskDetail'));
+  }, [selectedProjectId]);
 
   return (
     <div className="nh">
