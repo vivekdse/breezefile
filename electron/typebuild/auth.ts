@@ -54,6 +54,10 @@ type Session = {
   idToken: string;
   refreshToken: string;
   email: string;
+  // The Firebase user id (`sub`/`user_id` JWT claim) — immutable per account,
+  // opaque, NON-PHI. Used to namespace/segregate per-principal on-disk state
+  // (e.g. the encrypted PHI DB). May be '' if the token omitted it.
+  principal: string;
   // Absolute epoch ms at which the ID token expires.
   expiresAtMs: number;
 };
@@ -235,6 +239,7 @@ export async function signIn(email: string, password: string): Promise<AuthState
     idToken,
     refreshToken,
     email: resolvedEmail,
+    principal: principalFromIdToken(idToken),
     expiresAtMs: Date.now() + expiresInSec * 1000,
   };
   await persistRefreshToken(refreshToken);
@@ -270,6 +275,7 @@ export async function adoptSession(input: {
     idToken,
     refreshToken,
     email: resolvedEmail,
+    principal: principalFromIdToken(idToken),
     expiresAtMs: Date.now() + expiresInSec * 1000,
   };
   await persistRefreshToken(refreshToken);
@@ -327,6 +333,7 @@ async function doRefresh(refreshToken: string, email: string): Promise<string> {
     idToken,
     refreshToken: nextRefresh,
     email: resolvedEmail,
+    principal: principalFromIdToken(idToken),
     expiresAtMs: Date.now() + expiresInSec * 1000,
   };
   if (nextRefresh !== refreshToken) await persistRefreshToken(nextRefresh);
@@ -355,6 +362,16 @@ export async function getIdToken(): Promise<string> {
 
 export function getAuthState(): AuthState {
   return currentState();
+}
+
+/**
+ * The signed-in Firebase principal — the immutable `sub`/`user_id` JWT claim,
+ * opaque and NON-PHI. Returns '' when signed out or when the token omitted the
+ * claim (callers namespacing per-principal state should treat '' as "no stable
+ * principal available" and fall back to email or refuse to persist). Never PHI.
+ */
+export function getPrincipal(): string {
+  return session?.principal ?? '';
 }
 
 /**
@@ -423,15 +440,32 @@ export async function initHeadlessAuth(): Promise<AuthState | null> {
   return signInHeadless(email, password);
 }
 
-/** Decode the email claim from a Firebase ID token (JWT) without verifying. */
-function emailFromIdToken(idToken: string): string | null {
+/** Decode selected claims from a Firebase ID token (JWT) without verifying.
+ *  Verification is the server's job; here we only read NON-secret identity
+ *  claims (email, sub/user_id) the client already trusts post-refresh. */
+function decodeClaims(idToken: string): {
+  email?: string;
+  sub?: string;
+  user_id?: string;
+} | null {
   try {
     const payload = idToken.split('.')[1];
     if (!payload) return null;
     const json = Buffer.from(payload, 'base64url').toString('utf8');
-    const claims = JSON.parse(json) as { email?: string };
-    return claims.email ?? null;
+    return JSON.parse(json) as { email?: string; sub?: string; user_id?: string };
   } catch {
     return null;
   }
+}
+
+/** Decode the email claim from a Firebase ID token (JWT) without verifying. */
+function emailFromIdToken(idToken: string): string | null {
+  return decodeClaims(idToken)?.email ?? null;
+}
+
+/** Decode the immutable principal (Firebase `sub`, `user_id` fallback) from a
+ *  Firebase ID token. Returns '' when absent. Opaque, NON-PHI. */
+function principalFromIdToken(idToken: string): string {
+  const claims = decodeClaims(idToken);
+  return claims?.sub || claims?.user_id || '';
 }
