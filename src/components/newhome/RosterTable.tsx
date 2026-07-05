@@ -202,7 +202,11 @@ function ActionsMenu({ items, label }: { items: MenuItem[]; label: string }) {
  *  the two surfaces never drift on "what counts as the outcome".
  *  PHI: the returned string may carry task content — render only. */
 function summarizeOutcome(task: NewHomeTask, detailTask: Task | null | undefined): string {
-  const result = task.raw?.result;
+  // The LIST row never carries `result` (mapListRow gap — same as the
+  // outputSchema gap task-6b1136a8ff77 fixed for labels): the fetched DETAIL
+  // is the source of truth for the payload, with the raw row as a fallback
+  // for a source that does inline it.
+  const result = detailTask?.result ?? task.raw?.result;
   if (result && typeof result === 'object' && (result as { type?: unknown }).type === 'table') {
     const table = normalizeTablePayload((result as { payload?: unknown }).payload);
     if (table) {
@@ -750,8 +754,13 @@ export function RosterTable({
   }, [candidateJobIds, chained]);
 
   // A chained job's children are folded into its aggregate row — don't ALSO
-  // give them their own top-level row (a non-chained parent's children still
-  // render as plain rows, matching classic behavior).
+  // give them their own top-level row. This now covers THIN-parent chains too:
+  // since every parent-with-children renders as an aggregate chain row
+  // (Status breakdown + Runs), letting its steps also render as top-level rows
+  // double-counted them (QA round: the scaffold chain showed its parent AND
+  // both failed steps). A child only folds while its parent row is actually
+  // in the current (filtered) list — filter to "failed" and the failed steps
+  // surface as rows because their queued parent is filtered out.
   const hiddenChildIds = useMemo(() => {
     const set = new Set<string>();
     for (const res of resolutions.values()) {
@@ -759,8 +768,13 @@ export function RosterTable({
         for (const cid of Object.values(res.childIdByDefId)) set.add(cid);
       }
     }
+    for (const t of rows) {
+      if (t.raw.parentTaskId ?? null) continue; // only top-level parents fold
+      const kids = childrenByParentId.get(t.id);
+      if (kids) for (const c of kids) set.add(c.id);
+    }
     return set;
-  }, [resolutions]);
+  }, [resolutions, rows, childrenByParentId]);
 
   const visibleRows = useMemo(
     () => rows.filter((t) => !hiddenChildIds.has(t.id)),
@@ -901,6 +915,17 @@ export function RosterTable({
       failed: 0,
     };
     for (const cid of childIds) {
+      // Prefer the DERIVED New Home status (rowsById) — it already folds in
+      // attempts-exhausted → failed, stalled → needs, etc., so the parent's
+      // breakdown can never disagree with the pill the child's own row would
+      // show (QA round: raw 'open' children with exhausted attempts read
+      // "2 queued" on the parent while rendering as Failed rows). Fall back
+      // to the raw status for a child outside the scoped roster.
+      const row = rowsById.get(cid);
+      if (row) {
+        counts[statusBucket(row.status)] += 1;
+        continue;
+      }
       const child = allTasksById.get(cid);
       counts[statusBucket(child?.rawStatus ?? child?.status)] += 1;
     }
