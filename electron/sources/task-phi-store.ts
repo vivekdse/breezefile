@@ -1,0 +1,380 @@
+// task-ac9f4a27be7d — ENCRYPTED, per-principal store for the PHI layer of the
+// TypeBuild task cache (child of epic task-b3fb2928bb3c). The companion to the
+// PHI-FREE task-skeleton-store: the skeleton persists routing metadata in the
+// clear (it's NON-PHI and drives order/filter/counts); THIS store persists the
+// only PHI fields — task `title` and `body`/`notes` — in a whole-file-encrypted
+// SQLCipher DB so Home shows real titles instantly on cold start WITHOUT a
+// durable plaintext PHI copy on disk.
+//
+// SECURITY MODEL (see db-key.ts for the full rationale):
+//   - The DB file is encrypted via SQLCipher `PRAGMA key` with a raw 32-byte key
+//     derived (HKDF) from a per-principal safeStorage-wrapped master + a
+//     machine-local salt. The key is only resolvable inside a live, authenticated
+//     OS-user session; a copied file or backup is undecryptable.
+//   - The DB is NAMESPACED per principal (filename carries the principal tag AND
+//     the key is principal-bound), so principal A never opens principal B's DB.
+//   - On sign-out the store drops its rows AND the wrapped key is wiped
+//     (db-key.wipeDbKey), and since the master was random, the file can never be
+//     decrypted again — a defense-in-depth belt on top of the row wipe.
+//   - If safeStorage is unavailable (no OS keychain) we refuse to open an
+//     encrypted file and run MEMORY-ONLY for the session, mirroring the
+//     refresh-token policy in auth.ts. Home then falls back to the skeleton's
+//     opaque-id placeholders until the first network pull layers titles in memory.
+//
+// This module is Electron-main-only (via db-key). It is imported lazily by the
+// source so non-GUI paths that never open the PHI DB don't pull it in.
+
+import path from 'node:path';
+import os from 'node:os';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+// The SQLCipher-backed, drop-in fork of better-sqlite3 (same synchronous API,
+// adds PRAGMA key). ONLY this store uses it; the three NON-PHI DBs stay on stock
+// better-sqlite3. Isolated to this one import so the encrypted-driver dependency
+// has a single site.
+import Database from 'better-sqlite3-multiple-ciphers';
+import { resolveDbKey, keyPragmaLiteral, encryptionAvailable } from '../typebuild/db-key';
+import { principalTag } from '../typebuild/db-key-derive.mjs';
+
+// The PHI projection we persist: id + the two PHI fields. Nothing else — the
+// routing skeleton is the skeleton store's job. `title` comes from the list
+// pull; `body` is the decrypted detail (mapped into SourcedTask.notes).
+export type PhiRow = { id: string; title: string | null; body: string | null };
+
+// A single principal's open encrypted DB. We hold at most one open DB at a time
+// (the signed-in principal's). Switching principals closes the old one.
+type OpenDb = {
+  principal: string;
+  db: InstanceType<typeof Database>;
+};
+
+let current: OpenDb | null = null;
+// When encryption is unavailable we degrade to an in-memory map for the session
+// so titles at least persist across a re-render (never across a restart, and
+// never to disk). Keyed by id.
+//
+// INVARIANT (review fix): this is ALWAYS a Map once any open() attempt has been
+// made — even the encrypted path leaves it non-null-until-success so a write
+// that races an in-flight open() lands in memory instead of being silently
+// dropped, then gets flushed into the DB when open() succeeds. It is only reset
+// to null on sign-out (clearPhi). See ensureFallback().
+let memoryFallback: Map<string, PhiRow> | null = null;
+// In-flight open() promise, so concurrent openForPrincipal calls for the same
+// principal share ONE open (no double-Database / leaked handle). Cleared when
+// the open resolves.
+let openInFlight: Promise<InstanceType<typeof Database> | null> | null = null;
+
+function dbDir(): string {
+  return path.join(os.homedir(), '.breezefile');
+}
+
+function dbPath(principal: string): string {
+  return path.join(dbDir(), `typebuild-phi-${principalTag(principal)}.db`);
+}
+
+function ensureDir(): void {
+  const dir = dbDir();
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+/** Ensure the memory fallback map exists so a put*() that runs while open() is
+ *  still resolving lands SOMEWHERE (memory) instead of no-op'ing into the void.
+ *  On a successful encrypted open, any rows collected here are flushed to the DB
+ *  and the map is dropped. */
+function ensureFallback(): Map<string, PhiRow> {
+  memoryFallback = memoryFallback ?? new Map();
+  return memoryFallback;
+}
+
+/** Remove the encrypted DB file (and WAL/shm siblings) for a principal. Used
+ *  both on sign-out and to reap an orphaned file we can no longer decrypt. */
+function removeDbFile(principal: string): void {
+  const p = dbPath(principal);
+  try {
+    rmSync(p, { force: true });
+    rmSync(p + '-wal', { force: true });
+    rmSync(p + '-shm', { force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+const SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS task_phi (
+    id    TEXT PRIMARY KEY,
+    title TEXT,
+    body  TEXT
+  );
+`;
+
+// ─── Open / key ──────────────────────────────────────────────────────────────
+
+/**
+ * Open (or reuse) the encrypted PHI DB for `principal`. Returns null when the
+ * store must run memory-only (no principal, or safeStorage unavailable, or the
+ * key can't be resolved). Idempotent for the same principal; switching principals
+ * closes the previous DB first so two accounts never share a handle.
+ *
+ * This is async because key resolution touches safeStorage/userData. Callers
+ * that need a sync handle should have awaited a prior open() at sign-in.
+ */
+async function open(principal: string): Promise<InstanceType<typeof Database> | null> {
+  if (!principal) return null;
+  if (current && current.principal === principal) return current.db;
+  // Concurrent open() for the same principal share ONE open, so we never
+  // construct two Database handles for the same file (leak / Windows EBUSY).
+  if (openInFlight) return openInFlight;
+  openInFlight = doOpen(principal).finally(() => {
+    openInFlight = null;
+  });
+  return openInFlight;
+}
+
+async function doOpen(
+  principal: string,
+): Promise<InstanceType<typeof Database> | null> {
+  // Different principal currently open — tear it down first.
+  if (current && current.principal !== principal) closeCurrent();
+
+  // Make the fallback exist NOW (before any await) so a put*() that races this
+  // open lands in memory instead of being dropped; on success we flush it below.
+  ensureFallback();
+
+  if (!(await encryptionAvailable())) {
+    // No OS keychain — memory-only for the session (already ensured above).
+    return null;
+  }
+
+  const key = await resolveDbKey(principal);
+  if (!key) {
+    // Wrapped key won't resolve (keychain rotated / different OS user). The
+    // existing encrypted file (if any) is now undecryptable and orphaned — reap
+    // it so dead ciphertext doesn't accumulate across keychain rotations. Then
+    // run memory-only for the session.
+    removeDbFile(principal);
+    return null;
+  }
+
+  ensureDir();
+  const db = new Database(dbPath(principal));
+  try {
+    // Raw-key form: SQLCipher uses our HKDF-derived bytes directly (no second
+    // KDF). MUST be the first statement on the connection, before any read.
+    db.pragma(`key = "${keyPragmaLiteral(key)}"`);
+    db.pragma('journal_mode = WAL');
+    // Touch the DB to force the key to be validated NOW (a wrong key throws
+    // "file is not a database" here rather than at first query).
+    db.exec(SCHEMA_SQL);
+    db.prepare('SELECT count(*) FROM task_phi').get();
+  } catch (e) {
+    // Wrong key / corrupt / opened plaintext-by-mistake. Close and degrade to
+    // memory-only rather than crash sign-in. PHI-free log.
+    console.warn('[typebuild-phi] encrypted DB open failed:', (e as Error).message);
+    try {
+      db.close();
+    } catch {
+      /* ignore */
+    }
+    return null;
+  } finally {
+    // Zero our copy of the key material promptly.
+    key.fill(0);
+  }
+
+  current = { principal, db };
+  // Flush any rows collected in the fallback while open() was resolving (the
+  // race window) into the encrypted DB, then drop the fallback.
+  const pending = memoryFallback;
+  memoryFallback = null;
+  if (pending && pending.size > 0) {
+    try {
+      const stmt = db.prepare(
+        `INSERT INTO task_phi (id, title, body) VALUES (@id, @title, @body)
+         ON CONFLICT(id) DO UPDATE SET
+           title = COALESCE(excluded.title, task_phi.title),
+           body  = COALESCE(excluded.body,  task_phi.body)`,
+      );
+      const txn = db.transaction((rows: PhiRow[]) => {
+        for (const r of rows) stmt.run({ id: r.id, title: r.title, body: r.body });
+      });
+      txn([...pending.values()]);
+    } catch (e) {
+      console.warn('[typebuild-phi] fallback flush failed:', (e as Error).message);
+    }
+  }
+  return db;
+}
+
+function closeCurrent(): void {
+  if (!current) return;
+  try {
+    current.db.close();
+  } catch {
+    /* ignore */
+  }
+  current = null;
+}
+
+// ─── Public API — mirrors the skeleton store's shape ──────────────────────────
+
+/** Open the encrypted PHI DB for the signed-in principal. Call once at sign-in
+ *  (after auth restore) so subsequent reads/writes have a live handle. Safe to
+ *  call repeatedly. */
+export async function openForPrincipal(principal: string): Promise<void> {
+  await open(principal);
+}
+
+/** Load all persisted PHI rows for cold-start hydration. Returns [] when
+ *  memory-only or not yet opened. The caller layers title/body onto the
+ *  skeleton-hydrated cache rows. */
+export function loadPhi(): PhiRow[] {
+  if (current) {
+    const rows = current.db
+      .prepare('SELECT id, title, body FROM task_phi')
+      .all() as PhiRow[];
+    return rows;
+  }
+  if (memoryFallback) return [...memoryFallback.values()];
+  return [];
+}
+
+/** Look up one row's PHI (title/body), or null. */
+export function getPhi(id: string): PhiRow | null {
+  if (current) {
+    return (
+      (current.db
+        .prepare('SELECT id, title, body FROM task_phi WHERE id = ?')
+        .get(id) as PhiRow | undefined) ?? null
+    );
+  }
+  if (memoryFallback) return memoryFallback.get(id) ?? null;
+  return null;
+}
+
+/** Upsert a task's title (from a list pull). Leaves body untouched. No-ops for
+ *  a null/empty title so we never overwrite a known title with a placeholder.
+ *  When the DB isn't open yet, writes to the fallback map so a write that races
+ *  open() is NOT lost (open() flushes the fallback into the DB on success). */
+export function putTitle(id: string, title: string | null): void {
+  if (title == null) return;
+  if (current) {
+    current.db
+      .prepare(
+        `INSERT INTO task_phi (id, title, body) VALUES (?, ?, NULL)
+         ON CONFLICT(id) DO UPDATE SET title = excluded.title`,
+      )
+      .run(id, title);
+    return;
+  }
+  const fb = ensureFallback();
+  const prev = fb.get(id);
+  fb.set(id, { id, title, body: prev?.body ?? null });
+}
+
+/** Upsert many titles in one transaction (a full list pull). */
+export function putTitles(rows: Array<{ id: string; title: string | null }>): void {
+  if (current) {
+    const stmt = current.db.prepare(
+      `INSERT INTO task_phi (id, title, body) VALUES (@id, @title, NULL)
+       ON CONFLICT(id) DO UPDATE SET title = excluded.title`,
+    );
+    const txn = current.db.transaction((rs: Array<{ id: string; title: string | null }>) => {
+      for (const r of rs) if (r.title != null) stmt.run({ id: r.id, title: r.title });
+    });
+    txn(rows);
+    return;
+  }
+  for (const r of rows) putTitle(r.id, r.title);
+}
+
+/** Upsert a task's body (from a getTask detail pull). Leaves title untouched.
+ *  No-ops for a null body so a note-less detail fetch never WIPES a previously
+ *  persisted good body (a getTask on a task whose detail carries no notes would
+ *  otherwise overwrite the stored body with NULL). */
+export function putBody(id: string, body: string | null): void {
+  if (body == null) return;
+  if (current) {
+    current.db
+      .prepare(
+        `INSERT INTO task_phi (id, title, body) VALUES (?, NULL, ?)
+         ON CONFLICT(id) DO UPDATE SET body = excluded.body`,
+      )
+      .run(id, body);
+    return;
+  }
+  const fb = ensureFallback();
+  const prev = fb.get(id);
+  fb.set(id, { id, title: prev?.title ?? null, body });
+}
+
+/** Remove PHI rows no longer present in the FULL live set — used ONLY on the
+ *  full-reconcile path, where `liveIds` is the complete server inventory. NEVER
+ *  call this on the delta path: there `this.cache` may not contain every
+ *  persisted id (early hydration, delta-preserved rows), so intersecting with it
+ *  would delete still-valid PHI. Deletes converge here (full pull) and via
+ *  pruneIds (explicit tombstones) on the delta path. */
+export function pruneTo(liveIds: Set<string>): void {
+  if (current) {
+    const ids = (
+      current.db.prepare('SELECT id FROM task_phi').all() as { id: string }[]
+    ).map((r) => r.id);
+    const del = current.db.prepare('DELETE FROM task_phi WHERE id = ?');
+    const txn = current.db.transaction(() => {
+      for (const id of ids) if (!liveIds.has(id)) del.run(id);
+    });
+    txn();
+    return;
+  }
+  if (memoryFallback) {
+    for (const id of [...memoryFallback.keys()]) if (!liveIds.has(id)) memoryFallback.delete(id);
+  }
+}
+
+/** Remove PHI for an EXPLICIT id list — the delta path's tombstones. Only these
+ *  ids are dropped (never an intersection with the whole cache), so a task
+ *  present on disk but absent from the current in-memory cache keeps its PHI
+ *  until a full reconcile legitimately removes it. Mirrors the skeleton store's
+ *  delta semantics (explicit tombstones only; the periodic full pull converges). */
+export function pruneIds(ids: string[]): void {
+  if (ids.length === 0) return;
+  if (current) {
+    const del = current.db.prepare('DELETE FROM task_phi WHERE id = ?');
+    const txn = current.db.transaction(() => {
+      for (const id of ids) del.run(id);
+    });
+    txn();
+    return;
+  }
+  if (memoryFallback) for (const id of ids) memoryFallback.delete(id);
+}
+
+/**
+ * Sign-out teardown: empty the rows, close the DB, and DELETE the encrypted file
+ * so no PHI ciphertext lingers. Pass the signed-out `principal` so the file is
+ * reaped EVEN when the store ran memory-only this session (no `current`) but a
+ * prior session left an encrypted file on disk. The wrapped key is wiped
+ * separately by the caller (db-key.wipeDbKey) — belt and suspenders: even a file
+ * that survives (if unlink races) is undecryptable once the key is gone.
+ */
+export function clearPhi(principal?: string): void {
+  if (current) {
+    const p = current.principal;
+    try {
+      current.db.exec('DELETE FROM task_phi;');
+    } catch {
+      /* ignore */
+    }
+    closeCurrent();
+    removeDbFile(p);
+  } else if (principal) {
+    // Memory-only / never-opened this session: still reap any on-disk file left
+    // by a prior session so ciphertext doesn't accumulate across sign-outs.
+    removeDbFile(principal);
+  }
+  memoryFallback = null;
+}
+
+// For tests / explicit cleanup.
+export function _closeForTests(): void {
+  closeCurrent();
+  memoryFallback = null;
+}

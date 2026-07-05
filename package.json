@@ -15,7 +15,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test": "node --test tests/*.test.mjs",
-    "postinstall": "electron-rebuild -f -w better-sqlite3 -w @homebridge/node-pty-prebuilt-multiarch"
+    "postinstall": "electron-rebuild -f -w better-sqlite3,better-sqlite3-multiple-ciphers,@homebridge/node-pty-prebuilt-multiarch"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",
@@ -50,6 +50,7 @@
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "better-sqlite3": "^12.9.0",
+    "better-sqlite3-multiple-ciphers": "^12.9.0",
     "pdf-lib": "^1.17.1",
     "playwright-core": "^1.61.0",
     "react": "^19.0.0",
@@ -69,7 +70,9 @@
       "node_modules/@homebridge/node-pty-prebuilt-multiarch/**/*"
     ],
     "asarUnpack": [
-      "**/node_modules/@homebridge/node-pty-prebuilt-multiarch/**/*"
+      "**/node_modules/@homebridge/node-pty-prebuilt-multiarch/**/*",
+      "**/node_modules/better-sqlite3/**/*",
+      "**/node_modules/better-sqlite3-multiple-ciphers/**/*"
     ],
     "mac": {
       "category": "public.app-category.utilities",

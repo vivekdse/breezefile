@@ -42,7 +42,22 @@ import {
   clearSkeleton,
   type SkeletonTask,
 } from './task-skeleton-store';
-import { getAuthState, getIdToken } from '../typebuild/auth';
+import { getAuthState, getIdToken, getPrincipal } from '../typebuild/auth';
+// task-ac9f4a27be7d — the ENCRYPTED per-principal PHI store (titles/bodies). The
+// counterpart to the PHI-free skeleton store: this holds the only PHI columns,
+// whole-file-encrypted via SQLCipher, keyed by a safeStorage-wrapped per-principal
+// key. Cold start layers these titles onto the skeleton so Home shows real text
+// instantly without a durable plaintext PHI copy on disk.
+import {
+  openForPrincipal as openPhi,
+  loadPhi,
+  putTitles as putPhiTitles,
+  putBody as putPhiBody,
+  pruneTo as prunePhi,
+  pruneIds as prunePhiIds,
+  clearPhi,
+} from './task-phi-store';
+import { wipeDbKey } from '../typebuild/db-key';
 import { mintMcpToken } from '../typebuild/mcp-token';
 import { clearSession, registerSession } from '../typebuild/sessions';
 // task-6fc9e503623e — the pure, unit-tested liveness classifier (shared .mjs).
@@ -833,6 +848,12 @@ export class TypeBuildTaskSource implements TaskSource {
   // is in-memory only and resets on each full pull.
   private pollCount = 0;
 
+  // task-ac9f4a27be7d — the Firebase principal (sub) this source instance is
+  // bound to, captured at startPolling. Needed at sign-out to wipe the correct
+  // per-principal encrypted-DB key, since auth has already flipped to
+  // signed-out by the time stopPolling runs. '' when no stable principal.
+  private principal = '';
+
   // fm-b5at.10 — task ids whose session is mid-relaunch. The relaunch kills the
   // old PTY, whose onExit would otherwise fire the "Release this task?" prompt
   // (the user still holds the claim during the swap). We suppress that prompt
@@ -963,6 +984,16 @@ export class TypeBuildTaskSource implements TaskSource {
     }
     // Swap the in-memory cache to the fresh rows (titles in memory only).
     this.cache = fresh;
+    // task-ac9f4a27be7d — persist the PHI titles into the ENCRYPTED store so the
+    // NEXT cold start shows real titles instantly (the skeleton alone only knows
+    // the opaque id). Encrypted at rest; a no-op when the store is memory-only.
+    // Prune PHI for ids no longer live so task text for gone tasks doesn't linger.
+    try {
+      putPhiTitles([...fresh.values()].map((t) => ({ id: t.id, title: t.title })));
+      prunePhi(new Set(fresh.keys()));
+    } catch (e) {
+      console.warn('[typebuild] PHI title persist failed:', (e as Error).message);
+    }
     return diff;
   }
 
@@ -1000,6 +1031,18 @@ export class TypeBuildTaskSource implements TaskSource {
     // Apply to the in-memory cache: upsert changed, delete tombstoned.
     for (const t of changed) this.cache.set(t.id, t);
     for (const id of tombstones) this.cache.delete(id);
+    // task-ac9f4a27be7d — mirror the PHI titles for the changed rows into the
+    // encrypted store, and prune ONLY the explicit tombstones' PHI. Delta path:
+    // we must NOT intersect with the whole cache (the cache may not hold every
+    // persisted id during early hydration / delta-preserve, so that would delete
+    // still-valid PHI). Deletes converge via these tombstones + the periodic full
+    // reconcile's pruneTo. Encrypted at rest; a no-op when memory-only.
+    try {
+      putPhiTitles(changed.map((t) => ({ id: t.id, title: t.title })));
+      prunePhiIds(tombstones);
+    } catch (e) {
+      console.warn('[typebuild] PHI delta persist failed:', (e as Error).message);
+    }
     return diff;
   }
 
@@ -1130,7 +1173,18 @@ export class TypeBuildTaskSource implements TaskSource {
     if (res.status === 404) return null; // not visible
     if (!res.ok) throw new Error(`typebuild: get failed (${res.status})`);
     const detail = (await res.json().catch(() => ({}))) as DetailRow;
-    return this.mapDetail(detail, id);
+    const mapped = this.mapDetail(detail, id);
+    // task-ac9f4a27be7d — persist the decrypted body into the ENCRYPTED PHI store
+    // so a cold start can show it without a round-trip. GUI/get path ONLY — the
+    // headless daemon's claimNext (which also calls mapDetail) must NOT persist
+    // (see its PHI note), and it never opens the PHI store, so this stays here.
+    // Encrypted at rest; a no-op when the store is memory-only.
+    try {
+      putPhiBody(id, mapped.notes ?? null);
+    } catch (e) {
+      console.warn('[typebuild] PHI body persist failed:', (e as Error).message);
+    }
+    return mapped;
   }
 
   // ─── claim-next (headless breezed loop — fm-typebuild-repoint) ────────────
@@ -3759,10 +3813,63 @@ export class TypeBuildTaskSource implements TaskSource {
   // Called by the registration wiring when the source is registered /
   // unregistered (sign-in / sign-out).
   startPolling(): void {
+    // INVARIANT: one source instance is bound to one principal for its whole
+    // life. The auth wiring (main.ts register/unregister) constructs a FRESH
+    // TypeBuildTaskSource on every sign-in and drops it on sign-out, so an
+    // account switch always tears down + rebuilds — this.principal is set once,
+    // below, and never needs re-reading. If a future path ever re-signs-in
+    // WITHOUT an intervening unregister, this early-return would keep the old
+    // principal; that wiring must recreate the source instead.
     if (this.pollTimer) return;
+    // task-ac9f4a27be7d — capture the principal this source is bound to (for the
+    // sign-out teardown, which runs AFTER auth has flipped to signed-out and so
+    // can no longer read it) and open the encrypted PHI DB for it. Opening is
+    // async (key resolution touches safeStorage); once it resolves we hydrate
+    // real titles onto the skeleton-placeholder cache and broadcast. A missing
+    // principal / unavailable keychain simply means the PHI store runs
+    // memory-only and Home keeps the opaque-id placeholders until the first pull.
+    this.principal = getPrincipal();
     this.pollTimer = setInterval(() => void this.poll(), POLL_INTERVAL_MS);
-    // Kick an immediate pull so the UI populates without waiting 30s.
-    void this.poll();
+    // Open the encrypted PHI DB FIRST, then hydrate real titles onto the
+    // skeleton-placeholder cache, THEN kick the immediate pull — so the first
+    // poll's PHI writes land in an already-open store (the put*() fallback still
+    // catches any residual race, but ordering avoids a redundant flush). A
+    // missing principal / unavailable keychain leaves the store memory-only and
+    // Home keeps opaque-id placeholders until the first pull. The open+hydrate
+    // must never delay or block the poll on failure, hence the catch + always-poll.
+    const kickPoll = () => void this.poll();
+    if (this.principal) {
+      void openPhi(this.principal)
+        .then(() => this.hydratePhi())
+        .catch((e) =>
+          console.warn('[typebuild] PHI open failed:', (e as Error).message),
+        )
+        .finally(kickPoll);
+    } else {
+      kickPoll();
+    }
+  }
+
+  // task-ac9f4a27be7d — layer persisted PHI titles onto the skeleton-hydrated
+  // cache rows (which carry opaque-id placeholders) so Home shows real titles on
+  // cold start, then broadcast so the renderer repaints. Bodies stay lazy
+  // (fetched by getTask), but a persisted body is reused when present. PHI stays
+  // in memory once loaded — the DB is the encrypted at-rest copy.
+  private hydratePhi(): void {
+    let touched = false;
+    for (const row of loadPhi()) {
+      const cached = this.cache.get(row.id);
+      if (!cached) continue;
+      if (row.title) {
+        cached.title = row.title;
+        touched = true;
+      }
+      if (row.body != null && cached.notes == null) {
+        cached.notes = row.body;
+        touched = true;
+      }
+    }
+    if (touched) breezeHost().onTasksChanged();
   }
 
   stopPolling(): void {
@@ -3786,6 +3893,26 @@ export class TypeBuildTaskSource implements TaskSource {
       clearSkeleton();
     } catch (e) {
       console.warn('[typebuild] skeleton clear failed:', (e as Error).message);
+    }
+    // task-ac9f4a27be7d — drop the ENCRYPTED PHI DB (rows + file) and WIPE the
+    // per-principal wrapped key so a different account signing in on this machine
+    // can never see the prior account's task text — and so the encrypted file,
+    // if it lingers, is undecryptable once the (random) key is gone. Ordered
+    // after clearSkeleton so the routing set and its PHI layer are torn down
+    // together. Best-effort; a failure here must not block sign-out.
+    const principal = this.principal;
+    this.principal = '';
+    try {
+      // Pass the principal so the encrypted file is reaped even if this session
+      // ran memory-only (no open handle) but a prior session left a file.
+      clearPhi(principal || undefined);
+    } catch (e) {
+      console.warn('[typebuild] PHI clear failed:', (e as Error).message);
+    }
+    if (principal) {
+      void wipeDbKey(principal).catch((e) =>
+        console.warn('[typebuild] PHI key wipe failed:', (e as Error).message),
+      );
     }
   }
 
