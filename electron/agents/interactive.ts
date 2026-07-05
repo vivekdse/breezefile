@@ -24,6 +24,7 @@ import { resolveClaudeBin } from './claude';
 import { spawnManagedPty, reservePtyId, awaitPtyLiveness, writeManagedPty } from '../ipc';
 import type { PtyLivenessVerdict } from '../ipc';
 import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
+import { startTiming, timing } from '../core/launch-timing';
 
 export type InteractiveRunOptions = {
   /** Agent id for the run row. Defaults to task.auto_agent or the registry
@@ -289,6 +290,12 @@ export async function runTaskInteractive(
   ];
 
   const ptyId = reservePtyId();
+  // task fix/launch-latency-debug — pty-scoped timing flow. Started here so
+  // ipc.ts's onData can log the child's FIRST OUTPUT against the same epoch,
+  // separating "main-process fetch hang" from "claude cold-start hang".
+  const ptyFlow = `pty:${ptyId}`;
+  startTiming(ptyFlow);
+  timing(ptyFlow, 'spawnManagedPty call');
   spawnManagedPty({
     id: ptyId,
     file: bin,
@@ -385,10 +392,15 @@ export async function runTaskInteractive(
   // `liveness.alive` and, when false, releases the claim and records the exit
   // code + tail instead of reporting a running session.
   if (opts.awaitLiveness) {
+    timing(ptyFlow, 'awaitLiveness start');
     const liveness = await awaitPtyLiveness(ptyId, {
       minAliveMs: opts.awaitLiveness.minAliveMs,
     });
-    if (liveness.alive) injectWorkBundle(ptyId, opts);
+    timing(ptyFlow, `awaitLiveness result alive=${liveness.alive}`);
+    if (liveness.alive) {
+      injectWorkBundle(ptyId, opts);
+      timing(ptyFlow, `injectWorkBundle (len=${opts.workBundle?.length ?? 0})`);
+    }
     return { run, ptyId, launched: true, liveness };
   }
 

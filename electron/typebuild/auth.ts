@@ -40,6 +40,12 @@
 // security boundary), so hardcoding it here is the normal pattern.
 export const FIREBASE_API_KEY = 'AIzaSyCvfuXXWy81cFM7JU3XwbDx_auIunL-C3c';
 
+// Timeout-bounded fetch (Electron-free, safe for the headless daemon). Every
+// TypeBuild network call first awaits getIdToken()'s refresh below, so a bare
+// fetch here hanging on a dead Firebase socket stalls EVERY launch leg — bound
+// it (task fix/launch-latency-debug).
+import { fetchWithTimeout } from './http';
+
 const IDENTITY_TOOLKIT_URL =
   'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword';
 const SECURE_TOKEN_URL = 'https://securetoken.googleapis.com/v1/token';
@@ -216,7 +222,7 @@ function firebaseError(body: unknown, fallback: string): string {
  * the Firebase error code (e.g. INVALID_LOGIN_CREDENTIALS) on failure.
  */
 export async function signIn(email: string, password: string): Promise<AuthState> {
-  const res = await fetch(`${IDENTITY_TOOLKIT_URL}?key=${FIREBASE_API_KEY}`, {
+  const res = await fetchWithTimeout(`${IDENTITY_TOOLKIT_URL}?key=${FIREBASE_API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, returnSecureToken: true }),
@@ -297,7 +303,7 @@ export async function signOut(): Promise<void> {
  * drops to signed-out and rethrows.
  */
 async function doRefresh(refreshToken: string, email: string): Promise<string> {
-  const res = await fetch(`${SECURE_TOKEN_URL}?key=${FIREBASE_API_KEY}`, {
+  const res = await fetchWithTimeout(`${SECURE_TOKEN_URL}?key=${FIREBASE_API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({

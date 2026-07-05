@@ -63,6 +63,7 @@
 // location routing (multi-entity selection) is a deliberate follow-up punt.
 
 import { getIdToken } from './auth';
+import { fetchWithTimeout } from './http';
 
 export const API_BASE = 'https://general.typebuild.com';
 
@@ -73,7 +74,10 @@ export const API_BASE = 'https://general.typebuild.com';
 export async function typebuildFetch(reqUrl: string, init?: RequestInit): Promise<Response> {
   const doFetch = async (): Promise<Response> => {
     const token = await getIdToken();
-    return fetch(reqUrl, {
+    // Timeout-bounded: this resolver runs N-per-launch in the pre-spawn wave; a
+    // dead socket on any key must fail fast, not hang the wave (task
+    // fix/launch-latency-debug).
+    return fetchWithTimeout(reqUrl, {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,

@@ -64,6 +64,8 @@ import { wipeDbKey } from '../typebuild/db-key';
 // delta reconcile. Held here so its lifecycle rides startPolling/stopPolling.
 import { TaskStreamClient } from './typebuild-stream';
 import { mintMcpToken } from '../typebuild/mcp-token';
+import { fetchWithTimeout } from '../typebuild/http';
+import { startTiming, timing } from '../core/launch-timing';
 import { clearSession, registerSession } from '../typebuild/sessions';
 // task-6fc9e503623e — the pure, unit-tested liveness classifier (shared .mjs).
 // Keeping the runtime on the SAME helper the tests assert means the exit-code
@@ -1227,7 +1229,9 @@ export class TypeBuildTaskSource implements TaskSource {
         Accept: 'application/json',
       };
       if (body !== undefined) headers['Content-Type'] = 'application/json';
-      return fetch(`${API_BASE}${path}`, {
+      // Timeout-bounded so a dead socket fails fast (list poll + getTask +
+      // project resolve all flow through here). task fix/launch-latency-debug.
+      return fetchWithTimeout(`${API_BASE}${path}`, {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -3248,6 +3252,12 @@ export class TypeBuildTaskSource implements TaskSource {
     id: string,
     opts: { resume: boolean; preclaimed?: boolean },
   ): Promise<{ ptyId: number }> {
+    // task fix/launch-latency-debug — timing probes. Flow keyed by task id so
+    // concurrent launches don't interleave. Labels carry only phase names +
+    // opaque ids (no PHI). See electron/core/launch-timing.ts.
+    const tflow = `launch:${shortId(id)}`;
+    startTiming(tflow);
+
     // Routing fields (flags) come from the in-memory cache populated by the
     // list poll; fall back to an empty flag set if the row isn't cached yet.
     const cached = this.cache.get(id);
@@ -3340,22 +3350,32 @@ export class TypeBuildTaskSource implements TaskSource {
     //    outputSchema, skills) are NOT persisted in the local task/PHI cache, so a
     //    local read would drop bundle content. See the launch-latency report.
     const { fetchOperatorInstructions } = await import('../typebuild/operator-instructions');
+    // task fix/launch-latency-debug — each leg logs its own resolve/reject time
+    // so a single hanging round-trip is visible (Promise.all waits for the
+    // slowest leg). `probe` wraps a promise to time both outcomes.
+    const probe = <T>(label: string, p: Promise<T>): Promise<T> =>
+      p.then(
+        (v) => { timing(tflow, `wave1 ${label} resolved`); return v; },
+        (e) => { timing(tflow, `wave1 ${label} REJECTED`); throw e; },
+      );
+    timing(tflow, 'wave1 dispatch');
     const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail] =
       await Promise.all([
-        mintMcpToken(),
-        fetchOperatorInstructions('global')
+        probe('mint', mintMcpToken()),
+        probe('operator-instructions', fetchOperatorInstructions('global')
           .then((oi) => oi.body.trim())
-          .catch(() => ''),
-        opts.resume
+          .catch(() => '')),
+        probe('context-bundle', opts.resume
           ? Promise.resolve('')
           : import('../typebuild/task-context-bundle')
               .then(({ fetchTaskContextBundle, renderBundleAddendum }) =>
                 fetchTaskContextBundle(id).then((bundle) => renderBundleAddendum(bundle)),
               )
-              .catch(() => ''),
-        this.resolveLaunchContext(id),
-        opts.resume ? Promise.resolve(null) : this.getTask(id).catch(() => null),
+              .catch(() => '')),
+        probe('project', this.resolveLaunchContext(id)),
+        probe('getTask', opts.resume ? Promise.resolve(null) : this.getTask(id).catch(() => null)),
       ]);
+    timing(tflow, 'wave1 all settled');
     const runCwd = projectCtx.cwd ?? tasksCwd;
 
     // Pre-claimed Start (fm-v0rc): we already hold the claim over REST, so the
@@ -3415,6 +3435,7 @@ export class TypeBuildTaskSource implements TaskSource {
           // missing key as "(unresolved)"), matching the prior best-effort
           // semantics. PHI stays memory-only: values live only on this stack on
           // the way into the bundle and are never logged or persisted.
+          timing(tflow, `wave2 dataRef dispatch (${dataKeys.length} keys)`);
           const settled = await Promise.all(
             dataKeys.map(async (key) => {
               try {
@@ -3424,6 +3445,7 @@ export class TypeBuildTaskSource implements TaskSource {
               }
             }),
           );
+          timing(tflow, 'wave2 dataRef settled');
           const resolvedInputs = settled.filter(
             (r): r is { key: string; value: string } => r !== null,
           );
@@ -3448,6 +3470,7 @@ export class TypeBuildTaskSource implements TaskSource {
     }
 
     let ptyId = 0;
+    timing(tflow, 'runTaskInteractive call');
     const res = await runTaskInteractive(synthetic, {
       agentId: 'claude',
       // task-3f0c6a6abe41 — the resolved live MAIN window (see above). undefined
@@ -3545,6 +3568,11 @@ export class TypeBuildTaskSource implements TaskSource {
         void this.onSessionExit(id);
       },
     });
+
+    timing(
+      tflow,
+      `runTaskInteractive returned launched=${res.launched} liveness.alive=${res.liveness?.alive ?? 'n/a'}`,
+    );
 
     if (!res.launched) {
       // No GUI window to host the tab — interactive Start needs the app open
@@ -4154,6 +4182,10 @@ export class TypeBuildTaskSource implements TaskSource {
     // principal / unavailable keychain simply means the PHI store runs
     // memory-only and Home keeps the opaque-id placeholders until the first pull.
     this.principal = getPrincipal();
+    // task fix/launch-latency-debug — Home-load timing. Where does cold-start go:
+    // PHI open (safeStorage), hydrate, or the first network poll?
+    startTiming('home');
+    timing('home', `startPolling (cache=${this.cache.size} skeleton rows)`);
     this.pollTimer = setInterval(() => void this.poll(), POLL_INTERVAL_MS);
     // Open the encrypted PHI DB FIRST, then hydrate real titles onto the
     // skeleton-placeholder cache, THEN kick the immediate pull — so the first
@@ -4162,10 +4194,18 @@ export class TypeBuildTaskSource implements TaskSource {
     // missing principal / unavailable keychain leaves the store memory-only and
     // Home keeps opaque-id placeholders until the first pull. The open+hydrate
     // must never delay or block the poll on failure, hence the catch + always-poll.
-    const kickPoll = () => void this.poll();
+    const kickPoll = () => {
+      timing('home', 'first poll() dispatch');
+      void this.poll().then(() => timing('home', 'first poll() resolved'));
+    };
     if (this.principal) {
+      timing('home', 'openPhi start');
       void openPhi(this.principal)
-        .then(() => this.hydratePhi())
+        .then(() => {
+          timing('home', 'openPhi resolved -> hydratePhi');
+          this.hydratePhi();
+          timing('home', 'hydratePhi done');
+        })
         .catch((e) =>
           console.warn('[typebuild] PHI open failed:', (e as Error).message),
         )

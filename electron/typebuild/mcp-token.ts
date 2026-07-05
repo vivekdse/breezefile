@@ -27,6 +27,7 @@
 
 import { hostname } from 'node:os';
 import { getIdToken, signOut } from './auth';
+import { fetchWithTimeout } from './http';
 
 const MINT_URL = 'https://general.typebuild.com/mcp-token';
 // A stable, content-free device label. Server stores this for audit; it is not
@@ -89,7 +90,12 @@ export async function mintMcpToken(): Promise<MintedMcpToken> {
   //    fetch → unreachable.
   let res: Response;
   try {
-    res = await fetch(MINT_URL, {
+    // fetchWithTimeout: a dead/half-open socket must fail FAST here — the mint
+    // GATES the spawn, so a bare fetch hanging on undici's ~300s headers timeout
+    // was the operator window sitting idle for minutes. On timeout this throws
+    // FetchTimeoutError, caught just below → the typed 'unreachable' the renderer
+    // surfaces at once (task fix/launch-latency-debug).
+    res = await fetchWithTimeout(MINT_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${idToken}`,
