@@ -292,6 +292,26 @@
   cursor: default;
   filter: none;
 }
+/* task-ecabeafa41e1 — "View →" is the primary chain/template action (accent);
+   "▶ Run all" is a quieter secondary (outline) so View reads as primary. */
+.nh-roster__action--view {
+  background: var(--accent);
+}
+.nh-roster__action--runall {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  font-weight: 600;
+}
+.nh-roster__action--runall:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  filter: none;
+}
+.nh-roster__action--runall:disabled {
+  opacity: 0.45;
+  cursor: default;
+  filter: none;
+}
 .nh-roster__action-empty {
   color: var(--muted-on-panel);
 }

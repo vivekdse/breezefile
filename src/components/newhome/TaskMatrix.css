@@ -1,0 +1,380 @@
+/* TaskMatrix — Level-2 chain matrix (task-ecabeafa41e1 / task-2bcdd6c237bd).
+   Colors route through the shared theme tokens (--bg-*, --border-*, --text-*)
+   and the roster's --nh-* status vars so both the dusk and light themes resolve
+   without an override. The --nh-* block is mirrored from NewHomePage.css so this
+   panel is legible even when rendered outside a .nh ancestor. */
+.tm {
+  --nh-done: var(--ok);
+  --nh-done-soft: color-mix(in srgb, var(--ok) 16%, transparent);
+  --nh-progress: var(--accent);
+  --nh-progress-soft: var(--accent-soft);
+  --nh-queued: var(--muted-on-panel);
+  --nh-queued-soft: color-mix(in srgb, var(--muted-on-panel) 14%, transparent);
+  --nh-needs: var(--warn);
+  --nh-needs-soft: var(--warn-soft);
+  --nh-failed: var(--err);
+  --nh-failed-soft: var(--err-soft);
+
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  margin-bottom: var(--sp-5);
+  color: var(--text-on-panel);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.tm-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+}
+.tm-back {
+  appearance: none;
+  border: 1px solid var(--border-2);
+  background: var(--bg-1);
+  color: var(--text-on-panel);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--motion-hover), border-color var(--motion-hover);
+}
+.tm-back:hover {
+  background: var(--bg-3);
+  border-color: var(--accent);
+}
+.tm-back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tm-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tm-title {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-on-panel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-subtitle {
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+
+/* ── Scroll container + table ───────────────────────────────────────────── */
+.tm-scroll {
+  overflow-x: auto;
+  padding: var(--sp-3);
+}
+.tm-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  min-width: max-content;
+  font-size: var(--fs-sm);
+}
+.tm-table th,
+.tm-table td {
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-1);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.tm-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Group header row: one boxed cell spanning each step's field columns. */
+.tm-group-th {
+  text-align: center;
+  background: var(--bg-2);
+  border-left: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--border-1);
+  color: var(--text-on-panel);
+  font-weight: 600;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tm-group-marker {
+  margin-right: 6px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.tm-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Field header row: input keys then output fields. */
+.tm-field-row th {
+  background: var(--bg-2);
+  border-left: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--border-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted-on-panel);
+  vertical-align: bottom;
+}
+.tm-field-th--empty {
+  color: var(--muted-on-panel);
+  text-align: center;
+}
+.tm-field-label {
+  margin: 0 4px;
+}
+.tm-io {
+  display: inline-block;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: var(--r-sm);
+  vertical-align: middle;
+}
+.tm-io--in {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.tm-io--out {
+  color: var(--nh-done);
+  background: var(--nh-done-soft);
+}
+.tm-req {
+  color: var(--nh-needs);
+  font-weight: 700;
+  cursor: help;
+}
+
+/* Pinned lead (Run) column: title + status chip. */
+.tm-lead-th,
+.tm-lead-td {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-2);
+  min-width: 200px;
+}
+.tm-lead-th {
+  background: var(--bg-2);
+  z-index: 3;
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--muted-on-panel);
+  font-weight: 700;
+}
+.tm-lead-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.tm-run-title {
+  font-weight: 600;
+  color: var(--text-on-panel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+/* Row-level run actions, visible (not hover-hidden) beneath the run identity. */
+.tm-lead-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: 7px;
+}
+.tm-run-btn {
+  appearance: none;
+  border: none;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  padding: 3px 11px;
+  cursor: pointer;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.tm-run-btn:hover {
+  filter: brightness(1.08);
+}
+.tm-open-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  padding: 3px 11px;
+  cursor: pointer;
+  color: var(--text-on-panel);
+}
+.tm-open-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tm-run-done {
+  font-size: var(--fs-2xs);
+  color: var(--nh-done);
+  align-self: center;
+}
+
+/* Status pills — same vocabulary/tokens as the roster. */
+.tm-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tm-pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
+.tm-pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
+.tm-pill--queued { background: var(--nh-queued-soft); color: var(--nh-queued); }
+.tm-pill--needs { background: var(--nh-needs-soft); color: var(--nh-needs); }
+.tm-pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
+
+/* ── Body cells ─────────────────────────────────────────────────────────── */
+.tm-cell-td {
+  border-left: 1px solid var(--border-1);
+  min-width: 96px;
+}
+.tm-cell-td--na {
+  color: var(--muted-on-panel);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 5px,
+    color-mix(in srgb, var(--border-2) 60%, transparent) 5px,
+    color-mix(in srgb, var(--border-2) 60%, transparent) 6px
+  );
+}
+.tm-na {
+  font-style: italic;
+  font-size: var(--fs-2xs);
+  opacity: 0.7;
+}
+
+/* The cell wrapper anchors the hover popup. */
+.tm-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+}
+.tm-cell--placeholder {
+  min-width: 0;
+}
+.tm-val {
+  color: var(--text-on-panel);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-val--empty {
+  color: var(--muted-on-panel);
+}
+.tm-cell-note {
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+  font-style: italic;
+}
+.tm-cell-error {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--nh-failed);
+  cursor: help;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Inline INPUT editor — dashed underline that lights on focus. */
+.tm-input {
+  appearance: none;
+  width: 100%;
+  min-width: 72px;
+  max-width: 180px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--border-2);
+  border-radius: 0;
+  color: var(--text-on-panel);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 2px;
+}
+.tm-input:focus {
+  outline: none;
+  border-bottom: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+/* ── Hover popup: one floating menu per cell, opens downward ─────────────── */
+.tm-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  box-shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.35);
+  animation: tm-menu-in 90ms ease;
+}
+@keyframes tm-menu-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tm-menu-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-on-panel);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.tm-menu-item:hover {
+  background: var(--bg-2);
+  color: var(--accent);
+}
+.tm-menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-menu {
+    animation: none;
+  }
+  .tm-back {
+    transition: none;
+  }
+}

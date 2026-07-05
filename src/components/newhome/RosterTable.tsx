@@ -44,6 +44,7 @@ import type { PipelineColumn, PipelineGroup, ChildStatusLike } from './pipelineR
 import { buildRosterGroups } from './rosterGroups.mjs';
 import type { RosterGroup, RosterGroupInput, OutputCol, InputCol } from './rosterGroups.mjs';
 import { useChainedRoster, useTaskDataValues } from './useNewHomeData';
+import { TaskMatrix } from './TaskMatrix';
 import type { ChainedJobResolution } from './useNewHomeData';
 // task — the "▶ Start" row action reuses the OLD Tasks page's exact launch
 // path: primaryActionFor (the single source of truth for which primary action a
@@ -102,6 +103,8 @@ function RowAction({
   startEligible,
   chainStart,
   onChainStart,
+  viewable,
+  onViewMatrix,
   pending,
   error,
 }: {
@@ -123,6 +126,11 @@ function RowAction({
     | null;
   /** Route the chain-start click through the shared wrapper (owns pending/error). */
   onChainStart: (childId: string) => void;
+  /** task-ecabeafa41e1 — this row is a chain/template WITH RUNS: render the
+   *  primary "View →" (opens the Level-2 matrix). The chain-start button, when
+   *  present, becomes the secondary "▶ Run all". */
+  viewable: boolean;
+  onViewMatrix: (taskId: string) => void;
   /** task-48cd46a0e2da — the shared wrapper's pending/error for THIS row's id. */
   pending: boolean;
   error: string | null;
@@ -191,26 +199,46 @@ function RowAction({
   // nothing runnable (all done/cancelled) or the next step isn't eligible, we
   // render a DISABLED button with the REASON as tooltip + inline — never a
   // silent — (the round-8 regression).
-  if (chainStart) {
-    const isDisabled = 'disabled' in chainStart;
-    // Narrow explicitly so we never read `.enabled`/`.childId` off the disabled
-    // arm (or `.reason` off the enabled arm).
-    const reason = 'disabled' in chainStart ? chainStart.reason : undefined;
-    const btnDisabled = isDisabled || ('enabled' in chainStart && !chainStart.enabled) || pending;
+  // task-ecabeafa41e1 — a chain/template WITH RUNS: "View →" is the PRIMARY
+  // action (opens the Level-2 matrix), and the chain-start button (when there's
+  // a runnable step) becomes the SECONDARY "▶ Run all". View shows even when
+  // nothing is runnable (a complete chain still opens its matrix).
+  if (viewable || chainStart) {
+    const reason = chainStart && 'disabled' in chainStart ? chainStart.reason : undefined;
+    const runAllDisabled =
+      !chainStart || 'disabled' in chainStart || ('enabled' in chainStart && !chainStart.enabled) || pending;
     return (
       <span className="nh-roster__action-wrap">
-        <button
-          type="button"
-          className="nh-roster__action nh-roster__action--start"
-          disabled={btnDisabled}
-          title={'disabled' in chainStart ? chainStart.reason : chainStart.tooltip}
-          onClick={(e) => {
-            e.stopPropagation();
-            if ('childId' in chainStart) onChainStart(chainStart.childId);
-          }}
-        >
-          {pending ? 'Starting…' : '▶ Start chain'}
-        </button>
+        {viewable && (
+          <button
+            type="button"
+            className="nh-roster__action nh-roster__action--view"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewMatrix(task.id);
+            }}
+          >
+            View →
+          </button>
+        )}
+        {chainStart && (
+          <button
+            type="button"
+            className="nh-roster__action nh-roster__action--runall"
+            disabled={runAllDisabled}
+            title={
+              'disabled' in chainStart
+                ? chainStart.reason
+                : chainStart.tooltip ?? 'Run every runnable step'
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              if ('childId' in chainStart) onChainStart(chainStart.childId);
+            }}
+          >
+            {pending ? 'Running…' : '▶ Run all'}
+          </button>
+        )}
         {(error || reason) && (
           <span className="nh-roster__action-error" role="alert" title={error ?? reason}>
             {`⚠ ${error ?? reason}`}
@@ -1210,6 +1238,8 @@ export function RosterTable({
   // chips / parent Start-chain can resolve a CHILD's full Task (primaryActionFor
   // needs the whole object, not just an id) without each subtable re-fetching.
   const allTasksById = useMemo(() => new Map(allTasks.map((t) => [t.id, t])), [allTasks]);
+  // task-ecabeafa41e1 — Level-2 matrix: which chain parent's matrix is open (null = roster).
+  const [matrixParentId, setMatrixParentId] = useState<string | null>(null);
   const startActionFor = (
     t: NewHomeTask,
   ): { enabled: boolean; tooltip?: string } | null => {
@@ -1555,6 +1585,29 @@ export function RosterTable({
     }
   };
 
+  // task-ecabeafa41e1 — Level-2 matrix takes over the roster surface when a
+  // chain's "View →" is clicked; Back (onClose) returns to the list. runs=[parent]
+  // for now (single instance); multi-run grouping is a follow-up.
+  if (matrixParentId) {
+    const parent = allTasksById.get(matrixParentId);
+    if (parent) {
+      return (
+        <div className="nh-roster">
+          <TaskMatrix
+            chainTitle={parent.title}
+            runs={[parent]}
+            childrenOf={(pid) => childrenByParentId.get(pid) ?? []}
+            onClose={() => setMatrixParentId(null)}
+            onOpenTask={onOpenTask}
+            onStartChild={(cid) => {
+              void startAction.run(cid, { kind: 'start', run: () => onStart(cid) });
+            }}
+          />
+        </div>
+      );
+    }
+  }
+
   return (
     <div className="nh-roster">
       <div className="nh-roster__toolbar">
@@ -1729,6 +1782,8 @@ export function RosterTable({
                         }}
                         startEligible={startActionFor(t)}
                         chainStart={chainedRes ? chainStartFor(chainedRes) : plainChainStartFor(t.id)}
+                        viewable={!chainedRes && childrenByParentId.has(t.id)}
+                        onViewMatrix={setMatrixParentId}
                         onChainStart={(childId) => {
                           // Key the pending/error on the PARENT row id (t.id),
                           // but launch the CHILD — so the parent row shows the
