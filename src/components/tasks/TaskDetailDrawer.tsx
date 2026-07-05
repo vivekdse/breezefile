@@ -81,6 +81,7 @@ import type {
 } from '../../projects/index.mjs';
 import { TaskComposer } from '../TaskComposer';
 import { TaskAnswerBox } from './TaskAnswerBox';
+import { isDone } from './sections.mjs';
 import type { Project, Task, TaskRun } from '../../types';
 import './TaskDetailDrawer.css';
 
@@ -254,12 +255,6 @@ export function TaskDetailDrawer({
 
   const { tone, label: liveLabel } = liveToneFor(task, running);
 
-  // task-f60a8003efa9 — the Activity tab (clubbed Trace + Session) only exists
-  // when there's a run or session to show. "Has activity" = a live session, a
-  // resumable conversation, or any run in the timeline.
-  const hasActivity =
-    !!session || !!latestRun?.conversation_id || runs.length > 0;
-
   // Attachments — run output_path values, deduped. (No `body` dependency.)
   const attachments = useMemo(() => {
     const seen = new Set<string>();
@@ -286,23 +281,6 @@ export function TaskDetailDrawer({
     setMessageError(null);
     setMessageSent(null);
   }, [task.id]);
-
-  // The visible tabs, in keyboard/digit order. Activity is appended only when
-  // there's something to show, so the digit map (1..N) stays contiguous.
-  const visibleTabs = useMemo<DrawerTab[]>(
-    () => (hasActivity ? ['details', 'teach', 'activity'] : ['details', 'teach']),
-    [hasActivity],
-  );
-
-  const [tab, setTab] = useState<DrawerTab>(
-    normalizeTab(initialTab) ??
-      (hasActivity && (running || latestRun) ? 'activity' : 'details'),
-  );
-  // If the Activity tab disappears (e.g. a run is cleared) while it's selected,
-  // fall back to Details so we never sit on a hidden tab.
-  useEffect(() => {
-    if (!visibleTabs.includes(tab)) setTab('details');
-  }, [visibleTabs, tab]);
 
   const say = useCallback(
     (msg: string) => dispatch({ type: 'setStatus', msg }),
@@ -430,6 +408,52 @@ export function TaskDetailDrawer({
     () => requiredOutputs.filter((f) => hasValue(submittedByKey[f.key])).length,
     [requiredOutputs, submittedByKey],
   );
+
+  // task-4f1e8f45bf0e — a DONE single task's fielded result (outputsBlock, a
+  // parsed output_schema + submitted values) or any other structured result
+  // (resolvedResult, e.g. a `table` payload with no declared schema) is
+  // "activity" too, even though it never produced a local run/session — a
+  // plain TypeBuild task's server-side run history never populates `runs`
+  // (useTaskRuns is local-auto-only, see the `runs` useTaskRuns call above),
+  // so without this a completed single task's Activity tab (and its Result /
+  // TaskResultView section) was PERMANENTLY hidden — the bug's "no result
+  // VALUES anywhere" report. Reusing the SAME resolvedResult/outputsBlock this
+  // tab already renders from, rather than inventing a second "has a result"
+  // check.
+  const hasResult = !!resolvedResult || (!!outputsBlock && outputsBlock.fields.length > 0);
+  // task-f60a8003efa9 — the Activity tab (clubbed Trace + Session) only exists
+  // when there's a run or session to show. "Has activity" = a live session, a
+  // resumable conversation, any run in the timeline, or (task-4f1e8f45bf0e) a
+  // finished task's structured result.
+  const hasActivity =
+    !!session || !!latestRun?.conversation_id || runs.length > 0 || hasResult;
+
+  // The visible tabs, in keyboard/digit order. Activity is appended only when
+  // there's something to show, so the digit map (1..N) stays contiguous.
+  const visibleTabs = useMemo<DrawerTab[]>(
+    () => (hasActivity ? ['details', 'teach', 'activity'] : ['details', 'teach']),
+    [hasActivity],
+  );
+
+  // task-4f1e8f45bf0e — a DONE task defaults to a READ view (Activity, if it
+  // has a result to show; else Details) rather than the edit composer. The
+  // composer's own "Task details" tab is still one click away — this only
+  // changes the DEFAULT so completing a task never silently drops the user
+  // into "edit this task's definition" as if the row-click's purpose were to
+  // revise a finished task's title/routing.
+  const [tab, setTab] = useState<DrawerTab>(
+    normalizeTab(initialTab) ??
+      (isDone(task) && hasActivity
+        ? 'activity'
+        : hasActivity && (running || latestRun)
+          ? 'activity'
+          : 'details'),
+  );
+  // If the Activity tab disappears (e.g. a run is cleared) while it's selected,
+  // fall back to Details so we never sit on a hidden tab.
+  useEffect(() => {
+    if (!visibleTabs.includes(tab)) setTab('details');
+  }, [visibleTabs, tab]);
 
   // task-4a8d2c98f667 — this task's OWN legacy ```task-fields block (input
   // VALUES inline in the body), distinct from templateBlock/childByDefId
