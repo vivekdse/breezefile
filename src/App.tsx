@@ -1244,6 +1244,15 @@ function Shell() {
       const detail = (e as CustomEvent).detail as { cwd?: string } | undefined;
       if (detail?.cwd) setRunTaskCwd(detail.cwd);
     }
+    // task-7ea59baaea6c — New Home's project switch needs to close a
+    // currently-open unified task-detail drawer that belongs to the
+    // PREVIOUSLY selected project; otherwise the drawer keeps showing a
+    // stale cross-project task while the roster/stats behind it move on to
+    // the new project. New Home dispatches this rather than reaching into
+    // App's state directly (same event-bridge pattern as fm:openTaskDetail).
+    function onCloseTaskDetail() {
+      setTaskDetail(null);
+    }
     function onReloadDir(e: Event) {
       const detail = (e as CustomEvent).detail as { path?: string } | undefined;
       if (detail?.path) void loadDir(detail.path);
@@ -1314,6 +1323,7 @@ function Shell() {
     window.addEventListener('fm:openSettings', onOpenSettings);
     window.addEventListener('fm:openRunHistory', onOpenRunHistory);
     window.addEventListener('fm:openTaskDetail', onOpenTaskDetail);
+    window.addEventListener('fm:closeTaskDetail', onCloseTaskDetail);
     window.addEventListener('fm:openRunTask', onOpenRunTask);
     window.addEventListener('fm:reloadDir', onReloadDir);
     window.addEventListener('fm:setStatus', onSetStatus);
@@ -1343,6 +1353,7 @@ function Shell() {
       window.removeEventListener('fm:openSettings', onOpenSettings);
       window.removeEventListener('fm:openRunHistory', onOpenRunHistory);
       window.removeEventListener('fm:openTaskDetail', onOpenTaskDetail);
+      window.removeEventListener('fm:closeTaskDetail', onCloseTaskDetail);
       window.removeEventListener('fm:openRunTask', onOpenRunTask);
       window.removeEventListener('fm:reloadDir', onReloadDir);
       window.removeEventListener('fm:setStatus', onSetStatus);
