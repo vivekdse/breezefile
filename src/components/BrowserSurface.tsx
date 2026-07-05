@@ -22,9 +22,29 @@ import { useIsMac } from '../platform';
 // which mirrors the view onto exactly that rect below the toolbar.
 const viewByTab = new Map<string, number>();
 
-// Origins the user said "never save here" for, this session. Module-level so the
-// opt-out survives remounts (tab switches). NON-secret (origins only).
-const neverSaveOrigins = new Set<string>();
+// Origins the user said "never save here" for. Module-level so the opt-out
+// survives remounts (tab switches), and PERSISTED to localStorage so it also
+// survives app restarts (task-e550e3a1f512). NON-secret — origins only, never a
+// password.
+const NEVER_SAVE_KEY = 'breeze.neverSavePasswordOrigins';
+function loadNeverSaveOrigins(): Set<string> {
+  try {
+    const raw = localStorage.getItem(NEVER_SAVE_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((o): o is string => typeof o === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+const neverSaveOrigins = loadNeverSaveOrigins();
+function persistNeverSaveOrigin(origin: string): void {
+  neverSaveOrigins.add(origin);
+  try {
+    localStorage.setItem(NEVER_SAVE_KEY, JSON.stringify([...neverSaveOrigins]));
+  } catch {
+    /* storage full / disabled — the in-memory Set still guards this session */
+  }
+}
 
 /** Destroy the native views of tabs that are no longer open. Called by App
  *  whenever the tab set changes, so a closed browser tab releases its view. */
@@ -107,6 +127,9 @@ export function BrowserSurface({
   // Holds the captured password in trusted-UI state ONLY; cleared on save/dismiss
   // and on unmount. Never logged or persisted until the user accepts.
   const [pendingCred, setPendingCred] = useState<CapturedCredential | null>(null);
+  // task-e550e3a1f512 — whether the pending prompt is a fresh save or an update
+  // of an already-saved (but changed) password. Drives the prompt's wording.
+  const [pendingMode, setPendingMode] = useState<'save' | 'update'>('save');
 
   // The saved logins available for the CURRENT origin (task-4b786c018d78 +
   // ef6d465816b3). Holds NO passwords — origin + the list of usernames only; the
@@ -227,10 +250,38 @@ export function BrowserSurface({
     // Captured login submit → offer to save (task-1188c6535e91/ad89064bf45f).
     // Only for THIS view, and only if the user hasn't opted this origin out. The
     // password rides this event into trusted-UI state and nowhere else.
+    //
+    // task-e550e3a1f512 — stop re-nagging: (a) never prompt during AGENT-DRIVEN
+    // automation (operatorMode — the human isn't at the keyboard to answer);
+    // (b) compare the captured password against the vault in MAIN before
+    // prompting — an unchanged password shows NOTHING; a changed one prompts
+    // once as "Update password?"; a brand-new login prompts as "Save".
     const offCred = fm.onBrowserCredentialCaptured((c) => {
       if (c.id !== idRef.current) return;
       if (neverSaveOrigins.has(c.origin)) return;
-      setPendingCred(c);
+      // Agent sessions drive logins programmatically; a prompt there is noise
+      // (and no one to answer it). Suppress — the saved-login fill path already
+      // handles known logins; a genuinely new one can be saved from :secrets.
+      if (operatorMode) return;
+      // Compare-before-prompt. The verdict is computed in main; no stored
+      // password crosses back. On any lookup hiccup match() returns 'absent',
+      // so we fall back to the prior behaviour (prompt) rather than swallow a
+      // real new/changed credential.
+      void fm.typebuild.credentials
+        .match(c.origin, c.username, c.password)
+        .then((verdict) => {
+          // Ignore a late reply if the view moved on / was torn down.
+          if (c.id !== idRef.current) return;
+          if (verdict === 'match') return; // unchanged — never nag
+          setPendingMode(verdict === 'differs' ? 'update' : 'save');
+          setPendingCred(c);
+        })
+        .catch(() => {
+          // Signed out / transport — behave as before (offer to save).
+          if (c.id !== idRef.current) return;
+          setPendingMode('save');
+          setPendingCred(c);
+        });
     });
 
     // Show the view (fresh or reused) at our slot and start tracking its rect.
@@ -732,6 +783,7 @@ export function BrowserSurface({
       {pendingCred && (
         <SavePasswordPrompt
           cred={pendingCred}
+          mode={pendingMode}
           onSave={async (c) => {
             // Persist to the site-keyed credential vault (task-d60860fb4d7f):
             // encrypted at rest server-side, never written to this machine.
@@ -740,7 +792,9 @@ export function BrowserSurface({
           }}
           onDismiss={() => setPendingCred(null)}
           onNever={(origin) => {
-            neverSaveOrigins.add(origin);
+            // task-e550e3a1f512 — persist the opt-out so "Never" survives an app
+            // restart (was an in-memory Set before).
+            persistNeverSaveOrigin(origin);
             setPendingCred(null);
           }}
         />

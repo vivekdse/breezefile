@@ -5,6 +5,7 @@
 //
 //   typebuild:cred:list    (origin?)            -> SavedCredential[]  (NO passwords)
 //   typebuild:cred:resolve (origin, username)   -> string     (one password, on demand)
+//   typebuild:cred:match   (origin, username, password) -> 'absent'|'match'|'differs'
 //   typebuild:cred:save    ({origin,username,password}) -> {origin, username}
 //   typebuild:cred:delete  (origin, username)   -> void
 //
@@ -17,6 +18,7 @@ import { ipcMain } from 'electron';
 import {
   deleteSiteCredential,
   listSiteCredentials,
+  matchSiteCredential,
   resolveSiteCredential,
   saveSiteCredential,
 } from './site-credentials';
@@ -32,6 +34,13 @@ export function registerTypebuildCredentialsIpc(): void {
   );
   ipcMain.handle('typebuild:cred:resolve', (_e, origin: string, username: string) =>
     resolveSiteCredential(origin, username),
+  );
+  // task-e550e3a1f512 — compare-before-prompt: the password is compared in main
+  // and only the verdict crosses back (never a stored password).
+  ipcMain.handle(
+    'typebuild:cred:match',
+    (_e, origin: string, username: string, password: string) =>
+      matchSiteCredential(origin, username, password),
   );
   ipcMain.handle(
     'typebuild:cred:save',
