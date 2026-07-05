@@ -257,12 +257,21 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--ink, var(--fg-1));
+  /* task-ecabeafa41e1 follow-up — the operator/Chromium toolbar sits on
+     `--panel` (chrome), so its buttons MUST use the panel-text composite, not
+     `--ink` (the CANVAS-text token). Under themes where --panel is dark but
+     --ink is a dark canvas ink (dusk / paper-family inverted like plum), the
+     old `color: var(--ink)` rendered dark icons on the dark toolbar and the
+     back/forward/reload buttons vanished. --text-on-panel resolves to the
+     panel-tuned ink in every theme (tokens.css:127) — the design system's
+     documented rule is "prefer the composite tokens, never --ink directly". */
+  color: var(--text-on-panel, var(--fg-1));
   line-height: 1;
   cursor: pointer;
 }
 .browser-pane__btn:hover:not(:disabled) {
-  background: var(--bg-2, rgba(255, 255, 255, 0.08));
+  /* Hover wash tuned for the panel, not the canvas. */
+  background: var(--panel-2, var(--bg-2, rgba(127, 127, 127, 0.14)));
 }
 .browser-pane__btn:disabled {
   opacity: 0.35;
@@ -359,7 +368,9 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  color: var(--ink, var(--fg-1));
+  /* Dropdown sits on --panel (see .browser-ac) — use the panel-text composite,
+     not --ink (canvas ink), so rows stay legible in dark/inverted themes. */
+  color: var(--text-on-panel, var(--fg-1));
 }
 .browser-ac__row--active {
   background: var(--accent-soft, rgba(110, 168, 254, 0.18));
@@ -379,7 +390,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted, #7a818c);
+  /* On --panel — use the panel-muted composite (matches .browser-ac__row). */
+  color: var(--muted-on-panel, var(--fg-2));
 }
 .browser-pane__view {
   flex: 1;
