@@ -72,14 +72,13 @@ import { agentOptionHint } from './tasks/agent.mjs';
 // outputs/neededWhen) plus a "start from an existing chained task" picker —
 // there is no project-level template config anymore. See
 // docs/task-templates-design.md.
-import type { TaskDef, TaskDefCondition, TaskDefField } from './newhome/types';
-import { instantiateTemplate } from './newhome/newHomePrefs';
+import type { TaskDef, TaskDefField } from './newhome/types';
+import { instantiateChain } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
   effectiveFieldKey,
   fieldRef,
   inferFieldsFromProse,
-  parseTaskTemplateBlock,
   templateFillEntries,
 } from './newhome/taskSchema.mjs';
 // task-e112d60a3b7c — the first-class Template type the "New from Template"
@@ -1634,26 +1633,36 @@ export function TaskComposer(props: Props) {
   }, [hasChainOption, templateChoice]);
 
   // ── Chain builder state ──────────────────────────────────────────────────
-  // `chainDefs` is the in-memory TaskDef[] the human is defining — held
-  // purely in composer state until save(), when it's passed straight through
-  // to instantiateTemplate as `defs`. Field/step DEFINITIONS (keys, labels,
-  // types, conditions) are non-PHI; only the later input VALUES are PHI.
-  const chainDefSeqRef = useRef(1);
-  function blankChainDef(): TaskDef {
-    chainDefSeqRef.current += 1;
-    return { id: `step${chainDefSeqRef.current}`, name: '', inputs: [], outputs: [] };
+  // task-a7214605a998 (final model) — a CHAIN IS A HIGHER-ORDER TEMPLATE:
+  // nothing but an ORDERED LIST OF SAVED TEMPLATES. `chainTemplates` is that
+  // ordered list — refs to templates the user already saved (via "Make this a
+  // template" on a task), held in composer state until save(), when
+  // instantiateChain turns it into a thin parent container + one instantiated
+  // child task per template. NON-PHI: template id/name + field COUNTS only —
+  // NO field defs / instructions are authored here (the templates own those).
+  type ChainTemplateRow = {
+    templateId: string;
+    name: string;
+    variables: number;
+    outputs: number;
+  };
+  const [chainTemplates, setChainTemplates] = useState<ChainTemplateRow[]>([]);
+  function addChainTemplate(t: Template) {
+    setChainTemplates((prev) => [
+      ...prev,
+      {
+        templateId: t.id,
+        name: t.name,
+        variables: (t.variables ?? []).length,
+        outputs: (t.outputSchema ?? []).length,
+      },
+    ]);
   }
-  const [chainDefs, setChainDefs] = useState<TaskDef[]>(() => [
-    { id: 'step1', name: '', inputs: [], outputs: [] },
-  ]);
-  function addChainDef() {
-    setChainDefs((prev) => [...prev, blankChainDef()]);
+  function removeChainTemplate(idx: number) {
+    setChainTemplates((prev) => prev.filter((_, i) => i !== idx));
   }
-  function removeChainDef(idx: number) {
-    setChainDefs((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
-  }
-  function moveChainDef(idx: number, dir: -1 | 1) {
-    setChainDefs((prev) => {
+  function moveChainTemplate(idx: number, dir: -1 | 1) {
+    setChainTemplates((prev) => {
       const j = idx + dir;
       if (j < 0 || j >= prev.length) return prev;
       const next = prev.slice();
@@ -1663,116 +1672,26 @@ export function TaskComposer(props: Props) {
       return next;
     });
   }
-  function updateChainDef(idx: number, patch: Partial<TaskDef>) {
-    setChainDefs((prev) => prev.map((d, i) => (i === idx ? { ...d, ...patch } : d)));
-  }
-  function addChainField(defIdx: number, kind: 'inputs' | 'outputs') {
-    setChainDefs((prev) =>
-      prev.map((d, i) =>
-        i === defIdx
-          ? { ...d, [kind]: [...(d[kind] ?? []), { key: '', label: '', type: 'text' as const }] }
-          : d,
-      ),
-    );
-  }
-  function removeChainField(defIdx: number, kind: 'inputs' | 'outputs', fieldIdx: number) {
-    setChainDefs((prev) =>
-      prev.map((d, i) =>
-        i === defIdx ? { ...d, [kind]: (d[kind] ?? []).filter((_, fi) => fi !== fieldIdx) } : d,
-      ),
-    );
-  }
-  function updateChainField(
-    defIdx: number,
-    kind: 'inputs' | 'outputs',
-    fieldIdx: number,
-    patch: Partial<TaskDefField>,
-  ) {
-    setChainDefs((prev) =>
-      prev.map((d, i) =>
-        i === defIdx
-          ? { ...d, [kind]: (d[kind] ?? []).map((f, fi) => (fi === fieldIdx ? { ...f, ...patch } : f)) }
-          : d,
-      ),
-    );
-  }
-  function setChainNeededWhen(defIdx: number, cond: TaskDefCondition | null) {
-    setChainDefs((prev) => prev.map((d, i) => (i === defIdx ? { ...d, neededWhen: cond } : d)));
-  }
-  // Candidate upstream OUTPUT refs a later step's `neededWhen` can gate on —
-  // every output field from every step BEFORE `defIdx`. Carries the field
-  // itself (task-f8ae99553691) so the condition-value input below can be
-  // constrained by the referenced output's TYPE (bool → Yes/No, number →
-  // numeric, select → its own options, text → free text).
-  function upstreamOutputRefs(defIdx: number): { ref: string; label: string; field: TaskDefField }[] {
-    const out: { ref: string; label: string; field: TaskDefField }[] = [];
-    for (let i = 0; i < defIdx; i++) {
-      const d = chainDefs[i];
-      for (const f of d.outputs ?? []) {
-        if (!f.key) continue;
-        out.push({
-          ref: fieldRef(d.id, f.key),
-          label: `${d.name || `Step ${i + 1}`} · ${f.label || f.key}`,
-          field: f,
-        });
-      }
-    }
-    return out;
-  }
-  // At least one task-def with a non-empty name is required to advance past
-  // the chain builder.
-  const chainDefsValid = chainDefs.some((d) => d.name.trim().length > 0);
+  // At least one template is required to advance/save the chain.
+  const chainTemplatesValid = chainTemplates.length > 0;
 
-  // ── Copy from an existing chained task ──────────────────────────────────
-  // "Existing chained tasks" are prior TypeBuild tasks whose body carries a
-  // v2 ```task-template block (parseTaskTemplateBlock) — there is no saved
-  // template registry to browse, only past chained tasks (see the design
-  // doc's "Copy from an existing chained task" section). Reuses the same
-  // task-list access every other New Home surface uses (useTasks); no new
-  // fetch mechanism. Selecting one pre-fills the chain's name (the composer's
-  // title, if not already typed) + `defs` — VALUES are never copied.
-  const { tasks: allTasksForChainCopy } = useTasks({ includeDone: true });
-
-  // task-e112d60a3b7c — the chained-task "copy from existing chained task" flow
-  // stays exactly as it was: it scans prior TypeBuild tasks whose BODY carries a
-  // v2 ```task-template block (parseTaskTemplateBlock reads `t.notes`). This is
-  // deliberately NOT unified with the first-class Template API below: the
-  // Template API path (the from-template picker) is for SINGLE fielded
-  // templates; chained/multi-step task templates keep this v2-block
-  // copy-from-existing-chained-task flow.
-  const priorChains = useMemo(() => {
-    if (!hasChainOption) return [];
-    const out: { taskId: string; name: string; defs: TaskDef[]; updatedAt: number }[] = [];
-    for (const t of allTasksForChainCopy) {
-      if (t.source !== TYPEBUILD_SOURCE || t.parentTaskId) continue;
-      const parsed = parseTaskTemplateBlock(t.notes ?? null);
-      if (!parsed || parsed.defs === null) continue;
-      out.push({ taskId: t.id, name: parsed.name, defs: parsed.defs, updatedAt: t.updated_at ?? 0 });
-    }
-    out.sort((a, b) => b.updatedAt - a.updatedAt);
-    return out.slice(0, 25);
-  }, [allTasksForChainCopy, hasChainOption]);
-  function copyChainFrom(entry: { name: string; defs: TaskDef[] }) {
-    const cloned = entry.defs.map((d) => ({
-      ...d,
-      inputs: (d.inputs ?? []).map((f) => ({ ...f })),
-      outputs: (d.outputs ?? []).map((f) => ({ ...f })),
-      ...(d.neededWhen ? { neededWhen: { ...d.neededWhen } } : {}),
-    }));
-    setChainDefs(cloned.length > 0 ? cloned : [blankChainDef()]);
-    if (!title.trim()) setTitle(entry.name);
-  }
+  // The chain builder's inline template PICKER (typeahead over the user's saved
+  // templates — the SAME `templates` list the from-template picker uses). Open
+  // via "+ Add template", filter by name, ↑/↓ to highlight, Enter to append,
+  // Esc to close.
+  const [chainPickerOpen, setChainPickerOpen] = useState(false);
+  const [chainPickerQuery, setChainPickerQuery] = useState('');
+  const [chainPickerHighlight, setChainPickerHighlight] = useState(0);
 
   // ── task-e112d60a3b7c — "New from Template" (first-class, server-backed) ────
-  // A template is now a FIRST-CLASS server object (GET /chromeext/templates),
-  // not a scan over prior tasks: the server auto-registers/dedupes a template
-  // whenever a task is created with input field definitions / output_schema, so
-  // the picker just LISTS them. The list is NON-PHI (names + `variables` field
-  // defs; the prompt body `notes` is NOT included). On pick we prefill a title,
-  // ask one question per `variable`, then POST /templates/{id}/instantiate — the
-  // server creates the real task. NOTE: this path is for SINGLE fielded
-  // templates; chained/multi-step templates keep the v2-block chain-copy flow
-  // above (priorChains) — these are intentionally NOT unified yet.
+  // A template is a FIRST-CLASS server object (GET /chromeext/templates): the
+  // server auto-registers/dedupes a template whenever a task is created with
+  // input field definitions / output_schema, so the picker just LISTS them. The
+  // list is NON-PHI (names + `variables` field defs; the prompt body `notes` is
+  // NOT included). task-a7214605a998 — the CHAIN builder now reuses this SAME
+  // template list + source: a chain is an ordered list of these saved templates
+  // (see the chain-template picker below), so there is no separate
+  // copy-from-existing-chained-task flow anymore.
   const isFromTemplateMode = props.mode === 'create' && props.initialKind === 'template';
 
   // The server-backed template list, fetched EXACTLY ONCE on entering
@@ -1783,8 +1702,13 @@ export function TaskComposer(props: Props) {
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const templateListProjectId = projectId || initialProjectId || '';
+  // task-a7214605a998 — the CHAIN builder is a picker over these SAME saved
+  // templates, so load the list whenever the from-template picker OR the chain
+  // builder is active (not just from-template mode).
+  const needsTemplateList =
+    isFromTemplateMode || (hasChainOption && templateChoice === 'chain');
   useEffect(() => {
-    if (!isFromTemplateMode) return;
+    if (!needsTemplateList) return;
     let cancelled = false;
     setTemplatesLoading(true);
     setTemplatesError(null);
@@ -1804,9 +1728,9 @@ export function TaskComposer(props: Props) {
     return () => {
       cancelled = true;
     };
-    // Fetch once per from-template entry + project switch — NOT per keystroke.
+    // Fetch once per entry + project switch — NOT per keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFromTemplateMode, templateListProjectId]);
+  }, [needsTemplateList, templateListProjectId]);
 
   // Picker step: 'pick' (searchable list), 'title' (prefilled, Enter to
   // accept), 'values' (one question per input variable), then Ctrl+Enter
@@ -2044,8 +1968,11 @@ export function TaskComposer(props: Props) {
   // Whichever defs currently drive the aggregated field/outputs questions: the
   // chain when "Chained task" is picked, else the single plain-task def.
   const fieldsDefs = useMemo<TaskDef[]>(
-    () => (templateChoice === 'chain' ? chainDefs : [taskFieldsDef]),
-    [templateChoice, chainDefs, taskFieldsDef],
+    // task-a7214605a998 — a chain no longer authors inline fields (its steps are
+    // saved templates that own their own fields), so the chain path drives NO
+    // aggregated field/outputs questions. Only the plain-task def does.
+    () => (templateChoice === 'chain' ? [] : [taskFieldsDef]),
+    [templateChoice, taskFieldsDef],
   );
   const definedOutputsCount = useMemo(
     () => fieldsDefs.reduce((n, d) => n + (d.outputs?.length ?? 0), 0),
@@ -2056,7 +1983,10 @@ export function TaskComposer(props: Props) {
   const isMinimalChain = hasChainOption && templateChoice === 'chain';
   // The read-only outputs summary shows for any chain, or for a plain task that
   // actually defined outputs.
-  const showOutputsStep = hasChainOption && (templateChoice === 'chain' || definedOutputsCount > 0);
+  // task-a7214605a998 — the read-only outputs summary shows only for a plain
+  // task that actually defined outputs; a chain's outputs live in its templates,
+  // so the chain flow no longer has an outputs step.
+  const showOutputsStep = hasChainOption && definedOutputsCount > 0;
 
   // task-899af8b03aa6 — the "Make this a template" step shows for the TypeBuild
   // target only (templates are a TypeBuild concept): on a PLAIN create (not a
@@ -2125,12 +2055,13 @@ export function TaskComposer(props: Props) {
       }
       return main;
     }
-    // task-2fd63b922beb correction (Part B) — a "Chained task" is a THIN
-    // container: name (title) + project + the chain + a read-only outputs
-    // summary. The task-form questions (who/notes/advanced) are DROPPED.
+    // task-2fd63b922beb / task-a7214605a998 — a "Chained task" is a THIN
+    // container: name (title) + project + the chain (an ordered list of saved
+    // templates). The task-form questions (who/notes/advanced) are DROPPED, and
+    // there's no outputs step (a chain's outputs live in its templates).
     if (templateChoice === 'chain') {
       const pIdx = main.indexOf('project');
-      return [...main.slice(0, pIdx + 1), 'chain', 'outputs'];
+      return [...main.slice(0, pIdx + 1), 'chain'];
     }
     // task-2fd63b922beb correction (Part A) — a plain task's OWN optional
     // input/output fields. task-0d63c7b0ebdb — the 'fields' step DEFINES the
@@ -2376,8 +2307,8 @@ export function TaskComposer(props: Props) {
   // inline error and stays put, same convention as the date/cron validations
   // elsewhere in save().
   function tryAdvanceChain() {
-    if (!chainDefsValid) {
-      setError('Add at least one named step to the chain.');
+    if (!chainTemplatesValid) {
+      setError('Add at least one template to the chain.');
       return;
     }
     setError(null);
@@ -2808,18 +2739,16 @@ export function TaskComposer(props: Props) {
       setTimeout(() => titleRef.current?.focus(), 0);
       return { ok: false, error: msg };
     }
-    // task-2fd63b922beb (R2) — a chained-task job doesn't consume
-    // when/start/cron (a chain's per-task scheduling isn't modeled by the
-    // composer's single When/Start pick), so it saves via a dedicated path
-    // that skips those validations entirely and calls the instantiateTemplate
-    // seam instead of a single createTask. The title question doubles as the
-    // job's (meta parent's) title, per the design contract. A chain with no
-    // named step can't be saved as a job — the builder itself blocks
-    // advancing past it (chainDefsValid), but this is the last line of
-    // defense if that's ever bypassed (e.g. ⌘↵ from an earlier question).
+    // task-2fd63b922beb / task-a7214605a998 — a chained-task job doesn't consume
+    // when/start/cron, so it saves via a dedicated path (saveTemplateJob) that
+    // skips those validations and calls the instantiateChain seam instead of a
+    // single createTask. The title question doubles as the job's (parent
+    // container's) title. A chain with no template can't be saved — the builder
+    // blocks advancing past it (chainTemplatesValid), but this is the last line
+    // of defense if that's ever bypassed (e.g. ⌘↵ from an earlier question).
     if (props.mode === 'create' && hasChainOption && templateChoice === 'chain') {
-      if (!chainDefsValid) {
-        const msg = 'Add at least one named step to the chain.';
+      if (!chainTemplatesValid) {
+        const msg = 'Add at least one template to the chain.';
         setError(msg);
         setActiveIdx(QUESTIONS.indexOf('chain'));
         return { ok: false, error: msg };
@@ -3180,84 +3109,74 @@ export function TaskComposer(props: Props) {
     }
   }
 
-  // task-a7214605a998 — the bulk-create thunk instantiateTemplate calls ONCE to
-  // create the whole chain (thin parent container + one child per step) via the
-  // server bulk endpoint (POST /chromeext/tasks/bulk, reached through
-  // fm.typebuild.tasksBulkCreate). Replaces the old per-task createTask loop that
-  // embedded the chain as ```task-template / ```task-outputs / ```task-fields
-  // note-blocks: each step is now a REAL child task owning its OWN first-class
-  // output_schema (its output fields) and data_keys (its input fields, values
-  // empty at create time). Ordering rides as dependsOnIndexes and is wired to
-  // real depends_on edges by the source. The chain is a TypeBuild feature, so
-  // this always hits the TypeBuild source (not `target`).
-  //
-  // The composer's task-form picks (status/priority/agent/pin) are NOT threaded
-  // onto the children — they get the server's defaults, same as before.
-  async function bulkCreateTemplateJob(input: {
-    parent: { title: string; projectId?: string };
-    tasks: Array<{
-      title: string;
-      notes?: string;
-      projectId?: string;
-      outputSchema?: TaskDefField[];
-      data?: Record<string, string>;
-      dependsOnIndexes?: number[];
-    }>;
-  }): Promise<{ parentId: string | null; ids: string[] }> {
-    const toCreate = (t: {
-      title: string;
-      notes?: string;
-      projectId?: string;
-      outputSchema?: TaskDefField[];
-      data?: Record<string, string>;
-      dependsOnIndexes?: number[];
-    }): TaskCreate & { dependsOnIndexes?: number[] } => ({
-      title: t.title,
+  // task-a7214605a998 — the three thunks instantiateChain wires to real bridge
+  // calls. A chain = an ordered list of SAVED TEMPLATES, so creating it is:
+  //   createParent           → fm.tasksCreate (a thin { title, projectId } job)
+  //   instantiateChainTemplate → fm.typebuild.templates.instantiate (POST
+  //                            /chromeext/templates/{id}/instantiate — one real
+  //                            task inheriting the template's fields)
+  //   linkChainTask          → sourceAction('patch') → PATCH parent_task_id +
+  //                            depends_on (the instantiate endpoint accepts
+  //                            NEITHER, so linkage is a second pass; the source's
+  //                            patch whitelist now forwards both).
+  // The chain is a TypeBuild feature, so children/link go through the TypeBuild
+  // source (children inherit their template's project/agent/flags; the parent
+  // carries the chain name + project).
+  async function createChainParent(input: {
+    title: string;
+    projectId?: string;
+  }): Promise<{ id: string }> {
+    const payload: TaskCreate = {
+      title: input.title,
       folder: '',
-      notes: t.notes ?? '',
+      notes: '',
       auto_mode: false,
       auto_agent: null,
       auto_prompt: null,
-      ...(t.projectId ? { projectId: t.projectId } : {}),
-      ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
-      ...(t.data ? { data: t.data } : {}),
-      ...(t.dependsOnIndexes ? { dependsOnIndexes: t.dependsOnIndexes } : {}),
-    });
-    const parent: TaskCreate = {
-      title: input.parent.title,
-      folder: '',
-      auto_mode: false,
-      auto_agent: null,
-      auto_prompt: null,
-      ...(input.parent.projectId ? { projectId: input.parent.projectId } : {}),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
     };
-    return fm.typebuild.tasksBulkCreate({
-      parent,
-      tasks: input.tasks.map(toCreate),
-    });
+    const t = await createTask(payload, target);
+    return { id: t.id };
+  }
+  async function instantiateChainTemplate(
+    templateId: string,
+  ): Promise<{ id: string }> {
+    // Empty values — creation defines the child's fields (inherited from the
+    // template) but never collects their values here; they're filled later via
+    // the drawer/roster inline edit.
+    const r = await fm.typebuild.templates.instantiate(templateId, {});
+    return { id: r.id };
+  }
+  async function linkChainTask(
+    taskId: string,
+    patch: { parentTaskId: string; dependsOn?: string[] },
+  ): Promise<void> {
+    const body: Record<string, unknown> = { parent_task_id: patch.parentTaskId };
+    if (patch.dependsOn && patch.dependsOn.length > 0) {
+      body.depends_on = patch.dependsOn;
+    }
+    await taskSourceAction(target, taskId, 'patch', body);
   }
 
-  // task-2fd63b922beb (R2) — save path for a chained-task job: one meta
-  // parent + one child per task-def, via the instantiateTemplate seam (pinned
-  // signature — see docs/task-templates-design.md). Never creates a single
-  // plain task when a chain was chosen. `chainDefs` — the chain the human
-  // just defined inline (or copied from a prior chained task and edited) —
-  // is passed straight through; instantiateTemplate never reads it off a
-  // project pref, there is no such pref anymore.
+  // task-a7214605a998 — save path for a chained-task job: a thin parent
+  // container + one child per SAVED TEMPLATE (instantiated in order, linked
+  // parent + predecessor), via the instantiateChain seam. Never creates a
+  // single plain task when a chain was chosen. `chainTemplates` — the ordered
+  // list of templates the human picked — is passed straight through.
   async function saveTemplateJob(): Promise<{ ok: boolean; taskId?: string; error?: string }> {
     setBusy(true);
     setError(null);
     try {
-      const result = await instantiateTemplate({
+      const result = await instantiateChain({
         name: title.trim(),
         projectId: projectId || undefined,
-        defs: chainDefs,
-        // task-0d63c7b0ebdb — creation DEFINES the chain's step fields but never
-        // collects their VALUES, so instantiate with an EMPTY values map. Each
-        // step's inputs are filled later via the from-template flow or the
-        // drawer/roster inline edit.
-        values: {},
-        bulkCreateTasks: bulkCreateTemplateJob,
+        templates: chainTemplates.map((t) => ({
+          templateId: t.templateId,
+          name: t.name,
+        })),
+        createParent: createChainParent,
+        instantiateTemplate: (templateId) => instantiateChainTemplate(templateId),
+        linkTask: linkChainTask,
       });
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.parentId;
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
@@ -3830,11 +3749,11 @@ export function TaskComposer(props: Props) {
     return '';
   }
 
-  // task-2fd63b922beb (R2) — chain/field/outputs summaries.
+  // task-2fd63b922beb / task-a7214605a998 — chain/field/outputs summaries. The
+  // chain summary reads the ordered template names.
   function chainSummary(): string {
-    const named = chainDefs.filter((d) => d.name.trim());
-    if (named.length === 0) return 'No steps defined yet';
-    return named.map((d) => d.name).join(' → ');
+    if (chainTemplates.length === 0) return 'No templates added yet';
+    return chainTemplates.map((t) => t.name).join(' → ');
   }
   // task-2fd63b922beb correction (Part A) — the plain task's own field counts.
   function fieldsSummary(): string {
@@ -3911,8 +3830,9 @@ export function TaskComposer(props: Props) {
         ? "What should the agent do? (this becomes the prompt)"
         : 'Any notes?';
     }
-    // task-2fd63b922beb (R2)
-    if (q === 'chain') return 'Define the chain';
+    // task-2fd63b922beb / task-a7214605a998 — a chain is an ordered list of
+    // saved templates.
+    if (q === 'chain') return 'Add templates to the chain, in order';
     if (q === 'fields') return 'Inputs & outputs? (optional)';
     if (q === 'outputs') return 'What the agent will produce';
     if (isFieldQuestion(q)) {
@@ -4677,254 +4597,201 @@ export function TaskComposer(props: Props) {
                 <div className="composer__q-active-body">
                   <FieldLabel id="chain" />
                   <div className="composer__q-prompt">{promptFor('chain')}</div>
-                  {priorChains.length > 0 && (
-                    <div className="composer__chain-copyfrom">
-                      <span className="composer__chain-copyfrom-label">Start from an existing chained task:</span>
-                      <select
-                        className="composer__chain-copyfrom-select"
-                        defaultValue=""
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          const idx = Number(e.target.value);
-                          e.target.value = '';
-                          const entry = priorChains[idx];
-                          if (entry) copyChainFrom(entry);
-                        }}
-                      >
-                        <option value="" disabled>
-                          Copy from…
-                        </option>
-                        {priorChains.map((c, i) => (
-                          <option key={c.taskId} value={i}>
-                            {c.name} — {c.defs.length} step{c.defs.length === 1 ? '' : 's'}
-                          </option>
-                        ))}
-                      </select>
+                  {/* task-a7214605a998 — a chain is an ORDERED LIST OF SAVED
+                      TEMPLATES. This builder is a template PICKER + ordering,
+                      with ZERO field/instruction editing (the templates own
+                      their fields). Empty registry → prompt to create templates
+                      first. */}
+                  {templatesError ? (
+                    <div className="composer__chain-empty">
+                      Couldn’t load templates: {templatesError}
                     </div>
-                  )}
-                  <ul className="composer__chain-steps">
-                    {chainDefs.map((def, defIdx) => (
-                      <li key={def.id} className="composer__chain-step">
-                        <div className="composer__chain-step-head">
-                          <span className="composer__chain-step-num">{defIdx + 1}</span>
-                          <input
-                            className="composer__chain-step-name"
-                            type="text"
-                            placeholder="Step name"
-                            value={def.name}
-                            onChange={(e) => updateChainDef(defIdx, { name: e.target.value })}
-                            spellCheck={false}
-                          />
-                          <div className="composer__chain-step-actions">
-                            <button
-                              type="button"
-                              className="composer__chain-icon-btn"
-                              title="Move up"
-                              disabled={defIdx === 0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                moveChainDef(defIdx, -1);
-                              }}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              type="button"
-                              className="composer__chain-icon-btn"
-                              title="Move down"
-                              disabled={defIdx === chainDefs.length - 1}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                moveChainDef(defIdx, 1);
-                              }}
-                            >
-                              ↓
-                            </button>
-                            <button
-                              type="button"
-                              className="composer__chain-icon-btn composer__chain-icon-btn--danger"
-                              title="Remove step"
-                              disabled={chainDefs.length <= 1}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeChainDef(defIdx);
-                              }}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
-                        <textarea
-                          className="composer__chain-step-notes"
-                          placeholder="Notes for this step (agent prompt)…"
-                          rows={2}
-                          value={def.notes ?? ''}
-                          onChange={(e) => updateChainDef(defIdx, { notes: e.target.value })}
-                        />
-
-                        {/* task-2fd63b922beb correction (Part A.4) — shared
-                            field-definition editor (same component the plain
-                            Task form uses). task-330b2e31e9d3 — keyboard-driven
-                            (i/o add, ↑↓ rows, 1–5 type, r evidence, ⌘/Ctrl+⌫
-                            remove) once focus is inside it; reached via Tab or
-                            click within the step. */}
-                        <FieldEditors
-                          inputs={def.inputs ?? []}
-                          outputs={def.outputs ?? []}
-                          onAdd={(kind) => addChainField(defIdx, kind)}
-                          onUpdate={(kind, fi, patch) => updateChainField(defIdx, kind, fi, patch)}
-                          onRemove={(kind, fi) => removeChainField(defIdx, kind, fi)}
-                        />
-
-                        {defIdx > 0 && (
-                          <div className="composer__chain-neededwhen">
-                            <label className="composer__chain-neededwhen-toggle">
+                  ) : templatesLoading && templates.length === 0 ? (
+                    <div className="composer__chain-empty">Loading templates…</div>
+                  ) : templates.length === 0 ? (
+                    <div className="composer__chain-empty">
+                      No saved templates yet. Create templates first (via “Make this
+                      a template” on a task), then chain them here.
+                    </div>
+                  ) : (
+                    <>
+                      <ul className="composer__chain-steps">
+                        {chainTemplates.length === 0 && (
+                          <li className="composer__chain-empty">
+                            No templates added yet — add one below.
+                          </li>
+                        )}
+                        {chainTemplates.map((row, idx) => (
+                          <li
+                            key={`${row.templateId}:${idx}`}
+                            className="composer__chain-step"
+                          >
+                            <div className="composer__chain-step-head">
+                              <span className="composer__chain-step-num">{idx + 1}</span>
+                              <span className="composer__chain-step-name">
+                                {row.name}
+                                <span className="composer__option-hint">
+                                  {row.variables} input{row.variables === 1 ? '' : 's'}
+                                  {' · '}
+                                  {row.outputs} output{row.outputs === 1 ? '' : 's'}
+                                </span>
+                              </span>
+                              <div className="composer__chain-step-actions">
+                                <button
+                                  type="button"
+                                  className="composer__chain-icon-btn"
+                                  title="Move up"
+                                  disabled={idx === 0}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    moveChainTemplate(idx, -1);
+                                  }}
+                                >
+                                  ↑
+                                </button>
+                                <button
+                                  type="button"
+                                  className="composer__chain-icon-btn"
+                                  title="Move down"
+                                  disabled={idx === chainTemplates.length - 1}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    moveChainTemplate(idx, 1);
+                                  }}
+                                >
+                                  ↓
+                                </button>
+                                <button
+                                  type="button"
+                                  className="composer__chain-icon-btn composer__chain-icon-btn--danger"
+                                  title="Remove template"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeChainTemplate(idx);
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      {chainPickerOpen ? (
+                        (() => {
+                          const q = chainPickerQuery.trim().toLowerCase();
+                          const matches = templates.filter(
+                            (t) => !q || t.name.toLowerCase().includes(q),
+                          );
+                          const hi = Math.min(chainPickerHighlight, Math.max(matches.length - 1, 0));
+                          return (
+                            <div className="composer__chain-picker" onClick={(e) => e.stopPropagation()}>
                               <input
-                                type="checkbox"
-                                checked={!!def.neededWhen}
+                                className="composer__chain-step-name"
+                                type="text"
+                                autoFocus
+                                placeholder="Search templates…"
+                                value={chainPickerQuery}
+                                spellCheck={false}
                                 onChange={(e) => {
-                                  if (e.target.checked) {
-                                    const first = upstreamOutputRefs(defIdx)[0];
-                                    setChainNeededWhen(defIdx, {
-                                      ref: first?.ref ?? '',
-                                      op: '==',
-                                      value: first?.field.type === 'bool' ? false : '',
-                                    });
-                                  } else {
-                                    setChainNeededWhen(defIdx, null);
+                                  setChainPickerQuery(e.target.value);
+                                  setChainPickerHighlight(0);
+                                }}
+                                onKeyDown={(e) => {
+                                  e.stopPropagation();
+                                  if (e.key === 'Escape') {
+                                    setChainPickerOpen(false);
+                                    setChainPickerQuery('');
+                                  } else if (e.key === 'ArrowDown') {
+                                    e.preventDefault();
+                                    setChainPickerHighlight((h) =>
+                                      Math.min(h + 1, Math.max(matches.length - 1, 0)),
+                                    );
+                                  } else if (e.key === 'ArrowUp') {
+                                    e.preventDefault();
+                                    setChainPickerHighlight((h) => Math.max(h - 1, 0));
+                                  } else if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const t = matches[hi];
+                                    if (t) {
+                                      addChainTemplate(t);
+                                      setChainPickerQuery('');
+                                      setChainPickerHighlight(0);
+                                    }
                                   }
                                 }}
                               />
-                              only needed when…
-                            </label>
-                            {def.neededWhen && (() => {
-                              const candidates = upstreamOutputRefs(defIdx);
-                              const refField = candidates.find((r) => r.ref === def.neededWhen!.ref)?.field;
-                              return (
-                                <div className="composer__chain-neededwhen-row">
-                                  <select
-                                    className="composer__chain-field-type"
-                                    value={def.neededWhen.ref}
-                                    onChange={(e) => {
-                                      // task-f8ae99553691: switching the referenced
-                                      // output resets `value` — a stale value typed
-                                      // for a different field's type (e.g. a number
-                                      // typed while pointed at a bool field) must not
-                                      // silently carry over.
-                                      const nextField = candidates.find((r) => r.ref === e.target.value)?.field;
-                                      setChainNeededWhen(defIdx, {
-                                        ...def.neededWhen!,
-                                        ref: e.target.value,
-                                        value: nextField?.type === 'bool' ? false : '',
-                                      });
-                                    }}
-                                  >
-                                    {candidates.map((r) => (
-                                      <option key={r.ref} value={r.ref}>
-                                        {r.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <select
-                                    className="composer__chain-field-type"
-                                    value={def.neededWhen.op}
-                                    onChange={(e) =>
-                                      setChainNeededWhen(defIdx, {
-                                        ...def.neededWhen!,
-                                        op: e.target.value as TaskDefCondition['op'],
-                                      })
-                                    }
-                                  >
-                                    <option value="==">==</option>
-                                    <option value="!=">!=</option>
-                                    <option value="<">&lt;</option>
-                                    <option value=">">&gt;</option>
-                                  </select>
-                                  {/* task-f8ae99553691: the value input is
-                                      constrained by the referenced output field's
-                                      TYPE — bool renders as a Yes/No toggle STORED
-                                      as a real boolean (never the string "Yes"),
-                                      number as a numeric input, select as a
-                                      dropdown of that field's own options, and
-                                      free text otherwise. */}
-                                  {refField?.type === 'bool' ? (
-                                    <select
-                                      className="composer__chain-field-type"
-                                      value={def.neededWhen.value === true ? 'true' : 'false'}
-                                      onChange={(e) =>
-                                        setChainNeededWhen(defIdx, {
-                                          ...def.neededWhen!,
-                                          value: e.target.value === 'true',
-                                        })
-                                      }
-                                    >
-                                      <option value="true">Yes</option>
-                                      <option value="false">No</option>
-                                    </select>
-                                  ) : refField?.type === 'select' ? (
-                                    <select
-                                      className="composer__chain-field-type"
-                                      value={String(def.neededWhen.value ?? '')}
-                                      onChange={(e) =>
-                                        setChainNeededWhen(defIdx, { ...def.neededWhen!, value: e.target.value })
-                                      }
-                                    >
-                                      <option value="" disabled>
-                                        choose…
-                                      </option>
-                                      {(refField.options ?? []).map((o) => (
-                                        <option key={o} value={o}>
-                                          {o}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  ) : refField?.type === 'number' ? (
-                                    <input
-                                      className="composer__chain-field-label"
-                                      type="number"
-                                      placeholder="value"
-                                      value={String(def.neededWhen.value ?? '')}
-                                      onChange={(e) =>
-                                        setChainNeededWhen(defIdx, {
-                                          ...def.neededWhen!,
-                                          value: e.target.value === '' ? '' : Number(e.target.value),
-                                        })
-                                      }
-                                    />
-                                  ) : (
-                                    <input
-                                      className="composer__chain-field-label"
-                                      type="text"
-                                      placeholder="value"
-                                      value={String(def.neededWhen.value ?? '')}
-                                      onChange={(e) =>
-                                        setChainNeededWhen(defIdx, { ...def.neededWhen!, value: e.target.value })
-                                      }
-                                    />
-                                  )}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                              <ul className="composer__options" role="listbox">
+                                {matches.length === 0 ? (
+                                  <li className="composer__chain-empty">No matching templates.</li>
+                                ) : (
+                                  matches.map((t, i) => (
+                                    <li key={t.id}>
+                                      <button
+                                        type="button"
+                                        role="option"
+                                        aria-selected={i === hi}
+                                        className={
+                                          'composer__option' +
+                                          (i === hi ? ' composer__option--active' : '')
+                                        }
+                                        onMouseEnter={() => setChainPickerHighlight(i)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          addChainTemplate(t);
+                                          setChainPickerQuery('');
+                                          setChainPickerHighlight(0);
+                                        }}
+                                      >
+                                        <span className="composer__option-label">{t.name}</span>
+                                        <span className="composer__option-hint">
+                                          {(t.variables ?? []).length} input
+                                          {(t.variables ?? []).length === 1 ? '' : 's'}
+                                          {' · '}
+                                          {(t.outputSchema ?? []).length} output
+                                          {(t.outputSchema ?? []).length === 1 ? '' : 's'}
+                                        </span>
+                                      </button>
+                                    </li>
+                                  ))
+                                )}
+                              </ul>
+                              <button
+                                type="button"
+                                className="composer__chain-icon-btn"
+                                title="Close picker"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setChainPickerOpen(false);
+                                  setChainPickerQuery('');
+                                }}
+                              >
+                                Done
+                              </button>
+                            </div>
+                          );
+                        })()
+                      ) : null}
+                    </>
+                  )}
                   <div className="composer__chain-footer">
                     <button
                       type="button"
                       className="composer__chain-add-step-btn"
+                      disabled={templates.length === 0}
                       onClick={(e) => {
                         e.stopPropagation();
-                        addChainDef();
+                        setChainPickerQuery('');
+                        setChainPickerHighlight(0);
+                        setChainPickerOpen((o) => !o);
                       }}
                     >
-                      + add step
+                      + add template
                     </button>
                     <button
                       type="button"
                       className="composer__chain-continue-btn"
-                      disabled={!chainDefsValid}
+                      disabled={!chainTemplatesValid}
                       onClick={(e) => {
                         e.stopPropagation();
                         tryAdvanceChain();

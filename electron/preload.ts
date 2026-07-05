@@ -995,20 +995,6 @@ const fm = {
       ipcRenderer.invoke('typebuild:tasks:note', taskId, note) as Promise<
         { ok: true } | { ok: false; reason: string; status: number }
       >,
-    // task-a7214605a998 — BULK create a chain as an ordered list of REAL tasks
-    // (thin parent container + one child per step, each with its OWN
-    // output_schema/data_keys). `dependsOnIndexes` on a step encodes ordering
-    // (positions in `tasks`); the source wires real depends_on edges by returned
-    // id. PHI: task titles/bodies/data are sent to the server but never logged
-    // here. Returns { parentId, ids } (ids = [parentId, child0, child1, ...]).
-    tasksBulkCreate: (input: {
-      parent?: unknown;
-      tasks: Array<unknown>;
-    }) =>
-      ipcRenderer.invoke('typebuild:tasks:bulkCreate', input) as Promise<{
-        parentId: string | null;
-        ids: string[];
-      }>,
     // task-da23979fd907 — append to the USER-facing task message feed. NOT
     // claim-gated. PHI: `text` is sent to the server but never logged. Same
     // structured-result contract as taskNote (400 empty / 404 not_visible).

@@ -906,6 +906,33 @@
   outline: none;
   border-bottom-color: var(--accent);
 }
+/* task-a7214605a998 — when the name class is used as a READ-ONLY row label
+   (a chosen template's name, a <span>), drop the text-input underline and stack
+   the name over its field-count hint. */
+span.composer__chain-step-name {
+  border-bottom: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 2px;
+}
+/* task-a7214605a998 — chain builder empty state + inline template picker. */
+.composer__chain-empty {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  padding: 8px 2px;
+}
+.composer__chain-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 12px;
+  background: var(--surface);
+}
 .composer__chain-step-actions {
   display: flex;
   gap: 4px;

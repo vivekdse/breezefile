@@ -1355,95 +1355,14 @@ export class TypeBuildTaskSource implements TaskSource {
     return payload;
   }
 
-  // task-a7214605a998 — batch create over POST /chromeext/tasks/bulk: create an
-  // optional thin PARENT container first, then the ordered CHILD tasks, each
-  // mapped with the SAME per-task field mapping createTask uses
-  // (buildCreatePayload → output_schema/data/project_id/...). This is createTask
-  // batched — used by the New-Home chain save path so a chain becomes an ordered
-  // list of REAL tasks (each owning its own output_schema/data_keys), not a
-  // note-block-encoded meta parent.
-  //
-  // ORDERING: the bulk endpoint can NOT self-reference sibling ids in ONE call —
-  // child ids are minted server-side, so a payload can't name a sibling that
-  // doesn't exist yet (set_task_deps would reject it as dep_not_found). So a
-  // step's ordering rides as `dependsOnIndexes` (positions in `tasks`) and the
-  // real edges are wired in a SECOND pass: after bulk returns the ordered ids,
-  // PATCH each dependent child's depends_on with the resolved sibling id(s). The
-  // create is one bulk round-trip; the dep wiring is N-1 small PATCHes.
-  //
-  // Returns { parentId, ids } where ids = [parentId?, child0, child1, ...] in
-  // request order (parent first when a parent was created). PHI: titles/bodies/
-  // data ride in memory only, never logged.
-  async bulkCreateTasks(input: {
-    parent?: TaskCreate;
-    tasks: Array<TaskCreate & { dependsOnIndexes?: number[] }>;
-  }): Promise<{ parentId: string | null; ids: string[] }> {
-    const tasksIn = input.tasks ?? [];
-    if (tasksIn.length === 0) {
-      throw new Error('typebuild: bulk create requires at least one task');
-    }
-    const body: Record<string, unknown> = {
-      tasks: tasksIn.map((t) => this.buildCreatePayload(t)),
-    };
-    if (input.parent) body.parent = this.buildCreatePayload(input.parent);
-
-    const res = await this.request('POST', '/chromeext/tasks/bulk', body);
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        reason?: string;
-        index?: number;
-      };
-      throw new Error(
-        `typebuild: bulk create failed (${res.status})${
-          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
-        }`,
-      );
-    }
-    const data = (await res.json().catch(() => ({}))) as {
-      ok?: boolean;
-      parent_id?: string | null;
-      ids?: string[];
-    };
-    const ids = Array.isArray(data.ids) ? data.ids : [];
-    const hasParent = !!input.parent;
-    const parentId = data.parent_id ?? (hasParent ? ids[0] ?? null : null);
-    const childIds = hasParent ? ids.slice(1) : ids;
-
-    // Second pass — wire the sibling ordering the single bulk call could not
-    // express (child ids are only known now, from the returned `ids`).
-    for (let i = 0; i < tasksIn.length; i++) {
-      const idxs = tasksIn[i].dependsOnIndexes;
-      const childId = childIds[i];
-      if (!idxs || idxs.length === 0 || !childId) continue;
-      const depIds = idxs
-        .map((j) => childIds[j])
-        .filter((d): d is string => typeof d === 'string' && d.length > 0);
-      if (depIds.length === 0) continue;
-      const pres = await this.request(
-        'PATCH',
-        `/chromeext/${encodeURIComponent(childId)}`,
-        { depends_on: depIds },
-      );
-      if (!pres.ok) {
-        const perr = (await pres.json().catch(() => ({}))) as {
-          error?: string;
-          reason?: string;
-        };
-        throw new Error(
-          `typebuild: bulk create ordering failed (${pres.status})${
-            perr.reason ? `: ${perr.reason}` : perr.error ? `: ${perr.error}` : ''
-          }`,
-        );
-      }
-    }
-
-    // Refresh the cache/broadcast so the new rows appear without waiting on the
-    // 30s poll (same pattern as createTask).
-    breezeHost().onTasksChanged();
-    void this.refreshAndBroadcast();
-    return { parentId, ids };
-  }
+  // task-a7214605a998 (final model) — a CHAIN is an ORDERED LIST OF SAVED
+  // TEMPLATES; it is created NOT via /tasks/bulk (that was the earlier inline-
+  // field model) but by instantiating each referenced template in order and
+  // linking the resulting tasks. That orchestration lives in the renderer's
+  // testable `instantiateChain` seam (src/components/newhome/newHomePrefs.ts),
+  // wired to fm.tasksCreate (parent) + fm.typebuild.templates.instantiate
+  // (children) + sourceAction('patch') for parent_task_id/depends_on linkage —
+  // the last of which patchFields now forwards (see below).
 
   updateTask(_id: string, _patch: TaskUpdate): never {
     // Edits go through sourceAction('patch') (fm-j7w0/S4), not the local-style
@@ -3599,6 +3518,26 @@ export class TypeBuildTaskSource implements TaskSource {
       const s = typeof v === 'string' ? v : '';
       body.agent_id = s;
       cachePatch.agentId = s === '' ? null : s;
+    }
+    // task-a7214605a998 (chain linkage) — structural chain fields (opaque ids,
+    // NON-PHI). The chain builder creates a job's children by instantiating
+    // templates, then PATCHes each child's parent_task_id (+ depends_on on the
+    // predecessor) to wire the parent-linked, ordered chain — the instantiate
+    // endpoint accepts neither, so this whitelist is how the client sets them.
+    // '' clears parent_task_id server-side; depends_on is a full-replace list.
+    if ('parent_task_id' in input) {
+      const v = input.parent_task_id;
+      const s = typeof v === 'string' ? v : '';
+      body.parent_task_id = s;
+      cachePatch.parentTaskId = s === '' ? null : s;
+    }
+    if ('depends_on' in input) {
+      const v = input.depends_on;
+      // depends_on is a DetailRow-only field (no ListRow/cache slot), so it is
+      // forwarded to the server but not mirrored into the routing cache.
+      body.depends_on = Array.isArray(v)
+        ? v.filter((d): d is string => typeof d === 'string')
+        : [];
     }
     // task-a7214605a998 (S6) — structured output field schema edit (NON-PHI).
     // `null`/`[]` clears it server-side (the PATCH handler normalizes both to

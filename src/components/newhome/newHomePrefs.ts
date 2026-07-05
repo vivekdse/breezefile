@@ -4,140 +4,114 @@
 // repeatables), persisted to localStorage + best-effort synced to a server
 // endpoint. Per docs/task-templates-design.md's "Removed/superseded" section,
 // that per-project stored template was a wrong abstraction (task-2fd63b922beb)
-// and has been stripped entirely (R3, task-b1fa5098da3e): a project is now
-// just a category + a derived view. All that remains here is
-// `instantiateTemplate` — the ONE function that turns a chain (`TaskDef[]`,
-// given directly by the caller — never read off a project pref) into real tasks.
+// and has been stripped entirely (R3, task-b1fa5098da3e). All that remains here
+// is `instantiateChain` — the ONE function that turns a chain into real tasks.
 //
-// task-a7214605a998 (create pass) — a chain is now nothing but an ORDERED LIST
-// OF NORMAL TASKS. Each step becomes a REAL child task that owns its own title,
-// instructions (body), input fields (first-class `data`/`data_keys`) and output
-// fields (first-class `output_schema`). The chain is created ATOMICALLY via the
-// server bulk endpoint (POST /chromeext/tasks/bulk, reached through the injected
-// `bulkCreateTasks` thunk) — NOT the old N+1 loop that embedded the whole chain
-// as ```task-template / ```task-outputs / ```task-fields markdown note-blocks.
-// The note-block READERS stay (existing chains still parse) — only the WRITE
-// path changed here.
+// task-a7214605a998 (final model) — a CHAIN IS A HIGHER-ORDER TEMPLATE: nothing
+// but an ORDERED LIST OF SAVED TEMPLATES. Creating a chain = create a thin parent
+// container (the "job") + instantiate each referenced template IN ORDER into a
+// real child task, linked to the parent (parent_task_id) and to its predecessor
+// (depends_on). The step content is NOT authored inline anymore — it comes from
+// the templates the user already saved (via "Make this a template" on a task).
+// The old inline-field builder (TaskDef-owns-fields) and its note-block WRITE
+// path are gone; the note-block READERS stay so existing chains still render.
 
-import type { TaskDef, TaskDefField } from './types';
-import { effectiveFieldKey } from './taskSchema.mjs';
-
-// ─── Template instantiation (task-fb31518201da, rewritten task-a7214605a998) ─
+// ─── Chain instantiation (rewritten task-a7214605a998, template-picker model) ─
 //
-// instantiateTemplate turns a chain of TaskDefs — given directly by the caller,
-// NOT read off a project's TemplateConfig — into real tasks: one thin META
-// PARENT container (title = the chain/job name) plus one CHILD task per
-// task-def, in order, linked via the bulk endpoint's parent linkage + a linear
-// `dependsOnIndexes` ordering. ALL task-defs get a child, including conditional
-// (`neededWhen`) ones: the condition is evaluated client-side later from
-// `taskDefStatus` (taskSchema.mjs), not at instantiation time, so the linear
-// chain ordering holds regardless of which steps end up "not needed".
-//
-// Each child carries its step's fields as FIRST-CLASS task schema:
-//   - output fields → `outputSchema` (the server's output_schema)
-//   - input fields  → `data` keys with (usually empty) values (the server
-//     derives data_keys from the bag keys). Creation DEFINES the fields; it
-//     never asks the human for their VALUES (task-0d63c7b0ebdb) — so the values
-//     are empty unless a caller (the from-template flow) passes collected ones.
+// instantiateChain is transport-agnostic: it takes injected async thunks
+// (createParent / instantiateTemplate / linkTask) so the ordering + linkage
+// logic is unit-tested without Electron/network. The composer wires the thunks
+// to the real bridge calls:
+//   - createParent      → fm.tasksCreate (a thin { title, projectId } container)
+//   - instantiateTemplate → fm.typebuild.templates.instantiate (POST
+//                           /chromeext/templates/{id}/instantiate — creates one
+//                           real task from the template, inheriting its
+//                           output_schema/data_keys/project/agent/flags)
+//   - linkTask          → sourceAction('patch') → PATCH /chromeext/{id} with
+//                           parent_task_id + depends_on (the instantiate endpoint
+//                           itself accepts NEITHER, so linkage is a second pass)
 
-/** Split a flat `values` map — keyed by `<taskDefId>.<key>` per the
- *  TaskComposer/task-templates-design.md contract — into one bare-keyed map
- *  scoped to a single task-def, so each child's `data` bag only ever carries
- *  that task-def's own values. PHI: `values` flows through in-memory only,
- *  never logged. */
-function valuesForTaskDef(
-  values: Record<string, string> | null | undefined,
-  taskDefId: string,
-): Record<string, string> {
-  const prefix = `${taskDefId}.`;
-  const out: Record<string, string> = {};
-  for (const [ref, v] of Object.entries(values ?? {})) {
-    if (ref.startsWith(prefix)) out[ref.slice(prefix.length)] = v;
-  }
-  return out;
-}
-
-/** One create payload for a chain step, as the `bulkCreateTasks` thunk consumes
- *  it. A step's fields are FIRST-CLASS task schema (outputSchema/data), not
- *  note-blocks. `dependsOnIndexes` encodes ordering as positions in the tasks
- *  array (resolved to real ids by the source after the bulk create returns). */
-export type ChainTaskInput = {
-  title: string;
-  notes?: string;
-  projectId?: string;
-  outputSchema?: TaskDefField[];
-  data?: Record<string, string>;
-  dependsOnIndexes?: number[];
+/** One saved-template reference in the ordered chain the builder produces. */
+export type ChainTemplateRef = {
+  templateId: string;
+  /** Display name (for a clearer parent/child title); optional. */
+  name?: string;
 };
 
-/** Turn one chain instantiation ("job") into a thin meta-parent container + one
- *  linearly-ordered child task per task-def, created ATOMICALLY via the injected
- *  `bulkCreateTasks` thunk (POST /chromeext/tasks/bulk). `defs` is the chain
- *  itself — given directly by the caller (composer form state, or a chain copied
- *  from an existing chained task), never read off a project's TemplateConfig.
- *  See docs/task-templates-design.md for the contract. */
-export async function instantiateTemplate(opts: {
+/** Thrown when a step fails partway through. The parent + any children created
+ *  before the failing step are NOT rolled back — parentId/childIds let the
+ *  caller surface/resume the partially-created job rather than losing it. */
+export class InstantiateChainError extends Error {
+  parentId: string;
+  childIds: string[];
+  override cause: unknown;
+  constructor(message: string, parentId: string, childIds: string[], cause: unknown) {
+    super(message);
+    this.name = 'InstantiateChainError';
+    this.parentId = parentId;
+    this.childIds = childIds;
+    this.cause = cause;
+  }
+}
+
+/** Turn one chain ("job") into a thin meta-parent container + one child task per
+ *  referenced template, in order, each instantiated from its template and linked
+ *  to the parent + its predecessor. `templates` is the ordered list the builder
+ *  produced — refs to SAVED templates, never inline field defs. */
+export async function instantiateChain(opts: {
   /** The chain/job title — becomes the thin parent container's title. */
   name: string;
   projectId?: string;
-  /** The chain definition itself: full TaskDef objects, in order. Each maps to
-   *  a real child task owning its own first-class output_schema/data_keys. */
-  defs: TaskDef[];
-  /** Flat map keyed by `<taskDefId>.<fieldKey>` — INPUT values only. Usually
-   *  EMPTY at plain-create time (creation defines fields, collects no values);
-   *  the from-template flow passes collected values here. PHI: in memory only. */
-  values: Record<string, string>;
-  /** Injected transport: create the parent container + ordered children in one
-   *  bulk round-trip and return their ids ([parentId, child0, child1, ...]). */
-  bulkCreateTasks: (input: {
-    parent: { title: string; projectId?: string };
-    tasks: ChainTaskInput[];
-  }) => Promise<{ parentId: string | null; ids: string[] }>;
+  /** The ordered saved-template references. */
+  templates: ChainTemplateRef[];
+  /** Create the thin parent container; returns its id. */
+  createParent: (input: { title: string; projectId?: string }) => Promise<{ id: string }>;
+  /** Instantiate ONE saved template into a real task; returns the new task id.
+   *  Called with EMPTY values — creation defines the child's fields (inherited
+   *  from the template) but never collects their values here. */
+  instantiateTemplate: (
+    templateId: string,
+    opts: { projectId?: string },
+  ) => Promise<{ id: string }>;
+  /** Link a just-created child to the parent (parent_task_id) and, when it has a
+   *  predecessor, to it (depends_on) — a second pass, since the instantiate
+   *  endpoint accepts neither field. */
+  linkTask: (
+    taskId: string,
+    patch: { parentTaskId: string; dependsOn?: string[] },
+  ) => Promise<void>;
 }): Promise<{ parentId: string; childIds: string[] }> {
-  const { name, projectId, defs, values, bulkCreateTasks } = opts;
-  const taskDefs = defs ?? [];
-  if (taskDefs.length === 0) {
-    // A chain is an ordered list of tasks — an empty chain has nothing to
-    // create. The composer guards this (chainDefsValid) before ever calling in,
-    // so this is a defensive guard, not a real path.
-    throw new Error('instantiateTemplate: a chain needs at least one step');
+  const { name, projectId, templates, createParent, instantiateTemplate, linkTask } = opts;
+  const refs = templates ?? [];
+  if (refs.length === 0) {
+    throw new Error('instantiateChain: a chain needs at least one template');
   }
 
-  const tasks: ChainTaskInput[] = taskDefs.map((def, i) => {
-    // Input fields → a `data` bag. effectiveFieldKey normalizes each field's key
-    // (falling back to a slug of the label when the key was left blank) so a
-    // value never silently drops — the same normalization the single-task path
-    // uses. Values come from `values` when the caller collected them; otherwise
-    // empty (creation defines the fields/data_keys, never asks the values).
-    const defValues = valuesForTaskDef(values, def.id);
-    const data: Record<string, string> = {};
-    for (const f of def.inputs ?? []) {
-      const key = effectiveFieldKey(f);
-      if (!key) continue;
-      data[key] = defValues[f.key] ?? '';
+  const parent = await createParent({ title: name, ...(projectId ? { projectId } : {}) });
+
+  const childIds: string[] = [];
+  let predecessorId: string | undefined;
+  for (const ref of refs) {
+    try {
+      const child = await instantiateTemplate(ref.templateId, {
+        ...(projectId ? { projectId } : {}),
+      });
+      await linkTask(child.id, {
+        parentTaskId: parent.id,
+        ...(predecessorId ? { dependsOn: [predecessorId] } : {}),
+      });
+      childIds.push(child.id);
+      predecessorId = child.id;
+    } catch (err) {
+      throw new InstantiateChainError(
+        `instantiateChain: failed instantiating template "${ref.templateId}" ` +
+          `(${childIds.length} of ${refs.length} children created before failure)`,
+        parent.id,
+        childIds,
+        err,
+      );
     }
-    const outputs = def.outputs ?? [];
-    return {
-      title: def.name,
-      ...(def.notes ? { notes: def.notes } : {}),
-      ...(projectId ? { projectId } : {}),
-      ...(outputs.length > 0 ? { outputSchema: outputs } : {}),
-      ...(Object.keys(data).length > 0 ? { data } : {}),
-      // Linear ordering: every step but the first waits on its predecessor.
-      ...(i > 0 ? { dependsOnIndexes: [i - 1] } : {}),
-    };
-  });
+  }
 
-  const result = await bulkCreateTasks({
-    parent: { title: name, ...(projectId ? { projectId } : {}) },
-    tasks,
-  });
-
-  const ids = Array.isArray(result.ids) ? result.ids : [];
-  // The bulk endpoint returns ids = [parentId, child0, child1, ...] (parent
-  // first because a parent container is always created here). childIds are the
-  // rest, in step order.
-  const parentId = result.parentId ?? ids[0] ?? '';
-  const childIds = ids.slice(1);
-  return { parentId, childIds };
+  return { parentId: parent.id, childIds };
 }

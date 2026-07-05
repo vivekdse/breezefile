@@ -678,18 +678,6 @@ type Fm = {
     groups: {
       members: () => Promise<GroupMember[]>;
     };
-    // task-a7214605a998 — BULK create a chain as an ordered list of REAL tasks:
-    // a thin parent container + one child per step, each mapped through the SAME
-    // per-task field mapping createTask uses (so each child owns its OWN
-    // output_schema/data_keys). `dependsOnIndexes` on a step encodes ordering as
-    // positions in `tasks`; the source resolves them to real depends_on edges by
-    // returned id. Returns { parentId, ids } — ids = [parentId, child0, child1,
-    // ...] in request order. PHI: task bodies/data ride the payload the same way
-    // title/notes do; never logged.
-    tasksBulkCreate: (input: {
-      parent?: TaskCreate;
-      tasks: Array<TaskCreate & { dependsOnIndexes?: number[] }>;
-    }) => Promise<{ parentId: string | null; ids: string[] }>;
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (
       taskId: string,
