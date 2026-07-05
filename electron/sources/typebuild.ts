@@ -58,6 +58,11 @@ import {
   clearPhi,
 } from './task-phi-store';
 import { wipeDbKey } from '../typebuild/db-key';
+// task-996487c8c388 — main-process SSE client for the server's "something
+// changed" push. It's the live TRIGGER; poll() is still HOW we resync. On each
+// signal (and on connect/reconnect) it kicks poll(), which runs the existing
+// delta reconcile. Held here so its lifecycle rides startPolling/stopPolling.
+import { TaskStreamClient } from './typebuild-stream';
 import { mintMcpToken } from '../typebuild/mcp-token';
 import { clearSession, registerSession } from '../typebuild/sessions';
 // task-6fc9e503623e — the pure, unit-tested liveness classifier (shared .mjs).
@@ -853,6 +858,19 @@ export class TypeBuildTaskSource implements TaskSource {
   // per-principal encrypted-DB key, since auth has already flipped to
   // signed-out by the time stopPolling runs. '' when no stable principal.
   private principal = '';
+
+  // task-996487c8c388 — the main-process SSE client for the server's live
+  // "something changed" push. Started in startPolling, stopped in stopPolling.
+  // Its onSignal kicks poll() (the existing delta reconcile), so the stream is
+  // the fast trigger and the 30s interval poll remains only a backstop for a
+  // silently-dead stream.
+  private stream: TaskStreamClient | null = null;
+
+  // task-996487c8c388 — single-flight guard for poll(): true while a reconcile
+  // pass is running; pollAgain records that another trigger (SSE signal or the
+  // interval) arrived mid-poll so we run exactly one more pass afterward.
+  private pollInFlight = false;
+  private pollAgain = false;
 
   // fm-b5at.10 — task ids whose session is mid-relaunch. The relaunch kills the
   // old PTY, whose onExit would otherwise fire the "Release this task?" prompt
@@ -3858,6 +3876,21 @@ export class TypeBuildTaskSource implements TaskSource {
     } else {
       kickPoll();
     }
+
+    // task-996487c8c388 — open the live SSE push. Each signal (and every
+    // connect/reconnect) kicks poll(), so Home updates within the debounce
+    // window of a server-side change instead of waiting up to 30s for the next
+    // interval tick. The stream carries NO task data (PHI-free poke); poll() is
+    // still the only path that touches the cache/DB. The interval poll above
+    // stays as a backstop for a silently-dead stream + the periodic full
+    // reconcile (tombstone safety net). onSignal is fire-and-forget: it must
+    // never throw back into the stream loop.
+    this.stream = new TaskStreamClient({
+      apiBase: API_BASE,
+      getToken: () => getIdToken(),
+      onSignal: () => void this.poll(),
+    });
+    this.stream.start();
   }
 
   // task-ac9f4a27be7d — layer persisted PHI titles onto the skeleton-hydrated
@@ -3886,6 +3919,13 @@ export class TypeBuildTaskSource implements TaskSource {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    // task-996487c8c388 — tear down the SSE push (aborts the held connection +
+    // cancels any pending reconnect/debounce) so sign-out drops it cleanly and a
+    // new principal's source opens its own stream.
+    if (this.stream) {
+      this.stream.stop();
+      this.stream = null;
     }
     // fm-cveh (S8) — sign-out drops the source; disarm every claim keep-alive.
     for (const timer of this.keepAliveTimers.values()) clearInterval(timer);
@@ -3939,6 +3979,32 @@ export class TypeBuildTaskSource implements TaskSource {
   // back to a full pull next time by NOT advancing the cursor), and offline /
   // failed pulls (keep the last-known cache + cursor, retry next tick).
   private async poll(): Promise<void> {
+    // task-996487c8c388 — single-flight. Before SSE, polls were 30s apart so
+    // overlap was impossible; now the SSE trigger can call poll() while the 30s
+    // interval poll (or a prior signal's poll) is still in flight. Two concurrent
+    // pulls could both read the same cursor, both advance it, and race the cache
+    // swap / double-broadcast. Serialize: if a poll is running, mark that another
+    // is wanted and return; the in-flight one re-runs once when it finishes so a
+    // change that landed mid-poll is never missed.
+    if (this.pollInFlight) {
+      this.pollAgain = true;
+      return;
+    }
+    this.pollInFlight = true;
+    try {
+      do {
+        this.pollAgain = false;
+        await this.pollOnce();
+        // Re-run only if another trigger arrived mid-poll AND we're still armed
+        // (stopPolling clears pollTimer on sign-out — don't keep pulling then).
+      } while (this.pollAgain && this.pollTimer !== null);
+    } finally {
+      this.pollInFlight = false;
+    }
+  }
+
+  // One reconcile pass (delta or full). Extracted so poll() can serialize + coalesce.
+  private async pollOnce(): Promise<void> {
     // Pause when there's no window to update — saves a token round-trip and
     // server load while the app is closed-but-running (macOS dock).
     if (browserWindows().every((w) => w.isDestroyed())) return;
