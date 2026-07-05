@@ -21,7 +21,13 @@ import { defaultAgentId } from './registry';
 import { flagsToArgs } from './flags';
 import { openBrowserWindow, markSessionEnded } from '../browser/window';
 import { resolveClaudeBin } from './claude';
-import { spawnManagedPty, reservePtyId, awaitPtyLiveness, writeManagedPty } from '../ipc';
+import {
+  spawnManagedPty,
+  reservePtyId,
+  awaitPtyLiveness,
+  awaitPtyInputReady,
+  writeManagedPty,
+} from '../ipc';
 import type { PtyLivenessVerdict } from '../ipc';
 import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
 import { startTiming, timing } from '../core/launch-timing';
@@ -398,19 +404,19 @@ export async function runTaskInteractive(
     });
     timing(ptyFlow, `awaitLiveness result alive=${liveness.alive}`);
     if (liveness.alive) {
-      injectWorkBundle(ptyId, opts);
-      timing(ptyFlow, `injectWorkBundle (len=${opts.workBundle?.length ?? 0})`);
+      // Fire-and-forget: injection now WAITS for TUI input-readiness (below)
+      // and must not delay the launcher's return.
+      void injectWorkBundle(ptyId, opts);
+      timing(ptyFlow, `injectWorkBundle scheduled (len=${opts.workBundle?.length ?? 0})`);
     }
     return { run, ptyId, launched: true, liveness };
   }
 
   // No liveness gate requested — the caller (a non-TypeBuild `claude` launch)
-  // still gets the bundle, but we have no signal for "the TUI is ready for
-  // input" here, so fall back to a short fixed delay before writing. This
-  // path is not exercised by the TypeBuild Start flow (which always passes
-  // awaitLiveness), so the delay's coarseness is acceptable.
+  // still gets the bundle; injectWorkBundle's own input-readiness wait covers
+  // the "TUI not up yet" window on this path too.
   if (opts.workBundle && !opts.omitPrompt) {
-    setTimeout(() => injectWorkBundle(ptyId, opts), 1500);
+    void injectWorkBundle(ptyId, opts);
   }
 
   return { run, ptyId, launched: true };
@@ -427,8 +433,19 @@ export async function runTaskInteractive(
 // Skipped on a resume (`omitPrompt`): --continue resumes a conversation that
 // already received this bundle on its original launch, so re-injecting would
 // duplicate it into the transcript.
-function injectWorkBundle(ptyId: number, opts: InteractiveRunOptions): void {
+async function injectWorkBundle(ptyId: number, opts: InteractiveRunOptions): Promise<void> {
   if (!opts.workBundle || opts.omitPrompt) return;
+  // WAIT FOR THE TUI TO BE READY FIRST (fix 2026-07-05, stuck-operator bug).
+  // The liveness verdict resolves on the child's FIRST OUTPUT (~400-700ms in),
+  // while claude is still booting — stdin written then is SWALLOWED, not
+  // buffered: the bundle never reached the input box, and with promptViaBundle
+  // suppressing the argv prompt the agent sat at an empty prompt forever.
+  // awaitPtyInputReady resolves once the input prompt ('❯') has painted and the
+  // welcome-banner output has gone quiet; its maxWait cap injects anyway as a
+  // best-effort rather than never.
+  const ready = await awaitPtyInputReady(ptyId, { quietMs: 600, maxWaitMs: 12_000 });
+  timing(`pty:${ptyId}`, `injectWorkBundle write (inputReady=${ready})`);
+  if (!ready) return; // pty died while we waited — nothing to inject into
   // Write the bundle body FIRST, then submit with a SEPARATE, slightly-delayed
   // Enter. Sending `${bundle}\r` in a single write lets the trailing \r be
   // absorbed into the multi-line block (it lands as a newline, not a submit), so
@@ -436,5 +453,5 @@ function injectWorkBundle(ptyId: number, opts: InteractiveRunOptions): void {
   // Enter by hand (reported 2026-07-05). A standalone \r after the paste has
   // settled is processed as a real submit keypress, same as pressing Enter.
   writeManagedPty(ptyId, opts.workBundle);
-  setTimeout(() => writeManagedPty(ptyId, '\r'), 250);
+  setTimeout(() => writeManagedPty(ptyId, '\r'), 400);
 }

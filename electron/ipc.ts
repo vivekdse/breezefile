@@ -689,6 +689,44 @@ export type PtyLivenessVerdict = {
 };
 const livenessWatches = new Map<number, LivenessWatch>();
 
+// ── PTY input-readiness gate (fix 2026-07-05, stuck-operator bug) ────────────
+// "First output" is NOT "ready for input": the claude TUI's first escape codes
+// arrive ~400-700ms after spawn, while it is still booting — stdin written at
+// that moment is SWALLOWED, not buffered into the input box. The work bundle
+// used to be injected on the liveness verdict (= first output), so the agent's
+// only instruction was silently lost and the session idled forever at an empty
+// prompt. Readiness = the TUI has painted its input prompt ('❯') AND the output
+// stream has gone quiet (the welcome banner finished). Tracked per pty here
+// because onData is bound once at spawn.
+const ptyInputState = new Map<number, { lastDataAt: number; sawPrompt: boolean }>();
+
+/**
+ * Resolve once pty `id` looks ready to accept typed input: it has emitted the
+ * claude input-prompt marker and then been quiet for `quietMs`. Resolves true
+ * on readiness, true at `maxWaitMs` as a best-effort cap (inject anyway —
+ * better than never), false only if the pty died. Cheap 100ms polling; only
+ * ever active during a launch window.
+ */
+export function awaitPtyInputReady(
+  id: number,
+  opts?: { quietMs?: number; maxWaitMs?: number },
+): Promise<boolean> {
+  const quietMs = opts?.quietMs ?? 600;
+  const maxWaitMs = opts?.maxWaitMs ?? 12_000;
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!ptys.has(id)) return resolve(false);
+      const st = ptyInputState.get(id);
+      const now = Date.now();
+      if (st?.sawPrompt && now - st.lastDataAt >= quietMs) return resolve(true);
+      if (now - start >= maxWaitMs) return resolve(true);
+      setTimeout(check, 100);
+    };
+    check();
+  });
+}
+
 // Exit info kept briefly AFTER a pty is removed from `ptys`, so a liveness
 // awaiter that races the exit can still read the code/signal + tail. Cleared
 // lazily (see the setTimeout in the pty onExit handler).
@@ -823,6 +861,14 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
     const sid = ptys.get(id)?.senderId ?? opts.senderId;
     // Buffer for late-joining mirrors (operator pane remount / re-show).
     appendReplay(id, data);
+    // Input-readiness tracking (awaitPtyInputReady): note the chunk time and
+    // whether the claude input prompt has painted. '❯' is claude's prompt
+    // marker; a chunk-split of the multi-byte char is tolerable — the
+    // quiet-window + maxWait cap still fire.
+    const inputState = ptyInputState.get(id) ?? { lastDataAt: 0, sawPrompt: false };
+    inputState.lastDataAt = Date.now();
+    if (!inputState.sawPrompt && data.includes('❯')) inputState.sawPrompt = true;
+    ptyInputState.set(id, inputState);
     // task-6fc9e503623e — first output within the grace window counts as
     // "alive" (a claude session that printed anything is up and running).
     const w = livenessWatches.get(id);
@@ -857,6 +903,7 @@ function spawnManagedPty(opts: SpawnManagedPtyOpts): number {
     ptys.delete(id);
     ptyMirrors.delete(id);
     ptyReplay.delete(id);
+    ptyInputState.delete(id);
     try { opts.onExit?.({ exitCode, signal: signal ?? null }); } catch (e) {
       console.error('[pty] onExit hook:', e);
     }
