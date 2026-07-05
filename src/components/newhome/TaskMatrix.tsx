@@ -23,12 +23,18 @@ import { fm } from '../../bridge';
 import { getTask } from '../../tasks';
 import { useTaskDataValues } from './useNewHomeData';
 import { resultFields } from './taskSchema.mjs';
+import { TemplateEditPanel } from './TemplateEditPanel';
 import './TaskMatrix.css';
 
 export interface TaskMatrixProps {
   chainTitle: string; // header title
   runs: Task[]; // run-parent tasks; one row each (>=1)
   childrenOf: (parentId: string) => Task[]; // ordered step-children (LIST rows) of a parent
+  // task-57e1470fad6f — the TEMPLATE this group's runs came from, when known
+  // (the server emits template_id on the row). Enables "Edit template" in the
+  // header. Absent → the button is hidden (nothing to edit against). Chains have
+  // no server update endpoint yet, so chain groups pass null (see the task).
+  templateId?: string | null;
   onClose: () => void;
   onOpenTask: (taskId: string) => void; // open a task's detail
   onStartChild: (childId: string) => void; // start a step (caller already wraps feedback)
@@ -243,11 +249,16 @@ function InlineEditor({
 }
 
 export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
-  const { chainTitle, runs, childrenOf, onClose, onOpenTask, onStartChild } = props;
+  const { chainTitle, runs, childrenOf, templateId, onClose, onOpenTask, onStartChild } = props;
   // task-1b3eeb1aae1f — default the optimistic-feedback readers to inert
   // functions so the matrix renders unchanged when a caller doesn't wire them.
   const pendingFor = props.pendingFor ?? (() => false);
   const errorFor = props.errorFor ?? (() => null);
+
+  // task-57e1470fad6f — "Edit template" opens the definition editor overlay.
+  // Only offered when we know the template id (server emits template_id on the
+  // row); chains don't have a server update endpoint yet, so callers pass null.
+  const [editing, setEditing] = useState(false);
 
   // task-ecabeafa41e1 — a run's STEPS. A chain run has step-children; a SIMPLE
   // (non-chain) template run is CHILDLESS, so the run itself is the single
@@ -356,7 +367,24 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             {runs.length} {runs.length === 1 ? 'run' : 'runs'}
           </div>
         </div>
+        {/* task-57e1470fad6f — edit the template DEFINITION (rename, fields,
+            body). Only when the template id is known; chains hidden until the
+            server chain-update endpoint ships (task-a19115192233). */}
+        {templateId && (
+          <button
+            type="button"
+            className="tm-edit-tmpl"
+            onClick={() => setEditing(true)}
+            title="Edit this template's definition (does not change existing runs)"
+          >
+            ✎ Edit template
+          </button>
+        )}
       </div>
+
+      {editing && templateId && (
+        <TemplateEditPanel templateId={templateId} onClose={() => setEditing(false)} />
+      )}
 
       <div className="tm-scroll">
         <table className="tm-table">
