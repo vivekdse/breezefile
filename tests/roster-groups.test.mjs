@@ -10,6 +10,9 @@ import {
   groupKeyFor,
   deriveInstanceId,
   buildRosterGroups,
+  statusBucket,
+  summarizeGroupRows,
+  STATUS_BUCKETS,
 } from '../src/components/newhome/rosterGroups.mjs';
 
 const out = (key, label, extra = {}) => ({ key, label, type: 'text', ...extra });
@@ -129,4 +132,71 @@ test('buildRosterGroups: tolerates empty / malformed input', () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0].rows[0].taskId, 'ok');
   assert.equal(other.length, 0);
+});
+
+// ── task-ecabeafa41e1: Level-1 group summary (status buckets + assignees) ─────
+test('statusBucket: raw/coarse statuses map onto the five buckets', () => {
+  assert.equal(statusBucket('done'), 'done');
+  assert.equal(statusBucket('completed'), 'done');
+  assert.equal(statusBucket('succeeded'), 'done');
+  assert.equal(statusBucket('partial'), 'done');
+  assert.equal(statusBucket('in_progress'), 'progress');
+  assert.equal(statusBucket('progress'), 'progress');
+  assert.equal(statusBucket('running'), 'progress');
+  assert.equal(statusBucket('claimed'), 'progress');
+  assert.equal(statusBucket('failed'), 'failed');
+  assert.equal(statusBucket('error'), 'failed');
+  assert.equal(statusBucket('needs'), 'needs');
+  assert.equal(statusBucket('needs_review'), 'needs');
+  assert.equal(statusBucket('blocked'), 'needs');
+  assert.equal(statusBucket('asked'), 'needs');
+  // pending/queued/cancelled/unknown/empty all fall to queued
+  assert.equal(statusBucket('queued'), 'queued');
+  assert.equal(statusBucket('pending'), 'queued');
+  assert.equal(statusBucket('deferred'), 'queued');
+  assert.equal(statusBucket('cancelled'), 'queued');
+  assert.equal(statusBucket('something-odd'), 'queued');
+  assert.equal(statusBucket(undefined), 'queued');
+  assert.equal(statusBucket(null), 'queued');
+});
+
+test('STATUS_BUCKETS lists the five buckets in display order', () => {
+  assert.deepEqual(STATUS_BUCKETS, ['done', 'progress', 'queued', 'needs', 'failed']);
+});
+
+test('summarizeGroupRows: counts runs, buckets statuses, and de-dups assignees', () => {
+  const s = summarizeGroupRows([
+    { status: 'done', assignee: 'a@x.com' },
+    { status: 'done', assignee: 'a@x.com' }, // same assignee → still 1 distinct
+    { status: 'in_progress', assignee: 'b@x.com' },
+    { status: 'failed', assignee: null }, // no assignee → not counted
+    { status: 'queued' }, // missing assignee → not counted
+  ]);
+  assert.equal(s.runCount, 5);
+  assert.deepEqual(s.statusCounts, { done: 2, progress: 1, queued: 1, needs: 0, failed: 1 });
+  assert.deepEqual([...s.assignees].sort(), ['a@x.com', 'b@x.com']); // 2 distinct
+});
+
+test('summarizeGroupRows: multiple distinct assignees across chain-like runs (can exceed 1)', () => {
+  const s = summarizeGroupRows([
+    { status: 'done', assignee: 'alice@x.com' },
+    { status: 'progress', assignee: 'bob@x.com' },
+    { status: 'queued', assignee: 'carol@x.com' },
+  ]);
+  assert.equal(s.assignees.length, 3);
+});
+
+test('summarizeGroupRows: empty input yields zeroed summary, no throw', () => {
+  const s = summarizeGroupRows([]);
+  assert.equal(s.runCount, 0);
+  assert.deepEqual(s.statusCounts, { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 });
+  assert.deepEqual(s.assignees, []);
+  // defensive: non-array
+  const s2 = summarizeGroupRows(undefined);
+  assert.equal(s2.runCount, 0);
+});
+
+test('summarizeGroupRows: whitespace-only assignee is treated as unassigned', () => {
+  const s = summarizeGroupRows([{ status: 'done', assignee: '   ' }]);
+  assert.deepEqual(s.assignees, []);
 });

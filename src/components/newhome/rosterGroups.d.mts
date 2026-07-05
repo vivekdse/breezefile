@@ -57,6 +57,20 @@ export type OtherRow = { taskId: string; title: string; status: string | undefin
 
 export type RosterGroups = { groups: RosterGroup[]; other: OtherRow[] };
 
+export type StatusBucket = 'done' | 'progress' | 'queued' | 'needs' | 'failed';
+
+export type GroupSummary = {
+  runCount: number;
+  statusCounts: Record<StatusBucket, number>;
+  assignees: string[];
+};
+
+export const STATUS_BUCKETS: StatusBucket[];
+export function statusBucket(status: string | undefined | null): StatusBucket;
+export function summarizeGroupRows(
+  runs: { status?: string; assignee?: string | null }[],
+): GroupSummary;
+
 export function isFieldBearing(task: RosterGroupInput): boolean;
 export function groupNameFor(task: RosterGroupInput): string;
 export function groupKeyFor(task: RosterGroupInput): string;
