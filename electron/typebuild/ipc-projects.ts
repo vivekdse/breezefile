@@ -8,6 +8,7 @@
 //   typebuild:projects:create     (input)            -> Project
 //   typebuild:projects:patch      (id, patch)        -> { ok, project | reason }
 //   typebuild:tasks:note          (taskId, note)     -> { ok, reason? }
+//   typebuild:tasks:bulkCreate    ({parent?,tasks})  -> { parentId, ids }  (task-a7214605a998)
 //   typebuild:projects:archive    (id)               -> Project   (task-2c5448be520a)
 //   typebuild:projects:unarchive  (id)               -> Project
 //   typebuild:projects:delete     (id)               -> { ok, reason? }  (task-a9841cfc0e1b)
@@ -31,6 +32,7 @@
 import { ipcMain } from 'electron';
 import { getTaskSource } from '../sources/registry';
 import type { Agent, GroupMember, Project, TypeBuildTaskSource } from '../sources/typebuild';
+import type { TaskCreate } from '../tasks';
 
 let registered = false;
 
@@ -106,6 +108,23 @@ export function registerTypebuildProjectsIpc(): void {
   ipcMain.handle(
     'typebuild:tasks:note',
     (_e, taskId: string, note: string) => source().addTaskNote(taskId, note),
+  );
+  // task-a7214605a998 — BULK create a chain as an ordered list of REAL tasks
+  // (a thin parent container + one child per step, each owning its own
+  // output_schema/data_keys) via POST /chromeext/tasks/bulk. Ordering rides as
+  // per-task dependsOnIndexes (positions in `tasks`); the source wires the real
+  // depends_on edges by returned id in a second PATCH pass. PHI: task bodies/data
+  // ride in memory only, never logged on this hop.
+  ipcMain.handle(
+    'typebuild:tasks:bulkCreate',
+    (
+      _e,
+      input: {
+        parent?: TaskCreate;
+        tasks: Array<TaskCreate & { dependsOnIndexes?: number[] }>;
+      },
+    ): Promise<{ parentId: string | null; ids: string[] }> =>
+      source().bulkCreateTasks(input),
   );
   // task-da23979fd907 — append to the USER-facing task message feed. NOT
   // claim-gated (unlike tasks:note): anyone who can see the task may post. Same

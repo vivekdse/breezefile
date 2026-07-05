@@ -3180,39 +3180,61 @@ export function TaskComposer(props: Props) {
     }
   }
 
-  // task-04ea172532c0 — the createTask thunk instantiateTemplate calls once
-  // per task (the meta parent, then each child). It reuses the composer's
-  // EXISTING TypeBuild create path (the same `createTask(payload, target)`
-  // call `save()` makes above) so a template job's tasks are indistinguishable
-  // from any other TypeBuild create — same source, same shape — just with
-  // parentTaskId/dependsOn threaded through.
+  // task-a7214605a998 — the bulk-create thunk instantiateTemplate calls ONCE to
+  // create the whole chain (thin parent container + one child per step) via the
+  // server bulk endpoint (POST /chromeext/tasks/bulk, reached through
+  // fm.typebuild.tasksBulkCreate). Replaces the old per-task createTask loop that
+  // embedded the chain as ```task-template / ```task-outputs / ```task-fields
+  // note-blocks: each step is now a REAL child task owning its OWN first-class
+  // output_schema (its output fields) and data_keys (its input fields, values
+  // empty at create time). Ordering rides as dependsOnIndexes and is wired to
+  // real depends_on edges by the source. The chain is a TypeBuild feature, so
+  // this always hits the TypeBuild source (not `target`).
   //
-  // task-2fd63b922beb correction (Part B) — the chain is a THIN container, not
-  // a full task. Its children carry ONLY structural fields (title/notes/project
-  // + parent/depends linking); the composer's task-form picks
-  // (status/priority/agent/pin) are NOT threaded onto them, so children get the
-  // server's defaults. The scheduling (when/start/cron) questions aren't
-  // consumed here either — the chained flow doesn't even ask them.
-  async function createTaskForTemplateJob(input: {
-    title: string;
-    notes: string;
-    projectId?: string;
-    parentTaskId?: string;
-    dependsOn?: string[];
-  }): Promise<{ id: string }> {
-    const payload: TaskCreate = {
-      title: input.title,
+  // The composer's task-form picks (status/priority/agent/pin) are NOT threaded
+  // onto the children — they get the server's defaults, same as before.
+  async function bulkCreateTemplateJob(input: {
+    parent: { title: string; projectId?: string };
+    tasks: Array<{
+      title: string;
+      notes?: string;
+      projectId?: string;
+      outputSchema?: TaskDefField[];
+      data?: Record<string, string>;
+      dependsOnIndexes?: number[];
+    }>;
+  }): Promise<{ parentId: string | null; ids: string[] }> {
+    const toCreate = (t: {
+      title: string;
+      notes?: string;
+      projectId?: string;
+      outputSchema?: TaskDefField[];
+      data?: Record<string, string>;
+      dependsOnIndexes?: number[];
+    }): TaskCreate & { dependsOnIndexes?: number[] } => ({
+      title: t.title,
       folder: '',
-      notes: input.notes,
+      notes: t.notes ?? '',
       auto_mode: false,
       auto_agent: null,
       auto_prompt: null,
-      ...(input.projectId ? { projectId: input.projectId } : {}),
-      ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
-      ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
+      ...(t.projectId ? { projectId: t.projectId } : {}),
+      ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
+      ...(t.data ? { data: t.data } : {}),
+      ...(t.dependsOnIndexes ? { dependsOnIndexes: t.dependsOnIndexes } : {}),
+    });
+    const parent: TaskCreate = {
+      title: input.parent.title,
+      folder: '',
+      auto_mode: false,
+      auto_agent: null,
+      auto_prompt: null,
+      ...(input.parent.projectId ? { projectId: input.parent.projectId } : {}),
     };
-    const t = await createTask(payload, target);
-    return { id: t.id };
+    return fm.typebuild.tasksBulkCreate({
+      parent,
+      tasks: input.tasks.map(toCreate),
+    });
   }
 
   // task-2fd63b922beb (R2) — save path for a chained-task job: one meta
@@ -3235,7 +3257,7 @@ export function TaskComposer(props: Props) {
         // step's inputs are filled later via the from-template flow or the
         // drawer/roster inline edit.
         values: {},
-        createTask: createTaskForTemplateJob,
+        bulkCreateTasks: bulkCreateTemplateJob,
       });
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.parentId;
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();

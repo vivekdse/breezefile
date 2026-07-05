@@ -1,20 +1,19 @@
-// task-fb31518201da (T4) — unit tests for instantiateTemplate
-// (src/components/newhome/newHomePrefs.ts). That file is plain TypeScript
-// (not .mjs), and this repo's `node --test` runner has no TS loader — but it
-// DOES ship esbuild as a dependency (used by vite), so this test transpiles
-// newHomePrefs.ts on the fly with esbuild rather than duplicating its logic
-// into a separately-tested pure module. Two textual substitutions make the
-// transpiled module importable under plain node with no Electron/browser
-// environment:
-//   - the `import { fm } from '../../bridge'` line is stubbed out — `fm` is
-//     only touched by getTemplateConfig/setTemplateConfig/
-//     syncTemplateConfigFromServer (localStorage/server-pref plumbing), none
-//     of which instantiateTemplate/instantiateChain call — and bridge.ts
-//     reads `window.fm` at module scope, which throws outside a browser.
-//   - the relative `from './taskSchema.mjs'` import is rewritten to an
-//     absolute file:// URL, since the transpiled copy is written to a temp
-//     file outside src/components/newhome/.
+// task-fb31518201da (T4) / task-a7214605a998 (create pass) — unit tests for
+// instantiateTemplate (src/components/newhome/newHomePrefs.ts). That file is
+// plain TypeScript (not .mjs), and this repo's `node --test` runner has no TS
+// loader — but it DOES ship esbuild (used by vite), so this test transpiles
+// newHomePrefs.ts on the fly rather than duplicating its logic. The relative
+// `from './taskSchema.mjs'` import is rewritten to an absolute file:// URL since
+// the transpiled copy is written to a temp file outside src/components/newhome/.
 // This exercises the REAL instantiateTemplate source, not a reimplementation.
+//
+// task-a7214605a998 — instantiateTemplate no longer creates tasks one-at-a-time
+// with the chain embedded as ```task-template / ```task-outputs / ```task-fields
+// note-blocks. It builds ONE bulk request: a thin parent container + one child
+// per step, each carrying its step's fields as FIRST-CLASS task schema
+// (outputSchema = output fields; data = input-field keys, values empty at create
+// time), with linear ordering via dependsOnIndexes. These tests assert that new
+// shape against an injected `bulkCreateTasks` stub.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +31,6 @@ const taskSchemaUrl = pathToFileURL(
 ).href;
 
 const source = readFileSync(srcPath, 'utf8')
-  .replace(/import\s*\{\s*fm\s*\}\s*from\s*['"]\.\.\/\.\.\/bridge['"];?/, 'const fm = {};')
   .replace("from './taskSchema.mjs'", `from '${taskSchemaUrl}'`);
 
 const { code } = esbuild.transformSync(source, { loader: 'ts', format: 'esm', target: 'es2022' });
@@ -40,7 +38,7 @@ const { code } = esbuild.transformSync(source, { loader: 'ts', format: 'esm', ta
 const tmpFile = path.join(tmpdir(), `newHomePrefs.instantiateTemplate.${process.pid}.${Date.now()}.mjs`);
 writeFileSync(tmpFile, code);
 
-const { instantiateTemplate, InstantiateTemplateError } = await import(pathToFileURL(tmpFile).href);
+const { instantiateTemplate } = await import(pathToFileURL(tmpFile).href);
 rmSync(tmpFile, { force: true });
 
 // ── fixtures ────────────────────────────────────────────────────────────
@@ -72,250 +70,178 @@ function makeDefs() {
   ];
 }
 
-function stubCreateTask(idsOut, { failOn } = {}) {
-  let n = 0;
+/** A `bulkCreateTasks` stub that records the ONE call it receives and returns
+ *  fabricated ids in the server's shape: [parentId, child0, child1, ...]. */
+function stubBulk(captured, { fail } = {}) {
   return async (input) => {
-    n += 1;
-    const label = input.title;
-    if (failOn && label.includes(failOn)) {
-      throw new Error(`boom creating ${label}`);
-    }
-    const id = `t${n}`;
-    idsOut.push({ id, input });
-    return { id };
+    captured.push(input);
+    if (fail) throw new Error('boom bulk create');
+    const ids = ['p1', ...input.tasks.map((_, i) => `c${i + 1}`)];
+    return { parentId: 'p1', ids };
   };
 }
 
-// ── parent-first ordering + linkage ────────────────────────────────────────
+// ── one bulk call: thin parent + first-class children + linear ordering ─────
 
-test('instantiateTemplate creates the meta parent first, then one linearly-chained child per task-def', async () => {
-  const calls = [];
-  const createTask = stubCreateTask(calls);
-  const values = {
-    'intake.customer': 'Acme Cleaners',
-    'stain.method': 'enzymatic',
-  };
-
+test('instantiateTemplate makes ONE bulk call: a thin parent container + one child per task-def with first-class fields, linearly ordered', async () => {
+  const captured = [];
   const result = await instantiateTemplate({
     name: 'Order #42',
     projectId: 'proj-1',
     defs: makeDefs(),
-    values,
-    createTask,
+    values: { 'intake.customer': 'Acme Cleaners', 'stain.method': 'enzymatic' },
+    bulkCreateTasks: stubBulk(captured),
   });
 
-  assert.equal(calls.length, 4); // parent + 3 children (ALL task-defs, incl. conditional)
-  assert.equal(result.parentId, 't1');
-  assert.deepEqual(result.childIds, ['t2', 't3', 't4']);
+  assert.equal(captured.length, 1, 'exactly ONE bulk round-trip for the whole chain');
+  const { parent, tasks } = captured[0];
 
-  const [parentCall, intakeCall, stainCall, washCall] = calls;
+  // parent is a THIN container — title + project only, no note-blocks, no fields.
+  assert.deepEqual(parent, { title: 'Order #42', projectId: 'proj-1' });
 
-  // parent
-  assert.equal(parentCall.input.title, 'Order #42');
-  assert.equal(parentCall.input.projectId, 'proj-1');
-  assert.equal(parentCall.input.parentTaskId, undefined);
-  assert.equal(parentCall.input.dependsOn, undefined);
-  assert.match(parentCall.input.notes, /Job created from chain "Order #42": 3 tasks\./);
-  assert.match(parentCall.input.notes, /```task-template/);
-  assert.match(parentCall.input.notes, /"v":2/);
-  assert.match(parentCall.input.notes, /"name":"Order #42"/);
-  assert.match(parentCall.input.notes, /"id":"intake"/);
-  assert.match(parentCall.input.notes, /"id":"stain"/);
-  assert.match(parentCall.input.notes, /"id":"wash"/);
+  assert.equal(tasks.length, 3); // ALL task-defs, incl. the conditional one
 
-  // intake child: first child, no dependsOn, parented to job
-  assert.equal(intakeCall.input.title, 'Order #42 — Intake');
-  assert.equal(intakeCall.input.parentTaskId, 't1');
-  assert.equal(intakeCall.input.dependsOn, undefined);
-  assert.equal(intakeCall.input.projectId, 'proj-1');
-  assert.match(intakeCall.input.notes, /Collect the customer drop-off\./);
-  assert.match(intakeCall.input.notes, /```task-fields/);
-  assert.match(intakeCall.input.notes, /```task-outputs/);
+  // intake child — its own title/body + first-class output_schema + data (input
+  // field key, value collected). First step => no ordering dep.
+  const [intake, stain, wash] = tasks;
+  assert.equal(intake.title, 'Intake');
+  assert.equal(intake.notes, 'Collect the customer drop-off.');
+  assert.equal(intake.projectId, 'proj-1');
+  assert.deepEqual(intake.outputSchema, [
+    { key: 'has_stains', label: 'Stains present?', type: 'bool', required: true },
+  ]);
+  assert.deepEqual(intake.data, { customer: 'Acme Cleaners' });
+  assert.equal(intake.dependsOnIndexes, undefined);
 
-  // stain child (conditional): STILL created, chained to intake
-  assert.equal(stainCall.input.title, 'Order #42 — Stain treatment');
-  assert.equal(stainCall.input.parentTaskId, 't1');
-  assert.deepEqual(stainCall.input.dependsOn, ['t2']);
+  // stain child (conditional): STILL created, ordered after intake (index 0).
+  assert.equal(stain.title, 'Stain treatment');
+  assert.deepEqual(stain.outputSchema, [
+    { key: 'treated', label: 'Treated?', type: 'bool', required: true },
+  ]);
+  assert.deepEqual(stain.data, { method: 'enzymatic' });
+  assert.deepEqual(stain.dependsOnIndexes, [0]);
 
-  // wash child: chained to stain
-  assert.equal(washCall.input.title, 'Order #42 — Wash');
-  assert.deepEqual(washCall.input.dependsOn, ['t3']);
+  // wash child: ordered after stain (index 1); no inputs => no data bag.
+  assert.equal(wash.title, 'Wash');
+  assert.deepEqual(wash.outputSchema, [
+    { key: 'done', label: 'Done?', type: 'bool', required: true },
+  ]);
+  assert.equal(wash.data, undefined);
+  assert.deepEqual(wash.dependsOnIndexes, [1]);
+
+  // result maps the returned ids: parent first, then children in step order.
+  assert.equal(result.parentId, 'p1');
+  assert.deepEqual(result.childIds, ['c1', 'c2', 'c3']);
 });
 
-// ── per-child value scoping ─────────────────────────────────────────────────
+// ── empty values map: fields DEFINED (keys present), values empty ───────────
 
-test('instantiateTemplate splits fieldRef-keyed values per task-def and re-keys to bare field keys', async () => {
-  const calls = [];
-  const createTask = stubCreateTask(calls);
-  const values = {
-    'intake.customer': 'Acme',
-    'intake.items': '12',
-    'stain.method': 'enzymatic',
-  };
-
-  await instantiateTemplate({
-    name: 'Order',
-    defs: makeDefs(),
-    values,
-    createTask,
-  });
-
-  const intakeNotes = calls[1].input.notes;
-  const fieldsMatch = /```task-fields\n([\s\S]*?)```/.exec(intakeNotes);
-  assert.ok(fieldsMatch, 'intake child carries a task-fields block');
-  const parsed = JSON.parse(fieldsMatch[1].trim());
-  assert.deepEqual(parsed, {
-    templateId: 'Order',
-    taskDefId: 'intake',
-    values: { customer: 'Acme', items: '12' }, // bare keys, no "intake." prefix
-  });
-
-  const stainNotes = calls[2].input.notes;
-  const stainFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(stainNotes)[1].trim());
-  assert.deepEqual(stainFields.values, { method: 'enzymatic' }); // NOT intake's values
-
-  const washNotes = calls[3].input.notes;
-  const washFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(washNotes)[1].trim());
-  assert.deepEqual(washFields.values, {}); // no matching values for wash
-});
-
-// task-0d63c7b0ebdb — creation DEFINES step fields but never collects their
-// VALUES, so the composer now instantiates a chain with an EMPTY values map.
-// Every child must still carry its (empty) task-fields block + its full
-// task-outputs definitions, so later fills (roster/drawer/from-template) have
-// keys to populate.
-test('instantiateTemplate with an empty values map gives every child an empty task-fields values block but keeps its outputs', async () => {
-  const calls = [];
-  const createTask = stubCreateTask(calls);
-
+test('instantiateTemplate with an empty values map still declares each step`s input-field keys (empty values) + its output_schema', async () => {
+  const captured = [];
   await instantiateTemplate({
     name: 'Order',
     defs: makeDefs(),
     values: {}, // creation defines fields, collects no values
-    createTask,
+    bulkCreateTasks: stubBulk(captured),
   });
+  const { tasks } = captured[0];
 
-  // children are calls[1..3]; each carries an empty values block
-  for (const call of calls.slice(1)) {
-    const fields = JSON.parse(
-      /```task-fields\n([\s\S]*?)```/.exec(call.input.notes)[1].trim(),
-    );
-    assert.deepEqual(fields.values, {}, `${call.input.title} has no seeded values`);
-  }
+  // intake/stain declare their input key with an EMPTY value (defines data_keys).
+  assert.deepEqual(tasks[0].data, { customer: '' });
+  assert.deepEqual(tasks[1].data, { method: '' });
+  // wash has no inputs => no data bag at all.
+  assert.equal(tasks[2].data, undefined);
 
-  // intake still declares its OUTPUT field definitions (evidence contract).
-  const intakeOutputs = JSON.parse(
-    /```task-outputs\n([\s\S]*?)```/.exec(calls[1].input.notes)[1].trim(),
-  );
-  assert.equal(intakeOutputs.taskDefId, 'intake');
-  assert.deepEqual(
-    intakeOutputs.fields,
-    [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }],
-  );
+  // outputs (the evidence contract) still ride every child, first-class.
+  assert.deepEqual(tasks[0].outputSchema, [
+    { key: 'has_stains', label: 'Stains present?', type: 'bool', required: true },
+  ]);
 });
 
 // ── no projectId ────────────────────────────────────────────────────────────
 
 test('instantiateTemplate omits projectId entirely when none is given', async () => {
-  const calls = [];
-  const createTask = stubCreateTask(calls);
+  const captured = [];
   await instantiateTemplate({
     name: 'Order',
     defs: makeDefs(),
     values: {},
-    createTask,
+    bulkCreateTasks: stubBulk(captured),
   });
-  for (const { input } of calls) {
-    assert.ok(!('projectId' in input), 'projectId key should be absent, not undefined-valued');
+  const { parent, tasks } = captured[0];
+  assert.ok(!('projectId' in parent), 'parent projectId key absent, not undefined-valued');
+  for (const t of tasks) {
+    assert.ok(!('projectId' in t), 'child projectId key absent, not undefined-valued');
   }
 });
 
-// ── partial-failure propagation ─────────────────────────────────────────────
+// ── failure propagation ──────────────────────────────────────────────────────
 
-test('instantiateTemplate stops and throws with parentId + created childIds when a child create fails midway', async () => {
-  const calls = [];
-  const createTask = stubCreateTask(calls, { failOn: 'Stain treatment' });
-
+test('instantiateTemplate propagates a bulk-create failure', async () => {
+  const captured = [];
   await assert.rejects(
     () =>
       instantiateTemplate({
         name: 'Order',
         defs: makeDefs(),
         values: {},
-        createTask,
+        bulkCreateTasks: stubBulk(captured, { fail: true }),
       }),
-    (err) => {
-      assert.ok(err instanceof InstantiateTemplateError);
-      assert.equal(err.parentId, 't1');
-      assert.deepEqual(err.childIds, ['t2']); // intake succeeded before stain failed
-      assert.match(err.message, /stain/);
-      assert.ok(err.cause instanceof Error);
-      assert.match(err.cause.message, /boom creating Order — Stain treatment/);
-      return true;
-    },
+    /boom bulk create/,
   );
-
-  // parent + intake were created and NOT rolled back; wash was never attempted
-  assert.equal(calls.length, 2);
 });
 
-test('instantiateTemplate propagates a failure creating the parent itself with no children created', async () => {
-  const createTask = async () => {
-    throw new Error('parent create failed');
-  };
+// ── empty chain guarded ──────────────────────────────────────────────────────
+
+test('instantiateTemplate rejects an empty chain (a chain is an ordered list of tasks)', async () => {
+  const captured = [];
   await assert.rejects(
     () =>
       instantiateTemplate({
-        name: 'Order',
-        defs: makeDefs(),
+        name: 'Empty job',
+        defs: [],
         values: {},
-        createTask,
+        bulkCreateTasks: stubBulk(captured),
       }),
-    /parent create failed/,
+    /at least one step/,
   );
+  assert.equal(captured.length, 0, 'no bulk call for an empty chain');
 });
 
-// ── empty template ─────────────────────────────────────────────────────────
+// ── from-template chain: instantiateTemplate with COLLECTED values ──────────
+// The from-template flow fills values in at creation via the same seam — the
+// collected values land in each child's first-class `data` bag.
 
-test('instantiateTemplate with no taskDefs still creates the meta parent with an empty task-template block', async () => {
-  const calls = [];
-  const createTask = stubCreateTask(calls);
-  const result = await instantiateTemplate({
-    name: 'Empty job',
-    defs: [],
-    values: {},
-    createTask,
+test('from-template chain: collected values populate each child`s data bag; project inherited on parent + every child', async () => {
+  const captured = [];
+  await instantiateTemplate({
+    name: 'Order #99',
+    projectId: 'proj-inherited',
+    defs: makeDefs(),
+    values: { 'intake.customer': 'Acme Cleaners', 'stain.method': 'enzymatic' },
+    bulkCreateTasks: stubBulk(captured),
   });
-  assert.equal(result.parentId, 't1');
-  assert.deepEqual(result.childIds, []);
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].input.notes, /Job created from chain "Empty job": 0 tasks\./);
+  const { parent, tasks } = captured[0];
+
+  assert.equal(parent.projectId, 'proj-inherited');
+  for (const t of tasks) assert.equal(t.projectId, 'proj-inherited');
+
+  assert.deepEqual(tasks[0].data, { customer: 'Acme Cleaners' });
+  assert.deepEqual(tasks[1].data, { method: 'enzymatic' });
+  // wash got no typed value (none collected) and has no inputs => no data bag.
+  assert.equal(tasks[2].data, undefined);
 });
 
-// ── task-257bb4870c6c — "New from Template" assembly contract ─────────────
+// ── task-257bb4870c6c — "New from Template" single-task assembly contract ────
 //
-// The from-template flow is a SEPARATE first-class entry from plain create
-// (task-0d63c7b0ebdb), but reuses the exact same seams: aggregateInputs to
-// walk a template's input fields, effectiveFieldKey to normalize a value's
-// key (so a template whose field key was left blank/typed messily still
-// lands the value under a valid key — the fix from task-f9a723379aa8), and
-// instantiateTemplate for a CHAINED template (same call saveTemplateJob
-// makes, just with the human's COLLECTED values instead of an empty map).
-// These tests prove: given a template's field DEFS + collected VALUES, the
-// resulting create payload has data_keys populated (normalized) and the
-// inherited output_schema, with ZERO other questions consumed to assemble it
-// (project/notes/agent/etc. are simply copied off the template entry, never
-// derived from a walked question).
-
-// ── single fielded-task template (task-0d63c7b0ebdb "definitions-only" shape:
-// one synthetic TaskDef, id 'task', inputs seeded from dataKeys, outputs
-// verbatim from outputSchema — mirrors TaskComposer.tsx's templateCandidates
-// derivation for a non-chain template row) ─────────────────────────────────
+// The from-template SINGLE-task flow (TaskComposer.saveFromTemplate) reuses
+// aggregateInputs + effectiveFieldKey to turn a template's field DEFS + collected
+// VALUES into a first-class create payload (data + inherited output_schema),
+// asking ZERO other questions. It does NOT go through instantiateTemplate (that
+// is the chained path), so these tests exercise the shared taskSchema seams
+// directly — unchanged by the create-pass refactor.
 
 function makeSingleTaskTemplateDef() {
-  // What the composer reconstructs from a template task's LIST row: dataKeys
-  // (key names only, values are never on a list row — non-PHI) become input
-  // field defs; outputSchema rides through untouched (also non-PHI defs).
   return {
     id: 'task',
     name: 'Get second headline',
@@ -324,12 +250,9 @@ function makeSingleTaskTemplateDef() {
   };
 }
 
-/** Pure re-implementation of TaskComposer.tsx's saveFromTemplate() single-
- *  task branch's payload assembly (outputSchema/data only — the rest of the
- *  TaskCreate is static passthrough already covered by createTaskForTemplateJob-
- *  style tests elsewhere) so the CONTRACT is exercised without mounting React.
- *  Mirrors the real function line for line: effectiveFieldKey normalizes
- *  each input's key before writing its collected value into `data`. */
+/** Pure re-implementation of saveFromTemplate()'s single-task payload assembly
+ *  (outputSchema/data only). Mirrors the real function line for line:
+ *  effectiveFieldKey normalizes each input's key before writing its value. */
 function assembleSingleTemplateData(def, values) {
   const data = {};
   for (const f of def.inputs ?? []) {
@@ -343,10 +266,8 @@ function assembleSingleTemplateData(def, values) {
   };
 }
 
-test('from-template single task: one input value collected -> data_keys populated (normalized) + inherited output_schema, zero other fields asked', () => {
+test('from-template single task: one input value collected -> data populated (normalized) + inherited output_schema, zero other fields asked', () => {
   const def = makeSingleTaskTemplateDef();
-  // Exactly what acceptance describes: pick template, accept prefilled
-  // title, type ONE input value (a URL) — nothing else.
   const collected = { 'task.news_site_url': 'https://cnn.com' };
 
   const entries = aggregateInputs([def]);
@@ -368,7 +289,6 @@ test('from-template single task: a messy/blank field key still normalizes via ef
   };
   const collected = { 'task.': 'https://cnn.com' };
   const payload = assembleSingleTemplateData(def, collected);
-  // effectiveFieldKey falls back to the normalized LABEL when key is blank.
   assert.deepEqual(payload.data, { news_site_url: 'https://cnn.com' });
   assert.ok(!('outputSchema' in payload), 'no outputs defined -> outputSchema omitted, not empty-arrayed');
 });
@@ -380,49 +300,4 @@ test('from-template single task: no input fields at all -> no data key, still fi
   const payload = assembleSingleTemplateData(def, {});
   assert.ok(!('data' in payload));
   assert.ok(!('outputSchema' in payload));
-});
-
-// ── chained template: instantiateTemplate with COLLECTED (non-empty) values ─
-// (contrast with the task-0d63c7b0ebdb tests above, which instantiate with
-// an EMPTY values map at plain-create time — the from-template flow is the
-// one path that fills them in at creation, via the exact same seam.)
-
-test('from-template chain: instantiateTemplate with collected values populates every childs task-fields block, inherits project, asks nothing else', async () => {
-  const calls = [];
-  const createTask = stubCreateTask(calls);
-  const collectedValues = {
-    'intake.customer': 'Acme Cleaners',
-    'stain.method': 'enzymatic',
-  };
-
-  const result = await instantiateTemplate({
-    name: 'Order #99', // the prefilled title, accepted as-is
-    projectId: 'proj-inherited', // inherited SILENTLY from the template, never asked
-    defs: makeDefs(),
-    values: collectedValues,
-    createTask,
-  });
-
-  assert.equal(calls.length, 4);
-  assert.equal(result.parentId, 't1');
-
-  // project inherited on every task, not just the parent.
-  for (const { input } of calls) {
-    assert.equal(input.projectId, 'proj-inherited');
-  }
-
-  const intakeFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(calls[1].input.notes)[1].trim());
-  assert.deepEqual(intakeFields.values, { customer: 'Acme Cleaners' });
-
-  const stainFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(calls[2].input.notes)[1].trim());
-  assert.deepEqual(stainFields.values, { method: 'enzymatic' });
-
-  // wash step got no typed value (none collected for it) — present but empty,
-  // same "never silently drop a key" contract as the plain-create path.
-  const washFields = JSON.parse(/```task-fields\n([\s\S]*?)```/.exec(calls[3].input.notes)[1].trim());
-  assert.deepEqual(washFields.values, {});
-
-  // outputs (evidence contract) still ride every child, inherited verbatim.
-  const intakeOutputs = JSON.parse(/```task-outputs\n([\s\S]*?)```/.exec(calls[1].input.notes)[1].trim());
-  assert.deepEqual(intakeOutputs.fields, [{ key: 'has_stains', label: 'Stains present?', type: 'bool', required: true }]);
 });

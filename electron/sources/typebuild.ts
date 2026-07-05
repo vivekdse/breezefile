@@ -1252,45 +1252,10 @@ export class TypeBuildTaskSource implements TaskSource {
     if (!title && !body) {
       throw new Error('typebuild: title or body is required');
     }
-    const payload: Record<string, unknown> = { title, task: body };
-    // due_at: the composer passes day-only or ISO; pass it straight through
-    // (the server stores the ISO string verbatim). Omit when null/empty.
-    if (input.due_at) payload.due_at = input.due_at;
-    if (input.deferUntil) payload.defer_until = input.deferUntil;
-    if (typeof input.priority === 'number') payload.priority = input.priority;
-    // task-ab1d7955e23f — optional project container. Opaque id (non-PHI).
-    if (input.projectId) payload.project_id = input.projectId;
-    // task-896f3f7f5e75 — optional assigned AGENT (scalar; opaque id, non-PHI).
-    // Omit when unset so a create that doesn't care leaves the server default
-    // (no agent). An unknown agent_id → the server 400s (surfaced below).
-    if (input.agentId) payload.agent_id = input.agentId;
-    // task-fd1be6f6b22d — optional assignee (server `assigned_to`, an email/
-    // principal — NON-PHI). A manual task assigned to a group member rides here;
-    // omit when unset so an unassigned create leaves the server default.
-    if (input.assignedTo) payload.assigned_to = input.assignedTo;
-    // task-83a30b3c8804 — optional structural chain linking (opaque ids,
-    // non-PHI). See TaskCreate.parentTaskId/dependsOn (src/types.ts).
-    if (input.parentTaskId) payload.parent_task_id = input.parentTaskId;
-    if (input.dependsOn && input.dependsOn.length > 0) payload.depends_on = input.dependsOn;
-    // task-7bdb94445321 — optional repeat schedule (RRULE-lite, NON-PHI). The
-    // server validates + persists it on create; a done submit then spawns the
-    // next deferred occurrence. Omit when unset so plain creates are unchanged.
-    if (input.recurrence) payload.recurrence = input.recurrence;
-    // task-a7214605a998 (S6) — structured output field schema (S2, NON-PHI:
-    // key/label/type/options/required only) + data map (S1, PHI form-fill
-    // value bag). Both ride the create payload as first-class fields under
-    // the server's own names (output_schema/data) instead of the composer
-    // embedding ```task-outputs/```task-fields fenced blocks in the body. Omit
-    // when unset/empty so a create that doesn't use them is unchanged
-    // (NON-REGRESSION) — mirrors the server's own create-path semantics (an
-    // empty output_schema array is accepted and stored verbatim, so we still
-    // only send it when non-empty to avoid a no-op payload key).
-    if (Array.isArray(input.outputSchema) && input.outputSchema.length > 0) {
-      payload.output_schema = input.outputSchema;
-    }
-    if (input.data && typeof input.data === 'object' && Object.keys(input.data).length > 0) {
-      payload.data = input.data;
-    }
+    // task-a7214605a998 — the per-task field mapping is shared with bulkCreateTasks
+    // (buildCreatePayload below) so a batched create is byte-identical to N plain
+    // creates, one schema, no drift.
+    const payload = this.buildCreatePayload(input);
 
     const res = await this.request('POST', '/chromeext/tasks', payload);
     if (!res.ok) {
@@ -1345,6 +1310,139 @@ export class TypeBuildTaskSource implements TaskSource {
     breezeHost().onTasksChanged();
     void this.refreshAndBroadcast();
     return seeded;
+  }
+
+  // task-a7214605a998 — the create payload mapping, extracted so createTask AND
+  // bulkCreateTasks share ONE field mapping (a bulk create is createTask batched,
+  // not a second schema). Maps a TaskCreate to the server's /chromeext/tasks body
+  // (title/task/due_at/priority/project_id/agent_id/assigned_to/parent_task_id/
+  // depends_on/recurrence/output_schema/data). Fields are omitted when unset/empty
+  // so the payload is byte-identical to the plain create path (NON-REGRESSION).
+  // PHI: title/body/data ride in memory only, never logged.
+  private buildCreatePayload(input: TaskCreate): Record<string, unknown> {
+    const title = (input.title ?? '').trim();
+    const body = (input.notes ?? '')?.trim() ?? '';
+    const payload: Record<string, unknown> = { title, task: body };
+    // due_at: the composer passes day-only or ISO; pass it straight through
+    // (the server stores the ISO string verbatim). Omit when null/empty.
+    if (input.due_at) payload.due_at = input.due_at;
+    if (input.deferUntil) payload.defer_until = input.deferUntil;
+    if (typeof input.priority === 'number') payload.priority = input.priority;
+    // task-ab1d7955e23f — optional project container. Opaque id (non-PHI).
+    if (input.projectId) payload.project_id = input.projectId;
+    // task-896f3f7f5e75 — optional assigned AGENT (scalar; opaque id, non-PHI).
+    if (input.agentId) payload.agent_id = input.agentId;
+    // task-fd1be6f6b22d — optional assignee (server `assigned_to`, an email/
+    // principal — NON-PHI).
+    if (input.assignedTo) payload.assigned_to = input.assignedTo;
+    // task-83a30b3c8804 — optional structural chain linking (opaque ids, non-PHI).
+    if (input.parentTaskId) payload.parent_task_id = input.parentTaskId;
+    if (input.dependsOn && input.dependsOn.length > 0) payload.depends_on = input.dependsOn;
+    // task-7bdb94445321 — optional repeat schedule (RRULE-lite, NON-PHI).
+    if (input.recurrence) payload.recurrence = input.recurrence;
+    // task-a7214605a998 (S6) — structured output field schema (S2, NON-PHI:
+    // key/label/type/options/required only) + data map (S1, PHI form-fill value
+    // bag; keys become the server's data_keys). Both ride as first-class fields
+    // under the server's own names (output_schema/data) instead of the composer
+    // embedding ```task-outputs/```task-fields fenced blocks in the body. Only
+    // sent when non-empty to avoid a no-op payload key.
+    if (Array.isArray(input.outputSchema) && input.outputSchema.length > 0) {
+      payload.output_schema = input.outputSchema;
+    }
+    if (input.data && typeof input.data === 'object' && Object.keys(input.data).length > 0) {
+      payload.data = input.data;
+    }
+    return payload;
+  }
+
+  // task-a7214605a998 — batch create over POST /chromeext/tasks/bulk: create an
+  // optional thin PARENT container first, then the ordered CHILD tasks, each
+  // mapped with the SAME per-task field mapping createTask uses
+  // (buildCreatePayload → output_schema/data/project_id/...). This is createTask
+  // batched — used by the New-Home chain save path so a chain becomes an ordered
+  // list of REAL tasks (each owning its own output_schema/data_keys), not a
+  // note-block-encoded meta parent.
+  //
+  // ORDERING: the bulk endpoint can NOT self-reference sibling ids in ONE call —
+  // child ids are minted server-side, so a payload can't name a sibling that
+  // doesn't exist yet (set_task_deps would reject it as dep_not_found). So a
+  // step's ordering rides as `dependsOnIndexes` (positions in `tasks`) and the
+  // real edges are wired in a SECOND pass: after bulk returns the ordered ids,
+  // PATCH each dependent child's depends_on with the resolved sibling id(s). The
+  // create is one bulk round-trip; the dep wiring is N-1 small PATCHes.
+  //
+  // Returns { parentId, ids } where ids = [parentId?, child0, child1, ...] in
+  // request order (parent first when a parent was created). PHI: titles/bodies/
+  // data ride in memory only, never logged.
+  async bulkCreateTasks(input: {
+    parent?: TaskCreate;
+    tasks: Array<TaskCreate & { dependsOnIndexes?: number[] }>;
+  }): Promise<{ parentId: string | null; ids: string[] }> {
+    const tasksIn = input.tasks ?? [];
+    if (tasksIn.length === 0) {
+      throw new Error('typebuild: bulk create requires at least one task');
+    }
+    const body: Record<string, unknown> = {
+      tasks: tasksIn.map((t) => this.buildCreatePayload(t)),
+    };
+    if (input.parent) body.parent = this.buildCreatePayload(input.parent);
+
+    const res = await this.request('POST', '/chromeext/tasks/bulk', body);
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+        index?: number;
+      };
+      throw new Error(
+        `typebuild: bulk create failed (${res.status})${
+          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
+        }`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      parent_id?: string | null;
+      ids?: string[];
+    };
+    const ids = Array.isArray(data.ids) ? data.ids : [];
+    const hasParent = !!input.parent;
+    const parentId = data.parent_id ?? (hasParent ? ids[0] ?? null : null);
+    const childIds = hasParent ? ids.slice(1) : ids;
+
+    // Second pass — wire the sibling ordering the single bulk call could not
+    // express (child ids are only known now, from the returned `ids`).
+    for (let i = 0; i < tasksIn.length; i++) {
+      const idxs = tasksIn[i].dependsOnIndexes;
+      const childId = childIds[i];
+      if (!idxs || idxs.length === 0 || !childId) continue;
+      const depIds = idxs
+        .map((j) => childIds[j])
+        .filter((d): d is string => typeof d === 'string' && d.length > 0);
+      if (depIds.length === 0) continue;
+      const pres = await this.request(
+        'PATCH',
+        `/chromeext/${encodeURIComponent(childId)}`,
+        { depends_on: depIds },
+      );
+      if (!pres.ok) {
+        const perr = (await pres.json().catch(() => ({}))) as {
+          error?: string;
+          reason?: string;
+        };
+        throw new Error(
+          `typebuild: bulk create ordering failed (${pres.status})${
+            perr.reason ? `: ${perr.reason}` : perr.error ? `: ${perr.error}` : ''
+          }`,
+        );
+      }
+    }
+
+    // Refresh the cache/broadcast so the new rows appear without waiting on the
+    // 30s poll (same pattern as createTask).
+    breezeHost().onTasksChanged();
+    void this.refreshAndBroadcast();
+    return { parentId, ids };
   }
 
   updateTask(_id: string, _patch: TaskUpdate): never {
