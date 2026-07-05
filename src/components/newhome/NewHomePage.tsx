@@ -41,6 +41,7 @@ import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import { fm } from '../../bridge';
+import { getTask } from '../../tasks';
 import type { Project } from '../../types';
 import { buildProjectTree } from '../../projects/index.mjs';
 import { nextSelectionAfterArchive, nextSelectionAfterDelete, projectDeleteDecision } from './projectCrud.mjs';
@@ -205,10 +206,22 @@ export function NewHomePage() {
   // exactly as before (actions.start already surfaces failures via the
   // status line, and now also releases an orphaned claim on launch failure).
   async function startTask(id: string): Promise<StartOutcome> {
-    const t = tasks.find((x) => x.id === id);
-    if (!t) return { ok: false, spawned: false, message: 'task not found', released: false };
+    // task-ecabeafa41e1 — resolve the raw Task. The roster's `tasks` is
+    // project-scoped and omits chain STEP CHILDREN (a chain's "▶ Run all" and the
+    // matrix's per-step "▶ Run" both target a child id), so fall back to a direct
+    // getTask when the id isn't in the scoped list — otherwise start silently
+    // failed with "task not found".
+    let raw = tasks.find((x) => x.id === id)?.raw ?? null;
+    if (!raw) {
+      try {
+        raw = await getTask(id);
+      } catch {
+        raw = null;
+      }
+    }
+    if (!raw) return { ok: false, spawned: false, message: 'task not found', released: false };
     try {
-      return await actions.start(t.raw);
+      return await actions.start(raw);
     } finally {
       void refresh();
     }
