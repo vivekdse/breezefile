@@ -41,6 +41,7 @@ import {
 } from './vitals.mjs';
 import { TaskTimeline } from './TaskTimeline';
 import { TaskResultView } from './TaskResult';
+import { CopyButton } from '../CopyButton';
 import { resultRendererKind } from './taskResult.mjs';
 // task-896f3f7f5e75 — pure agent display helper (name + launch_mode caption for
 // the assigned-agent detail line). Shared with the composer + unit-tested.
@@ -169,7 +170,10 @@ function CollapsibleNotes({ notes }: { notes: string }) {
   const collapsible = lineCount > NOTES_COLLAPSE_LINES || longByChars;
   return (
     <div className="tasks__detail-notes">
-      <div className="tasks__detail-section">Notes</div>
+      <div className="tasks__detail-section tasks__detail-section--row">
+        Notes
+        <CopyButton getText={() => notes} title="Copy notes" />
+      </div>
       <p
         className={[
           'tasks__detail-notes-body',
@@ -379,7 +383,11 @@ function ManualDetail({
         )}
       </header>
 
-      <h2 className="tasks__detail-title">{task.title}</h2>
+      <div className="tasks__detail-title-row">
+        <h2 className="tasks__detail-title">{task.title}</h2>
+        <CopyButton getText={() => task.title} title="Copy title" />
+        <CopyButton getText={() => task.id} label="Copy ID" title="Copy task ID" />
+      </div>
 
       {primary && primary.kind !== 'none' && (
         <div className="tasks__detail-primary">
@@ -719,7 +727,11 @@ function AgentDetail({
         </div>
       </header>
 
-      <h2 className="tasks__detail-title">{task.title}</h2>
+      <div className="tasks__detail-title-row">
+        <h2 className="tasks__detail-title">{task.title}</h2>
+        <CopyButton getText={() => task.title} title="Copy title" />
+        <CopyButton getText={() => task.id} label="Copy ID" title="Copy task ID" />
+      </div>
 
       {/* task-80be320f06b3 — vitals: time-in-status, last-activity, and (when
           stranded) a remediation banner. Re-renders on a 60s tick. */}
@@ -820,7 +832,10 @@ function AgentDetail({
       )}
 
       <div className="tasks__detail-notes">
-        <div className="tasks__detail-section">Details</div>
+        <div className="tasks__detail-section tasks__detail-section--row">
+          Details
+          {body && <CopyButton getText={() => body} title="Copy details" />}
+        </div>
         {bodyLoading ? (
           <p className="tasks__detail-notes-body tasks__detail-muted">Loading…</p>
         ) : body ? (

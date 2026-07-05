@@ -83,6 +83,7 @@ import { TaskComposer } from '../TaskComposer';
 import { TaskAnswerBox } from './TaskAnswerBox';
 import { isDone } from './sections.mjs';
 import type { Project, Task, TaskRun } from '../../types';
+import { CopyButton } from '../CopyButton';
 import './TaskDetailDrawer.css';
 
 // task-b30e546672db — the former 'config' tab IS the task itself. It's renamed
@@ -969,7 +970,11 @@ export function TaskDetailDrawer({
           </button>
         </header>
 
-        <h2 className="tdd__title">{task.title}</h2>
+        <div className="tdd__title-row">
+          <h2 className="tdd__title">{task.title}</h2>
+          <CopyButton getText={() => task.title} title="Copy title" />
+          <CopyButton getText={() => task.id} label="Copy ID" title="Copy task ID" />
+        </div>
 
         {/* live action row — the row's ONE primary affordance (Start/run, claim,
             run-now, …) + Enter thread + Stop (calm-by-default, only shown when
@@ -1249,6 +1254,13 @@ export function TaskDetailDrawer({
                           className={`tdd__output-v${submitted ? '' : ' tdd__output-v--pending'}`}
                         >
                           {submitted ? String(v) : 'awaiting agent'}
+                          {submitted && (
+                            <CopyButton
+                              getText={() => String(v)}
+                              title={`Copy ${f.label}`}
+                              className="tdd__output-copy"
+                            />
+                          )}
                         </div>
                       </div>
                     );
