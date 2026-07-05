@@ -17,9 +17,9 @@
 //   topbar (project picker · + New Task)
 //   project hero (name + subtitle)
 //   HeroStats
-//   filter pills (state owned here, passed down)
-//   RosterTable
-//   OutcomesPanel
+//   RosterTable (one unified table: template groups, chains, plain tasks —
+//     with each finished row's outcome inline; the status filter lives on the
+//     HeroStats cards)
 //   conditional: TaskDetailDialog
 //
 // This component owns ALL cross-child state (selectedProjectId, filter,
@@ -35,7 +35,6 @@ import type { NewHomeStatus } from './types';
 import { HeroStats } from './HeroStats';
 import { RosterTable } from './RosterTable';
 import { TaskDetailDialog } from './TaskDetailDialog';
-import { OutcomesPanel } from './OutcomesPanel';
 import { ProjectDialog } from './ProjectDialog';
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
@@ -178,8 +177,8 @@ export function NewHomePage() {
   // + refresh so RosterTable stays presentational (mirrors the onRetry pattern).
   const actions = useTaskActions();
 
-  // task-69651204e222 — the ONE open path all four New-Home sources funnel
-  // through (RosterTable rows, OutcomesPanel, the copilot open_task listener,
+  // task-69651204e222 — the ONE open path all New-Home sources funnel
+  // through (RosterTable rows, the copilot open_task listener,
   // and the Pipeline child jumps). When USE_UNIFIED_DETAIL is on it resolves
   // the underlying Task from the current roster snapshot and dispatches the
   // app-wide fm:openTaskDetail event (App.tsx → TaskDetailDrawer) — matching
@@ -714,11 +713,6 @@ export function NewHomePage() {
           onSearch={setSearch}
           onRetry={startTask}
           onStart={startTask}
-        />
-
-        <OutcomesPanel
-          tasks={tasks.filter((t) => t.status === 'done' || t.status === 'failed')}
-          onOpenTask={openTaskDetail}
         />
       </div>
 

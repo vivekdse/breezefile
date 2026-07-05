@@ -2,37 +2,42 @@
 // escalation layer on top of it (spec §7). Renders the tasks NewHomePage
 // already scoped/filtered by project + status.
 //
-// task-b1fa5098da3e (R3) — a project no longer carries configured columns
-// (TemplateConfig/TemplateField removed, docs/task-templates-design.md
-// "Removed/superseded"). Every row renders the SAME fixed built-in columns
-// (Title/Status/Last Action/Who/Action). A CHAINED task — a top-level task
-// with children whose OWN body parses a v2 ```task-template block (see
-// useChainedRoster) — additionally renders a SUBTABLE beneath its summary
-// row, with grouped per-task-def IN/OUT columns aggregated from THAT job's
-// own defs (never a project pref). A plain task (no chain, or a
-// non-chained parent with children) renders as a normal row. Mixed projects
-// (some chained, some plain) render both kinds side by side.
+// UNIFIED ROSTER (2026-07-05 redesign): ONE table renders every kind of work
+// with the SAME columns — Title · Status · Last Run · Who · Runs · Actions:
+//   • a TEMPLATE GROUP row (rosterGroups.mjs) aggregates a template's run
+//     instances: Status shows a per-bucket breakdown ("3 done · 2 queued"),
+//     Runs = instance count, Actions = View → (Level-2 matrix) / ▶ Run all /
+//     + New run.
+//   • a CHAINED row (a v2-chained job OR a thin parent container with step
+//     children) aggregates its STEPS the same way: Status breakdown over the
+//     children, Runs = step count, Actions = View → / ▶ Run all /
+//     Auto-continue. The old inline per-step subtable is gone — step detail
+//     lives in the Level-2 matrix (View →); the auto-continue + chain-parent
+//     resolution machinery it carried survives in the headless
+//     <ChainAutomation> below.
+//   • a PLAIN task row: single status pill, Runs = 1, the usual primary
+//     action (Answer/Retry/▶ Start/View →). A DONE/FAILED row shows its
+//     one-line outcome under the title (the old OutcomesPanel, folded in).
+// Every row also gets a ⋮ actions menu listing all its applicable actions.
 //
-// PHI: `title`, `lastAction`, `customValues` values, and `risk` may carry
-// task text — render in memory only, never persist/log (see
-// docs/typebuild-data-field-contract.md).
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+// The status filter lives ONLY on the HeroStats cards now (the old pill bar
+// duplicated them and was removed); the toolbar keeps the search/query box.
+//
+// PHI: `title`, `lastAction`, `customValues` values, `risk`, and outcome
+// summaries may carry task text — render in memory only, never persist/log
+// (see docs/typebuild-data-field-contract.md).
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { NewHomeStatus, NewHomeTask } from './types';
 import type { Task } from '../../types';
 import { claimFreshness } from '../tasks/lifecycle.mjs';
-import { evalCondition, fieldRef, metaStatus, taskDefStatus } from './taskSchema.mjs';
-import type { MergedStepStatus } from './taskSchema.mjs';
+import { resultFields, taskDefStatus } from './taskSchema.mjs';
 import {
   nextAutoContinueChildId,
-  pipelineColumns,
-  partitionJobs,
-  runnableStepId,
-  mergeChildStatus,
   chainStartTarget,
   thinChainStartTarget,
   childStatusMap,
-  toChildStatus,
+  fieldedSchemaSource,
 } from './pipelineRoster.mjs';
 import { isAutoContinueOn, setAutoContinue } from './chainAutoContinuePrefs';
 import {
@@ -40,8 +45,8 @@ import {
   parentStatusFromChildren,
   shouldResolveParent,
 } from './chainParentResolve.mjs';
-import type { PipelineColumn, PipelineGroup, ChildStatusLike } from './pipelineRoster.mjs';
-import { buildRosterGroups, summarizeGroupRows, STATUS_BUCKETS } from './rosterGroups.mjs';
+import type { ChildStatusLike } from './pipelineRoster.mjs';
+import { buildRosterGroups, summarizeGroupRows, statusBucket, STATUS_BUCKETS } from './rosterGroups.mjs';
 import type {
   RosterGroup,
   RosterGroupInput,
@@ -55,23 +60,15 @@ import type { ChainedJobResolution } from './useNewHomeData';
 // path: primaryActionFor (the single source of truth for which primary action a
 // row offers) decides eligibility, and useTaskActions().start (→ runTaskNow) is
 // the same claim-then-launch IPC the old play button fires. No new launch path.
-import { taskSourceAction, useTasks, useTypebuildReadiness } from '../../tasks';
+import { getTask, taskSourceAction, useTasks, useTypebuildReadiness } from '../../tasks';
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { useStartAction } from '../tasks/useStartAction';
 import { useRunningSessions } from '../tasks/useRunningSessions';
-import { primaryActionFor, isInProgress } from '../tasks/primaryAction.mjs';
+import { primaryActionFor } from '../tasks/primaryAction.mjs';
 import { isDone } from '../tasks/sections.mjs';
+import { normalizeTablePayload, coerceCell } from '../tasks/taskResult.mjs';
 import './RosterTable.css';
-
-const FILTER_PILLS: { id: 'all' | NewHomeStatus; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'needs', label: 'Needs Me' },
-  { id: 'progress', label: 'In Progress' },
-  { id: 'queued', label: 'Queued' },
-  { id: 'done', label: 'Done' },
-  { id: 'failed', label: 'Failed' },
-];
 
 const WHO_GLYPH: Record<NewHomeTask['who'], string> = {
   agent: '\u{1F916}', // 🤖
@@ -87,7 +84,15 @@ const STATUS_LABEL: Record<NewHomeStatus, string> = {
   failed: 'Failed',
 };
 
-const BASE_COLUMN_COUNT = 5; // Title, Status, Last Action, Who, Action
+const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = {
+  done: 'done',
+  progress: 'in progress',
+  queued: 'queued',
+  needs: 'needs you',
+  failed: 'failed',
+};
+
+const BASE_COLUMN_COUNT = 6; // Title, Status, Last Run, Who, Runs, Actions
 
 /** task-6c62e6f0905e — tooltip for the live pulse: "Agent active · claim
  *  renewed 12m ago" when we have a claim timestamp to describe (the common
@@ -100,16 +105,345 @@ function liveTooltip(task: NewHomeTask): string {
   return fresh ? `Agent active · claim renewed ${fresh.relative}` : 'Agent active';
 }
 
+/** Aggregate status cell — one small pill per non-zero bucket ("3 done ·
+ *  2 queued"). Used for any row that summarizes several tasks (a template
+ *  group's runs, a chained row's steps). */
+function StatusBreakdown({ counts }: { counts: Record<StatusBucket, number> }) {
+  const active = STATUS_BUCKETS.filter((b) => counts[b] > 0);
+  if (active.length === 0) return <span className="nh-roster__action-empty">—</span>;
+  return (
+    <span className="nh-roster__breakdown">
+      {active.map((b) => (
+        <span
+          key={b}
+          className={`nh-roster__pill nh-roster__pill--${b}`}
+          title={`${counts[b]} ${STATUS_SUMMARY_LABEL[b]}`}
+        >
+          {counts[b]} {STATUS_SUMMARY_LABEL[b]}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// ─── ⋮ actions menu ─────────────────────────────────────────────────────────
+// Every unified row carries one: the full list of the row's applicable actions
+// (View / ▶ Run all / + New run / ↗ Open / Auto-continue), so the primary
+// button never has to cram in secondary verbs.
+type MenuItem =
+  | { label: string; onClick: () => void; disabled?: boolean; title?: string }
+  | { label: string; checkbox: true; checked: boolean; onToggle: () => void; title?: string };
+
+function ActionsMenu({ items, label }: { items: MenuItem[]; label: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  if (items.length === 0) return null;
+  return (
+    <span className="nh-roster__menu-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className="nh-roster__menu-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        title="Actions"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        ⋮
+      </button>
+      {open && (
+        <div className="nh-roster__menu" role="menu" onClick={(e) => e.stopPropagation()}>
+          {items.map((it, i) =>
+            'checkbox' in it ? (
+              <label key={i} className="nh-roster__menu-item nh-roster__menu-item--check" title={it.title}>
+                <input type="checkbox" checked={it.checked} onChange={it.onToggle} />
+                {it.label}
+              </label>
+            ) : (
+              <button
+                key={i}
+                type="button"
+                role="menuitem"
+                className="nh-roster__menu-item"
+                disabled={it.disabled}
+                title={it.title}
+                onClick={() => {
+                  setOpen(false);
+                  it.onClick();
+                }}
+              >
+                {it.label}
+              </button>
+            ),
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// ─── outcome one-liner (the old OutcomesPanel, folded into the table) ───────
+
+/** One-line best-effort outcome summary for a finished row: prefer a
+ *  structured `table` result (first row's cells, joined), then a
+ *  `{type:'fields'}` result labeled via the output schema, then the task's
+ *  last-action text. Same extraction TaskDetailDialog/TaskDetailDrawer use —
+ *  the two surfaces never drift on "what counts as the outcome".
+ *  PHI: the returned string may carry task content — render only. */
+function summarizeOutcome(task: NewHomeTask, detailTask: Task | null | undefined): string {
+  const result = task.raw?.result;
+  if (result && typeof result === 'object' && (result as { type?: unknown }).type === 'table') {
+    const table = normalizeTablePayload((result as { payload?: unknown }).payload);
+    if (table) {
+      const firstRow = table.rows[0];
+      if (firstRow && firstRow.length > 0) {
+        return firstRow.map((c) => coerceCell(c)).filter(Boolean).join(' · ');
+      }
+      if (table.headers.length > 0) {
+        return table.headers.join(' · ');
+      }
+    }
+  }
+  const fields = resultFields(result ?? null);
+  if (fields && Object.keys(fields.fields).length > 0) {
+    // task-6b1136a8ff77 — the list row never carries `outputSchema`
+    // (mapListRow gap); combine the fetched detail's schema with the raw row's
+    // via fieldedSchemaSource, exactly like TaskDetailDrawer.
+    const schema = fieldedSchemaSource(
+      { outputSchema: detailTask?.outputSchema },
+      { outputSchema: task.raw?.outputSchema },
+    );
+    const labelByKey = new Map((schema ?? []).map((f) => [f.key, f.label]));
+    return Object.entries(fields.fields)
+      .map(([k, v]) => `${labelByKey.get(k) ?? k}=${String(v)}`)
+      .join(' · ');
+  }
+  // No structured result → nothing to say. (The old OutcomesPanel fell back to
+  // lastAction here, but in the unified table that's just the age string the
+  // Last Run column already shows — rendering it again is noise.)
+  return '';
+}
+
+/** Lazy per-row detail for finished PLAIN rows (getTask), so the outcome
+ *  one-liner can label `{type:'fields'}` results via the server output schema.
+ *  Same lazy/cached fetch-and-merge pattern TaskMatrix uses. */
+function useOutcomeDetails(finishedIds: string[]): Map<string, Task> {
+  const idKey = useMemo(() => [...finishedIds].sort().join(','), [finishedIds]);
+  const [detailById, setDetailById] = useState<Map<string, Task>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    const ids = idKey ? idKey.split(',') : [];
+    const missing = ids.filter((id) => !detailById.has(id));
+    if (missing.length === 0) return;
+    void (async () => {
+      const fetched: [string, Task][] = [];
+      for (const id of missing) {
+        try {
+          const t = await getTask(id);
+          if (t) fetched.push([id, t]);
+        } catch {
+          // Offline / no access — summary falls back to the list row.
+        }
+      }
+      if (cancelled || fetched.length === 0) return;
+      setDetailById((prev) => {
+        const next = new Map(prev);
+        for (const [id, t] of fetched) next.set(id, t);
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // idKey encodes the finished-task id set; re-run only when it moves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idKey]);
+  return detailById;
+}
+
+// ─── headless chain automation ──────────────────────────────────────────────
+// The auto-continue + chain-parent-resolution machinery that used to live on
+// the inline ChainedJobSubtable. The subtable is gone (step detail moved to
+// the Level-2 matrix), but a chain must still self-advance and self-resolve
+// while its row is on screen — so the effects survive here, rendering nothing.
+function ChainAutomation({
+  jobId,
+  agentRun,
+  autoOn,
+  clearNonce,
+  resolution,
+  allTasksById,
+  onStartChild,
+  onErrorChange,
+}: {
+  /** task-6a14190fb2f7 — the job's own top-level task id. Auto-continue's
+   *  localStorage pref and its claim-guard bookkeeping are keyed off this. */
+  jobId: string;
+  /** task-6a14190fb2f7 — auto-continue's DEFAULT-ON only ever applies to an
+   *  agent-run chain — a human-run chain is never force-advanced. */
+  agentRun: boolean;
+  /** The per-job auto-continue pref (owned by RosterTable's menu toggle). */
+  autoOn: boolean;
+  /** Bumped on a manual ▶ Run all / re-enable — clears the back-off errors so
+   *  an explicit human retry gets one clean attempt per step again
+   *  (task-6fc9e503623e's "uncheck to freeze, re-check to retry"). */
+  clearNonce: number;
+  resolution: Extract<ChainedJobResolution, { status: 'chained' }>;
+  allTasksById: Map<string, Task>;
+  /** task-c141c7765aa4 — returns the StartOutcome (never throws) so the
+   *  auto-continue effect can verify a session actually spawned instead of
+   *  firing-and-forgetting the launch. */
+  onStartChild: (childId: string) => Promise<StartOutcome>;
+  /** Surface the current auto-start failure (or null) on the parent row. */
+  onErrorChange: (jobId: string, message: string | null) => void;
+}) {
+  const { valuesByRef, childIdByDefId, childrenLoading, defs } = resolution;
+  const tbReady = useTypebuildReadiness();
+  const actions = useTaskActions();
+  const sessions = useRunningSessions();
+  // task-f26e7745eda6 — def id → the child's LIVE server status, so a
+  // cancelled child is excluded from runnable/next-step.
+  const childByDefId = useMemo<Record<string, ChildStatusLike>>(
+    () => childStatusMap(Object.entries(childIdByDefId), (id) => allTasksById.get(id)),
+    [childIdByDefId, allTasksById],
+  );
+
+  const nextChildId = useMemo(
+    () => nextAutoContinueChildId(defs, valuesByRef, childIdByDefId, childByDefId),
+    [defs, valuesByRef, childIdByDefId, childByDefId],
+  );
+  // Guard against double-start WHILE A LAUNCH IS IN FLIGHT (see the long
+  // history on task-c141c7765aa4: only a genuinely SPAWNED session keeps the
+  // guard set; any failure clears it and records a visible back-off error).
+  const autoStartInFlightRef = useRef<string | null>(null);
+  const [autoStartErrors, setAutoStartErrors] = useState<Record<string, string>>({});
+
+  // task-6fc9e503623e — a manual retry (Run all) or re-enabling auto-continue
+  // clears the back-off errors so the chain gets one clean attempt per step.
+  const prevClearRef = useRef(clearNonce);
+  const prevAutoOnRef = useRef(autoOn);
+  useEffect(() => {
+    const cleared =
+      clearNonce !== prevClearRef.current || (autoOn && !prevAutoOnRef.current);
+    prevClearRef.current = clearNonce;
+    prevAutoOnRef.current = autoOn;
+    if (cleared) setAutoStartErrors({});
+  }, [clearNonce, autoOn]);
+
+  // Report the current failure (if any) up to the row's actions cell.
+  useEffect(() => {
+    const first = Object.values(autoStartErrors)[0] ?? null;
+    onErrorChange(jobId, first);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartErrors, jobId]);
+
+  useEffect(() => {
+    if (!autoOn || !agentRun || !nextChildId) return;
+    if (childrenLoading) return; // don't act on a partially-loaded job
+    if (autoStartInFlightRef.current === nextChildId) return; // already in flight
+    // task-6fc9e503623e (BACK-OFF) — never re-attempt a step that just failed
+    // to stay alive: one auto attempt per step per enablement, never an
+    // infinite claim/release cycle.
+    if (autoStartErrors[nextChildId]) return;
+    const child = allTasksById.get(nextChildId);
+    if (!child) return;
+    const pa = primaryActionFor(child, {
+      caps: actions.caps(child),
+      tbReady,
+      myEmail: tbReady.email,
+      session: sessions.get(nextChildId),
+    });
+    // Only ever auto-start when primaryActionFor itself says this exact
+    // child is start-eligible right now.
+    if (pa.kind !== 'start' || !pa.enabled) return;
+    autoStartInFlightRef.current = nextChildId;
+    void onStartChild(nextChildId).then((outcome: StartOutcome) => {
+      if (outcome.ok && outcome.spawned) return; // live session — never double-fire
+      // Launch failed OR the child exited within the liveness window. The
+      // claim was already released by useTaskActions().start; record the
+      // reason so the row surfaces it AND the back-off stops the churn loop.
+      autoStartInFlightRef.current = null;
+      const message = outcome.ok ? 'auto-start did not spawn a session' : outcome.message;
+      setAutoStartErrors((prev) => ({ ...prev, [nextChildId]: message }));
+    });
+  }, [
+    autoOn,
+    agentRun,
+    nextChildId,
+    childrenLoading,
+    allTasksById,
+    actions,
+    tbReady,
+    sessions,
+    onStartChild,
+    autoStartErrors,
+  ]);
+
+  // ── chain-parent resolution (client-side interim) ─────────────────────────
+  // When the LAST non-skipped child of a chain reaches a terminal state,
+  // resolve the PARENT container server-side (complete/cancel via the existing
+  // source verbs) so claim_next stops handing out a finished empty container.
+  // IDEMPOTENT + SAFE: shouldResolveParent gates on the parent's CURRENT
+  // server rawStatus; the in-flight ref stops a concurrent double-fire.
+  const parentResolveInFlightRef = useRef(false);
+  useEffect(() => {
+    if (childrenLoading) return; // don't act on a partially-loaded job
+    if (parentResolveInFlightRef.current) return;
+
+    const childStates: { rawStatus?: string | null }[] = [];
+    for (const def of defs) {
+      if (taskDefStatus(def, valuesByRef) === 'skip') continue;
+      const childId = childIdByDefId[def.id];
+      const child = childId ? allTasksById.get(childId) : undefined;
+      childStates.push({ rawStatus: child?.rawStatus ?? null });
+    }
+
+    const resolutionStatus = parentStatusFromChildren(childStates);
+    const parent = allTasksById.get(jobId);
+    if (!shouldResolveParent(parent?.rawStatus ?? null, resolutionStatus)) return;
+    if (!resolutionStatus) return; // (shouldResolveParent already ensures this)
+
+    // Build the aggregate chain evidence for the parent's submission. Held in
+    // memory ONLY for the payload — never logged/persisted (PHI).
+    const aggregate = buildChainAggregateResult({ defs, valuesByRef });
+    void aggregate; // consumed by a result-carrying submit when the source supports it
+
+    const parentSource = parent?.source ?? 'typebuild';
+    parentResolveInFlightRef.current = true;
+    const verb = resolutionStatus.status === 'done' ? 'complete' : 'cancel';
+    void taskSourceAction(parentSource, jobId, verb)
+      .then(() => {
+        // Leave the guard SET on success — the next render's
+        // shouldResolveParent sees the terminal rawStatus and short-circuits.
+      })
+      .catch(() => {
+        // Failed to resolve (offline / contested) — clear the guard so a
+        // later render retries once.
+        parentResolveInFlightRef.current = false;
+      });
+  }, [childrenLoading, defs, valuesByRef, childIdByDefId, allTasksById, jobId]);
+
+  return null;
+}
+
+// ─── primary row action (plain tasks) ───────────────────────────────────────
 function RowAction({
   task,
   onOpenTask,
   onRetry,
   onStart,
   startEligible,
-  chainStart,
-  onChainStart,
-  viewable,
-  onViewMatrix,
   viewableDetail,
   pending,
   error,
@@ -122,29 +456,9 @@ function RowAction({
    *  Tasks page's state machine). `enabled` gates on TypeBuild readiness;
    *  `tooltip` is the same hover text the old play button shows. */
   startEligible: { enabled: boolean; tooltip?: string } | null;
-  /** task-4045bcee23cb (U3a #1) / task-48cd46a0e2da — the parent-row chain
-   *  action. `{childId,...}` → an eligible ▶ Start chain; `{disabled,reason}` →
-   *  render a DISABLED ▶ Start chain with the reason as tooltip (never a bare —
-   *  with no explanation — the round-8 silent no-op); null → not a chain row. */
-  chainStart:
-    | { childId: string; enabled: boolean; tooltip?: string }
-    | { disabled: true; reason: string }
-    | null;
-  /** Route the chain-start click through the shared wrapper (owns pending/error). */
-  onChainStart: (childId: string) => void;
-  /** task-ecabeafa41e1 — this row is a chain/template WITH RUNS: render the
-   *  primary "View →" (opens the Level-2 matrix). The chain-start button, when
-   *  present, becomes the secondary "▶ Run all". */
-  viewable: boolean;
-  onViewMatrix: (taskId: string) => void;
-  /** task-4f1e8f45bf0e — this row is a DONE, non-chain, childless single task
-   *  that carries a fielded result (output schema and/or a structured
-   *  `result`). There's no matrix to open (no step children), so "View →"
-   *  opens the same task-detail drawer a row click does — which now (per
-   *  task-4f1e8f45bf0e) defaults a done task straight to its Activity/Outputs
-   *  read view rather than the edit composer. Mutually exclusive with
-   *  `viewable` (a row is either a chain/template with runs, or a plain
-   *  fielded single task — never both). */
+  /** task-4f1e8f45bf0e — a DONE, non-chain, childless single task carrying a
+   *  fielded result: "View →" opens the task-detail drawer (which defaults a
+   *  done task to its Activity/Outputs read view). */
   viewableDetail: boolean;
   /** task-48cd46a0e2da — the shared wrapper's pending/error for THIS row's id. */
   pending: boolean;
@@ -182,13 +496,7 @@ function RowAction({
     );
   }
   // ▶ Start — the SAME claim-then-launch path the old Tasks page's play button
-  // fires (onStart → NewHomePage → useTaskActions().start → runTaskNow). Shown
-  // only for rows primaryActionFor deems start-eligible (typebuild, open/queued,
-  // unclaimed-or-mine-and-idle) — never a claimed-by-other, in-progress, blocked,
-  // terminal, or parent-with-open-children row. stopPropagation so the click
-  // launches instead of opening the detail dialog (mirrors Answer/Retry).
-  // task-48cd46a0e2da — a pending state ("starting…") and an inline error make
-  // the click's outcome always visible.
+  // fires. Shown only for rows primaryActionFor deems start-eligible.
   if (startEligible) {
     return (
       <span className="nh-roster__action-wrap">
@@ -208,65 +516,6 @@ function RowAction({
       </span>
     );
   }
-  // ▶ Start chain — task-4045bcee23cb (U3a #1) / task-48cd46a0e2da. The parent
-  // itself has nothing startable (a container with open children — fm-bq86),
-  // but the CHAIN may: launch the first runnable child. When the chain has
-  // nothing runnable (all done/cancelled) or the next step isn't eligible, we
-  // render a DISABLED button with the REASON as tooltip + inline — never a
-  // silent — (the round-8 regression).
-  // task-ecabeafa41e1 — a chain/template WITH RUNS: "View →" is the PRIMARY
-  // action (opens the Level-2 matrix), and the chain-start button (when there's
-  // a runnable step) becomes the SECONDARY "▶ Run all". View shows even when
-  // nothing is runnable (a complete chain still opens its matrix).
-  if (viewable || chainStart) {
-    const reason = chainStart && 'disabled' in chainStart ? chainStart.reason : undefined;
-    const runAllDisabled =
-      !chainStart || 'disabled' in chainStart || ('enabled' in chainStart && !chainStart.enabled) || pending;
-    return (
-      <span className="nh-roster__action-wrap">
-        {viewable && (
-          <button
-            type="button"
-            className="nh-roster__action nh-roster__action--view"
-            onClick={(e) => {
-              e.stopPropagation();
-              onViewMatrix(task.id);
-            }}
-          >
-            View →
-          </button>
-        )}
-        {chainStart && (
-          <button
-            type="button"
-            className="nh-roster__action nh-roster__action--runall"
-            disabled={runAllDisabled}
-            title={
-              'disabled' in chainStart
-                ? chainStart.reason
-                : chainStart.tooltip ?? 'Run every runnable step'
-            }
-            onClick={(e) => {
-              e.stopPropagation();
-              if ('childId' in chainStart) onChainStart(chainStart.childId);
-            }}
-          >
-            {pending ? 'Running…' : '▶ Run all'}
-          </button>
-        )}
-        {(error || reason) && (
-          <span className="nh-roster__action-error" role="alert" title={error ?? reason}>
-            {`⚠ ${error ?? reason}`}
-          </span>
-        )}
-      </span>
-    );
-  }
-  // task-4f1e8f45bf0e — a DONE, non-chain, childless single task with a
-  // fielded result: give it the same "View →" affordance chains get, opening
-  // the task-detail drawer (which now defaults a done task to its read/
-  // outcome view) rather than leaving the action column at a bare "—" — the
-  // bug report's "a done single task's fielded result is unreachable".
   if (viewableDetail) {
     return (
       <button
@@ -282,824 +531,6 @@ function RowAction({
     );
   }
   return <span className="nh-roster__action-empty">{'—'}</span>;
-}
-
-// ─── chained-job subtable (task-a4397184def4, reworked task-b1fa5098da3e) ──
-// A chained job's grouped per-task-def columns, derived from THAT job's own
-// v2 ```task-template block (useChainedRoster) — never a project pref.
-// Rendered as a nested subtable beneath the job's summary row.
-
-/** metaStatus ('done'|'active'|'pending') → the roster pill class + label the
- *  built-in status column already ships. task-4045bcee23cb (U3a polish a) —
- *  the 'pending' bucket now says "Queued", matching STATUS_LABEL/FILTER_PILLS
- *  above (same `queued` pill class, same state, one token everywhere on the
- *  roster — a chained job row no longer says "Pending" while the stats card
- *  and every plain row for the identical state say "Queued"). */
-const META_PILL: Record<ReturnType<typeof metaStatus>, { cls: NewHomeStatus; label: string }> = {
-  done: { cls: 'done', label: 'Done' },
-  active: { cls: 'progress', label: 'In Progress' },
-  pending: { cls: 'queued', label: 'Queued' },
-};
-
-// task-4045bcee23cb (U3a) — per-step status chip label, rendered on a
-// subtable GROUP HEADER (one per task-def). 'queued' — not 'pending' — to
-// match the unified vocabulary above; 'n/a' for a conditionally-skipped step.
-// task-f26e7745eda6 — 'cancelled' (grey, ≠ n/a) and 'failed' (retry) are the
-// MERGED-in child server statuses.
-const STEP_CHIP_LABEL: Record<MergedStepStatus, string> = {
-  done: 'done',
-  active: 'running',
-  pending: 'queued',
-  skip: 'n/a',
-  cancelled: 'cancelled',
-  failed: 'failed',
-};
-
-/** One subtable group-header's status chip — "done"/"running"/"queued"/"n/a",
- *  plus a ▶ affordance when this step is THE runnable one (task-4045bcee23cb
- *  U3a #2). Eligibility for the ▶ still goes through `startAction` (built by
- *  the caller from `primaryActionFor`, the U3 single source of truth) — this
- *  component only decides WHERE to show it (the runnable step's own header),
- *  never whether starting is allowed. */
-function StepChip({
-  status,
-  runnable,
-  startAction,
-  onStart,
-  running,
-  autoStartError,
-  pending,
-}: {
-  status: MergedStepStatus;
-  runnable: boolean;
-  /** null when there's no child to start yet, or primaryActionFor doesn't
-   *  offer 'start' for it (e.g. claimed by someone else, already running). */
-  startAction: { enabled: boolean; tooltip?: string } | null;
-  onStart: () => void;
-  /** task-48cd46a0e2da (A#3) — a manual per-step ▶ is in flight; show
-   *  "Starting…" and disable so the click's outcome is visible, never silent. */
-  pending?: boolean;
-  /** task-c141c7765aa4 (#3) — true when the child is claimed/in_progress
-   *  RIGHT NOW (isInProgress), regardless of whether any output has landed
-   *  yet. Drives a "running headless" watch affordance so a claimed step is
-   *  never just a silent "queued" chip while a session is (or should be)
-   *  live somewhere. Ties to task-c14137435369 (session-start visibility) —
-   *  this is only the minimal "it's running, here's where to look" surface,
-   *  not that task's full solution. */
-  running?: boolean;
-  /** task-c141c7765aa4 (#1) — set when THIS step's auto-continue attempt just
-   *  failed to spawn a session. Rendered inline so the failure is visible on
-   *  the roster, not just a status-bar line that scrolls away. */
-  autoStartError?: string | null;
-}) {
-  // task-3f0c6a6abe41 (#2) — OPTIMISTIC ROLLBACK. A recorded auto-start
-  // failure for this step MUST win over any lingering "running" signal: the
-  // launch promise rejected (or the claim was released), so the step is NOT
-  // running regardless of a stale in_progress the source cache may still hold
-  // for up to one system-poll interval. Force the running indicator off and
-  // show the failure + ▶ instead, so the UI never says RUNNING while the
-  // server says OPEN.
-  const showRunning = !!running && !autoStartError && status === 'active';
-  return (
-    <span className="nh-pipe__step-chip-wrap">
-      {/* task-3f0c6a6abe41 (#4) — the pill ALREADY reads "running" for an
-          active step (STEP_CHIP_LABEL.active === 'running'); the live-session
-          signal is just a pulsing dot ON the pill, not a second "running"
-          word (which rendered the duplicated "RUNNING ● RUNNING"). */}
-      <span
-        className={
-          `nh-pipe__step-chip nh-pipe__step-chip--${status}` +
-          (showRunning ? ' nh-pipe__step-chip--live' : '')
-        }
-        title={
-          showRunning
-            ? 'A session is running for this step (headless — no visible tab yet)'
-            : undefined
-        }
-      >
-        {showRunning && <span className="nh-pipe__step-live-dot" aria-hidden="true" />}
-        {STEP_CHIP_LABEL[status]}
-      </span>
-      {runnable && startAction && (
-        <button
-          type="button"
-          className="nh-pipe__step-start"
-          disabled={!startAction.enabled || !!pending}
-          title={startAction.tooltip ?? 'Start this step'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onStart();
-          }}
-        >
-          {pending ? '…' : '▶'}
-        </button>
-      )}
-      {autoStartError && (
-        <span className="nh-pipe__step-error" role="alert" title={autoStartError}>
-          {`⚠ ${autoStartError}`}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function hasCellValue(v: string | number | undefined): boolean {
-  return v !== undefined && v !== null && v !== '';
-}
-
-/** Inline INPUT editor — the approved-prototype dashed-input pattern. Commits
- *  on blur (text/number/date) or on change (select/bool). Stops click/keydown
- *  from bubbling so focusing/typing never opens the child or triggers row
- *  keyboard-nav. PHI: the value lives in local state only, never logged. */
-function PipelineInput({
-  col,
-  value,
-  disabled,
-  onCommit,
-}: {
-  col: PipelineColumn;
-  value: string;
-  disabled: boolean;
-  onCommit: (value: string) => void;
-}) {
-  const [draft, setDraft] = useState(value);
-  // Keep the draft in sync when the resolved value changes underneath us
-  // (e.g. a lazy detail fetch lands, or another client edits the child).
-  useEffect(() => setDraft(value), [value]);
-
-  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
-  const commit = () => {
-    if (draft !== value) onCommit(draft);
-  };
-
-  if (col.type === 'select' && col.options && col.options.length > 0) {
-    return (
-      <select
-        className="nh-pipe__input nh-pipe__input--select"
-        value={draft}
-        disabled={disabled}
-        onClick={stop}
-        onKeyDown={stop}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          onCommit(e.target.value);
-        }}
-      >
-        <option value="">—</option>
-        {col.options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  if (col.type === 'bool') {
-    return (
-      <select
-        className="nh-pipe__input nh-pipe__input--select"
-        value={draft}
-        disabled={disabled}
-        onClick={stop}
-        onKeyDown={stop}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          onCommit(e.target.value);
-        }}
-      >
-        <option value="">—</option>
-        <option value="Yes">Yes</option>
-        <option value="No">No</option>
-      </select>
-    );
-  }
-  const inputType = col.type === 'number' ? 'number' : col.type === 'date' ? 'date' : 'text';
-  return (
-    <input
-      className="nh-pipe__input"
-      type={inputType}
-      value={draft}
-      disabled={disabled}
-      placeholder="—"
-      onClick={stop}
-      onKeyDown={(e) => {
-        stop(e);
-        if (e.key === 'Enter') e.currentTarget.blur();
-        if (e.key === 'Escape') {
-          // task-4045bcee23cb (U3a polish c) — Escape reverts the draft to the
-          // last-committed value AND blurs, instead of merely stopping
-          // propagation (which left the cursor/focus sitting in the input with
-          // whatever half-typed text was there). Blur fires after the draft
-          // reset below, so `commit`'s draft!==value check sees the reverted
-          // draft and correctly no-ops (nothing to save).
-          setDraft(value);
-          e.currentTarget.blur();
-        }
-      }}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-    />
-  );
-}
-
-/** One pipeline cell. INPUT cells are editable (dashed input); OUTPUT cells are
- *  read-only. A conditional-skipped def's cells render hatched `n/a`. Clicking
- *  the cell (outside the input) opens THAT def's child task. */
-function PipelineCell({
-  col,
-  valuesByRef,
-  childId,
-  skipped,
-  loading,
-  onOpenChild,
-  onSaveInput,
-}: {
-  col: PipelineColumn;
-  valuesByRef: Record<string, string | number>;
-  childId: string | undefined;
-  skipped: boolean;
-  loading: boolean;
-  onOpenChild: (id: string) => void;
-  onSaveInput: (childId: string, key: string, value: string) => void;
-}) {
-  const openChild = (e: { stopPropagation: () => void }) => {
-    e.stopPropagation();
-    if (childId) onOpenChild(childId);
-  };
-
-  if (skipped) {
-    return (
-      <td
-        className="nh-pipe__cell nh-pipe__cell--na"
-        title="Not needed for this job"
-        onClick={openChild}
-      >
-        <span className="nh-pipe__na">n/a</span>
-      </td>
-    );
-  }
-
-  const value = valuesByRef[fieldRef(col.taskDefId, col.key)];
-  const has = hasCellValue(value);
-
-  if (col.io === 'out') {
-    const missing = col.required && !has;
-    return (
-      <td
-        className={`nh-pipe__cell nh-pipe__cell--out${missing ? ' nh-pipe__cell--missing' : ''}`}
-        onClick={openChild}
-        title={missing ? undefined : col.label}
-      >
-        {has ? (
-          <span className="nh-pipe__val">{String(value)}</span>
-        ) : missing && !loading ? (
-          // task-4045bcee23cb (U3a polish b) — a required-but-unsubmitted
-          // output is no longer a plain "—*"; the dashed underline + tooltip
-          // is the affordance (mirrors the dashed-input pattern PipelineInput
-          // already uses for editable cells), so a missing required output
-          // reads as "there's something here to notice", not stray punctuation.
-          <span className="nh-pipe__empty nh-pipe__empty--missing" title="required — awaiting agent">
-            —
-          </span>
-        ) : (
-          <span className="nh-pipe__empty">{loading ? '·' : '—'}</span>
-        )}
-      </td>
-    );
-  }
-
-  // INPUT cell — editable.
-  return (
-    <td className="nh-pipe__cell nh-pipe__cell--in" onClick={openChild} title={col.label}>
-      <PipelineInput
-        col={col}
-        value={has ? String(value) : ''}
-        disabled={!childId || loading}
-        onCommit={(v) => {
-          if (childId) onSaveInput(childId, col.key, v);
-        }}
-      />
-    </td>
-  );
-}
-
-/** A chained job's own grouped subtable — ONE data row of that job's
- *  aggregated valuesByRef, with its own header (built from that job's own
- *  defs, so heterogeneous chains across jobs render independently). */
-function ChainedJobSubtable({
-  jobId,
-  agentRun,
-  groups,
-  resolution,
-  onOpenTask,
-  onSaveInput,
-  allTasksById,
-  onStartChild,
-}: {
-  /** task-6a14190fb2f7 — the job's own top-level task id. Auto-continue's
-   *  localStorage pref and its claim-guard bookkeeping are keyed off this. */
-  jobId: string;
-  /** task-6a14190fb2f7 — "is this chain agent-run" (the parent row's `who` is
-   *  not purely human). Auto-continue's DEFAULT-ON only ever applies to an
-   *  agent-run chain — a human-run chain is never force-advanced against the
-   *  user's will, regardless of the per-job pref. */
-  agentRun: boolean;
-  groups: PipelineGroup[];
-  /** task-ce4b4c8ca955 — also accepts 'fielded' (a single-task job with its
-   *  own output fields/result, one synthetic def, no real children): the
-   *  SAME grouped-subtable shape a chained job resolves to, just with
-   *  `childIdByDefId` pointing the one def at the job itself. Reused as-is —
-   *  no parallel renderer — because a 'fielded' job's auto-continue/
-   *  start-chain machinery is naturally inert: `runnableStepId` returns null
-   *  once the def is done, and a non-done job is never `primaryActionFor`
-   *  kind:'start' while claimed/in_progress, so this never self-relaunches. */
-  resolution: Extract<ChainedJobResolution, { status: 'chained' | 'fielded' }>;
-  onOpenTask: (id: string) => void;
-  onSaveInput: (childId: string, key: string, value: string) => void;
-  /** task-4045bcee23cb (U3a #2) — full-roster id→Task lookup, so the runnable
-   *  group header can resolve its child's raw Task and run it through
-   *  primaryActionFor (start-eligibility must never be guessed from the
-   *  view-model alone). */
-  allTasksById: Map<string, Task>;
-  /** task-c141c7765aa4 — returns the StartOutcome (never throws) so the
-   *  auto-continue effect can verify a session actually spawned instead of
-   *  firing-and-forgetting the launch. */
-  onStartChild: (childId: string) => Promise<StartOutcome>;
-}) {
-  const { valuesByRef, childIdByDefId, childrenLoading, defs } = resolution;
-  const tbReady = useTypebuildReadiness();
-  const actions = useTaskActions();
-  // task-48cd46a0e2da (A#3) — the per-step ▶ Start also routes through the
-  // shared wrapper so a MANUAL step start shows pending/error, never a silent
-  // no-op (the auto-continue path keeps its own back-off error state below).
-  const manualStart = useStartAction();
-  const sessions = useRunningSessions();
-  // task-f26e7745eda6 — def id → the child's LIVE server status (from the
-  // full-roster raw Task, which is NOT stale — it tracks the system poll). The
-  // pure status-derivation now consults this so a cancelled child is excluded
-  // from runnable/next-step and rendered as 'cancelled', never 'queued'.
-  const childByDefId = useMemo<Record<string, ChildStatusLike>>(
-    () => childStatusMap(Object.entries(childIdByDefId), (id) => allTasksById.get(id)),
-    [childIdByDefId, allTasksById],
-  );
-  const runnableId = useMemo(
-    () => runnableStepId(defs, valuesByRef, childByDefId),
-    [defs, valuesByRef, childByDefId],
-  );
-
-  // task-6a14190fb2f7 (#3) — terminal state. The SERVER already flips the
-  // parent to 'done' once every child resolves (the chain "reads done" per
-  // the live E2E report) — metaStatus here just mirrors that in the UI; this
-  // component never double-writes the parent's status itself.
-  const meta = useMemo(() => metaStatus(defs, valuesByRef), [defs, valuesByRef]);
-  const justCompletedRef = useRef(false);
-  const wasDoneRef = useRef(meta === 'done');
-  if (meta === 'done' && !wasDoneRef.current) justCompletedRef.current = true;
-  wasDoneRef.current = meta === 'done';
-
-  // ── auto-continue (#2) ────────────────────────────────────────────────────
-  // A per-job toggle (chainAutoContinuePrefs, default ON for an agent-run
-  // chain) that automatically starts the next runnable child the instant it
-  // becomes runnable, instead of waiting for a human to notice the "ready ▶"
-  // chip and click it. Durable home for this is server-side dispatch/breezed
-  // (the client shouldn't need to be open for a chain to advance) — this is
-  // the client-side implementation until that lands.
-  const [autoOn, setAutoOnState] = useState(() => isAutoContinueOn(jobId));
-  useEffect(() => setAutoOnState(isAutoContinueOn(jobId)), [jobId]);
-  const toggleAuto = () => {
-    const next = !autoOn;
-    setAutoOnState(next);
-    setAutoContinue(jobId, next);
-  };
-
-  const nextChildId = useMemo(
-    () => nextAutoContinueChildId(defs, valuesByRef, childIdByDefId, childByDefId),
-    [defs, valuesByRef, childIdByDefId, childByDefId],
-  );
-  // Guard against double-start WHILE A LAUNCH IS IN FLIGHT: track the child id
-  // we're currently awaiting a start for so a re-render (or the fast poll's
-  // next tick, before the child's own status has caught up) never calls start
-  // twice concurrently for the same step. This is belt-and-suspenders on top
-  // of primaryActionFor + the server's claim (a claimed/in_progress child's
-  // primaryActionFor is never 'start', so a second start simply isn't
-  // attempted; and even if it raced through, the server's claim rejects a
-  // contested start with {ok:false}).
-  //
-  // task-c141c7765aa4 (ROOT CAUSE FIX #1) — this guard used to be a
-  // fire-and-forget PERMANENT mark (autoStartedForRef never cleared), so once
-  // onStartChild's underlying claim-then-launch succeeded at the CLAIM half
-  // but failed at the LAUNCH half (no focused/open window — the common case
-  // for a background auto-continue tick with no user gesture), the effect
-  // never tried again: the step sat claimed with no session and no retry,
-  // invisible until the 2h TTL. Now we AWAIT the full outcome; only a
-  // genuinely SPAWNED session (outcome.spawned) keeps the guard set. Any
-  // failure clears the guard (so the effect retries once the step is
-  // re-runnable — e.g. after the claim-release below) and records a visible
-  // per-step error the chip renders inline instead of a silent stall.
-  const autoStartInFlightRef = useRef<string | null>(null);
-  const [autoStartErrors, setAutoStartErrors] = useState<Record<string, string>>({});
-
-  // task-6fc9e503623e — when auto-continue is toggled back ON, clear the
-  // back-off errors so a freshly re-enabled chain gets one clean attempt per
-  // step again (matches the tester's "uncheck to freeze, re-check to retry"
-  // workflow). Keyed off `autoOn` flipping true.
-  const prevAutoOnRef = useRef(autoOn);
-  useEffect(() => {
-    if (autoOn && !prevAutoOnRef.current) setAutoStartErrors({});
-    prevAutoOnRef.current = autoOn;
-  }, [autoOn]);
-
-  // Manual ▶ from a step chip: clear the auto-continue back-off error for that
-  // child (an explicit human retry) AND route through the shared wrapper so the
-  // click shows pending/error and can never be silent (task-48cd46a0e2da A#3).
-  const startChildManually = (childId: string) => {
-    setAutoStartErrors((prev) => {
-      if (!(childId in prev)) return prev;
-      const next = { ...prev };
-      delete next[childId];
-      return next;
-    });
-    void manualStart.run(childId, { kind: 'start', run: () => onStartChild(childId) });
-  };
-
-  useEffect(() => {
-    if (!autoOn || !agentRun || !nextChildId) return;
-    if (childrenLoading) return; // don't act on a partially-loaded job
-    if (autoStartInFlightRef.current === nextChildId) return; // already in flight
-    // task-6fc9e503623e (BACK-OFF) — do NOT re-attempt a step that just failed
-    // to STAY ALIVE. Without this, auto-continue re-claims the same step on
-    // every poll (claim → early-exit → release → runnable again → claim …),
-    // the observed churn loop. A recorded error freezes auto-retry for that
-    // child until it's manually retried (clears the error) or auto-continue is
-    // re-toggled (clears all). This is the regression guard: one auto attempt
-    // per step per enablement, never an infinite claim/release cycle.
-    if (autoStartErrors[nextChildId]) return;
-    const child = allTasksById.get(nextChildId);
-    if (!child) return;
-    const pa = primaryActionFor(child, {
-      caps: actions.caps(child),
-      tbReady,
-      myEmail: tbReady.email,
-      session: sessions.get(nextChildId),
-    });
-    // Only ever auto-start when primaryActionFor itself says this exact
-    // child is start-eligible right now — never claimed/in_progress/done
-    // (those all resolve to a non-'start' kind, see primaryAction.mjs).
-    if (pa.kind !== 'start' || !pa.enabled) return;
-    autoStartInFlightRef.current = nextChildId;
-    void onStartChild(nextChildId).then((outcome: StartOutcome) => {
-      if (outcome.ok && outcome.spawned) {
-        // A real, LIVE session came up (useTaskActions gates `spawned` on the
-        // liveness verdict now) — keep the guard set so we never double-fire.
-        return;
-      }
-      // Launch failed OR the child exited within the liveness window. The
-      // claim was already released by useTaskActions().start; record the
-      // reason (which now includes the exit code for an early exit) so the
-      // chip surfaces it AND the BACK-OFF above stops the churn loop.
-      autoStartInFlightRef.current = null;
-      const message = outcome.ok ? 'auto-start did not spawn a session' : outcome.message;
-      setAutoStartErrors((prev) => ({ ...prev, [nextChildId]: message }));
-    });
-  }, [
-    autoOn,
-    agentRun,
-    nextChildId,
-    childrenLoading,
-    allTasksById,
-    actions,
-    tbReady,
-    sessions,
-    onStartChild,
-    autoStartErrors,
-  ]);
-
-  // ── chain-parent resolution (client-side interim) ─────────────────────────
-  // When the LAST non-skipped child of a REAL chain reaches a terminal state,
-  // resolve the PARENT container server-side. Today the "✓ Chain complete"
-  // above is display-only: metaStatus mirrors the children in the UI but the
-  // parent stays open/unclaimed, so claim_next can hand out a completed empty
-  // container and the roster raw-status still reads "Queued". We use the
-  // EXISTING source verb (`complete` → PATCH {status:'done'}); the source layer
-  // has no result-carrying submit action, so the aggregate is built for the
-  // payload (and to prove the evidence exists) but the interim submit only
-  // moves status. See chainParentResolve.mjs for the pure logic.
-  //
-  // A 'fielded' single-task job is NOT a chain (its one synthetic def points at
-  // the job itself) — it must never be resolved here, or we'd double-submit a
-  // single task against its own completion. Guard on resolution.status.
-  //
-  // IDEMPOTENT + SAFE: shouldResolveParent gates on the parent's CURRENT server
-  // rawStatus, so an already-terminal parent — whether we submitted it a moment
-  // ago OR the server resolved it on its own — is NEVER resubmitted. The
-  // in-flight ref stops a concurrent double-fire within one terminal transition.
-  const parentResolveInFlightRef = useRef(false);
-  useEffect(() => {
-    if (resolution.status !== 'chained') return; // fielded/other → not a chain
-    if (childrenLoading) return; // don't act on a partially-loaded job
-    if (parentResolveInFlightRef.current) return;
-
-    // Per-step child terminal states, in step order, over the NON-skipped defs
-    // that actually have a child row. A skipped (n/a) def contributes nothing;
-    // a non-skipped def whose child hasn't been created yet makes the chain
-    // NOT-yet-terminal (rawStatus:null), so parentStatusFromChildren returns
-    // null and we do nothing.
-    const childStates: { rawStatus?: string | null }[] = [];
-    for (const def of defs) {
-      if (taskDefStatus(def, valuesByRef) === 'skip') continue;
-      const childId = childIdByDefId[def.id];
-      const child = childId ? allTasksById.get(childId) : undefined;
-      childStates.push({ rawStatus: child?.rawStatus ?? null });
-    }
-
-    const resolutionStatus = parentStatusFromChildren(childStates);
-    const parent = allTasksById.get(jobId);
-    if (!shouldResolveParent(parent?.rawStatus ?? null, resolutionStatus)) return;
-    if (!resolutionStatus) return; // (shouldResolveParent already ensures this)
-
-    // Build the aggregate chain evidence for the parent's submission. Held in
-    // memory ONLY for the payload — never logged/persisted (PHI). The source
-    // `complete` verb currently carries no result, so this is prepared for the
-    // moment a result-carrying submit action lands; we do not log its values.
-    const aggregate = buildChainAggregateResult({ defs, valuesByRef });
-    void aggregate; // consumed by a result-carrying submit when the source supports it
-
-    const parentSource = parent?.source ?? 'typebuild';
-    parentResolveInFlightRef.current = true;
-    // 'done' → complete; 'partial' → cancel is the closest terminal the source
-    // layer exposes (there is no `partial` verb). Either way the container stops
-    // being handed out by claim_next and the roster stops reading "Queued".
-    const verb = resolutionStatus.status === 'done' ? 'complete' : 'cancel';
-    void taskSourceAction(parentSource, jobId, verb)
-      .then(() => {
-        // Leave the guard SET on success: the parent is now terminal, and the
-        // next render's shouldResolveParent sees the terminal rawStatus and
-        // short-circuits — a belt-and-suspenders second layer of idempotency.
-      })
-      .catch(() => {
-        // Failed to resolve (offline / contested) — clear the guard so a later
-        // render retries once. Never log the reason with values (PHI); this
-        // path carries none anyway.
-        parentResolveInFlightRef.current = false;
-      });
-  }, [
-    resolution.status,
-    childrenLoading,
-    defs,
-    valuesByRef,
-    childIdByDefId,
-    allTasksById,
-    jobId,
-  ]);
-
-  return (
-    <>
-      <div className="nh-pipe__chain-bar">
-        {meta === 'done' ? (
-          <span className="nh-pipe__chain-celebration" role="status">
-            {'✓ Chain complete'}
-            {justCompletedRef.current && <span className="nh-pipe__chain-celebration-badge">just now</span>}
-          </span>
-        ) : (
-          <label className="nh-pipe__auto-continue" title="Automatically start the next step when the previous one finishes">
-            <input type="checkbox" checked={autoOn} onChange={toggleAuto} />
-            <span>Auto-continue</span>
-          </label>
-        )}
-      </div>
-      <table className="nh-pipe__table nh-pipe__subtable">
-      <thead>
-        <tr>
-          {groups.map((g) => {
-            const def = defs.find((d) => d.id === g.taskDefId);
-            const baseStatus = def ? taskDefStatus(def, valuesByRef) : 'pending';
-            const childId = childIdByDefId[g.taskDefId];
-            const child = childId ? allTasksById.get(childId) : undefined;
-            // task-48cd46a0e2da (A#3) — surface EITHER the auto-continue
-            // back-off error OR the manual per-step wrapper error (whichever is
-            // set) so a failed manual ▶ is never silent.
-            const stepError = childId
-              ? autoStartErrors[childId] ?? manualStart.errorFor(childId)
-              : null;
-            const stepPending = childId ? manualStart.pendingFor(childId) : false;
-            const liveSession = child ? sessions.get(child.id) : undefined;
-            // task-c141c7765aa4 / task-3f0c6a6abe41 / task-6fc9e503623e —
-            // "Is this step's session actually live right now?" RE-DERIVED FROM
-            // SERVER TRUTH every render: server says in_progress OR we hold a
-            // live local session — AND no recorded auto-start failure. The
-            // `!stepError` gate is the optimistic rollback: the instant a launch
-            // rejects/early-exits, this goes false so the chip never lies
-            // RUNNING while the server says OPEN, even before the next poll.
-            const childRunning =
-              !stepError && !!child && (isInProgress(child) || !!liveSession);
-            // task-f26e7745eda6 — merge the child's AUTHORITATIVE server status:
-            // cancelled → grey 'cancelled' (excluded from runnable); failed/
-            // blocked → 'failed'; in_progress → 'active'. A cancelled/failed
-            // child reads that way regardless of output values or run signal.
-            const merged = mergeChildStatus(baseStatus, toChildStatus(child));
-            // The chip's final status. Only a still-runnable step (pending or
-            // output-partial 'active') reflects the LIVE run signal: shown as
-            // 'active' when childRunning, else demoted to the pure output-
-            // derived base (so a step with a recorded failure or no live session
-            // reads its real output progress — 'pending'/'active' — not a stale
-            // server 'in_progress'). Terminal/frozen states (done/skip/
-            // cancelled/failed) are authoritative and pass through untouched —
-            // listed POSITIVELY so a future status can't silently fall into the
-            // run-signal branch (reviewer Angle-E #3).
-            const status: MergedStepStatus =
-              merged === 'pending' || merged === 'active'
-                ? childRunning
-                  ? 'active'
-                  : baseStatus
-                : merged;
-            const runnable = g.taskDefId === runnableId;
-            // task-4045bcee23cb (U3a) — same actionsFor eligibility rule as the
-            // row-level ▶ Start and the parent's Start-chain: never invent a
-            // second rule for "can this step be started".
-            const startAction =
-              child &&
-              (() => {
-                const pa = primaryActionFor(child, {
-                  caps: actions.caps(child),
-                  tbReady,
-                  myEmail: tbReady.email,
-                  session: sessions.get(child.id),
-                });
-                return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
-              })();
-            return (
-              <th key={g.taskDefId} colSpan={g.columns.length} className="nh-pipe__group-th" title={g.name}>
-                <span className="nh-pipe__group-name">{g.name}</span>
-                <StepChip
-                  status={status}
-                  runnable={runnable}
-                  startAction={startAction ?? null}
-                  onStart={() => childId && startChildManually(childId)}
-                  running={childRunning}
-                  autoStartError={stepError}
-                  pending={stepPending}
-                />
-              </th>
-            );
-          })}
-        </tr>
-        <tr>
-          {groups.flatMap((g) =>
-            g.columns.map((col) => (
-              <th
-                key={`${g.taskDefId}.${col.key}.${col.io}`}
-                className={`nh-pipe__field-th nh-pipe__field-th--${col.io}`}
-                title={`${g.name} · ${col.label} · ${col.io === 'in' ? 'input' : 'output'}${col.required ? ' · required' : ''}`}
-              >
-                <span className="nh-pipe__field-label">{col.label}</span>
-                <span className={`nh-pipe__io nh-pipe__io--${col.io}`}>
-                  {col.io === 'in' ? 'IN' : 'OUT'}
-                </span>
-                {col.required && <span className="nh-pipe__req">REQ</span>}
-              </th>
-            )),
-          )}
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          {groups.map((g) => {
-            const skipped = !!g.neededWhen && !evalCondition(g.neededWhen, valuesByRef);
-            const childId = childIdByDefId[g.taskDefId];
-            return g.columns.map((col) => (
-              <PipelineCell
-                key={`${g.taskDefId}.${col.key}.${col.io}`}
-                col={col}
-                valuesByRef={valuesByRef}
-                childId={childId}
-                skipped={skipped}
-                loading={childrenLoading}
-                onOpenChild={onOpenTask}
-                onSaveInput={onSaveInput}
-              />
-            ));
-          })}
-        </tr>
-      </tbody>
-      </table>
-    </>
-  );
-}
-
-// ─── template-grouped section (task-b8fa34a80a34) ──────────────────────────
-// The extended, TEMPLATE-GROUPED table that REPLACES the old per-task 'fielded'
-// subtable: a section per template, one subheading, an Inputs|Outputs two-tier
-// header with IN/OUT/REQ badges, a sticky-left Run column (status pill +
-// distinguishing instance id), and value cells filled from the lazily-resolved
-// task detail (outputs) + data bag (inputs). The field-column region scrolls
-// horizontally inside its own container while the Run column stays pinned.
-//
-// PHI: input/output VALUES render in memory only (resolved via the lazy detail
-// resolver + taskData.resolve) — never logged or persisted.
-
-
-// task-ecabeafa41e1 — LEVEL 1. A group is summarized by ONE row: num runs, a
-// per-status count breakdown, the distinct-assignee count (a chain's steps may
-// be assigned to different people, so this can be >1), and the group actions
-// (View → into the Level-2 matrix · ▶ Run all · + New run). The per-run
-// inputs/outputs table now lives in the Level-2 matrix (TaskMatrix), reached
-// via "View →" — this row is deliberately field-column-free so stacked groups
-// align on one calm spine (the roster-redesign fix).
-const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = {
-  done: 'done',
-  progress: 'in progress',
-  queued: 'queued',
-  needs: 'needs you',
-  failed: 'failed',
-};
-
-function TemplateSection({
-  group,
-  summary,
-  onView,
-  onRunAll,
-  onNewRun,
-  runAllPending,
-}: {
-  group: RosterGroup;
-  /** task-ecabeafa41e1 — aggregated Level-1 stats for this group's runs. */
-  summary: GroupSummary;
-  /** Open the Level-2 matrix for this group (View →). */
-  onView: (group: RosterGroup) => void;
-  /** Run all runnable runs/steps in this group (▶ Run all). */
-  onRunAll: (group: RosterGroup) => void;
-  onNewRun: (group: RosterGroup) => void;
-  /** True while a Run-all launch for this group is in flight. */
-  runAllPending: boolean;
-}) {
-  const { runCount, statusCounts, assignees } = summary;
-  const activeBuckets = STATUS_BUCKETS.filter((b) => statusCounts[b] > 0);
-  const assigneeTitle =
-    assignees.length > 0 ? assignees.join(', ') : 'Unassigned';
-  // A group is "runnable" if anything isn't already done/queued-terminal — i.e.
-  // there's at least one queued/needs/failed/in-progress run to advance.
-  const hasRunnable =
-    statusCounts.queued + statusCounts.needs + statusCounts.failed + statusCounts.progress > 0;
-  return (
-    <section className="nh-tmpl-section nh-tmpl-section--summary">
-      <div className="nh-tmpl__head">
-        <button
-          type="button"
-          className="nh-tmpl__title nh-tmpl__title--view"
-          onClick={() => onView(group)}
-          title="View runs, inputs and outputs"
-        >
-          {group.name}
-        </button>
-        <span className="nh-tmpl__count">
-          {runCount} run{runCount === 1 ? '' : 's'}
-        </span>
-        {/* Status breakdown — one chip per non-zero bucket, roster pill colors. */}
-        <span className="nh-tmpl__stats">
-          {activeBuckets.map((b) => (
-            <span
-              key={b}
-              className={`nh-tmpl__stat nh-roster__pill nh-roster__pill--${b}`}
-              title={`${statusCounts[b]} ${STATUS_SUMMARY_LABEL[b]}`}
-            >
-              {statusCounts[b]} {STATUS_SUMMARY_LABEL[b]}
-            </span>
-          ))}
-        </span>
-        {/* Distinct assignees — count + tooltip listing them (can be >1). */}
-        <span className="nh-tmpl__who" title={assigneeTitle}>
-          {assignees.length === 0
-            ? 'Unassigned'
-            : assignees.length === 1
-              ? assignees[0]
-              : `${assignees.length} people`}
-        </span>
-        <span className="nh-tmpl__actions">
-          <button
-            type="button"
-            className="nh-tmpl__view"
-            onClick={() => onView(group)}
-          >
-            View →
-          </button>
-          {hasRunnable && (
-            <button
-              type="button"
-              className="nh-tmpl__runall"
-              onClick={() => onRunAll(group)}
-              disabled={runAllPending}
-              title="Start every runnable step of every run in this group"
-            >
-              {runAllPending ? 'Starting…' : '▶ Run all'}
-            </button>
-          )}
-          <button type="button" className="nh-tmpl__new" onClick={() => onNewRun(group)}>
-            <span className="nh-tmpl__new-plus">+</span> New run
-          </button>
-        </span>
-      </div>
-    </section>
-  );
 }
 
 export function RosterTable({
@@ -1135,26 +566,15 @@ export function RosterTable({
   /** Launch a start-eligible task. Threaded from NewHomePage, which owns the
    *  useTaskActions().start (→ runTaskNow) call and the post-action roster
    *  refresh — the SAME mechanism the old Tasks page's play button uses.
-   *  Resolves with the StartOutcome (never throws) so the chained subtable's
-   *  auto-continue effect can verify a session actually spawned before it
-   *  treats the step as "handled" (task-c141c7765aa4). Manual callers (the
-   *  row ▶ Start / Retry buttons) ignore the resolved value. */
+   *  Resolves with the StartOutcome (never throws) so the chain auto-continue
+   *  effect can verify a session actually spawned (task-c141c7765aa4). */
   onStart: (id: string) => Promise<StartOutcome>;
-  /** Optional — NewHomePage today drives filtering via HeroStats cards and
-   *  pre-filters `tasks` before passing them down, so this pill bar is not
-   *  yet wired to a live callback from the shell. Kept optional so this
-   *  component still compiles/renders correctly against the current
-   *  NewHomePage call site; wire this up from NewHomePage in a follow-up so
-   *  the pills become the second, always-visible way to change `filter`
-   *  (matching the V11 reference's toolbar). Until then the pills reflect
-   *  the current `filter` and are a no-op if clicked without a handler. */
+  /** Used by the empty state's "Clear filter" (the status filter itself now
+   *  lives only on the HeroStats cards — the redundant pill bar is gone). */
   onFilter?: (f: 'all' | NewHomeStatus) => void;
   /** Set the free-text search query. Optional so older call sites still
    *  compile; when absent the search box is hidden. */
   onSearch?: (query: string) => void;
-  /** Optional — NewHomePage doesn't thread its `loading` flag down to this
-   *  component yet; wire it in a follow-up so the table can show a skeleton
-   *  during the initial fetch instead of a bare "No tasks" flash. */
   loading?: boolean;
 }) {
   // Defensive: filter locally too, in case a future caller passes an
@@ -1165,22 +585,16 @@ export function RosterTable({
   );
 
   // ── ▶ Start eligibility (reuses the OLD Tasks page's exact rule) ───────────
-  // primaryActionFor is the single source of truth for a row's primary action;
-  // we render Start exactly when it returns kind:'start'. Its ctx is the same
-  // the old page assembles: source capabilities, TypeBuild readiness + my email
-  // (claimed-by-me vs claimed-by-other), any live local session tab, and whether
-  // this row is a container parent with still-open children (a parent can't be
-  // Started until its children resolve — fm-bq86). `allTasks` is the FULL,
-  // UNFILTERED roster so a status filter that hides a parent's open children
-  // can't make it falsely look start-eligible. PHI: no task text is read here —
-  // only ids/status/claim/parent metadata.
+  // primaryActionFor is the single source of truth for a row's primary action.
+  // `allTasks` is the FULL, UNFILTERED roster so a status filter that hides a
+  // parent's open children can't make it falsely look start-eligible. PHI: no
+  // task text is read here — only ids/status/claim/parent metadata.
   const tbReady = useTypebuildReadiness();
   const sessions = useRunningSessions();
   const actions = useTaskActions();
   // task-48cd46a0e2da — the SHARED start wrapper: EVERY start affordance in
-  // this component (row ▶ Start, parent ▶ Start-chain, per-step ▶, Retry)
-  // routes through it, so none can be silent. It owns pending/error UI keyed by
-  // the row/parent id; the RowAction renders errorFor(id) inline.
+  // this component routes through it, so none can be silent. It owns
+  // pending/error UI keyed by the row/parent id.
   const startAction = useStartAction();
   const { tasks: allTasks } = useTasks({ includeDone: true });
   const openChildParentIds = useMemo(() => {
@@ -1190,9 +604,6 @@ export function RosterTable({
     }
     return set;
   }, [allTasks]);
-  // task-4045bcee23cb (U3a) — id → raw Task lookup so a chained job's step
-  // chips / parent Start-chain can resolve a CHILD's full Task (primaryActionFor
-  // needs the whole object, not just an id) without each subtable re-fetching.
   const allTasksById = useMemo(() => new Map(allTasks.map((t) => [t.id, t])), [allTasks]);
   // task-ecabeafa41e1 — Level-2 matrix: which chain parent's matrix is open (null = roster).
   const [matrixParentId, setMatrixParentId] = useState<string | null>(null);
@@ -1217,15 +628,10 @@ export function RosterTable({
   ): Record<string, ChildStatusLike> =>
     childStatusMap(Object.entries(chainedRes.childIdByDefId), (id) => allTasksById.get(id));
 
-  // task-4045bcee23cb (U3a #1) / task-48cd46a0e2da — "▶ Start chain": for a
-  // chained-job parent row, resolve the first RUNNABLE child (chainStartTarget,
-  // which now SKIPS cancelled steps and, when nothing is runnable, returns an
-  // explicit REASON so the click is never silent). Returns one of:
-  //   - { childId, enabled, tooltip }         → a real, eligible start
-  //   - { disabled:true, reason }             → nothing to start / not eligible,
-  //                                             with a human reason to surface
-  //   - null                                  → not a chain-start row at all
-  //                                             (the parent's own Start applies)
+  // task-4045bcee23cb (U3a #1) / task-48cd46a0e2da — "▶ Run all" for a v2
+  // chained row: resolve the first RUNNABLE child (chainStartTarget, which
+  // skips cancelled steps and, when nothing is runnable, returns an explicit
+  // REASON so the click is never silent).
   const chainStartFor = (
     chainedRes: Extract<ChainedJobResolution, { status: 'chained' }>,
   ):
@@ -1240,11 +646,8 @@ export function RosterTable({
       childStatus,
     );
     if (target.childId === null) {
-      // A genuinely COMPLETE chain is the calm terminal state — show no action
-      // (—), not a disabled button + warning on every finished row. But a chain
-      // that's stuck because its remaining step is CANCELLED (or still loading)
-      // IS actionable news: surface the disabled button + reason so the click
-      // isn't silent and the user knows to reopen the step.
+      // A genuinely COMPLETE chain is the calm terminal state — no action. A
+      // chain stuck on a CANCELLED (or still-loading) step IS actionable news.
       if (/complete/i.test(target.reason)) return null;
       return { disabled: true, reason: target.reason };
     }
@@ -1259,14 +662,9 @@ export function RosterTable({
     if (pa.kind === 'start') {
       return { childId: target.childId, enabled: pa.enabled, tooltip: pa.tooltip };
     }
-    // The runnable child exists but isn't a fresh Start right now. If it's
-    // already RUNNING/claimed (open-session, or an in-progress note), that's the
-    // normal in-flight state — the subtable's own step chip conveys it, so the
-    // parent row stays calm (no button).
+    // Already running/claimed → the normal in-flight state; stay calm.
     if (pa.kind === 'open-session') return null;
-    // task-48cd46a0e2da (A#1) — a BLOCKED next step resolves to 'reopen', not
-    // 'start'. That's actionable: tell the user to open the step and reopen it,
-    // rather than the generic (and wrong) "can't be started right now".
+    // task-48cd46a0e2da (A#1) — a BLOCKED next step resolves to 'reopen'.
     if (pa.kind === 'reopen') {
       return { disabled: true, reason: `${target.stepName} is blocked — open it to reopen/continue` };
     }
@@ -1276,16 +674,10 @@ export function RosterTable({
     return { disabled: true, reason };
   };
 
-  // task-d1164f534605 — "▶ Start chain" for a THIN-PARENT chain: a body-less
-  // parent container (the instantiateChain output — no v2 task-template block)
-  // whose CHILD rows ARE the steps. The def-based chainStartFor above needs a
-  // block the thin parent doesn't have, so a freshly-created chain otherwise
-  // shows '—' on its parent row (the "no way to start the task I just created"
-  // report). Here we target the FIRST non-terminal child (the chain head for a
-  // fresh chain; the next step as each completes) and run it through
-  // primaryActionFor for eligibility — identical shape + feedback to
-  // chainStartFor. Returns null for a non-container row (no children) so normal
-  // rows fall through to their own Start / '—'.
+  // task-d1164f534605 — "▶ Run all" for a THIN-PARENT chain: a body-less
+  // parent container whose CHILD rows ARE the steps. Target the FIRST
+  // non-terminal child and run it through primaryActionFor for eligibility —
+  // identical shape + feedback to chainStartFor.
   const childrenByParentId = useMemo(() => {
     const m = new Map<string, typeof allTasks>();
     for (const c of allTasks) {
@@ -1309,8 +701,6 @@ export function RosterTable({
       kids.map((c) => ({ id: c.id, rawStatus: c.rawStatus ?? null })),
     );
     if (target.childId === null) {
-      // A complete chain is the calm terminal state (no button); anything else
-      // (still loading, etc.) is actionable news worth a disabled button+reason.
       if (/complete/i.test(target.reason)) return null;
       return { disabled: true, reason: target.reason };
     }
@@ -1329,7 +719,6 @@ export function RosterTable({
     if (pa.kind === 'retry') {
       return { childId: target.childId, enabled: true, tooltip: 'retry the failed step' };
     }
-    // Already running/claimed → calm (the child row conveys it), no button.
     if (pa.kind === 'open-session') return null;
     if (pa.kind === 'reopen') {
       return { disabled: true, reason: 'the next step is blocked — open it to reopen/continue' };
@@ -1343,17 +732,16 @@ export function RosterTable({
   };
 
   // ── chained-job detection (task-b1fa5098da3e, R3) ─────────────────────────
-  // Candidate jobs: EVERY top-level row (no parentTaskId) — not just those
-  // with children. A row with children could be a chained task; a childless
-  // top-level row can't be chained but MAY still be a "fielded" single-task
-  // job (task-ce4b4c8ca955: its own server output_schema / legacy
-  // ```task-outputs block + result, with no chain at all) — useChainedRoster
+  // Candidate jobs: EVERY top-level row (no parentTaskId) — useChainedRoster
   // resolves each candidate's own body lazily to learn which of
   // plain/fielded/chained it is.
-  const candidateJobIds = useMemo(
-    () => partitionJobs(rows.map((t) => ({ id: t.id, parentTaskId: t.raw.parentTaskId ?? null }))).topLevelIds,
-    [rows],
-  );
+  const candidateJobIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const t of rows) {
+      if (!(t.raw.parentTaskId ?? null)) ids.push(t.id);
+    }
+    return ids;
+  }, [rows]);
   const chained = useChainedRoster({ jobIds: candidateJobIds });
   const resolutions = useMemo(() => {
     const map = new Map<string, ChainedJobResolution>();
@@ -1361,8 +749,8 @@ export function RosterTable({
     return map;
   }, [candidateJobIds, chained]);
 
-  // A chained job's children are folded into its subtable — don't ALSO give
-  // them their own top-level row (a non-chained parent's children still
+  // A chained job's children are folded into its aggregate row — don't ALSO
+  // give them their own top-level row (a non-chained parent's children still
   // render as plain rows, matching classic behavior).
   const hiddenChildIds = useMemo(() => {
     const set = new Set<string>();
@@ -1379,39 +767,26 @@ export function RosterTable({
     [rows, hiddenChildIds],
   );
 
-  // ── template-grouped sections (task-b8fa34a80a34) ─────────────────────────
-  // THE CHAINS SPLIT: a v2-chained job (resolution.status === 'chained') keeps
-  // its EXISTING parent+child subtable rollup in the flat table below — it is
-  // deliberately NOT folded into the new grouped-section treatment. Everything
-  // grouped here is a SINGLE fielded-task template INSTANCE (a childless task
-  // that declares input data-keys and/or an output schema). This replaces the
-  // old per-task 'fielded' subtable, which is removed.
-  //
-  // Grouping is forward-compatible (rosterGroups.mjs): by `templateId` when the
-  // server ships it, else by (templateName || title, projectId) — so multiple
-  // instances that share a title group into one section NOW. Field metadata is
-  // sourced defensively: the resolved 'fielded' detail's output defs (today) OR
-  // the raw list/detail schema (when the server carries it on the row).
+  // ── template-grouped rows (task-b8fa34a80a34) ──────────────────────────────
+  // A SINGLE fielded-task template instance (a childless task that declares
+  // input data-keys and/or an output schema) groups under its template; chains
+  // keep their own aggregate row (never grouped).
   const groupableInputs = useMemo<RosterGroupInput[]>(() => {
     const out: RosterGroupInput[] = [];
     for (const t of visibleRows) {
       const res = resolutions.get(t.id);
-      // Chains stay in the flat table (their rollup owns them) — never grouped.
       if (res && res.status === 'chained') continue;
       const fieldedOutputs =
         res && res.status === 'fielded' ? res.defs[0]?.outputs ?? [] : [];
       const rawOutputs = t.raw.outputSchema ?? [];
       const outputSchema = fieldedOutputs.length > 0 ? fieldedOutputs : rawOutputs;
       const dataKeys = t.raw.dataKeys ?? [];
-      // Not field-bearing → leave it in the flat table (a plain / "other" row).
+      // Not field-bearing → a plain row.
       if (outputSchema.length === 0 && dataKeys.length === 0) continue;
       out.push({
         id: t.id,
         title: t.title,
         projectId: t.projectId,
-        // Forward-compatible: templateId upgrades grouping to exact when present;
-        // templateName isn't surfaced on the row yet, so grouping falls back to
-        // the shared title (rosterGroups.groupNameFor).
         templateId: t.templateId ?? null,
         templateName: null,
         dataKeys,
@@ -1428,7 +803,7 @@ export function RosterTable({
     [groupableInputs],
   );
 
-  // Grouped instances are lifted OUT of the flat table (no double render).
+  // Grouped instances are lifted OUT of the plain rows (no double render).
   const groupedTaskIds = useMemo(() => {
     const set = new Set<string>();
     for (const g of templateGroups) for (const r of g.rows) set.add(r.taskId);
@@ -1440,25 +815,19 @@ export function RosterTable({
     [visibleRows, groupedTaskIds],
   );
 
-  // task-ecabeafa41e1 — Level-1 group rows no longer render field values inline
-  // (that table moved into the Level-2 TaskMatrix, which resolves its own input
-  // data-bag + output result values on demand). So the roster no longer
-  // pre-fetches per-cell values here; only the group SUMMARY (counts/assignees)
-  // is computed, from metadata already on the rows.
+  const rowsById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+
   const onNewRun = (_group: RosterGroup) => {
-    // task-b8fa34a80a34 — open the canonical New-from-Template flow. Pre-picking
-    // THIS template isn't wired yet (the composer's template picker doesn't
-    // accept an initial template id/name); until it does, this opens the picker.
+    // task-b8fa34a80a34 — open the canonical New-from-Template flow.
+    // Pre-picking THIS template isn't wired yet; this opens the picker.
     window.dispatchEvent(
       new CustomEvent('fm:openTask', { detail: { mode: 'create', initialKind: 'template' } }),
     );
     window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
   };
 
-  // task-ecabeafa41e1 — LEVEL 1 group summaries. For each template group,
-  // aggregate its runs' status buckets + distinct assignees (assignee =
-  // assigned_to, falling back to the current claimer). Value-free: only the
-  // NON-PHI status + assignee-principal cross into summarizeGroupRows.
+  // task-ecabeafa41e1 — group summaries: per-bucket status counts + distinct
+  // assignees (assignee = assigned_to, falling back to the current claimer).
   const groupSummaries = useMemo(() => {
     const m = new Map<string, GroupSummary>();
     for (const g of templateGroups) {
@@ -1474,15 +843,26 @@ export function RosterTable({
     return m;
   }, [templateGroups, allTasksById]);
 
+  // A group's Last Run = the most recent activity across its runs.
+  const groupLastRun = (g: RosterGroup): { label: string; detail: string } => {
+    let best: NewHomeTask | null = null;
+    for (const r of g.rows) {
+      const t = rowsById.get(r.taskId);
+      if (!t) continue;
+      if (!best || (t.lastActionAt ?? 0) > (best.lastActionAt ?? 0)) best = t;
+    }
+    return best
+      ? { label: best.lastAction, detail: best.lastActionDetail }
+      : { label: '—', detail: '' };
+  };
+
   // task-ecabeafa41e1 — "View →" on a group opens the Level-2 matrix over ALL
-  // the group's runs (multi-run). A simple-template run is childless, so the
-  // matrix treats each run as a single implicit step (see TaskMatrix).
+  // the group's runs (multi-run).
   const [matrixGroupKey, setMatrixGroupKey] = useState<string | null>(null);
   const onViewGroup = (group: RosterGroup) => setMatrixGroupKey(group.key);
 
-  // task-ecabeafa41e1 — "▶ Run all": start every runnable run in the group.
-  // For a simple template each run IS the unit of work, so we start each
-  // non-terminal run through the shared start wrapper (optimistic + de-duped).
+  // task-ecabeafa41e1 — "▶ Run all": start every runnable run in the group
+  // through the shared start wrapper (optimistic + de-duped).
   const runAllGroup = (group: RosterGroup) => {
     for (const r of group.rows) {
       const bucket = r.status ?? '';
@@ -1491,13 +871,58 @@ export function RosterTable({
       void startAction.run(r.taskId, { kind: 'start', run: () => onStart(r.taskId) });
     }
   };
-  // A group's Run-all shows pending while ANY of its runs' starts are in flight.
   const runAllPendingFor = (group: RosterGroup): boolean =>
     group.rows.some((r) => startAction.pendingFor(r.taskId));
-  // When every task is grouped (no flat rows) AND there ARE groups, hide the
-  // flat table entirely; otherwise render it so plain/"other" + chained rows —
-  // and the empty state — show exactly as today (non-regression).
-  const showFlatTable = flatRows.length > 0 || templateGroups.length === 0;
+
+  // ── chained-row aggregates ─────────────────────────────────────────────────
+  // A chain's STEPS, as ids: the v2 block's children when resolved, else the
+  // container's child rows. Order matches the chain.
+  const chainChildIds = (t: NewHomeTask): string[] => {
+    const res = resolutions.get(t.id);
+    if (res && res.status === 'chained') {
+      const ids: string[] = [];
+      for (const def of res.defs) {
+        // A conditionally-skipped step isn't part of this job's work — leave
+        // it out of the Runs count and the status breakdown.
+        if (taskDefStatus(def, res.valuesByRef) === 'skip') continue;
+        const cid = res.childIdByDefId[def.id];
+        if (cid) ids.push(cid);
+      }
+      return ids;
+    }
+    return (childrenByParentId.get(t.id) ?? []).map((c) => c.id);
+  };
+  const chainCounts = (childIds: string[]): Record<StatusBucket, number> => {
+    const counts: Record<StatusBucket, number> = {
+      done: 0,
+      progress: 0,
+      queued: 0,
+      needs: 0,
+      failed: 0,
+    };
+    for (const cid of childIds) {
+      const child = allTasksById.get(cid);
+      counts[statusBucket(child?.rawStatus ?? child?.status)] += 1;
+    }
+    return counts;
+  };
+
+  // Auto-continue prefs (localStorage-backed) + the manual-retry clear nonce
+  // the headless ChainAutomation watches (task-6fc9e503623e).
+  const [autoPrefs, setAutoPrefs] = useState<Record<string, boolean>>({});
+  const autoOnFor = (jobId: string): boolean => autoPrefs[jobId] ?? isAutoContinueOn(jobId);
+  const [clearNonces, setClearNonces] = useState<Record<string, number>>({});
+  const bumpClearNonce = (jobId: string) =>
+    setClearNonces((prev) => ({ ...prev, [jobId]: (prev[jobId] ?? 0) + 1 }));
+  const toggleAuto = (jobId: string) => {
+    const next = !autoOnFor(jobId);
+    setAutoContinue(jobId, next);
+    setAutoPrefs((prev) => ({ ...prev, [jobId]: next }));
+  };
+  // Per-chain auto-start failure surfaced on the row (from ChainAutomation).
+  const [chainErrors, setChainErrors] = useState<Record<string, string | null>>({});
+  const onChainErrorChange = (jobId: string, message: string | null) =>
+    setChainErrors((prev) => (prev[jobId] === message ? prev : { ...prev, [jobId]: message }));
 
   const hasAnyTasks = tasks.length > 0;
   const isFiltered = filter !== 'all' || !!search.trim();
@@ -1509,15 +934,8 @@ export function RosterTable({
   };
 
   // task-1af4f59428eb (Item 4) — j/k + arrow-key row navigation, SCOPED to
-  // this table: the handler lives on <tbody>'s onKeyDown (React's synthetic
-  // bubble phase), fires only while focus is already inside the roster (a
-  // row has tabIndex=0 and DOM focus), and calls stopPropagation so the key
-  // never reaches src/useKeyboard.ts's window-level listener — the SAME
-  // scoping pattern BrowserSurface uses for its Chromium shortcuts
-  // (`.browser-pane`'s onKeyDown, never a document/window listener). This is
-  // additive: it only handles j/k/ArrowUp/ArrowDown/Enter while a <tr> has
-  // focus; clicking a row (onOpenTask) and the existing per-row Enter handler
-  // are untouched, so nothing that worked today changes.
+  // this table: fires only while a row has DOM focus, stopPropagation so the
+  // key never reaches src/useKeyboard.ts's window-level listener.
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
 
   const focusRow = (id: string) => {
@@ -1525,9 +943,6 @@ export function RosterTable({
   };
 
   const onBodyKeyDown = (e: ReactKeyboardEvent<HTMLTableSectionElement>) => {
-    // Only handle when a ROW itself has focus (not e.g. the search input or
-    // a row's Answer/Retry button) — mirrors BrowserSurface's "only fires
-    // when focus is inside the surface" scoping, one level tighter.
     const target = e.target as HTMLElement;
     if (!target.dataset || target.dataset.rosterRow == null) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return; // don't shadow any chord
@@ -1552,20 +967,32 @@ export function RosterTable({
       return;
     }
     if (e.key === 'Enter') {
-      // Already handled per-row below; stop it here too so a future refactor
-      // that removes the per-row handler doesn't silently lose Enter-to-open.
       e.stopPropagation();
       onOpenTask(currentId);
     }
   };
 
+  // Outcome one-liners for finished PLAIN rows (the old OutcomesPanel, folded
+  // into the title cell). Only plain childless rows carry one — group/chain
+  // outcomes live in their Level-2 matrix.
+  const finishedPlainIds = useMemo(
+    () =>
+      flatRows
+        .filter(
+          (t) =>
+            (t.status === 'done' || t.status === 'failed') && !childrenByParentId.has(t.id),
+        )
+        .map((t) => t.id),
+    [flatRows, childrenByParentId],
+  );
+  const outcomeDetails = useOutcomeDetails(finishedPlainIds);
+  const finishedPlainIdSet = useMemo(() => new Set(finishedPlainIds), [finishedPlainIds]);
+
   // task-ecabeafa41e1 — Level-2 matrix takes over the roster surface when a
   // "View →" is clicked; Back (onClose) returns to the list. Two entry points:
-  //   • matrixParentId — a single CHAIN parent from a flat "View →" (runs=[parent],
-  //     columns grouped by its step-children).
-  //   • matrixGroupKey — a template GROUP from a Level-1 "View →" (runs = all the
-  //     group's run instances, which are childless for a simple template, so the
-  //     matrix renders each run as one implicit step: its own inputs + outputs).
+  //   • matrixParentId — a single CHAIN parent (runs=[parent], columns grouped
+  //     by its step-children).
+  //   • matrixGroupKey — a template GROUP (runs = all the group's instances).
   const matrixView = (() => {
     if (matrixParentId) {
       const parent = allTasksById.get(matrixParentId);
@@ -1587,15 +1014,10 @@ export function RosterTable({
         .map((r) => allTasksById.get(r.taskId))
         .filter((t): t is Task => !!t);
       if (runs.length === 0) return null;
-      // task-57e1470fad6f — the group's template id, when the server emits it on
-      // the row (templateId). Shared across a template group's runs; take the
-      // first that carries one. Absent → the matrix hides "Edit template".
       const templateId = runs.find((r) => r.templateId)?.templateId ?? null;
       return {
         title: group.name,
         runs,
-        // Simple-template runs are childless; the matrix falls back to the run
-        // itself as the single step when childrenOf() is empty.
         childrenOf: (pid: string) => childrenByParentId.get(pid) ?? [],
         templateId,
         close: () => setMatrixGroupKey(null),
@@ -1604,9 +1026,38 @@ export function RosterTable({
     return null;
   })();
 
+  // The headless chain automation must stay mounted even while the matrix
+  // covers the roster (a chain should keep advancing while you inspect it).
+  const chainAutomations = (
+    <>
+      {flatRows.map((t) => {
+        const res = resolutions.get(t.id);
+        if (!res || res.status !== 'chained') return null;
+        return (
+          <ChainAutomation
+            key={`auto-${t.id}`}
+            jobId={t.id}
+            // task-6a14190fb2f7 — t.who is never purely 'human' for a row
+            // whose ball a human currently holds (deriveWho routes any open
+            // pending_question to 'human'), so excluding 'human' is exactly
+            // "don't force-advance a chain the human is actively driving".
+            agentRun={t.who !== 'human'}
+            autoOn={autoOnFor(t.id)}
+            clearNonce={clearNonces[t.id] ?? 0}
+            resolution={res}
+            allTasksById={allTasksById}
+            onStartChild={onStart}
+            onErrorChange={onChainErrorChange}
+          />
+        );
+      })}
+    </>
+  );
+
   if (matrixView) {
     return (
       <div className="nh-roster">
+        {chainAutomations}
         <TaskMatrix
           chainTitle={matrixView.title}
           runs={matrixView.runs}
@@ -1620,7 +1071,7 @@ export function RosterTable({
           // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Feed the SAME useStartAction
           // wrapper's per-child pending/error into the matrix so its ▶ Run /
           // ▶ Start step show an instant "Starting…" (disabled) on click and a
-          // visible failure — the feedback the matrix was missing.
+          // visible failure.
           pendingFor={startAction.pendingFor}
           errorFor={startAction.errorFor}
         />
@@ -1628,24 +1079,13 @@ export function RosterTable({
     );
   }
 
+  const nothingToShow = flatRows.length === 0 && templateGroups.length === 0;
+
   return (
     <div className="nh-roster">
-      <div className="nh-roster__toolbar">
-        <div className="nh-roster__pills" role="tablist" aria-label="Filter tasks by status">
-          {FILTER_PILLS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              role="tab"
-              aria-selected={filter === p.id}
-              className={`nh-roster__pill-btn${filter === p.id ? ' nh-roster__pill-btn--active' : ''}`}
-              onClick={() => onFilter?.(p.id)}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        {onSearch && (
+      {chainAutomations}
+      {onSearch && (
+        <div className="nh-roster__toolbar">
           <div className="nh-roster__search">
             <input
               type="search"
@@ -1669,33 +1109,18 @@ export function RosterTable({
               </span>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Template-grouped sections first (task-b8fa34a80a34): one section per
-          template, then the flat table (chained rollups + plain/"other" rows)
-          below. */}
-      {templateGroups.map((g) => (
-        <TemplateSection
-          key={g.key}
-          group={g}
-          summary={groupSummaries.get(g.key) ?? summarizeGroupRows([])}
-          onView={onViewGroup}
-          onRunAll={runAllGroup}
-          onNewRun={onNewRun}
-          runAllPending={runAllPendingFor(g)}
-        />
-      ))}
-
-      {showFlatTable && (
       <div className="nh-roster__table-wrap">
         <table className="nh-roster__table">
           <thead>
             <tr>
               <th>Title</th>
               <th>Status</th>
-              <th>Last Action</th>
+              <th>Last Run</th>
               <th>Who</th>
+              <th className="nh-roster__th-runs">Runs</th>
               <th className="nh-roster__th-action" />
             </tr>
           </thead>
@@ -1718,7 +1143,7 @@ export function RosterTable({
                 </td>
               </tr>
             )}
-            {!loading && flatRows.length === 0 && templateGroups.length === 0 && isFiltered && (
+            {!loading && nothingToShow && isFiltered && (
               <tr>
                 <td colSpan={BASE_COLUMN_COUNT} className="nh-roster__empty">
                   No tasks match {search.trim() ? <>“{search.trim()}”</> : 'this filter'}.{' '}
@@ -1728,28 +1153,104 @@ export function RosterTable({
                 </td>
               </tr>
             )}
+
+            {/* Template-group rows first, then chained + plain rows — all the
+                SAME columns. */}
+            {templateGroups.map((g) => {
+              const summary = groupSummaries.get(g.key) ?? summarizeGroupRows([]);
+              const { runCount, statusCounts, assignees } = summary;
+              const last = groupLastRun(g);
+              const hasRunnable =
+                statusCounts.queued + statusCounts.needs + statusCounts.failed + statusCounts.progress > 0;
+              const runAllPending = runAllPendingFor(g);
+              const assigneeTitle = assignees.length > 0 ? assignees.join(', ') : 'Unassigned';
+              return (
+                <tr
+                  key={`group-${g.key}`}
+                  className="nh-roster__row--group"
+                  onClick={() => onViewGroup(g)}
+                >
+                  <td className="nh-roster__title-cell">
+                    <div className="nh-roster__title nh-roster__title--group" title="A template — each run is one instance">
+                      {g.name}
+                    </div>
+                  </td>
+                  <td>
+                    <StatusBreakdown counts={statusCounts} />
+                  </td>
+                  <td className="nh-roster__last-action" title={last.detail}>
+                    {last.label}
+                  </td>
+                  <td className="nh-roster__who nh-roster__who--group" title={assigneeTitle}>
+                    {assignees.length === 0
+                      ? 'Unassigned'
+                      : assignees.length === 1
+                        ? assignees[0]
+                        : `${assignees.length} people`}
+                  </td>
+                  <td className="nh-roster__runs">{runCount}</td>
+                  <td className="nh-roster__action-cell">
+                    <span className="nh-roster__action-wrap">
+                      <button
+                        type="button"
+                        className="nh-roster__action nh-roster__action--view"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewGroup(g);
+                        }}
+                        title="View each run's status, inputs and outputs"
+                      >
+                        View →
+                      </button>
+                      <ActionsMenu
+                        label={`Actions for ${g.name}`}
+                        items={[
+                          { label: 'View runs →', onClick: () => onViewGroup(g) },
+                          ...(hasRunnable
+                            ? [
+                                {
+                                  label: runAllPending ? 'Starting…' : '▶ Run all',
+                                  onClick: () => runAllGroup(g),
+                                  disabled: runAllPending,
+                                  title: 'Start every runnable run in this group',
+                                },
+                              ]
+                            : []),
+                          { label: '+ New run', onClick: () => onNewRun(g) },
+                        ]}
+                      />
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+
             {flatRows.map((t) => {
               const resolution = resolutions.get(t.id);
-              // task-b8fa34a80a34 — CHAINS SPLIT: only a v2-chained job renders
-              // an inline subtable rollup here. The old 'fielded' single-task
-              // subtable is REMOVED — those instances are now lifted into the
-              // template-grouped sections above (groupableInputs), so they never
-              // reach the flat table (groupedTaskIds filters them out).
-              const subtableRes =
+              const chainedRes =
                 resolution && resolution.status === 'chained' ? resolution : null;
-              const chainedRes = subtableRes;
-              const isChained = !!subtableRes;
-              const groups = subtableRes ? pipelineColumns(subtableRes.defs) : [];
-              const meta = subtableRes ? META_PILL[metaStatus(subtableRes.defs, subtableRes.valuesByRef)] : null;
+              const childIds = chainChildIds(t);
+              const isChain = childIds.length > 0;
               const rowTint =
                 t.status === 'needs'
                   ? 'nh-roster__row--needs'
                   : t.status === 'failed'
                     ? 'nh-roster__row--failed'
                     : '';
-              return (
-                <Fragment key={t.id}>
+              const outcome = finishedPlainIdSet.has(t.id)
+                ? summarizeOutcome(t, outcomeDetails.get(t.id))
+                : '';
+
+              // ── chained / container row: aggregate status + View/Run-all ──
+              if (isChain) {
+                const counts = chainCounts(childIds);
+                const runAll = chainedRes ? chainStartFor(chainedRes) : plainChainStartFor(t.id);
+                const runAllReason = runAll && 'disabled' in runAll ? runAll.reason : undefined;
+                const pending = startAction.pendingFor(t.id);
+                const rowError = startAction.errorFor(t.id) ?? chainErrors[t.id] ?? null;
+                return (
                   <tr
+                    key={t.id}
                     ref={(el) => {
                       if (el) rowRefs.current.set(t.id, el);
                       else rowRefs.current.delete(t.id);
@@ -1757,9 +1258,14 @@ export function RosterTable({
                     data-roster-row={t.id}
                     className={rowTint}
                     tabIndex={0}
-                    onClick={() => onOpenTask(t.id)}
+                    onClick={() => setMatrixParentId(t.id)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') onOpenTask(t.id);
+                      if (e.key === 'Enter') {
+                        // stopPropagation: the tbody-level Enter handler opens
+                        // the task DETAIL — a chain row's Enter opens its matrix.
+                        e.stopPropagation();
+                        setMatrixParentId(t.id);
+                      }
                     }}
                   >
                     <td className="nh-roster__title-cell">
@@ -1770,17 +1276,9 @@ export function RosterTable({
                     </td>
                     <td>
                       {t.live && (
-                        <span
-                          className="nh-roster__live-dot"
-                          aria-hidden="true"
-                          title={liveTooltip(t)}
-                        />
+                        <span className="nh-roster__live-dot" aria-hidden="true" title={liveTooltip(t)} />
                       )}
-                      <span
-                        className={`nh-roster__pill nh-roster__pill--${meta ? meta.cls : t.status}`}
-                      >
-                        {meta ? meta.label : STATUS_LABEL[t.status]}
-                      </span>
+                      <StatusBreakdown counts={counts} />
                     </td>
                     <td className="nh-roster__last-action" title={t.lastActionDetail}>
                       {t.lastAction}
@@ -1788,7 +1286,124 @@ export function RosterTable({
                     <td className="nh-roster__who" title={t.who}>
                       {WHO_GLYPH[t.who]}
                     </td>
+                    <td className="nh-roster__runs">{childIds.length}</td>
                     <td className="nh-roster__action-cell">
+                      <span className="nh-roster__action-wrap">
+                        <button
+                          type="button"
+                          className="nh-roster__action nh-roster__action--view"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMatrixParentId(t.id);
+                          }}
+                          title="View each step's status, inputs and outputs"
+                        >
+                          View →
+                        </button>
+                        <ActionsMenu
+                          label={`Actions for ${t.title}`}
+                          items={[
+                            { label: 'View steps →', onClick: () => setMatrixParentId(t.id) },
+                            ...(runAll
+                              ? [
+                                  {
+                                    label: pending ? 'Starting…' : '▶ Run all',
+                                    onClick: () => {
+                                      if ('childId' in runAll) {
+                                        bumpClearNonce(t.id);
+                                        // Key pending/error on the PARENT row id,
+                                        // but launch the CHILD.
+                                        void startAction.run(t.id, {
+                                          kind: 'start',
+                                          run: () => onStart(runAll.childId),
+                                        });
+                                      }
+                                    },
+                                    disabled:
+                                      'disabled' in runAll ||
+                                      ('enabled' in runAll && !runAll.enabled) ||
+                                      pending,
+                                    title:
+                                      'disabled' in runAll
+                                        ? runAll.reason
+                                        : runAll.tooltip ?? 'Run every runnable step',
+                                  },
+                                ]
+                              : []),
+                            ...(chainedRes
+                              ? [
+                                  {
+                                    label: 'Auto-continue',
+                                    checkbox: true as const,
+                                    checked: autoOnFor(t.id),
+                                    onToggle: () => toggleAuto(t.id),
+                                    title:
+                                      'Automatically start the next step when the previous one finishes',
+                                  },
+                                ]
+                              : []),
+                            { label: '↗ Open task', onClick: () => onOpenTask(t.id) },
+                          ]}
+                        />
+                        {(rowError || runAllReason) && (
+                          <span
+                            className="nh-roster__action-error"
+                            role="alert"
+                            title={rowError ?? runAllReason}
+                          >
+                            {`⚠ ${rowError ?? runAllReason}`}
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              }
+
+              // ── plain task row ─────────────────────────────────────────────
+              return (
+                <tr
+                  key={t.id}
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(t.id, el);
+                    else rowRefs.current.delete(t.id);
+                  }}
+                  data-roster-row={t.id}
+                  className={rowTint}
+                  tabIndex={0}
+                  onClick={() => onOpenTask(t.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') onOpenTask(t.id);
+                  }}
+                >
+                  <td className="nh-roster__title-cell">
+                    <div className="nh-roster__title">{t.title}</div>
+                    {t.risk && (t.status === 'needs' || t.status === 'failed') && (
+                      <div className="nh-roster__risk">{t.risk}</div>
+                    )}
+                    {outcome && (
+                      <div className="nh-roster__outcome" title={outcome}>
+                        {outcome}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {t.live && (
+                      <span className="nh-roster__live-dot" aria-hidden="true" title={liveTooltip(t)} />
+                    )}
+                    <span className={`nh-roster__pill nh-roster__pill--${t.status}`}>
+                      {STATUS_LABEL[t.status]}
+                    </span>
+                  </td>
+                  <td className="nh-roster__last-action" title={t.lastActionDetail}>
+                    {t.lastAction}
+                  </td>
+                  <td className="nh-roster__who" title={t.who}>
+                    {WHO_GLYPH[t.who]}
+                  </td>
+                  <td className="nh-roster__runs">1</td>
+                  <td className="nh-roster__action-cell">
+                    <span className="nh-roster__action-wrap">
                       <RowAction
                         task={t}
                         onOpenTask={onOpenTask}
@@ -1801,69 +1416,27 @@ export function RosterTable({
                           void startAction.run(id, { kind: 'start', run: () => onStart(id) });
                         }}
                         startEligible={startActionFor(t)}
-                        chainStart={chainedRes ? chainStartFor(chainedRes) : plainChainStartFor(t.id)}
-                        viewable={!chainedRes && childrenByParentId.has(t.id)}
-                        // task-4f1e8f45bf0e — a DONE, non-chain, CHILDLESS
-                        // single task whose own body resolved to 'fielded' (a
-                        // real output schema/result, not just a plain task with
-                        // nothing to show) gets "View →" here. Most fielded
-                        // single tasks are lifted into the template-grouped
-                        // sections above (groupableInputs) and never reach this
-                        // flat row at all; this covers the ones that AREN'T
-                        // grouped — e.g. no dataKeys/outputSchema on the list row
-                        // yet, so groupableInputs skipped them, but the lazy
-                        // per-row resolution (useChainedRoster) still found a
-                        // fielded result once it fetched the detail.
+                        // task-4f1e8f45bf0e — a DONE, non-chain, CHILDLESS single
+                        // task whose lazy resolution found a fielded result gets
+                        // "View →" into the detail drawer's read view.
                         viewableDetail={
-                          !chainedRes &&
-                          t.status === 'done' &&
-                          !childrenByParentId.has(t.id) &&
-                          resolution?.status === 'fielded'
+                          t.status === 'done' && resolution?.status === 'fielded'
                         }
-                        onViewMatrix={setMatrixParentId}
-                        onChainStart={(childId) => {
-                          // Key the pending/error on the PARENT row id (t.id),
-                          // but launch the CHILD — so the parent row shows the
-                          // pending/error for its own ▶ Start chain click.
-                          void startAction.run(t.id, { kind: 'start', run: () => onStart(childId) });
-                        }}
                         pending={startAction.pendingFor(t.id)}
                         error={startAction.errorFor(t.id)}
                       />
-                    </td>
-                  </tr>
-                  {isChained && subtableRes && (
-                    <tr className="nh-roster__subrow">
-                      <td colSpan={BASE_COLUMN_COUNT} className="nh-roster__subrow-cell">
-                        <ChainedJobSubtable
-                          jobId={t.id}
-                          // task-6a14190fb2f7 — "agent-run chain" gate for
-                          // auto-continue's default-ON: t.who is never purely
-                          // 'human' for a row whose ball a human currently
-                          // holds (deriveWho routes any open pending_question
-                          // to 'human' — see useNewHomeData.ts), so excluding
-                          // 'human' here is exactly "don't force-advance a
-                          // chain the human is actively driving/waiting on".
-                          agentRun={t.who !== 'human'}
-                          groups={groups}
-                          resolution={subtableRes}
-                          onOpenTask={onOpenTask}
-                          onSaveInput={(childId, key, value) => {
-                            void chained.saveInput(childId, key, value);
-                          }}
-                          allTasksById={allTasksById}
-                          onStartChild={onStart}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                      <ActionsMenu
+                        label={`Actions for ${t.title}`}
+                        items={[{ label: '↗ Open task', onClick: () => onOpenTask(t.id) }]}
+                      />
+                    </span>
+                  </td>
+                </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      )}
     </div>
   );
 }

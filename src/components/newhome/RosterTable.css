@@ -12,7 +12,7 @@
 .nh-roster__toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-3) 0;
 }
@@ -62,36 +62,8 @@
   color: var(--nh-failed);
 }
 
-.nh-roster__pills {
-  display: inline-flex;
-  gap: 4px;
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: var(--r-md);
-  padding: 4px;
-}
-
-.nh-roster__pill-btn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--muted-on-panel);
-  font: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  padding: 6px 12px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background var(--motion-hover), color var(--motion-hover);
-}
-.nh-roster__pill-btn:hover {
-  background: var(--bg-3);
-  color: var(--text-on-panel);
-}
-.nh-roster__pill-btn--active {
-  background: var(--text-on-panel);
-  color: var(--bg-1);
-}
+/* The status-filter pill bar is gone (the HeroStats cards ARE the filter);
+   the toolbar now only carries the search box, right-aligned. */
 
 .nh-roster__table-wrap {
   overflow-x: auto;
@@ -383,394 +355,43 @@
   color: var(--nh-needs);
 }
 
-/* ── Chained-job subtable row (task-b1fa5098da3e, R3) ─────────────────────
-   A chained task's summary row (Title/Status/Last Action/Who/Action, same
-   fixed columns every row gets) is immediately followed by this subrow: a
-   nested subtable with grouped per-task-def IN/OUT columns, built from that
-   job's OWN v2 task-template block. Not a clickable row itself — clicks are
-   handled by the subtable's own cells (open child) / the summary row above
-   (open the job/parent). */
-.nh-roster__subrow {
-  cursor: default;
-}
-.nh-roster__subrow:hover {
-  background: transparent;
-}
-.nh-roster__subrow-cell {
-  padding: 0 var(--sp-3) var(--sp-3) var(--sp-3) !important;
-  border-bottom: 1px solid var(--border-1);
-}
-.nh-pipe__subtable {
-  width: auto;
-  border: 1px solid var(--border-1);
-  border-radius: var(--r-sm);
-  overflow: hidden;
-}
 
-/* ── Pipeline table (task-a4397184def4, T5, reworked task-b1fa5098da3e) ───
-   Grouped, per-task-def columns aggregating INPUT (editable) + OUTPUT
-   (read-only) fields, derived from a chained job's OWN body — never a
-   project pref. Only rendered for rows that resolve as chained; every other
-   row renders the classic fixed columns unchanged. */
-.nh-pipe__table th {
-  vertical-align: bottom;
-}
-/* Grouped header: one cell spanning a task-def's fields, boxed so the grouping
-   reads at a glance. */
-.nh-pipe__group-th {
-  text-align: center !important;
-  border-left: 1px solid var(--border-1);
-  border-bottom: 1px solid var(--border-1);
-  color: var(--text-on-panel) !important;
-  background: var(--bg-2);
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.nh-pipe__group-name {
-  margin-right: 6px;
-}
-/* task-4045bcee23cb (U3a #2) — per-step status chip on a subtable GROUP
-   HEADER (done / running / queued / n-a), plus the ▶ that appears only on the
-   one runnable step. */
-.nh-pipe__step-chip-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  vertical-align: middle;
-}
-.nh-pipe__step-chip {
-  display: inline-block;
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  padding: 1px 6px;
-  border-radius: 999px;
-}
-.nh-pipe__step-chip--done { background: var(--nh-done-soft); color: var(--nh-done); }
-.nh-pipe__step-chip--active { background: var(--nh-progress-soft); color: var(--nh-progress); }
-.nh-pipe__step-chip--pending { background: var(--nh-queued-soft); color: var(--nh-queued); }
-/* task-f26e7745eda6 — a server-CANCELLED child: neutral grey, VISUALLY DISTINCT
-   from n/a (skip) — cancelled is a dead-but-real step (reopen to continue), skip
-   is "not needed for this job". failed/blocked: the failed palette (retry). */
-.nh-pipe__step-chip--cancelled {
-  background: var(--bg-2);
-  color: var(--muted-on-panel);
-  text-decoration: line-through;
-}
-.nh-pipe__step-chip--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
+/* ── Unified-roster additions (2026-07-05 redesign) ───────────────────────
+   One table for template groups, chained rows, and plain tasks: aggregate
+   status chips, the Runs column, the per-row ⋮ actions menu, and the inline
+   outcome one-liner (the old OutcomesPanel, folded in). */
 
-/* task-6a14190fb2f7 — the small bar above a chained job's subtable: the
-   auto-continue toggle while the chain is running, or a quiet terminal
-   celebration once metaStatus flips to 'done' (the server's own parent
-   resolution — this is a read of that state, never a second write). */
-.nh-pipe__chain-bar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 2px 4px 4px;
-  font-size: var(--fs-2xs);
-}
-.nh-pipe__auto-continue {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--muted-on-panel);
-  cursor: pointer;
-  user-select: none;
-}
-.nh-pipe__auto-continue input {
-  cursor: pointer;
-}
-.nh-pipe__chain-celebration {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--nh-done);
-  font-weight: 600;
-}
-.nh-pipe__chain-celebration-badge {
-  font-weight: 400;
-  font-style: italic;
-  opacity: 0.75;
-}
-.nh-pipe__step-chip--skip { background: var(--bg-2); color: var(--muted-on-panel); }
-.nh-pipe__step-start {
-  border: none;
-  background: var(--nh-progress-soft);
-  color: var(--nh-progress);
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 999px;
-  cursor: pointer;
-}
-.nh-pipe__step-start:hover:not(:disabled) {
-  filter: brightness(0.95);
-}
-.nh-pipe__step-start:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-/* task-c141c7765aa4 (#3) / task-3f0c6a6abe41 (#4) — "running headless" watch
-   affordance. The pill ALREADY reads "running" for an active step; the live
-   signal is just a pulsing dot INSIDE the pill (never a second "running"
-   word — that produced the duplicated "RUNNING ● RUNNING"). */
-.nh-pipe__step-chip--live {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.nh-pipe__step-live-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: nh-pipe-pulse 1.6s ease-in-out infinite;
-}
-@keyframes nh-pipe-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-/* task-c141c7765aa4 (#1) / task-3f0c6a6abe41 (#1) — visible failure when
-   auto-continue's launch didn't spawn a session. Replaces silence with the
-   REAL reason inline ("no open Breeze window …"); the claim was already
-   released so the ▶ next to it is live for a manual retry. */
-.nh-pipe__step-error {
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  color: var(--nh-failed);
-  cursor: help;
-}
-.nh-pipe__field-th {
-  border-left: 1px solid var(--border-1);
-  white-space: nowrap;
-}
-.nh-pipe__field-label {
-  margin-right: 6px;
-}
-/* IN / OUT / REQ chips on the field-header row. */
-.nh-pipe__io {
-  display: inline-block;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 1px 4px;
-  border-radius: var(--r-sm);
-  vertical-align: middle;
-}
-.nh-pipe__io--in {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.nh-pipe__io--out {
-  color: var(--nh-done);
-  background: var(--nh-done-soft);
-}
-.nh-pipe__req {
-  display: inline-block;
-  margin-left: 4px;
-  font-size: 8px;
-  font-weight: 700;
-  color: var(--nh-needs);
-}
-
-/* Body cells. */
-.nh-pipe__cell {
-  border-left: 1px solid var(--border-1);
-  white-space: nowrap;
-  min-width: 88px;
-}
-.nh-pipe__cell--out .nh-pipe__val {
-  color: var(--text-on-panel);
-}
-.nh-pipe__empty {
-  color: var(--muted-on-panel);
-}
-.nh-pipe__cell--missing {
-  background: color-mix(in srgb, var(--nh-needs-soft) 40%, transparent);
-}
-/* task-4045bcee23cb (U3a polish b) — a required-but-unsubmitted output reads
-   as a dashed underline (hover for "required — awaiting agent") rather than a
-   bare "—*", so the affordance is discoverable without relying on a
-   superscript asterisk. */
-.nh-pipe__empty--missing {
-  text-decoration: underline dashed;
-  text-decoration-color: var(--nh-needs);
-  text-underline-offset: 2px;
-  cursor: help;
-}
-/* Conditional-skip: a whole task-def group hatched "n/a" — visually distinct
-   from a merely-empty (pending) cell. */
-.nh-pipe__cell--na {
-  color: var(--muted-on-panel);
-  cursor: default;
-  background-image: repeating-linear-gradient(
-    45deg,
-    transparent,
-    transparent 5px,
-    color-mix(in srgb, var(--border-2) 60%, transparent) 5px,
-    color-mix(in srgb, var(--border-2) 60%, transparent) 6px
-  );
-}
-.nh-pipe__na {
-  font-size: var(--fs-2xs);
-  font-style: italic;
-  opacity: 0.7;
-}
-
-/* Inline INPUT editor — the approved-prototype dashed-input pattern. */
-.nh-pipe__input {
-  appearance: none;
-  width: 100%;
-  min-width: 64px;
-  max-width: 160px;
-  background: transparent;
-  border: none;
-  border-bottom: 1px dashed var(--border-2);
-  border-radius: 0;
-  color: var(--text-on-panel);
-  font: inherit;
-  font-size: var(--fs-sm);
-  padding: 2px 2px;
-}
-.nh-pipe__input::placeholder {
-  color: var(--muted-on-panel);
-}
-.nh-pipe__input:hover:not(:disabled) {
-  border-bottom-color: var(--accent);
-}
-.nh-pipe__input:focus {
-  outline: none;
-  border-bottom: 1px solid var(--accent);
-  background: var(--accent-soft);
-}
-.nh-pipe__input:disabled {
-  color: var(--muted-on-panel);
-  border-bottom-color: transparent;
-  cursor: default;
-}
-.nh-pipe__input--select {
-  cursor: pointer;
-}
-
-/* ── Template-grouped sections (task-b8fa34a80a34) ────────────────────────
-   The extended, TEMPLATE-GROUPED table that REPLACES the old per-task
-   'fielded' subtable: a section per template with a single subheading, an
-   Inputs|Outputs two-tier header (IN/OUT/REQ badges), a sticky-left Run column
-   (status pill + instance id), and a horizontally-scrolling field region.
-   Every value routes through the app's shared tokens / --nh-* status vars, so
-   both themes resolve without an override. */
-.nh-tmpl-section {
-  padding: var(--sp-3) var(--sp-3) 0;
-}
-.nh-tmpl-section:first-of-type {
-  padding-top: var(--sp-2);
-}
-
-.nh-tmpl__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-2);
-}
-.nh-tmpl__title {
-  font-weight: 600;
-  font-size: var(--fs-md);
-  color: var(--text-on-panel);
-}
-.nh-tmpl__count {
-  font-size: var(--fs-2xs);
-  color: var(--muted-on-panel);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-/* Hover-reveal "+ New run" affordance (keyboard-focusable → always shown). */
-.nh-tmpl__new {
-  margin-left: auto;
-  appearance: none;
-  font: inherit;
-  font-size: var(--fs-2xs);
-  color: var(--muted-on-panel);
-  background: transparent;
-  border: 1px solid transparent;
-  padding: 3px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity var(--motion-hover), color var(--motion-hover),
-    border-color var(--motion-hover), background var(--motion-hover);
-}
-.nh-tmpl-section:hover .nh-tmpl__new,
-.nh-tmpl__new:focus-visible {
-  opacity: 1;
-}
-.nh-tmpl__new:hover,
-.nh-tmpl__new:focus-visible {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  outline: none;
-}
-.nh-tmpl__new-plus {
-  color: var(--accent);
-  font-weight: 700;
-}
-
-/* task-ecabeafa41e1 — LEVEL 1 summary row. The group is one aligned strip:
-   name · N runs · status-count chips · assignee(s) · [View → · Run all · New
-   run]. No field columns here — those live in the Level-2 matrix. */
-.nh-tmpl-section--summary {
-  padding-bottom: var(--sp-2);
-}
-.nh-tmpl-section--summary .nh-tmpl__head {
-  align-items: center;
-  margin-bottom: 0;
-  padding: var(--sp-2) var(--sp-2);
-  background: var(--bg-1);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-2, 8px);
-}
-/* The group name doubles as a View affordance. */
-.nh-tmpl__title--view {
-  appearance: none;
-  font: inherit;
-  font-weight: 600;
-  font-size: var(--fs-md);
-  color: var(--text-on-panel);
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-}
-.nh-tmpl__title--view:hover,
-.nh-tmpl__title--view:focus-visible {
-  color: var(--accent);
-  outline: none;
-  text-decoration: underline;
-}
-/* Status-count chips — reuse the roster pill colors (nh-roster__pill--<bucket>)
-   at a compact size. */
-.nh-tmpl__stats {
+/* Aggregate status cell — one compact pill per non-zero bucket. */
+.nh-roster__breakdown {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
   flex-wrap: wrap;
 }
-.nh-tmpl__stat {
+.nh-roster__breakdown .nh-roster__pill {
   font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
   padding: 1px 8px;
   white-space: nowrap;
 }
-/* Distinct-assignee summary (count, or the single name; tooltip lists all). */
-.nh-tmpl__who {
+
+/* Runs column — a small tabular count. */
+.nh-roster__th-runs {
+  width: 1%;
+  text-align: right !important;
+}
+.nh-roster__runs {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+}
+
+/* A template-group row's title reads as a definition, not an instance. */
+.nh-roster__title--group {
+  font-weight: 600;
+}
+.nh-roster__who--group {
   font-size: var(--fs-2xs);
   color: var(--muted-on-panel);
   white-space: nowrap;
@@ -778,239 +399,83 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.nh-tmpl__actions {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-1);
-}
-/* In the summary row the actions group owns the right-push; New run no longer
-   needs its own margin-left:auto, and is always visible here (not hover-only). */
-.nh-tmpl-section--summary .nh-tmpl__new {
-  margin-left: 0;
-  opacity: 1;
-}
-.nh-tmpl__view,
-.nh-tmpl__runall {
-  appearance: none;
-  font: inherit;
-  font-size: var(--fs-2xs);
-  padding: 3px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  white-space: nowrap;
-  border: 1px solid transparent;
-  transition: color var(--motion-hover), border-color var(--motion-hover),
-    background var(--motion-hover);
-}
-.nh-tmpl__view {
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-color: transparent;
-}
-.nh-tmpl__view:hover,
-.nh-tmpl__view:focus-visible {
-  border-color: var(--accent);
-  outline: none;
-}
-.nh-tmpl__runall {
-  color: var(--muted-on-panel);
-  background: transparent;
-}
-.nh-tmpl__runall:hover:not(:disabled),
-.nh-tmpl__runall:focus-visible {
-  color: var(--nh-progress);
-  border-color: var(--nh-progress);
-  outline: none;
-}
-.nh-tmpl__runall:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
 
-.nh-tmpl__shell {
-  background: var(--bg-1);
-  border: 1px solid var(--border-1);
-  border-radius: var(--r-md);
-  overflow: hidden;
-}
-/* Only the field columns scroll; the Run column is pinned via sticky-left. */
-.nh-tmpl__scroll {
-  overflow-x: auto;
-}
-
-.nh-tmpl__table {
-  border-collapse: separate;
-  border-spacing: 0;
-  width: 100%;
-  min-width: max-content;
-  font-size: var(--fs-sm);
-}
-.nh-tmpl__table th,
-.nh-tmpl__table td {
-  text-align: left;
-  padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--border-1);
-  white-space: nowrap;
-  vertical-align: middle;
-}
-.nh-tmpl__table tbody tr:last-child td {
-  border-bottom: none;
-}
-.nh-tmpl__table tbody tr {
-  cursor: pointer;
-  transition: background var(--motion-hover);
-}
-.nh-tmpl__table tbody tr:hover td {
-  background: var(--bg-2);
-}
-
-/* group band row (Inputs | Outputs) */
-.nh-tmpl__band th {
-  padding-top: var(--sp-2);
-  padding-bottom: 4px;
-  font-size: var(--fs-2xs);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  font-weight: 700;
-  color: var(--muted-on-panel);
-  border-bottom: 1px solid var(--border-1);
-}
-.nh-tmpl__band-in {
-  color: var(--accent);
-}
-.nh-tmpl__band-out {
-  color: var(--nh-done);
-}
-
-/* field-label row */
-.nh-tmpl__cols th {
-  padding-top: 6px;
-  padding-bottom: 8px;
+/* Inline outcome one-liner under a finished row's title. */
+.nh-roster__outcome {
+  margin-top: 2px;
   font-size: var(--fs-xs);
-  font-weight: 600;
   color: var(--muted-on-panel);
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border-2);
-  vertical-align: bottom;
-  text-transform: none;
-  letter-spacing: normal;
+  max-width: 48ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.nh-tmpl__colwrap {
+
+/* ⋮ actions menu — every row carries one with its full action list. */
+.nh-roster__menu-wrap {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
-.nh-tmpl__col--num {
-  text-align: right;
-}
-
-/* IN / OUT / REQ badges */
-.nh-tmpl__badge {
-  display: inline-block;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 1px 4px;
+.nh-roster__menu-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-on-panel);
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1;
+  padding: 4px 8px;
   border-radius: var(--r-sm);
-  line-height: 1.4;
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
 }
-.nh-tmpl__badge--in {
-  color: var(--accent);
-  background: var(--accent-soft);
+.nh-roster__menu-btn:hover,
+.nh-roster__menu-btn[aria-expanded='true'] {
+  background: var(--bg-2);
+  color: var(--text-on-panel);
 }
-.nh-tmpl__badge--out {
-  color: var(--nh-done);
-  background: var(--nh-done-soft);
-}
-.nh-tmpl__badge--req {
-  color: var(--nh-needs);
-  background: var(--nh-needs-soft);
-}
-
-/* pinned lead (Run) column: status pill + instance id */
-.nh-tmpl__lead {
-  position: sticky;
-  left: 0;
-  z-index: 2;
+.nh-roster__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
   background: var(--bg-1);
-  border-right: 1px solid var(--border-2);
-  min-width: 208px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
 }
-.nh-tmpl__band .nh-tmpl__lead,
-.nh-tmpl__cols .nh-tmpl__lead {
-  background: var(--bg-2);
-  z-index: 3;
-}
-.nh-tmpl__table tbody tr:hover .nh-tmpl__lead {
-  background: var(--bg-2);
-}
-.nh-tmpl__lead-inner {
+.nh-roster__menu-item {
+  appearance: none;
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-}
-.nh-tmpl__inst {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--fs-xs);
+  gap: 6px;
+  border: none;
+  background: transparent;
   color: var(--text-on-panel);
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
   white-space: nowrap;
-  max-width: 140px;
 }
-.nh-tmpl__inst--faint {
+.nh-roster__menu-item:hover:not(:disabled) {
+  background: var(--bg-2);
+}
+.nh-roster__menu-item:disabled {
   color: var(--muted-on-panel);
+  cursor: not-allowed;
 }
-
-/* value cells */
-.nh-tmpl__cell--num {
-  text-align: right;
+.nh-roster__menu-item--check {
+  user-select: none;
 }
-.nh-tmpl__val {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--fs-xs);
-  color: var(--text-on-panel);
-  font-variant-numeric: tabular-nums;
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: inline-block;
-  vertical-align: middle;
-}
-.nh-tmpl__empty {
-  color: var(--muted-on-panel);
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
-.nh-tmpl__empty--missing {
-  text-decoration: underline dashed;
-  text-decoration-color: var(--nh-needs);
-  text-underline-offset: 2px;
-  cursor: help;
-}
-.nh-tmpl__loading {
-  color: var(--muted-on-panel);
-  font-family: var(--font-mono, ui-monospace, monospace);
-}
-.nh-tmpl__await-cell {
-  color: var(--muted-on-panel);
-}
-.nh-tmpl__await {
-  font-style: italic;
-  font-size: var(--fs-xs);
-  color: var(--muted-on-panel);
-}
-.nh-tmpl__link {
-  color: var(--accent);
-  text-decoration: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--fs-xs);
-}
-.nh-tmpl__link:hover {
-  border-bottom-color: var(--accent);
+.nh-roster__menu-item--check input {
+  cursor: pointer;
 }
 
 /* [data-theme="light"] needs no overrides — every value above routes through
