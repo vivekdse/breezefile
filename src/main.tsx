@@ -30,11 +30,17 @@ const operatorPty =
 const operatorViewParam = operatorParams.get('view');
 const operatorView =
   operatorViewParam != null && operatorViewParam !== '' ? Number(operatorViewParam) : null;
+// task-7ba4409eeb5c — set on the OPTIMISTIC-launch open (window up, pty not yet
+// spawned). Distinguishes a healthy in-flight launch (show "Starting session…")
+// from a genuinely session-less window (the bare open-browser verb, "No agent
+// session."). Cleared when the real pty attaches (the window reloads with
+// `operator=<ptyId>` and no launching flag).
+const operatorLaunching = operatorParams.get('launching') === '1';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {isOperator ? (
-      <OperatorSession ptyId={operatorPty} viewId={operatorView} />
+      <OperatorSession ptyId={operatorPty} viewId={operatorView} launching={operatorLaunching} />
     ) : (
       <App />
     )}
