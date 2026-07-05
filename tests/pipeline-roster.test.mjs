@@ -18,6 +18,7 @@ import {
   mergeChildStatus,
   childStatusOverride,
   chainStartTarget,
+  thinChainStartTarget,
   toChildStatus,
   childStatusMap,
 } from '../src/components/newhome/pipelineRoster.mjs';
@@ -452,6 +453,62 @@ test('chainStartTarget yields a "complete" reason when the whole chain is done',
   const t = chainStartTarget(CHAIN_DEFS, values, childIdByDefId, {});
   assert.equal(t.childId, null);
   assert.match(t.reason, /complete/i);
+});
+
+// ── task-d1164f534605: thinChainStartTarget — start a THIN-PARENT chain ───────
+// A body-less parent whose child ROWS are the steps (no defs). The runnable
+// step is the first non-terminal child in creation order; the server enforces
+// depends_on, so the caller's primaryActionFor + start-wrapper handle eligibility.
+
+test('thinChainStartTarget targets the FIRST non-terminal child (the chain head of a fresh chain)', () => {
+  const t = thinChainStartTarget([
+    { id: 'c-a', rawStatus: 'open' },
+    { id: 'c-b', rawStatus: 'open' }, // dep-gated, but indistinguishable on the list
+  ]);
+  assert.equal(t.childId, 'c-a');
+});
+
+test('thinChainStartTarget advances to the next step once the head is done', () => {
+  const t = thinChainStartTarget([
+    { id: 'c-a', rawStatus: 'done' },
+    { id: 'c-b', rawStatus: 'open' },
+    { id: 'c-c', rawStatus: 'open' },
+  ]);
+  assert.equal(t.childId, 'c-b');
+});
+
+test('thinChainStartTarget treats done/cancelled/partial as terminal, failed as runnable', () => {
+  assert.equal(
+    thinChainStartTarget([
+      { id: 'c-a', rawStatus: 'done' },
+      { id: 'c-b', rawStatus: 'cancelled' },
+      { id: 'c-c', rawStatus: 'failed' },
+    ]).childId,
+    'c-c',
+  );
+  assert.equal(
+    thinChainStartTarget([
+      { id: 'c-a', rawStatus: 'done' },
+      { id: 'c-b', rawStatus: 'partial' },
+      { id: 'c-c', rawStatus: 'open' },
+    ]).childId,
+    'c-c',
+  );
+});
+
+test('thinChainStartTarget reports "complete" (not a bare null) when every step is terminal', () => {
+  const t = thinChainStartTarget([
+    { id: 'c-a', rawStatus: 'done' },
+    { id: 'c-b', rawStatus: 'done' },
+  ]);
+  assert.equal(t.childId, null);
+  assert.match(t.reason, /complete/i);
+});
+
+test('thinChainStartTarget reports a reason for an empty/childless container', () => {
+  const t = thinChainStartTarget([]);
+  assert.equal(t.childId, null);
+  assert.match(t.reason, /no steps/i);
 });
 
 test('chainStartTarget yields a "loading" reason when the runnable step has no child yet', () => {

@@ -537,6 +537,39 @@ export function chainStartTarget(taskDefs, valuesByRef, childIdByDefId, childByD
 }
 
 /**
+ * task-d1164f534605 — resolve the "▶ Start chain" target for a THIN-PARENT chain:
+ * a body-less parent container (created by instantiateChain) whose ordered CHILD
+ * rows ARE the steps. Unlike chainStartTarget (which walks a parent's own v2
+ * task-template DEFS + a def→child index), a thin parent has NO defs and NO
+ * body block, so the steps are just its children in creation order.
+ *
+ * The runnable step is the FIRST non-terminal child in order. depends_on lives
+ * only on the DETAIL fetch (not on list rows), so we cannot see here which later
+ * child is dep-blocked — but we never need to: for a fresh chain the head is the
+ * first non-terminal child, and after each step completes the NEXT child becomes
+ * the first non-terminal one. The server enforces depends_on, so even a
+ * mis-ordered claim is rejected VISIBLY (via the shared start wrapper), never a
+ * silent no-op. Eligibility of the chosen child (startable right now vs.
+ * claimed/blocked) is NOT decided here — the caller runs it through
+ * primaryActionFor, exactly like chainStartFor does for def-based chains.
+ *
+ * 'done'/'cancelled'/'partial' are terminal (a step that won't run again);
+ * 'failed' is NOT terminal (it's the retryable current step); 'blocked'/'open'/
+ * 'in_progress' are the live current step.
+ *
+ * @param {{ id: string, rawStatus?: string|null }[]} orderedChildren  children in creation order
+ * @returns {{ childId: string } | { childId: null, reason: string }}
+ */
+export function thinChainStartTarget(orderedChildren) {
+  const kids = orderedChildren ?? [];
+  if (kids.length === 0) return { childId: null, reason: 'no steps in this chain yet' };
+  const TERMINAL = new Set(['done', 'cancelled', 'partial']);
+  const head = kids.find((c) => c && !TERMINAL.has(c.rawStatus ?? ''));
+  if (!head) return { childId: null, reason: 'no runnable step — the chain is complete' };
+  return { childId: head.id };
+}
+
+/**
  * task-c141c7765aa4 (chip staleness, 3rd sighting) — thin wrapper kept for
  * back-compat: layer only the child's live RUN state (in_progress → 'active')
  * on the output-derived base. New callers should prefer mergeChildStatus,

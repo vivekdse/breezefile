@@ -30,6 +30,7 @@ import {
   runnableStepId,
   mergeChildStatus,
   chainStartTarget,
+  thinChainStartTarget,
   childStatusMap,
   toChildStatus,
 } from './pipelineRoster.mjs';
@@ -1289,6 +1290,72 @@ export function RosterTable({
     return { disabled: true, reason };
   };
 
+  // task-d1164f534605 — "▶ Start chain" for a THIN-PARENT chain: a body-less
+  // parent container (the instantiateChain output — no v2 task-template block)
+  // whose CHILD rows ARE the steps. The def-based chainStartFor above needs a
+  // block the thin parent doesn't have, so a freshly-created chain otherwise
+  // shows '—' on its parent row (the "no way to start the task I just created"
+  // report). Here we target the FIRST non-terminal child (the chain head for a
+  // fresh chain; the next step as each completes) and run it through
+  // primaryActionFor for eligibility — identical shape + feedback to
+  // chainStartFor. Returns null for a non-container row (no children) so normal
+  // rows fall through to their own Start / '—'.
+  const childrenByParentId = useMemo(() => {
+    const m = new Map<string, typeof allTasks>();
+    for (const c of allTasks) {
+      const p = c.parentTaskId;
+      if (!p) continue;
+      const arr = m.get(p);
+      if (arr) arr.push(c);
+      else m.set(p, [c]);
+    }
+    return m;
+  }, [allTasks]);
+  const plainChainStartFor = (
+    parentId: string,
+  ):
+    | { childId: string; enabled: boolean; tooltip?: string }
+    | { disabled: true; reason: string }
+    | null => {
+    const kids = childrenByParentId.get(parentId);
+    if (!kids || kids.length === 0) return null; // not a container → not a chain
+    const target = thinChainStartTarget(
+      kids.map((c) => ({ id: c.id, rawStatus: c.rawStatus ?? null })),
+    );
+    if (target.childId === null) {
+      // A complete chain is the calm terminal state (no button); anything else
+      // (still loading, etc.) is actionable news worth a disabled button+reason.
+      if (/complete/i.test(target.reason)) return null;
+      return { disabled: true, reason: target.reason };
+    }
+    const child = allTasksById.get(target.childId);
+    if (!child) return { disabled: true, reason: 'the next step is still loading' };
+    const pa = primaryActionFor(child, {
+      caps: actions.caps(child),
+      tbReady,
+      myEmail: tbReady.email,
+      session: sessions.get(target.childId),
+    });
+    if (pa.kind === 'start') {
+      return { childId: target.childId, enabled: pa.enabled, tooltip: pa.tooltip };
+    }
+    // A failed head step is the retryable current step — offer it as a start.
+    if (pa.kind === 'retry') {
+      return { childId: target.childId, enabled: true, tooltip: 'retry the failed step' };
+    }
+    // Already running/claimed → calm (the child row conveys it), no button.
+    if (pa.kind === 'open-session') return null;
+    if (pa.kind === 'reopen') {
+      return { disabled: true, reason: 'the next step is blocked — open it to reopen/continue' };
+    }
+    const note = pa.kind === 'none' ? pa.note ?? '' : '';
+    if (/in progress|claimed/i.test(note)) return null;
+    return {
+      disabled: true,
+      reason: note ? `next step: ${note}` : 'the next step can’t be started right now',
+    };
+  };
+
   // ── chained-job detection (task-b1fa5098da3e, R3) ─────────────────────────
   // Candidate jobs: EVERY top-level row (no parentTaskId) — not just those
   // with children. A row with children could be a chained task; a childless
@@ -1661,7 +1728,7 @@ export function RosterTable({
                           void startAction.run(id, { kind: 'start', run: () => onStart(id) });
                         }}
                         startEligible={startActionFor(t)}
-                        chainStart={chainedRes ? chainStartFor(chainedRes) : null}
+                        chainStart={chainedRes ? chainStartFor(chainedRes) : plainChainStartFor(t.id)}
                         onChainStart={(childId) => {
                           // Key the pending/error on the PARENT row id (t.id),
                           // but launch the CHILD — so the parent row shows the

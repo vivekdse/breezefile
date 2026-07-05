@@ -121,6 +121,10 @@ export function chainStartTarget(
   | { childId: string; stepId: string; stepName: string }
   | { childId: null; reason: string };
 
+export function thinChainStartTarget(
+  orderedChildren: { id: string; rawStatus?: string | null }[] | null | undefined,
+): { childId: string } | { childId: null; reason: string };
+
 export function stepDisplayStatus(
   baseStatus: TaskDefRenderStatus,
   childInProgress: boolean,
