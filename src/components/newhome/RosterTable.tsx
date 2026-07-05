@@ -41,9 +41,14 @@ import {
   shouldResolveParent,
 } from './chainParentResolve.mjs';
 import type { PipelineColumn, PipelineGroup, ChildStatusLike } from './pipelineRoster.mjs';
-import { buildRosterGroups } from './rosterGroups.mjs';
-import type { RosterGroup, RosterGroupInput, OutputCol, InputCol } from './rosterGroups.mjs';
-import { useChainedRoster, useTaskDataValues } from './useNewHomeData';
+import { buildRosterGroups, summarizeGroupRows, STATUS_BUCKETS } from './rosterGroups.mjs';
+import type {
+  RosterGroup,
+  RosterGroupInput,
+  GroupSummary,
+  StatusBucket,
+} from './rosterGroups.mjs';
+import { useChainedRoster } from './useNewHomeData';
 import { TaskMatrix } from './TaskMatrix';
 import type { ChainedJobResolution } from './useNewHomeData';
 // task — the "▶ Start" row action reuses the OLD Tasks page's exact launch
@@ -992,184 +997,106 @@ function ChainedJobSubtable({
 // PHI: input/output VALUES render in memory only (resolved via the lazy detail
 // resolver + taskData.resolve) — never logged or persisted.
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const URL_RE = /^(https?:\/\/|www\.)[^\s]+$|^[a-z0-9-]+(\.[a-z0-9-]+)+(\/[^\s]*)?$/i;
 
-/** Render a single field VALUE, linkifying url/email types; everything else is
- *  a mono/tabular value truncated with a title-hover. PHI: memory-only. */
-function TemplateValue({ value }: { value: string }) {
-  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
-  if (EMAIL_RE.test(value)) {
-    return (
-      <a className="nh-tmpl__link" href={`mailto:${value}`} onClick={stop}>
-        {value}
-      </a>
-    );
-  }
-  if (URL_RE.test(value)) {
-    const href = /^https?:\/\//i.test(value) ? value : `https://${value}`;
-    return (
-      <a className="nh-tmpl__link nh-tmpl__link--plain" href={href} target="_blank" rel="noreferrer" onClick={stop}>
-        {value}
-      </a>
-    );
-  }
-  return (
-    <span className="nh-tmpl__val" title={value}>
-      {value}
-    </span>
-  );
-}
+// task-ecabeafa41e1 — LEVEL 1. A group is summarized by ONE row: num runs, a
+// per-status count breakdown, the distinct-assignee count (a chain's steps may
+// be assigned to different people, so this can be >1), and the group actions
+// (View → into the Level-2 matrix · ▶ Run all · + New run). The per-run
+// inputs/outputs table now lives in the Level-2 matrix (TaskMatrix), reached
+// via "View →" — this row is deliberately field-column-free so stacked groups
+// align on one calm spine (the roster-redesign fix).
+const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = {
+  done: 'done',
+  progress: 'in progress',
+  queued: 'queued',
+  needs: 'needs you',
+  failed: 'failed',
+};
 
 function TemplateSection({
   group,
-  getOutput,
-  isRowLoading,
-  dataValues,
-  onOpenTask,
+  summary,
+  onView,
+  onRunAll,
   onNewRun,
+  runAllPending,
 }: {
   group: RosterGroup;
-  /** Resolved OUTPUT value for (taskId, outputKey), or undefined until it lands. */
-  getOutput: (taskId: string, key: string) => string | number | undefined;
-  /** True while this row's detail is still resolving (cells show a subtle "…"). */
-  isRowLoading: (taskId: string) => boolean;
-  /** taskId → { inputKey → resolved data-bag value }. */
-  dataValues: Map<string, Record<string, string>>;
-  onOpenTask: (id: string) => void;
+  /** task-ecabeafa41e1 — aggregated Level-1 stats for this group's runs. */
+  summary: GroupSummary;
+  /** Open the Level-2 matrix for this group (View →). */
+  onView: (group: RosterGroup) => void;
+  /** Run all runnable runs/steps in this group (▶ Run all). */
+  onRunAll: (group: RosterGroup) => void;
   onNewRun: (group: RosterGroup) => void;
+  /** True while a Run-all launch for this group is in flight. */
+  runAllPending: boolean;
 }) {
-  const { inputCols, outputCols, rows } = group;
-  const allCols: (InputCol | OutputCol)[] = [...inputCols, ...outputCols];
-  const firstInputKey = inputCols[0]?.key ?? null;
+  const { runCount, statusCounts, assignees } = summary;
+  const activeBuckets = STATUS_BUCKETS.filter((b) => statusCounts[b] > 0);
+  const assigneeTitle =
+    assignees.length > 0 ? assignees.join(', ') : 'Unassigned';
+  // A group is "runnable" if anything isn't already done/queued-terminal — i.e.
+  // there's at least one queued/needs/failed/in-progress run to advance.
+  const hasRunnable =
+    statusCounts.queued + statusCounts.needs + statusCounts.failed + statusCounts.progress > 0;
   return (
-    <section className="nh-tmpl-section">
+    <section className="nh-tmpl-section nh-tmpl-section--summary">
       <div className="nh-tmpl__head">
-        <span className="nh-tmpl__title">{group.name}</span>
-        <span className="nh-tmpl__count">
-          {rows.length} run{rows.length === 1 ? '' : 's'}
-        </span>
-        {/* Hover affordance — opens the canonical New-from-Template flow. */}
-        <button type="button" className="nh-tmpl__new" onClick={() => onNewRun(group)}>
-          <span className="nh-tmpl__new-plus">+</span> New run
+        <button
+          type="button"
+          className="nh-tmpl__title nh-tmpl__title--view"
+          onClick={() => onView(group)}
+          title="View runs, inputs and outputs"
+        >
+          {group.name}
         </button>
-      </div>
-      <div className="nh-tmpl__shell">
-        <div className="nh-tmpl__scroll">
-          <table className="nh-tmpl__table">
-            <thead>
-              <tr className="nh-tmpl__band">
-                <th className="nh-tmpl__lead nh-tmpl__band-cell">&nbsp;</th>
-                {inputCols.length > 0 && (
-                  <th className="nh-tmpl__band-in nh-tmpl__band-cell" colSpan={inputCols.length}>
-                    Inputs
-                  </th>
-                )}
-                {outputCols.length > 0 && (
-                  <th className="nh-tmpl__band-out nh-tmpl__band-cell" colSpan={outputCols.length}>
-                    Outputs
-                  </th>
-                )}
-              </tr>
-              <tr className="nh-tmpl__cols">
-                <th className="nh-tmpl__lead">Run</th>
-                {allCols.map((c) => (
-                  <th
-                    key={`${c.io}.${c.key}`}
-                    className={`nh-tmpl__col nh-tmpl__col--${c.io}${c.type === 'number' ? ' nh-tmpl__col--num' : ''}`}
-                  >
-                    <span className="nh-tmpl__colwrap">
-                      {c.label}
-                      <span className={`nh-tmpl__badge nh-tmpl__badge--${c.io}`}>
-                        {c.io === 'in' ? 'IN' : 'OUT'}
-                      </span>
-                      {c.io === 'out' && (c as OutputCol).required && (
-                        <span className="nh-tmpl__badge nh-tmpl__badge--req">REQ</span>
-                      )}
-                    </span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const loading = isRowLoading(r.taskId);
-                const inVals = dataValues.get(r.taskId) ?? {};
-                const status = (r.status ?? 'queued') as NewHomeStatus;
-                // Instance id: prefer the resolved first-INPUT value (e.g.
-                // source=cnn.com), else the value-free helper fallback
-                // (title-or-#n). PHI: the value renders in memory only.
-                const firstInputVal = firstInputKey ? inVals[firstInputKey] : undefined;
-                const instId = firstInputVal || r.instanceId;
-                // task-b8fa34a80a34 — an in-progress row collapses its OUTPUT
-                // cells into one "Awaiting results…" span so a running row never
-                // reads as a line of empty cells.
-                const collapseOutputs = status === 'progress' && outputCols.length > 0;
-                return (
-                  <tr key={r.taskId} onClick={() => onOpenTask(r.taskId)}>
-                    <td className="nh-tmpl__lead">
-                      <div className="nh-tmpl__lead-inner">
-                        <span className={`nh-roster__pill nh-roster__pill--${status}`}>
-                          {STATUS_LABEL[status]}
-                        </span>
-                        <span
-                          className={`nh-tmpl__inst${firstInputVal ? '' : ' nh-tmpl__inst--faint'}`}
-                          title={instId}
-                        >
-                          {instId}
-                        </span>
-                      </div>
-                    </td>
-                    {inputCols.map((c) => {
-                      const v = inVals[c.key];
-                      return (
-                        <td key={`in.${c.key}`} className="nh-tmpl__cell">
-                          {v ? (
-                            <TemplateValue value={v} />
-                          ) : loading ? (
-                            <span className="nh-tmpl__loading">…</span>
-                          ) : (
-                            <span className="nh-tmpl__empty">—</span>
-                          )}
-                        </td>
-                      );
-                    })}
-                    {collapseOutputs ? (
-                      <td className="nh-tmpl__cell nh-tmpl__await-cell" colSpan={outputCols.length}>
-                        <span className="nh-tmpl__await">Awaiting results…</span>
-                      </td>
-                    ) : (
-                      outputCols.map((c) => {
-                        const raw = getOutput(r.taskId, c.key);
-                        const v = raw === undefined || raw === null || raw === '' ? '' : String(raw);
-                        const missing = c.required && !v;
-                        return (
-                          <td
-                            key={`out.${c.key}`}
-                            className={`nh-tmpl__cell${c.type === 'number' ? ' nh-tmpl__cell--num' : ''}`}
-                          >
-                            {v ? (
-                              <TemplateValue value={v} />
-                            ) : loading ? (
-                              <span className="nh-tmpl__loading">…</span>
-                            ) : (
-                              <span
-                                className={`nh-tmpl__empty${missing ? ' nh-tmpl__empty--missing' : ''}`}
-                                title={missing ? 'required — awaiting agent' : undefined}
-                              >
-                                —
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <span className="nh-tmpl__count">
+          {runCount} run{runCount === 1 ? '' : 's'}
+        </span>
+        {/* Status breakdown — one chip per non-zero bucket, roster pill colors. */}
+        <span className="nh-tmpl__stats">
+          {activeBuckets.map((b) => (
+            <span
+              key={b}
+              className={`nh-tmpl__stat nh-roster__pill nh-roster__pill--${b}`}
+              title={`${statusCounts[b]} ${STATUS_SUMMARY_LABEL[b]}`}
+            >
+              {statusCounts[b]} {STATUS_SUMMARY_LABEL[b]}
+            </span>
+          ))}
+        </span>
+        {/* Distinct assignees — count + tooltip listing them (can be >1). */}
+        <span className="nh-tmpl__who" title={assigneeTitle}>
+          {assignees.length === 0
+            ? 'Unassigned'
+            : assignees.length === 1
+              ? assignees[0]
+              : `${assignees.length} people`}
+        </span>
+        <span className="nh-tmpl__actions">
+          <button
+            type="button"
+            className="nh-tmpl__view"
+            onClick={() => onView(group)}
+          >
+            View →
+          </button>
+          {hasRunnable && (
+            <button
+              type="button"
+              className="nh-tmpl__runall"
+              onClick={() => onRunAll(group)}
+              disabled={runAllPending}
+              title="Start every runnable step of every run in this group"
+            >
+              {runAllPending ? 'Starting…' : '▶ Run all'}
+            </button>
+          )}
+          <button type="button" className="nh-tmpl__new" onClick={() => onNewRun(group)}>
+            <span className="nh-tmpl__new-plus">+</span> New run
+          </button>
+        </span>
       </div>
     </section>
   );
@@ -1513,33 +1440,11 @@ export function RosterTable({
     [visibleRows, groupedTaskIds],
   );
 
-  // INPUT cell values (data bag) — resolved lazily, bounded, PHI-safe.
-  const dataRequests = useMemo(() => {
-    const reqs: { taskId: string; keys: string[] }[] = [];
-    for (const g of templateGroups) {
-      const keys = g.inputCols.map((c) => c.key);
-      if (keys.length === 0) continue;
-      for (const r of g.rows) reqs.push({ taskId: r.taskId, keys });
-    }
-    return reqs;
-  }, [templateGroups]);
-  const dataValues = useTaskDataValues(dataRequests);
-
-  // OUTPUT cell values come from the SAME lazy detail resolution the flat
-  // table's chained/fielded rows use: a 'fielded' resolution carries the task's
-  // result folded into `valuesByRef`, keyed by fieldRef(defId, outputKey).
-  const getOutput = (taskId: string, key: string): string | number | undefined => {
-    const res = resolutions.get(taskId);
-    if (res && res.status === 'fielded') {
-      const defId = res.defs[0]?.id;
-      if (defId) return res.valuesByRef[fieldRef(defId, key)];
-    }
-    return undefined;
-  };
-  const isRowLoading = (taskId: string): boolean => {
-    const res = resolutions.get(taskId);
-    return !res || res.status === 'loading';
-  };
+  // task-ecabeafa41e1 — Level-1 group rows no longer render field values inline
+  // (that table moved into the Level-2 TaskMatrix, which resolves its own input
+  // data-bag + output result values on demand). So the roster no longer
+  // pre-fetches per-cell values here; only the group SUMMARY (counts/assignees)
+  // is computed, from metadata already on the rows.
   const onNewRun = (_group: RosterGroup) => {
     // task-b8fa34a80a34 — open the canonical New-from-Template flow. Pre-picking
     // THIS template isn't wired yet (the composer's template picker doesn't
@@ -1549,6 +1454,46 @@ export function RosterTable({
     );
     window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
   };
+
+  // task-ecabeafa41e1 — LEVEL 1 group summaries. For each template group,
+  // aggregate its runs' status buckets + distinct assignees (assignee =
+  // assigned_to, falling back to the current claimer). Value-free: only the
+  // NON-PHI status + assignee-principal cross into summarizeGroupRows.
+  const groupSummaries = useMemo(() => {
+    const m = new Map<string, GroupSummary>();
+    for (const g of templateGroups) {
+      const runs = g.rows.map((r) => {
+        const t = allTasksById.get(r.taskId);
+        return {
+          status: r.status,
+          assignee: t?.assignedTo ?? t?.claimedBy ?? null,
+        };
+      });
+      m.set(g.key, summarizeGroupRows(runs));
+    }
+    return m;
+  }, [templateGroups, allTasksById]);
+
+  // task-ecabeafa41e1 — "View →" on a group opens the Level-2 matrix over ALL
+  // the group's runs (multi-run). A simple-template run is childless, so the
+  // matrix treats each run as a single implicit step (see TaskMatrix).
+  const [matrixGroupKey, setMatrixGroupKey] = useState<string | null>(null);
+  const onViewGroup = (group: RosterGroup) => setMatrixGroupKey(group.key);
+
+  // task-ecabeafa41e1 — "▶ Run all": start every runnable run in the group.
+  // For a simple template each run IS the unit of work, so we start each
+  // non-terminal run through the shared start wrapper (optimistic + de-duped).
+  const runAllGroup = (group: RosterGroup) => {
+    for (const r of group.rows) {
+      const bucket = r.status ?? '';
+      const done = bucket === 'done' || bucket === 'cancelled';
+      if (done) continue;
+      void startAction.run(r.taskId, { kind: 'start', run: () => onStart(r.taskId) });
+    }
+  };
+  // A group's Run-all shows pending while ANY of its runs' starts are in flight.
+  const runAllPendingFor = (group: RosterGroup): boolean =>
+    group.rows.some((r) => startAction.pendingFor(r.taskId));
   // When every task is grouped (no flat rows) AND there ARE groups, hide the
   // flat table entirely; otherwise render it so plain/"other" + chained rows —
   // and the empty state — show exactly as today (non-regression).
@@ -1615,32 +1560,63 @@ export function RosterTable({
   };
 
   // task-ecabeafa41e1 — Level-2 matrix takes over the roster surface when a
-  // chain's "View →" is clicked; Back (onClose) returns to the list. runs=[parent]
-  // for now (single instance); multi-run grouping is a follow-up.
-  if (matrixParentId) {
-    const parent = allTasksById.get(matrixParentId);
-    if (parent) {
-      return (
-        <div className="nh-roster">
-          <TaskMatrix
-            chainTitle={parent.title}
-            runs={[parent]}
-            childrenOf={(pid) => childrenByParentId.get(pid) ?? []}
-            onClose={() => setMatrixParentId(null)}
-            onOpenTask={onOpenTask}
-            onStartChild={(cid) => {
-              void startAction.run(cid, { kind: 'start', run: () => onStart(cid) });
-            }}
-            // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Feed the SAME useStartAction
-            // wrapper's per-child pending/error into the matrix so its ▶ Run /
-            // ▶ Start step show an instant "Starting…" (disabled) on click and a
-            // visible failure — the feedback the matrix was missing.
-            pendingFor={startAction.pendingFor}
-            errorFor={startAction.errorFor}
-          />
-        </div>
-      );
+  // "View →" is clicked; Back (onClose) returns to the list. Two entry points:
+  //   • matrixParentId — a single CHAIN parent from a flat "View →" (runs=[parent],
+  //     columns grouped by its step-children).
+  //   • matrixGroupKey — a template GROUP from a Level-1 "View →" (runs = all the
+  //     group's run instances, which are childless for a simple template, so the
+  //     matrix renders each run as one implicit step: its own inputs + outputs).
+  const matrixView = (() => {
+    if (matrixParentId) {
+      const parent = allTasksById.get(matrixParentId);
+      if (!parent) return null;
+      return {
+        title: parent.title,
+        runs: [parent],
+        childrenOf: (pid: string) => childrenByParentId.get(pid) ?? [],
+        close: () => setMatrixParentId(null),
+      };
     }
+    if (matrixGroupKey) {
+      const group = templateGroups.find((g) => g.key === matrixGroupKey);
+      if (!group) return null;
+      const runs = group.rows
+        .map((r) => allTasksById.get(r.taskId))
+        .filter((t): t is Task => !!t);
+      if (runs.length === 0) return null;
+      return {
+        title: group.name,
+        runs,
+        // Simple-template runs are childless; the matrix falls back to the run
+        // itself as the single step when childrenOf() is empty.
+        childrenOf: (pid: string) => childrenByParentId.get(pid) ?? [],
+        close: () => setMatrixGroupKey(null),
+      };
+    }
+    return null;
+  })();
+
+  if (matrixView) {
+    return (
+      <div className="nh-roster">
+        <TaskMatrix
+          chainTitle={matrixView.title}
+          runs={matrixView.runs}
+          childrenOf={matrixView.childrenOf}
+          onClose={matrixView.close}
+          onOpenTask={onOpenTask}
+          onStartChild={(cid) => {
+            void startAction.run(cid, { kind: 'start', run: () => onStart(cid) });
+          }}
+          // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Feed the SAME useStartAction
+          // wrapper's per-child pending/error into the matrix so its ▶ Run /
+          // ▶ Start step show an instant "Starting…" (disabled) on click and a
+          // visible failure — the feedback the matrix was missing.
+          pendingFor={startAction.pendingFor}
+          errorFor={startAction.errorFor}
+        />
+      </div>
+    );
   }
 
   return (
@@ -1694,11 +1670,11 @@ export function RosterTable({
         <TemplateSection
           key={g.key}
           group={g}
-          getOutput={getOutput}
-          isRowLoading={isRowLoading}
-          dataValues={dataValues}
-          onOpenTask={onOpenTask}
+          summary={groupSummaries.get(g.key) ?? summarizeGroupRows([])}
+          onView={onViewGroup}
+          onRunAll={runAllGroup}
           onNewRun={onNewRun}
+          runAllPending={runAllPendingFor(g)}
         />
       ))}
 

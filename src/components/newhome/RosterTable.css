@@ -722,6 +722,112 @@
   font-weight: 700;
 }
 
+/* task-ecabeafa41e1 — LEVEL 1 summary row. The group is one aligned strip:
+   name · N runs · status-count chips · assignee(s) · [View → · Run all · New
+   run]. No field columns here — those live in the Level-2 matrix. */
+.nh-tmpl-section--summary {
+  padding-bottom: var(--sp-2);
+}
+.nh-tmpl-section--summary .nh-tmpl__head {
+  align-items: center;
+  margin-bottom: 0;
+  padding: var(--sp-2) var(--sp-2);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2, 8px);
+}
+/* The group name doubles as a View affordance. */
+.nh-tmpl__title--view {
+  appearance: none;
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-on-panel);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.nh-tmpl__title--view:hover,
+.nh-tmpl__title--view:focus-visible {
+  color: var(--accent);
+  outline: none;
+  text-decoration: underline;
+}
+/* Status-count chips — reuse the roster pill colors (nh-roster__pill--<bucket>)
+   at a compact size. */
+.nh-tmpl__stats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+.nh-tmpl__stat {
+  font-size: var(--fs-2xs);
+  font-variant-numeric: tabular-nums;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+/* Distinct-assignee summary (count, or the single name; tooltip lists all). */
+.nh-tmpl__who {
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nh-tmpl__actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+/* In the summary row the actions group owns the right-push; New run no longer
+   needs its own margin-left:auto, and is always visible here (not hover-only). */
+.nh-tmpl-section--summary .nh-tmpl__new {
+  margin-left: 0;
+  opacity: 1;
+}
+.nh-tmpl__view,
+.nh-tmpl__runall {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  transition: color var(--motion-hover), border-color var(--motion-hover),
+    background var(--motion-hover);
+}
+.nh-tmpl__view {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: transparent;
+}
+.nh-tmpl__view:hover,
+.nh-tmpl__view:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+.nh-tmpl__runall {
+  color: var(--muted-on-panel);
+  background: transparent;
+}
+.nh-tmpl__runall:hover:not(:disabled),
+.nh-tmpl__runall:focus-visible {
+  color: var(--nh-progress);
+  border-color: var(--nh-progress);
+  outline: none;
+}
+.nh-tmpl__runall:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .nh-tmpl__shell {
   background: var(--bg-1);
   border: 1px solid var(--border-1);

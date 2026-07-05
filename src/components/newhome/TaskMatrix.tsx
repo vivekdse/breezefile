@@ -249,13 +249,27 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
   const pendingFor = props.pendingFor ?? (() => false);
   const errorFor = props.errorFor ?? (() => null);
 
-  // Every child id across every run (primitive key so effects re-run only when
-  // the SET of children actually changes, not on each parent render).
+  // task-ecabeafa41e1 — a run's STEPS. A chain run has step-children; a SIMPLE
+  // (non-chain) template run is CHILDLESS, so the run itself is the single
+  // implicit step (its own dataKeys/outputSchema/result become the row's one
+  // step-group). One helper so every steps/columns/cells path agrees.
+  const stepsOf = useMemo(() => {
+    return (parentId: string): Task[] => {
+      const kids = childrenOf(parentId);
+      if (kids.length > 0) return kids;
+      const self = runs.find((r) => r.id === parentId);
+      return self ? [self] : [];
+    };
+  }, [childrenOf, runs]);
+
+  // Every step id across every run (primitive key so effects re-run only when
+  // the SET of steps actually changes, not on each parent render). For a simple
+  // template the "step" IS the run, so its own id joins the set.
   const idKey = useMemo(() => {
     const ids: string[] = [];
-    for (const run of runs) for (const c of childrenOf(run.id)) ids.push(c.id);
+    for (const run of runs) for (const c of stepsOf(run.id)) ids.push(c.id);
     return Array.from(new Set(ids)).sort().join(',');
-  }, [runs, childrenOf]);
+  }, [runs, stepsOf]);
 
   // DETAIL for every child (getTask): outputSchema / dataKeys / result / status.
   const [detail, setDetail] = useState<Map<string, Task>>(new Map());
@@ -299,8 +313,9 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
   }, [idKey, detail]);
   const dataValues = useTaskDataValues(dataRequests);
 
-  // COLUMNS come from the FIRST run's ordered step-children.
-  const steps = runs[0] ? childrenOf(runs[0].id) : [];
+  // COLUMNS come from the FIRST run's ordered steps (its step-children, or the
+  // run itself when it's a childless simple-template run).
+  const steps = runs[0] ? stepsOf(runs[0].id) : [];
   const stepGroups = useMemo(
     () =>
       steps.map((step, index) => {
@@ -338,7 +353,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
         <div className="tm-heading">
           <div className="tm-title">{chainTitle}</div>
           <div className="tm-subtitle">
-            chain · {runs.length} {runs.length === 1 ? 'run' : 'runs'}
+            {runs.length} {runs.length === 1 ? 'run' : 'runs'}
           </div>
         </div>
       </div>
@@ -392,7 +407,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
           </thead>
           <tbody>
             {runs.map((run) => {
-              const rowChildren = childrenOf(run.id);
+              const rowChildren = stepsOf(run.id);
               return (
                 <tr key={run.id}>
                   <td className="tm-lead-td">
