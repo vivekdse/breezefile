@@ -1,4 +1,4 @@
-import type { Agent, Entry, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Agent, ChainDef, Entry, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 import type { TaskDefField } from './components/newhome/types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
@@ -582,6 +582,24 @@ type Fm = {
         titleOverride?: string,
         projectId?: string,
       ) => Promise<{ id: string; status: string }>;
+    };
+    // task-41e5fc25ed2b (picker slice) — server-side ChainDefs surfaced in the
+    // "New from Template" picker beside single templates. `list` is NON-PHI ([]
+    // signed-out); `create` files a new ChainDef from INLINE steps; `instantiate`
+    // atomically creates a parent container + one child task per step and returns
+    // { parentTaskId, taskIds }. Chain rendering/builder deferred.
+    chains: {
+      list: (projectId?: string) => Promise<ChainDef[]>;
+      create: (chainDef: {
+        name: string;
+        steps: unknown[];
+        project_id?: string;
+        group_id?: string;
+      }) => Promise<ChainDef>;
+      instantiate: (
+        chainId: string,
+        stepInputs?: Array<Record<string, string>>,
+      ) => Promise<{ parentTaskId: string; taskIds: string[] }>;
     };
     // Credential vault — the user's OWN identifiers (NPI, Tax ID, login IDs),
     // NOT patient PHI. Values are encrypted on TypeBuild, scoped to the user,

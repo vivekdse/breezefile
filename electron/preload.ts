@@ -133,6 +133,35 @@ type Template = {
   notes?: string | null;
 };
 
+// task-41e5fc25ed2b (picker slice) — a ChainDef as it crosses the bridge
+// (camelCase). Inlined like Template (preload carries no shared-type imports);
+// mirrors `ChainDef` in electron/sources/typebuild.ts and src/types.ts. Steps
+// carry title/body TEMPLATES + NON-PHI field STRUCTURE only (never values).
+type ChainDefField = {
+  key: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+};
+type ChainDefStep = {
+  titleTemplate: string;
+  bodyTemplate?: string;
+  humanGate?: boolean;
+  inputs?: ChainDefField[];
+  outputs?: ChainDefField[];
+  neededWhen?: unknown;
+};
+type ChainDef = {
+  id: string;
+  name: string;
+  steps: ChainDefStep[];
+  projectId: string | null;
+  groupId?: string | null;
+  createdBy?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
 const fm = {
   platform: process.platform,
   versions: process.versions,
@@ -1170,6 +1199,28 @@ const fm = {
           titleOverride,
           projectId,
         ) as Promise<{ id: string; status: string }>,
+    },
+    // task-41e5fc25ed2b (picker slice) — server-side ChainDefs in the "New from
+    // Template" picker. `list` enumerates chains (NON-PHI: step title/body
+    // templates + field defs — [] signed-out so the picker degrades to single
+    // templates only); `create` files a new ChainDef from INLINE steps;
+    // `instantiate` atomically creates a parent container + one child task per
+    // step (empty step_inputs from the picker — a ChainDef has no per-run vars)
+    // and returns { parentTaskId, taskIds }. Chain rendering/builder deferred.
+    chains: {
+      list: (projectId?: string) =>
+        ipcRenderer.invoke('typebuild:chains:list', projectId) as Promise<ChainDef[]>,
+      create: (chainDef: {
+        name: string;
+        steps: unknown[];
+        project_id?: string;
+        group_id?: string;
+      }) => ipcRenderer.invoke('typebuild:chains:create', chainDef) as Promise<ChainDef>,
+      instantiate: (chainId: string, stepInputs?: Array<Record<string, string>>) =>
+        ipcRenderer.invoke('typebuild:chains:instantiate', chainId, stepInputs) as Promise<{
+          parentTaskId: string;
+          taskIds: string[];
+        }>,
     },
   },
   // ─── TypeBuild side-by-side layout (fm-b5at.6) ────────────────────────

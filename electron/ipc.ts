@@ -3302,6 +3302,33 @@ end tell`;
       return src.instantiateTemplate(templateId, values ?? {}, titleOverride, projectId);
     },
   );
+  // task-41e5fc25ed2b (picker slice) — server-side ChainDefs in the "New from
+  // Template" picker. `list` degrades to [] signed-out (picker shows only single
+  // templates); `create`/`instantiate` throw signed-out (only reached from an
+  // explicit user/script action). `instantiate` returns { parentTaskId, taskIds }.
+  ipcMain.handle('typebuild:chains:list', (_e, projectId?: string) => {
+    const src = typebuildSource();
+    return src ? src.listChains(projectId) : [];
+  });
+  ipcMain.handle(
+    'typebuild:chains:create',
+    (
+      _e,
+      chainDef: { name: string; steps: unknown[]; project_id?: string; group_id?: string },
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.createChain(chainDef);
+    },
+  );
+  ipcMain.handle(
+    'typebuild:chains:instantiate',
+    (_e, chainId: string, stepInputs?: Array<Record<string, string>>) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.instantiateChain(chainId, stepInputs);
+    },
+  );
   // fm-b5at.8 — PHI-free schedule overlay for remote-source tasks. Lets a
   // time-gated remote (TypeBuild) task fire on the local cron. Rows carry
   // ONLY opaque ids + a cron string — never titles/bodies. setSchedule

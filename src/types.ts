@@ -487,6 +487,39 @@ export type Agent = {
   launchMode: string;
 };
 
+// task-41e5fc25ed2b (picker slice) — a server-side ChainDef as the renderer
+// sees it. A ChainDef is a reusable, ORDERED list of INLINE steps (not template
+// refs); instantiating one atomically creates a parent container + one child
+// task per step (server advance loop runs them). Steps carry NON-PHI field
+// STRUCTURE only (inputs/outputs mirror a task's data_keys/output_schema shape),
+// never values. Surfaced in the "New from Template" picker alongside single
+// templates; a ChainDef has no per-instantiation variables, so picking one
+// instantiates immediately. Mirrors electron/sources/typebuild.ts `ChainDef`.
+export type ChainDefField = {
+  key: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+};
+export type ChainDefStep = {
+  titleTemplate: string;
+  bodyTemplate?: string;
+  humanGate?: boolean;
+  inputs?: ChainDefField[];
+  outputs?: ChainDefField[];
+  neededWhen?: unknown;
+};
+export type ChainDef = {
+  id: string;
+  name: string;
+  steps: ChainDefStep[];
+  projectId: string | null;
+  groupId?: string | null;
+  createdBy?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
 // task-fd1be6f6b22d — a TypeBuild group member as the renderer sees it
 // (camelCase; mirrors electron/sources/typebuild.ts `GroupMember`). NON-PHI: a
 // user identity (email/principal + optional display name/role), not patient

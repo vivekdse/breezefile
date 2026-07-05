@@ -297,6 +297,24 @@
 .composer__option-label { flex: 0 0 auto; font-weight: 500; }
 .composer__option-hint { flex: 1 1 auto; font-size: 12px; color: var(--muted); }
 
+/* task-41e5fc25ed2b — "Chain" badge marking a ChainDef row in the from-template
+   picker (a multi-step workflow vs a single template). */
+.composer__badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.composer__badge--chain {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 .composer__or {
   font-size: 10px;
   color: var(--muted);

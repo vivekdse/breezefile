@@ -61,7 +61,7 @@ import {
   buildCronFromForm,
   defaultRecurrenceForm,
 } from '../recurrence';
-import type { Agent, GroupMember, Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
+import type { Agent, ChainDef, GroupMember, Project, Task, TaskCreate, TaskSourceInfo, TaskStatus, TaskUpdate } from '../types';
 // task-896f3f7f5e75 — pure agent display helpers (launch-mode caption for the
 // picker option hint). Shared with the detail panel + unit-tested in isolation.
 import { agentOptionHint } from './tasks/agent.mjs';
@@ -1701,6 +1701,11 @@ export function TaskComposer(props: Props) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
+  // task-41e5fc25ed2b (picker slice) — server-side ChainDefs are MERGED into the
+  // from-template picker alongside single templates. Fetched (NON-PHI) only in
+  // from-template mode; the chain BUILDER does not read this. A fetch miss
+  // degrades to [] (the picker just shows single templates) — never blocks it.
+  const [chains, setChains] = useState<ChainDef[]>([]);
   const templateListProjectId = projectId || initialProjectId || '';
   // task-a7214605a998 — the CHAIN builder is a picker over these SAME saved
   // templates, so load the list whenever the from-template picker OR the chain
@@ -1725,6 +1730,22 @@ export function TaskComposer(props: Props) {
         if (!cancelled) setTemplatesLoading(false);
       }
     })();
+    // task-41e5fc25ed2b — MERGE server ChainDefs into the picker. Only in
+    // from-template mode (the chain builder doesn't list chains). A chain fetch
+    // failure is NON-fatal: leave `chains` empty so single templates still show
+    // (never surface it as templatesError — that would hide the working list).
+    if (isFromTemplateMode) {
+      void (async () => {
+        try {
+          const rows = await fm.typebuild.chains.list(templateListProjectId || undefined);
+          if (cancelled) return;
+          setChains(Array.isArray(rows) ? rows : []);
+        } catch {
+          if (cancelled) return;
+          setChains([]);
+        }
+      })();
+    }
     return () => {
       cancelled = true;
     };
@@ -1746,14 +1767,41 @@ export function TaskComposer(props: Props) {
   const [templateEntry, setTemplateEntry] = useState<Template | null>(null);
   const [templateEditDetails, setTemplateEditDetails] = useState(false);
 
-  // Typeahead filter on the template NAME (same substring-match pattern the
-  // composer's other pickers use). Runs over the already-fetched list — no
-  // per-keystroke network.
+  // task-41e5fc25ed2b — one picker entry: either a single Template or a ChainDef.
+  type PickCandidate =
+    | { kind: 'single'; id: string; name: string; template: Template }
+    | { kind: 'chain'; id: string; name: string; chain: ChainDef };
+
+  // task-41e5fc25ed2b — the picker's candidate list is single templates AND
+  // server ChainDefs, merged into one discriminated shape (kind:'single' carries
+  // a Template; kind:'chain' carries a ChainDef). `id`/`name` are lifted to the
+  // top so the render + typeahead treat both kinds uniformly. Chains sort first
+  // (they're the "run a whole workflow" option). Selecting a chain instantiates
+  // immediately (no per-run variables); a single walks the title/values flow.
+  const templateCandidates = useMemo<PickCandidate[]>(() => {
+    const chainCands: PickCandidate[] = chains.map((c) => ({
+      kind: 'chain',
+      id: c.id,
+      name: c.name,
+      chain: c,
+    }));
+    const singleCands: PickCandidate[] = templates.map((t) => ({
+      kind: 'single',
+      id: t.id,
+      name: t.name,
+      template: t,
+    }));
+    return [...chainCands, ...singleCands];
+  }, [templates, chains]);
+
+  // Typeahead filter on the candidate NAME (same substring-match pattern the
+  // composer's other pickers use). Runs over the already-fetched merged list —
+  // no per-keystroke network. Filters both kinds identically.
   const filteredTemplateCandidates = useMemo(() => {
     const q = templatePickQuery.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter((c) => c.name.toLowerCase().includes(q));
-  }, [templates, templatePickQuery]);
+    if (!q) return templateCandidates;
+    return templateCandidates.filter((c) => c.name.toLowerCase().includes(q));
+  }, [templateCandidates, templatePickQuery]);
 
   // copilot parity / row-shortcut: a pre-selected template id (props.templateTaskId)
   // skips straight past the picker into the title step.
@@ -1762,12 +1810,20 @@ export function TaskComposer(props: Props) {
     if (templateEntry) return;
     const preselectId = props.mode === 'create' ? props.templateTaskId : undefined;
     if (!preselectId) return;
-    const found = templates.find((c) => c.id === preselectId);
+    const found = templateCandidates.find((c) => c.id === preselectId);
     if (found) chooseTemplateEntry(found);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFromTemplateMode, templates, templateEntry]);
+  }, [isFromTemplateMode, templateCandidates, templateEntry]);
 
-  function chooseTemplateEntry(entry: Template) {
+  function chooseTemplateEntry(cand: PickCandidate) {
+    // task-41e5fc25ed2b — a ChainDef has NO per-instantiation variables, so
+    // picking one instantiates IMMEDIATELY (empty step_inputs) rather than
+    // walking the title/values flow; the single-template path is unchanged.
+    if (cand.kind === 'chain') {
+      void saveFromChain(cand.chain);
+      return;
+    }
+    const entry = cand.template;
     setTemplateEntry(entry);
     setTitle(entry.name);
     setTemplateFillActiveIdx(0);
@@ -1897,6 +1953,34 @@ export function TaskComposer(props: Props) {
       setBusy(false);
       instantiatingRef.current = false;
       return { ok: false, error: msg };
+    }
+  }
+
+  // task-41e5fc25ed2b — instantiate a picked ChainDef. POST
+  // /chromeext/chains/{id}/instantiate with EMPTY step_inputs (the picker slice
+  // supplies no per-step values): the SERVER atomically creates a parent
+  // container + one child task per step and runs its advance loop. Mirrors
+  // saveFromTemplate's success path exactly (flash the PARENT task id + refresh
+  // roster + exit) and reuses the same instantiatingRef double-create guard.
+  async function saveFromChain(chain: ChainDef): Promise<void> {
+    if (instantiatingRef.current) return;
+    instantiatingRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await fm.typebuild.chains.instantiate(chain.id);
+      const flashId = result.parentTaskId;
+      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = flashId;
+      (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
+      window.dispatchEvent(new CustomEvent('fm:taskFlash', { detail: { taskId: flashId } }));
+      setCreated(true);
+      props.onSaved?.();
+      setTimeout(() => exit(), 900);
+    } catch (e) {
+      const msg = humanizeError(e).message;
+      setError(msg);
+      setBusy(false);
+      instantiatingRef.current = false;
     }
   }
 
@@ -4037,7 +4121,7 @@ export function TaskComposer(props: Props) {
                   <div className="composer__error" role="alert" style={{ marginTop: 12 }}>
                     {templatesError}
                   </div>
-                ) : templates.length === 0 ? (
+                ) : templateCandidates.length === 0 ? (
                   <div className="composer__q-prompt" style={{ marginTop: 12 }}>
                     No templates yet — create a task with input fields and it's saved as a
                     template automatically.
@@ -4060,11 +4144,23 @@ export function TaskComposer(props: Props) {
                             chooseTemplateEntry(c);
                           }}
                         >
-                          <span className="composer__option-label">{c.name}</span>
+                          <span className="composer__option-label">
+                            {c.name}
+                            {/* task-41e5fc25ed2b — mark ChainDef rows so a
+                                multi-step workflow reads distinctly from a single
+                                template. */}
+                            {c.kind === 'chain' && (
+                              <span className="composer__badge composer__badge--chain">Chain</span>
+                            )}
+                          </span>
                           <span className="composer__option-hint">
-                            {c.variables.length === 1
-                              ? '1 field'
-                              : `${c.variables.length} fields`}
+                            {c.kind === 'chain'
+                              ? c.chain.steps.length === 1
+                                ? '1 step'
+                                : `${c.chain.steps.length} steps`
+                              : c.template.variables.length === 1
+                                ? '1 field'
+                                : `${c.template.variables.length} fields`}
                           </span>
                         </button>
                       </li>

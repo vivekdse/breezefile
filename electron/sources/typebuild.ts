@@ -522,6 +522,125 @@ export type Template = {
   notes?: string | null;
 };
 
+// ─── ChainDef (task-41e5fc25ed2b, picker slice) ───────────────────────────
+// A server-side Chain definition (GET/POST /chromeext/chains). A ChainDef is an
+// ORDERED list of INLINE steps (title/body templates + NON-PHI field schemas),
+// NOT template refs. Its `steps[].inputs/outputs` mirror a task's
+// data_keys/output_schema shape (key/label/type/required) — field STRUCTURE
+// only, never values. Instantiating one (POST /chromeext/chains/{id}/instantiate)
+// atomically creates a parent container + one child task per step. Surfaced in
+// the "New from Template" picker beside single templates. Mirrors `ChainDef` in
+// src/types.ts. `chain_meta` rendering / builder are OUT of scope here.
+type ChainDefFieldRow = {
+  key?: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+};
+type ChainDefStepRow = {
+  title_template?: string;
+  body_template?: string;
+  human_gate?: boolean;
+  inputs?: unknown;
+  outputs?: unknown;
+  needed_when?: unknown;
+};
+type ChainDefRow = {
+  id?: string;
+  name?: string;
+  steps?: unknown;
+  project_id?: string | null;
+  group_id?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+/** A TypeBuild ChainDef as the renderer sees it (camelCase). NON-PHI: step
+ *  title/body TEMPLATES + field STRUCTURE only (never values). Mirrors
+ *  `ChainDef` in src/types.ts. */
+export type ChainDef = {
+  id: string;
+  name: string;
+  steps: ChainDefStep[];
+  projectId: string | null;
+  groupId?: string | null;
+  createdBy?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+export type ChainDefStep = {
+  titleTemplate: string;
+  bodyTemplate?: string;
+  humanGate?: boolean;
+  inputs?: ChainDefField[];
+  outputs?: ChainDefField[];
+  neededWhen?: unknown;
+};
+export type ChainDefField = {
+  key: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+};
+
+// Normalize a raw step's field schema (inputs/outputs). Fail-soft: entries
+// without a string `key` are dropped rather than rejecting the whole chain
+// (same convention as mapOutputSchema).
+function mapChainFields(raw: unknown): ChainDefField[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ChainDefField[] = [];
+  for (const f of raw as ChainDefFieldRow[]) {
+    const key = f && typeof f.key === 'string' ? f.key : '';
+    if (!key) continue;
+    const field: ChainDefField = { key };
+    if (typeof f.label === 'string') field.label = f.label;
+    if (typeof f.type === 'string') field.type = f.type;
+    if (typeof f.required === 'boolean') field.required = f.required;
+    out.push(field);
+  }
+  return out;
+}
+
+function mapChainStep(raw: ChainDefStepRow | null | undefined): ChainDefStep | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const titleTemplate = typeof raw.title_template === 'string' ? raw.title_template : '';
+  if (!titleTemplate) return null;
+  const step: ChainDefStep = { titleTemplate };
+  if (typeof raw.body_template === 'string') step.bodyTemplate = raw.body_template;
+  if (typeof raw.human_gate === 'boolean') step.humanGate = raw.human_gate;
+  const inputs = mapChainFields(raw.inputs);
+  if (inputs) step.inputs = inputs;
+  const outputs = mapChainFields(raw.outputs);
+  if (outputs) step.outputs = outputs;
+  if (raw.needed_when != null) step.neededWhen = raw.needed_when;
+  return step;
+}
+
+// Map a raw server chain row → the camelCase client `ChainDef`. A row missing
+// an id (or with no usable steps) yields null (dropped) so a malformed entry
+// never reaches the picker. Malformed individual steps are dropped.
+function mapChainRow(raw: ChainDefRow | null | undefined): ChainDef | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = typeof raw.id === 'string' ? raw.id : '';
+  if (!id) return null;
+  const steps: ChainDefStep[] = [];
+  for (const s of Array.isArray(raw.steps) ? (raw.steps as ChainDefStepRow[]) : []) {
+    const step = mapChainStep(s);
+    if (step) steps.push(step);
+  }
+  return {
+    id,
+    name: typeof raw.name === 'string' ? raw.name : id,
+    steps,
+    projectId: raw.project_id ?? null,
+    groupId: raw.group_id ?? null,
+    createdBy: raw.created_by ?? null,
+    createdAt: raw.created_at ?? null,
+    updatedAt: raw.updated_at ?? null,
+  };
+}
+
 // ─── Status mapping ──────────────────────────────────────────────────────
 // Map the server's status into the local TaskStatus enum. `rawStatus` ALWAYS
 // carries the server's raw status so the UI badge shows failed/partial/blocked
@@ -1760,6 +1879,103 @@ export class TypeBuildTaskSource implements TaskSource {
     breezeHost().onTasksChanged();
     void this.refreshAndBroadcast();
     return { id, status: data.status ?? 'open' };
+  }
+
+  // ─── chains (task-41e5fc25ed2b, picker slice) ────────────────────────────
+  // The server-side ChainDef API (/chromeext/chains), surfaced in the "New from
+  // Template" picker beside single templates. Reuses this.request (same Bearer
+  // auth + JSON Accept as the template methods). List is NON-PHI (step
+  // title/body templates + field STRUCTURE). This slice adds list + create +
+  // instantiate ONLY — chain rendering/builder are deferred (task-41e5fc25ed2b).
+
+  // GET /chromeext/chains?project_id=<id> → { chains: [...] }. `projectId`
+  // optional (omit the param when absent → all visible chains). Malformed rows
+  // dropped by mapChainRow; a parse miss degrades to [] (picker shows only
+  // single templates) rather than a crash — same contract as listAgents.
+  async listChains(projectId?: string): Promise<ChainDef[]> {
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    const qs = params.toString();
+    const res = await this.request('GET', `/chromeext/chains${qs ? `?${qs}` : ''}`);
+    if (!res.ok) {
+      throw new Error(`typebuild: list chains failed (${res.status})`);
+    }
+    const data = (await res.json().catch(() => ({}))) as { chains?: ChainDefRow[] };
+    const rows = Array.isArray(data.chains) ? data.chains : [];
+    const out: ChainDef[] = [];
+    for (const r of rows) {
+      const c = mapChainRow(r);
+      if (c) out.push(c);
+    }
+    return out;
+  }
+
+  // POST /chromeext/chains { name, steps:[...], project_id? } → { ok, id, chain }.
+  // `steps` are INLINE step defs (title_template + optional body/human_gate/
+  // inputs/outputs/needed_when) in the SERVER's snake_case shape — the caller
+  // supplies them ready to send (this slice's backfill script + any future
+  // builder). Step field schemas are NON-PHI structure. Returns the created
+  // ChainDef (camelCase).
+  async createChain(chainDef: {
+    name: string;
+    steps: unknown[];
+    project_id?: string;
+    group_id?: string;
+  }): Promise<ChainDef> {
+    const res = await this.request('POST', '/chromeext/chains', chainDef);
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+      throw new Error(
+        `typebuild: create chain failed (${res.status})${
+          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
+        }`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as { chain?: ChainDefRow };
+    const chain = mapChainRow(data.chain);
+    if (!chain) throw new Error('typebuild: create chain returned no chain');
+    return chain;
+  }
+
+  // POST /chromeext/chains/{id}/instantiate { step_inputs? } → { ok,
+  // parent_task_id, task_ids }. The server ATOMICALLY creates a parent container
+  // + one child task per step (its advance loop runs them). `stepInputs` is an
+  // optional list aligned to steps ([{key:value},...]) — VALUES MAY be PHI, so
+  // they ride the encrypted request body only, never logged. A ChainDef has no
+  // per-instantiation variables in the picker slice, so callers pass nothing.
+  // On success we refresh + broadcast so the new tasks appear without waiting on
+  // the poll (same pattern as instantiateTemplate).
+  async instantiateChain(
+    chainId: string,
+    stepInputs?: Array<Record<string, string>>,
+  ): Promise<{ parentTaskId: string; taskIds: string[] }> {
+    const payload: Record<string, unknown> = {};
+    if (stepInputs && stepInputs.length) payload.step_inputs = stepInputs;
+    const res = await this.request(
+      'POST',
+      `/chromeext/chains/${encodeURIComponent(chainId)}/instantiate`,
+      payload,
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+      throw new Error(
+        `typebuild: instantiate chain failed (${res.status})${
+          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
+        }`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      parent_task_id?: string;
+      task_ids?: string[];
+    };
+    const parentTaskId = data.parent_task_id ?? '';
+    if (!parentTaskId) throw new Error('typebuild: instantiate chain returned no parent_task_id');
+    breezeHost().onTasksChanged();
+    void this.refreshAndBroadcast();
+    return {
+      parentTaskId,
+      taskIds: Array.isArray(data.task_ids) ? data.task_ids : [],
+    };
   }
 
   // GET /chromeext/projects/{id}(?effective=1). 404 (not found / not visible)
