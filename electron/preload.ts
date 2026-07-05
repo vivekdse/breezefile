@@ -560,6 +560,11 @@ const fm = {
   tasksList: (filter?: unknown) => ipcRenderer.invoke('tasks:list', filter),
   tasksGet: (id: string, source?: string) =>
     ipcRenderer.invoke('tasks:get', id, source),
+  // task-3abb663aba25 — cache-only peek for the renderer diff-apply path.
+  tasksPeek: (source: string, ids: string[], filter?: unknown) =>
+    ipcRenderer.invoke('tasks:peek', source, ids, filter),
+  // task-3abb663aba25 — per-project done/cancelled counts from the DB skeleton.
+  tasksTerminalCounts: () => ipcRenderer.invoke('tasks:terminalCounts'),
   tasksCreate: (input: unknown, source?: string) =>
     ipcRenderer.invoke('tasks:create', input, source),
   tasksUpdate: (id: string, patch: unknown, source?: string) =>

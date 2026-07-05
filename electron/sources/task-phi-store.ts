@@ -34,11 +34,27 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { resolveDbKey, keyPragmaLiteral, encryptionAvailable } from '../typebuild/db-key';
 import { principalTag } from '../typebuild/db-key-derive.mjs';
+// task-fe9e4c4cda44 — the shared DDL + column allow-list (also imported by the
+// on-disk no-plaintext-PHI test so store + test build byte-identical tables).
+// The SKELETON-vs-PHI two-store decision is documented in that module's header.
+import { PHI_TABLE_SQL, PHI_MIGRATION_COLUMNS } from './task-phi-schema.mjs';
 
-// The PHI projection we persist: id + the two PHI fields. Nothing else — the
-// routing skeleton is the skeleton store's job. `title` comes from the list
-// pull; `body` is the decrypted detail (mapped into SourcedTask.notes).
-export type PhiRow = { id: string; title: string | null; body: string | null };
+// The PHI projection we persist: id + the two PHI fields, PLUS the NON-PHI
+// sync-metadata (task-fe9e4c4cda44) carried on every row. `title` comes from the
+// list pull; `body` is the decrypted detail (mapped into SourcedTask.notes).
+// `serverUpdatedAt` is the server's ISO updated_at; `localUpdatedAt` is when we
+// last wrote locally; `syncState`/`origin` mark provenance (read path always
+// writes 'synced'/'server' — 'pending'/'local' belong to the out-of-scope
+// optimistic-write queue, task-a606864378cb).
+export type PhiRow = {
+  id: string;
+  title: string | null;
+  body: string | null;
+  serverUpdatedAt?: string | null;
+  localUpdatedAt?: number | null;
+  syncState?: string;
+  origin?: string;
+};
 
 // A single principal's open encrypted DB. We hold at most one open DB at a time
 // (the signed-in principal's). Switching principals closes the old one.
@@ -98,13 +114,25 @@ function removeDbFile(principal: string): void {
   }
 }
 
-const SCHEMA_SQL = `
-  CREATE TABLE IF NOT EXISTS task_phi (
-    id    TEXT PRIMARY KEY,
-    title TEXT,
-    body  TEXT
+const SCHEMA_SQL = PHI_TABLE_SQL;
+
+// task-fe9e4c4cda44 — additive migration for a pre-existing Phase-1 task_phi
+// (id/title/body only). Add any sync-metadata column the live table is missing;
+// a fresh DB already has them from PHI_TABLE_SQL, so this is a no-op there. Runs
+// inside the open() try/catch so a migration hiccup degrades to memory-only
+// rather than crashing sign-in.
+function migratePhi(db: InstanceType<typeof Database>): void {
+  const existing = new Set(
+    (db.prepare('PRAGMA table_info(task_phi)').all() as { name: string }[]).map(
+      (c) => c.name,
+    ),
   );
-`;
+  for (const col of PHI_MIGRATION_COLUMNS) {
+    if (!existing.has(col.name)) {
+      db.exec(`ALTER TABLE task_phi ADD COLUMN ${col.spec}`);
+    }
+  }
+}
 
 // ─── Open / key ──────────────────────────────────────────────────────────────
 
@@ -164,6 +192,9 @@ async function doOpen(
     // Touch the DB to force the key to be validated NOW (a wrong key throws
     // "file is not a database" here rather than at first query).
     db.exec(SCHEMA_SQL);
+    // task-fe9e4c4cda44 — bring a legacy (id/title/body-only) table up to the
+    // current sync-metadata schema before the first read/write.
+    migratePhi(db);
     db.prepare('SELECT count(*) FROM task_phi').get();
   } catch (e) {
     // Wrong key / corrupt / opened plaintext-by-mistake. Close and degrade to
@@ -187,14 +218,9 @@ async function doOpen(
   memoryFallback = null;
   if (pending && pending.size > 0) {
     try {
-      const stmt = db.prepare(
-        `INSERT INTO task_phi (id, title, body) VALUES (@id, @title, @body)
-         ON CONFLICT(id) DO UPDATE SET
-           title = COALESCE(excluded.title, task_phi.title),
-           body  = COALESCE(excluded.body,  task_phi.body)`,
-      );
+      const stmt = db.prepare(PHI_UPSERT_SQL);
       const txn = db.transaction((rows: PhiRow[]) => {
-        for (const r of rows) stmt.run({ id: r.id, title: r.title, body: r.body });
+        for (const r of rows) stmt.run(upsertParams(r));
       });
       txn([...pending.values()]);
     } catch (e) {
@@ -203,6 +229,40 @@ async function doOpen(
   }
   return db;
 }
+
+// task-fe9e4c4cda44 — ONE upsert used by every writer + the fallback flush, so
+// the title/body COALESCE-preserve semantics and the sync-metadata stamping can
+// never drift between paths. title/body are COALESCE'd (a title-only write never
+// wipes a stored body and vice-versa); the sync-metadata is refreshed on EVERY
+// write (server_updated_at keeps its last-known value when the writer doesn't
+// carry one; local_updated_at/sync_state/origin always take the incoming value).
+const PHI_UPSERT_SQL = `
+  INSERT INTO task_phi (id, title, body, server_updated_at, local_updated_at, sync_state, origin)
+  VALUES (@id, @title, @body, @server_updated_at, @local_updated_at, @sync_state, @origin)
+  ON CONFLICT(id) DO UPDATE SET
+    title = COALESCE(excluded.title, task_phi.title),
+    body  = COALESCE(excluded.body,  task_phi.body),
+    server_updated_at = COALESCE(excluded.server_updated_at, task_phi.server_updated_at),
+    local_updated_at  = excluded.local_updated_at,
+    sync_state = excluded.sync_state,
+    origin = excluded.origin
+`;
+
+function upsertParams(r: PhiRow): Record<string, unknown> {
+  return {
+    id: r.id,
+    title: r.title ?? null,
+    body: r.body ?? null,
+    server_updated_at: r.serverUpdatedAt ?? null,
+    local_updated_at: r.localUpdatedAt ?? Date.now(),
+    sync_state: r.syncState ?? 'synced',
+    origin: r.origin ?? 'server',
+  };
+}
+
+// Columns loadPhi/getPhi read back (round-trips the sync-metadata too).
+const PHI_SELECT_COLS =
+  'id, title, body, server_updated_at AS serverUpdatedAt, local_updated_at AS localUpdatedAt, sync_state AS syncState, origin';
 
 function closeCurrent(): void {
   if (!current) return;
@@ -229,7 +289,7 @@ export async function openForPrincipal(principal: string): Promise<void> {
 export function loadPhi(): PhiRow[] {
   if (current) {
     const rows = current.db
-      .prepare('SELECT id, title, body FROM task_phi')
+      .prepare(`SELECT ${PHI_SELECT_COLS} FROM task_phi`)
       .all() as PhiRow[];
     return rows;
   }
@@ -237,12 +297,12 @@ export function loadPhi(): PhiRow[] {
   return [];
 }
 
-/** Look up one row's PHI (title/body), or null. */
+/** Look up one row's PHI (title/body + sync-metadata), or null. */
 export function getPhi(id: string): PhiRow | null {
   if (current) {
     return (
       (current.db
-        .prepare('SELECT id, title, body FROM task_phi WHERE id = ?')
+        .prepare(`SELECT ${PHI_SELECT_COLS} FROM task_phi WHERE id = ?`)
         .get(id) as PhiRow | undefined) ?? null
     );
   }
@@ -254,56 +314,90 @@ export function getPhi(id: string): PhiRow | null {
  *  a null/empty title so we never overwrite a known title with a placeholder.
  *  When the DB isn't open yet, writes to the fallback map so a write that races
  *  open() is NOT lost (open() flushes the fallback into the DB on success). */
-export function putTitle(id: string, title: string | null): void {
+export function putTitle(
+  id: string,
+  title: string | null,
+  serverUpdatedAt?: string | null,
+): void {
   if (title == null) return;
+  const row: PhiRow = {
+    id,
+    title,
+    body: null,
+    serverUpdatedAt: serverUpdatedAt ?? null,
+    localUpdatedAt: Date.now(),
+    syncState: 'synced',
+    origin: 'server',
+  };
   if (current) {
-    current.db
-      .prepare(
-        `INSERT INTO task_phi (id, title, body) VALUES (?, ?, NULL)
-         ON CONFLICT(id) DO UPDATE SET title = excluded.title`,
-      )
-      .run(id, title);
+    current.db.prepare(PHI_UPSERT_SQL).run(upsertParams(row));
     return;
   }
   const fb = ensureFallback();
   const prev = fb.get(id);
-  fb.set(id, { id, title, body: prev?.body ?? null });
+  // Preserve any body collected in the fallback while carrying the fresh meta.
+  fb.set(id, { ...row, body: prev?.body ?? null });
 }
 
-/** Upsert many titles in one transaction (a full list pull). */
-export function putTitles(rows: Array<{ id: string; title: string | null }>): void {
+/** Upsert many titles in one transaction (a full list pull). Each row may carry
+ *  the server's ISO `serverUpdatedAt` (non-PHI) so the persisted sync-metadata
+ *  reflects the server's last-touch time. */
+export function putTitles(
+  rows: Array<{ id: string; title: string | null; serverUpdatedAt?: string | null }>,
+): void {
   if (current) {
-    const stmt = current.db.prepare(
-      `INSERT INTO task_phi (id, title, body) VALUES (@id, @title, NULL)
-       ON CONFLICT(id) DO UPDATE SET title = excluded.title`,
+    const stmt = current.db.prepare(PHI_UPSERT_SQL);
+    const now = Date.now();
+    const txn = current.db.transaction(
+      (rs: Array<{ id: string; title: string | null; serverUpdatedAt?: string | null }>) => {
+        for (const r of rs) {
+          if (r.title == null) continue;
+          stmt.run(
+            upsertParams({
+              id: r.id,
+              title: r.title,
+              body: null,
+              serverUpdatedAt: r.serverUpdatedAt ?? null,
+              localUpdatedAt: now,
+              syncState: 'synced',
+              origin: 'server',
+            }),
+          );
+        }
+      },
     );
-    const txn = current.db.transaction((rs: Array<{ id: string; title: string | null }>) => {
-      for (const r of rs) if (r.title != null) stmt.run({ id: r.id, title: r.title });
-    });
     txn(rows);
     return;
   }
-  for (const r of rows) putTitle(r.id, r.title);
+  for (const r of rows) putTitle(r.id, r.title, r.serverUpdatedAt);
 }
 
 /** Upsert a task's body (from a getTask detail pull). Leaves title untouched.
  *  No-ops for a null body so a note-less detail fetch never WIPES a previously
  *  persisted good body (a getTask on a task whose detail carries no notes would
  *  otherwise overwrite the stored body with NULL). */
-export function putBody(id: string, body: string | null): void {
+export function putBody(
+  id: string,
+  body: string | null,
+  serverUpdatedAt?: string | null,
+): void {
   if (body == null) return;
+  const row: PhiRow = {
+    id,
+    title: null,
+    body,
+    serverUpdatedAt: serverUpdatedAt ?? null,
+    localUpdatedAt: Date.now(),
+    syncState: 'synced',
+    origin: 'server',
+  };
   if (current) {
-    current.db
-      .prepare(
-        `INSERT INTO task_phi (id, title, body) VALUES (?, NULL, ?)
-         ON CONFLICT(id) DO UPDATE SET body = excluded.body`,
-      )
-      .run(id, body);
+    current.db.prepare(PHI_UPSERT_SQL).run(upsertParams(row));
     return;
   }
   const fb = ensureFallback();
   const prev = fb.get(id);
-  fb.set(id, { id, title: prev?.title ?? null, body });
+  fb.set(id, { ...row, title: prev?.title ?? null });
 }
 
 /** Remove PHI rows no longer present in the FULL live set — used ONLY on the

@@ -518,6 +518,37 @@ export function patchSkeleton(id: string, patch: Partial<SkeletonTask>): void {
   });
 }
 
+// ─── Terminal counts (task-3abb663aba25) ────────────────────────────────────
+// Per-project DONE/CANCELLED tallies computed from the NON-PHI skeleton so Home
+// can show exact rolled-up counts WITHOUT the renderer materializing the whole
+// done archive (it fetches only the live working set). Reads opaque routing
+// columns only (project_id + status) — no title/body ever involved. Live rows
+// only (tombstone = 0); rows with no project are omitted (they roll up to no
+// project). Returns { [projectId]: { done, cancelled } }.
+export function terminalCountsByProject(): Record<
+  string,
+  { done: number; cancelled: number }
+> {
+  const d = open();
+  const rows = d
+    .prepare(
+      `SELECT project_id AS pid, status, COUNT(*) AS c
+         FROM task_skeleton
+        WHERE tombstone = 0
+          AND status IN ('done', 'cancelled')
+          AND project_id IS NOT NULL
+        GROUP BY project_id, status`,
+    )
+    .all() as { pid: string; status: string; c: number }[];
+  const out: Record<string, { done: number; cancelled: number }> = {};
+  for (const r of rows) {
+    const bucket = (out[r.pid] ??= { done: 0, cancelled: 0 });
+    if (r.status === 'done') bucket.done += r.c;
+    else if (r.status === 'cancelled') bucket.cancelled += r.c;
+  }
+  return out;
+}
+
 // ─── Projects skeleton ─────────────────────────────────────────────────────
 // Projects are NON-PHI; we cache id + name + archived so cold start renders
 // names instantly. The full detail (instructions) stays a per-call fetch.

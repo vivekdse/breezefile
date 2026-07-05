@@ -5,6 +5,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { fm } from './bridge';
 import { humanizeError } from './errorMessages';
+// task-3abb663aba25 — pure diff-apply for the local mirror (unit-tested in
+// tests/tasks-mirror.test.mjs). Lets a tasks:changed diff update just the
+// affected rows instead of re-pulling the whole list.
+import { mergeTaskMirror, computeRemovedIds } from './tasksMirror.mjs';
 import type { RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 
 // ─── optimistic pending-patch overlay (fm-kmhq, Phase A3) ──────────────────
@@ -117,41 +121,75 @@ export function useTasks(filter: TaskFilter = {}): {
       }
     };
     load();
-    // task-b3fb2928bb3c (Phase 1) — diff-aware change handler. When the
-    // broadcast carries a PHI-free diff ({ added, changed, removed } — opaque
-    // ids only) AND nothing was added or changed, we PRUNE the removed ids from
-    // the held list in place instead of re-serializing the WHOLE list over IPC.
-    // Any added/changed id (or a legacy payload-free broadcast) falls back to a
-    // full re-pull, so correctness never depends on the diff. This is what
-    // keeps a 30s poll that only removed a finished task from re-pulling the
-    // entire inventory across the IPC boundary.
-    const onChanged = (detail?: {
+    // task-3abb663aba25 — FULL diff-apply change handler. When the broadcast
+    // carries a PHI-free diff ({ source, added, changed, removed } — opaque ids
+    // only), apply it against the local mirror instead of re-pulling + re-
+    // serializing the WHOLE list over IPC on every change:
+    //   • no-op diff                → do nothing;
+    //   • removed only              → prune those ids from the mirror in place;
+    //   • added/changed present     → PEEK just those rows from the source's
+    //     in-memory cache (fm.tasksPeek — no network) and fold them in; any
+    //     requested id the peek doesn't return (left the cache OR no longer
+    //     matches this slice's filter) is removed from the mirror.
+    // Correctness never depends on the diff: a legacy payload-free broadcast, a
+    // filter the cache-side peek can't faithfully reproduce, or any peek error
+    // all fall back to a full re-pull.
+    //
+    // The peek honors only the filter dimensions the source's applyFilter
+    // reproduces (status/includeDone/search). Filters with claimedByMe/activeOnly
+    // (server- or renderer-side semantics the cache peek can't replicate) take the
+    // full-re-pull path so a diff-apply can never desync a specialized slice.
+    const peekableFilter = (f: TaskFilter): boolean =>
+      !f.claimedByMe && !f.activeOnly && !f.folder && f.pinned == null;
+    const onChanged = async (detail?: {
+      source: string;
       added: string[];
       changed: string[];
       removed: string[];
     }) => {
-      if (
-        detail &&
-        detail.added.length === 0 &&
-        detail.changed.length === 0 &&
-        detail.removed.length > 0
-      ) {
-        const gone = new Set(detail.removed);
+      if (!detail) {
+        void load();
+        return;
+      }
+      const { added, changed, removed } = detail;
+      if (added.length === 0 && changed.length === 0 && removed.length === 0) {
+        return; // nothing moved
+      }
+      const requested = [...added, ...changed];
+      // Pure removal-only diff, or a filter we can't peek faithfully → keep the
+      // cheap in-place prune / full re-pull respectively.
+      if (requested.length === 0) {
+        const gone = new Set(removed);
         const pruned = lastListRef.current.filter((t) => !gone.has(t.id));
         lastListRef.current = pruned;
         if (!cancelled) setTasks(applyPendingPatches(pruned));
         return;
       }
-      // No-op diff (nothing moved for any source) → skip the re-pull entirely.
-      if (
-        detail &&
-        detail.added.length === 0 &&
-        detail.changed.length === 0 &&
-        detail.removed.length === 0
-      ) {
+      if (!peekableFilter(filterRef.current)) {
+        void load();
         return;
       }
-      void load();
+      try {
+        const peeked = await fm.tasksPeek(
+          detail.source,
+          requested,
+          filterRef.current,
+        );
+        if (cancelled) return;
+        if (peeked == null) {
+          // Source can't peek (no in-memory cache) → full re-pull.
+          void load();
+          return;
+        }
+        const returnedIds = peeked.map((t) => t.id);
+        const removedIds = computeRemovedIds(requested, returnedIds, removed);
+        const merged = mergeTaskMirror(lastListRef.current, peeked, removedIds);
+        lastListRef.current = merged;
+        setTasks(applyPendingPatches(merged));
+      } catch {
+        // Any peek failure must not strand the UI on stale data.
+        if (!cancelled) void load();
+      }
     };
     const unsub = fm.onTasksChanged(onChanged);
     // Re-apply the overlay when a fresh patch is recorded (no re-fetch yet).
@@ -176,6 +214,39 @@ export function useTasks(filter: TaskFilter = {}): {
       setTasks(applyPendingPatches(list));
     },
   };
+}
+
+// task-3abb663aba25 — per-project DONE/CANCELLED counts from the DB skeleton.
+// Home feeds these into rollUpTaskStats' terminal overlay so the grid shows exact
+// rolled-up counts while the renderer only materializes the LIVE working set
+// (useTasks({ includeDone:false })) — the done archive never crosses IPC as rows.
+// Re-pulls on tasks:changed (a completed/deleted task shifts a terminal count)
+// so the badges stay fresh. Starts empty; failures keep the last-known map.
+export function useProjectTerminalCounts(): Record<
+  string,
+  { done: number; cancelled: number }
+> {
+  const [counts, setCounts] = useState<
+    Record<string, { done: number; cancelled: number }>
+  >({});
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const c = await fm.tasksTerminalCounts();
+        if (!cancelled) setCounts(c);
+      } catch {
+        /* keep the last-known counts */
+      }
+    };
+    void load();
+    const unsub = fm.onTasksChanged(() => void load());
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+  return counts;
 }
 
 // breezed P4 — `source` ('local' | <host>) routes the mutation to the

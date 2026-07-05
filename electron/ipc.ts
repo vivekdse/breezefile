@@ -45,6 +45,9 @@ import {
 } from './sources/registry';
 import { unsupported } from './core/task-source';
 import type { TypeBuildTaskSource } from './sources/typebuild';
+// task-3abb663aba25 — DB-skeleton terminal (done/cancelled) counts so Home rolls
+// up exact numbers without materializing the done archive in the renderer.
+import { terminalCountsByProject } from './sources/task-skeleton-store';
 import { registerTagStoreIpc } from './tag-store';
 import { registerLlmIpc } from './llm';
 import {
@@ -3055,6 +3058,44 @@ end tell`;
     if (!source) throw new Error(NO_SOURCE);
     return remoteRequest(source, 'GET', `/tasks/${encodeURIComponent(id)}`);
   });
+  // task-3abb663aba25 — cache-only peek used by the renderer's diff-apply path.
+  // Returns the rows for `ids` that match `filter` from the source's in-memory
+  // cache (no network) so useTasks can update just the changed rows instead of
+  // re-pulling the whole list. Returns null when the source can't peek (no
+  // in-memory cache) so the renderer falls back to a full re-pull. Rows are
+  // tagged with the source id, like tasks:list.
+  ipcMain.handle(
+    'tasks:peek',
+    async (
+      _e,
+      source: string,
+      ids: string[],
+      filter?: TaskFilter,
+    ): Promise<Array<Record<string, unknown>> | null> => {
+      const src = getTaskSource(source);
+      if (!src || typeof src.peekTasks !== 'function') return null;
+      const rows = await src.peekTasks(
+        Array.isArray(ids) ? ids : [],
+        filter ?? {},
+      );
+      return rows.map((t) => ({ ...t, source }));
+    },
+  );
+  // task-3abb663aba25 — per-project DONE/CANCELLED counts from the NON-PHI DB
+  // skeleton. Lets Home show exact rolled-up terminal counts without pulling the
+  // whole done archive into the renderer. Best-effort: any failure (locked/absent
+  // db) returns {} so the grid just shows live-only counts rather than erroring.
+  ipcMain.handle(
+    'tasks:terminalCounts',
+    (): Record<string, { done: number; cancelled: number }> => {
+      try {
+        return terminalCountsByProject();
+      } catch (e) {
+        console.warn('[tasks:terminalCounts]', (e as Error).message);
+        return {};
+      }
+    },
+  );
   // Auto-by-folder routing: if the caller didn't pin a source and the
   // task's folder lives under a *connected* host's sshfs mount, the
   // task belongs to that machine — create it on its daemon with the

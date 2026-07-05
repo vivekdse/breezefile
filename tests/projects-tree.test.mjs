@@ -167,6 +167,47 @@ test('rollUpTaskStats: own vs rolled (children sum into parents)', () => {
   assert.equal(aetna.rolled.total, 2); // leaf: own === rolled
 });
 
+test('rollUpTaskStats: terminal overlay folds DB done/cancelled counts + rolls up', () => {
+  // task-3abb663aba25 — Home fetches only the LIVE working set (no done tasks);
+  // the terminal counts come from the DB skeleton as an overlay. The overlay must
+  // add to own.done/cancelled/total and roll up into ancestors exactly like a row.
+  const roots = buildProjectTree([
+    proj({ id: 'ins', name: 'Insurance' }),
+    proj({ id: 'aetna', name: 'Aetna', parentProjectId: 'ins' }),
+  ]);
+  const liveTasks = [
+    task({ projectId: 'ins', status: 'pending' }), // 1 live open on ins
+    task({ projectId: 'aetna', status: 'in_progress' }), // 1 live in_progress on aetna
+  ];
+  const terminal = {
+    ins: { done: 2, cancelled: 1 },
+    aetna: { done: 5 },
+  };
+  const stats = rollUpTaskStats(roots, liveTasks, terminal);
+
+  const ins = stats.get('ins');
+  assert.equal(ins.own.done, 2);
+  assert.equal(ins.own.cancelled, 1);
+  assert.equal(ins.own.open, 1);
+  assert.equal(ins.own.total, 4); // 1 live + 2 done + 1 cancelled
+  // rolled: own(4) + aetna own(1 live + 5 done = 6) = 10
+  assert.equal(ins.rolled.total, 10);
+  assert.equal(ins.rolled.done, 7); // 2 + 5
+  assert.equal(ins.rolled.cancelled, 1);
+
+  const aetna = stats.get('aetna');
+  assert.equal(aetna.own.done, 5);
+  assert.equal(aetna.own.total, 6);
+});
+
+test('rollUpTaskStats: omitting the terminal overlay is unchanged (back-compat)', () => {
+  const roots = buildProjectTree([proj({ id: 'p', name: 'P' })]);
+  const tasks = [task({ projectId: 'p', status: 'done' })];
+  const s = rollUpTaskStats(roots, tasks).get('p');
+  assert.equal(s.own.done, 1);
+  assert.equal(s.own.total, 1);
+});
+
 test('rollUpTaskStats: needsYou counts open + blocked, not in_progress/done', () => {
   const roots = buildProjectTree([proj({ id: 'p', name: 'P' })]);
   const tasks = [

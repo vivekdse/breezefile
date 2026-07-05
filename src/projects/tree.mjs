@@ -230,7 +230,7 @@ function addStats(into, from) {
  * @param {Task[]} tasks
  * @returns {Map<string, { own: TaskStats, rolled: TaskStats }>}
  */
-export function rollUpTaskStats(roots, tasks) {
+export function rollUpTaskStats(roots, tasks, terminalByProject) {
   const index = indexTree(roots);
   /** @type {Map<string, { own: TaskStats, rolled: TaskStats }>} */
   const stats = new Map();
@@ -245,6 +245,29 @@ export function rollUpTaskStats(roots, tasks) {
     const entry = stats.get(pid);
     if (!entry) continue; // task points at a project not in this forest
     tallyTask(entry.own, t);
+  }
+
+  // task-3abb663aba25 — TERMINAL-count overlay. Home no longer materializes the
+  // whole done/cancelled archive in the renderer (it fetches only the live
+  // working set — includeDone:false). The terminal counts instead come from the
+  // DB skeleton (all statuses, opaque routing only) as a per-project
+  // { done, cancelled } map and are folded into `own` here so the rolled-up
+  // badges stay exact as history grows, WITHOUT pulling every done task across
+  // IPC. Absent (undefined) → behaves exactly as before (tasks carry terminals).
+  if (terminalByProject) {
+    const entries =
+      terminalByProject instanceof Map
+        ? terminalByProject.entries()
+        : Object.entries(terminalByProject);
+    for (const [pid, counts] of entries) {
+      const entry = stats.get(pid);
+      if (!entry || !counts) continue;
+      const done = Number(counts.done) || 0;
+      const cancelled = Number(counts.cancelled) || 0;
+      entry.own.done += done;
+      entry.own.cancelled += cancelled;
+      entry.own.total += done + cancelled;
+    }
   }
 
   // 2. Roll up: post-order so children are summed before parents. Seed each

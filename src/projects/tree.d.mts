@@ -35,8 +35,16 @@ export function ancestorChain(roots: ProjectNode[], projectId: string): Project[
 /** Human breadcrumb path, e.g. "Insurance Authorization › Aetna HMO". */
 export function breadcrumbPath(roots: ProjectNode[], projectId: string, sep?: string): string;
 
-/** Per-project own + rolled-up (own + descendants) task stats. */
+/** task-3abb663aba25 — per-project terminal (done/cancelled) counts sourced from
+ *  the DB skeleton, folded into the roll-up so Home need not materialize the done
+ *  archive in the renderer. Keyed by project id. */
+export type TerminalCounts = Record<string, { done?: number; cancelled?: number }>;
+
+/** Per-project own + rolled-up (own + descendants) task stats. `terminalByProject`
+ *  is an OPTIONAL overlay of done/cancelled counts (from the DB skeleton) folded
+ *  into each project's own stats; omit it when `tasks` already carries terminals. */
 export function rollUpTaskStats(
   roots: ProjectNode[],
   tasks: Task[],
+  terminalByProject?: TerminalCounts | Map<string, { done?: number; cancelled?: number }>,
 ): Map<string, { own: TaskStats; rolled: TaskStats }>;

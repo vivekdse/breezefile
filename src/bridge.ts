@@ -290,6 +290,20 @@ type Fm = {
   // fm-dhc — task store
   tasksList: (filter?: TaskFilter) => Promise<Task[]>;
   tasksGet: (id: string, source?: string) => Promise<Task | null>;
+  /** task-3abb663aba25 — cache-only peek: rows for `ids` matching `filter` from
+   *  the source's in-memory cache (no network). Returns null when the source
+   *  can't peek, so the caller falls back to a full re-pull. */
+  tasksPeek: (
+    source: string,
+    ids: string[],
+    filter?: TaskFilter,
+  ) => Promise<Task[] | null>;
+  /** task-3abb663aba25 — per-project { done, cancelled } counts from the DB
+   *  skeleton, so Home rolls up exact terminal counts without materializing the
+   *  done archive in the renderer. */
+  tasksTerminalCounts: () => Promise<
+    Record<string, { done: number; cancelled: number }>
+  >;
   tasksCreate: (input: TaskCreate, source?: string) => Promise<Task>;
   tasksUpdate: (id: string, patch: TaskUpdate, source?: string) => Promise<Task>;
   tasksDelete: (id: string, source?: string) => Promise<void>;

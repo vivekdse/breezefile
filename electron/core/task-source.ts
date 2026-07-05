@@ -123,6 +123,19 @@ export interface TaskSource {
   listTasks(filter: TaskFilter): Promise<SourcedTask[]> | SourcedTask[];
   getTask(id: string): Promise<SourcedTask | null> | SourcedTask | null;
 
+  /** task-3abb663aba25 — return the rows for `ids` that currently match
+   *  `filter`, read from the source's IN-MEMORY cache ONLY (no network, no
+   *  disk). Used by the renderer's diff-apply path so a `tasks:changed` diff can
+   *  update just the affected rows without re-pulling + re-serializing the whole
+   *  list. Rows returned carry PHI (title/body) in memory, same as listTasks —
+   *  it's an IPC reply to the renderer, never persisted or logged. Optional:
+   *  sources without an in-memory cache omit it and the renderer falls back to a
+   *  full re-pull. */
+  peekTasks?(
+    ids: string[],
+    filter: TaskFilter,
+  ): Promise<SourcedTask[]> | SourcedTask[];
+
   /** Mutations may throw an Error('unsupported') when the matching
    *  capability is off. */
   createTask(input: TaskCreate): Promise<SourcedTask> | SourcedTask;

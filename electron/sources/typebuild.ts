@@ -1126,7 +1126,13 @@ export class TypeBuildTaskSource implements TaskSource {
     // the opaque id). Encrypted at rest; a no-op when the store is memory-only.
     // Prune PHI for ids no longer live so task text for gone tasks doesn't linger.
     try {
-      putPhiTitles([...fresh.values()].map((t) => ({ id: t.id, title: t.title })));
+      putPhiTitles(
+        [...fresh.values()].map((t) => ({
+          id: t.id,
+          title: t.title,
+          serverUpdatedAt: t.updatedAtIso ?? null,
+        })),
+      );
       prunePhi(new Set(fresh.keys()));
     } catch (e) {
       console.warn('[typebuild] PHI title persist failed:', (e as Error).message);
@@ -1175,7 +1181,13 @@ export class TypeBuildTaskSource implements TaskSource {
     // still-valid PHI). Deletes converge via these tombstones + the periodic full
     // reconcile's pruneTo. Encrypted at rest; a no-op when memory-only.
     try {
-      putPhiTitles(changed.map((t) => ({ id: t.id, title: t.title })));
+      putPhiTitles(
+        changed.map((t) => ({
+          id: t.id,
+          title: t.title,
+          serverUpdatedAt: t.updatedAtIso ?? null,
+        })),
+      );
       prunePhiIds(tombstones);
     } catch (e) {
       console.warn('[typebuild] PHI delta persist failed:', (e as Error).message);
@@ -1301,6 +1313,22 @@ export class TypeBuildTaskSource implements TaskSource {
     return out;
   }
 
+  // task-3abb663aba25 — cache-only peek for the renderer's diff-apply path. Given
+  // the ids the tasks:changed diff flagged (added ∪ changed), return the ones that
+  // still match `filter` FROM THE IN-MEMORY CACHE — no network, no disk. The
+  // renderer folds these into its mirror (and removes any requested id we DON'T
+  // return, because it either left the cache or no longer matches the filter),
+  // avoiding a whole-list re-pull. PHI (titles) ride the returned rows in memory
+  // exactly like listTasks; nothing is persisted or logged here.
+  peekTasks(ids: string[], filter: TaskFilter): SourcedTask[] {
+    const rows: SourcedTask[] = [];
+    for (const id of ids) {
+      const row = this.cache.get(id);
+      if (row) rows.push(row);
+    }
+    return this.applyFilter(rows, filter);
+  }
+
   // ─── get (decrypted detail) ─────────────────────────────────────────────
   async getTask(id: string): Promise<SourcedTask | null> {
     const res = await this.request(
@@ -1317,7 +1345,7 @@ export class TypeBuildTaskSource implements TaskSource {
     // (see its PHI note), and it never opens the PHI store, so this stays here.
     // Encrypted at rest; a no-op when the store is memory-only.
     try {
-      putPhiBody(id, mapped.notes ?? null);
+      putPhiBody(id, mapped.notes ?? null, mapped.updatedAtIso ?? null);
     } catch (e) {
       console.warn('[typebuild] PHI body persist failed:', (e as Error).message);
     }
