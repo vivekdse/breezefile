@@ -867,7 +867,11 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
       const prev = detail;
       setDetails((m) => {
         const next = new Map(m);
-        next.set(childId, { notes: newBody, result: detail.result });
+        // task-6b1136a8ff77 — carry `outputSchema` through the optimistic set;
+        // dropping it here would blank out a fielded resolution the instant a
+        // sibling input is saved (harmless today since children never resolve
+        // fielded, but a latent inconsistency with the real detail shape).
+        next.set(childId, { notes: newBody, result: detail.result, outputSchema: detail.outputSchema });
         return next;
       });
       try {
