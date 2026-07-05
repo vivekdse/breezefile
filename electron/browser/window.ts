@@ -122,7 +122,7 @@ export function getOperatorViewId(): number | null {
  *  that PTY's terminal; without it the window is just the browser pane (the
  *  HTTP `open-browser` verb). Reuse does NOT renavigate — the agent drives
  *  navigation via the helper's `goto`. */
-export function openBrowserWindow(url?: string, ptyId?: number): void {
+export function openBrowserWindow(url?: string, ptyId?: number, launching?: boolean): void {
   // Resolve the requested url through the single chokepoint: empty/missing OR a
   // stale example.com placeholder both become the themed splash (in the current
   // splashTheme) rather than overriding it — example.com must never load on task
@@ -223,7 +223,7 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
   // The whole window is the operator React chrome. It renders a left
   // BrowserSurface bound to the view id above (measuring its placeholder +
   // streaming bounds over `browser:bounds`) and a right terminal pane.
-  loadOperatorChrome(win, ptyId, operatorViewId);
+  loadOperatorChrome(win, ptyId, operatorViewId, launching);
 
   fillScreen(win);
 }
@@ -259,9 +259,11 @@ export function openSessionStartingSplash(): void {
   }
   // No operator window yet — pop it NOW showing the splash, with NO terminal
   // pane (ptyId omitted) until the real pty attaches via the later
-  // openBrowserWindow(undefined, ptyId).
+  // openBrowserWindow(undefined, ptyId). `launching` makes the right pane read
+  // "Starting session…" for the whole wait instead of "No agent session"
+  // (task-7ba4409eeb5c).
   pendingUrl = fresh;
-  openBrowserWindow();
+  openBrowserWindow(undefined, undefined, true);
 }
 
 // task-1b3eeb1aae1f — tear the optimistic session-starting splash back down when
@@ -281,9 +283,19 @@ export function closeSessionStartingSplash(): void {
 // hash that pins which PTY the right pane mirrors and which shared browser view
 // the left pane drives. Reused on a fresh Start to re-point an already-open
 // window at the new session while keeping the same browser view.
-function loadOperatorChrome(win: BrowserWindow, ptyId?: number, viewId?: number | null): void {
+function loadOperatorChrome(
+  win: BrowserWindow,
+  ptyId?: number,
+  viewId?: number | null,
+  launching?: boolean,
+): void {
   let hash = ptyId != null ? `operator=${ptyId}` : 'operator';
   if (viewId != null) hash += `&view=${viewId}`;
+  // task-7ba4409eeb5c — mark an OPTIMISTIC-launch open (window up, pty not yet
+  // spawned) so the right pane shows "Starting session…" instead of "No agent
+  // session." Only set on the starting-splash path; a real pty attach reloads
+  // WITHOUT it (ptyId present), and the plain open-browser verb never sets it.
+  if (launching && ptyId == null) hash += '&launching=1';
   if (VITE_DEV_SERVER_URL) {
     void win.webContents.loadURL(`${VITE_DEV_SERVER_URL}#${hash}`);
   } else {

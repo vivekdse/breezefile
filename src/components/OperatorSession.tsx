@@ -87,9 +87,14 @@ function writeGeom(g: Geom): void {
 export function OperatorSession({
   ptyId,
   viewId,
+  launching = false,
 }: {
   ptyId: number | null;
   viewId: number | null;
+  // task-7ba4409eeb5c — true while the session is still starting (window opened
+  // optimistically, pty not yet spawned). Drives the "Starting session…" pane
+  // so a healthy launch doesn't read as "No agent session."
+  launching?: boolean;
 }) {
   const initial = useRef(readGeom());
   // The user's chosen UI theme. We report it to main so the "task starting"
@@ -352,6 +357,18 @@ export function OperatorSession({
             )}
           {ptyId != null ? (
             <Terminal ptyId={ptyId} cwd="" isActive />
+          ) : launching ? (
+            // task-7ba4409eeb5c — the window opened optimistically (task-
+            // 1b3eeb1aae1f); the pty is still spawning. Show a live "starting"
+            // state for the whole wait so a healthy launch never reads as a
+            // failed / empty session.
+            <div className="operator__starting" role="status" aria-live="polite">
+              <span className="operator__starting-spinner" aria-hidden="true" />
+              <span className="operator__starting-label">Starting session…</span>
+              <span className="operator__starting-sub">
+                Connecting to the agent — this can take a moment.
+              </span>
+            </div>
           ) : (
             <div className="operator__no-pty">No agent session.</div>
           )}
