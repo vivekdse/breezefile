@@ -3292,14 +3292,23 @@ export class TypeBuildTaskSource implements TaskSource {
     // closes the splash while it is still pty-less (closeSessionStartingSplash is
     // guarded on operatorPtyId == null) so a failed launch never leaves a window
     // spinning; the renderer surfaces the typed reason on the row.
+    // task-47919c5fd866 — NEUTRAL START: only pop the operator window + browser
+    // splash for a BROWSER task (server flags include 'chrome'/'playwright').
+    // A terminal/API task starts as a plain task-tab terminal with no browser
+    // pane and no "setting up the browser" splash. Same signal launchSessionInner
+    // uses to decide whether to force the 'playwright' run style.
+    const cachedForKind = this.cache.get(id);
+    const kindFlags = cachedForKind?.flags ?? [];
+    const isBrowserTask =
+      kindFlags.includes('chrome') || kindFlags.includes('playwright');
     const { openSessionStartingSplash, closeSessionStartingSplash } = await import(
       '../browser/window'
     );
-    openSessionStartingSplash();
+    if (isBrowserTask) openSessionStartingSplash();
     try {
       return await this.launchSessionInner(id, opts);
     } catch (err) {
-      closeSessionStartingSplash();
+      if (isBrowserTask) closeSessionStartingSplash();
       throw err;
     }
   }
@@ -3339,23 +3348,38 @@ export class TypeBuildTaskSource implements TaskSource {
     // 'resume' (→ --continue) so the prior conversation continues with the
     // fresh token instead of starting cold.
     //
-    // SPIKE (spike/playwright-cdp): drive the EMBEDDED Breeze browser tab via
-    // Playwright over CDP instead of the Claude-in-Chrome extension. 'playwright'
-    // is forced on (the in-app analog of the old forced 'chrome'): the launcher
-    // opens a browser tab, points the agent at the helper CLI, and pre-grants
-    // its permission (see ensureTasksWorkspace). We strip any server-sent
-    // 'chrome' so the two browser integrations never both load. The Set dedupes.
-    // 'auto' is forced on alongside 'playwright': every browser task launches in
-    // the classifier-driven auto permission mode (flags.ts → --permission-mode
-    // auto) so the agent's Bash driver/tool CLI calls run unattended instead of
-    // prompting on each one. The mode still pauses on risky/irreversible actions
-    // and never bypasses the human-gated final submit.
+    // task-47919c5fd866 — NEUTRAL START. A task is a BROWSER task only when the
+    // server marks it one (flags include 'chrome' or 'playwright', the two
+    // browser-integration signals). Terminal/API tasks (shell, code, API calls)
+    // must start WITHOUT a browser pane or "setting up the browser" splash —
+    // faster and the default preference. Previously 'playwright' was forced on
+    // for EVERY task, so the operator split window + splash always appeared.
+    const isBrowserTask =
+      serverFlags.includes('chrome') || serverFlags.includes('playwright');
+
+    // SPIKE (spike/playwright-cdp): for a BROWSER task, drive the EMBEDDED Breeze
+    // browser tab via Playwright over CDP instead of the Claude-in-Chrome
+    // extension. 'playwright' selects that style (the launcher opens the operator
+    // browser window, points the agent at the helper CLI, and pre-grants its
+    // permission — see ensureTasksWorkspace); we strip any server-sent 'chrome'
+    // so the two browser integrations never both load. 'playwright' is forced on
+    // ONLY for a browser task now (task-47919c5fd866) — a TERMINAL/API task runs
+    // as a plain interactive terminal (main-window task tab, no browser pane, no
+    // "setting up the browser" splash).
+    //
+    // 'auto' is forced on for BOTH kinds: it's the classifier-driven permission
+    // mode (flags.ts → --permission-mode auto) that lets the agent's Bash calls
+    // (browser driver CLIs AND terminal/shell work) run unattended instead of
+    // prompting on each one — orthogonal to the browser, and a terminal task is
+    // just as Bash-heavy, so dropping it would stall terminal runs on per-call
+    // permission prompts. The mode still pauses on risky/irreversible actions
+    // and never bypasses the human-gated final submit. The Set dedupes.
     const flags = Array.from(
       new Set([
         ...serverFlags.filter((f) => f !== 'chrome'),
         'interactive',
-        'playwright',
         'auto',
+        ...(isBrowserTask ? ['playwright'] : []),
         ...(opts.resume ? ['resume'] : []),
       ]),
     );
