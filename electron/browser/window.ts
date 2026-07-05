@@ -228,6 +228,55 @@ export function openBrowserWindow(url?: string, ptyId?: number): void {
   fillScreen(win);
 }
 
+// task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Pop the operator window showing the
+// "task starting" splash the INSTANT Start / Run all / matrix-Run is clicked —
+// BEFORE the pre-spawn network waterfall (mint + operator-instructions +
+// context-bundle + project + getTask + N× resolveTaskDataRef) and before the
+// pty spawns. Without this the window is only created by openBrowserWindow AFTER
+// that whole >10s chain, so the user stares at nothing. The later
+// openBrowserWindow(undefined, ptyId) call (once the pty is live) REUSES this
+// same window and re-points its terminal pane to the real session — so the human
+// sees a window in <~500ms and the terminal fills in underneath when ready.
+//
+// Reuse-safe: an already-open operator window is focused/restored; a STALE
+// splash on its page pane (e.g. the prior chain step's "done" card) is refreshed
+// back to the live "starting" splash so a new step reads as starting. It NEVER
+// clobbers a real page the agent navigated to (isSplashUrl guards that) and
+// never touches the terminal pane / owned pty — the pty repoint stays the sole
+// job of openBrowserWindow(undefined, ptyId).
+export function openSessionStartingSplash(): void {
+  const fresh = splashDataUrl(splashTheme);
+  const existing = getBrowserWindow();
+  if (existing) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    const wc = (operatorViewId != null ? getBrowserView(operatorViewId) : null)?.webContents;
+    if (wc && !wc.isDestroyed() && isSplashUrl(wc.getURL())) {
+      pendingUrl = fresh;
+      void wc.loadURL(fresh);
+    }
+    return;
+  }
+  // No operator window yet — pop it NOW showing the splash, with NO terminal
+  // pane (ptyId omitted) until the real pty attaches via the later
+  // openBrowserWindow(undefined, ptyId).
+  pendingUrl = fresh;
+  openBrowserWindow();
+}
+
+// task-1b3eeb1aae1f — tear the optimistic session-starting splash back down when
+// the launch fails BEFORE a pty ever attached (mint / no-window / an early throw
+// in launchSession). GUARDED: only closes while the operator window is still
+// splash-only (operatorPtyId == null), so it can never kill a window already
+// hosting a live (or just-spawned) session — that path leaves the window up and
+// the row surfaces the error instead.
+export function closeSessionStartingSplash(): void {
+  const win = getBrowserWindow();
+  if (!win) return;
+  if (operatorPtyId != null) return;
+  win.close();
+}
+
 // Load (or reload) the operator React chrome with the `#operator=<ptyId>&view=<id>`
 // hash that pins which PTY the right pane mirrors and which shared browser view
 // the left pane drives. Reused on a fresh Start to re-point an already-open

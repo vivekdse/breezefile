@@ -3214,6 +3214,40 @@ export class TypeBuildTaskSource implements TaskSource {
     id: string,
     opts: { resume: boolean; preclaimed?: boolean },
   ): Promise<{ ptyId: number }> {
+    // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Pop the operator window showing the
+    // "task starting" splash NOW, before the entire pre-spawn waterfall below
+    // (mint + operator-instructions + context-bundle + project + getTask + N×
+    // resolveTaskDataRef) and before the pty spawns. The window used to appear
+    // only at the END of that chain (openBrowserWindow after the pty is up), so
+    // the user stared at nothing for >10s. The later openBrowserWindow(undefined,
+    // ptyId) inside runTaskInteractive REUSES this same window and re-points its
+    // terminal to the live session. On a RELAUNCH (--continue) the tab is
+    // repointed by relaunchSession and the operator window already exists, so
+    // openSessionStartingSplash just refreshes/focuses it (idempotent).
+    //
+    // No wasted-window risk from CLAIM: runNow() claims over REST BEFORE calling
+    // launchSession, so by the time we open the splash the claim already
+    // succeeded (a contested claim never reaches here). The remaining in-session
+    // failure modes (mint error, no hostable window) throw below — the catch
+    // closes the splash while it is still pty-less (closeSessionStartingSplash is
+    // guarded on operatorPtyId == null) so a failed launch never leaves a window
+    // spinning; the renderer surfaces the typed reason on the row.
+    const { openSessionStartingSplash, closeSessionStartingSplash } = await import(
+      '../browser/window'
+    );
+    openSessionStartingSplash();
+    try {
+      return await this.launchSessionInner(id, opts);
+    } catch (err) {
+      closeSessionStartingSplash();
+      throw err;
+    }
+  }
+
+  private async launchSessionInner(
+    id: string,
+    opts: { resume: boolean; preclaimed?: boolean },
+  ): Promise<{ ptyId: number }> {
     // Routing fields (flags) come from the in-memory cache populated by the
     // list poll; fall back to an empty flag set if the row isn't cached yet.
     const cached = this.cache.get(id);

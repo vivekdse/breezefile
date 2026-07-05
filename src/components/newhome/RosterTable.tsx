@@ -1631,6 +1631,12 @@ export function RosterTable({
             onStartChild={(cid) => {
               void startAction.run(cid, { kind: 'start', run: () => onStart(cid) });
             }}
+            // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Feed the SAME useStartAction
+            // wrapper's per-child pending/error into the matrix so its ▶ Run /
+            // ▶ Start step show an instant "Starting…" (disabled) on click and a
+            // visible failure — the feedback the matrix was missing.
+            pendingFor={startAction.pendingFor}
+            errorFor={startAction.errorFor}
           />
         </div>
       );

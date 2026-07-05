@@ -32,6 +32,13 @@ export interface TaskMatrixProps {
   onClose: () => void;
   onOpenTask: (taskId: string) => void; // open a task's detail
   onStartChild: (childId: string) => void; // start a step (caller already wraps feedback)
+  // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH feedback for the matrix's ▶ Run / ▶
+  // Start step. The caller routes onStartChild through the shared useStartAction
+  // wrapper (RosterTable); these read that wrapper's per-child pending/error so a
+  // clicked step shows an IMMEDIATE "Starting…" (disabled) and, on failure, a
+  // visible reason — matching the row/parent affordances the roster already has.
+  pendingFor?: (childId: string) => boolean;
+  errorFor?: (childId: string) => string | null;
 }
 
 type OutputField = NonNullable<Task['outputSchema']>[number];
@@ -102,6 +109,9 @@ interface CellProps {
   required?: boolean; // OUTPUT only — drives the "—✳" empty state
   onStart: () => void;
   onOpen: () => void;
+  // task-1b3eeb1aae1f — a start for THIS child is in flight / last failed.
+  startPending?: boolean;
+  startError?: string | null;
 }
 
 function MatrixCell({
@@ -113,6 +123,8 @@ function MatrixCell({
   required,
   onStart,
   onOpen,
+  startPending,
+  startError,
 }: CellProps): JSX.Element {
   const [hovered, setHovered] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -154,9 +166,14 @@ function MatrixCell({
         </span>
       )}
       {saving && <span className="tm-cell-note">saving…</span>}
-      {error && (
-        <span className="tm-cell-error" title={error}>
-          {error}
+      {/* task-1b3eeb1aae1f — optimistic start feedback for the ▶ Start step
+          action. `startPending` shows the instant the step is clicked (before
+          any network); `startError` surfaces a launch failure so it never hangs
+          silently. Kept distinct from the input-save error above. */}
+      {startPending && <span className="tm-cell-note">starting…</span>}
+      {(error || startError) && (
+        <span className="tm-cell-error" title={error ?? startError ?? undefined}>
+          {error ?? startError}
         </span>
       )}
       {hovered && !editing && (
@@ -174,8 +191,14 @@ function MatrixCell({
               ✎ Enter value
             </button>
           )}
-          <button type="button" className="tm-menu-item" role="menuitem" onClick={onStart}>
-            ▶ Start step
+          <button
+            type="button"
+            className="tm-menu-item"
+            role="menuitem"
+            onClick={onStart}
+            disabled={startPending}
+          >
+            {startPending ? 'Starting…' : '▶ Start step'}
           </button>
           <button type="button" className="tm-menu-item" role="menuitem" onClick={onOpen}>
             ↗ Open run
@@ -221,6 +244,10 @@ function InlineEditor({
 
 export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
   const { chainTitle, runs, childrenOf, onClose, onOpenTask, onStartChild } = props;
+  // task-1b3eeb1aae1f — default the optimistic-feedback readers to inert
+  // functions so the matrix renders unchanged when a caller doesn't wire them.
+  const pendingFor = props.pendingFor ?? (() => false);
+  const errorFor = props.errorFor ?? (() => null);
 
   // Every child id across every run (primitive key so effects re-run only when
   // the SET of children actually changes, not on each parent render).
@@ -376,17 +403,30 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                     <div className="tm-lead-actions">
                       {(() => {
                         const next = firstRunnableChild(rowChildren);
-                        return next ? (
-                          <button
-                            type="button"
-                            className="tm-run-btn"
-                            title="Run the next step of this run"
-                            onClick={() => onStartChild(next.id)}
-                          >
-                            ▶ Run
-                          </button>
-                        ) : (
-                          <span className="tm-run-done">✓ complete</span>
+                        if (!next) return <span className="tm-run-done">✓ complete</span>;
+                        // task-1b3eeb1aae1f — the row's ▶ Run targets the run's
+                        // NEXT runnable step; read that child's pending/error so
+                        // the click shows an IMMEDIATE "Starting…" (disabled) and
+                        // a failure surfaces instead of a silent no-op.
+                        const pending = pendingFor(next.id);
+                        const err = errorFor(next.id);
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              className="tm-run-btn"
+                              title="Run the next step of this run"
+                              onClick={() => onStartChild(next.id)}
+                              disabled={pending}
+                            >
+                              {pending ? 'Starting…' : '▶ Run'}
+                            </button>
+                            {err && (
+                              <span className="tm-run-error" title={err}>
+                                ⚠ {err}
+                              </span>
+                            )}
+                          </>
                         );
                       })()}
                       <button
@@ -422,6 +462,8 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                             value={inputValue(child.id, key)}
                             onStart={() => onStartChild(child.id)}
                             onOpen={() => onOpenTask(child.id)}
+                            startPending={pendingFor(child.id)}
+                            startError={errorFor(child.id)}
                           />
                         </td>,
                       );
@@ -438,6 +480,8 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                             required={o.required}
                             onStart={() => onStartChild(child.id)}
                             onOpen={() => onOpenTask(child.id)}
+                            startPending={pendingFor(child.id)}
+                            startError={errorFor(child.id)}
                           />
                         </td>,
                       );

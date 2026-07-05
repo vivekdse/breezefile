@@ -213,6 +213,26 @@
 .tm-run-btn:hover {
   filter: brightness(1.08);
 }
+/* task-1b3eeb1aae1f — optimistic "Starting…" state: dim + not-allowed so a
+   clicked ▶ Run reads as in-flight and can't be double-fired. */
+.tm-run-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  filter: none;
+}
+/* A launch failure for the row's next step — same failed vocabulary as the
+   cell error, aligned inline with the ▶ Run button. */
+.tm-run-error {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--nh-failed);
+  cursor: help;
+  align-self: center;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tm-open-btn {
   appearance: none;
   background: transparent;
@@ -368,6 +388,15 @@
 .tm-menu-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+/* task-1b3eeb1aae1f — the ▶ Start step while a launch is in flight. */
+.tm-menu-item:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.tm-menu-item:disabled:hover {
+  background: transparent;
+  color: var(--text-on-panel);
 }
 
 @media (prefers-reduced-motion: reduce) {
