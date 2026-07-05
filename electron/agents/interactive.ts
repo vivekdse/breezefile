@@ -401,5 +401,12 @@ export async function runTaskInteractive(
 // duplicate it into the transcript.
 function injectWorkBundle(ptyId: number, opts: InteractiveRunOptions): void {
   if (!opts.workBundle || opts.omitPrompt) return;
-  writeManagedPty(ptyId, `${opts.workBundle}\r`);
+  // Write the bundle body FIRST, then submit with a SEPARATE, slightly-delayed
+  // Enter. Sending `${bundle}\r` in a single write lets the trailing \r be
+  // absorbed into the multi-line block (it lands as a newline, not a submit), so
+  // the text populates in the TUI but never sends — the user then has to press
+  // Enter by hand (reported 2026-07-05). A standalone \r after the paste has
+  // settled is processed as a real submit keypress, same as pressing Enter.
+  writeManagedPty(ptyId, opts.workBundle);
+  setTimeout(() => writeManagedPty(ptyId, '\r'), 250);
 }
