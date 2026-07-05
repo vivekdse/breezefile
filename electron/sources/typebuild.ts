@@ -1863,6 +1863,62 @@ export class TypeBuildTaskSource implements TaskSource {
     return this.mapTemplateRow(row);
   }
 
+  // PATCH /chromeext/templates/{id} — edit a template's DEFINITION (task-
+  // 57e1470fad6f). Body carries only the supplied fields: name, variables
+  // (full-replace), output_schema (full-replace), notes, agent_id, flags,
+  // project_id, group_id. Server is owner-only (403 not_owner), 404 when not
+  // visible, 422 when the name looks like PHI. `notes` MAY be PHI — it rides the
+  // encrypted body only, never logged. Editing does NOT retro-mutate already-
+  // instantiated tasks (they're independent snapshots); new instances pick up
+  // the edited def. Returns the updated Template. On success we refresh so any
+  // template-derived view reflects the change.
+  async updateTemplate(
+    id: string,
+    patch: {
+      name?: string;
+      variables?: unknown[];
+      outputSchema?: unknown[];
+      notes?: string;
+      agentId?: string | null;
+      flags?: string[];
+      projectId?: string | null;
+      groupId?: string | null;
+    },
+  ): Promise<Template> {
+    // Map camelCase → the server's snake_case, sending only supplied keys.
+    const payload: Record<string, unknown> = {};
+    if (patch.name !== undefined) payload.name = patch.name;
+    if (patch.variables !== undefined) payload.variables = patch.variables;
+    if (patch.outputSchema !== undefined) payload.output_schema = patch.outputSchema;
+    if (patch.notes !== undefined) payload.notes = patch.notes;
+    if (patch.agentId !== undefined) payload.agent_id = patch.agentId;
+    if (patch.flags !== undefined) payload.flags = patch.flags;
+    if (patch.projectId !== undefined) payload.project_id = patch.projectId;
+    if (patch.groupId !== undefined) payload.group_id = patch.groupId;
+    const res = await this.request(
+      'PATCH',
+      `/chromeext/templates/${encodeURIComponent(id)}`,
+      payload,
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      throw new Error(
+        `typebuild: update template failed (${res.status})${
+          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
+        }`,
+      );
+    }
+    const raw = (await res.json().catch(() => ({}))) as { template?: TemplateRow };
+    const mapped = this.mapTemplateRow(raw.template);
+    if (!mapped) throw new Error('typebuild: update template returned no template');
+    // A template changed server-side — refresh template-derived views.
+    void this.refreshAndBroadcast();
+    return mapped;
+  }
+
   // POST /chromeext/templates/{id}/instantiate { values, title_override?,
   // project_id? } → { ok, id, status:'open' } — the server creates a REAL task
   // (data bag from `values`, output_schema copied, project/agent/flags

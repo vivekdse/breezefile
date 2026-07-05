@@ -1191,6 +1191,20 @@ const fm = {
         ipcRenderer.invoke('typebuild:templates:list', projectId) as Promise<Template[]>,
       get: (id: string) =>
         ipcRenderer.invoke('typebuild:templates:get', id) as Promise<Template | null>,
+      // task-57e1470fad6f — edit a template definition (owner-only server-side).
+      update: (
+        id: string,
+        patch: {
+          name?: string;
+          variables?: TemplateField[];
+          outputSchema?: TemplateField[];
+          notes?: string;
+          agentId?: string | null;
+          flags?: string[];
+          projectId?: string | null;
+          groupId?: string | null;
+        },
+      ) => ipcRenderer.invoke('typebuild:templates:update', id, patch) as Promise<Template>,
       instantiate: (
         templateId: string,
         values: Record<string, string>,

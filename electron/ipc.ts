@@ -3329,6 +3329,29 @@ end tell`;
     const src = typebuildSource();
     return src ? src.getTemplate(id) : null;
   });
+  // task-57e1470fad6f — edit a template's definition (owner-only server-side).
+  // `patch` MAY carry PHI in `notes` — never logged on this hop.
+  ipcMain.handle(
+    'typebuild:templates:update',
+    (
+      _e,
+      id: string,
+      patch: {
+        name?: string;
+        variables?: unknown[];
+        outputSchema?: unknown[];
+        notes?: string;
+        agentId?: string | null;
+        flags?: string[];
+        projectId?: string | null;
+        groupId?: string | null;
+      },
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.updateTemplate(id, patch ?? {});
+    },
+  );
   ipcMain.handle(
     'typebuild:templates:instantiate',
     (

@@ -590,6 +590,21 @@ type Fm = {
     templates: {
       list: (projectId?: string) => Promise<Template[]>;
       get: (id: string) => Promise<Template | null>;
+      // task-57e1470fad6f — edit a template definition (owner-only server-side;
+      // rejects a PHI name 422, non-owner 403). Only supplied fields change.
+      update: (
+        id: string,
+        patch: {
+          name?: string;
+          variables?: TaskDefField[];
+          outputSchema?: TaskDefField[];
+          notes?: string;
+          agentId?: string | null;
+          flags?: string[];
+          projectId?: string | null;
+          groupId?: string | null;
+        },
+      ) => Promise<Template>;
       instantiate: (
         templateId: string,
         values: Record<string, string>,

@@ -1574,6 +1574,9 @@ export function RosterTable({
         title: parent.title,
         runs: [parent],
         childrenOf: (pid: string) => childrenByParentId.get(pid) ?? [],
+        // task-57e1470fad6f — a chain parent; chain templates have no server
+        // update endpoint yet (task-a19115192233), so no Edit affordance.
+        templateId: null as string | null,
         close: () => setMatrixParentId(null),
       };
     }
@@ -1584,12 +1587,17 @@ export function RosterTable({
         .map((r) => allTasksById.get(r.taskId))
         .filter((t): t is Task => !!t);
       if (runs.length === 0) return null;
+      // task-57e1470fad6f — the group's template id, when the server emits it on
+      // the row (templateId). Shared across a template group's runs; take the
+      // first that carries one. Absent → the matrix hides "Edit template".
+      const templateId = runs.find((r) => r.templateId)?.templateId ?? null;
       return {
         title: group.name,
         runs,
         // Simple-template runs are childless; the matrix falls back to the run
         // itself as the single step when childrenOf() is empty.
         childrenOf: (pid: string) => childrenByParentId.get(pid) ?? [],
+        templateId,
         close: () => setMatrixGroupKey(null),
       };
     }
@@ -1603,6 +1611,7 @@ export function RosterTable({
           chainTitle={matrixView.title}
           runs={matrixView.runs}
           childrenOf={matrixView.childrenOf}
+          templateId={matrixView.templateId}
           onClose={matrixView.close}
           onOpenTask={onOpenTask}
           onStartChild={(cid) => {
