@@ -71,6 +71,16 @@ Development work for this repo is tracked in **TypeBuild**, via the TypeBuild MC
 - **Find work:** `list_tasks` (filter by `parent`, `status`, etc.).
 - **File work:** `create_task` — use `parent_task_id` for containment (epics →
   children) and `depends_on` for ordering.
+- **Server-side follow-ups go on `task_manager_api`, not here.** This repo is the
+  **client**; the server is the FastAPI "brain" `task_manager_api`
+  (repo `~/git_repos/small_business_software/software/task_manager_api`, live at
+  general.typebuild.com, tmux `taskapi`). Whenever client work surfaces a change
+  that must land on the server (a REST/MCP endpoint, the task/PHI schema, a wire
+  contract, deploy/smoke), **automatically file it as a `create_task` against the
+  server project — `project_id="project-df6cef3fbc84"`** — rather than leaving it
+  as a client task or a loose note. Cross-reference the originating client task/PR
+  in the body. (General rule: resolve each repo → its TypeBuild project via
+  `resolve_project_folder` and anchor the task to that `project_id`.)
 - Do **not** use `bd`, TodoWrite, or markdown TODO lists for tracking.
 - Task titles/bodies may be **PHI** — keep them in the conversation; never write
   them to files, notes, or logs.
