@@ -103,6 +103,15 @@ export type InteractiveRunOptions = {
    *  get_task). Ignored when `omitPrompt` is set (a --continue resume already
    *  has this context). */
   workBundle?: string;
+  /** task-aaa1bf931e32 — the GLOBAL server-hosted operator instructions, when the
+   *  CALLER has already fetched them (the TypeBuild launcher fetches the doc in
+   *  its parallel pre-spawn wave). When DEFINED (even the empty string), it is
+   *  appended verbatim for browser runs and this launcher SKIPS its own
+   *  fetchOperatorInstructions call — de-duplicating the round-trip AND the
+   *  system-prompt addendum that otherwise happened once here and once in the
+   *  caller's extraArgs. When UNDEFINED (the plain `claude` path), the launcher
+   *  fetches the doc itself for a playwright run, exactly as before. NON-PHI. */
+  operatorInstructions?: string;
 };
 
 export type InteractiveRunResult = {
@@ -226,8 +235,15 @@ export async function runTaskInteractive(
   // Defensive + additive: any failure (offline, unset doc) leaves it empty and
   // the launch proceeds on the bundled playbook. NON-PHI standing guidance —
   // never a value; never logged.
-  let operatorInstructions = '';
-  if (playwright) {
+  //
+  // task-aaa1bf931e32 — DE-DUP: when the caller already fetched the doc (the
+  // TypeBuild launcher does, in its parallel pre-spawn wave, and passes it via
+  // opts.operatorInstructions), use that value verbatim and SKIP the fetch — the
+  // doc was previously fetched here AND in the caller's extraArgs, a double
+  // round-trip and a duplicated addendum. `opts.operatorInstructions === undefined`
+  // (the plain `claude` path) falls back to fetching it ourselves for a browser run.
+  let operatorInstructions = opts.operatorInstructions ?? '';
+  if (opts.operatorInstructions === undefined && playwright) {
     try {
       const { fetchOperatorInstructions } = await import('../typebuild/operator-instructions');
       const oi = await fetchOperatorInstructions('global');

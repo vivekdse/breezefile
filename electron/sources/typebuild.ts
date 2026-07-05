@@ -3253,11 +3253,19 @@ export class TypeBuildTaskSource implements TaskSource {
     const cached = this.cache.get(id);
     const serverFlags = cached?.flags ?? [];
 
-    // 1. Mint the MCP token FIRST — success gates the spawn. mintMcpToken
-    //    throws a typed McpTokenError ({code}) on failure; we let it propagate
-    //    so the IPC layer carries the code to the renderer, which maps it to
-    //    the right in-app message. No terminal opens on a thrown mint.
-    const minted = await mintMcpToken();
+    // 1. Mint the MCP token — success gates the spawn. mintMcpToken throws a
+    //    typed McpTokenError ({code}) on failure; we let it propagate so the IPC
+    //    layer carries the code to the renderer, which maps it to the right
+    //    in-app message. No terminal opens on a thrown mint.
+    //
+    //    task-aaa1bf931e32 — LATENCY: the mint no longer runs SERIALLY ahead of
+    //    the rest of the pre-spawn fetches. It is now one leg of the single
+    //    Promise.all wave below (alongside operator-instructions, the context
+    //    bundle, the project resolve, and the task detail), so all the
+    //    genuinely-independent round-trips overlap instead of stacking. The mint
+    //    is still the ONLY leg allowed to reject (the others are wrapped to
+    //    degrade to a safe empty value), so a failed mint still rejects the wave
+    //    with its typed code and gates the spawn exactly as before.
 
     // Force the interactive run style; pass through the server's arg-producing
     // flags. 'interactive' is a no-op for flagsToArgs but documents intent;
@@ -3303,58 +3311,51 @@ export class TypeBuildTaskSource implements TaskSource {
     // session runs here and loads the seeded settings via --settings below.
     const { cwd: tasksCwd, settingsPath } = ensureTasksWorkspace();
 
-    // task-7bc1f1dfc202 — server-hosted operator instructions. Lead with the ONE
-    // GLOBAL doc (scope=global): fetch it at session start and append it as a
-    // system-prompt addendum so it layers onto BOTH delivery paths (workspace
-    // CLAUDE.md and project-folder prompt) uniformly. The fetch caches on disk and
-    // falls back to that cache offline; an unset/empty doc yields '' and we simply
-    // inject nothing (the bundled playbook still rides the workspace CLAUDE.md /
-    // prompt addendum). NON-PHI standing guidance — never a value; never logged.
-    // Defensive: any failure leaves operatorInstructions empty so the launch
-    // proceeds on the bundled default.
-    let operatorInstructions = '';
-    try {
-      const { fetchOperatorInstructions } = await import('../typebuild/operator-instructions');
-      const oi = await fetchOperatorInstructions('global');
-      operatorInstructions = oi.body.trim();
-    } catch {
-      /* server-hosted instructions are additive — never block a launch on them */
-    }
-
-    // task-9bd1389e64c6 — pre-fetched task-context bundle. ONE GET pulls the
-    // server-prepared (async-at-create, server-cached) bundle of RELEVANT SITES
-    // for this task + their associated memories + any task-level recall, rendered
-    // as NON-PHI Markdown. We inject it as a system-prompt addendum (same seam as
-    // operator-instructions) so the agent has all standing context in its FIRST
-    // turn and makes ZERO extra recall_site/recall_task discovery round-trips
-    // before acting. Empty when the server has no bundle yet (404), detection is
-    // still running (ready:false), or the fetch failed — the launch always
-    // proceeds; the agent falls back to live discovery. NON-PHI by contract (the
-    // task body is never part of the bundle); body never logged. On a relaunch we
-    // skip it: --continue resumes a conversation that already has this context, so
-    // re-injecting would duplicate it. Disk-cached for offline launches.
-    let contextBundleAddendum = '';
-    if (!opts.resume) {
-      try {
-        const { fetchTaskContextBundle, renderBundleAddendum } = await import(
-          '../typebuild/task-context-bundle'
-        );
-        const bundle = await fetchTaskContextBundle(id);
-        contextBundleAddendum = renderBundleAddendum(bundle);
-      } catch {
-        /* the bundle is additive — never block a launch on it */
-      }
-    }
-
-    // task-ab1d7955e23f (item 4) — project-derived launch context. When the
-    // task belongs to a TypeBuild project, run it IN the project's folder and
-    // inject the project's cascading instructions into the session. Resolved
-    // with effective=1 so we get the merged (parent → child) instructions.
-    // Defensive: a null/folderless project, a missing folder, or any resolve
-    // error falls back to the generic tasks workspace and an instruction-free
-    // prompt — the session still launches. Project name/instructions/folders
-    // are NON-PHI teaching context; the task title/body are never touched here.
-    const projectCtx = await this.resolveLaunchContext(id);
+    // task-aaa1bf931e32 — PARALLEL PRE-SPAWN WAVE. Every one of these fetches is
+    // independent of the others (none consumes another's result), so they now run
+    // CONCURRENTLY in a single Promise.all instead of the old serial waterfall
+    // (mint → operator-instructions → context-bundle → project → getTask), which
+    // stacked ~5 round-trips end-to-end before the pty could spawn. The mint is
+    // the ONLY leg allowed to reject (it gates the spawn with a typed code); the
+    // other four are each wrapped to DEGRADE to a safe empty value on any failure
+    // (offline / 404 / parse), preserving the exact best-effort semantics they
+    // had as standalone try/catch blocks. Data that DEPENDS on one of these
+    // (the per-key PHI value resolves need the task detail's dataKeys) runs in a
+    // second wave, below.
+    //
+    // Legs:
+    //  - mintMcpToken(): the MCP JWT (gates the spawn; may reject with a typed code).
+    //  - operatorInstructions (task-7bc1f1dfc202): the ONE GLOBAL server-hosted
+    //    browser playbook, appended as a system-prompt addendum. Disk-cached;
+    //    NON-PHI standing guidance. '' when unset/offline.
+    //  - contextBundleAddendum (task-9bd1389e64c6): the pre-prepared relevant-sites
+    //    + memories bundle (NON-PHI), appended as its own addendum so the agent
+    //    skips discovery round-trips. Skipped on resume (--continue already has it).
+    //  - projectCtx (task-ab1d7955e23f): project-derived cwd + cascading
+    //    instructions when the task belongs to a project. {} on miss.
+    //  - detail (getTask): the task detail (title/body/dataKeys/outputSchema/skills)
+    //    the work bundle is assembled from. NULL on failure/resume → no bundle,
+    //    the /work-claim prompt fallback still runs the task (NON-REGRESSION).
+    //    NOTE: this stays a NETWORK read — the detail-only fields (dataKeys,
+    //    outputSchema, skills) are NOT persisted in the local task/PHI cache, so a
+    //    local read would drop bundle content. See the launch-latency report.
+    const { fetchOperatorInstructions } = await import('../typebuild/operator-instructions');
+    const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail] =
+      await Promise.all([
+        mintMcpToken(),
+        fetchOperatorInstructions('global')
+          .then((oi) => oi.body.trim())
+          .catch(() => ''),
+        opts.resume
+          ? Promise.resolve('')
+          : import('../typebuild/task-context-bundle')
+              .then(({ fetchTaskContextBundle, renderBundleAddendum }) =>
+                fetchTaskContextBundle(id).then((bundle) => renderBundleAddendum(bundle)),
+              )
+              .catch(() => ''),
+        this.resolveLaunchContext(id),
+        opts.resume ? Promise.resolve(null) : this.getTask(id).catch(() => null),
+      ]);
     const runCwd = projectCtx.cwd ?? tasksCwd;
 
     // Pre-claimed Start (fm-v0rc): we already hold the claim over REST, so the
@@ -3399,23 +3400,33 @@ export class TypeBuildTaskSource implements TaskSource {
     // only, on the way into runTaskInteractive's workBundle option, which
     // writes them straight into the pty's stdin fd.
     let workBundle = '';
-    if (!opts.resume) {
+    if (!opts.resume && detail) {
       try {
         const { resolveTaskDataRef } = await import('../typebuild/task-data');
         const { buildTaskWorkBundle } = await import('../typebuild/task-work-bundle');
-        const detail = await this.getTask(id);
-        if (detail) {
+        {
           const dataKeys = detail.dataKeys ?? [];
-          const resolvedInputs: { key: string; value: string }[] = [];
-          for (const key of dataKeys) {
-            try {
-              const value = await resolveTaskDataRef(id, key);
-              resolvedInputs.push({ key, value });
-            } catch {
-              // Unresolved key — bundle renders it as "(unresolved)" rather
-              // than silently omitting it; never blocks the rest of the launch.
-            }
-          }
+          // task-aaa1bf931e32 — BATCH the per-key PHI value resolves. There is no
+          // multi-key resolve endpoint (task-data.ts is one-value-per-call by
+          // design, so a single value crosses the wire per fill), so we keep N
+          // requests but issue them CONCURRENTLY instead of the old serial loop
+          // (N stacked round-trips). Each key's failure is still isolated (a
+          // rejected resolve maps to a dropped entry; the bundle renders the
+          // missing key as "(unresolved)"), matching the prior best-effort
+          // semantics. PHI stays memory-only: values live only on this stack on
+          // the way into the bundle and are never logged or persisted.
+          const settled = await Promise.all(
+            dataKeys.map(async (key) => {
+              try {
+                return { key, value: await resolveTaskDataRef(id, key) };
+              } catch {
+                return null;
+              }
+            }),
+          );
+          const resolvedInputs = settled.filter(
+            (r): r is { key: string; value: string } => r !== null,
+          );
           const rawSkills = (detail as unknown as { skills?: unknown }).skills;
           workBundle = buildTaskWorkBundle(
             {
@@ -3476,6 +3487,12 @@ export class TypeBuildTaskSource implements TaskSource {
       // PHI: generic, content-free tab label.
       label: `TypeBuild task ${shortId(id)}`,
       source: this.id,
+      // task-aaa1bf931e32 — hand the ALREADY-FETCHED global operator instructions
+      // to the launcher so it appends them (browser runs only) WITHOUT re-fetching
+      // the doc itself. Providing this option (even '') suppresses interactive.ts's
+      // own fetchOperatorInstructions call, de-duplicating both the round-trip and
+      // the system-prompt addendum. NON-PHI standing guidance.
+      operatorInstructions,
       // --settings: load the seeded permission grant explicitly (so it applies
       // without depending on the cwd being "trusted"). It pre-approves the
       // typebuild + claude-in-chrome MCP tools so /work runs end-to-end without
@@ -3492,12 +3509,14 @@ export class TypeBuildTaskSource implements TaskSource {
         // on routine browser work.
         '--model', 'claude-sonnet-5',
         '--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG,
-        // task-7bc1f1dfc202 — the GLOBAL server-hosted operator instructions,
-        // layered on as a system-prompt addendum. Omitted entirely when the doc
-        // is unset/empty or the fetch failed (bundled playbook still applies).
-        ...(operatorInstructions
-          ? ['--append-system-prompt', operatorInstructions]
-          : []),
+        // task-aaa1bf931e32 — the GLOBAL operator instructions used to be appended
+        // HERE (extraArgs) AND independently re-fetched + re-appended inside
+        // runTaskInteractive (interactive.ts) because the `playwright` flag is
+        // force-on for TypeBuild launches — a DOUBLE fetch AND a duplicated
+        // system-prompt addendum. It now rides the `operatorInstructions` option
+        // below: interactive.ts appends the caller-supplied value verbatim and
+        // SKIPS its own fetch, so the doc is fetched once (in the parallel wave
+        // above) and appended once.
         // task-9bd1389e64c6 — the pre-fetched relevant-sites + memories bundle,
         // layered on as its OWN system-prompt addendum so the agent starts with
         // all standing context and skips the discovery round-trips. Omitted when
