@@ -3100,6 +3100,16 @@ export class TypeBuildTaskSource implements TaskSource {
       // the session proves alive. '' when the fetch/resolve above didn't run
       // or failed — runTaskInteractive's injectWorkBundle no-ops on empty.
       workBundle,
+      // task-bd35fc4330c0 (follow-up) — when the bundle built, make it the
+      // agent's FIRST turn and SUPPRESS the positional /work-claim prompt. That
+      // prompt used to launch the work loop immediately, so the agent called
+      // get_task to read the body BEFORE this bundle arrived ~5s later (the
+      // "it starts by fetching the task" waste). Now the agent's opening turn
+      // IS the full bundle. Guarded on `workBundle` being non-empty: an empty
+      // bundle keeps the positional prompt (the non-regression fallback) so we
+      // never launch an agent with no instruction. Never on resume (--continue
+      // already has the context).
+      promptViaBundle: !!workBundle && !opts.resume,
       // On resume, suppress the positional prompt so --continue resumes the
       // existing conversation rather than seeding a new /work claim.
       omitPrompt: opts.resume,

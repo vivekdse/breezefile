@@ -37,6 +37,20 @@ export type InteractiveRunOptions = {
    *  prompt alongside --continue would seed a NEW message (re-running the
    *  /work claim). Omitting it makes --continue a clean resume. */
   omitPrompt?: boolean;
+  /** task-bd35fc4330c0 (follow-up) — when true, the positional prompt is
+   *  SUPPRESSED and the `workBundle` (injected over stdin once the session is
+   *  live) is the agent's FIRST and only seeded turn. This is how a pre-claimed
+   *  TypeBuild Start avoids the agent's opening `get_task`: the old argv prompt
+   *  ("Run /typebuild:typebuild-work for task X") launches the work loop
+   *  immediately, so the agent calls get_task to read the body BEFORE the
+   *  ~5s-delayed bundle lands. With this flag the agent instead sits at an idle
+   *  TUI for the liveness window and its first turn is the full bundle (body +
+   *  inputs + outputs + run-the-loop instruction) — zero opening fetch.
+   *  The CALLER must only set this when `workBundle` is non-empty: suppressing
+   *  the prompt with an empty bundle would launch an agent with NO instruction
+   *  at all. Distinct from `omitPrompt` (a --continue resume, which seeds
+   *  NOTHING — neither prompt nor bundle). */
+  promptViaBundle?: boolean;
   /** Override the working directory (else task.folder, else home). */
   cwd?: string;
   /** Extra claude args appended after the flags-derived args. */
@@ -78,15 +92,16 @@ export type InteractiveRunOptions = {
    *  project instructions + attached skills) delivered as the agent's FIRST
    *  message via STDIN INJECTION, not argv and not --append-system-prompt —
    *  see electron/typebuild/task-work-bundle.ts for why (PHI must never ride
-   *  argv or disk). When set, this replaces the positional `prompt` as far as
-   *  the agent's first turn is concerned: `prompt`/`effectivePrompt` still
-   *  seeds the CLI's positional arg (so claude launches straight into a turn
-   *  instead of an empty prompt box) but should be a short, PHI-free framing
-   *  line (e.g. "Run /typebuild:typebuild-work..."), and this bundle is typed
-   *  into the pty's stdin as a SECOND, immediately-following message carrying
-   *  the actual task content. Omitted → legacy behavior (positional prompt
-   *  only, agent fetches the rest itself via get_task). Ignored when
-   *  `omitPrompt` is set (a --continue resume already has this context). */
+   *  argv or disk). Paired with `promptViaBundle`: when that flag is set the
+   *  positional `prompt` is suppressed and THIS bundle is the agent's first and
+   *  only seeded turn (typed into the pty's stdin once the session proves live),
+   *  so its framing line must itself start the work loop — see
+   *  electron/typebuild/task-work-bundle.ts. When `promptViaBundle` is NOT set
+   *  (e.g. the non-liveness `claude` path), the positional prompt still seeds
+   *  turn one and this bundle follows as a second stdin message. Omitted →
+   *  legacy behavior (positional prompt only, agent fetches the rest itself via
+   *  get_task). Ignored when `omitPrompt` is set (a --continue resume already
+   *  has this context). */
   workBundle?: string;
 };
 
@@ -241,6 +256,12 @@ export async function runTaskInteractive(
   // second directory and claude launches with NO prompt (empty box, nothing
   // runs). `--` terminates option parsing so the prompt lands as the
   // positional arg. Only emitted when we actually pass a prompt.
+  //
+  // Suppressed in two cases: `omitPrompt` (a --continue resume) and
+  // `promptViaBundle` (the full task bundle is injected over stdin as the
+  // agent's first turn instead — see injectWorkBundle; this is what stops the
+  // pre-claimed agent from opening with a redundant get_task).
+  const suppressPositional = opts.omitPrompt || opts.promptViaBundle;
   const args = [
     ...flagArgs,
     ...(opts.extraArgs ?? []),
@@ -248,7 +269,7 @@ export async function runTaskInteractive(
     // addendum (browser runs only; empty when unset/offline → omitted).
     ...(operatorInstructions ? ['--append-system-prompt', operatorInstructions] : []),
     '--add-dir', cwd,
-    ...(opts.omitPrompt ? [] : ['--', effectivePrompt]),
+    ...(suppressPositional ? [] : ['--', effectivePrompt]),
   ];
 
   const ptyId = reservePtyId();

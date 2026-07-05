@@ -193,14 +193,21 @@ export function buildTaskWorkBundle(
 ): string {
   const parts: string[] = [];
 
+  // This bundle is the agent's FIRST turn (the launcher suppresses the old
+  // positional /work-claim prompt when the bundle is present — see
+  // interactive.ts promptViaBundle). So the framing must itself kick off the
+  // work loop AND tell the agent NOT to re-fetch what is already inlined below
+  // — otherwise it opens with a redundant get_task (the exact waste this fixes).
   parts.push(
     task.preclaimed
-      ? `Task ${task.id} is already claimed by me. Do not call claim_task/claim_next_task` +
-          ' again — everything needed to work it is below. Use submit_task /' +
-          ` submit_task_result with task id ${task.id} when done.`
-      : `Task ${task.id} — everything needed to work it is below (you do not need` +
-          ` get_task). Claim it (claim_task) before you start, then use submit_task /` +
-          ` submit_task_result with task id ${task.id} when done.`,
+      ? `Run the TypeBuild work loop (the typebuild-work skill) for task ${task.id} NOW.` +
+          ' It is already claimed by me — do NOT claim it again (claim_task/claim_next_task)' +
+          ' and do NOT call get_task; the full body, inputs and required outputs are all' +
+          ` below. When finished, call submit_task / submit_task_result with task id ${task.id}.`
+      : `Run the TypeBuild work loop (the typebuild-work skill) for task ${task.id} NOW.` +
+          ' Claim it (claim_task) first, then work it using the context below — you do NOT' +
+          ' need get_task; the full body, inputs and required outputs are all below.' +
+          ` When finished, call submit_task / submit_task_result with task id ${task.id}.`,
   );
 
   parts.push('');
