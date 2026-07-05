@@ -105,6 +105,7 @@ function RowAction({
   onChainStart,
   viewable,
   onViewMatrix,
+  viewableDetail,
   pending,
   error,
 }: {
@@ -131,6 +132,15 @@ function RowAction({
    *  present, becomes the secondary "▶ Run all". */
   viewable: boolean;
   onViewMatrix: (taskId: string) => void;
+  /** task-4f1e8f45bf0e — this row is a DONE, non-chain, childless single task
+   *  that carries a fielded result (output schema and/or a structured
+   *  `result`). There's no matrix to open (no step children), so "View →"
+   *  opens the same task-detail drawer a row click does — which now (per
+   *  task-4f1e8f45bf0e) defaults a done task straight to its Activity/Outputs
+   *  read view rather than the edit composer. Mutually exclusive with
+   *  `viewable` (a row is either a chain/template with runs, or a plain
+   *  fielded single task — never both). */
+  viewableDetail: boolean;
   /** task-48cd46a0e2da — the shared wrapper's pending/error for THIS row's id. */
   pending: boolean;
   error: string | null;
@@ -245,6 +255,25 @@ function RowAction({
           </span>
         )}
       </span>
+    );
+  }
+  // task-4f1e8f45bf0e — a DONE, non-chain, childless single task with a
+  // fielded result: give it the same "View →" affordance chains get, opening
+  // the task-detail drawer (which now defaults a done task to its read/
+  // outcome view) rather than leaving the action column at a bare "—" — the
+  // bug report's "a done single task's fielded result is unreachable".
+  if (viewableDetail) {
+    return (
+      <button
+        type="button"
+        className="nh-roster__action nh-roster__action--view"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenTask(task.id);
+        }}
+      >
+        View →
+      </button>
     );
   }
   return <span className="nh-roster__action-empty">{'—'}</span>;
@@ -1783,6 +1812,23 @@ export function RosterTable({
                         startEligible={startActionFor(t)}
                         chainStart={chainedRes ? chainStartFor(chainedRes) : plainChainStartFor(t.id)}
                         viewable={!chainedRes && childrenByParentId.has(t.id)}
+                        // task-4f1e8f45bf0e — a DONE, non-chain, CHILDLESS
+                        // single task whose own body resolved to 'fielded' (a
+                        // real output schema/result, not just a plain task with
+                        // nothing to show) gets "View →" here. Most fielded
+                        // single tasks are lifted into the template-grouped
+                        // sections above (groupableInputs) and never reach this
+                        // flat row at all; this covers the ones that AREN'T
+                        // grouped — e.g. no dataKeys/outputSchema on the list row
+                        // yet, so groupableInputs skipped them, but the lazy
+                        // per-row resolution (useChainedRoster) still found a
+                        // fielded result once it fetched the detail.
+                        viewableDetail={
+                          !chainedRes &&
+                          t.status === 'done' &&
+                          !childrenByParentId.has(t.id) &&
+                          resolution?.status === 'fielded'
+                        }
                         onViewMatrix={setMatrixParentId}
                         onChainStart={(childId) => {
                           // Key the pending/error on the PARENT row id (t.id),
