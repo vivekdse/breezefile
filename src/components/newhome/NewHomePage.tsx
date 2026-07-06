@@ -44,6 +44,8 @@ import { getTask } from '../../tasks';
 import type { Project } from '../../types';
 import { ancestorChain, buildProjectTree } from '../../projects/index.mjs';
 import { buildSubprojectSections } from './subprojectSections.mjs';
+import { sortByRecency, partitionByRecency, paginateGroupAware } from './rosterOrder.mjs';
+import { groupKeyFor, isFieldBearing } from './rosterGroups.mjs';
 import { nextSelectionAfterArchive, nextSelectionAfterDelete, projectDeleteDecision } from './projectCrud.mjs';
 import { IconActionButton } from './IconActionButton';
 import {
@@ -65,6 +67,14 @@ import './NewHomePage.css';
 // the old dialog for one release if the drawer regresses. Remove the dialog
 // (and this flag) only after the drawer has proven out.
 const USE_UNIFIED_DETAIL = true;
+
+// Recency + pagination (local-first speed). Done tasks finished more than
+// HOT_DAYS ago are hidden by default (behind a "show older" toggle) so Home
+// leads with live work instead of a month of history. PAGE_SIZE bounds the
+// first paint to a slice of roster UNITS (a group counts as one), with a
+// "Load more" to extend.
+const HOT_DAYS = 14;
+const PAGE_SIZE = 50;
 
 type FilterState = 'all' | NewHomeStatus;
 
@@ -140,6 +150,13 @@ export function NewHomePage() {
   // task-7bdb94445321 follow-up — free-text roster search, ANDed with the
   // status filter. Empty string = no text filter (status filter still applies).
   const [search, setSearch] = useState('');
+
+  // Recency + pagination (local-first speed). `showOlder` reveals done tasks
+  // finished more than HOT_DAYS ago (hidden by default so Home shows live work,
+  // not a month of history). `pageLimit` bounds how many roster UNITS render at
+  // once; "Load more" bumps it. Both reset when the scope/filter/search changes.
+  const [showOlder, setShowOlder] = useState(false);
+  const [pageLimit, setPageLimit] = useState(PAGE_SIZE);
 
   // task-a9841cfc0e1b (spec §3) — "Show archived" reveals archived projects
   // in the picker (with an Unarchive action) so an archive is recoverable
@@ -421,11 +438,39 @@ export function NewHomePage() {
 
   const filteredTasks = useMemo(() => {
     const byStatus = filter === 'all' ? tasks : tasks.filter((t) => t.status === filter);
-    if (queryState.kind === 'query') return runTaskQuery(byStatus, queryState.compiled, Date.now());
-    if (queryState.kind === 'text') return applySearch(byStatus, search);
+    let out;
+    if (queryState.kind === 'query') out = runTaskQuery(byStatus, queryState.compiled, Date.now());
+    else if (queryState.kind === 'text') out = applySearch(byStatus, search);
     // 'invalid' → don't filter (the error hint tells the user why); 'none' → all.
-    return byStatus;
-  }, [tasks, filter, search, queryState]);
+    else out = byStatus;
+
+    // Recency cutoff: hide done tasks finished more than HOT_DAYS ago so Home
+    // leads with live work. Skipped when the user explicitly asks for the old
+    // rows — filtering to 'done', toggling "show older", or searching (a search
+    // should reach the whole history). `coldCount` (below) drives the toggle.
+    const searching = queryState.kind === 'query' || queryState.kind === 'text';
+    if (!showOlder && filter !== 'done' && !searching) {
+      const { hot } = partitionByRecency(out, { now: Date.now(), hotDays: HOT_DAYS });
+      out = hot;
+    }
+    // Newest activity first (then priority, then id) — a stable, recency-led order.
+    return sortByRecency(out);
+  }, [tasks, filter, search, queryState, showOlder]);
+
+  // How many done tasks are currently hidden by the recency cutoff — powers the
+  // "Show N older" affordance. Computed off the FULL (status-filtered) set so
+  // the count is honest regardless of the cutoff applied above.
+  const coldCount = useMemo(() => {
+    if (filter === 'done' || queryState.kind === 'query' || queryState.kind === 'text') return 0;
+    const base = filter === 'all' ? tasks : tasks.filter((t) => t.status === filter);
+    return partitionByRecency(base, { now: Date.now(), hotDays: HOT_DAYS }).cold.length;
+  }, [tasks, filter, queryState]);
+
+  // Reset pagination whenever the visible set's shape changes, so "Load more"
+  // never carries a stale offset across a scope/filter/search/toggle change.
+  useEffect(() => {
+    setPageLimit(PAGE_SIZE);
+  }, [selectedProjectId, filter, search, showOlder]);
 
   // task-c82d8e0f4eae — split the (subtree-aggregated) roster into the selected
   // project's OWN tasks plus one navigable rollup section per direct child
@@ -449,6 +494,28 @@ export function NewHomePage() {
       })),
     };
   }, [filteredTasks, projectTree, selectedProjectId]);
+
+  // Group-aware pagination of the roster rows: render only the first `pageLimit`
+  // UNITS (a template/chain group counts as one unit and never splits across the
+  // boundary), so the first paint is bounded. `rosterHasMore`/`rosterShown`/
+  // `rosterTotal` drive the "Load more" affordance. The group key mirrors the
+  // roster's own grouping (field-bearing template instances group by templateId/
+  // name; everything else — plain tasks, chains — is its own unit).
+  const { page: pagedOwnTasks, shown: rosterShown, total: rosterTotal, hasMore: rosterHasMore } =
+    useMemo(() => {
+      const groupKeyOf = (t: (typeof ownTasks)[number]): string | null => {
+        const input = {
+          id: t.id,
+          title: t.title,
+          projectId: t.projectId,
+          templateId: t.templateId ?? null,
+          dataKeys: t.raw.dataKeys ?? [],
+          outputSchema: t.raw.outputSchema ?? [],
+        };
+        return isFieldBearing(input) ? groupKeyFor(input) : null;
+      };
+      return paginateGroupAware(ownTasks, groupKeyOf, { limit: pageLimit });
+    }, [ownTasks, pageLimit]);
 
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
@@ -793,7 +860,7 @@ export function NewHomePage() {
         )}
 
         <RosterTable
-          tasks={ownTasks}
+          tasks={pagedOwnTasks}
           subprojectSections={subprojectSections}
           onNavigateProject={setSelectedProjectId}
           filter={filter}
@@ -807,6 +874,40 @@ export function NewHomePage() {
           onRetry={startTask}
           onStart={startTask}
         />
+
+        {/* Roster footer: pagination + the recency cutoff toggle. Only rendered
+            when there's something more to reveal, so it stays out of the way. */}
+        {(rosterHasMore || coldCount > 0 || (showOlder && coldCount === 0)) && (
+          <div className="nh-roster-more">
+            {rosterHasMore && (
+              <button
+                type="button"
+                className="nh-roster-more__btn"
+                onClick={() => setPageLimit((n) => n + PAGE_SIZE)}
+              >
+                Load more <span className="nh-roster-more__count">({rosterShown} of {rosterTotal})</span>
+              </button>
+            )}
+            {coldCount > 0 && !showOlder && (
+              <button
+                type="button"
+                className="nh-roster-more__link"
+                onClick={() => setShowOlder(true)}
+              >
+                Show {coldCount} older {coldCount === 1 ? 'task' : 'tasks'}
+              </button>
+            )}
+            {showOlder && (
+              <button
+                type="button"
+                className="nh-roster-more__link"
+                onClick={() => setShowOlder(false)}
+              >
+                Hide older tasks
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {openTaskId && (

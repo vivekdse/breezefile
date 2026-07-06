@@ -1,0 +1,646 @@
+<title>Local-First Speed — Architecture Evaluation & Plan</title>
+<style>
+  :root {
+    /* Palette — "cold storage": deep slate ground, cyan data-signal accent,
+       amber for the security/caution axis. Neutrals carry a slight blue bias. */
+    --ink: #0e151c;
+    --ink-2: #33414f;
+    --paper: #f6f8fa;
+    --paper-2: #eceff3;
+    --line: #d3dae1;
+    --line-2: #e2e7ec;
+    --accent: #0aa3b8;      /* signal cyan — the "fast path" */
+    --accent-deep: #07727f;
+    --accent-soft: #d9f0f3;
+    --warn: #b26a00;        /* amber — the security axis */
+    --warn-soft: #f6e8cf;
+    --good: #2f855a;
+    --good-soft: #d6ecdf;
+    --bad: #c0392b;
+    --bad-soft: #f6dcd8;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.5rem; }
+
+  /* ── Masthead ─────────────────────────────────────────── */
+  header {
+    border-bottom: 2px solid var(--ink);
+    background:
+      linear-gradient(180deg, #fff, var(--paper));
+  }
+  .masthead { padding: 2.6rem 0 2rem; }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent-deep);
+    margin: 0 0 0.9rem;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 4.4vw, 3rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.8rem;
+    text-wrap: balance;
+    font-weight: 800;
+  }
+  h1 .em { color: var(--accent-deep); }
+  .standfirst {
+    font-size: 1.12rem;
+    color: var(--ink-2);
+    max-width: 46rem;
+    margin: 0;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.4rem;
+    margin-top: 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--ink-2);
+  }
+  .meta-row b { color: var(--ink); font-weight: 600; }
+
+  /* ── Sections ─────────────────────────────────────────── */
+  section { padding: 2.6rem 0; border-bottom: 1px solid var(--line-2); }
+  .sec-head { display: flex; align-items: baseline; gap: 0.8rem; margin: 0 0 1.4rem; }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--accent);
+    font-weight: 600;
+    flex: 0 0 auto;
+  }
+  h2 {
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+    margin: 0;
+    font-weight: 750;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.06rem;
+    margin: 1.8rem 0 0.6rem;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+  }
+  p { margin: 0 0 1rem; max-width: 46rem; }
+  a { color: var(--accent-deep); }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--paper-2);
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    padding: 0.05em 0.35em;
+    color: var(--ink);
+    word-break: break-word;
+  }
+  strong { font-weight: 650; }
+
+  /* ── The verdict banner ───────────────────────────────── */
+  .verdict {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1rem 1.2rem;
+    align-items: start;
+    background: var(--accent-soft);
+    border: 1px solid #a9dde4;
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 1.2rem 1.4rem;
+    margin: 0 0 0.5rem;
+  }
+  .verdict .glyph { font-family: var(--mono); font-size: 1.4rem; color: var(--accent-deep); font-weight: 700; }
+  .verdict p { margin: 0; max-width: none; }
+
+  /* ── Flow diagram (cold start) ────────────────────────── */
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0.5rem;
+    margin: 1.2rem 0 0.4rem;
+    overflow-x: auto;
+    padding-bottom: 0.4rem;
+  }
+  .step {
+    flex: 1 1 8rem;
+    min-width: 8rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.7rem 0.8rem;
+    background: #fff;
+    position: relative;
+  }
+  .step .t {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+  .step .d { font-size: 0.86rem; line-height: 1.35; }
+  .step.fast { border-color: var(--accent); background: var(--accent-soft); }
+  .step.slow { border-color: var(--warn); background: var(--warn-soft); }
+  .step .tag {
+    position: absolute; top: -0.55rem; right: 0.6rem;
+    font-family: var(--mono); font-size: 0.6rem; font-weight: 700;
+    padding: 0.05rem 0.4rem; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .step.fast .tag { background: var(--accent); color: #fff; }
+  .step.slow .tag { background: var(--warn); color: #fff; }
+
+  /* ── Problem cards ────────────────────────────────────── */
+  .cards { display: grid; gap: 1rem; margin-top: 1rem; }
+  @media (min-width: 40rem) { .cards.three { grid-template-columns: repeat(3, 1fr); } }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.1rem 1.2rem;
+    background: #fff;
+  }
+  .card h4 {
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .card h4 .n {
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+    background: var(--ink); color: #fff; border-radius: 5px;
+    width: 1.4rem; height: 1.4rem; display: inline-grid; place-items: center; flex: 0 0 auto;
+  }
+  .card p { font-size: 0.9rem; margin: 0 0 0.6rem; max-width: none; }
+  .card .impact {
+    font-family: var(--mono); font-size: 0.72rem; color: var(--bad);
+    background: var(--bad-soft); border-radius: 5px; padding: 0.3rem 0.5rem; display: block;
+  }
+
+  /* ── Callouts ─────────────────────────────────────────── */
+  .callout {
+    border-radius: 10px; padding: 1rem 1.2rem; margin: 1.2rem 0;
+    border: 1px solid; font-size: 0.94rem;
+  }
+  .callout p { margin: 0; max-width: none; }
+  .callout p + p { margin-top: 0.6rem; }
+  .callout.security { background: var(--warn-soft); border-color: #e6c891; }
+  .callout.security .lbl { color: var(--warn); }
+  .callout.key { background: var(--paper-2); border-color: var(--line); }
+  .callout.key .lbl { color: var(--accent-deep); }
+  .lbl {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em;
+    text-transform: uppercase; font-weight: 700; display: block; margin-bottom: 0.4rem;
+  }
+
+  /* ── Roadmap ──────────────────────────────────────────── */
+  .phase {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1.1rem;
+    padding: 1.3rem 0;
+    border-top: 1px solid var(--line-2);
+  }
+  .phase:first-of-type { border-top: none; }
+  .phase-tag { flex: 0 0 auto; }
+  .phase-badge {
+    font-family: var(--mono); font-size: 0.7rem; font-weight: 700;
+    padding: 0.25rem 0.55rem; border-radius: 6px; white-space: nowrap;
+    display: inline-block;
+  }
+  .p-now  { background: var(--good-soft); color: var(--good); border: 1px solid #a9d6bd; }
+  .p-next { background: var(--accent-soft); color: var(--accent-deep); border: 1px solid #a9dde4; }
+  .p-later{ background: var(--paper-2); color: var(--ink-2); border: 1px solid var(--line); }
+  .p-effort {
+    display: block; margin-top: 0.5rem; font-family: var(--mono);
+    font-size: 0.66rem; color: var(--ink-2); text-align: center;
+  }
+  .phase h3 { margin: 0 0 0.35rem; }
+  .phase p { font-size: 0.92rem; margin: 0 0 0.5rem; }
+  .phase ul { margin: 0.3rem 0 0; padding-left: 1.1rem; font-size: 0.9rem; }
+  .phase li { margin: 0.25rem 0; }
+  .win {
+    display: inline-block; font-family: var(--mono); font-size: 0.7rem;
+    color: var(--accent-deep); font-weight: 600; margin-top: 0.5rem;
+  }
+
+  /* ── Table ────────────────────────────────────────────── */
+  .tbl-scroll { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 34rem; }
+  th, td { text-align: left; padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+  thead th {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-2); background: var(--paper-2); font-weight: 700;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td .yes { color: var(--good); font-weight: 600; }
+  td .no  { color: var(--bad); font-weight: 600; }
+
+  /* ── Idea grid (perception) ───────────────────────────── */
+  .ideas { display: grid; gap: 0.9rem; margin-top: 1rem; }
+  @media (min-width: 44rem) { .ideas { grid-template-columns: 1fr 1fr; } }
+  .idea {
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 0.9rem 1.1rem; background: #fff;
+  }
+  .idea h4 { margin: 0 0 0.35rem; font-size: 0.92rem; }
+  .idea p { margin: 0; font-size: 0.86rem; max-width: none; color: var(--ink-2); }
+
+  ul.clean { padding-left: 1.15rem; }
+  ul.clean li { margin: 0.4rem 0; max-width: 44rem; }
+
+  footer { padding: 2.4rem 0 3rem; color: var(--ink-2); font-size: 0.82rem; }
+  footer code { font-size: 0.8em; }
+  .foot-note { font-family: var(--mono); font-size: 0.72rem; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .step, .card, .idea { transition: transform 0.15s ease; }
+  }
+</style>
+
+<header>
+  <div class="wrap masthead">
+    <p class="kicker">Architecture Evaluation · TypeBuild Client</p>
+    <h1>Local-first, <span class="em">encrypted</span>, and actually fast</h1>
+    <p class="standfirst">
+      The client already stores tasks in a local SQLite cache and paints Home from disk before
+      the network answers. This evaluates why the encrypted copy silently drops to memory-only,
+      why every launch pulls the entire task history from every group, and lays out a plan to make
+      the front end feel instant — without weakening the at-rest security model.
+    </p>
+    <div class="meta-row">
+      <span><b>Scope:</b> read-first, no code changed</span>
+      <span><b>Repos:</b> breezefile · task_manager_api</span>
+      <span><b>Verdict:</b> local-first is the right base — three fixable gaps</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── 1. WHERE WE ARE ─────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>Where we are today</h2></div>
+
+    <div class="verdict">
+      <span class="glyph">✓</span>
+      <p>
+        <strong>The foundation is sound.</strong> Tasks persist to a local SQLite cache split into two files:
+        a <strong>plaintext skeleton</strong> (routing metadata — status, priority, assignee, project, timestamps)
+        and an <strong>encrypted PHI store</strong> (SQLCipher, holding only <code>title</code> and <code>body</code>).
+        On cold start the renderer paints <em>synchronously from the plaintext skeleton</em> — no key, no network —
+        then layers real titles in as they arrive. That disk-first design is exactly right. The problems are all
+        at the edges of it.
+      </p>
+    </div>
+
+    <h3>The cold-start sequence</h3>
+    <p>What blocks the first paint is essentially nothing network-bound. But the <em>real titles</em> ride a slower, fragile path:</p>
+    <div class="flow">
+      <div class="step fast">
+        <span class="tag">instant</span>
+        <span class="t">1 · Skeleton read</span>
+        <span class="d">Plaintext SQLite → in-memory cache. Order, counts, filters all correct. No key needed.</span>
+      </div>
+      <div class="step fast">
+        <span class="tag">instant</span>
+        <span class="t">2 · First paint</span>
+        <span class="d">Home renders from the skeleton — but titles show as <code>TypeBuild task ab12</code> placeholders.</span>
+      </div>
+      <div class="step slow">
+        <span class="tag">fragile</span>
+        <span class="t">3 · PHI hydrate</span>
+        <span class="d">Open the encrypted store (needs the OS keychain) → layer in real titles. <strong>Skipped entirely if the keychain is unavailable.</strong></span>
+      </div>
+      <div class="step slow">
+        <span class="tag">heavy</span>
+        <span class="t">4 · Network sync</span>
+        <span class="d">Pull the <em>entire</em> visible inventory (every status, every group) to reconcile.</span>
+      </div>
+    </div>
+    <p style="font-size:0.86rem;color:var(--ink-2);margin-top:0.8rem">
+      Steps 1–2 are the win already banked. Steps 3 and 4 are where the perceived speed and the real latency leak out.
+    </p>
+  </section>
+
+  <!-- ── 2. THE THREE PROBLEMS ───────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>The three problems, precisely</h2></div>
+    <div class="cards three">
+      <div class="card">
+        <h4><span class="n">A</span> Titles vanish on restart</h4>
+        <p>
+          The encrypted PHI store only persists when Electron <code>safeStorage.isEncryptionAvailable()</code>
+          is true — i.e. an OS keychain (Keychain / libsecret / DPAPI) is present and unlocked. When it isn't,
+          the store runs <strong>memory-only</strong>: titles never touch disk, and every cold start shows opaque
+          placeholders until the network answers.
+        </p>
+        <span class="impact">This dev box (LXQt, no keyring) hits it every launch.</span>
+      </div>
+      <div class="card">
+        <h4><span class="n">B</span> Every task, every launch</h4>
+        <p>
+          The sync always requests <code>?titles=1&amp;all=1</code> — <strong>every status</strong> (including
+          done/cancelled from a year ago) across <strong>every group</strong> the user belongs to. The server
+          answers with a full-table scan, decrypting each row's title (and body, to derive a template flag).
+          No <code>limit</code>, no recency cutoff, no group scope.
+        </p>
+        <span class="impact">Latency + a Home cluttered with stale done tasks.</span>
+      </div>
+      <div class="card">
+        <h4><span class="n">C</span> No relevance scoping</h4>
+        <p>
+          Group membership is known authoritatively on the server and is fetched client-side <em>only</em> for the
+          assignee picker. It is never used to scope what you see. The server already accepts
+          <code>group_id</code>, <code>status</code>, and <code>limit</code> filters — <strong>the client uses none of them.</strong>
+        </p>
+        <span class="impact">Users wade through other teams' work to find their own.</span>
+      </div>
+    </div>
+
+    <div class="callout key">
+      <span class="lbl">The uncomfortable truth about B</span>
+      <p>
+        The server's <code>list_tasks</code> does <code>SELECT * FROM tasks ORDER BY created_at</code> — it loads the
+        <em>whole</em> table, then filters visibility in Python row-by-row, decrypting each surviving title and body.
+        The client's "pull everything" pattern makes that full scan run on every reconcile. The filters to fix this
+        already exist on the endpoint; they're simply not being sent.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── 3. WHY MEMORY-ONLY / SECURITY ───────────────────── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>Why it drops to memory-only — and how to keep titles on disk securely</h2></div>
+
+    <p>
+      The encryption is deliberately strong. The SQLCipher key is
+      <code>HKDF-SHA256(master, deviceSalt, "typebuild-phi-db:" + principal)</code> — three factors that must
+      <em>all</em> be present:
+    </p>
+    <ul class="clean">
+      <li><strong>A random master key</strong> — generated once per user, stored <em>only</em> wrapped by the OS keychain (<code>safeStorage</code>). The raw master never hits disk.</li>
+      <li><strong>A device salt</strong> — a machine-local random file, binding the key to this machine.</li>
+      <li><strong>The principal</strong> — the Firebase user id, namespacing the key and file so account A can never open account B's DB.</li>
+    </ul>
+
+    <div class="callout security">
+      <span class="lbl">Why the fallback exists (and why it's blunt)</span>
+      <p>
+        Because the master is <em>random and keychain-wrapped</em>, a stolen disk or backup is undecryptable — you'd need
+        a live, authenticated OS session the keychain trusts. That's a genuinely good property. <strong>But there is no
+        alternate key path.</strong> If the keychain is absent, the code refuses to persist rather than write a
+        weakly-sealed key — so it falls all the way back to memory-only. Good security instinct, blunt failure mode.
+      </p>
+    </div>
+
+    <h3>The fix: add a second key path, keep the strong one as default</h3>
+    <p>
+      We don't weaken the keychain path — we add a <strong>tiered key-resolution ladder</strong> so "no keychain"
+      degrades to "still encrypted on disk" instead of "nothing on disk." Best available factor wins:
+    </p>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead>
+          <tr><th>Tier</th><th>Key source</th><th>Survives restart?</th><th>Stolen-disk safe?</th><th>When it applies</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1</strong></td>
+            <td>Keychain-wrapped master <span style="color:var(--ink-2)">(today)</span></td>
+            <td><span class="yes">Yes</span></td>
+            <td><span class="yes">Strong</span></td>
+            <td>Keychain present &amp; unlocked (most macOS/Windows, GNOME/KDE Linux)</td>
+          </tr>
+          <tr>
+            <td><strong>2</strong></td>
+            <td>Session-token–derived key <span style="color:var(--ink-2)">(new)</span></td>
+            <td><span class="yes">Yes*</span></td>
+            <td><span class="yes">Good</span></td>
+            <td>No keychain, but a valid refresh/session secret exists on disk (already stored)</td>
+          </tr>
+          <tr>
+            <td><strong>3</strong></td>
+            <td>Passphrase-derived key (Argon2id) <span style="color:var(--ink-2)">(new, opt-in)</span></td>
+            <td><span class="yes">Yes</span></td>
+            <td><span class="yes">Strong</span></td>
+            <td>User sets an app passphrase; unlocks the store on launch</td>
+          </tr>
+          <tr>
+            <td><strong>4</strong></td>
+            <td>Memory-only <span style="color:var(--ink-2)">(today's fallback)</span></td>
+            <td><span class="no">No</span></td>
+            <td><span class="yes">n/a</span></td>
+            <td>Nothing else available — last resort only</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:0.84rem;color:var(--ink-2)">
+      * Tier 2 is bounded by the session secret's lifetime — titles persist across restarts while signed in,
+      and become undecryptable after sign-out (which is exactly the property we want). It reuses the auth material
+      the app already keeps, so it adds persistence on headless / no-keyring machines with no new secret to manage.
+      Every tier still binds to the device salt + principal, so cross-machine and cross-account isolation are unchanged.
+    </p>
+
+    <div class="callout key">
+      <span class="lbl">Design guardrail</span>
+      <p>
+        The security invariant stays: <strong>no durable plaintext PHI on disk, ever.</strong> Tiers 2–3 keep the file
+        encrypted; they only change <em>where the unlocking secret comes from</em>. The ladder is ordered by strength,
+        picks the best available, and records which tier is active so the UI can nudge ("set a passphrase to keep
+        your task names on this device").
+      </p>
+    </div>
+  </section>
+
+  <!-- ── 4. FAST BY DEFAULT ──────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>Making the pull small — relevance + recency</h2></div>
+    <p>
+      The single biggest latency win is to <strong>stop pulling the whole history</strong>. Three changes, all
+      using filters the server <em>already</em> supports:
+    </p>
+
+    <h3>Scope by the user's groups</h3>
+    <p>
+      Fetch the user's group set once (the <code>/chromeext/groups</code> endpoint exists), let them pick an active
+      scope, and thread <code>group_id</code> into the list + poll requests. Tasks and projects narrow to what's
+      relevant. This is both a <em>latency</em> win (smaller result set) and a <em>UX</em> win (you see your team's work,
+      not everyone's).
+    </p>
+
+    <h3>Split "active" from "history"</h3>
+    <p>
+      Two-tier loading by recency:
+    </p>
+    <ul class="clean">
+      <li><strong>Hot set</strong> — open + in-progress + needs-you + recently-finished (last N days). Small, fast, always synced. This is what Home shows by default.</li>
+      <li><strong>Cold history</strong> — older done/cancelled tasks. Loaded lazily, on demand (a "show completed" / search-into-history action), never on the launch critical path.</li>
+    </ul>
+    <p>
+      This needs one small server addition — a recency cutoff (<code>done_since</code> / <code>completed_after</code>),
+      since today done-hiding is status-based only, with no date filter. Pair it with <code>limit</code> for a
+      hard ceiling on the first pull.
+    </p>
+
+    <div class="callout key">
+      <span class="lbl">And on the server, while we're there</span>
+      <p>
+        The full-table scan wants an index on <code>updated_at</code> (delta sync) and a visibility-aware query that
+        filters in SQL rather than loading every row into Python. Deriving the template flag by decrypting
+        <em>every body on every list</em> is the other hot spot — cache that non-PHI flag as a column so the list
+        never touches the encrypted body. These are server tasks (filed against <code>task_manager_api</code>).
+      </p>
+    </div>
+  </section>
+
+  <!-- ── 5. ROADMAP ──────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><h2>Sequenced plan</h2></div>
+    <p>Ordered so each phase ships a felt improvement and de-risks the next. Client-only work first; server changes batched.</p>
+
+    <div class="phase">
+      <div class="phase-tag">
+        <span class="phase-badge p-now">PHASE 1</span>
+        <span class="p-effort">client · S</span>
+      </div>
+      <div>
+        <h3>Group + recency scoping on the wire</h3>
+        <p>Pure client change using existing server filters. Biggest bang, lowest risk, no security surface touched.</p>
+        <ul>
+          <li>Add <code>groupId</code> to <code>TaskFilter</code>; thread it + <code>status</code> into <code>listTasks</code> / <code>pollFull</code> / <code>pollDelta</code>.</li>
+          <li>Fetch the user's groups on sign-in; a scope picker in Home (default: all my groups, or last-used).</li>
+          <li>Cap the seed pull with <code>limit</code>; page the rest.</li>
+        </ul>
+        <span class="win">→ Smaller pulls, faster reconcile, relevant Home. Ships alone.</span>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-tag">
+        <span class="phase-badge p-next">PHASE 2</span>
+        <span class="p-effort">client · M</span>
+      </div>
+      <div>
+        <h3>Tiered key ladder — persist titles without a keychain</h3>
+        <p>Add tiers 2–4 to <code>resolveDbKey</code> so no-keyring machines keep encrypted titles on disk.</p>
+        <ul>
+          <li>Tier 2: derive a wrapping key from the existing session/refresh secret (HKDF, same salt + principal binding).</li>
+          <li>Record the active tier; expose it so the UI can explain state and offer the passphrase upgrade.</li>
+          <li>Tier 3 (opt-in passphrase, Argon2id) can follow as its own slice.</li>
+        </ul>
+        <span class="win">→ Instant real titles on cold start, everywhere — not just keychain machines.</span>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-tag">
+        <span class="phase-badge p-next">PHASE 3</span>
+        <span class="p-effort">server · M</span>
+      </div>
+      <div>
+        <h3>Server: cheap lists</h3>
+        <p>Batched <code>task_manager_api</code> work so the server stops paying for the full scan.</p>
+        <ul>
+          <li>Index <code>updated_at</code>; visibility-scope + status/group/recency filter in SQL, not Python.</li>
+          <li>Store the non-PHI template flag as a column → the list never decrypts bodies.</li>
+          <li>Add a <code>completed_after</code> / done-recency cutoff so the hot set has a real date boundary.</li>
+        </ul>
+        <span class="win">→ The heavy reconcile (step 4) gets an order-of-magnitude cheaper.</span>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-tag">
+        <span class="phase-badge p-later">PHASE 4</span>
+        <span class="p-effort">client · M</span>
+      </div>
+      <div>
+        <h3>Optimistic writes + local-first mutations</h3>
+        <p>Close the loop: make <em>writes</em> feel instant too, not just reads.</p>
+        <ul>
+          <li>Apply mutations to the local cache immediately; queue the network write; reconcile on ack (roll back on failure).</li>
+          <li>Bound the local history so the skeleton DB doesn't grow without limit.</li>
+          <li>An offline/stale indicator so trust is never ambiguous.</li>
+        </ul>
+        <span class="win">→ No round-trip wait on any interaction. (Overlaps an existing epic — coordinate.)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 6. PERCEPTION OF SPEED ──────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">06</span><h2>Perceived speed — cheap wins beyond raw latency</h2></div>
+    <p>
+      Half of "fast" is feel. These are low-cost and stack on top of the real-latency work above.
+    </p>
+    <div class="ideas">
+      <div class="idea">
+        <h4>Skeleton-shaped placeholders, not opaque ids</h4>
+        <p>While a title hydrates, show a subtle shimmer block sized to the row — never <code>TypeBuild task ab12</code>, which reads as broken. The eye forgives a loading shape; it snags on a wrong value.</p>
+      </div>
+      <div class="idea">
+        <h4>Paint the hot set first, stream the rest</h4>
+        <p>Render open/needs-you rows the instant the skeleton loads; let done/history fill in below without blocking. The screen that matters is ready before the rest exists.</p>
+      </div>
+      <div class="idea">
+        <h4>Persist last scroll + open state</h4>
+        <p>Restore Home exactly where the user left it. Returning to a familiar frozen frame reads as "already loaded" even mid-sync.</p>
+      </div>
+      <div class="idea">
+        <h4>Optimistic everything</h4>
+        <p>Claim, start, edit — reflect the change locally on click, reconcile in the background. The action already happened as far as the user can tell.</p>
+      </div>
+      <div class="idea">
+        <h4>Warm the cache before it's asked for</h4>
+        <p>Prefetch a task's detail (body, outputs) on row hover / keyboard focus, so opening it is instant. Idle time is free bandwidth.</p>
+      </div>
+      <div class="idea">
+        <h4>Never show a spinner for &lt;300ms work</h4>
+        <p>A flashed spinner makes fast work feel slow. Delay any loading indicator; if the data lands first, the user saw only the result.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 7. ANSWERS ─────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">07</span><h2>Direct answers to your questions</h2></div>
+    <ul class="clean">
+      <li><strong>Is the local DB where tasks are stored now, saved locally?</strong> Yes — a two-file SQLite cache (plaintext skeleton + encrypted title/body). Home paints from it before the network. That's real, and it's why cold start is already fast for <em>layout</em>.</li>
+      <li><strong>Does local storage = speed?</strong> For reads, yes, and it's largely delivered. The gaps are: titles don't persist without a keychain (Problem A), and the network reconcile is heavy because it pulls everything (Problem B).</li>
+      <li><strong>Given the DB can be fully encrypted, why memory-only?</strong> Because the <em>only</em> way it currently unlocks the encryption is the OS keychain. No keychain → it refuses to write a key → memory-only. The fix is a key ladder (§3) that keeps the file encrypted using the session secret or a passphrase when the keychain is absent.</li>
+      <li><strong>Loading every task, done a month ago or recent?</strong> Correct — <code>all=1</code>, no recency cutoff, no limit. Split hot/cold by recency (§4) and cap the first pull.</li>
+      <li><strong>Loading from every group?</strong> Correct — no group scope on the wire, though the server supports it and knows your groups. Scope by group (§4, Phase 1) for both relevance and latency.</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  <p class="foot-note">
+    Grounded in: <code>electron/sources/typebuild.ts</code> · <code>task-skeleton-store.ts</code> ·
+    <code>task-phi-store.ts</code> · <code>typebuild/db-key.ts</code> ·
+    server <code>app/routers/chromeext.py</code> · <code>app/utils/chromeext_db.py</code>.
+  </p>
+  <p style="margin-top:0.6rem">
+    No code changed in producing this evaluation. Phase 1 is the recommended starting point — client-only,
+    uses filters the server already ships, and delivers the clearest felt improvement.
+  </p>
+</footer>
