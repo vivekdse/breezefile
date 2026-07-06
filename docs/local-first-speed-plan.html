@@ -454,10 +454,40 @@
     </div>
     <p style="font-size:0.84rem;color:var(--ink-2)">
       * Tier 2 is bounded by the session secret's lifetime — titles persist across restarts while signed in,
-      and become undecryptable after sign-out (which is exactly the property we want). It reuses the auth material
-      the app already keeps, so it adds persistence on headless / no-keyring machines with no new secret to manage.
-      Every tier still binds to the device salt + principal, so cross-machine and cross-account isolation are unchanged.
+      and become undecryptable after sign-out. It reuses auth material the app already keeps, so it adds persistence
+      on headless / no-keyring machines with no new secret to manage. Every tier still binds to the device salt +
+      principal, so cross-machine and cross-account isolation are unchanged.
     </p>
+
+    <div class="callout security">
+      <span class="lbl">Why session-token-derived is NOT the obvious winner — even assuming FDE + login timeout</span>
+      <p>
+        If the machine has full-disk encryption and a locked screen, the "stolen disk" threat the OS keychain guards
+        against is <em>already handled at the disk layer</em> — so a token-derived key becomes far more defensible. But two
+        things keep it from being the clear pick:
+      </p>
+      <p>
+        <strong>1. Login timeout turns into data loss, not just re-auth.</strong> The DB is encrypted with a key
+        <em>derived from the token</em>. When the token rotates/expires, the old key no longer derives — the encrypted titles
+        on disk go <em>undecryptable</em>, not merely "sign in again to view." You must re-encrypt the store on each new
+        login (or keep a stable master the token only <em>wraps</em>, rotating the wrapper, not the key). Get it wrong and a
+        timeout silently orphans the cache — worse than memory-only, which fails cleanly.
+      </p>
+      <p>
+        <strong>2. It couples two lifetimes that should be independent.</strong> The token proves identity to the
+        <em>server</em>; reusing it to encrypt <em>local data at rest</em> means a server-side session policy (timeout, forced
+        re-auth, revocation) silently governs whether your local titles are readable.
+      </p>
+      <p>
+        <strong>The honest conclusion:</strong> under FDE, a <em>stable random master</em> (keychain-wrapped when available,
+        plain-wrapped in a 0600 file when not) gives the <em>same</em> transparent no-friction persistence with <em>less</em>
+        machinery than the token-rotation dance — and a <strong>passphrase (Argon2id)</strong> is the only option that gives
+        real at-rest protection <em>independent</em> of the OS session. Session-derived sits in an awkward middle: more code
+        than the stable-master approach, weaker than the passphrase one. Recommended framing: keychain (transparent, where
+        available) → stable-master (transparent, no keyring) → passphrase (opt-in, strong) → memory-only. Session-derived
+        only if you specifically want "titles auto-lock when the session ends" as a feature, not as the default.
+      </p>
+    </div>
 
     <div class="callout key">
       <span class="lbl">Design guardrail</span>
@@ -518,18 +548,35 @@
 
     <div class="phase">
       <div class="phase-tag">
-        <span class="phase-badge p-now">PHASE 1</span>
+        <span class="phase-badge p-now">SHIPPED</span>
+        <span class="p-effort">client · done</span>
+      </div>
+      <div>
+        <h3>Recency-led roster + group plumbing <span style="color:var(--good);font-weight:700">✓</span></h3>
+        <p>The display-layer wins that needed no server change or security tradeoff — <strong>shipped</strong>.</p>
+        <ul>
+          <li><strong>Recency sort</strong> — the roster leads with most-recent activity, not source order.</li>
+          <li><strong>Hide old done</strong> — tasks finished &gt; 14 days ago are hidden behind a "Show N older" link; searching / filtering to Done always includes them.</li>
+          <li><strong>Group-aware pagination</strong> — first 50 units with "Load more"; a template/chain group counts as one unit and never splits.</li>
+          <li><strong>Group plumbing</strong> — <code>groupId</code> now flows server → view-model; <code>useNewHomeData</code> can scope by group and exposes the group list. The picker UI is the one remaining follow-up.</li>
+        </ul>
+        <span class="win">→ Home leads with live, relevant work — done, in a pure tested module; roster UI untouched.</span>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-tag">
+        <span class="phase-badge p-next">NEXT</span>
         <span class="p-effort">client · S</span>
       </div>
       <div>
-        <h3>Group + recency scoping on the wire</h3>
-        <p>Pure client change using existing server filters. Biggest bang, lowest risk, no security surface touched.</p>
+        <h3>Group scope picker</h3>
+        <p>The one UI piece left from the relevance work — deferred only because the Home chrome was being reworked in parallel.</p>
         <ul>
-          <li>Add <code>groupId</code> to <code>TaskFilter</code>; thread it + <code>status</code> into <code>listTasks</code> / <code>pollFull</code> / <code>pollDelta</code>.</li>
-          <li>Fetch the user's groups on sign-in; a scope picker in Home (default: all my groups, or last-used).</li>
-          <li>Cap the seed pull with <code>limit</code>; page the rest.</li>
+          <li>A <code>listGroups()</code> (id + name) on the source → bridge; a compact "All groups / &lt;group&gt;" picker in the topbar, mirroring the project picker.</li>
+          <li>Wires straight into the shipped <code>useNewHomeData(projectId, {groupId})</code> seam + the <code>groups</code> list.</li>
         </ul>
-        <span class="win">→ Smaller pulls, faster reconcile, relevant Home. Ships alone.</span>
+        <span class="win">→ See one team's work at a time. Data layer already done.</span>
       </div>
     </div>
 
