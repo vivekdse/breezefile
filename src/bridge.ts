@@ -1,4 +1,4 @@
-import type { Agent, ChainDef, Entry, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Agent, ChainDef, Entry, Group, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 import type { TaskDefField } from './components/newhome/types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
@@ -730,6 +730,8 @@ type Fm = {
     // [] on a failure so the picker degrades to the Manual/Claude fallback.
     groups: {
       members: () => Promise<GroupMember[]>;
+      /** The caller's groups as { id, name } — labels the scope picker. */
+      list: () => Promise<Group[]>;
     };
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (

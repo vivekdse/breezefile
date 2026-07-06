@@ -534,6 +534,10 @@ export type GroupMember = {
   role: string | null;
 };
 
+/** A group the caller belongs to, as { id, name } — labels the group-scope
+ *  picker with real names instead of opaque ids. NON-PHI. */
+export type Group = { id: string; name: string };
+
 export type TaskUpdate = Partial<{
   title: string;
   notes: string | null;

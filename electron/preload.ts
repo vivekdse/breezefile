@@ -38,6 +38,8 @@ type GroupMember = {
   displayName: string | null;
   role: string | null;
 };
+// A group as { id, name } for the scope picker's label. Inlined; NON-PHI.
+type Group = { id: string; name: string };
 
 // One credential-vault entry as it crosses the bridge (NAMES only — never a
 // value). `key` is the "me."-prefixed field; `secret` marks write-only fields
@@ -1028,6 +1030,7 @@ const fm = {
     groups: {
       members: () =>
         ipcRenderer.invoke('typebuild:groups:members') as Promise<GroupMember[]>,
+      list: () => ipcRenderer.invoke('typebuild:groups:list') as Promise<Group[]>,
     },
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
     // structured-result contract as projects.patch.

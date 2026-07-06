@@ -30,7 +30,7 @@
 
 import { ipcMain } from 'electron';
 import { getTaskSource } from '../sources/registry';
-import type { Agent, GroupMember, Project, TypeBuildTaskSource } from '../sources/typebuild';
+import type { Agent, Group, GroupMember, Project, TypeBuildTaskSource } from '../sources/typebuild';
 
 let registered = false;
 
@@ -67,6 +67,9 @@ export function registerTypebuildProjectsIpc(): void {
     'typebuild:groups:members',
     (_e): Promise<GroupMember[]> => source().listGroupMembers(),
   );
+  // The caller's groups as { id, name } — labels the group-scope picker with
+  // real names. Source degrades to [] so the picker falls back to id-as-label.
+  ipcMain.handle('typebuild:groups:list', (_e): Promise<Group[]> => source().listGroups());
   ipcMain.handle(
     'typebuild:projects:get',
     (_e, id: string, effective?: boolean): Promise<Project | null> =>

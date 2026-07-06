@@ -454,6 +454,11 @@ export type GroupMember = {
   displayName: string | null;
   role: string | null;
 };
+// A raw group row from GET /chromeext/groups → { groups: [{ id, name, ... }] }.
+type GroupRow = { id?: string; name?: string | null };
+/** A group as the renderer sees it (camelCase). NON-PHI — opaque id + a display
+ *  name. Used to label the group-scope picker with real names, not raw ids. */
+export type Group = { id: string; name: string };
 // Dedupe by principal + map to the client shape. Defensive (mirrors
 // mapAgentRow): rows without a principal are dropped; blank display_name/role
 // collapse to null.
@@ -1373,6 +1378,28 @@ export class TypeBuildTaskSource implements TaskSource {
     for (const r of rows) {
       const a = mapAgentRow(r);
       if (a) out.push(a);
+    }
+    return out;
+  }
+
+  // ─── groups (group-name registry for the scope picker) ──────────────────
+  // GET /chromeext/groups → { groups: [{ id, name, my_role, members, ... }] } —
+  // the groups the caller belongs to. We keep only the NON-PHI { id, name } for
+  // labelling the group-scope picker with real names instead of opaque ids.
+  // Degrades to [] on any failure so the picker falls back to id-as-label
+  // rather than crashing (NON-REGRESSION). Never logs response bodies.
+  async listGroups(): Promise<Group[]> {
+    const res = await this.request('GET', '/chromeext/groups');
+    if (!res.ok) {
+      throw new Error(`typebuild: list groups failed (${res.status})`);
+    }
+    const data = (await res.json().catch(() => ({}))) as { groups?: GroupRow[] };
+    const rows = Array.isArray(data.groups) ? data.groups : [];
+    const out: Group[] = [];
+    for (const r of rows) {
+      if (!r || typeof r.id !== 'string' || !r.id) continue;
+      const name = typeof r.name === 'string' && r.name.trim() ? r.name : r.id;
+      out.push({ id: r.id, name });
     }
     return out;
   }
