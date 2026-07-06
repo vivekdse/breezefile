@@ -92,12 +92,12 @@ function isFilterState(v: unknown): v is FilterState {
 }
 
 // task-group-scope-picker — display label for a group in the picker / chip.
-// The data layer surfaces only an opaque group id (+ task count) — there is no
-// client-side group-name registry yet (a server GET /chromeext/groups that
-// returns {id,name} is the follow-up) — so the id IS the label. Kept as a
-// one-liner so wiring in real names later is a single-spot change.
-function groupLabel(id: string): string {
-  return id;
+// The data layer surfaces an opaque group id (+ task count); the real name comes
+// from GET /chromeext/groups (fetched into `groupNames` on mount). Fall back to
+// the id when the name registry hasn't landed / a group isn't in it, so the
+// picker is never blocked on the fetch.
+function groupLabel(id: string, names: Map<string, string>): string {
+  return names.get(id) || id;
 }
 
 // Human-readable label per status bucket for the active-filter chip.
@@ -189,6 +189,25 @@ export function NewHomePage() {
   // in the picker (with an Unarchive action) so an archive is recoverable
   // from the same surface, not a one-way door into a settings page.
   const [showArchived, setShowArchived] = useState(false);
+  // Group id → display name, from GET /chromeext/groups. Fetched once on mount so
+  // the scope picker shows real names, not opaque ids. Empty until it lands (and
+  // on failure) — groupLabel falls back to the id, so the picker never blocks.
+  const [groupNames, setGroupNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void fm.typebuild.groups
+      .list()
+      .then((list) => {
+        if (cancelled) return;
+        setGroupNames(new Map(list.map((g) => [g.id, g.name])));
+      })
+      .catch(() => {
+        /* signed out / transport — keep id-as-label */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const { tasks, counts, projects, groups, loading, refresh, refreshProjects } = useNewHomeData(
     selectedProjectId,
     // task-group-scope-picker — pass the group scope into the data layer so it
@@ -678,7 +697,7 @@ export function NewHomePage() {
               <option value="">All groups</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>
-                  {groupLabel(g.id)} ({g.count})
+                  {groupLabel(g.id, groupNames)} ({g.count})
                 </option>
               ))}
             </select>
@@ -874,7 +893,7 @@ export function NewHomePage() {
                 applied narrowing is visible and clearable by hand. */}
             {selectedGroupId && (
               <span className="nh-filter-chip nh-filter-chip--group">
-                <span className="nh-filter-chip__text">Group: {groupLabel(selectedGroupId)}</span>
+                <span className="nh-filter-chip__text">Group: {groupLabel(selectedGroupId, groupNames)}</span>
                 <button
                   type="button"
                   className="nh-filter-chip__x"
