@@ -128,6 +128,34 @@ export function indexTree(treeOrRoots) {
 }
 
 /**
+ * task-c82d8e0f4eae — every project id in the subtree rooted at `projectId`:
+ * the project itself PLUS every descendant, at arbitrary depth. This is what a
+ * parent project's roster aggregates over — a parent with no direct tasks but
+ * task-bearing subprojects must still surface that whole subtree.
+ *
+ * Degrades gracefully: an id NOT in the forest (projects still loading, or a
+ * stale/foreign selection) returns a set of just `{projectId}` — exact-match
+ * scoping — rather than an empty set that would blank the roster.
+ *
+ * @param {ProjectNode[]} roots
+ * @param {string} projectId
+ * @returns {Set<string>}
+ */
+export function descendantProjectIds(roots, projectId) {
+  const index = indexTree(roots);
+  const target = index.get(projectId);
+  if (!target) return new Set([projectId]);
+  /** @type {Set<string>} */
+  const out = new Set();
+  const walk = (node) => {
+    out.add(node.project.id);
+    for (const child of node.children) walk(child);
+  };
+  walk(target);
+  return out;
+}
+
+/**
  * The chain of projects from the root down to (and including) `projectId`,
  * general→specific. Returns [] when the id isn't in the forest.
  * @param {ProjectNode[]} roots

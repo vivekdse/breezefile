@@ -537,8 +537,20 @@ function RowAction({
   return <span className="nh-roster__action-empty">{'—'}</span>;
 }
 
+/** task-c82d8e0f4eae — one direct child subproject rolled up into a navigable
+ *  roster section (name + per-bucket status chips + task count). The pure
+ *  partition lives in subprojectSections.mjs; NewHomePage maps it to this. */
+type SubprojectSectionRow = {
+  id: string;
+  name: string;
+  statusCounts: Record<StatusBucket, number>;
+  taskCount: number;
+};
+
 export function RosterTable({
   tasks,
+  subprojectSections = [],
+  onNavigateProject,
   filter,
   search = '',
   queryMode = 'none',
@@ -551,6 +563,13 @@ export function RosterTable({
   loading,
 }: {
   tasks: NewHomeTask[];
+  /** task-c82d8e0f4eae — direct child subprojects of the selected project (or,
+   *  for "All projects", each top-level project), each a navigable rollup
+   *  section. Empty when the selection has no task-bearing subprojects. */
+  subprojectSections?: SubprojectSectionRow[];
+  /** Scope the whole surface to a subproject (drill parent → subproject →
+   *  tasks). Same setter the picker/breadcrumb call. */
+  onNavigateProject?: (id: string) => void;
   filter: 'all' | NewHomeStatus;
   /** Free-text search query, ANDed with the status filter. NewHomePage owns
    *  the actual filtering (it pre-filters `tasks`); this component just renders
@@ -949,7 +968,9 @@ export function RosterTable({
   const onChainErrorChange = (jobId: string, message: string | null) =>
     setChainErrors((prev) => (prev[jobId] === message ? prev : { ...prev, [jobId]: message }));
 
-  const hasAnyTasks = tasks.length > 0;
+  // "Any content" includes navigable subproject sections — a parent project
+  // with no direct tasks but task-bearing subprojects is NOT empty.
+  const hasAnyTasks = tasks.length > 0 || subprojectSections.length > 0;
   const isFiltered = filter !== 'all' || !!search.trim();
   // "Clear" resets BOTH dimensions so one click always gets you back to the
   // full roster, regardless of which filter emptied it.
@@ -1104,7 +1125,8 @@ export function RosterTable({
     );
   }
 
-  const nothingToShow = flatRows.length === 0 && templateGroups.length === 0;
+  const nothingToShow =
+    flatRows.length === 0 && templateGroups.length === 0 && subprojectSections.length === 0;
 
   return (
     <div className="nh-roster">
@@ -1178,6 +1200,52 @@ export function RosterTable({
                 </td>
               </tr>
             )}
+
+            {/* task-c82d8e0f4eae — subproject rollup sections first: a parent's
+                direct child subprojects, each a navigable row (same columns —
+                hero-stat-style status chips, a task count) that drills into
+                that subproject. */}
+            {subprojectSections.map((s) => (
+              <tr
+                key={`subproject-${s.id}`}
+                className="nh-roster__row--group nh-roster__row--subproject"
+                onClick={() => onNavigateProject?.(s.id)}
+                title="A subproject — click to open its tasks"
+              >
+                <td className="nh-roster__title-cell">
+                  <div
+                    className="nh-roster__title nh-roster__title--group nh-roster__title--subproject"
+                    title="A subproject — click to open its tasks"
+                  >
+                    <span className="nh-roster__subproject-glyph" aria-hidden="true">
+                      {'\u{1F5C2}'}
+                    </span>
+                    {s.name}
+                  </div>
+                </td>
+                <td>
+                  <StatusBreakdown counts={s.statusCounts} />
+                </td>
+                <td className="nh-roster__last-action">—</td>
+                <td className="nh-roster__who">—</td>
+                <td className="nh-roster__runs">{s.taskCount}</td>
+                <td className="nh-roster__action-cell">
+                  <span className="nh-roster__action-wrap">
+                    <button
+                      type="button"
+                      className="nh-roster__action nh-roster__action--view"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onNavigateProject?.(s.id);
+                      }}
+                      title={`Open ${s.name}`}
+                    >
+                      Open →
+                    </button>
+                  </span>
+                </td>
+              </tr>
+            ))}
 
             {/* Template-group rows first, then chained + plain rows — all the
                 SAME columns. */}

@@ -6,6 +6,7 @@
 export {
   buildProjectTree,
   indexTree,
+  descendantProjectIds,
   ancestorChain,
   breadcrumbPath,
   rollUpTaskStats,

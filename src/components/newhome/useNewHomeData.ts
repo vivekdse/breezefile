@@ -51,7 +51,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getTask, taskSourceAction, useTasks } from '../../tasks';
 import { fm } from '../../bridge';
-import { classify, todayKey } from '../../projects/index.mjs';
+import { buildProjectTree, classify, descendantProjectIds, todayKey } from '../../projects/index.mjs';
 import { useRunningSessions } from '../tasks/useRunningSessions';
 import type { Agent, Project, Task, TaskAuditEvent } from '../../types';
 import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
@@ -422,16 +422,27 @@ export function useNewHomeData(
     };
   }, []);
 
+  // task-c82d8e0f4eae — SUBTREE aggregation. Scoping on a bare
+  // `t.projectId === projectId` made a parent project (or any project with
+  // subprojects that hold the actual tasks) render an empty roster — whole
+  // subtrees were invisible. A selected project now scopes to its ENTIRE
+  // descendant subtree (descendantProjectIds over the same tree the picker
+  // nests with); "All projects" (projectId null) stays the unscoped roster.
+  const scopeIds = useMemo(() => {
+    if (!projectId) return null;
+    return descendantProjectIds(buildProjectTree(projects), projectId);
+  }, [projectId, projects]);
+
   const tasks = useMemo(() => {
-    const scoped = projectId
-      ? rawTasks.filter((t) => t.projectId === projectId)
+    const scoped = scopeIds
+      ? rawTasks.filter((t) => t.projectId != null && scopeIds.has(t.projectId))
       : rawTasks;
     const now = Date.now();
     const today = todayKey(now);
     return scoped.map((t) =>
       toNewHomeTask(t, today, now, runningSessions, auditByTask.get(t.id)),
     );
-  }, [rawTasks, projectId, runningSessions, auditByTask]);
+  }, [rawTasks, scopeIds, runningSessions, auditByTask]);
 
   const counts = useMemo(() => {
     const c: Record<NewHomeStatus, number> = { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 };

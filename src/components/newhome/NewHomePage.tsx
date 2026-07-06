@@ -42,7 +42,8 @@ import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeCon
 import { fm } from '../../bridge';
 import { getTask } from '../../tasks';
 import type { Project } from '../../types';
-import { buildProjectTree } from '../../projects/index.mjs';
+import { ancestorChain, buildProjectTree } from '../../projects/index.mjs';
+import { buildSubprojectSections } from './subprojectSections.mjs';
 import { nextSelectionAfterArchive, nextSelectionAfterDelete, projectDeleteDecision } from './projectCrud.mjs';
 import { IconActionButton } from './IconActionButton';
 import {
@@ -426,9 +427,41 @@ export function NewHomePage() {
     return byStatus;
   }, [tasks, filter, search, queryState]);
 
+  // task-c82d8e0f4eae — split the (subtree-aggregated) roster into the selected
+  // project's OWN tasks plus one navigable rollup section per direct child
+  // subproject. The roster below shows own tasks; the sections let the user
+  // drill parent → subproject → tasks. HeroStats/counts keep reflecting the
+  // full subtree (useNewHomeData.counts) — the sections are the breakdown.
+  const { ownTasks, subprojectSections } = useMemo(() => {
+    const { ownTaskIds, sections } = buildSubprojectSections(
+      filteredTasks.map((t) => ({ id: t.id, projectId: t.projectId, status: t.status })),
+      projectTree,
+      selectedProjectId,
+    );
+    const ownSet = new Set(ownTaskIds);
+    return {
+      ownTasks: filteredTasks.filter((t) => ownSet.has(t.id)),
+      subprojectSections: sections.map((s) => ({
+        id: s.id,
+        name: s.name,
+        statusCounts: s.statusCounts,
+        taskCount: s.taskCount,
+      })),
+    };
+  }, [filteredTasks, projectTree, selectedProjectId]);
+
   const selectedProject = selectedProjectId
     ? projects.find((p) => p.id === selectedProjectId) ?? null
     : null;
+
+  // task-c82d8e0f4eae — breadcrumb back up the subproject chain (general →
+  // specific). Every crumb but the last scopes the picker to that ancestor;
+  // "All projects" resets to the unscoped root. Only shown once a project is
+  // selected (there's always a way back out of a drill-in).
+  const breadcrumb = useMemo(
+    () => (selectedProjectId ? ancestorChain(projectTree, selectedProjectId) : []),
+    [selectedProjectId, projectTree],
+  );
 
   // task-fd5b93809b1b — a persisted selection can outlive the project it
   // points at (deleted/archived elsewhere, or a stale value from another
@@ -573,6 +606,38 @@ export function NewHomePage() {
       <div className="nh__content">
         <div className="nh__hero">
           <div className="nh__hero-text">
+            {selectedProjectId && (
+              <nav className="nh__breadcrumb" aria-label="Project path">
+                <button
+                  type="button"
+                  className="nh__breadcrumb-crumb"
+                  onClick={() => setSelectedProjectId(null)}
+                >
+                  All projects
+                </button>
+                {breadcrumb.map((p, i) => {
+                  const isLast = i === breadcrumb.length - 1;
+                  return (
+                    <span key={p.id} className="nh__breadcrumb-seg">
+                      <span className="nh__breadcrumb-sep" aria-hidden="true">
+                        ›
+                      </span>
+                      {isLast ? (
+                        <span className="nh__breadcrumb-current">{p.name}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="nh__breadcrumb-crumb"
+                          onClick={() => setSelectedProjectId(p.id)}
+                        >
+                          {p.name}
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </nav>
+            )}
             {/* Hover-to-edit (task-5c8ca16e8e46): hovering the title or
                 description reveals an inline ✎ affordance; clicking it opens the
                 existing project edit dialog (scoped to this project). No inline
@@ -728,7 +793,9 @@ export function NewHomePage() {
         )}
 
         <RosterTable
-          tasks={filteredTasks}
+          tasks={ownTasks}
+          subprojectSections={subprojectSections}
+          onNavigateProject={setSelectedProjectId}
           filter={filter}
           search={search}
           queryMode={queryState.kind}
