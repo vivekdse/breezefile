@@ -57,6 +57,12 @@
   font-size: var(--fs-sm);
 }
 
+/* task-group-scope-picker — the group scope sits right after the project
+   picker and inherits its shape; a small gap keeps the two pickers distinct. */
+.nh__group-picker {
+  margin-left: 6px;
+}
+
 .nh__btn {
   appearance: none;
   border: 1px solid var(--border-2);
@@ -354,6 +360,15 @@
 .nh-filter-chip--invalid {
   border-color: var(--nh-failed);
   color: var(--nh-failed);
+}
+/* task-group-scope-picker — the active group scope, a structural filter like
+   the project scope. Accent-toned + the "Group:" text prefix distinguish it
+   from the search-query chip (which carries a 🔍/⚡ icon). Theme-aware tokens
+   only — no per-theme hex. */
+.nh-filter-chip--group {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 /* Status chip carries the same status accent as its hero card, so the roster
    cue and the active card read as one selection. Colors route through the
