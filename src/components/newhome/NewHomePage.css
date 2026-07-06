@@ -230,6 +230,14 @@
   border-color: var(--nh-failed);
   color: var(--nh-failed);
 }
+/* Status chip carries the same status accent as its hero card, so the roster
+   cue and the active card read as one selection. Colors route through the
+   shared, theme-aware --nh-* tokens — no per-theme hex. */
+.nh-filter-chip--done { border-color: var(--nh-done); background: var(--nh-done-soft); color: var(--nh-done); }
+.nh-filter-chip--progress { border-color: var(--nh-progress); background: var(--nh-progress-soft); color: var(--nh-progress); }
+.nh-filter-chip--queued { border-color: var(--nh-queued); background: var(--nh-queued-soft); color: var(--nh-queued); }
+.nh-filter-chip--needs { border-color: var(--nh-needs); background: var(--nh-needs-soft); color: var(--nh-needs); }
+.nh-filter-chip--failed { border-color: var(--nh-failed); background: var(--nh-failed-soft); color: var(--nh-failed); }
 .nh-filter-chip__kind {
   font-size: var(--fs-2xs);
 }

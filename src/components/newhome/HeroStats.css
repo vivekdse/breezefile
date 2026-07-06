@@ -10,39 +10,57 @@
   gap: var(--sp-3);
 }
 
+/* Each card carries its own status accent + soft-fill as local custom
+   properties (defaulting to the neutral border/panel tokens), so the shared
+   hover/active rules below reference one pair of vars instead of repeating a
+   selector per status. Both derive from the theme-aware --nh-* tokens, so the
+   active treatment holds up across every theme with no hardcoded hex. */
 .nh-hero-stats__stat {
+  --nh-card-accent: var(--border-2);
+  --nh-card-accent-soft: var(--bg-2);
   appearance: none;
   text-align: left;
   background: var(--bg-1);
   border: 1px solid var(--border-1);
-  border-left: 4px solid var(--border-2);
+  border-left: 4px solid var(--nh-card-accent);
   border-radius: var(--r-lg);
   padding: var(--sp-3) var(--sp-4);
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: border-color var(--motion-hover), background var(--motion-hover);
+  transition: border-color var(--motion-hover), background var(--motion-hover),
+    box-shadow var(--motion-hover);
 }
 .nh-hero-stats__stat:hover {
   background: var(--bg-2);
 }
+
+.nh-hero-stats__stat--done { --nh-card-accent: var(--nh-done); --nh-card-accent-soft: var(--nh-done-soft); }
+.nh-hero-stats__stat--progress { --nh-card-accent: var(--nh-progress); --nh-card-accent-soft: var(--nh-progress-soft); }
+.nh-hero-stats__stat--queued { --nh-card-accent: var(--nh-queued); --nh-card-accent-soft: var(--nh-queued-soft); }
+.nh-hero-stats__stat--needs { --nh-card-accent: var(--nh-needs); --nh-card-accent-soft: var(--nh-needs-soft); }
+.nh-hero-stats__stat--failed { --nh-card-accent: var(--nh-failed); --nh-card-accent-soft: var(--nh-failed-soft); }
+
+/* Active = this card's status is the current roster filter. Filled with the
+   status' soft tint, ringed by the full-strength accent on all four sides
+   (not just the left rule), and lifted with a matching outer glow so the
+   selection reads at a glance rather than as a 1px inset hairline. */
 .nh-hero-stats__stat--active {
-  background: var(--bg-2);
-  border-color: var(--border-2);
-  box-shadow: inset 0 0 0 1px var(--border-2);
+  background: var(--nh-card-accent-soft);
+  border-color: var(--nh-card-accent);
+  border-left-width: 4px;
+  box-shadow: inset 0 0 0 1px var(--nh-card-accent),
+    0 0 0 1px var(--nh-card-accent);
 }
-
-.nh-hero-stats__stat--done { border-left-color: var(--nh-done); }
-.nh-hero-stats__stat--progress { border-left-color: var(--nh-progress); }
-.nh-hero-stats__stat--queued { border-left-color: var(--nh-queued); }
-.nh-hero-stats__stat--needs { border-left-color: var(--nh-needs); }
-.nh-hero-stats__stat--failed { border-left-color: var(--nh-failed); }
-
-.nh-hero-stats__stat--done.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-done); }
-.nh-hero-stats__stat--progress.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-progress); }
-.nh-hero-stats__stat--queued.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-queued); }
-.nh-hero-stats__stat--needs.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-needs); }
-.nh-hero-stats__stat--failed.nh-hero-stats__stat--active { box-shadow: inset 0 0 0 1px var(--nh-failed); }
+.nh-hero-stats__stat--active:hover {
+  background: var(--nh-card-accent-soft);
+}
+/* Pull the label + value into the accent when active so the whole card, not
+   just its frame, signals the live filter. */
+.nh-hero-stats__stat--active .nh-hero-stats__label,
+.nh-hero-stats__stat--active .nh-hero-stats__value {
+  color: var(--nh-card-accent);
+}
 
 .nh-hero-stats__label {
   color: var(--muted-on-panel);
