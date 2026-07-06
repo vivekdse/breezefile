@@ -391,6 +391,22 @@
 .nh-roster__title--group {
   font-weight: 600;
 }
+
+/* task-c82d8e0f4eae — a subproject rollup row: a navigable grouping that drills
+   into its own tasks. A left accent + folder glyph mark it apart from a
+   template group without inventing a new surface. */
+.nh-roster__row--subproject > .nh-roster__title-cell {
+  box-shadow: inset 3px 0 0 var(--accent, var(--fg));
+}
+.nh-roster__title--subproject {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.nh-roster__subproject-glyph {
+  font-size: var(--fs-sm);
+  opacity: 0.8;
+}
 .nh-roster__who--group {
   font-size: var(--fs-2xs);
   color: var(--muted-on-panel);

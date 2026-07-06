@@ -3,6 +3,7 @@ export type { ProjectNode, TaskStats } from './tree.d.mts';
 export {
   buildProjectTree,
   indexTree,
+  descendantProjectIds,
   ancestorChain,
   breadcrumbPath,
   rollUpTaskStats,

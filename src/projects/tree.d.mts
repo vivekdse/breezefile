@@ -29,6 +29,10 @@ export function buildProjectTree(projects: Project[]): ProjectNode[];
 /** Flatten a forest into a Map<id, ProjectNode> for O(1) lookup. */
 export function indexTree(treeOrRoots: ProjectNode[] | ProjectNode): Map<string, ProjectNode>;
 
+/** task-c82d8e0f4eae — the project id + every descendant id (whole subtree).
+ *  An id not in the forest degrades to a `{projectId}` singleton. */
+export function descendantProjectIds(roots: ProjectNode[], projectId: string): Set<string>;
+
 /** Root→target project chain, general→specific (ends with the target). */
 export function ancestorChain(roots: ProjectNode[], projectId: string): Project[];
 
