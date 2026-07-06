@@ -401,3 +401,55 @@
   padding: 0 4px;
   text-decoration: underline;
 }
+
+/* Roster footer — pagination "Load more" + the recency-cutoff "Show older"
+   toggle (local-first speed). Quiet, centered, out of the way. */
+.nh-roster-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6) var(--sp-6);
+}
+.nh-roster-more__btn {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-on-panel);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: background var(--motion-hover), border-color var(--motion-hover);
+}
+.nh-roster-more__btn:hover,
+.nh-roster-more__btn:focus-visible {
+  background: var(--bg-2);
+  border-color: var(--accent);
+  outline: none;
+}
+.nh-roster-more__count {
+  color: var(--muted-on-panel);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.nh-roster-more__link {
+  appearance: none;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.nh-roster-more__link:hover,
+.nh-roster-more__link:focus-visible {
+  color: var(--accent);
+  outline: none;
+  text-decoration: underline;
+}
