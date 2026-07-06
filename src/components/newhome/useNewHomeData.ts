@@ -57,6 +57,7 @@ import type { Agent, Project, Task, TaskAuditEvent } from '../../types';
 import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
 import { metaStatus as metaStatusOf, parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
 import { buildJobValuesByRef, classifyJob, fieldedSchemaSource, partitionJobs, resolveFieldedJob, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
+import { filterByGroup } from './groupScope.mjs';
 
 // task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
 // "is this task an active agent" is never computed two different ways. classify()
@@ -447,10 +448,12 @@ export function useNewHomeData(
   const groupId = opts?.groupId ?? null;
 
   const tasks = useMemo(() => {
-    let scoped = scopeIds
+    const projectScoped = scopeIds
       ? rawTasks.filter((t) => t.projectId != null && scopeIds.has(t.projectId))
       : rawTasks;
-    if (groupId) scoped = scoped.filter((t) => t.groupId === groupId);
+    // Group scope via the pure, unit-tested predicate (groupScope.mjs) — a
+    // null groupId ("All groups") returns the list unchanged.
+    const scoped = filterByGroup(projectScoped, groupId);
     const now = Date.now();
     const today = todayKey(now);
     return scoped.map((t) =>

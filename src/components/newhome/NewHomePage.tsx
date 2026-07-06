@@ -58,6 +58,14 @@ import {
   // load/save and blanks the whole app at runtime. Same discipline as the
   // fileTypes.ts / launcherPrefs.ts imports elsewhere.
 } from './selectedProjectPrefs.ts';
+import {
+  loadSelectedGroupId,
+  saveSelectedGroupId,
+  isStaleGroupSelection,
+  // Explicit `.ts` extension for the SAME shadow-import reason as
+  // selectedProjectPrefs above: a sibling selectedGroupPrefs.mjs (pure helpers)
+  // shadows this wrapper on Vite/esbuild's extensionless resolution.
+} from './selectedGroupPrefs.ts';
 import './NewHomePage.css';
 
 // task-69651204e222 — CONVERGENCE FLAG. When true, New Home's task-open path
@@ -81,6 +89,15 @@ type FilterState = 'all' | NewHomeStatus;
 const FILTER_STATES: FilterState[] = ['all', 'done', 'progress', 'queued', 'needs', 'failed'];
 function isFilterState(v: unknown): v is FilterState {
   return typeof v === 'string' && (FILTER_STATES as string[]).includes(v);
+}
+
+// task-group-scope-picker — display label for a group in the picker / chip.
+// The data layer surfaces only an opaque group id (+ task count) — there is no
+// client-side group-name registry yet (a server GET /chromeext/groups that
+// returns {id,name} is the follow-up) — so the id IS the label. Kept as a
+// one-liner so wiring in real names later is a single-spot change.
+function groupLabel(id: string): string {
+  return id;
 }
 
 // Human-readable label per status bucket for the active-filter chip.
@@ -140,6 +157,16 @@ export function NewHomePage() {
     setSelectedProjectIdState(id);
     saveSelectedProjectId(id);
   }
+  // task-group-scope-picker — the group scope, next to the project picker.
+  // Seeded from (and mirrored to) storage the SAME way selectedProjectId is,
+  // so the "+ New Task" remount doesn't reset it. null = "All groups".
+  const [selectedGroupId, setSelectedGroupIdState] = useState<string | null>(
+    () => loadSelectedGroupId(),
+  );
+  function setSelectedGroupId(id: string | null) {
+    setSelectedGroupIdState(id);
+    saveSelectedGroupId(id);
+  }
   const [filter, setFilter] = useState<FilterState>('all');
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   // task-7ea59baaea6c — tracks the project id as of the last run of the
@@ -162,9 +189,14 @@ export function NewHomePage() {
   // in the picker (with an Unarchive action) so an archive is recoverable
   // from the same surface, not a one-way door into a settings page.
   const [showArchived, setShowArchived] = useState(false);
-  const { tasks, counts, projects, loading, refresh, refreshProjects } = useNewHomeData(
+  const { tasks, counts, projects, groups, loading, refresh, refreshProjects } = useNewHomeData(
     selectedProjectId,
-    { includeArchived: showArchived },
+    // task-group-scope-picker — pass the group scope into the data layer so it
+    // narrows `tasks` (and therefore counts / hero stats / subproject sections /
+    // roster) consistently, mirroring how the project scope flows. `groups` is
+    // derived off the project-scoped set BEFORE the group filter, so selecting a
+    // group never shrinks the picker's own options.
+    { includeArchived: showArchived, groupId: selectedGroupId },
   );
   // task-a9841cfc0e1b — project CRUD UI state: which dialog (create vs edit)
   // is open, if any. Edit passes the project being edited; create passes
@@ -470,7 +502,7 @@ export function NewHomePage() {
   // never carries a stale offset across a scope/filter/search/toggle change.
   useEffect(() => {
     setPageLimit(PAGE_SIZE);
-  }, [selectedProjectId, filter, search, showOlder]);
+  }, [selectedProjectId, selectedGroupId, filter, search, showOlder]);
 
   // task-c82d8e0f4eae — split the (subtree-aggregated) roster into the selected
   // project's OWN tasks plus one navigable rollup section per direct child
@@ -544,6 +576,20 @@ export function NewHomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId, projects]);
 
+  // task-group-scope-picker — a persisted group scope can outlive the group's
+  // presence in the current project-scoped set (the last task in it finished
+  // and aged out, or the project scope changed to one that has no such group).
+  // Once groups have actually populated, fall back to "All groups" rather than
+  // wedging the roster on a scope that can never match. isStaleGroupSelection
+  // treats an empty `groups` as "not yet loaded" (never stale), so this never
+  // fires against the initial pre-fetch render.
+  useEffect(() => {
+    if (isStaleGroupSelection(selectedGroupId, groups)) {
+      setSelectedGroupId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupId, groups]);
+
   const openTask = openTaskId ? tasks.find((t) => t.id === openTaskId) : undefined;
 
   // Publish grounding for the globally-mounted Copilot (src/copilot/
@@ -616,6 +662,27 @@ export function NewHomePage() {
               </option>
             ))}
           </select>
+          {/* task-group-scope-picker — compact GROUP scope, mirroring the
+              project picker. "All groups" = no scoping (default); selecting one
+              narrows the roster, hero stats, and subproject sections to tasks
+              owned by that group (via useNewHomeData's groupId seam). Only shown
+              when the current set actually spans one or more groups, so a
+              single-group / no-group deployment isn't cluttered. */}
+          {groups.length > 0 && (
+            <select
+              className="nh__project-picker nh__group-picker"
+              value={selectedGroupId ?? ''}
+              onChange={(e) => setSelectedGroupId(e.target.value || null)}
+              title="Scope to one group"
+            >
+              <option value="">All groups</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {groupLabel(g.id)} ({g.count})
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             className="nh__btn"
@@ -799,9 +866,26 @@ export function NewHomePage() {
 
         <HeroStats counts={counts} activeFilter={filter} onFilter={setFilter} />
 
-        {(filter !== 'all' || search.trim()) && (
+        {(filter !== 'all' || search.trim() || selectedGroupId) && (
           <div className="nh-filter-chip-bar">
             <span className="nh-filter-chip-bar__label">Filtering:</span>
+            {/* task-group-scope-picker — the active group scope renders as a
+                chip in the SAME bar as the status/search filters, so every
+                applied narrowing is visible and clearable by hand. */}
+            {selectedGroupId && (
+              <span className="nh-filter-chip nh-filter-chip--group">
+                <span className="nh-filter-chip__text">Group: {groupLabel(selectedGroupId)}</span>
+                <button
+                  type="button"
+                  className="nh-filter-chip__x"
+                  aria-label="Clear group scope"
+                  title="Clear group scope"
+                  onClick={() => setSelectedGroupId(null)}
+                >
+                  ×
+                </button>
+              </span>
+            )}
             {filter !== 'all' && (
               <span className={`nh-filter-chip nh-filter-chip--status nh-filter-chip--${filter}`}>
                 <span className="nh-filter-chip__text">{FILTER_LABELS[filter]}</span>
@@ -852,6 +936,7 @@ export function NewHomePage() {
               onClick={() => {
                 setFilter('all');
                 setSearch('');
+                setSelectedGroupId(null);
               }}
             >
               Clear all
