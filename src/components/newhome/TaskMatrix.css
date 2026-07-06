@@ -124,6 +124,24 @@
   border-bottom: none;
 }
 
+/* task-dc5ad168cd3a — per-step-group banding. Alternating step groups carry
+   .tm-band on BOTH header rows (group title + IN/OUT field row) and the data
+   cells beneath, so each chain step's columns read as one group instead of a
+   continuous strip. The tint is the shared, theme-derived --surface-band token
+   (a whisper — ~4% of the on-panel foreground), so it stays subtle and
+   correct-contrast in every theme.
+     - Header cells already paint background-color (--bg-2), so the band is
+       LAYERED as a background-image tint that sits over that color.
+     - Body cells are otherwise transparent, so the band is a background-color;
+       this also tints n/a cells (their hatch background-image draws on top). */
+.tm-group-th.tm-band,
+.tm-field-th.tm-band {
+  background-image: linear-gradient(var(--surface-band), var(--surface-band));
+}
+.tm-cell-td.tm-band {
+  background-color: var(--surface-band);
+}
+
 /* Group header row: one boxed cell spanning each step's field columns. */
 .tm-group-th {
   text-align: center;
