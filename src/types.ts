@@ -416,6 +416,12 @@ export type TaskCreate = {
   // task-ab1d7955e23f — optional TypeBuild project container (opaque id,
   // non-PHI). The local source ignores it; TypeBuild maps it to `project_id`.
   projectId?: string;
+  // Optional TypeBuild GROUP (opaque id, non-PHI) — the team the task is created
+  // into. The local source ignores it; TypeBuild maps it to `group_id` on create.
+  // The composer sets this from the currently-selected group scope so a create
+  // lands in the active team (the server may require it). Omitted / '' = server
+  // default (no group / the server's own default).
+  groupId?: string;
   // task-896f3f7f5e75 — optional TypeBuild agent assignment (opaque id, NON-PHI;
   // one agent per task). The local source ignores it; TypeBuild maps it to the
   // server's `agent_id` on create. Omitted / '' = no agent.
