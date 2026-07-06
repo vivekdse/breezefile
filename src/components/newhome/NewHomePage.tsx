@@ -645,7 +645,7 @@ export function NewHomePage() {
           <div className="nh-filter-chip-bar">
             <span className="nh-filter-chip-bar__label">Filtering:</span>
             {filter !== 'all' && (
-              <span className="nh-filter-chip">
+              <span className={`nh-filter-chip nh-filter-chip--status nh-filter-chip--${filter}`}>
                 <span className="nh-filter-chip__text">{FILTER_LABELS[filter]}</span>
                 <button
                   type="button"
