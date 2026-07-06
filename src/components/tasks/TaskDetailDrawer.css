@@ -26,11 +26,13 @@
    and pull the overlay's right edge in by the sidebar's width, so `.tdd`
    centers in the space actually left of the chat — never overlaid, never
    clipped. The literal 480px mirrors CopilotKit's own
-   `DEFAULT_SIDEBAR_WIDTH`/`--sidebar-width` (react-core v2); there's no CSS
-   custom property CopilotKit exposes for it on `:root`/`body` to reference
-   instead, so this is a matched-constant fallback, not a guess. */
+   `DEFAULT_SIDEBAR_WIDTH` (react-core v2). We drive the real sidebar width from
+   the app token --copilot-sidebar-width (copilot-theme.css), which the
+   CopilotSidebar `width` prop consumes — so read the SAME token here and the
+   overlay's right edge always matches the actual sidebar width (the literal
+   480px is only the fallback if that token isn't loaded). */
 body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
-  right: var(--sidebar-width, 480px);
+  right: var(--copilot-sidebar-width, 480px);
 }
 @media (max-width: 767px) {
   /* CopilotKit only reserves body margin (and renders the sidebar as a fixed
