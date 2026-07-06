@@ -481,6 +481,15 @@ const fm = {
     ipcRenderer.on('browser:state', handler);
     return () => ipcRenderer.off('browser:state', handler);
   },
+  // task-2e6c926c466c — Ctrl/Cmd+B: launch (or focus) the ad-hoc browser + agent
+  // pair in the operator window. Reuses the operator session-spawn path in main;
+  // returns whether a fresh session launched or an existing one was focused.
+  openAdHocBrowser: () =>
+    ipcRenderer.invoke('browser:adhoc-open') as Promise<{
+      launched: boolean;
+      reused: boolean;
+      ptyId: number;
+    }>,
   // SPIKE (spike/playwright-cdp): main → renderer request to OPEN a browser
   // tab (e.g. the `playwright` task flag opens one for the agent to drive).
   onBrowserOpen: (cb: (s: { url?: string }) => void) => {

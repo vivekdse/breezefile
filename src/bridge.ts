@@ -269,6 +269,15 @@ type Fm = {
       canGoForward: boolean;
     }) => void,
   ) => () => void;
+  // task-2e6c926c466c — Ctrl/Cmd+B: launch (or focus) the ad-hoc browser + agent
+  // pair. Reuses the operator session-spawn path in main (browser + adopted
+  // agent terminal, driven over CDP), but with NO task — generic instructions,
+  // no PHI. Resolves once the pair is live (or the existing one is focused).
+  openAdHocBrowser: () => Promise<{
+    launched: boolean;
+    reused: boolean;
+    ptyId: number;
+  }>;
   // SPIKE (spike/playwright-cdp): main → renderer "open a browser tab" request.
   onBrowserOpen: (cb: (s: { url?: string }) => void) => () => void;
   // Login-submit capture (task-1188c6535e91 / task-ad89064bf45f): fired when the

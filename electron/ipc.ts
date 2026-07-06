@@ -2666,6 +2666,16 @@ end tell`;
     return createBrowserView(win, { url: opts?.url, fill: 'edge' });
   });
 
+  // task-2e6c926c466c — Ctrl/Cmd+B: launch (or focus) the ad-hoc browser + agent
+  // pair. Reuses the operator session-spawn path (runTaskInteractive with the
+  // `playwright` flag) so the agent drives the browser over CDP exactly like a
+  // TypeBuild browser task, but with NO task (generic instructions, no PHI).
+  // Dynamic import keeps the agents graph out of the ipc module's eager load.
+  ipcMain.handle('browser:adhoc-open', async () => {
+    const { runAdHocBrowserSession } = await import('./agents/adhoc-browser');
+    return runAdHocBrowserSession();
+  });
+
   ipcMain.on(
     'browser:bounds',
     (
