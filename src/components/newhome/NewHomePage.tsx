@@ -230,17 +230,35 @@ export function NewHomePage() {
   // Projects attention rollup uses (src/projects/tree.mjs), not a re-derived
   // heuristic.
   const projectTree = useMemo(() => buildProjectTree(projects), [projects]);
+  // Groups-first hierarchy: GROUP is the primary scope, PROJECTS nest under it.
+  // The group picker lists ALL the caller's groups (the fetched registry —
+  // groupNames — which is authoritative and independent of the current task
+  // set), each with a task count when known (from useNewHomeData.groups). Sorted
+  // by name for a stable menu.
+  const groupOptions = useMemo(() => {
+    const countById = new Map(groups.map((g) => [g.id, g.count]));
+    return [...groupNames.entries()]
+      .map(([id, name]) => ({ id, name, count: countById.get(id) ?? 0 }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [groupNames, groups]);
+
+  // The project picker lists only projects belonging to the SELECTED group (or
+  // every project when "All groups"). A project is in a group when its own
+  // groupId matches — walked over the same tree so nesting is preserved; a
+  // matching child still appears at its depth even if a parent belongs elsewhere.
   const flatProjectOptions = useMemo(() => {
     const out: { project: Project; depth: number }[] = [];
     const walk = (nodes: ReturnType<typeof buildProjectTree>) => {
       for (const n of nodes) {
-        out.push({ project: n.project, depth: n.depth });
+        if (!selectedGroupId || n.project.groupId === selectedGroupId) {
+          out.push({ project: n.project, depth: n.depth });
+        }
         walk(n.children);
       }
     };
     walk(projectTree);
     return out;
-  }, [projectTree]);
+  }, [projectTree, selectedGroupId]);
   // task — the roster's ▶ Start button. Launches via the SAME mechanism the old
   // Tasks page's play button uses (useTaskActions().start → runTaskNow), then
   // refreshes the roster the SAME way onRetry does — this shell owns the action
@@ -599,15 +617,18 @@ export function NewHomePage() {
   // presence in the current project-scoped set (the last task in it finished
   // and aged out, or the project scope changed to one that has no such group).
   // Once groups have actually populated, fall back to "All groups" rather than
-  // wedging the roster on a scope that can never match. isStaleGroupSelection
-  // treats an empty `groups` as "not yet loaded" (never stale), so this never
-  // fires against the initial pre-fetch render.
+  // wedging the roster on a scope that can never match. Checked against
+  // groupOptions (the fetched group REGISTRY — every group the user belongs to,
+  // including ones with zero current tasks), NOT the task-derived `groups`, so a
+  // valid empty group is never wrongly cleared. isStaleGroupSelection treats an
+  // empty list as "not yet loaded" (never stale) so this doesn't fire on the
+  // initial pre-fetch render.
   useEffect(() => {
-    if (isStaleGroupSelection(selectedGroupId, groups)) {
+    if (isStaleGroupSelection(selectedGroupId, groupOptions)) {
       setSelectedGroupId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGroupId, groups]);
+  }, [selectedGroupId, groupOptions]);
 
   const openTask = openTaskId ? tasks.find((t) => t.id === openTaskId) : undefined;
 
@@ -661,12 +682,48 @@ export function NewHomePage() {
     <div className="nh">
       <div className="nh__topbar">
         <div className="nh__topbar-left">
+          {/* task-group-scope-picker — compact GROUP scope, mirroring the
+              project picker. "All groups" = no scoping (default); selecting one
+              narrows the roster, hero stats, and subproject sections to tasks
+              owned by that group (via useNewHomeData's groupId seam). Only shown
+              when the current set actually spans one or more groups, so a
+              single-group / no-group deployment isn't cluttered. */}
+          {groupOptions.length > 0 && (
+            <select
+              className="nh__project-picker nh__group-picker"
+              value={selectedGroupId ?? ''}
+              onChange={(e) => {
+                const next = e.target.value || null;
+                setSelectedGroupId(next);
+                // Groups-first: a project outside the new group no longer
+                // belongs; clear it so the project picker + roster stay coherent.
+                if (
+                  selectedProjectId &&
+                  next &&
+                  projects.find((p) => p.id === selectedProjectId)?.groupId !== next
+                ) {
+                  setSelectedProjectId(null);
+                }
+              }}
+              title="Scope to one group"
+            >
+              <option value="">All groups</option>
+              {groupOptions.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                  {g.count > 0 ? ` (${g.count})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <select
             className="nh__project-picker"
             value={selectedProjectId ?? ''}
             onChange={(e) => setSelectedProjectId(e.target.value || null)}
           >
-            <option value="">All projects</option>
+            <option value="">
+              {selectedGroupId ? 'All projects in group' : 'All projects'}
+            </option>
             {/* task-a9841cfc0e1b (spec §4) — indent reflects each project's
                 depth in the parent/child forest (buildProjectTree), so
                 nesting is visible right in the picker without a separate
@@ -681,27 +738,6 @@ export function NewHomePage() {
               </option>
             ))}
           </select>
-          {/* task-group-scope-picker — compact GROUP scope, mirroring the
-              project picker. "All groups" = no scoping (default); selecting one
-              narrows the roster, hero stats, and subproject sections to tasks
-              owned by that group (via useNewHomeData's groupId seam). Only shown
-              when the current set actually spans one or more groups, so a
-              single-group / no-group deployment isn't cluttered. */}
-          {groups.length > 0 && (
-            <select
-              className="nh__project-picker nh__group-picker"
-              value={selectedGroupId ?? ''}
-              onChange={(e) => setSelectedGroupId(e.target.value || null)}
-              title="Scope to one group"
-            >
-              <option value="">All groups</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {groupLabel(g.id, groupNames)} ({g.count})
-                </option>
-              ))}
-            </select>
-          )}
           <button
             type="button"
             className="nh__btn"
