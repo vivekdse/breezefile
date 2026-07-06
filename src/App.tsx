@@ -1082,18 +1082,34 @@ function Shell() {
         e.preventDefault();
         setSettingsOpen((v) => !v);
       }
-      // SPIKE (spike/playwright-cdp) — Cmd/Ctrl+B opens an embedded browser tab.
+      // task-2e6c926c466c — Cmd/Ctrl+B launches the embedded browser WITH a live
+      // Claude Code agent attached (the operator arrangement: browser + adopted
+      // agent terminal, driven over CDP), NOT a bare browser tab. Main reuses the
+      // operator session-spawn path (runAdHocBrowserSession → runTaskInteractive
+      // with the `playwright` flag) and opens/adopts the operator window; a second
+      // Ctrl+B focuses the existing pair. No task, so the agent gets generic
+      // browser-driving instructions and nothing PHI. Best-effort: a failed
+      // launch surfaces on the status line rather than throwing.
       if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault();
-        dispatch({
-          type: 'newTab',
-          // Empty start url → the view backend shows the themed splash, not
-          // example.com (task-d85d23f3aea4).
-          tab: makeTab('/', {
-            kind: 'browser',
-            browserUrl: '',
-          }),
-        });
+        void fm
+          .openAdHocBrowser()
+          .then((res) => {
+            dispatch({
+              type: 'setStatus',
+              msg: res.reused
+                ? 'browser · focused the attached agent session'
+                : res.launched
+                  ? 'browser · attaching a Claude Code agent…'
+                  : 'browser · could not start (no open window?)',
+            });
+          })
+          .catch(() => {
+            dispatch({
+              type: 'setStatus',
+              msg: 'browser · could not start the attached agent',
+            });
+          });
       }
     }
     window.addEventListener('keydown', h);
