@@ -45,6 +45,7 @@ import type { Project } from '../../types';
 import { ancestorChain, buildProjectTree } from '../../projects/index.mjs';
 import { buildSubprojectSections } from './subprojectSections.mjs';
 import { nextSelectionAfterArchive, nextSelectionAfterDelete, projectDeleteDecision } from './projectCrud.mjs';
+import { IconActionButton } from './IconActionButton';
 import {
   loadSelectedProjectId,
   saveSelectedProjectId,
@@ -604,7 +605,7 @@ export function NewHomePage() {
 
       <div className="nh__content">
         <div className="nh__hero">
-          <div>
+          <div className="nh__hero-text">
             {selectedProjectId && (
               <nav className="nh__breadcrumb" aria-label="Project path">
                 <button
@@ -637,16 +638,47 @@ export function NewHomePage() {
                 })}
               </nav>
             )}
-            <div className="nh__hero-title">
-              {selectedProject ? selectedProject.name : 'New Home'}
-            </div>
-            <div className="nh__hero-sub">
-              {loading
-                ? 'Loading…'
-                : selectedProject
-                  ? selectedProject.description || 'Agent work monitor for this project'
+            {/* Hover-to-edit (task-5c8ca16e8e46): hovering the title or
+                description reveals an inline ✎ affordance; clicking it opens the
+                existing project edit dialog (scoped to this project). No inline
+                editing engine — just the discoverable hover+click into the edit
+                flow already used by the header's Edit action. */}
+            {selectedProject ? (
+              <button
+                type="button"
+                className="nh__hero-editable"
+                onClick={() => setProjectDialog({ mode: 'edit', project: selectedProject })}
+                disabled={projectActionBusy}
+                title="Edit project"
+              >
+                <span className="nh__hero-title nh__hero-editable-text">
+                  {selectedProject.name}
+                </span>
+                <span className="nh__hero-editable-pencil" aria-hidden="true">✎</span>
+              </button>
+            ) : (
+              <div className="nh__hero-title">New Home</div>
+            )}
+            {selectedProject && !loading ? (
+              <button
+                type="button"
+                className="nh__hero-editable"
+                onClick={() => setProjectDialog({ mode: 'edit', project: selectedProject })}
+                disabled={projectActionBusy}
+                title="Edit project description"
+              >
+                <span className="nh__hero-sub nh__hero-editable-text">
+                  {selectedProject.description || 'Agent work monitor for this project'}
+                </span>
+                <span className="nh__hero-editable-pencil" aria-hidden="true">✎</span>
+              </button>
+            ) : (
+              <div className="nh__hero-sub">
+                {loading
+                  ? 'Loading…'
                   : 'Agent work monitor — every project, ranked by what needs you'}
-            </div>
+              </div>
+            )}
             {selectedProject?.instructions && (
               <div className="nh__hero-instructions" title="Agent instructions">
                 <span className="nh__hero-instructions-label">Agent instructions:</span>{' '}
@@ -657,35 +689,29 @@ export function NewHomePage() {
           {/* task-a9841cfc0e1b (spec §2/§3) — edit/archive/delete live on the
               selected project's hero, not a separate settings page: rename,
               edit description/instructions/folders, or archive/delete it,
-              all without leaving New Home. */}
+              all without leaving New Home. task-5c8ca16e8e46 — compact icon
+              buttons via the SHARED IconActionButton, not oversized text. */}
           {selectedProject && (
             <div className="nh__hero-actions">
-              <button
-                type="button"
-                className="nh__btn"
+              <IconActionButton
+                icon="✎"
+                label="Edit project"
                 onClick={() => setProjectDialog({ mode: 'edit', project: selectedProject })}
                 disabled={projectActionBusy}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                className="nh__btn"
+              />
+              <IconActionButton
+                icon="🗄"
+                label="Archive project (hides it from the picker; reversible)"
                 onClick={confirmArchive}
                 disabled={projectActionBusy}
-                title="Hide this project from the picker (reversible)"
-              >
-                Archive
-              </button>
-              <button
-                type="button"
-                className="nh__btn nh__btn--danger"
+              />
+              <IconActionButton
+                icon="🗑"
+                label="Delete project (permanent; only if it has no tasks)"
                 onClick={confirmDelete}
                 disabled={projectActionBusy}
-                title="Permanently delete this project (only if it has no tasks)"
-              >
-                Delete
-              </button>
+                variant="danger"
+              />
             </div>
           )}
         </div>
@@ -710,7 +736,7 @@ export function NewHomePage() {
           <div className="nh-filter-chip-bar">
             <span className="nh-filter-chip-bar__label">Filtering:</span>
             {filter !== 'all' && (
-              <span className="nh-filter-chip">
+              <span className={`nh-filter-chip nh-filter-chip--status nh-filter-chip--${filter}`}>
                 <span className="nh-filter-chip__text">{FILTER_LABELS[filter]}</span>
                 <button
                   type="button"

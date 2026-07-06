@@ -132,6 +132,17 @@
   --muted-on-canvas:  var(--muted,      var(--fg-2));
   --rule-on-panel:    var(--panel-rule, var(--rule,    var(--border-1)));
 
+  /* Column-group banding — a whisper of surface tint used to visually group
+     related columns (e.g. a chain step's OUT columns in the New Home matrix,
+     TaskMatrix). Like --warn-soft/--err-soft above, it DERIVES from a
+     theme-safe composite token (--text-on-panel) rather than hardcoding a
+     color, so it resolves to a sensible, low-contrast value in EVERY theme
+     the app ships — a faint LIGHTENING on the dark themes (dusk/plum), a faint
+     DARKENING on the light/paper themes — with no per-theme override needed.
+     Kept intentionally tiny (~4% of the on-panel foreground): grouping, not
+     zebra stripes. Contrast stays a whisper against every --bg-1 surface. */
+  --surface-band: color-mix(in srgb, var(--text-on-panel) 4%, transparent);
+
   /* ------------- Default theme: Alpine dusk ------------- */
   /* A twilight mountain lake — pre-dawn indigo sky, glacier teal,
      twilight violet, alpenglow pink. Cold, still, cinematic. */

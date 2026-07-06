@@ -395,7 +395,11 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                 Run
               </th>
               {stepGroups.map((g) => (
-                <th key={`g${g.index}`} className="tm-group-th" colSpan={g.span}>
+                <th
+                  key={`g${g.index}`}
+                  className={`tm-group-th${g.index % 2 ? ' tm-band' : ''}`}
+                  colSpan={g.span}
+                >
                   <span className="tm-group-marker">{stepMarker(g.index)}</span>
                   <span className="tm-group-name">{g.title}</span>
                 </th>
@@ -404,22 +408,26 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             {/* Field header: input keys (IN) then output fields (OUT + ✳). */}
             <tr className="tm-field-row">
               {stepGroups.map((g) => {
+                // task-dc5ad168cd3a — mild per-step-group banding: alternating
+                // groups carry a --surface-band tint so each step's columns read
+                // as one group. Applied on BOTH header rows and the data cells.
+                const band = g.index % 2 ? ' tm-band' : '';
                 if (g.inputs.length + g.outputs.length === 0) {
                   return (
-                    <th key={`fe${g.index}`} className="tm-field-th tm-field-th--empty">
+                    <th key={`fe${g.index}`} className={`tm-field-th tm-field-th--empty${band}`}>
                       —
                     </th>
                   );
                 }
                 return [
                   ...g.inputs.map((key) => (
-                    <th key={`fi${g.index}-${key}`} className="tm-field-th">
+                    <th key={`fi${g.index}-${key}`} className={`tm-field-th${band}`}>
                       <span className="tm-io tm-io--in">IN</span>
                       <span className="tm-field-label">{key}</span>
                     </th>
                   )),
                   ...g.outputs.map((o) => (
-                    <th key={`fo${g.index}-${o.key}`} className="tm-field-th">
+                    <th key={`fo${g.index}-${o.key}`} className={`tm-field-th${band}`}>
                       <span className="tm-io tm-io--out">OUT</span>
                       <span className="tm-field-label">{o.label || o.key}</span>
                       {o.required && (
@@ -482,11 +490,18 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                     </div>
                   </td>
                   {stepGroups.map((g) => {
+                    // task-dc5ad168cd3a — same alternating band as the headers so
+                    // a step's data cells read as one group with its column titles.
+                    const band = g.index % 2 ? ' tm-band' : '';
                     const child = rowChildren[g.index];
                     if (!child) {
                       // This run has no child for this step — hatch the whole group.
                       return (
-                        <td key={`na${g.index}`} className="tm-cell-td tm-cell-td--na" colSpan={g.span}>
+                        <td
+                          key={`na${g.index}`}
+                          className={`tm-cell-td tm-cell-td--na${band}`}
+                          colSpan={g.span}
+                        >
                           <span className="tm-na">n/a</span>
                         </td>
                       );
@@ -496,7 +511,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                     const cells: JSX.Element[] = [];
                     for (const key of g.inputs) {
                       cells.push(
-                        <td key={`ci${g.index}-${key}`} className="tm-cell-td tm-cell-td--in">
+                        <td key={`ci${g.index}-${key}`} className={`tm-cell-td tm-cell-td--in${band}`}>
                           <MatrixCell
                             io="in"
                             childId={child.id}
@@ -513,7 +528,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                     }
                     for (const o of g.outputs) {
                       cells.push(
-                        <td key={`co${g.index}-${o.key}`} className="tm-cell-td tm-cell-td--out">
+                        <td key={`co${g.index}-${o.key}`} className={`tm-cell-td tm-cell-td--out${band}`}>
                           <MatrixCell
                             io="out"
                             childId={child.id}
@@ -534,7 +549,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                       // that still carries the step's status + hover actions.
                       const p = pillFor(childDetail?.status ?? child.status, childDetail?.rawStatus ?? child.rawStatus);
                       cells.push(
-                        <td key={`cp${g.index}`} className="tm-cell-td">
+                        <td key={`cp${g.index}`} className={`tm-cell-td${band}`}>
                           <div className="tm-cell tm-cell--placeholder">
                             <span className={`tm-pill tm-pill--${p.kind}`}>{p.label}</span>
                           </div>
