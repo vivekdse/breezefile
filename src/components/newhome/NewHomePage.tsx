@@ -338,6 +338,9 @@ export function NewHomePage() {
           mode: 'create',
           defaultFolder: '',
           projectId: selectedProjectId ?? undefined,
+          // The active GROUP scope so a new task lands in the currently-selected
+          // team (the server may require a group). Omitted for "All groups".
+          groupId: selectedGroupId ?? undefined,
           initialKind: kind,
         },
       }),

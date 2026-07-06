@@ -373,6 +373,9 @@ export function buildCreatePayload(input) {
   if (typeof input.priority === 'number') payload.priority = input.priority;
   // task-ab1d7955e23f — optional project container. Opaque id (non-PHI).
   if (input.projectId) payload.project_id = input.projectId;
+  // Optional GROUP (server `group_id`) — the team the task is created into.
+  // Opaque id (non-PHI). Sent from the composer's active group scope.
+  if (input.groupId) payload.group_id = input.groupId;
   // task-896f3f7f5e75 — optional assigned AGENT (scalar; opaque id, non-PHI).
   if (input.agentId) payload.agent_id = input.agentId;
   // task-fd1be6f6b22d — optional assignee (server `assigned_to`, an email/
