@@ -327,6 +327,8 @@ function toNewHomeTask(
     title: t.title,
     status,
     projectId: t.projectId ?? null,
+    // Group ownership (NON-PHI) for group-scoped relevance filtering.
+    groupId: t.groupId ?? null,
     // task-b8fa34a80a34 — forward-compatible template id (undefined until the
     // server ships `template_id` — see mapListRow). The template roster reads
     // it defensively and falls back to (name,project) grouping when absent.
@@ -361,13 +363,17 @@ function toNewHomeTask(
 
 export function useNewHomeData(
   projectId?: string | null,
-  opts?: { includeArchived?: boolean },
+  opts?: { includeArchived?: boolean; groupId?: string | null },
 ): {
   tasks: NewHomeTask[];
   counts: Record<NewHomeStatus, number>;
   approvals: NewHomeTask[];
   projects: Project[];
   agents: Agent[];
+  /** The distinct GROUP ids present across the (project-scoped) task set, each
+   *  with how many tasks it owns — the input a future group picker narrows on.
+   *  NON-PHI (opaque group ids + counts). Empty when nothing is group-scoped. */
+  groups: { id: string; count: number }[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -433,16 +439,42 @@ export function useNewHomeData(
     return descendantProjectIds(buildProjectTree(projects), projectId);
   }, [projectId, projects]);
 
+  // Group scope (relevance filter): when a group is selected, narrow to tasks
+  // owned by it. Applied AFTER project scoping and BEFORE mapping so counts +
+  // sections + roster all reflect the scoped set consistently. null/undefined =
+  // no group scope (every group). This is a DISPLAY filter — the source cache
+  // stays complete, so no other surface loses data.
+  const groupId = opts?.groupId ?? null;
+
   const tasks = useMemo(() => {
-    const scoped = scopeIds
+    let scoped = scopeIds
       ? rawTasks.filter((t) => t.projectId != null && scopeIds.has(t.projectId))
       : rawTasks;
+    if (groupId) scoped = scoped.filter((t) => t.groupId === groupId);
     const now = Date.now();
     const today = todayKey(now);
     return scoped.map((t) =>
       toNewHomeTask(t, today, now, runningSessions, auditByTask.get(t.id)),
     );
-  }, [rawTasks, scopeIds, runningSessions, auditByTask]);
+  }, [rawTasks, scopeIds, groupId, runningSessions, auditByTask]);
+
+  // The distinct groups present in the PROJECT-scoped set (before the group
+  // filter itself), each with a task count — the menu a group picker offers.
+  // Derived off the raw project-scoped rows so selecting a group doesn't shrink
+  // the very list the picker is built from.
+  const groups = useMemo(() => {
+    const base = scopeIds
+      ? rawTasks.filter((t) => t.projectId != null && scopeIds.has(t.projectId))
+      : rawTasks;
+    const counts = new Map<string, number>();
+    for (const t of base) {
+      const g = t.groupId;
+      if (g) counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([id, count]) => ({ id, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [rawTasks, scopeIds]);
 
   const counts = useMemo(() => {
     const c: Record<NewHomeStatus, number> = { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 };
@@ -461,6 +493,7 @@ export function useNewHomeData(
     approvals,
     projects,
     agents,
+    groups,
     loading,
     error,
     refresh,

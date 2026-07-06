@@ -253,6 +253,10 @@ export type Task = {
   // task-ab1d7955e23f — owning TypeBuild project container (opaque id,
   // non-PHI). Carried from the server `project_id`; absent on local rows.
   projectId?: string | null;
+  // Owning GROUP (opaque id, non-PHI) — the team a task is shared with, from
+  // the server `group_id`. Enables group-scoped relevance filtering; absent on
+  // local rows / a personal task.
+  groupId?: string | null;
   // task-b8fa34a80a34 — the TEMPLATE this task was instantiated from (opaque,
   // NON-PHI id). FORWARD-COMPATIBLE: the server does NOT yet return this on
   // list/detail rows — mapListRow/mapDetail map it only when the field is
