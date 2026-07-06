@@ -162,6 +162,93 @@
   flex-shrink: 0;
 }
 
+/* task-5c8ca16e8e46 — the SHARED compact icon button (see IconActionButton.tsx).
+   One square, quiet affordance used for Edit / Archive / Delete across every
+   New Home surface, replacing the oversized full-text nh__btn cluster. Glyph
+   sits centered; Delete keeps the destructive accent via --danger. */
+.nh__icon-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+  font-size: var(--fs-sm);
+  line-height: 1;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--motion-hover), border-color var(--motion-hover),
+    color var(--motion-hover);
+}
+.nh__icon-btn:hover {
+  background: var(--bg-3);
+}
+.nh__icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.nh__icon-btn--danger {
+  border-color: var(--nh-failed);
+  color: var(--nh-failed);
+}
+.nh__icon-btn--danger:hover {
+  background: var(--nh-failed-soft);
+}
+
+/* task-5c8ca16e8e46 — hover-to-edit on the hero title/description. The text is
+   a quiet button (looks like plain text) that reveals a ✎ on hover/focus and
+   opens the project edit dialog on click. */
+.nh__hero-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.nh__hero-editable {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  width: max-content;
+  max-width: 100%;
+  border-radius: var(--r-sm);
+}
+.nh__hero-editable:disabled {
+  cursor: default;
+}
+.nh__hero-editable-text {
+  min-width: 0;
+}
+.nh__hero-editable .nh__hero-editable-pencil {
+  flex-shrink: 0;
+  opacity: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted-on-canvas);
+  transition: opacity var(--motion-hover);
+}
+.nh__hero-editable:hover:not(:disabled) .nh__hero-editable-pencil,
+.nh__hero-editable:focus-visible .nh__hero-editable-pencil {
+  opacity: 1;
+}
+.nh__hero-editable:hover:not(:disabled) .nh__hero-editable-text {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
 .nh__project-action-error {
   display: flex;
   align-items: center;
