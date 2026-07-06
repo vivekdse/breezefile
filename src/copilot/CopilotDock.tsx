@@ -110,6 +110,18 @@ function CopilotGrounding() {
       <ChatOpenBridge />
       <CopilotSidebar
         position="right"
+        // Width MUST be set via this prop, not CSS. v2 writes --sidebar-width
+        // INLINE on the [data-copilot-sidebar] <aside> (from its own sidebarWidth
+        // state), and its rule `@media(min-width:768px){[data-copilot-sidebar]{
+        // width:var(--sidebar-width,480px)!important}}` reads that inline var — so
+        // a stylesheet `[data-copilot-sidebar]{--sidebar-width:…}` override loses to
+        // the inline value and does nothing (the earlier failed fix). Passing width
+        // here feeds that inline var directly AND short-circuits v2's auto-measure
+        // ResizeObserver (which only runs when width is undefined), so it sticks.
+        // The actual value lives in the --copilot-sidebar-width app token
+        // (copilot-theme.css), which TaskDetailDrawer.css also reads, so both stay
+        // in sync. v2 inlines this string verbatim; the token resolves per theme.
+        width="var(--copilot-sidebar-width)"
         input={{ autoFocus: true }}
         autoScroll="pin-to-bottom"
         labels={{
