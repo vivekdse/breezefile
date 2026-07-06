@@ -231,14 +231,20 @@ export function NewHomePage() {
   // heuristic.
   const projectTree = useMemo(() => buildProjectTree(projects), [projects]);
   // Groups-first hierarchy: GROUP is the primary scope, PROJECTS nest under it.
-  // The group picker lists ALL the caller's groups (the fetched registry —
-  // groupNames — which is authoritative and independent of the current task
-  // set), each with a task count when known (from useNewHomeData.groups). Sorted
-  // by name for a stable menu.
+  // The group picker options = the UNION of the fetched name registry
+  // (groupNames, from GET /chromeext/groups — real names, every group you belong
+  // to even with zero current tasks) AND the groups present in the current task
+  // set (useNewHomeData.groups — the source of TASK COUNTS, and the fallback so
+  // the picker still shows when the name fetch is empty/slow/unavailable, e.g.
+  // signed out of the groups endpoint or a source that doesn't serve it). A
+  // registry name wins for the label; a task-only group falls back to its id.
+  // Sorted by label for a stable menu. This union is why the picker never
+  // disappears just because the name fetch came back empty.
   const groupOptions = useMemo(() => {
     const countById = new Map(groups.map((g) => [g.id, g.count]));
-    return [...groupNames.entries()]
-      .map(([id, name]) => ({ id, name, count: countById.get(id) ?? 0 }))
+    const ids = new Set<string>([...groupNames.keys(), ...groups.map((g) => g.id)]);
+    return [...ids]
+      .map((id) => ({ id, name: groupNames.get(id) || id, count: countById.get(id) ?? 0 }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [groupNames, groups]);
 
