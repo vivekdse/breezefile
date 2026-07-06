@@ -78,6 +78,9 @@ export type SourcedTask = Omit<Task, 'folder'> & {
   // task-ab1d7955e23f — owning project container (opaque, non-PHI). Optional;
   // present when a task was created into / belongs to a TypeBuild Project.
   projectId?: string | null;
+  // Owning GROUP (opaque, non-PHI) — the team a task is shared with. Enables
+  // group-scoped relevance filtering. null/undefined for a personal task.
+  groupId?: string | null;
   // task-b8fa34a80a34 — the TEMPLATE this task was instantiated from (opaque,
   // NON-PHI id). FORWARD-COMPATIBLE: the server does not emit `template_id`
   // yet, so mapListRow sets this only when present; until then it's undefined

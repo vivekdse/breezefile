@@ -380,6 +380,7 @@ test('mapListRow maps a fully-populated open row', () => {
     defer_until: '2026-07-08T00:00:00Z',
     parent_task_id: 'parent-1',
     project_id: 'proj-1',
+    group_id: 'group-7',
     template_id: 'tmpl-1',
     agent_id: 'agent-1',
     created_at: '2026-07-01T00:00:00Z',
@@ -401,6 +402,7 @@ test('mapListRow maps a fully-populated open row', () => {
   assert.equal(mapped.deferUntil, '2026-07-08T00:00:00Z');
   assert.equal(mapped.parentTaskId, 'parent-1');
   assert.equal(mapped.projectId, 'proj-1');
+  assert.equal(mapped.groupId, 'group-7');
   assert.equal(mapped.templateId, 'tmpl-1');
   assert.equal(mapped.agentId, 'agent-1');
   assert.deepEqual(mapped.pending_question, { text: 'Which?' });

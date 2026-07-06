@@ -37,6 +37,11 @@ export type NewHomeTask = {
   title: string;
   status: NewHomeStatus;
   projectId: string | null;
+  /** The GROUP this task belongs to (NON-PHI opaque id), when the server
+   *  scopes it to one; null for a personal/ungrouped task. Enables group-scoped
+   *  relevance filtering in the data layer (a group picker can narrow the roster
+   *  to one team's work). Additive/optional so existing consumers are unaffected. */
+  groupId?: string | null;
   /** task-b8fa34a80a34 — the TEMPLATE this task was instantiated from (opaque,
    *  NON-PHI id), when the server carries it. FORWARD-COMPATIBLE: absent today
    *  (the server does not yet emit `template_id`), so the New Home template

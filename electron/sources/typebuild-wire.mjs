@@ -330,6 +330,9 @@ export function mapListRow(row, now = Date.now()) {
     parentTaskId: row.parent_task_id ?? null,
     // task-ab1d7955e23f — owning project container (opaque, non-PHI).
     projectId: row.project_id ?? null,
+    // Owning GROUP (opaque, non-PHI) — enables group-scoped relevance filtering
+    // in the New Home data layer. Received on the list row; mapped through now.
+    groupId: row.group_id ?? null,
     // task-b8fa34a80a34 — template this task was instantiated from (opaque,
     // non-PHI). DEFENSIVE / forward-compatible: the server does not emit
     // `template_id` today, so this is undefined for now and the roster falls
