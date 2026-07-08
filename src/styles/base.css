@@ -106,9 +106,22 @@ button {
 }
 
 input,
-textarea {
+textarea,
+select {
   font: inherit;
   color: inherit;
+}
+
+/* Native <select> dropdown popups: Chromium paints the popup from each
+   option's OWN background/color (not the select's), falling back to the OS
+   scheme — which renders near-invisible white-on-white on light-OS setups
+   under our dark themes. Pin options to the active theme's tokens so every
+   select popup (composer field types, template editor, settings, …) stays
+   readable in all themes. */
+select option,
+select optgroup {
+  background: var(--bg-1);
+  color: var(--fg-1);
 }
 
 /* Tight, refined scrollbars — visible only on hover */
