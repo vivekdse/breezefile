@@ -540,6 +540,69 @@ function shortId(id: string): string {
   return id.length <= 8 ? id : id.slice(0, 8);
 }
 
+// task-73f6304ffb94 — client-normalized SavedQuery catalog entry (the wire
+// shape describeQueries/describeQuery return, matching src/copilot/savedQueries
+// QueryCatalogEntry). NON-PHI metadata: field names + types only.
+export type QueryCatalogFieldWire = { name: string; type: string };
+export type QueryCatalogEntryWire = {
+  id: string;
+  familyId?: string;
+  name: string;
+  version: number;
+  status: string;
+  entityType?: string;
+  display?: string;
+  fields: QueryCatalogFieldWire[];
+  source?: { id: string; name: string; entityTypes: string[] } | null;
+};
+
+// Normalize one server describe row (snake_case entity_type / family_id, nested
+// source.entity_types) into QueryCatalogEntryWire. Returns null when there's no
+// usable id. Defensive: missing/mistyped fields are coerced or dropped, so a
+// single bad row can't poison the whole catalog.
+function normalizeCatalogEntry(raw: unknown): QueryCatalogEntryWire | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const q = raw as Record<string, unknown>;
+  const id = typeof q.id === 'string' ? q.id : '';
+  if (!id) return null;
+  const fields = Array.isArray(q.fields)
+    ? (q.fields as unknown[])
+        .filter((f): f is Record<string, unknown> => !!f && typeof f === 'object' && typeof (f as Record<string, unknown>).name === 'string')
+        .map((f) => ({
+          name: f.name as string,
+          type: typeof f.type === 'string' ? (f.type as string) : 'unknown',
+        }))
+    : [];
+  const rawSource = q.source as Record<string, unknown> | null | undefined;
+  const source =
+    rawSource && typeof rawSource === 'object' && typeof rawSource.id === 'string'
+      ? {
+          id: rawSource.id,
+          name: typeof rawSource.name === 'string' ? rawSource.name : rawSource.id,
+          entityTypes: Array.isArray(rawSource.entity_types)
+            ? (rawSource.entity_types as unknown[]).filter((e): e is string => typeof e === 'string')
+            : Array.isArray(rawSource.entityTypes)
+              ? (rawSource.entityTypes as unknown[]).filter((e): e is string => typeof e === 'string')
+              : [],
+        }
+      : null;
+  const entityTypeRaw = q.entity_type ?? q.entityType;
+  const displayRaw = q.display;
+  const familyRaw = q.family_id ?? q.familyId;
+  const entry: QueryCatalogEntryWire = {
+    id,
+    name: typeof q.name === 'string' && q.name ? q.name : id,
+    version: typeof q.version === 'number' ? q.version : 1,
+    status: typeof q.status === 'string' ? q.status : 'unknown',
+    fields,
+    source,
+  };
+  if (typeof familyRaw === 'string') entry.familyId = familyRaw;
+  if (typeof entityTypeRaw === 'string' && entityTypeRaw) entry.entityType = entityTypeRaw;
+  if (typeof displayRaw === 'string' && displayRaw) entry.display = displayRaw;
+  return entry;
+}
+
 // ─── Source implementation ───────────────────────────────────────────────
 
 export class TypeBuildTaskSource implements TaskSource {
@@ -2267,6 +2330,37 @@ export class TypeBuildTaskSource implements TaskSource {
         entityType:
           q.entityType ?? q.output_schema?.ref?.entityType ?? q.outputSchema?.ref?.entityType,
       }));
+  }
+
+  // task-73f6304ffb94 — SavedQuery CATALOG for the source-aware key picker.
+  // GET /chromeext/queries/describe → { queries: [{ id, family_id, name,
+  //   version, status, entity_type, display, fields:[{name,type}], source }] }
+  //   — latest APPROVED version per family, the fields[] each query exposes.
+  //   GET /chromeext/queries/:id/describe is the same per-query shape for one.
+  // NON-PHI metadata (field names + types only). Normalized to the client shape
+  // (camelCase entityType, source.entityTypes) at this boundary so the renderer
+  // reasons over one shape. [] / null on a parse miss so the picker degrades.
+  async describeQueries(): Promise<QueryCatalogEntryWire[]> {
+    const res = await this.request('GET', '/chromeext/queries/describe');
+    if (!res.ok) throw new Error(`typebuild: query describe failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as { queries?: unknown[] };
+    return (Array.isArray(data.queries) ? data.queries : [])
+      .map((q) => normalizeCatalogEntry(q))
+      .filter((q): q is QueryCatalogEntryWire => q !== null);
+  }
+
+  async describeQuery(savedQueryId: string): Promise<QueryCatalogEntryWire | null> {
+    const res = await this.request(
+      'GET',
+      `/chromeext/queries/${encodeURIComponent(savedQueryId)}/describe`,
+    );
+    if (!res.ok) throw new Error(`typebuild: query describe failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as { queries?: unknown[]; query?: unknown };
+    // The single endpoint uses the same per-query shape; accept it top-level,
+    // wrapped as { query }, or as the first of a { queries } list, defensively.
+    const raw =
+      data.query ?? (Array.isArray(data.queries) ? data.queries[0] : undefined) ?? data;
+    return normalizeCatalogEntry(raw);
   }
 
   // ─── SavedQuery authoring (task-d8a0b081eb93) ────────────────────────────

@@ -169,6 +169,103 @@ test('parseTaskTemplateBlock v2 sanitizes malformed defs/fields rather than reje
   assert.equal(parsed.defs[1].neededWhen, undefined); // malformed condition dropped, not kept
 });
 
+// task-73f6304ffb94 — a source-aware INPUT field's `source` binding must
+// survive build→parse, and a malformed `source` must be dropped at parse.
+test('build→parse preserves a well-formed source binding on an input field', () => {
+  const defs = [
+    {
+      id: 'lookup',
+      name: 'Lookup',
+      inputs: [
+        {
+          key: 'name',
+          label: 'Name',
+          type: 'text',
+          source: { savedQueryId: 'sq-1', version: 2, entityType: 'person' },
+        },
+      ],
+      outputs: [],
+    },
+  ];
+  const parsed = parseTaskTemplateBlock(buildTaskTemplateBlock('Chain', defs));
+  assert.deepEqual(parsed.defs[0].inputs[0], {
+    key: 'name',
+    label: 'Name',
+    type: 'text',
+    source: { savedQueryId: 'sq-1', version: 2, entityType: 'person' },
+  });
+});
+
+test('build→parse keeps a minimal source (savedQueryId only) and drops absent optionals', () => {
+  const defs = [
+    {
+      id: 'lookup',
+      name: 'Lookup',
+      inputs: [{ key: 'dob', label: 'Dob', type: 'date', source: { savedQueryId: 'sq-9' } }],
+      outputs: [],
+    },
+  ];
+  const parsed = parseTaskTemplateBlock(buildTaskTemplateBlock('Chain', defs));
+  assert.deepEqual(parsed.defs[0].inputs[0].source, { savedQueryId: 'sq-9' });
+});
+
+test('parse drops a malformed source (no savedQueryId / wrong type) but keeps the field', () => {
+  const body = [
+    '```task-template',
+    JSON.stringify({
+      v: 2,
+      name: 'Chain',
+      defs: [
+        {
+          id: 'lookup',
+          name: 'Lookup',
+          inputs: [
+            { key: 'a', label: 'A', type: 'text', source: {} }, // no savedQueryId → dropped
+            { key: 'b', label: 'B', type: 'text', source: 'nope' }, // not an object → dropped
+            { key: 'c', label: 'C', type: 'text', source: { savedQueryId: '' } }, // empty id → dropped
+            { key: 'd', label: 'D', type: 'text', source: { savedQueryId: 'sq-ok', version: 'x' } }, // bad version coerced away
+          ],
+          outputs: [],
+        },
+      ],
+    }),
+    '```',
+  ].join('\n');
+  const parsed = parseTaskTemplateBlock(body);
+  const inputs = parsed.defs[0].inputs;
+  assert.equal(inputs.length, 4); // fields themselves survive
+  assert.equal(inputs[0].source, undefined);
+  assert.equal(inputs[1].source, undefined);
+  assert.equal(inputs[2].source, undefined);
+  assert.deepEqual(inputs[3].source, { savedQueryId: 'sq-ok' }); // bad version dropped
+});
+
+test('parse strips unknown props on a field, keeping only schema-known ones + source', () => {
+  const body = [
+    '```task-template',
+    JSON.stringify({
+      v: 2,
+      name: 'Chain',
+      defs: [
+        {
+          id: 'x',
+          name: 'X',
+          inputs: [{ key: 'k', label: 'L', type: 'text', junk: 1, source: { savedQueryId: 'sq' } }],
+          outputs: [],
+        },
+      ],
+    }),
+    '```',
+  ].join('\n');
+  const parsed = parseTaskTemplateBlock(body);
+  assert.deepEqual(parsed.defs[0].inputs[0], {
+    key: 'k',
+    label: 'L',
+    type: 'text',
+    source: { savedQueryId: 'sq' },
+  });
+});
+
 test('parseTaskTemplateBlock v1 legacy bodies surface distinctly (name/defs null, legacy populated)', () => {
   const block = '```task-template\n{"templateId":"tmpl-1","taskDefIds":["intake","stain","wash"]}\n```';
   const parsed = parseTaskTemplateBlock(block);

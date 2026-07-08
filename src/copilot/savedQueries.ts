@@ -64,6 +64,38 @@ export async function listApprovedQueries(): Promise<SavedQuerySummary[]> {
   return fm.typebuild.queries.list('approved');
 }
 
+// task-73f6304ffb94 — SavedQuery CATALOG (the source-aware key picker). The
+// canonical wire types live in ../bridge; re-exported here so picker/consumer
+// code has one import site (fieldCatalog.mjs's .d.mts + FieldKeyPicker.tsx).
+export type { QueryCatalogEntry, QueryCatalogField } from '../bridge';
+
+/** Describe every APPROVED SavedQuery visible to the signed-in principal — the
+ *  fields[] each exposes, for the source-aware key picker (latest approved per
+ *  family only, server-side). NON-PHI metadata (field names + types). Returns
+ *  [] when signed out / on error so the picker degrades to "Other (custom
+ *  key)" and stays fully usable offline. Never throws (unlike execute, whose
+ *  rows carry PHI); the catalog is safe to hold in state. */
+export async function describeQueries(): Promise<import('../bridge').QueryCatalogEntry[]> {
+  try {
+    return await fm.typebuild.queries.describe();
+  } catch {
+    return [];
+  }
+}
+
+/** Describe ONE SavedQuery's exposed fields[] (same per-query shape). The
+ *  picker uses the catalog (describeQueries) rather than this; exposed for
+ *  callers that already hold a query id. Returns null on miss/error. */
+export async function describeQuery(
+  savedQueryId: string,
+): Promise<import('../bridge').QueryCatalogEntry | null> {
+  try {
+    return await fm.typebuild.queries.describeOne(savedQueryId);
+  } catch {
+    return null;
+  }
+}
+
 /** A registered DataSource as the client sees it (public projection — NO
  *  creds). This is the "API spec" grounding context the authoring LLM writes
  *  query code against: name + base_url + entity_types. (task-d8a0b081eb93) */

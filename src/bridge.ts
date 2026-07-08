@@ -36,6 +36,25 @@ export type FormExtensionRecord = {
   groupId: string | null;
 };
 
+// task-73f6304ffb94 — a SavedQuery CATALOG entry as it crosses the bridge
+// (client-normalized camelCase; mirrors QueryCatalogEntryWire in
+// electron/sources/typebuild.ts). The source-aware key picker groups its menu
+// per query — one group per entry, one option per `fields[]` field. NON-PHI
+// metadata: field names + types only (never task values). Re-exported from
+// src/copilot/savedQueries.ts as the canonical consumer-facing type.
+export type QueryCatalogField = { name: string; type: string };
+export type QueryCatalogEntry = {
+  id: string;
+  familyId?: string;
+  name: string;
+  version: number;
+  status: string;
+  entityType?: string;
+  display?: string;
+  fields: QueryCatalogField[];
+  source?: { id: string; name: string; entityTypes: string[] } | null;
+};
+
 // task-e112d60a3b7c — a first-class Task Template as it crosses the bridge
 // (camelCase; mirrors `Template` in electron/sources/typebuild.ts). The "New
 // from Template" picker lists these. `variables` are the INPUT fields the human
@@ -513,6 +532,14 @@ type Fm = {
       ) => Promise<
         Array<{ id: string; name: string; version: number; status: string; entityType?: string }>
       >;
+      // task-73f6304ffb94 — SavedQuery CATALOG for the source-aware key picker.
+      // `describe` enumerates each approved query's exposed fields[] (latest
+      // approved per family — grouped per query in the picker menu); `describeOne`
+      // is the same per-query shape for a single id. NON-PHI metadata (field
+      // names + types only). [] / null signed out so the picker degrades to
+      // "Other (custom key)". See src/components/newhome/fieldCatalog.mjs.
+      describe: () => Promise<QueryCatalogEntry[]>;
+      describeOne: (savedQueryId: string) => Promise<QueryCatalogEntry | null>;
       // task-d8a0b081eb93 — SavedQuery AUTHORING (design-time CopilotKit flow).
       // `create` files a DRAFT; `get` reads code+schema for the approve card;
       // `approve` is the MANDATORY human gate (draft→approved == publish);

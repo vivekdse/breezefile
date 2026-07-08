@@ -3256,6 +3256,19 @@ end tell`;
     const src = typebuildSource();
     return src ? src.listQueries(status) : [];
   });
+  // task-73f6304ffb94 — SavedQuery CATALOG for the source-aware key picker
+  // (Template/composer authoring). `describe` returns every approved query's
+  // exposed fields[] (latest approved per family); `describeOne` is the same
+  // per-query shape for a single id. NON-PHI metadata (field names + types).
+  // Signed out → [] / null so the picker degrades to "Other (custom key)".
+  ipcMain.handle('typebuild:queries:describe', (_e) => {
+    const src = typebuildSource();
+    return src ? src.describeQueries() : [];
+  });
+  ipcMain.handle('typebuild:queries:describeOne', (_e, savedQueryId: string) => {
+    const src = typebuildSource();
+    return src ? src.describeQuery(savedQueryId) : null;
+  });
   // task-d8a0b081eb93 — SavedQuery AUTHORING (design-time CopilotKit flow):
   // ground the LLM with the DataSource spec (datasources:list — NO creds),
   // create a DRAFT (queries:create), inspect it (queries:get), clone→draft a
