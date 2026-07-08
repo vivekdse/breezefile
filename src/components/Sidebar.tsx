@@ -584,12 +584,23 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
   const { tasks: all } = useTasks({});
   const [menuFor, setMenuFor] = useState<{ task: Task; x: number; y: number } | null>(null);
   // Re-render every 30s so the "5min ago" cutoff actually drops stale
-  // completions off the list without waiting on an unrelated event.
-  const [, setTick] = useState(0);
+  // completions off the list without waiting on an unrelated event — but
+  // ONLY while a graced row is actually riding its window. A perpetual tick
+  // re-filtered the whole (history-inclusive) task list twice a minute for
+  // the app's entire uptime; with no graced row there is nothing to expire.
+  const [tick, setTick] = useState(0);
+  const hasGraced = all.some(
+    (t) =>
+      t.auto_mode &&
+      t.status === 'done' &&
+      t.completed_at &&
+      Date.now() - t.completed_at < AUTO_DONE_VISIBLE_MS,
+  );
   useEffect(() => {
+    if (!hasGraced) return;
     const id = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [hasGraced]);
 
   const today = todayISO();
   const tasks = useMemo(() => {
@@ -622,7 +633,10 @@ function ActiveTasksSection({ cwd }: ActiveTasksSectionProps) {
     const elsewhere: Task[] = [];
     for (const t of active) (t.folder === cwd ? here : elsewhere).push(t);
     return [...here, ...elsewhere];
-  }, [all, today, cwd]);
+    // `tick` is a real input: the filter reads Date.now(), and the tick is
+    // what re-evaluates it so an expired grace row actually drops off.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [all, today, cwd, tick]);
 
   const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
   const overflow = Math.max(0, tasks.length - MAX_VISIBLE_TASKS);

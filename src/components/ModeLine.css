@@ -57,7 +57,7 @@
    dismissal by nulling the local msg after 3s; the exit is a React-unmount
    rather than an animation so we don't need to manage two-phase state. */
 .modeline__slide {
-  animation: gpStatusSlideIn var(--dur-med) var(--ease-emphasis) both;
+  animation: gpStatusSlideIn var(--dur-med) var(--ease-emphasis) backwards;
 }
 
 /* fm-pdx — mode/prefix cross-fade. The span is re-keyed in React whenever
@@ -65,5 +65,5 @@
    transition (normal → command → find → visual) and reads as "gearing
    up" rather than a text swap. */
 .modeline__xfade {
-  animation: gpPopIn var(--dur-fast) var(--ease-in-out) both;
+  animation: gpPopIn var(--dur-fast) var(--ease-in-out) backwards;
 }

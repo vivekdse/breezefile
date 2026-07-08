@@ -60,7 +60,7 @@
      border. Transitioning those made the active pill visibly lag behind the
      file view when the user switched tabs via click or Ctrl+Tab. Only the
      enter/exit geometry (max-width/opacity/padding/margin) still animates. */
-  animation: gpTabOpen var(--dur-slow) var(--ease-emphasis) both;
+  animation: gpTabOpen var(--dur-slow) var(--ease-emphasis) backwards;
   transition:
     max-width var(--motion-toggle),
     opacity var(--motion-toggle),

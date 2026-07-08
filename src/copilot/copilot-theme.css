@@ -253,18 +253,54 @@
   color: var(--_cpk-accent) !important;
   border: 1px solid
     color-mix(in srgb, var(--_cpk-accent) 35%, transparent) !important;
-  /* box-shadow is left WITHOUT !important on purpose: an !important shadow
-     would outrank the breathe keyframe and freeze it. The (0,2,0) selector
-     still beats v2's single-class cpk:shadow-sm, so this base shadow wins
-     until the animation drives it. */
+  /* The (0,2,0) selector beats v2's single-class cpk:shadow-sm, so this base
+     shadow wins. The ambient breathe lives on ::after (see below), not here. */
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--_cpk-accent) 10%, transparent),
     0 8px 28px color-mix(in srgb, var(--_cpk-accent) 22%, transparent),
     inset 0 0 24px color-mix(in srgb, var(--_cpk-accent) 8%, transparent);
   transition: transform var(--motion-hover), box-shadow var(--motion-hover),
     border-color var(--motion-hover) !important;
-  /* Same ambient breathe as the disabled chip, on the app's 1.8s rhythm. */
-  animation: copilot-launcher-breathe 1.8s var(--ease-in-out) infinite !important;
+}
+
+/* Ambient breathe — the glow delta rides a ::after layer whose OPACITY
+   animates, not the element's box-shadow. box-shadow is not compositor-
+   animatable: an infinite box-shadow keyframe on this always-visible button
+   forced a main-thread style recalc + repaint every frame, forever (measured
+   at ~15% of a core on an otherwise idle window). Opacity runs on the GPU
+   compositor and costs the main thread nothing. The static base shadow above
+   is the trough; ::after carries the crest and fades in/out over it. The
+   inset component of the old crest is dropped — ::after paints over the icon,
+   so an inset glow there would wash it out, and the 6→10% inset delta was
+   imperceptible anyway. */
+.copilot-dock .copilotKitButton::after,
+.copilot-dock [data-testid='copilot-chat-toggle']::after,
+.copilot-dock__launcher::after {
+  content: '';
+  position: absolute;
+  inset: -1px; /* cover the border-box so the ring hugs the border */
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--_cpk-accent) 14%, transparent),
+    0 10px 34px color-mix(in srgb, var(--_cpk-accent) 28%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: copilot-launcher-breathe 1.8s var(--ease-in-out) infinite;
+}
+/* Hover applies its own, stronger halo on the element itself — hide the
+   ambient layer so the two don't stack into an over-glow. */
+.copilot-dock .copilotKitButton:hover::after,
+.copilot-dock [data-testid='copilot-chat-toggle']:hover::after,
+.copilot-dock__launcher:hover::after {
+  animation: none;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .copilot-dock .copilotKitButton::after,
+  .copilot-dock [data-testid='copilot-chat-toggle']::after,
+  .copilot-dock__launcher::after {
+    animation: none;
+  }
 }
 
 /* Icon inherits currentColor; force it accent too in case v2 pins a fill. */
@@ -309,6 +345,10 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
+}
+body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
+  .copilot-dock [data-testid='copilot-chat-toggle']::after {
+  content: none;
 }
 body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
   .copilot-dock [data-testid='copilot-chat-toggle']:hover {
@@ -361,12 +401,9 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
     inset 0 0 24px color-mix(in srgb, var(--accent) 6%, transparent);
   transition: transform var(--motion-hover), box-shadow var(--motion-hover),
     border-color var(--motion-hover);
-  /* 1.8s matches the app's ambient-loop rhythm (task-dot-breathe 1.8s,
-     tddPulse 1.6s) rather than guruandai's slower 4.2s, so the copilot chip
-     breathes in step with the rest of the app's "alive" affordances. There's
-     no shared duration token for multi-second ambient loops — every loop in
-     the codebase hardcodes its seconds — so we follow that convention. */
-  animation: copilot-launcher-breathe 1.8s var(--ease-in-out) infinite;
+  /* Anchor for the ::after breathe layer (shared with the enabled toggle,
+     defined in section 4 above). */
+  position: relative;
 }
 
 .copilot-dock__launcher:hover {
@@ -378,22 +415,18 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
     inset 0 0 28px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-/* Uses --_cpk-accent (the captured app accent) so the glow is the brand hue on
-   BOTH the enabled toggle (where plain --accent is a chip surface) and the
-   disabled chip. Both elements define --_cpk-accent; see their rules. */
+/* Opacity-only on purpose — runs on the compositor. The glow colors live in
+   the ::after box-shadow (which uses --_cpk-accent so the hue is right on
+   BOTH the enabled toggle and the disabled chip); this just fades that layer
+   in and out. 1.8s matches the app's ambient-loop rhythm (task-dot-breathe
+   1.8s, tddPulse 1.6s). */
 @keyframes copilot-launcher-breathe {
   0%,
   100% {
-    box-shadow:
-      0 0 0 4px color-mix(in srgb, var(--_cpk-accent) 8%, transparent),
-      0 8px 28px color-mix(in srgb, var(--_cpk-accent) 18%, transparent),
-      inset 0 0 24px color-mix(in srgb, var(--_cpk-accent) 6%, transparent);
+    opacity: 0;
   }
   50% {
-    box-shadow:
-      0 0 0 6px color-mix(in srgb, var(--_cpk-accent) 14%, transparent),
-      0 10px 34px color-mix(in srgb, var(--_cpk-accent) 28%, transparent),
-      inset 0 0 28px color-mix(in srgb, var(--_cpk-accent) 10%, transparent);
+    opacity: 1;
   }
 }
 

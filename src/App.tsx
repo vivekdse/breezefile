@@ -363,10 +363,24 @@ function Shell() {
         silenceTimers.delete(ptyId);
       }
     };
-    const armSilence = (ptyId: number) => {
+    // The timer is NOT re-armed on every term:data chunk — a streaming TUI
+    // (Claude Code repaints its spinner 10+ times/sec) would mean a
+    // clearTimeout+setTimeout pair per chunk for the whole session, which
+    // showed up as sustained CPU in long-uptime profiles. Instead the timer
+    // fires on schedule, consults lastDataAt, and re-arms itself for the
+    // remaining quiet window; the per-chunk cost is one Map.set.
+    const armSilence = (ptyId: number, delay: number = SILENCE_MS) => {
       clearSilence(ptyId);
       const t = setTimeout(() => {
         silenceTimers.delete(ptyId);
+        const last = lastDataAt.get(ptyId);
+        const quiet = last ? Date.now() - last : Infinity;
+        if (quiet < SILENCE_MS) {
+          // Output flowed while the timer was pending — still alive. Sleep
+          // out the rest of the silence window and check again.
+          armSilence(ptyId, SILENCE_MS - quiet);
+          return;
+        }
         const tabs = tabsRef.current;
         const idx = tabs.findIndex((t) => t.terminal?.ptyId === ptyId);
         if (idx < 0) return;
@@ -377,14 +391,14 @@ function Shell() {
         // output can restore 'busy'.
         dispatch({ type: 'setTerminalAttention', tabIndex: idx, attention: 'idle' });
         watchdogIdle.add(ptyId);
-      }, SILENCE_MS);
+      }, delay);
       silenceTimers.set(ptyId, t);
     };
     const offData = fm.onTermData((id) => {
       lastDataAt.set(id, Date.now());
       if (silenceTimers.has(id)) {
-        // Already tracked as busy — sustain it (resets the watchdog).
-        armSilence(id);
+        // Already tracked as busy — lastDataAt alone sustains it; the
+        // pending timer reads it when it fires.
       } else if (watchdogIdle.has(id)) {
         // Output resumed after the watchdog gave up: the session was alive
         // all along (slow tool call / long thinking). Restore busy.
@@ -472,9 +486,18 @@ function Shell() {
       }
     }, RECONCILE_MS);
 
+    // Prune per-pty bookkeeping when its pty dies. Without this the maps
+    // grow monotonically with every terminal ever spawned in the session.
+    const offExit = fm.onTermExit((id) => {
+      clearSilence(id);
+      watchdogIdle.delete(id);
+      lastDataAt.delete(id);
+    });
+
     return () => {
       offFg();
       offData();
+      offExit();
       clearInterval(reconcile);
       for (const t of silenceTimers.values()) clearTimeout(t);
       silenceTimers.clear();
