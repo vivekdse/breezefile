@@ -73,6 +73,9 @@ import { agentOptionHint } from './tasks/agent.mjs';
 // there is no project-level template config anymore. See
 // docs/task-templates-design.md.
 import type { TaskDef, TaskDefField } from './newhome/types';
+// task-73f6304ffb94 — the source-aware key picker + source-binding badge, the
+// ONE shared "+ input" affordance (also used by TemplateEditPanel).
+import { FieldKeyPicker, SourceBadge } from './newhome/FieldKeyPicker';
 import { instantiateChain } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
@@ -726,6 +729,7 @@ function FieldRowEditor({
   keyInputRef,
   onUpdate,
   onRemove,
+  onClearSource,
 }: {
   field: TaskDefField;
   list: FieldKind;
@@ -735,6 +739,7 @@ function FieldRowEditor({
   keyInputRef?: (el: HTMLInputElement | null) => void;
   onUpdate: (patch: Partial<TaskDefField>) => void;
   onRemove: () => void;
+  onClearSource: () => void;
 }) {
   return (
     <div
@@ -743,6 +748,12 @@ function FieldRowEditor({
       data-fe-list={list}
       data-fe-row-idx={rowIdx}
     >
+      {/* task-73f6304ffb94 — an INPUT field bound to a SavedQuery shows a badge
+          with the query name + an ✕ to unbind (renaming the key is independent
+          of the binding — clearing here only drops `source`). */}
+      {list === 'inputs' && field.source && (
+        <SourceBadge source={field.source} onClear={onClearSource} />
+      )}
       <input
         ref={keyInputRef}
         className="composer__chain-field-key"
@@ -834,8 +845,10 @@ function FieldEditors({
   inputs,
   outputs,
   onAdd,
+  onAddField,
   onUpdate,
   onRemove,
+  onClearSource,
   onExitUp,
   onExitDown,
   containerRef,
@@ -843,8 +856,13 @@ function FieldEditors({
   inputs: TaskDefField[];
   outputs: TaskDefField[];
   onAdd: (kind: FieldKind) => void;
+  // task-73f6304ffb94 — append a fully-formed field (the source-aware picker's
+  // output: a `source`-bound catalog field, or a blank "Other" field). Distinct
+  // from onAdd (blank add for the keyboard `i`/`o` shortcuts + outputs button).
+  onAddField: (kind: FieldKind, field: TaskDefField) => void;
   onUpdate: (kind: FieldKind, fieldIdx: number, patch: Partial<TaskDefField>) => void;
   onRemove: (kind: FieldKind, fieldIdx: number) => void;
+  onClearSource: (kind: FieldKind, fieldIdx: number) => void;
   onExitUp?: () => void;
   onExitDown?: () => void;
   containerRef?: MutableRefObject<HTMLDivElement | null>;
@@ -892,6 +910,15 @@ function FieldEditors({
     pendingFocus.current = { kind, idx: newIdx };
     setCursor(kind === 'inputs' ? inputs.length : inputs.length + outputs.length);
     onAdd(kind);
+  }
+  // task-73f6304ffb94 — append a fully-formed field (from the source-aware
+  // picker) and focus its key input, same cursor/focus bookkeeping as
+  // addAndFocus so a picker-add lands the row cursor exactly like a blank add.
+  function addFieldAndFocus(kind: FieldKind, field: TaskDefField) {
+    const newIdx = kind === 'inputs' ? inputs.length : outputs.length;
+    pendingFocus.current = { kind, idx: newIdx };
+    setCursor(kind === 'inputs' ? inputs.length : inputs.length + outputs.length);
+    onAddField(kind, field);
   }
   function isTextTarget(t: EventTarget | null): boolean {
     const el = t as HTMLElement | null;
@@ -1002,17 +1029,30 @@ function FieldEditors({
         <div key={kind} className="composer__chain-fieldgroup">
           <div className="composer__chain-fieldgroup-head">
             <span>{kind === 'inputs' ? 'Inputs' : 'Outputs'}</span>
-            <button
-              type="button"
-              className="composer__chain-add-btn"
-              title={kind === 'inputs' ? 'Add input (i)' : 'Add output (o)'}
-              onClick={(e) => {
-                e.stopPropagation();
-                addAndFocus(kind);
-              }}
-            >
-              + {kind === 'inputs' ? 'input' : 'output'}
-            </button>
+            {kind === 'inputs' ? (
+              // task-73f6304ffb94 — inputs add via the source-aware picker (API
+              // fields grouped per query + "Other (custom key)"). The keyboard
+              // `i` shortcut still adds a blank input via addAndFocus/onAdd.
+              <FieldKeyPicker
+                existingKeys={inputs.map((f) => f.key).filter(Boolean)}
+                onPick={(field) => addFieldAndFocus('inputs', field)}
+                buttonLabel="+ input"
+                buttonClassName="composer__chain-add-btn"
+                buttonTitle="Add input — from an API field or a custom key (i)"
+              />
+            ) : (
+              <button
+                type="button"
+                className="composer__chain-add-btn"
+                title="Add output (o)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  addAndFocus(kind);
+                }}
+              >
+                + output
+              </button>
+            )}
           </div>
           {fields.map((f, fi) => (
             <FieldRowEditor
@@ -1025,6 +1065,7 @@ function FieldEditors({
               keyInputRef={setKeyRef(`${kind}:${fi}`)}
               onUpdate={(patch) => onUpdate(kind, fi, patch)}
               onRemove={() => onRemove(kind, fi)}
+              onClearSource={() => onClearSource(kind, fi)}
             />
           ))}
         </div>
@@ -2006,11 +2047,26 @@ export function TaskComposer(props: Props) {
   function addTaskField(kind: 'inputs' | 'outputs') {
     taskFieldSetter(kind)((prev) => [...prev, { key: '', label: '', type: 'text' as const }]);
   }
+  // task-73f6304ffb94 — append a fully-formed field from the source-aware
+  // picker (a `source`-bound catalog field, or a blank "Other" field).
+  function addTaskFieldFull(kind: 'inputs' | 'outputs', field: TaskDefField) {
+    taskFieldSetter(kind)((prev) => [...prev, field]);
+  }
   function removeTaskField(kind: 'inputs' | 'outputs', fieldIdx: number) {
     taskFieldSetter(kind)((prev) => prev.filter((_, i) => i !== fieldIdx));
   }
   function updateTaskField(kind: 'inputs' | 'outputs', fieldIdx: number, patch: Partial<TaskDefField>) {
     taskFieldSetter(kind)((prev) => prev.map((f, i) => (i === fieldIdx ? { ...f, ...patch } : f)));
+  }
+  // task-73f6304ffb94 — drop a field's SavedQuery binding (key/label/type kept).
+  function clearTaskFieldSource(kind: 'inputs' | 'outputs', fieldIdx: number) {
+    taskFieldSetter(kind)((prev) =>
+      prev.map((f, i) => {
+        if (i !== fieldIdx) return f;
+        const { source: _drop, ...rest } = f;
+        return rest;
+      }),
+    );
   }
   // The single synthetic task-def the plain form's fields aggregate through —
   // reuses the exact same aggregateInputs / build*Block path as a chain.
@@ -4986,8 +5042,10 @@ export function TaskComposer(props: Props) {
                       inputs={taskInputs}
                       outputs={taskOutputs}
                       onAdd={(kind) => addTaskField(kind)}
+                      onAddField={(kind, field) => addTaskFieldFull(kind, field)}
                       onUpdate={(kind, fi, patch) => updateTaskField(kind, fi, patch)}
                       onRemove={(kind, fi) => removeTaskField(kind, fi)}
+                      onClearSource={(kind, fi) => clearTaskFieldSource(kind, fi)}
                       onExitUp={() => goBack()}
                       onExitDown={() => goNext()}
                       containerRef={taskFieldsRef}

@@ -107,6 +107,23 @@ type FormExtension = {
   groupId: string | null;
 };
 
+// task-73f6304ffb94 — a SavedQuery CATALOG entry as it crosses the bridge
+// (client-normalized camelCase). Inlined like the others (preload carries no
+// shared-type imports); mirrors QueryCatalogEntryWire in
+// electron/sources/typebuild.ts and QueryCatalogEntry in src/copilot/
+// savedQueries.ts. NON-PHI metadata: field names + types only.
+type QueryCatalogEntryWire = {
+  id: string;
+  familyId?: string;
+  name: string;
+  version: number;
+  status: string;
+  entityType?: string;
+  display?: string;
+  fields: Array<{ name: string; type: string }>;
+  source?: { id: string; name: string; entityTypes: string[] } | null;
+};
+
 // task-e112d60a3b7c — a Task Template as it crosses the bridge (camelCase).
 // Inlined like Project/Agent (preload carries no shared-type imports); mirrors
 // `Template` in electron/sources/typebuild.ts. `variables`/`outputSchema` are
@@ -1100,6 +1117,17 @@ const fm = {
         ipcRenderer.invoke('typebuild:queries:list', status) as Promise<
           Array<{ id: string; name: string; version: number; status: string; entityType?: string }>
         >,
+      // task-73f6304ffb94 — SavedQuery CATALOG for the source-aware key picker.
+      // `describe` enumerates each approved query's exposed fields[] (latest
+      // approved per family); `describeOne` is the same per-query shape for one
+      // id. NON-PHI metadata (field names + types only). [] / null signed out.
+      describe: () =>
+        ipcRenderer.invoke('typebuild:queries:describe') as Promise<QueryCatalogEntryWire[]>,
+      describeOne: (savedQueryId: string) =>
+        ipcRenderer.invoke(
+          'typebuild:queries:describeOne',
+          savedQueryId,
+        ) as Promise<QueryCatalogEntryWire | null>,
       // task-d8a0b081eb93 — SavedQuery AUTHORING (design-time CopilotKit flow).
       // `create` files a DRAFT; `get` reads it back (code+schema for the approve
       // card); `approve` is the MANDATORY human gate (draft→approved == publish);

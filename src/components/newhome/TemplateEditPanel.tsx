@@ -15,6 +15,7 @@ import type { JSX } from 'react';
 import { fm } from '../../bridge';
 import type { Template } from '../../bridge';
 import type { TaskDefField } from './types';
+import { FieldKeyPicker, SourceBadge } from './FieldKeyPicker';
 import './TemplateEditPanel.css';
 
 type FieldType = TaskDefField['type'];
@@ -39,17 +40,43 @@ function FieldRows({
     onChange(fields.map((f, j) => (j === i ? { ...f, ...patch } : f)));
   const remove = (i: number) => onChange(fields.filter((_, j) => j !== i));
   const add = () => onChange([...fields, blankField()]);
+  // task-73f6304ffb94 — clear a field's SavedQuery binding, leaving key/label/
+  // type untouched (turns a source-backed row into a plain key).
+  const clearSource = (i: number) =>
+    onChange(
+      fields.map((f, j) => {
+        if (j !== i) return f;
+        const { source: _drop, ...rest } = f;
+        return rest;
+      }),
+    );
+  const existingKeys = fields.map((f) => f.key).filter(Boolean);
   return (
     <div className="tep-fields">
       <div className="tep-fields__head">
         <span className="tep-fields__title">{io === 'in' ? 'Inputs' : 'Outputs'}</span>
-        <button type="button" className="tep-fields__add" onClick={add}>
-          + Add {io === 'in' ? 'input' : 'output'}
-        </button>
+        {io === 'in' ? (
+          // task-73f6304ffb94 — inputs use the source-aware picker (API fields +
+          // "Other (custom key)"); outputs keep the plain add.
+          <FieldKeyPicker
+            existingKeys={existingKeys}
+            onPick={(f) => onChange([...fields, f])}
+            buttonLabel="+ Add input"
+            buttonClassName="tep-fields__add"
+            buttonTitle="Add an input field (from an API, or a custom key)"
+          />
+        ) : (
+          <button type="button" className="tep-fields__add" onClick={add}>
+            + Add output
+          </button>
+        )}
       </div>
       {fields.length === 0 && <div className="tep-fields__empty">No {io === 'in' ? 'inputs' : 'outputs'} yet.</div>}
       {fields.map((f, i) => (
         <div className="tep-field" key={i}>
+          {io === 'in' && f.source && (
+            <SourceBadge source={f.source} onClear={() => clearSource(i)} />
+          )}
           <input
             className="tep-field__key"
             placeholder="key"

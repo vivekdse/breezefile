@@ -1,0 +1,107 @@
+/* task-73f6304ffb94 — source-aware key picker. Co-located with the component so
+   any surface that renders <FieldKeyPicker>/<SourceBadge> (the composer's field
+   editor, the Template edit panel) picks up the styles by importing the
+   component alone. Mirrors the theme-variable convention of SourceTypeahead.css. */
+.fkp {
+  position: relative;
+  display: inline-block;
+}
+.fkp__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  margin-top: 4px;
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg-2, var(--bg-1, #fff));
+  border: 1px solid var(--border-1, var(--rule, #ccc));
+  border-radius: var(--r-sm, 6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+.fkp__group + .fkp__group {
+  border-top: 1px solid var(--border-1, var(--rule, #ddd));
+}
+.fkp__group-head {
+  padding: 6px 10px 3px;
+  font-size: var(--fs-xs, 11px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2, var(--muted, #888));
+}
+.fkp__opt {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-1, inherit);
+  text-align: left;
+  padding: 6px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-sm, 13px);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.fkp__opt:hover,
+.fkp__opt:focus {
+  background: var(--accent, #4a90d9);
+  color: var(--text-on-accent, #fff);
+  outline: none;
+}
+.fkp__opt-type {
+  font-size: var(--fs-xs, 11px);
+  opacity: 0.65;
+}
+.fkp__opt--other {
+  border-top: 1px solid var(--border-1, var(--rule, #ddd));
+  color: var(--text-2, var(--muted, #888));
+  font-style: italic;
+}
+.fkp__hint {
+  padding: 7px 10px;
+  color: var(--text-2, var(--muted, #888));
+  font-size: var(--fs-sm, 13px);
+  opacity: 0.8;
+}
+
+/* Source binding badge on a field row. */
+.fkp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #4a90d9) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #4a90d9) 40%, transparent);
+  color: var(--accent, #4a90d9);
+  font-size: var(--fs-xs, 11px);
+  font-weight: 500;
+  max-width: 160px;
+}
+.fkp-badge__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fkp-badge__clear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 2px;
+  opacity: 0.7;
+}
+.fkp-badge__clear:hover {
+  opacity: 1;
+}

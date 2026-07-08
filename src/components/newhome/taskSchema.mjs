@@ -279,6 +279,31 @@ function isTaskDefFieldLike(v) {
   return true;
 }
 
+// task-73f6304ffb94 — a source-aware INPUT field binds a SavedQuery via
+// `source` (see types.ts TaskDefField.source). A well-formed source needs a
+// non-empty string `savedQueryId`; `version` (number) + `entityType` (string)
+// are optional. Anything else is malformed and MUST be dropped at the untrusted
+// parse boundary (a task body any client can edit) rather than carried through.
+function isSourceLike(v) {
+  return !!v && typeof v === 'object' && typeof v.savedQueryId === 'string' && v.savedQueryId.length > 0;
+}
+
+// Reconstruct one field from a parsed block, keeping only the schema-known
+// props (so unknown junk in a hand-edited body is dropped) and a well-formed
+// `source` binding. Assumes `f` already passed isTaskDefFieldLike.
+function sanitizeField(f) {
+  const out = { key: f.key, label: f.label, type: f.type };
+  if (Array.isArray(f.options)) out.options = f.options;
+  if (typeof f.required === 'boolean') out.required = f.required;
+  if (isSourceLike(f.source)) {
+    const s = { savedQueryId: f.source.savedQueryId };
+    if (typeof f.source.version === 'number') s.version = f.source.version;
+    if (typeof f.source.entityType === 'string' && f.source.entityType) s.entityType = f.source.entityType;
+    out.source = s;
+  }
+  return out;
+}
+
 /** Build the ```task-outputs block declaring one task-def's output field
  *  DEFINITIONS (non-PHI — safe alongside the PHI-bearing task-fields block in
  *  the same body). */
@@ -325,8 +350,11 @@ function isTaskDefConditionLike(v) {
 function sanitizeTaskDefForParse(v) {
   if (!v || typeof v !== 'object') return null;
   if (typeof v.id !== 'string' || typeof v.name !== 'string') return null;
-  const inputs = Array.isArray(v.inputs) ? v.inputs.filter(isTaskDefFieldLike) : [];
-  const outputs = Array.isArray(v.outputs) ? v.outputs.filter(isTaskDefFieldLike) : [];
+  // task-73f6304ffb94 — map through sanitizeField so a well-formed `source`
+  // binding on an INPUT field survives the round-trip and a malformed one is
+  // dropped (never carried through from an untrusted body).
+  const inputs = Array.isArray(v.inputs) ? v.inputs.filter(isTaskDefFieldLike).map(sanitizeField) : [];
+  const outputs = Array.isArray(v.outputs) ? v.outputs.filter(isTaskDefFieldLike).map(sanitizeField) : [];
   const out = { id: v.id, name: v.name, inputs, outputs };
   if (typeof v.notes === 'string') out.notes = v.notes;
   if (v.neededWhen === null) out.neededWhen = null;
