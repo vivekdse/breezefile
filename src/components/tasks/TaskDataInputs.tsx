@@ -23,6 +23,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { fm } from '../../bridge';
+import { SourceTypeahead } from '../newhome/SourceTypeahead';
+import type { QueryRef } from '../../copilot/savedQueries';
 import {
   normalizeDataKey,
   isValidDataKey,
@@ -44,12 +46,19 @@ export function TaskDataInputs({
   createdBy,
   viewerEmail,
   legacyFields,
+  fieldDefs,
   onLegacyFieldsSave,
   onSaved,
 }: {
   taskId: string;
   /** Server-declared `data_keys` (non-PHI names), when the server sends them. */
   dataKeys?: string[];
+  /** task-e713f307c422 — optional map of data-key → its TaskDefField definition,
+   *  so a source-backed input renders as a live-query typeahead instead of a
+   *  plain text field. Absent → every key renders as plain text (unchanged
+   *  behavior). Definitions are NON-PHI; only the VALUE a user selects (display
+   *  snapshot + opaque ref) is written to the data bag. */
+  fieldDefs?: Record<string, import('../newhome/types').TaskDefField>;
   claimedBy?: string | null;
   createdBy?: string | null;
   viewerEmail?: string | null;
@@ -132,6 +141,23 @@ export function TaskDataInputs({
     setRevealed(allRevealed);
   }, [isLegacy, legacyFields]);
 
+  // task-e713f307c422 — eagerly resolve the CURRENT display snapshot of each
+  // source-backed key so the typeahead can show what was previously picked
+  // (a plain key resolves only on explicit reveal; a typeahead has no reveal
+  // affordance). Only when the viewer may edit (a read-only viewer keeps the
+  // reveal-on-demand path). The value stays in component state only.
+  useEffect(() => {
+    if (isLegacy || !fieldDefs) return;
+    for (const key of keys) {
+      if (fieldDefs[key]?.source && values[key] === undefined && !resolving[key]) {
+        void resolveKey(key);
+      }
+    }
+    // resolveKey/values/resolving are intentionally omitted — this fires on the
+    // key set / fieldDefs changing; resolveKey guards against double-resolves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys, fieldDefs, isLegacy]);
+
   const resolveKey = async (key: string) => {
     if (isLegacy) return; // legacy values are already in hand
     if (resolving[key] || values[key] !== undefined) return;
@@ -153,6 +179,20 @@ export function TaskDataInputs({
 
   const editValue = (key: string, next: string) => {
     setValues((v) => ({ ...v, [key]: next }));
+  };
+
+  // task-e713f307c422 — a source-backed field's selection: record the row's
+  // display label as the key's own value AND JSON-stringify its opaque ref into
+  // a sibling `<key>.ref` key, mirroring the placeholder-key convention the
+  // original NewTaskModal used (`field.<k>.display` / `field.<k>.ref`). The
+  // sibling key is folded into sessionKnownKeys so it renders and, more
+  // importantly, is included in the save's known-key set. The ref is NON-PHI;
+  // the label is a short display snapshot (memory-only, never logged).
+  const selectSource = (key: string, label: string, ref: QueryRef) => {
+    const refKey = `${key}.ref`;
+    editValue(key, label);
+    editValue(refKey, JSON.stringify(ref));
+    setSessionKnownKeys((k) => (k.includes(refKey) ? k : [...k, refKey]));
   };
 
   const removeKey = (key: string) => {
@@ -290,6 +330,11 @@ export function TaskDataInputs({
           const isRevealed = !!revealed[key] || !looksSensitive(key);
           const isResolving = !!resolving[key];
           const value = values[key];
+          // task-e713f307c422 — a source-backed input renders as a live-query
+          // typeahead instead of a plain text field. The current picked value
+          // (key's own value) is the display snapshot; selecting a new row
+          // rewrites it and the sibling `<key>.ref`.
+          const sourceDef = fieldDefs?.[key]?.source ? fieldDefs![key] : null;
           return (
             <div
               key={key}
@@ -307,7 +352,28 @@ export function TaskDataInputs({
                 </div>
               ) : (
                 <div className="tdd__input-v-row">
-                  {!isRevealed ? (
+                  {sourceDef ? (
+                    // Resolve the existing display snapshot lazily so the
+                    // typeahead can show what was previously picked. The ref
+                    // sibling (`<key>.ref`) is written on select, not shown.
+                    canEdit ? (
+                      <SourceTypeahead
+                        field={sourceDef}
+                        display={value ?? ''}
+                        onSelect={(label, ref) => selectSource(key, label, ref)}
+                      />
+                    ) : value === undefined ? (
+                      <button
+                        type="button"
+                        className="tdd__input-reveal"
+                        onClick={() => void resolveKey(key)}
+                      >
+                        Show value
+                      </button>
+                    ) : (
+                      <input type="text" className="tdd__input-value" value={value} disabled readOnly />
+                    )
+                  ) : !isRevealed ? (
                     <>
                       <span className="tdd__input-masked">••••••••</span>
                       <button type="button" className="tdd__input-reveal" onClick={() => toggleReveal(key)}>

@@ -1,0 +1,76 @@
+/* task-e713f307c422 — data-source-backed field typeahead (SavedQuery selector).
+   Reintroduced post-R3 from commit 126c0fd's NewTaskModal.css `nh-typeahead*`
+   block, co-located with the component so any surface that renders
+   <SourceTypeahead> (the drawer's Inputs editor, a future composer) picks up
+   the styles by importing the component alone. */
+.nh-typeahead {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.nh-typeahead__selected {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+.nh-typeahead__input {
+  appearance: none;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--text-1);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  width: 100%;
+}
+.nh-typeahead__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.nh-typeahead__menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin-top: 2px;
+  background: var(--bg-2, var(--bg-1));
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.nh-typeahead__opt {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  padding: 7px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.nh-typeahead__opt:hover,
+.nh-typeahead__opt:focus {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  outline: none;
+}
+.nh-typeahead__hint {
+  padding: 7px 10px;
+  color: var(--text-2, var(--text-1));
+  font-size: var(--fs-sm);
+  opacity: 0.75;
+}
+.nh-typeahead__hint--err {
+  color: var(--err);
+  opacity: 1;
+}

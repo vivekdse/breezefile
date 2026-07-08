@@ -96,6 +96,12 @@ export type TaskDefField = {
   type: 'text' | 'number' | 'date' | 'select' | 'bool';
   options?: string[]; // select only
   required?: boolean; // OUTPUT fields: required === evidence
+  /** task-e713f307c422 (reintroduced) — when set, this INPUT field is backed by
+   *  a live external-API query (a SavedQuery). The value-fill UI renders it as a
+   *  typeahead (see SourceTypeahead) instead of a plain input; selecting a row
+   *  records the row's opaque ref into the task data bag. Rides the self-
+   *  describing TaskDef (NOT a project pref) — consistent with the R3 model. */
+  source?: { savedQueryId: string; version?: number; entityType?: string };
 };
 
 /** task-8b694714b13c — a conditional gate on a downstream TaskDef, keyed off

@@ -72,7 +72,7 @@ import {
 } from '../newhome/pipelineRoster.mjs';
 import type { ChildStatusLike } from '../newhome/pipelineRoster.mjs';
 import type { MergedStepStatus } from '../newhome/taskSchema.mjs';
-import type { TaskDef } from '../newhome/types';
+import type { TaskDef, TaskDefField } from '../newhome/types';
 import '../TasksPage.css';
 import { resolveEffectiveInstructions } from '../../projects/index.mjs';
 import type {
@@ -518,6 +518,31 @@ export function TaskDetailDrawer({
     return out;
   }, [childTasks]);
   const pipelineDefs = useMemo<TaskDef[]>(() => templateBlock?.defs ?? [], [templateBlock]);
+  // task-e713f307c422 — data-key → its input TaskDefField, for the Inputs
+  // editor to render a source-backed input as a live-query typeahead. A chain
+  // is self-describing: the field DEFINITIONS (with `source`) live on the
+  // PARENT (meta) task's v2 `task-template` block, keyed by def id; this child
+  // knows its own def id from its `task-fields` block. So we resolve the parent
+  // from the roster snapshot (already threaded for the pipeline rollup), parse
+  // its v2 block, find this child's def, and map that def's INPUT field keys →
+  // their defs. Only source-bearing fields need to be here (a plain key falls
+  // through to the text path), but we map all inputs so labels/types are right.
+  // Degrades to unset (plain text) when: no roster, no parent, the parent block
+  // is legacy/absent, or this task carries no own `task-fields` def id.
+  const sourceFieldDefs = useMemo<Record<string, TaskDefField> | undefined>(() => {
+    const myDefId = ownFieldsBlock?.taskDefId;
+    if (!myDefId || !task.parentTaskId || !roster || !roster.length) return undefined;
+    const parent = roster.find((t) => t.id === task.parentTaskId);
+    if (!parent) return undefined;
+    const parentBlock = parseTaskTemplateBlock(parent.notes ?? null);
+    const defs = parentBlock?.defs;
+    if (!defs) return undefined;
+    const myDef = defs.find((d) => d.id === myDefId);
+    if (!myDef) return undefined;
+    const map: Record<string, TaskDefField> = {};
+    for (const f of myDef.inputs ?? []) map[f.key] = f;
+    return Object.keys(map).length ? map : undefined;
+  }, [ownFieldsBlock, task.parentTaskId, roster]);
   // task-f26e7745eda6 — def id → the child's LIVE server status, consulted by
   // the runnable walk + step chips (cancelled excluded/shown; failed shown).
   const pipelineChildStatus = useMemo<Record<string, ChildStatusLike>>(
@@ -1226,6 +1251,7 @@ export function TaskDetailDrawer({
                   createdBy={task.createdBy}
                   viewerEmail={myEmail}
                   legacyFields={ownFieldsBlock}
+                  fieldDefs={sourceFieldDefs}
                   onLegacyFieldsSave={saveLegacyFields}
                   onSaved={refreshBody}
                 />
