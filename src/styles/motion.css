@@ -10,6 +10,12 @@
  * driven by `animation: <name> var(--dur-*) var(--ease-*)`. Transforms that
  * move content significant distances should additionally be guarded with a
  * local @media query in the component where they're applied.
+ *
+ * Entrance animations must use fill mode `backwards`, never `both`/`forwards`:
+ * a finished fill-forwards animation stays "relevant" for the element's whole
+ * lifetime (it keeps holding the final keyframe), so every row/crumb/tab ever
+ * mounted accumulates a live Animation object. That requires each entrance
+ * keyframe's `to` state to equal the element's natural computed style.
  */
 
 /* Row fade-in — used by FileRow for directory-load stagger (fm-z1f) and by
@@ -64,10 +70,12 @@
   to   { opacity: 0; transform: scale(0.98); }
 }
 
-/* Tab open/close — width-only so sibling tabs reflow naturally. */
+/* Tab open/close — width-only so sibling tabs reflow naturally. The `to`
+   max-width must match .tabbar__tab's natural 220px (fill is `backwards`, so
+   the element snaps to its own style the moment the animation finishes). */
 @keyframes gpTabOpen {
   from { opacity: 0; max-width: 0;    margin-right: 0; }
-  to   { opacity: 1; max-width: 240px; }
+  to   { opacity: 1; max-width: 220px; }
 }
 
 /* Reduced-motion safeguard for ones that translate significantly. */

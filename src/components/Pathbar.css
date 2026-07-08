@@ -47,7 +47,7 @@
    (React keys by index+segment, so changing path re-mounts and re-runs
    the animation). */
 .pathbar__crumb-wrap {
-  animation: gpPopIn var(--dur-med) var(--ease-emphasis) both;
+  animation: gpPopIn var(--dur-med) var(--ease-emphasis) backwards;
   display: inline-flex;
   align-items: center;
 }

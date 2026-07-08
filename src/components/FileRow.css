@@ -151,7 +151,7 @@
    don't turn into a slow motion show. Skipping refresh-in-place (the
    animation only runs on first mount of a row). */
 .row {
-  animation: gpRowFadeIn var(--dur-slow) var(--ease-emphasis) both;
+  animation: gpRowFadeIn var(--dur-slow) var(--ease-emphasis) backwards;
   animation-delay: calc(min(var(--row-i, 0), 25) * 8ms);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -490,7 +490,7 @@
      transform-origin to 'left top' (the cursor point, since the menu is
      positioned with the click coords). gpPopIn scales from 0.98 to 1 so
      the menu appears to grow from where the user clicked. */
-  animation: gpPopIn var(--dur-med) var(--ease-emphasis) both;
+  animation: gpPopIn var(--dur-med) var(--ease-emphasis) backwards;
 }
 .ctx-menu__item {
   display: flex;

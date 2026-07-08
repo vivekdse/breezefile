@@ -68,7 +68,7 @@
   /* fm-a98 — fade each thumbnail in when its src resolves.
      Thumbs are fetched asynchronously via fm.thumb; without this the
      grid flashes rectangles as they resolve. */
-  animation: gpRowFadeIn var(--dur-med) var(--ease-out) both;
+  animation: gpRowFadeIn var(--dur-med) var(--ease-out) backwards;
 }
 /* Fallback plate (no thumbnail): editorial typed icon at center with a
    small ext chip in the top-right corner. Per-kind color comes from
