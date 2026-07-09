@@ -22,3 +22,35 @@ export type CatalogPickerGroup = { id: string; name: string; fields: QueryCatalo
 export function catalogPickerGroups(
   catalog: QueryCatalogEntry[] | null | undefined,
 ): CatalogPickerGroup[];
+
+// task-342f3e151d99 — the keyboard-first FieldSourcePicker's option shapes.
+// `label` is pre-computed (no re-deriving humanize/join logic in the React
+// layer): "<query> · <Field Label>" for top-level field options, just the
+// field label for step-2 (fieldOptionsForSource) options.
+export type PickerOptionCustom = { kind: 'custom' };
+export type PickerOptionBrowse = { kind: 'browse' };
+export type PickerOptionSource = { kind: 'source'; entry: QueryCatalogEntry; label: string };
+export type PickerOptionField = {
+  kind: 'field';
+  entry: QueryCatalogEntry;
+  field: QueryCatalogField;
+  label: string;
+};
+export type PickerOption =
+  | PickerOptionCustom
+  | PickerOptionBrowse
+  | PickerOptionSource
+  | PickerOptionField;
+
+export function pickerOptions(
+  catalog: QueryCatalogEntry[] | null | undefined,
+  opts?: { query?: string; threshold?: number },
+): (PickerOptionCustom | PickerOptionField | PickerOptionBrowse)[];
+export function sourceOptions(
+  catalog: QueryCatalogEntry[] | null | undefined,
+  opts?: { query?: string },
+): PickerOptionSource[];
+export function fieldOptionsForSource(
+  entry: QueryCatalogEntry | null | undefined,
+  opts?: { query?: string },
+): PickerOptionField[];

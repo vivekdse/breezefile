@@ -106,24 +106,114 @@ export function blankCustomField() {
   return { key: '', label: '', type: 'text' };
 }
 
-/** Flatten a catalog into the picker's option list: one group per query (with
- *  its display name), each carrying its fields. Entries with no usable id or no
- *  fields are dropped so the menu never shows an empty/unpickable group.
- *  Pure + defensive: a null/malformed catalog yields []. */
-export function catalogPickerGroups(catalog) {
+// task-342f3e151d99 — shared normalization step for everything below that
+// walks the catalog: drops entries with no usable id or no usable fields, and
+// resolves the display name once. Keeps catalogPickerGroups/pickerOptions/
+// sourceOptions all agreeing on what counts as a "pickable" entry.
+function normalizedEntries(catalog) {
   if (!Array.isArray(catalog)) return [];
-  const groups = [];
+  const out = [];
   for (const entry of catalog) {
     if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !entry.id) continue;
     const fields = Array.isArray(entry.fields)
       ? entry.fields.filter((f) => f && typeof f === 'object' && typeof f.name === 'string' && f.name.trim())
       : [];
     if (fields.length === 0) continue;
-    groups.push({
-      id: entry.id,
-      name: typeof entry.name === 'string' && entry.name ? entry.name : entry.id,
-      fields,
-    });
+    const name = typeof entry.name === 'string' && entry.name ? entry.name : entry.id;
+    out.push({ entry, name, fields });
   }
-  return groups;
+  return out;
+}
+
+/** Flatten a catalog into the picker's option list: one group per query (with
+ *  its display name), each carrying its fields. Entries with no usable id or no
+ *  fields are dropped so the menu never shows an empty/unpickable group.
+ *  Pure + defensive: a null/malformed catalog yields []. Kept for back-compat
+ *  (no remaining internal call sites after task-342f3e151d99's keyboard-first
+ *  picker landed; still exported in case another surface wants the grouped
+ *  shape). */
+export function catalogPickerGroups(catalog) {
+  return normalizedEntries(catalog).map(({ entry, name, fields }) => ({ id: entry.id, name, fields }));
+}
+
+// Every (entry, field) pair in the catalog, flattened, each carrying the
+// "<query name> · <Field Label>" label the TOP-LEVEL picker (pickerOptions)
+// shows — the query name disambiguates once >1 source is in play.
+function flattenFields(catalog) {
+  const out = [];
+  for (const { entry, name, fields } of normalizedEntries(catalog)) {
+    for (const field of fields) {
+      const fieldLabel = humanizeFieldName(field.name) || field.name.trim();
+      out.push({ entry, field, label: `${name} · ${fieldLabel}` });
+    }
+  }
+  return out;
+}
+
+function norm(s) {
+  return typeof s === 'string' ? s.trim().toLowerCase() : '';
+}
+
+/** task-342f3e151d99 — the ordered option list for the keyboard-first picker's
+ *  TOP (default) step: `{kind:'custom'}` is always first (a freeform key the
+ *  user names), then source-backed field options flattened + labelled
+ *  "<query name> · <Field Label>", then a trailing `{kind:'browse'}` when the
+ *  list was truncated.
+ *
+ *  Truncation: when there are more fields than `threshold` (default 6) OR
+ *  more than one source/query in the catalog, don't dump everything — show
+ *  the top `threshold` fields and append `browse` so the user can drill into
+ *  a two-step source→field picker instead. A single query with <= threshold
+ *  fields shows everything with no `browse`.
+ *
+ *  Search: when `query` is a non-empty string, it filters across ALL sources
+ *  + fields (case-insensitive, matches the field's raw name or its full
+ *  "<query> · <label>" text) and `browse` is omitted — search already reaches
+ *  everything `browse` would have drilled into. `custom` still leads. */
+export function pickerOptions(catalog, { query = '', threshold = 6 } = {}) {
+  const all = flattenFields(catalog);
+  const custom = { kind: 'custom' };
+  const q = norm(query);
+  if (q) {
+    const matched = all.filter(
+      ({ field, label }) => norm(field.name).includes(q) || norm(label).includes(q),
+    );
+    return [custom, ...matched.map(({ entry, field, label }) => ({ kind: 'field', entry, field, label }))];
+  }
+  const entryCount = new Set(all.map((i) => i.entry.id)).size;
+  const truncate = all.length > threshold || entryCount > 1;
+  const shown = truncate ? all.slice(0, threshold) : all;
+  const options = [custom, ...shown.map(({ entry, field, label }) => ({ kind: 'field', entry, field, label }))];
+  if (truncate) options.push({ kind: 'browse' });
+  return options;
+}
+
+/** task-342f3e151d99 — step 1 of "Browse all…": one `{kind:'source', entry,
+ *  label}` per pickable query, filtered by `query` against the query's
+ *  display name (case-insensitive substring). */
+export function sourceOptions(catalog, { query = '' } = {}) {
+  const q = norm(query);
+  const entries = normalizedEntries(catalog);
+  const filtered = q ? entries.filter(({ name }) => norm(name).includes(q)) : entries;
+  return filtered.map(({ entry, name }) => ({ kind: 'source', entry, label: name }));
+}
+
+/** task-342f3e151d99 — step 2 of "Browse all…": the field options for ONE
+ *  source entry (already chosen at step 1), labelled with just the humanized
+ *  field name (no query prefix — the source is already the context), filtered
+ *  by `query` against the raw field name or its label. */
+export function fieldOptionsForSource(entry, { query = '' } = {}) {
+  if (!entry || typeof entry !== 'object') return [];
+  const fields = Array.isArray(entry.fields)
+    ? entry.fields.filter((f) => f && typeof f === 'object' && typeof f.name === 'string' && f.name.trim())
+    : [];
+  const q = norm(query);
+  const withLabel = fields.map((field) => ({
+    field,
+    label: humanizeFieldName(field.name) || field.name.trim(),
+  }));
+  const filtered = q
+    ? withLabel.filter(({ field, label }) => norm(field.name).includes(q) || norm(label).includes(q))
+    : withLabel;
+  return filtered.map(({ field, label }) => ({ kind: 'field', entry, field, label }));
 }
