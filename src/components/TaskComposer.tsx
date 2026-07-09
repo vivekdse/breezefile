@@ -1889,7 +1889,14 @@ export function TaskComposer(props: Props) {
       void saveFromTemplate(entry, entry.name);
       return;
     }
-    setTemplatePickPhase('title');
+    // task-2aabe526f8c6 — a template is a task with HOLES: instantiating it
+    // means filling the holes and starting, NOT renaming the work. "Schedule
+    // surgery" stays "Schedule surgery" for John, Jane and Anita. The title is
+    // already prefilled from the template name above and the old 'title' phase
+    // only re-checked it was non-empty, so it was a mandatory keystroke that
+    // asked the user to redo the one decision the template already made. Go
+    // straight to the values. (Renaming stays available via "Edit details…".)
+    setTemplatePickPhase('values');
   }
 
   // The picked template's input-VALUE questions — one per `variable`, in
