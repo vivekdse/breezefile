@@ -96,6 +96,7 @@ import {
   effectiveFieldKey,
   fieldRef,
   inferFieldsFromProse,
+  fieldDraftSteps,
   nextFieldDraftStep,
   prevFieldDraftStep,
   templateFillEntries,
@@ -2318,7 +2319,13 @@ export function TaskComposer(props: Props) {
       }
       sectionRef.current?.focus();
     }
-  }, [active]);
+    // task-342f3e151d99 — `active` stays 'field-draft' for EVERY step of the
+    // sub-walk, so keying only on it left the key/label/options inputs
+    // unfocused after a step change (source -> key, key -> label). Keystrokes
+    // then fell through to the window handler, where a bare 't' toggled "Make
+    // this a template" mid-typing. Re-run on the step too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, fieldDraft?.step]);
 
   // task-2d96db620f6b — when a section becomes active, bring it to the TOP of
   // the composer's scroll container so its options render in view rather than
@@ -3509,6 +3516,20 @@ export function TaskComposer(props: Props) {
 
     if (active === 'title') return;
     if (inText()) return;
+    // task-342f3e151d99 — belt and braces: the key/label/options steps are TEXT
+    // entry. inText() already returns when their input holds focus, but if focus
+    // is ever lost (a step change, a re-render) the bare-letter shortcuts below
+    // must NOT fire — typing "test" into an output key once toggled "Make this a
+    // template" on the 't'. A text step never binds a bare letter.
+    if (
+      active === 'field-draft' &&
+      fieldDraft &&
+      (fieldDraft.step === 'key' || fieldDraft.step === 'label' || fieldDraft.step === 'options')
+    ) {
+      if (e.key === 'Escape') { e.preventDefault(); cancelFieldDraft(); return; }
+      if (e.key === 'Enter') { e.preventDefault(); advanceFieldDraft(); return; }
+      return;
+    }
 
     if (e.key === 'ArrowDown') { e.preventDefault(); moveDown(); return; }
     if (e.key === 'ArrowUp')   { e.preventDefault(); moveUp();   return; }
@@ -4272,7 +4293,7 @@ export function TaskComposer(props: Props) {
   // activeIdx cursor via its `field-row:<kind>:<idx>` QuestionId. Enter steps
   // into its sub-walk (startEditFieldRow, wired in the keydown handler); this
   // component only renders — FieldRowSummary is the presentational shell.
-  function FieldRowQuestion({
+  function renderFieldRow({
     kind,
     idx,
     field,
@@ -4318,7 +4339,46 @@ export function TaskComposer(props: Props) {
   // keydown handler + advanceFieldDraft/retreatFieldDraft/pickSourceStepOption/
   // chooseFieldDraftType/chooseFieldDraftRequired above. Renders only while a
   // draft is open — the caller guards on `fieldDraft`.
-  function FieldDraftQuestion() {
+  // task-342f3e151d99 — the sub-walk's full step list INCLUDING the 'source'
+  // step (which only a NEW input has; taskSchema.fieldDraftSteps models the
+  // shared key/label/type/[options]/[required] tail that also runs on edit).
+  function draftStepList(d: FieldDraft): FieldDraftStepId[] {
+    const head: FieldDraftStepId[] = d.kind === 'inputs' && d.editIdx === null ? ['source'] : [];
+    return [...head, ...(fieldDraftSteps(d.kind, d.field.type) as FieldDraftStepId[])];
+  }
+  // task-342f3e151d99 — the sub-walk's step chips: a short name and, once
+  // answered, the value the user gave. Kept next to the render so the two stay
+  // in step (pun intended) with fieldDraftSteps.
+  function fieldDraftStepLabel(s: FieldDraftStepId): string {
+    switch (s) {
+      case 'source': return 'source';
+      case 'key': return 'key';
+      case 'label': return 'label';
+      case 'type': return 'type';
+      case 'options': return 'options';
+      case 'required': return 'evidence';
+      default: return s;
+    }
+  }
+  function fieldDraftStepAnswer(d: FieldDraft, s: FieldDraftStepId): string {
+    switch (s) {
+      case 'source': return d.field.source ? 'API field' : 'custom';
+      case 'key': return d.field.key;
+      case 'label': return d.field.label;
+      case 'type': return d.field.type;
+      case 'options': return (d.field.options ?? []).join(', ');
+      case 'required': return d.field.required ? 'required' : 'optional';
+      default: return '';
+    }
+  }
+
+  // task-342f3e151d99 — these are render FUNCTIONS, not nested components.
+  // Declaring a component inside the parent gives it a NEW identity on every
+  // render, so React unmounts and remounts its subtree — the draft's <input>
+  // lost focus after each keystroke, and the stray letters fell through to the
+  // window handler (typing "test" into an output key hit the bare-'t' shortcut
+  // and toggled "Make this a template"). Calling them keeps one stable tree.
+  function renderFieldDraft() {
     if (!fieldDraft) return null;
     const d = fieldDraft;
     return (
@@ -4329,6 +4389,42 @@ export function TaskComposer(props: Props) {
       >
         <div className="composer__q-active-body">
           <FieldLabel id="field-draft" />
+          {/* task-342f3e151d99 — show the WHOLE sub-walk, not one prompt
+              swapping in place: the user must see how many questions define a
+              field, what they already answered, and be able to step back. Past
+              steps show their answer and are clickable; the current one is
+              marked; upcoming ones are dimmed. Mirrors how the main walk keeps
+              answered questions on screen. */}
+          <ol className="composer__draft-steps">
+            {draftStepList(d).map((s) => {
+              const steps = draftStepList(d);
+              const stepIdx = steps.indexOf(s);
+              const curIdx = steps.indexOf(d.step);
+              const done = stepIdx < curIdx;
+              const isCur = s === d.step;
+              return (
+                <li
+                  key={s}
+                  className={
+                    'composer__draft-step' +
+                    (isCur ? ' composer__draft-step--active' : '') +
+                    (done ? ' composer__draft-step--done' : '')
+                  }
+                  onClick={(e) => {
+                    if (!done) return;
+                    e.stopPropagation();
+                    setFieldDraftHighlight(0);
+                    setFieldDraft((prev) => (prev ? { ...prev, step: s } : prev));
+                  }}
+                >
+                  <span className="composer__draft-step-name">{fieldDraftStepLabel(s)}</span>
+                  <span className="composer__draft-step-answer">
+                    {done ? fieldDraftStepAnswer(d, s) || '—' : isCur ? '' : ''}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
           <div className="composer__q-prompt">{promptFor('field-draft')}</div>
           {d.step === 'source' && (
             // task-342f3e151d99 — the real picker: Custom is always option 1,
@@ -5359,6 +5455,18 @@ export function TaskComposer(props: Props) {
                   >
                     + input
                   </button>
+                  {/* task-342f3e151d99 — every other question advertises its
+                      keys; this one must too, or `i` is a secret. */}
+                  <div className="composer__field-hint">
+                    <kbd>i</kbd> add an input · <kbd>↵</kbd> next question
+                    {taskInputs.length > 0 && (
+                      <>
+                        {' · '}
+                        <kbd>↑</kbd>
+                        <kbd>↓</kbd> review a field
+                      </>
+                    )}
+                  </div>
                 </div>
               ) : (
                 renderInert('fields')
@@ -5367,16 +5475,15 @@ export function TaskComposer(props: Props) {
           )}
           {showFieldsSteps &&
             taskInputs.map((field, idx) => (
-              <FieldRowQuestion
-                key={`inputs:${idx}`}
-                kind="inputs"
-                idx={idx}
-                field={field}
-                onRemove={() => removeTaskField('inputs', idx)}
-                onClearSource={() => clearTaskFieldSource('inputs', idx)}
-              />
+              renderFieldRow({
+                kind: 'inputs',
+                idx,
+                field,
+                onRemove: () => removeTaskField('inputs', idx),
+                onClearSource: () => clearTaskFieldSource('inputs', idx),
+              })
             ))}
-          {showFieldsSteps && fieldDraft?.kind === 'inputs' && <FieldDraftQuestion />}
+          {showFieldsSteps && fieldDraft?.kind === 'inputs' && renderFieldDraft()}
 
           {/* task-342f3e151d99 — OUTPUTS. Same shape as Inputs above, `o` adds. */}
           {showFieldsSteps && (
@@ -5400,6 +5507,16 @@ export function TaskComposer(props: Props) {
                   >
                     + output
                   </button>
+                  <div className="composer__field-hint">
+                    <kbd>o</kbd> add an output · <kbd>↵</kbd> next question
+                    {taskOutputs.length > 0 && (
+                      <>
+                        {' · '}
+                        <kbd>↑</kbd>
+                        <kbd>↓</kbd> review a field
+                      </>
+                    )}
+                  </div>
                 </div>
               ) : (
                 renderInert('outputs')
@@ -5408,16 +5525,15 @@ export function TaskComposer(props: Props) {
           )}
           {showFieldsSteps &&
             taskOutputs.map((field, idx) => (
-              <FieldRowQuestion
-                key={`outputs:${idx}`}
-                kind="outputs"
-                idx={idx}
-                field={field}
-                onRemove={() => removeTaskField('outputs', idx)}
-                onClearSource={() => clearTaskFieldSource('outputs', idx)}
-              />
+              renderFieldRow({
+                kind: 'outputs',
+                idx,
+                field,
+                onRemove: () => removeTaskField('outputs', idx),
+                onClearSource: () => clearTaskFieldSource('outputs', idx),
+              })
             ))}
-          {showFieldsSteps && fieldDraft?.kind === 'outputs' && <FieldDraftQuestion />}
+          {showFieldsSteps && fieldDraft?.kind === 'outputs' && renderFieldDraft()}
 
           {/* task-899af8b03aa6 — "Make this a template". A yes/no step (mirrors
               Pin) plus inline explanatory copy: the declared input/output fields
