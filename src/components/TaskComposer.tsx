@@ -56,6 +56,11 @@ import {
   useTypebuildAuth,
 } from '../tasks';
 import { humanizeError } from '../errorMessages';
+// task-73f6304ffb94 — a template variable may bind a SavedQuery (`source`), so
+// the New-from-Template fill walk offers the SAME live typeahead the task
+// drawer does, instead of a bare text box. One widget, both surfaces.
+import { SourceTypeahead } from './newhome/SourceTypeahead';
+import type { QueryRef } from '../copilot/savedQueries';
 import {
   type RecurrenceForm,
   buildCronFromForm,
@@ -1979,6 +1984,11 @@ export function TaskComposer(props: Props) {
         const key = effectiveFieldKey(f);
         if (!key) continue;
         values[key] = templateFillValues[fieldRef(entry.id, f.key)] ?? '';
+        // task-73f6304ffb94 — a source-backed pick also carries its opaque
+        // record ref on a sibling `<key>.ref` key, so the instantiated task's
+        // data bag points at the REAL record, not just the typed-looking label.
+        const refVal = templateFillValues[fieldRef(entry.id, `${f.key}.ref`)];
+        if (refVal) values[`${key}.ref`] = refVal;
       }
       const result = await fm.typebuild.templates.instantiate(
         entry.id,
@@ -4347,6 +4357,28 @@ export function TaskComposer(props: Props) {
                                     </li>
                                   ))}
                                 </ul>
+                              ) : field.source ? (
+                                // Source-backed: search the bound SavedQuery live.
+                                // Picking a row records the display label as the
+                                // field's value AND the opaque ref on a sibling
+                                // `<key>.ref` entry (mirroring the drawer), which
+                                // saveFromTemplate threads into instantiate.
+                                <SourceTypeahead
+                                  field={field}
+                                  display={value || undefined}
+                                  onSelect={(label: string, qref: QueryRef) => {
+                                    setTemplateFillValue(ref, label);
+                                    if (templateEntry) {
+                                      setTemplateFillValue(
+                                        fieldRef(templateEntry.id, `${field.key}.ref`),
+                                        JSON.stringify(qref),
+                                      );
+                                    }
+                                    setTemplateFillActiveIdx((n) =>
+                                      Math.min(n + 1, templateEntryFieldEntries.length - 1),
+                                    );
+                                  }}
+                                />
                               ) : (
                                 <input
                                   className="composer__path-input"
