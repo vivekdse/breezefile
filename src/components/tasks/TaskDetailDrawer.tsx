@@ -304,6 +304,11 @@ export function TaskDetailDrawer({
   // inventing a second schema-preference rule — plus threading `result` too.
   const [detailSchema, setDetailSchema] = useState<Task['outputSchema'] | null>(null);
   const [detailResult, setDetailResult] = useState<Task['result'] | null>(null);
+  // The LIST row carries no `data_keys` (the server sends them only on the
+  // detail fetch), so the Inputs editor rendered zero rows for every task —
+  // only its "add a key" affordance. Keep the detail's keys and prefer them.
+  // NON-PHI: key NAMES only, never values.
+  const [detailDataKeys, setDetailDataKeys] = useState<string[] | null>(null);
   const reqRef = useRef(0);
   // task-b30e546672db — re-pull the decrypted body after an embedded-editor save
   // so the read-only surfaces (and the next edit's prefill) reflect the change.
@@ -312,6 +317,7 @@ export function TaskDetailDrawer({
       setBody(task.notes ?? null);
       setDetailSchema(null);
       setDetailResult(null);
+      setDetailDataKeys(null);
       return;
     }
     const myReq = ++reqRef.current;
@@ -321,12 +327,14 @@ export function TaskDetailDrawer({
         setBody(full?.notes ?? null);
         setDetailSchema(full?.outputSchema ?? null);
         setDetailResult(full?.result ?? null);
+        setDetailDataKeys(full?.dataKeys ?? null);
       })
       .catch(() => {
         if (reqRef.current === myReq) {
           setBody(null);
           setDetailSchema(null);
           setDetailResult(null);
+          setDetailDataKeys(null);
         }
       });
   }, [isTypebuild, task.id, task.notes]);
@@ -335,17 +343,20 @@ export function TaskDetailDrawer({
       setBody(task.notes ?? null);
       setDetailSchema(null);
       setDetailResult(null);
+      setDetailDataKeys(null);
       return;
     }
     setBody(null);
     setDetailSchema(null);
     setDetailResult(null);
+    setDetailDataKeys(null);
     refreshBody();
     return () => {
       // Drop the decrypted body the instant we leave this task.
       setBody(null);
       setDetailSchema(null);
       setDetailResult(null);
+      setDetailDataKeys(null);
     };
   }, [task.id, isTypebuild, task.notes, refreshBody]);
 
@@ -1279,7 +1290,7 @@ export function TaskDetailDrawer({
               {isTypebuild && (
                 <TaskDataInputs
                   taskId={task.id}
-                  dataKeys={task.dataKeys}
+                  dataKeys={detailDataKeys ?? task.dataKeys}
                   claimedBy={claimedBy}
                   createdBy={task.createdBy}
                   viewerEmail={myEmail}
