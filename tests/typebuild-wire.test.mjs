@@ -477,6 +477,9 @@ test('buildCreatePayload includes every optional field when supplied', () => {
     dependsOn: ['dep-1', 'dep-2'],
     recurrence: '1w',
     outputSchema: [{ key: 'k', label: 'K', type: 'text' }],
+    variables: [
+      { key: 'person', label: 'Person', type: 'text', source: { savedQueryId: 'sq-1', version: 2 } },
+    ],
     data: { k: 'v' },
   };
   assert.deepEqual(buildCreatePayload(input), {
@@ -492,6 +495,9 @@ test('buildCreatePayload includes every optional field when supplied', () => {
     depends_on: ['dep-1', 'dep-2'],
     recurrence: '1w',
     output_schema: [{ key: 'k', label: 'K', type: 'text' }],
+    variables: [
+      { key: 'person', label: 'Person', type: 'text', source: { savedQueryId: 'sq-1', version: 2 } },
+    ],
     data: { k: 'v' },
   });
 });

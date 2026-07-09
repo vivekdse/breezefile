@@ -460,6 +460,18 @@ export type TaskCreate = {
     options?: string[];
     required?: boolean;
   }[];
+  // task-73f6304ffb94 follow-up — INPUT field DEFINITIONS (server `variables`,
+  // NON-PHI: definitions + the key-picker's SavedQuery `source` binding, never
+  // values). Sending these is what makes the server auto-register a Template
+  // from an input-only "make this a template" create.
+  variables?: {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'select' | 'bool';
+    options?: string[];
+    required?: boolean;
+    source?: { savedQueryId: string; version?: number; entityType?: string };
+  }[];
   data?: Record<string, string>;
 };
 

@@ -185,6 +185,19 @@ export type TaskCreate = {
     options?: string[];
     required?: boolean;
   }[];
+  // task-73f6304ffb94 follow-up — INPUT field DEFINITIONS (NON-PHI: key/label/
+  // type/options/required + the key-picker's SavedQuery `source` binding).
+  // The TypeBuild source maps them to the server's `variables` create field,
+  // which is what makes the server auto-register a Template from the task.
+  // Values never ride here — they go through `data`.
+  variables?: {
+    key: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'select' | 'bool';
+    options?: string[];
+    required?: boolean;
+    source?: { savedQueryId: string; version?: number; entityType?: string };
+  }[];
   data?: Record<string, string>;
 };
 

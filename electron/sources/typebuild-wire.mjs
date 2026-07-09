@@ -397,6 +397,13 @@ export function buildCreatePayload(input) {
   if (Array.isArray(input.outputSchema) && input.outputSchema.length > 0) {
     payload.output_schema = input.outputSchema;
   }
+  // task-73f6304ffb94 follow-up — INPUT field DEFINITIONS (server `variables`,
+  // NON-PHI: key/label/type/options/required + `source`). Carrying these is
+  // what triggers the server's template auto-registration for an input-only
+  // "make this a template" save; the data-bag keys alone register nothing.
+  if (Array.isArray(input.variables) && input.variables.length > 0) {
+    payload.variables = input.variables;
+  }
   if (input.data && typeof input.data === 'object' && Object.keys(input.data).length > 0) {
     payload.data = input.data;
   }

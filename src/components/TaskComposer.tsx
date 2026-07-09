@@ -3021,6 +3021,7 @@ export function TaskComposer(props: Props) {
       // to a plain task today (NON-REGRESSION).
       const notesForSave = trimmedNotes;
       let outputSchemaForSave: TaskDefField[] | undefined;
+      let variablesForSave: TaskDefField[] | undefined;
       let dataForSave: Record<string, string> | undefined;
       if (hasChainOption && templateChoice === 'blank') {
         // task-0d63c7b0ebdb — creation DEFINES the input fields but never asks
@@ -3045,6 +3046,19 @@ export function TaskComposer(props: Props) {
         }
         if (Object.keys(inputKeys).length > 0) {
           dataForSave = inputKeys;
+        }
+        // task-73f6304ffb94 follow-up — the input DEFINITIONS (key/label/type/
+        // options/required + the key-picker's `source` binding) ride the create
+        // as `variables`. The server's auto-register hook only registers a
+        // Template when the payload carries `variables` or `output_schema` —
+        // input keys alone (the empty data-bag entries above) register NOTHING,
+        // which silently dropped every input-only "make this a template" save.
+        // NON-PHI: field definitions only, never values.
+        const inputDefs = taskInputs
+          .map((f) => ({ ...f, key: effectiveFieldKey(f) }))
+          .filter((f) => !!f.key);
+        if (inputDefs.length > 0) {
+          variablesForSave = inputDefs;
         }
         if (taskOutputs.length > 0) {
           // Output field keys ride output_schema verbatim (they're NON-PHI
@@ -3132,6 +3146,7 @@ export function TaskComposer(props: Props) {
               // task defines no fields, same as the fenced-block path before it
               // (NON-REGRESSION).
               ...(outputSchemaForSave ? { outputSchema: outputSchemaForSave } : {}),
+              ...(variablesForSave ? { variables: variablesForSave } : {}),
               ...(dataForSave ? { data: dataForSave } : {}),
             }
           : isTypebuild
