@@ -904,7 +904,21 @@ export class TypeBuildTaskSource implements TaskSource {
       });
     };
 
-    let res = await doFetch();
+    let res: Response;
+    try {
+      res = await doFetch();
+    } catch (err) {
+      // A timed-out GET gets ONE retry: reads are idempotent, and a single
+      // slow response (server warming right after a redeploy, a transient
+      // stall) otherwise surfaces as a hard UI error the moment it exceeds
+      // the 8s fetch budget (seen live on templates:list). Writes are never
+      // retried here — a timeout after a POST/PATCH may have landed.
+      if (method === 'GET' && err instanceof Error && err.name === 'FetchTimeoutError') {
+        res = await doFetch();
+      } else {
+        throw err;
+      }
+    }
     if (res.status === 401) {
       // getIdToken refreshes proactively, but the token could have been
       // revoked. Force a retry; a second 401 means we're really signed out.
