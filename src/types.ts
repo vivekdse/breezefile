@@ -42,7 +42,7 @@ export type TagFilter = { mode: TagFilterMode; ids: string[] };
 // same ProjectsPage component; like 'projects'/'tasks' it ignores `trail` for
 // rendering and gates its own scoped verbs. The bare file-manager folder tab
 // stays 'folder'; the flat all-tasks page stays 'tasks'.
-export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home' | 'newhome';
+export type TabKind = 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home' | 'newhome' | 'groups';
 
 export type Tab = {
   id: string;
@@ -555,6 +555,33 @@ export type GroupMember = {
 /** A group the caller belongs to, as { id, name } — labels the group-scope
  *  picker with real names instead of opaque ids. NON-PHI. */
 export type Group = { id: string; name: string };
+
+// The Groups management surface's richer view (mirrors
+// electron/sources/typebuild.ts). NON-PHI: user identities + role, not patient
+// data. `status` separates an accepted member from an outstanding invite.
+export type GroupMemberDetail = {
+  principal: string;
+  displayName: string | null;
+  role: 'admin' | 'member';
+  status: 'active' | 'pending';
+  invitedBy: string | null;
+};
+/** A group WITH its roster and the caller's role. `myRole` null → the caller's
+ *  role is unknown; the UI must FAIL CLOSED and hide mutating controls. */
+export type GroupDetail = {
+  id: string;
+  name: string;
+  createdBy: string | null;
+  myRole: 'admin' | 'member' | null;
+  members: GroupMemberDetail[];
+};
+/** A pending invite addressed to the caller (their inbox). NON-PHI. */
+export type GroupInvite = {
+  groupId: string;
+  groupName: string;
+  role: 'admin' | 'member';
+  invitedBy: string | null;
+};
 
 export type TaskUpdate = Partial<{
   title: string;

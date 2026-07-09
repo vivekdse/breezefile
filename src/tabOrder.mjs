@@ -19,7 +19,7 @@
 // Kinds that render in the right-hand "task" zone of the Tabbar. Everything
 // else (notably 'folder', 'edit', 'browser') renders in the left "folder" zone.
 // Keep in sync with the partition in src/components/Tabbar.tsx.
-const TASK_ZONE_KINDS = new Set(['task', 'tasks', 'projects', 'home', 'newhome']);
+const TASK_ZONE_KINDS = new Set(['task', 'tasks', 'projects', 'home', 'newhome', 'groups']);
 
 /**
  * @param {{ kind?: string }} tab

@@ -40,6 +40,27 @@ type GroupMember = {
 };
 // A group as { id, name } for the scope picker's label. Inlined; NON-PHI.
 type Group = { id: string; name: string };
+// The Groups management surface's richer view. Inlined; NON-PHI.
+type GroupMemberDetail = {
+  principal: string;
+  displayName: string | null;
+  role: 'admin' | 'member';
+  status: 'active' | 'pending';
+  invitedBy: string | null;
+};
+type GroupDetail = {
+  id: string;
+  name: string;
+  createdBy: string | null;
+  myRole: 'admin' | 'member' | null;
+  members: GroupMemberDetail[];
+};
+type GroupInvite = {
+  groupId: string;
+  groupName: string;
+  role: 'admin' | 'member';
+  invitedBy: string | null;
+};
 
 // One credential-vault entry as it crosses the bridge (NAMES only — never a
 // value). `key` is the "me."-prefixed field; `secret` marks write-only fields
@@ -1057,6 +1078,50 @@ const fm = {
       members: () =>
         ipcRenderer.invoke('typebuild:groups:members') as Promise<GroupMember[]>,
       list: () => ipcRenderer.invoke('typebuild:groups:list') as Promise<Group[]>,
+      // Group management (the Groups tab). Mutations reject with a
+      // human-readable message the surface shows inline.
+      listDetailed: () =>
+        ipcRenderer.invoke('typebuild:groups:listDetailed') as Promise<GroupDetail[]>,
+      create: (name: string) =>
+        ipcRenderer.invoke('typebuild:groups:create', name) as Promise<Group>,
+      update: (groupId: string, name: string) =>
+        ipcRenderer.invoke('typebuild:groups:update', groupId, name) as Promise<void>,
+      remove: (groupId: string, reassignTasksTo?: string) =>
+        ipcRenderer.invoke(
+          'typebuild:groups:delete',
+          groupId,
+          reassignTasksTo,
+        ) as Promise<void>,
+      addMember: (
+        groupId: string,
+        email: string,
+        opts?: { role?: 'admin' | 'member'; direct?: boolean },
+      ) =>
+        ipcRenderer.invoke('typebuild:groups:addMember', groupId, email, opts) as Promise<{
+          status: 'active' | 'pending';
+          role: 'admin' | 'member';
+        }>,
+      removeMember: (groupId: string, principal: string) =>
+        ipcRenderer.invoke(
+          'typebuild:groups:removeMember',
+          groupId,
+          principal,
+        ) as Promise<void>,
+      setMemberRole: (groupId: string, principal: string, role: 'admin' | 'member') =>
+        ipcRenderer.invoke(
+          'typebuild:groups:setMemberRole',
+          groupId,
+          principal,
+          role,
+        ) as Promise<{ ok: boolean; unsupported?: true }>,
+      invites: () =>
+        ipcRenderer.invoke('typebuild:groups:invites') as Promise<GroupInvite[]>,
+      respondToInvite: (groupId: string, accept: boolean) =>
+        ipcRenderer.invoke(
+          'typebuild:groups:respondToInvite',
+          groupId,
+          accept,
+        ) as Promise<void>,
     },
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
     // structured-result contract as projects.patch.

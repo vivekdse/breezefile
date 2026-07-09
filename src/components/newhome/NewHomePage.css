@@ -63,6 +63,28 @@
   margin-left: 6px;
 }
 
+/* Quiet "Manage groups" affordance beside the group scope picker — opens the
+   Groups management surface (its own singleton tab). Text-link idiom so it
+   stays out of the way of the primary pickers. */
+.nh__manage-groups {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.nh__manage-groups:hover,
+.nh__manage-groups:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
 .nh__btn {
   appearance: none;
   border: 1px solid var(--border-2);

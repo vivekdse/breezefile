@@ -386,6 +386,7 @@ type GroupMemberRow = {
   role?: string | null;
   display_name?: string | null;
   status?: string;
+  invited_by?: string | null;
 };
 /** A group member as the renderer sees it (camelCase). NON-PHI. */
 export type GroupMember = {
@@ -394,10 +395,114 @@ export type GroupMember = {
   role: string | null;
 };
 // A raw group row from GET /chromeext/groups → { groups: [{ id, name, ... }] }.
-type GroupRow = { id?: string; name?: string | null };
+type GroupRow = {
+  id?: string;
+  name?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  my_role?: string | null;
+  members?: GroupMemberRow[];
+};
 /** A group as the renderer sees it (camelCase). NON-PHI — opaque id + a display
  *  name. Used to label the group-scope picker with real names, not raw ids. */
 export type Group = { id: string; name: string };
+
+/** A group member with full membership detail, as the Groups management surface
+ *  sees it. NON-PHI. `status` distinguishes an accepted member ('active') from
+ *  an outstanding invite ('pending'); the roster renders those separately. */
+export type GroupMemberDetail = {
+  principal: string;
+  displayName: string | null;
+  role: 'admin' | 'member';
+  status: 'active' | 'pending';
+  invitedBy: string | null;
+};
+/** A group WITH its roster and the caller's own role — what the Groups tab
+ *  renders. `myRole` is null when the server omits it (treat as non-admin: all
+ *  mutating controls stay hidden, i.e. fail closed). NON-PHI. */
+export type GroupDetail = {
+  id: string;
+  name: string;
+  createdBy: string | null;
+  myRole: 'admin' | 'member' | null;
+  members: GroupMemberDetail[];
+};
+/** A pending invite addressed to the caller (their inbox). NON-PHI. */
+export type GroupInvite = {
+  groupId: string;
+  groupName: string;
+  role: 'admin' | 'member';
+  invitedBy: string | null;
+};
+
+// Normalize a free-form server role/status into the closed set the UI switches
+// on. Anything unrecognized collapses to the LEAST-privileged / safest value:
+// an unknown role is a plain 'member', an unknown status is 'active' (the row
+// came back from a members list, so it exists) — never invent 'admin'.
+function asRole(v: unknown): 'admin' | 'member' {
+  return v === 'admin' ? 'admin' : 'member';
+}
+function asStatus(v: unknown): 'active' | 'pending' {
+  return v === 'pending' ? 'pending' : 'active';
+}
+// `my_role` is the one place an absent value must NOT default to 'member':
+// the caller might not be a member at all. Null → the UI hides every control.
+function asMyRole(v: unknown): 'admin' | 'member' | null {
+  if (v === 'admin') return 'admin';
+  if (v === 'member') return 'member';
+  return null;
+}
+// Turn a failed group call into a message a PERSON can act on. The server sends
+// a machine-readable `reason` (not_admin / last_admin / not_member / ...); left
+// raw, those surface to the user as "500"-flavoured noise. Falls back to the
+// status code when the body is empty or unrecognized. Never logs the body —
+// it may name principals.
+const GROUP_REASONS: Record<string, string> = {
+  not_admin: 'Only a group admin can do that.',
+  not_member: 'That person is not a member of this group.',
+  last_admin: 'A group must keep at least one admin.',
+  bad_role: 'That role is not valid.',
+  no_pending_invite: 'That invite is no longer available.',
+  unknown_group: 'That group no longer exists.',
+  group_required: 'You need to belong to a group first.',
+};
+async function groupError(res: Response, what: string): Promise<string> {
+  const body = (await res.json().catch(() => ({}))) as {
+    reason?: string;
+    detail?: unknown;
+  };
+  // FastAPI nests as {detail: {reason}} on HTTPException, or {reason} directly.
+  const detail = body.detail;
+  const reason =
+    body.reason ??
+    (detail && typeof detail === 'object' && 'reason' in detail
+      ? String((detail as { reason?: unknown }).reason ?? '')
+      : typeof detail === 'string'
+        ? detail
+        : '');
+  const friendly = reason ? GROUP_REASONS[reason] : undefined;
+  if (friendly) return friendly;
+  if (res.status === 403) return GROUP_REASONS.not_admin;
+  return `typebuild: ${what} failed (${res.status})`;
+}
+
+function mapMemberDetail(r: GroupMemberRow): GroupMemberDetail | null {
+  if (!r || typeof r !== 'object') return null;
+  const principal = typeof r.principal === 'string' ? r.principal.trim() : '';
+  if (!principal) return null;
+  const displayName =
+    typeof r.display_name === 'string' && r.display_name.trim()
+      ? r.display_name.trim()
+      : null;
+  return {
+    principal,
+    displayName,
+    role: asRole(r.role),
+    status: asStatus(r.status),
+    invitedBy:
+      typeof r.invited_by === 'string' && r.invited_by.trim() ? r.invited_by : null,
+  };
+}
 // Dedupe by principal + map to the client shape. Defensive (mirrors
 // mapAgentRow): rows without a principal are dropped; blank display_name/role
 // collapse to null.
@@ -1456,6 +1561,169 @@ export class TypeBuildTaskSource implements TaskSource {
     throw new Error(`typebuild: list group members failed (${primary.status})`);
   }
 
+  // ─── group management ────────────────────────────────────────────────────
+  // The mutating half of the group API, backing the Groups tab. Distinct from
+  // listGroups() above, which deliberately narrows to { id, name } for the
+  // scope picker: this one keeps my_role + the roster. Authorization lives on
+  // the SERVER (ROLE_CAPABILITIES / has_capability); the client hides admin-only
+  // controls as a courtesy, and a 403 here is a real answer, not a bug.
+  //
+  // These THROW on failure (unlike the list-and-degrade readers) because every
+  // caller is a user-initiated mutation whose failure must be shown, never
+  // swallowed into a silently-unchanged roster.
+
+  /** GET /chromeext/groups — full detail: roster + the caller's role. */
+  async listGroupsDetailed(): Promise<GroupDetail[]> {
+    const res = await this.request('GET', '/chromeext/groups');
+    if (!res.ok) throw new Error(`typebuild: list groups failed (${res.status})`);
+    const data = (await res.json().catch(() => ({}))) as { groups?: GroupRow[] };
+    const rows = Array.isArray(data.groups) ? data.groups : [];
+    const out: GroupDetail[] = [];
+    for (const r of rows) {
+      if (!r || typeof r.id !== 'string' || !r.id) continue;
+      const members: GroupMemberDetail[] = [];
+      for (const m of Array.isArray(r.members) ? r.members : []) {
+        const mapped = mapMemberDetail(m);
+        if (mapped) members.push(mapped);
+      }
+      out.push({
+        id: r.id,
+        name: typeof r.name === 'string' && r.name.trim() ? r.name : r.id,
+        createdBy: typeof r.created_by === 'string' ? r.created_by : null,
+        myRole: asMyRole(r.my_role),
+        members,
+      });
+    }
+    return out;
+  }
+
+  /** POST /chromeext/groups — caller becomes the group's first admin. */
+  async createGroup(name: string): Promise<Group> {
+    const res = await this.request('POST', '/chromeext/groups', { name });
+    if (!res.ok) throw new Error(await groupError(res, 'create group'));
+    const data = (await res.json().catch(() => ({}))) as GroupRow;
+    const id = typeof data.id === 'string' ? data.id : '';
+    if (!id) throw new Error('typebuild: create group returned no id');
+    return { id, name: typeof data.name === 'string' ? data.name : name };
+  }
+
+  /** PATCH /chromeext/groups/{id} — rename. Admin-only (403 → not_admin). */
+  async updateGroup(groupId: string, name: string): Promise<void> {
+    const res = await this.request('PATCH', `/chromeext/groups/${encodeURIComponent(groupId)}`, {
+      name,
+    });
+    if (!res.ok) throw new Error(await groupError(res, 'rename group'));
+  }
+
+  /** DELETE /chromeext/groups/{id} — admin-only. `reassignTasksTo` re-homes the
+   *  group's projects + tasks into another group; omit to let the server decide. */
+  async deleteGroup(groupId: string, reassignTasksTo?: string): Promise<void> {
+    const q = reassignTasksTo
+      ? `?reassign_tasks_to=${encodeURIComponent(reassignTasksTo)}`
+      : '';
+    const res = await this.request(
+      'DELETE',
+      `/chromeext/groups/${encodeURIComponent(groupId)}${q}`,
+    );
+    if (!res.ok) throw new Error(await groupError(res, 'delete group'));
+  }
+
+  /** POST /chromeext/groups/{id}/members — admin-only. Defaults to an INVITE
+   *  (status 'pending'); `direct: true` adds the member as active immediately.
+   *  NOTE the wire key is `direct` (REST), not `activate` (the MCP tool's name). */
+  async addGroupMember(
+    groupId: string,
+    email: string,
+    opts?: { role?: 'admin' | 'member'; direct?: boolean },
+  ): Promise<{ status: 'active' | 'pending'; role: 'admin' | 'member' }> {
+    const body: Record<string, unknown> = { email };
+    if (opts?.role) body.role = opts.role;
+    if (opts?.direct) body.direct = true;
+    const res = await this.request(
+      'POST',
+      `/chromeext/groups/${encodeURIComponent(groupId)}/members`,
+      body,
+    );
+    if (!res.ok) throw new Error(await groupError(res, 'add member'));
+    const data = (await res.json().catch(() => ({}))) as {
+      status?: string;
+      role?: string;
+    };
+    return { status: asStatus(data.status), role: asRole(data.role) };
+  }
+
+  /** DELETE /chromeext/groups/{id}/members/{principal} — admin, OR self-leave.
+   *  409 when removing the last active admin (the server's structural guard). */
+  async removeGroupMember(groupId: string, principal: string): Promise<void> {
+    const res = await this.request(
+      'DELETE',
+      `/chromeext/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(principal)}`,
+    );
+    if (!res.ok) throw new Error(await groupError(res, 'remove member'));
+  }
+
+  /** PATCH /chromeext/groups/{id}/members/{principal} — promote/demote.
+   *
+   *  NOT YET DEPLOYED: the endpoint is filed as task-15e74c46cffa on the server.
+   *  Until it ships the server answers 404/405, which we surface as a distinct
+   *  `unsupported` flag rather than an error, so the UI can FEATURE-DETECT and
+   *  hide the control instead of showing the user a scary failure. Any other
+   *  non-OK status is a genuine error (403 not_admin, 409 last_admin). */
+  async setGroupMemberRole(
+    groupId: string,
+    principal: string,
+    role: 'admin' | 'member',
+  ): Promise<{ ok: boolean; unsupported?: true }> {
+    const res = await this.request(
+      'PATCH',
+      `/chromeext/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(principal)}`,
+      { role },
+    );
+    if (res.status === 404 || res.status === 405) return { ok: false, unsupported: true };
+    if (!res.ok) throw new Error(await groupError(res, 'change member role'));
+    return { ok: true };
+  }
+
+  /** GET /chromeext/groups/invites — the caller's own pending-invite inbox.
+   *  Degrades to [] (like the other readers) so a missing route can't block the
+   *  Groups tab from rendering the groups the user already belongs to. */
+  async listGroupInvites(): Promise<GroupInvite[]> {
+    const res = await this.request('GET', '/chromeext/groups/invites');
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => ({}))) as {
+      invites?: {
+        group_id?: string;
+        group_name?: string | null;
+        role?: string | null;
+        invited_by?: string | null;
+      }[];
+    };
+    const out: GroupInvite[] = [];
+    for (const r of Array.isArray(data.invites) ? data.invites : []) {
+      if (!r || typeof r.group_id !== 'string' || !r.group_id) continue;
+      out.push({
+        groupId: r.group_id,
+        groupName:
+          typeof r.group_name === 'string' && r.group_name.trim()
+            ? r.group_name
+            : r.group_id,
+        role: asRole(r.role),
+        invitedBy: typeof r.invited_by === 'string' ? r.invited_by : null,
+      });
+    }
+    return out;
+  }
+
+  /** POST /chromeext/groups/{id}/invites/{accept,decline} — self only. */
+  async respondToGroupInvite(groupId: string, accept: boolean): Promise<void> {
+    const verb = accept ? 'accept' : 'decline';
+    const res = await this.request(
+      'POST',
+      `/chromeext/groups/${encodeURIComponent(groupId)}/invites/${verb}`,
+    );
+    if (!res.ok) throw new Error(await groupError(res, `${verb} invite`));
+  }
+
   // ─── templates (task-e112d60a3b7c) ───────────────────────────────────────
   // The first-class Template API (/chromeext/templates), superseding the old
   // client-side task-scanning "template" derivation. NON-PHI on the list; the
@@ -1781,6 +2049,11 @@ export class TypeBuildTaskSource implements TaskSource {
     instructions?: string;
     parentProjectId?: string;
     folders?: string[];
+    // task-group-select-dialog — explicit GROUP the project is created into
+    // (opaque id, non-PHI). Mapped to the server's `group_id`, mirroring the
+    // parentProjectId → parent_project_id convention. Omitted / '' = server
+    // default (its own group auto-resolution).
+    groupId?: string;
   }): Promise<Project> {
     const payload: Record<string, unknown> = { name: input.name };
     if (input.description !== undefined) payload.description = input.description;
@@ -1789,6 +2062,9 @@ export class TypeBuildTaskSource implements TaskSource {
     }
     if (input.parentProjectId) {
       payload.parent_project_id = input.parentProjectId;
+    }
+    if (input.groupId) {
+      payload.group_id = input.groupId;
     }
     if (input.folders !== undefined) payload.folders = input.folders;
 

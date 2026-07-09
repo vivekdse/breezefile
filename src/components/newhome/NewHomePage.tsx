@@ -725,6 +725,18 @@ export function NewHomePage() {
               ))}
             </select>
           )}
+          {/* Entry point into the Groups management surface (its own singleton
+              tab) — a small quiet affordance beside the group scope picker. */}
+          <button
+            type="button"
+            className="nh__manage-groups"
+            title="Manage groups — members, roles, invites"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent('fm:openGroups'))
+            }
+          >
+            Manage groups
+          </button>
           <select
             className="nh__project-picker"
             value={selectedProjectId ?? ''}
@@ -1081,6 +1093,9 @@ export function NewHomePage() {
         <ProjectDialog
           project={projectDialog.mode === 'edit' ? projectDialog.project : null}
           projects={projects}
+          // task-group-select-dialog — preselect the new project's group from
+          // the group currently scoped in New Home (null = "All groups").
+          defaultGroupId={selectedGroupId}
           onClose={() => setProjectDialog(null)}
           onSaved={(project) => onProjectSaved(project, projectDialog.mode === 'create')}
         />

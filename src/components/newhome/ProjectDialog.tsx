@@ -18,7 +18,7 @@
 // dialog only performs the mutation and reports success/failure.
 import { useEffect, useMemo, useState } from 'react';
 import { fm } from '../../bridge';
-import type { Project } from '../../types';
+import type { Group, Project } from '../../types';
 import { validParentOptions } from './projectCrud.mjs';
 import './ProjectDialog.css';
 
@@ -27,13 +27,18 @@ type Props = {
   project?: Project | null;
   /** Every known project (for the parent picker + cycle-prevention). */
   projects: Project[];
+  /** task-group-select-dialog — the group currently scoped in New Home, used
+   *  to PRESELECT the group for a new project (highest-priority default). Null
+   *  when the caller is on "All groups"; then the first available group (or a
+   *  selected parent's group) is preselected instead. */
+  defaultGroupId?: string | null;
   onClose: () => void;
   /** Called after a successful create/update so the caller can refresh the
    *  list and (for create) select the new project. */
   onSaved: (project: Project) => void;
 };
 
-export function ProjectDialog({ project, projects, onClose, onSaved }: Props) {
+export function ProjectDialog({ project, projects, defaultGroupId, onClose, onSaved }: Props) {
   const isEdit = !!project;
   const [name, setName] = useState(project?.name ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
@@ -44,6 +49,13 @@ export function ProjectDialog({ project, projects, onClose, onSaved }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
+  // task-group-select-dialog — the caller's groups (id + name), loaded on mount
+  // the same way the parent options are derived. `groupsLoaded` distinguishes
+  // "still loading" from "genuinely belongs to zero groups" so the zero-group
+  // hint doesn't flash before the list lands.
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
+  const [groupId, setGroupId] = useState('');
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -66,10 +78,79 @@ export function ProjectDialog({ project, projects, onClose, onSaved }: Props) {
   );
   const parentById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
 
+  // task-group-select-dialog — load the caller's groups on mount. Create mode
+  // uses them to populate the select; edit mode uses them only to resolve the
+  // read-only group NAME (falls back to the opaque id if the fetch is empty).
+  useEffect(() => {
+    let cancelled = false;
+    void fm.typebuild.groups
+      .list()
+      .then((list) => {
+        if (cancelled) return;
+        setGroups(list);
+        setGroupsLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGroupsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // task-group-select-dialog — the group inherited from a selected parent
+  // project: when a parent is chosen the child MUST live in the parent's group
+  // (mirroring the server), so the select locks to this value.
+  const inheritedGroupId = parentProjectId
+    ? parentById.get(parentProjectId)?.groupId ?? null
+    : null;
+  const groupLocked = !!inheritedGroupId;
+
+  // task-group-select-dialog — EDIT read-only label: resolve the project's
+  // group id to its real name from the loaded registry; fall back to the id
+  // (never blocks on the fetch). null when the project has no group.
+  const editGroupName = useMemo(() => {
+    if (!project?.groupId) return null;
+    return groups.find((g) => g.id === project.groupId)?.name ?? project.groupId;
+  }, [project?.groupId, groups]);
+
+  // Preselect once groups have loaded (create only), in priority order:
+  //   (a) the caller's scoped group (defaultGroupId), else
+  //   (b) a selected parent's group, else
+  //   (c) the first group in the list.
+  // Runs only while `groupId` is still empty so it never fights the user's own
+  // pick. The inheritance effect below handles later parent changes.
+  useEffect(() => {
+    if (isEdit || !groupsLoaded || groupId) return;
+    const has = (id: string | null | undefined): id is string =>
+      !!id && groups.some((g) => g.id === id);
+    if (has(defaultGroupId)) setGroupId(defaultGroupId);
+    else if (has(inheritedGroupId)) setGroupId(inheritedGroupId);
+    else if (groups.length) setGroupId(groups[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupsLoaded, groups, defaultGroupId, inheritedGroupId, isEdit]);
+
+  // Inheritance rule: whenever a parent IS selected, force the group to the
+  // parent's group (the select is rendered disabled). Clearing the parent
+  // leaves the last value in place and re-enables the select.
+  useEffect(() => {
+    if (isEdit) return;
+    if (inheritedGroupId) setGroupId(inheritedGroupId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inheritedGroupId, isEdit]);
+
   async function handleSave() {
     const trimmed = name.trim();
     if (!trimmed) {
       setError('A project name is required.');
+      return;
+    }
+    // task-group-select-dialog — group is REQUIRED on create when the user
+    // belongs to any groups (mirrors the `name` required-ness above). Zero
+    // groups is a separate blocked state handled by the submit button + hint.
+    if (!isEdit && groups.length > 0 && !groupId) {
+      setError('Select a group for this project.');
       return;
     }
     setSaving(true);
@@ -94,6 +175,10 @@ export function ProjectDialog({ project, projects, onClose, onSaved }: Props) {
           description: description.trim() || undefined,
           instructions: instructions.trim() || undefined,
           parentProjectId: parentProjectId || undefined,
+          // task-group-select-dialog — explicit group so the project lands where
+          // the user chose, not the server's silent auto-resolution. Maps to
+          // `group_id` at the source (parentProjectId → parent_project_id idiom).
+          groupId: groupId || undefined,
           folders: folders.length ? folders : undefined,
         });
         onSaved(created);
@@ -236,6 +321,59 @@ export function ProjectDialog({ project, projects, onClose, onSaved }: Props) {
             </div>
           )}
 
+          {/* task-group-select-dialog — CREATE: the group is an EXPLICIT,
+              required choice (the server would otherwise auto-resolve one the
+              user never saw). Disabled + inherited when a parent is selected
+              (the child must live in the parent's group). Read-only in edit
+              mode (below) — patch_project can't move groups. */}
+          {!isEdit && (
+            <div className="nh-dialog__section">
+              <label className="nh-pdlg__label" htmlFor="nh-pdlg-group">
+                Group
+              </label>
+              <div className="nh-pdlg__hint">
+                {groupLocked
+                  ? 'Inherited from the parent project — a subproject lives in its parent’s group.'
+                  : 'Who can see this project.'}
+              </div>
+              <select
+                id="nh-pdlg-group"
+                className="nh-pdlg__select"
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                disabled={groupLocked || groups.length === 0}
+              >
+                {groups.length === 0 && <option value="">(no groups)</option>}
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+              {groupsLoaded && groups.length === 0 && (
+                <div className="nh-pdlg__hint">
+                  You need a group before you can create a project.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* task-group-select-dialog — EDIT: group is READ-ONLY. The server's
+              patch_project doesn't move a project between groups, so we show
+              it (never send group_id on patch) rather than offer an edit that
+              would silently no-op. */}
+          {isEdit && (
+            <div className="nh-dialog__section">
+              <label className="nh-pdlg__label">Group</label>
+              <div className="nh-pdlg__readonly">
+                {editGroupName ?? '(none)'}
+              </div>
+              <div className="nh-pdlg__hint">
+                Changing a project’s group isn’t supported.
+              </div>
+            </div>
+          )}
+
           <div className="nh-dialog__section">
             <label className="nh-pdlg__label">
               Folders <span className="nh-pdlg__optional">(optional)</span>
@@ -295,7 +433,7 @@ export function ProjectDialog({ project, projects, onClose, onSaved }: Props) {
             type="button"
             className="nh__btn nh__btn--primary"
             onClick={() => void handleSave()}
-            disabled={saving || !name.trim()}
+            disabled={saving || !name.trim() || (!isEdit && !groupId)}
           >
             {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create project'}
           </button>

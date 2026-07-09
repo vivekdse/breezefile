@@ -39,6 +39,19 @@
   font-size: var(--fs-sm);
 }
 
+/* task-group-select-dialog — read-only field value (edit-mode Group row): the
+   same box as an input/select but non-interactive, since patch_project can't
+   move a project between groups. */
+.nh-pdlg__readonly {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  color: var(--text-on-panel);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--sp-2);
+}
+
 .nh-pdlg__folder-list {
   list-style: none;
   margin: 0 0 var(--sp-2);

@@ -182,6 +182,7 @@ type Verb =
   | 'tasks'
   | 'projects'
   | 'new-home'
+  | 'groups'
   | 'files'
   | 'new-task'
   | 'new-from-template'
@@ -1906,6 +1907,23 @@ export const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openNewHome'));
+    },
+  },
+  {
+    // Groups: the team/group management surface (roster, invites, members,
+    // roles). Slotless, singleton tab (kind:'groups') — see openGroupsTab in
+    // store.tsx.
+    id: 'groups',
+    label: 'Groups',
+    aliases: ['groups', 'group', 'teams', 'team', 'members'],
+    icon: '⬡',
+    describe: () =>
+      'Open Groups — manage teams, members, roles, and invites',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openGroups'));
     },
   },
   {

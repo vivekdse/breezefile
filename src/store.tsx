@@ -247,6 +247,7 @@ type Action =
   | { type: 'openProjectsTab'; focus?: boolean }
   | { type: 'openHomeTab'; focus?: boolean }
   | { type: 'openNewHomeTab'; focus?: boolean }
+  | { type: 'openGroupsTab'; focus?: boolean }
   | { type: 'openEditTab'; path: string; focus?: boolean }
   | { type: 'setTabDirty'; index: number; dirty: boolean }
   | { type: 'openOrFocusFolderTab'; path: string; focus?: boolean }
@@ -335,7 +336,7 @@ type Action =
 function makeTab(
   path: string,
   opts?: {
-    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home' | 'newhome';
+    kind?: 'folder' | 'task' | 'tasks' | 'edit' | 'browser' | 'projects' | 'home' | 'newhome' | 'groups';
     taskId?: string | null;
     editPath?: string | null;
     browserUrl?: string;
@@ -540,6 +541,24 @@ function reducer(s: State, a: Action): State {
       const seedCwd =
         s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
       const tab = makeTab(seedCwd, { kind: 'newhome' });
+      return {
+        ...s,
+        tabs: [...s.tabs, tab],
+        activeTab: a.focus !== false ? s.tabs.length : s.activeTab,
+      };
+    }
+    case 'openGroupsTab': {
+      // Singleton "Groups" management surface (roster + invites + members).
+      // Same focus-or-spawn lifecycle as openNewHomeTab; a distinct
+      // kind:'groups' keeps it a separate full-screen surface. Trail seeds from
+      // the active tab's cwd / home — unused for kind:'groups' rendering.
+      const existing = s.tabs.findIndex((t) => t.kind === 'groups');
+      if (existing >= 0) {
+        return a.focus !== false ? { ...s, activeTab: existing } : s;
+      }
+      const seedCwd =
+        s.tabs[s.activeTab]?.trail.at(-1) ?? s.tabs[0]?.trail.at(-1) ?? '/';
+      const tab = makeTab(seedCwd, { kind: 'groups' });
       return {
         ...s,
         tabs: [...s.tabs, tab],

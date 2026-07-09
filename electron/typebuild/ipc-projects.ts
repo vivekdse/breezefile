@@ -30,7 +30,7 @@
 
 import { ipcMain } from 'electron';
 import { getTaskSource } from '../sources/registry';
-import type { Agent, Group, GroupMember, Project, TypeBuildTaskSource } from '../sources/typebuild';
+import type { Agent, Group, GroupDetail, GroupInvite, GroupMember, Project, TypeBuildTaskSource } from '../sources/typebuild';
 
 let registered = false;
 
@@ -70,6 +70,56 @@ export function registerTypebuildProjectsIpc(): void {
   // The caller's groups as { id, name } — labels the group-scope picker with
   // real names. Source degrades to [] so the picker falls back to id-as-label.
   ipcMain.handle('typebuild:groups:list', (_e): Promise<Group[]> => source().listGroups());
+  // ─── group management (the Groups tab) ──────────────────────────────────
+  // Unlike the readers above, these REJECT on failure: each is a user-initiated
+  // mutation whose error message (not_admin / last_admin / …) the surface shows
+  // inline. Authorization is enforced SERVER-side; hiding controls is courtesy.
+  ipcMain.handle(
+    'typebuild:groups:listDetailed',
+    (_e): Promise<GroupDetail[]> => source().listGroupsDetailed(),
+  );
+  ipcMain.handle(
+    'typebuild:groups:create',
+    (_e, name: string): Promise<Group> => source().createGroup(name),
+  );
+  ipcMain.handle(
+    'typebuild:groups:update',
+    (_e, groupId: string, name: string): Promise<void> =>
+      source().updateGroup(groupId, name),
+  );
+  ipcMain.handle(
+    'typebuild:groups:delete',
+    (_e, groupId: string, reassignTasksTo?: string): Promise<void> =>
+      source().deleteGroup(groupId, reassignTasksTo),
+  );
+  ipcMain.handle(
+    'typebuild:groups:addMember',
+    (
+      _e,
+      groupId: string,
+      email: string,
+      opts?: { role?: 'admin' | 'member'; direct?: boolean },
+    ) => source().addGroupMember(groupId, email, opts),
+  );
+  ipcMain.handle(
+    'typebuild:groups:removeMember',
+    (_e, groupId: string, principal: string): Promise<void> =>
+      source().removeGroupMember(groupId, principal),
+  );
+  ipcMain.handle(
+    'typebuild:groups:setMemberRole',
+    (_e, groupId: string, principal: string, role: 'admin' | 'member') =>
+      source().setGroupMemberRole(groupId, principal, role),
+  );
+  ipcMain.handle(
+    'typebuild:groups:invites',
+    (_e): Promise<GroupInvite[]> => source().listGroupInvites(),
+  );
+  ipcMain.handle(
+    'typebuild:groups:respondToInvite',
+    (_e, groupId: string, accept: boolean): Promise<void> =>
+      source().respondToGroupInvite(groupId, accept),
+  );
   ipcMain.handle(
     'typebuild:projects:get',
     (_e, id: string, effective?: boolean): Promise<Project | null> =>

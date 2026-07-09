@@ -1,4 +1,4 @@
-import type { Agent, ChainDef, Entry, Group, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Agent, ChainDef, Entry, Group, GroupDetail, GroupInvite, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 import type { TaskDefField } from './components/newhome/types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
@@ -731,6 +731,10 @@ type Fm = {
         instructions?: string;
         parentProjectId?: string;
         folders?: string[];
+        // task-group-select-dialog — explicit GROUP id (opaque, non-PHI). The
+        // source maps it to the server's `group_id`, mirroring parentProjectId →
+        // parent_project_id. Omitted / '' = server default group resolution.
+        groupId?: string;
       }) => Promise<Project>;
       // task-fdf3dc6b3c5c — PROJECT-scope teach write-back. Structured result so
       // the UI surfaces owner-only (403) / PHI-guard (422) failures gracefully.
@@ -768,6 +772,28 @@ type Fm = {
       members: () => Promise<GroupMember[]>;
       /** The caller's groups as { id, name } — labels the scope picker. */
       list: () => Promise<Group[]>;
+      // ── group management (the Groups tab) ──
+      /** Groups WITH roster + the caller's role. */
+      listDetailed: () => Promise<GroupDetail[]>;
+      create: (name: string) => Promise<Group>;
+      update: (groupId: string, name: string) => Promise<void>;
+      remove: (groupId: string, reassignTasksTo?: string) => Promise<void>;
+      /** Defaults to an INVITE (pending); `direct` adds as active immediately. */
+      addMember: (
+        groupId: string,
+        email: string,
+        opts?: { role?: 'admin' | 'member'; direct?: boolean },
+      ) => Promise<{ status: 'active' | 'pending'; role: 'admin' | 'member' }>;
+      removeMember: (groupId: string, principal: string) => Promise<void>;
+      /** `unsupported: true` when the server route isn't deployed yet
+       *  (task-15e74c46cffa) — feature-detect and hide the control. */
+      setMemberRole: (
+        groupId: string,
+        principal: string,
+        role: 'admin' | 'member',
+      ) => Promise<{ ok: boolean; unsupported?: true }>;
+      invites: () => Promise<GroupInvite[]>;
+      respondToInvite: (groupId: string, accept: boolean) => Promise<void>;
     };
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (
