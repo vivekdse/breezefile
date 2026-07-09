@@ -3112,11 +3112,11 @@ export function TaskComposer(props: Props) {
               deferUntil: resolvedStart,
               ...(parsedPriority !== undefined ? { priority: parsedPriority } : {}),
               ...(projectId ? { projectId } : {}),
-              // The active group scope rides the create as `groupId` (→ server
-              // `group_id`) so a new task lands in the currently-selected team.
-              // Omitted when there's no group scope; the server applies its own
-              // rule (default group / require-a-group) in that case.
-              ...(props.groupId ? { groupId: props.groupId } : {}),
+              // task-464e739dc9fa — the group is NOT sent: it lives on the
+              // project now. The server derives the task's group from the
+              // resolved (explicit or per-user default) project and 422s a
+              // client-sent group_id. props.groupId remains a VIEW scope only
+              // (member picker, list filtering).
               // task-896f3f7f5e75 — the chosen agent rides the create as
               // `agentId` (TaskCreate models it; the TypeBuild source maps it to
               // `agent_id`). '' (None) → omit the key so a create that doesn't

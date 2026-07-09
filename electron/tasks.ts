@@ -147,9 +147,11 @@ export type TaskCreate = {
   // non-PHI). The local store ignores it; the TypeBuild source maps it to the
   // server's `project_id` on create.
   projectId?: string;
-  // Optional TypeBuild GROUP (opaque id, non-PHI) — the team the task is created
-  // into. The local store ignores it; the TypeBuild source maps it to the
-  // server's `group_id` on create. Set from the composer's active group scope.
+  // Optional TypeBuild GROUP (opaque id, non-PHI). task-464e739dc9fa: the
+  // group lives on the PROJECT now — the server derives/stamps a task's group
+  // from its resolved project and REJECTS a client-sent group_id (422), so the
+  // wire mapper never sends this. Retained on the type only as a legacy no-op
+  // so stale callers stay type-valid; treat as ignored.
   groupId?: string;
   // task-896f3f7f5e75 — optional TypeBuild agent assignment (opaque id, NON-PHI;
   // one agent per task). The local store ignores it; the TypeBuild source maps

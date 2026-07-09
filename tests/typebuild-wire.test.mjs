@@ -486,7 +486,6 @@ test('buildCreatePayload includes every optional field when supplied', () => {
     defer_until: '2026-07-08T00:00:00Z',
     priority: 2,
     project_id: 'proj-1',
-    group_id: 'group-1',
     agent_id: 'agent-1',
     assigned_to: 'bob@x.com',
     parent_task_id: 'parent-1',
@@ -495,6 +494,15 @@ test('buildCreatePayload includes every optional field when supplied', () => {
     output_schema: [{ key: 'k', label: 'K', type: 'text' }],
     data: { k: 'v' },
   });
+});
+
+// task-464e739dc9fa — the group lives on the PROJECT: the server stamps a
+// task's group from its resolved project and 422s a client-sent group_id, so
+// the mapper must NEVER emit it, even when a (legacy) groupId is supplied.
+test('buildCreatePayload never sends group_id (server derives it from the project)', () => {
+  const payload = buildCreatePayload({ title: 'T', notes: 'N', groupId: 'group-1' });
+  assert.equal('group_id' in payload, false);
+  assert.equal('groupId' in payload, false);
 });
 
 test('buildCreatePayload omits empty/falsy optional fields (no no-op keys)', () => {
