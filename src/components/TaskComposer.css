@@ -1066,49 +1066,48 @@ span.composer__chain-step-name {
   cursor: default;
 }
 
-/* task-342f3e151d99 — the field sub-walk's step list. The user must SEE that
-   defining a field is several questions, what they already answered, and be
-   able to click back to a past one. Answered steps show their value; the
-   current step is marked; upcoming steps stay dim. */
+/* task-342f3e151d99 — the field sub-walk, expanded. Defining a field is
+   several questions, so show them all: answered rows carry their value (and
+   click to go back), the current row carries the live control, upcoming rows
+   show their question dimmed. Mirrors the main walk's answered/active/future
+   rhythm so the sub-walk doesn't feel like a different form. */
 .composer__draft-steps {
   list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.composer__draft-step {
-  display: inline-flex;
+.composer__draft-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
   align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-  padding: 3px 8px;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
+  gap: 10px;
+  padding: 6px 8px;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+}
+.composer__draft-row-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--muted);
-  opacity: 0.55;
 }
-.composer__draft-step--done {
-  opacity: 1;
-  cursor: pointer;
-  border-color: var(--rule);
-}
-.composer__draft-step--done:hover { border-color: var(--accent); }
-.composer__draft-step--active {
-  opacity: 1;
-  color: var(--ink);
-  border-color: var(--accent);
-}
-.composer__draft-step-name { text-transform: lowercase; letter-spacing: 0.02em; }
-.composer__draft-step-answer {
+.composer__draft-row--done { cursor: pointer; }
+.composer__draft-row--done:hover { background: var(--bg-1); }
+.composer__draft-row--done .composer__draft-row-answer {
   color: var(--ink);
   font-weight: 500;
-  max-width: 16ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
+.composer__draft-row--future { opacity: 0.45; }
+.composer__draft-row-todo { color: var(--muted); font-size: 13px; }
+.composer__draft-row--active {
+  border-left-color: var(--accent);
+  background: var(--bg-1);
+}
+.composer__draft-row-body { min-width: 0; }
+.composer__draft-row-body .composer__q-prompt { margin-bottom: 6px; }
 
 /* The keyboard affordance under the Inputs/Outputs prompts — every other
    question advertises its keys, so these must too. */

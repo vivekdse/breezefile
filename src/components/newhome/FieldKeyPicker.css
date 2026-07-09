@@ -155,3 +155,21 @@
 .fkp-badge__clear:hover {
   opacity: 1;
 }
+
+/* task-342f3e151d99 — the digit hint must LOOK like a key, exactly as the
+   composer's other option lists render theirs (boxed <kbd>), otherwise the
+   shortcut reads as decoration and the user never tries it. */
+.fsp__option-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  opacity: 1;
+  color: var(--muted);
+}
+.fsp__option--active .fsp__option-key {
+  border-color: var(--accent);
+  color: var(--ink);
+}

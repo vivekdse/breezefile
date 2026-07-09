@@ -2305,6 +2305,12 @@ export function TaskComposer(props: Props) {
       // text, same as title/notes: focus the input immediately.
       fieldDraftInputRef.current?.focus();
       fieldDraftInputRef.current?.select();
+    } else if (active === 'field-draft' && fieldDraft?.step === 'source') {
+      // task-342f3e151d99 — the SOURCE step is owned by FieldSourcePicker, which
+      // focuses its own listbox root and handles arrows/digits/Enter/typing. The
+      // generic branch below would focus the SECTION instead, stealing that
+      // focus — the picker's handler then never fires, and the window walk has
+      // already yielded for this step, so the keyboard went dead. Leave it be.
     } else if (isFieldQuestion(active) && !isFieldOptionType(fieldEntryFor(active)?.field ?? { key: '', label: '', type: 'text' })) {
       // task-04ea172532c0 — a free-entry (text/number/date) template field
       // focuses its own input, same as title/notes; select/bool fields fall
@@ -4378,54 +4384,11 @@ export function TaskComposer(props: Props) {
   // lost focus after each keystroke, and the stray letters fell through to the
   // window handler (typing "test" into an output key hit the bare-'t' shortcut
   // and toggled "Make this a template"). Calling them keeps one stable tree.
-  function renderFieldDraft() {
-    if (!fieldDraft) return null;
-    const d = fieldDraft;
+  // task-342f3e151d99 — the live control for whichever step is current.
+  // Split out of the section render so each draft ROW can host it.
+  function renderFieldDraftControl(d: FieldDraft) {
     return (
-      <section
-        ref={sectionRefFor('field-draft')}
-        className={sectionClasses('field-draft')}
-        onClick={() => setActiveIdx(QUESTIONS.indexOf('field-draft'))}
-      >
-        <div className="composer__q-active-body">
-          <FieldLabel id="field-draft" />
-          {/* task-342f3e151d99 — show the WHOLE sub-walk, not one prompt
-              swapping in place: the user must see how many questions define a
-              field, what they already answered, and be able to step back. Past
-              steps show their answer and are clickable; the current one is
-              marked; upcoming ones are dimmed. Mirrors how the main walk keeps
-              answered questions on screen. */}
-          <ol className="composer__draft-steps">
-            {draftStepList(d).map((s) => {
-              const steps = draftStepList(d);
-              const stepIdx = steps.indexOf(s);
-              const curIdx = steps.indexOf(d.step);
-              const done = stepIdx < curIdx;
-              const isCur = s === d.step;
-              return (
-                <li
-                  key={s}
-                  className={
-                    'composer__draft-step' +
-                    (isCur ? ' composer__draft-step--active' : '') +
-                    (done ? ' composer__draft-step--done' : '')
-                  }
-                  onClick={(e) => {
-                    if (!done) return;
-                    e.stopPropagation();
-                    setFieldDraftHighlight(0);
-                    setFieldDraft((prev) => (prev ? { ...prev, step: s } : prev));
-                  }}
-                >
-                  <span className="composer__draft-step-name">{fieldDraftStepLabel(s)}</span>
-                  <span className="composer__draft-step-answer">
-                    {done ? fieldDraftStepAnswer(d, s) || '—' : isCur ? '' : ''}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-          <div className="composer__q-prompt">{promptFor('field-draft')}</div>
+      <>
           {d.step === 'source' && (
             // task-342f3e151d99 — the real picker: Custom is always option 1,
             // then the top source-backed fields, then "Browse all…" (pick a
@@ -4542,6 +4505,69 @@ export function TaskComposer(props: Props) {
           <div className="composer__field-editors-hint" aria-hidden="true">
             ↵ next · ↑ back · esc cancel
           </div>
+      </>
+    );
+  }
+
+  function renderFieldDraft() {
+    if (!fieldDraft) return null;
+    const d = fieldDraft;
+    return (
+      <section
+        ref={sectionRefFor('field-draft')}
+        className={sectionClasses('field-draft')}
+        onClick={() => setActiveIdx(QUESTIONS.indexOf('field-draft'))}
+      >
+        <div className="composer__q-active-body">
+          <FieldLabel id="field-draft" />
+          {/* task-342f3e151d99 — the sub-walk EXPANDS into one visible row per
+              question, not a single prompt swapping in place. The user must see
+              how many questions define a field, what they already answered, and
+              what is still coming. Answered rows show their value and are
+              clickable to go back; the current row carries the live control;
+              upcoming rows show their question, dimmed. Same shape as the main
+              walk's answered/active/future questions. */}
+          <ol className="composer__draft-steps">
+            {draftStepList(d).map((s) => {
+              const steps = draftStepList(d);
+              const curIdx = steps.indexOf(d.step);
+              const stepIdx = steps.indexOf(s);
+              const done = stepIdx < curIdx;
+              const isCur = s === d.step;
+              return (
+                <li
+                  key={s}
+                  className={
+                    'composer__draft-row' +
+                    (isCur ? ' composer__draft-row--active' : '') +
+                    (done ? ' composer__draft-row--done' : ' composer__draft-row--future')
+                  }
+                  onClick={(e) => {
+                    if (!done) return;
+                    e.stopPropagation();
+                    setFieldDraftHighlight(0);
+                    setFieldDraft((prev) => (prev ? { ...prev, step: s } : prev));
+                  }}
+                >
+                  <span className="composer__draft-row-label">{fieldDraftStepLabel(s)}</span>
+                  {isCur ? (
+                    <div className="composer__draft-row-body">
+                      <div className="composer__q-prompt">{fieldDraftPrompt(d)}</div>
+                      {renderFieldDraftControl(d)}
+                    </div>
+                  ) : done ? (
+                    <span className="composer__draft-row-answer">
+                      {fieldDraftStepAnswer(d, s) || '—'}
+                    </span>
+                  ) : (
+                    <span className="composer__draft-row-todo">
+                      {fieldDraftPrompt({ ...d, step: s })}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         </div>
       </section>
     );
