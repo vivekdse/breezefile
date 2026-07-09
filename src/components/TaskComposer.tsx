@@ -23,11 +23,18 @@
 //   A template is auto-registered server-side on create-with-fields (no explicit
 //   create API), so T is an intent+guarantee: ON requires ≥1 input on save; in
 //   EDIT it reflects whether the task already backs a template.
-// - The Inputs & outputs step (and the chain builder's per-step field lists)
-//   are keyboard-driven (task-330b2e31e9d3): with the editor focused,
-//   i = add input, o = add output, ↑/↓ walk the rows, Enter edits the cursor
-//   row's key, 1–5 set its type, r toggles an output's evidence flag, and
-//   ⌘/Ctrl+⌫ removes it. See FieldEditors.
+// - Inputs and Outputs (a plain task's own optional fields) are two separate,
+//   explained sections in the SAME walk (task-342f3e151d99 — see also
+//   task-e085ebbdb23f for the shared field-VALUE renderer). i = add input,
+//   o = add output (from THIS window handler, available anywhere in the
+//   Inputs/Outputs region — no nested keydown handler, no stopPropagation).
+//   Adding (or Enter-editing an existing row) opens a per-field SUB-WALK, one
+//   question per step, in the SAME activeIdx cursor: key → label → type
+//   (digits 1–5 pick text/number/date/select/bool) → options (select only) →
+//   required (outputs only, yes/no). Enter accepts the current step and
+//   advances (or commits the field, on the last step); ↑ steps back (or exits
+//   the sub-walk on the first step); Esc cancels the in-progress field.
+//   ⌘/Ctrl+⌫ on an existing row removes it.
 //
 // The window keydown handler is registered ONCE via a ref that always
 // points at the freshest closure — without that, the brief render gap
@@ -36,7 +43,6 @@
 // doesn't advance").
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, MutableRefObject } from 'react';
 import { useAgentContext } from '@copilotkit/react-core/v2';
 import { z } from 'zod';
 import { useCopilotInfo } from '../copilot/useCopilotInfo';
@@ -80,13 +86,19 @@ import { agentOptionHint } from './tasks/agent.mjs';
 import type { TaskDef, TaskDefField } from './newhome/types';
 // task-73f6304ffb94 — the source-aware key picker + source-binding badge, the
 // ONE shared "+ input" affordance (also used by TemplateEditPanel).
-import { FieldKeyPicker, SourceBadge } from './newhome/FieldKeyPicker';
+// task-342f3e151d99 — `useQueryCatalog` is the shared seam a FieldSourcePicker
+// component will eventually wrap (see sourceStepOptions below); it already
+// lives here so both surfaces share ONE catalog fetch.
+import { SourceBadge, useQueryCatalog } from './newhome/FieldKeyPicker';
+import { catalogPickerGroups, fieldFromCatalog } from './newhome/fieldCatalog.mjs';
 import { instantiateChain } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
   effectiveFieldKey,
   fieldRef,
   inferFieldsFromProse,
+  nextFieldDraftStep,
+  prevFieldDraftStep,
   templateFillEntries,
 } from './newhome/taskSchema.mjs';
 // task-e112d60a3b7c — the first-class Template type the "New from Template"
@@ -194,7 +206,13 @@ type QuestionId =
   // declared input/output fields become the reusable template's variables.
   | 'template'
   | 'notes'
-  | `field:${string}`;
+  | `field:${string}`
+  // task-342f3e151d99 — the field-DEFINITION walk. `field-row:<kind>:<idx>`
+  // reviews an already-defined input/output (Enter steps into its sub-walk);
+  // 'field-draft' is the single slot for the field currently being added or
+  // edited, one question per step (see FieldDraft below).
+  | `field-row:${string}`
+  | 'field-draft';
 // Order is the keyboard ↓ flow. Name, folder, and notes come first — they
 // are the only fields that actually matter for most tasks, and a task can
 // be created the moment they're filled (everything below is optional and
@@ -706,6 +724,41 @@ function isFieldOptionType(field: TaskDefField): boolean {
   return field.type === 'select' || field.type === 'bool';
 }
 
+// task-342f3e151d99 — synthetic QuestionIds for the field-DEFINITION walk
+// (distinct from the field-VALUE walk above). `field-row:<kind>:<idx>` reviews
+// one already-defined field; parseFieldRowQId reads it back. Both pure.
+function fieldRowQId(kind: FieldKind, idx: number): QuestionId {
+  return `field-row:${kind}:${idx}` as QuestionId;
+}
+function isFieldRowQuestion(q: QuestionId): q is `field-row:${string}` {
+  return q.startsWith('field-row:');
+}
+function parseFieldRowQId(q: QuestionId): { kind: FieldKind; idx: number } | null {
+  if (!isFieldRowQuestion(q)) return null;
+  const rest = q.slice('field-row:'.length);
+  const sep = rest.indexOf(':');
+  if (sep < 0) return null;
+  const kind = rest.slice(0, sep);
+  const idx = parseInt(rest.slice(sep + 1), 10);
+  if ((kind !== 'inputs' && kind !== 'outputs') || Number.isNaN(idx)) return null;
+  return { kind, idx };
+}
+
+// task-342f3e151d99 — the field currently being ADDED or EDITED. `editIdx`
+// is null for a brand-new field (committed by APPENDING to the list) or the
+// row index being edited (committed by REPLACING it in place). `field` is the
+// in-progress draft; `step` is the current sub-walk question. The draft is
+// held entirely in memory and only written into taskInputs/taskOutputs on
+// commit — so Escape mid-walk (task-342f3e151d99's "cancel removes the
+// half-built row") is just discarding this state; nothing was ever inserted.
+type FieldDraftStepId = 'source' | 'key' | 'label' | 'type' | 'options' | 'required';
+type FieldDraft = {
+  kind: FieldKind;
+  editIdx: number | null;
+  field: TaskDefField;
+  step: FieldDraftStepId;
+};
+
 // task-330b2e31e9d3 — the field-definition types, in the order digit shortcuts
 // 1–5 pick them (mirrors how the value option-lists are digit-picked). Kept at
 // module scope so both the row editor and the keyboard handler agree.
@@ -714,103 +767,41 @@ const FIELD_TYPE_OPTIONS: TaskDefField['type'][] = [
   'text', 'number', 'date', 'select', 'bool',
 ];
 
-// task-2fd63b922beb correction (Part A.4) — the field-definition editor, ONE
-// implementation shared by BOTH the chain builder's per-step input/output
-// lists AND the plain Task form's single-def input/output lists. Field
-// DEFINITIONS (key/label/type/options/required) are NON-PHI; these editors
-// never touch field VALUES. `showRequired` = this is an OUTPUT list, whose
-// `required` flag marks the field as the step's evidence.
-//
-// task-330b2e31e9d3 — the row carries data-fe-* attributes (so the group's
-// keyboard handler can resolve which list/row an event came from), a ref to its
-// key input (so add/nav can focus it), and an `active` highlight for the
-// keyboard row cursor.
-function FieldRowEditor({
+// task-342f3e151d99 — one already-DEFINED field, reviewed as a single line in
+// the main question walk (replaces the old grid row). It carries no option
+// list of its own — Enter here means "step into this field's sub-walk to
+// edit it", not "pick option N" (see the composer header's keyboard grammar
+// table). `showRequired` = this is an OUTPUT row, whose `required` flag marks
+// the field as the step's evidence.
+function FieldRowSummary({
   field,
-  list,
-  rowIdx,
   showRequired,
   active,
-  keyInputRef,
-  onUpdate,
   onRemove,
   onClearSource,
 }: {
   field: TaskDefField;
-  list: FieldKind;
-  rowIdx: number;
   showRequired: boolean;
   active: boolean;
-  keyInputRef?: (el: HTMLInputElement | null) => void;
-  onUpdate: (patch: Partial<TaskDefField>) => void;
   onRemove: () => void;
   onClearSource: () => void;
 }) {
+  const typeLabel =
+    field.type === 'select' && (field.options ?? []).length > 0
+      ? `select (${(field.options ?? []).join(', ')})`
+      : field.type;
   return (
-    <div
-      className={'composer__chain-field-row' + (active ? ' composer__chain-field-row--active' : '')}
-      data-fe-row=""
-      data-fe-list={list}
-      data-fe-row-idx={rowIdx}
-    >
+    <div className={'composer__field-row' + (active ? ' composer__field-row--active' : '')}>
       {/* task-73f6304ffb94 — an INPUT field bound to a SavedQuery shows a badge
-          with the query name + an ✕ to unbind (renaming the key is independent
-          of the binding — clearing here only drops `source`). */}
-      {list === 'inputs' && field.source && (
-        <SourceBadge source={field.source} onClear={onClearSource} />
+          with the query name + an ✕ to unbind. */}
+      {field.source && <SourceBadge source={field.source} onClear={onClearSource} />}
+      <span className="composer__field-row-key">{field.key || '(no key)'}</span>
+      <span className="composer__field-row-label">{field.label || '—'}</span>
+      <span className="composer__field-row-type">{typeLabel}</span>
+      {showRequired && field.required && (
+        <span className="composer__field-row-required">evidence</span>
       )}
-      <input
-        ref={keyInputRef}
-        className="composer__chain-field-key"
-        type="text"
-        placeholder="key"
-        value={field.key}
-        onChange={(e) => onUpdate({ key: e.target.value })}
-      />
-      <input
-        className="composer__chain-field-label"
-        type="text"
-        placeholder="label"
-        value={field.label}
-        onChange={(e) => onUpdate({ label: e.target.value })}
-      />
-      <select
-        className="composer__chain-field-type"
-        value={field.type}
-        onChange={(e) => onUpdate({ type: e.target.value as TaskDefField['type'] })}
-      >
-        <option value="text">text</option>
-        <option value="number">number</option>
-        <option value="date">date</option>
-        <option value="select">select</option>
-        <option value="bool">bool</option>
-      </select>
-      {field.type === 'select' && (
-        <input
-          className="composer__chain-field-options"
-          type="text"
-          placeholder="options, comma-separated"
-          value={(field.options ?? []).join(', ')}
-          onChange={(e) =>
-            onUpdate({
-              options: e.target.value
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-        />
-      )}
-      {showRequired && (
-        <label className="composer__chain-field-required">
-          <input
-            type="checkbox"
-            checked={!!field.required}
-            onChange={(e) => onUpdate({ required: e.target.checked })}
-          />
-          evidence
-        </label>
-      )}
+      {active && <span className="composer__field-row-hint">↵ edit</span>}
       <button
         type="button"
         className="composer__chain-icon-btn composer__chain-icon-btn--danger"
@@ -822,262 +813,6 @@ function FieldRowEditor({
       >
         ✕
       </button>
-    </div>
-  );
-}
-
-// task-330b2e31e9d3 — Inputs + Outputs field-definition editor with a
-// hand-rolled, keyboard-first model (NO hotkey lib) matching the composer's
-// question-walk idiom. One instance owns BOTH lists so the add-input /
-// add-output shortcuts work from anywhere inside it. Two focus modes:
-//
-//   LIST-NAV  (the container div is focused): i = add input · o = add output ·
-//             ↑/↓ move the row cursor (at the ends, onExitUp/onExitDown hand
-//             back to the composer walk) · Enter edits the cursor row (focuses
-//             its key input) · 1–5 set the cursor row's type · r toggles an
-//             output's required/evidence flag · Backspace/Delete removes the
-//             cursor row.
-//   EDIT      (a control inside a row is focused): normal typing · Tab moves
-//             between the key/label/type/options/required/remove controls ·
-//             Enter or Escape returns to LIST-NAV · ⌘/Ctrl+⌫ removes the row.
-//
-// ⌘/Ctrl+⌫ removes in either mode (so you can delete a row mid-edit) WITHOUT
-// hijacking plain Backspace inside a text input. Handled keys stopPropagation
-// so the window-level walk (which would otherwise advance the question on
-// ↑/↓/Enter) doesn't also fire; this also makes the whole thing work in the
-// embedded drawer, which never registers the window handler.
-function FieldEditors({
-  inputs,
-  outputs,
-  onAdd,
-  onAddField,
-  onUpdate,
-  onRemove,
-  onClearSource,
-  onExitUp,
-  onExitDown,
-  containerRef,
-}: {
-  inputs: TaskDefField[];
-  outputs: TaskDefField[];
-  onAdd: (kind: FieldKind) => void;
-  // task-73f6304ffb94 — append a fully-formed field (the source-aware picker's
-  // output: a `source`-bound catalog field, or a blank "Other" field). Distinct
-  // from onAdd (blank add for the keyboard `i`/`o` shortcuts + outputs button).
-  onAddField: (kind: FieldKind, field: TaskDefField) => void;
-  onUpdate: (kind: FieldKind, fieldIdx: number, patch: Partial<TaskDefField>) => void;
-  onRemove: (kind: FieldKind, fieldIdx: number) => void;
-  onClearSource: (kind: FieldKind, fieldIdx: number) => void;
-  onExitUp?: () => void;
-  onExitDown?: () => void;
-  containerRef?: MutableRefObject<HTMLDivElement | null>;
-}) {
-  const localRef = useRef<HTMLDivElement | null>(null);
-  const setContainer = (el: HTMLDivElement | null) => {
-    localRef.current = el;
-    if (containerRef) containerRef.current = el;
-  };
-  const keyRefs = useRef(new Map<string, HTMLInputElement>());
-  const setKeyRef = (k: string) => (el: HTMLInputElement | null) => {
-    if (el) keyRefs.current.set(k, el);
-    else keyRefs.current.delete(k);
-  };
-  const pendingFocus = useRef<{ kind: FieldKind; idx: number } | null>(null);
-  const [cursor, setCursor] = useState(0);
-
-  // Combined [inputs…, outputs…] row order the cursor walks.
-  const rows = useMemo(
-    () => [
-      ...inputs.map((field, idx) => ({ kind: 'inputs' as FieldKind, idx, field })),
-      ...outputs.map((field, idx) => ({ kind: 'outputs' as FieldKind, idx, field })),
-    ],
-    [inputs, outputs],
-  );
-  const total = rows.length;
-  const cur = total === 0 ? -1 : Math.min(cursor, total - 1);
-
-  // Focus a freshly-added row's key input on the render that first shows it.
-  useEffect(() => {
-    const pf = pendingFocus.current;
-    if (!pf) return;
-    pendingFocus.current = null;
-    keyRefs.current.get(`${pf.kind}:${pf.idx}`)?.focus();
-  });
-
-  function combinedIndex(kind: FieldKind, idx: number): number {
-    return kind === 'inputs' ? idx : inputs.length + idx;
-  }
-  function focusKey(kind: FieldKind, idx: number) {
-    keyRefs.current.get(`${kind}:${idx}`)?.focus();
-  }
-  function addAndFocus(kind: FieldKind) {
-    const newIdx = kind === 'inputs' ? inputs.length : outputs.length;
-    pendingFocus.current = { kind, idx: newIdx };
-    setCursor(kind === 'inputs' ? inputs.length : inputs.length + outputs.length);
-    onAdd(kind);
-  }
-  // task-73f6304ffb94 — append a fully-formed field (from the source-aware
-  // picker) and focus its key input, same cursor/focus bookkeeping as
-  // addAndFocus so a picker-add lands the row cursor exactly like a blank add.
-  function addFieldAndFocus(kind: FieldKind, field: TaskDefField) {
-    const newIdx = kind === 'inputs' ? inputs.length : outputs.length;
-    pendingFocus.current = { kind, idx: newIdx };
-    setCursor(kind === 'inputs' ? inputs.length : inputs.length + outputs.length);
-    onAddField(kind, field);
-  }
-  function isTextTarget(t: EventTarget | null): boolean {
-    const el = t as HTMLElement | null;
-    if (!el) return false;
-    if (el.tagName === 'TEXTAREA') return true;
-    if (el.tagName === 'INPUT') {
-      const type = (el as HTMLInputElement).type;
-      return type === 'text' || type === 'number' || type === 'date' || type === 'search' || type === '';
-    }
-    return false;
-  }
-  function rowFromTarget(t: EventTarget | null): { kind: FieldKind; idx: number } | null {
-    const el = (t as HTMLElement | null)?.closest?.('[data-fe-row]') as HTMLElement | null;
-    if (!el) return null;
-    const kind = el.getAttribute('data-fe-list') as FieldKind | null;
-    const idx = parseInt(el.getAttribute('data-fe-row-idx') ?? '', 10);
-    if ((kind !== 'inputs' && kind !== 'outputs') || Number.isNaN(idx)) return null;
-    return { kind, idx };
-  }
-
-  function onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
-    // Remove works in either mode; the modifier keeps plain Backspace typing.
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Backspace') {
-      const row = e.target === localRef.current ? rows[cur] : rowFromTarget(e.target);
-      if (row) {
-        e.preventDefault();
-        e.stopPropagation();
-        onRemove(row.kind, row.idx);
-        localRef.current?.focus();
-      }
-      return;
-    }
-
-    const inList = e.target === localRef.current;
-    if (inList) {
-      if (e.key === 'i' || e.key === 'I') { e.preventDefault(); e.stopPropagation(); addAndFocus('inputs'); return; }
-      if (e.key === 'o' || e.key === 'O') { e.preventDefault(); e.stopPropagation(); addAndFocus('outputs'); return; }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault(); e.stopPropagation();
-        if (cur < 0 || cur >= total - 1) onExitDown?.();
-        else setCursor(cur + 1);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault(); e.stopPropagation();
-        if (cur <= 0) onExitUp?.();
-        else setCursor(cur - 1);
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault(); e.stopPropagation();
-        const row = rows[cur];
-        if (row) focusKey(row.kind, row.idx);
-        else onExitDown?.();
-        return;
-      }
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        const row = rows[cur];
-        if (row) { e.preventDefault(); e.stopPropagation(); onRemove(row.kind, row.idx); }
-        return;
-      }
-      if (e.key === 'r' || e.key === 'R') {
-        const row = rows[cur];
-        if (row && row.kind === 'outputs') {
-          e.preventDefault(); e.stopPropagation();
-          onUpdate('outputs', row.idx, { required: !row.field.required });
-        }
-        return;
-      }
-      const n = parseInt(e.key, 10);
-      if (!Number.isNaN(n) && n >= 1 && n <= FIELD_TYPE_OPTIONS.length) {
-        const row = rows[cur];
-        if (row) {
-          e.preventDefault(); e.stopPropagation();
-          onUpdate(row.kind, row.idx, { type: FIELD_TYPE_OPTIONS[n - 1] });
-        }
-        return;
-      }
-      return;
-    }
-
-    // EDIT mode (focus inside a row).
-    if (e.key === 'Escape' || (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && isTextTarget(e.target))) {
-      e.preventDefault();
-      e.stopPropagation();
-      const row = rowFromTarget(e.target);
-      if (row) setCursor(combinedIndex(row.kind, row.idx));
-      localRef.current?.focus();
-      return;
-    }
-    // everything else stays native (typing, Tab between controls, <select>
-    // arrows, checkbox space).
-  }
-
-  const groups: { kind: FieldKind; fields: TaskDefField[] }[] = [
-    { kind: 'inputs', fields: inputs },
-    { kind: 'outputs', fields: outputs },
-  ];
-
-  return (
-    <div
-      ref={setContainer}
-      className="composer__field-editors"
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-    >
-      {groups.map(({ kind, fields }) => (
-        <div key={kind} className="composer__chain-fieldgroup">
-          <div className="composer__chain-fieldgroup-head">
-            <span>{kind === 'inputs' ? 'Inputs' : 'Outputs'}</span>
-            {kind === 'inputs' ? (
-              // task-73f6304ffb94 — inputs add via the source-aware picker (API
-              // fields grouped per query + "Other (custom key)"). The keyboard
-              // `i` shortcut still adds a blank input via addAndFocus/onAdd.
-              <FieldKeyPicker
-                existingKeys={inputs.map((f) => f.key).filter(Boolean)}
-                onPick={(field) => addFieldAndFocus('inputs', field)}
-                buttonLabel="+ input"
-                buttonClassName="composer__chain-add-btn"
-                buttonTitle="Add input — from an API field or a custom key (i)"
-              />
-            ) : (
-              <button
-                type="button"
-                className="composer__chain-add-btn"
-                title="Add output (o)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  addAndFocus(kind);
-                }}
-              >
-                + output
-              </button>
-            )}
-          </div>
-          {fields.map((f, fi) => (
-            <FieldRowEditor
-              key={fi}
-              field={f}
-              list={kind}
-              rowIdx={fi}
-              showRequired={kind === 'outputs'}
-              active={cur >= 0 && rows[cur]?.kind === kind && rows[cur]?.idx === fi}
-              keyInputRef={setKeyRef(`${kind}:${fi}`)}
-              onUpdate={(patch) => onUpdate(kind, fi, patch)}
-              onRemove={() => onRemove(kind, fi)}
-              onClearSource={() => onClearSource(kind, fi)}
-            />
-          ))}
-        </div>
-      ))}
-      <div className="composer__field-editors-hint" aria-hidden="true">
-        i input · o output · ↑↓ rows · 1–5 type · r evidence · ⌘/Ctrl+⌫ remove
-      </div>
     </div>
   );
 }
@@ -2058,25 +1793,14 @@ export function TaskComposer(props: Props) {
   const [taskOutputs, setTaskOutputs] = useState<TaskDefField[]>(
     (props.mode === 'create' && props.initialOutputs) || [],
   );
-  function taskFieldSetter(kind: 'inputs' | 'outputs') {
+  function taskFieldSetter(kind: FieldKind) {
     return kind === 'inputs' ? setTaskInputs : setTaskOutputs;
   }
-  function addTaskField(kind: 'inputs' | 'outputs') {
-    taskFieldSetter(kind)((prev) => [...prev, { key: '', label: '', type: 'text' as const }]);
-  }
-  // task-73f6304ffb94 — append a fully-formed field from the source-aware
-  // picker (a `source`-bound catalog field, or a blank "Other" field).
-  function addTaskFieldFull(kind: 'inputs' | 'outputs', field: TaskDefField) {
-    taskFieldSetter(kind)((prev) => [...prev, field]);
-  }
-  function removeTaskField(kind: 'inputs' | 'outputs', fieldIdx: number) {
+  function removeTaskField(kind: FieldKind, fieldIdx: number) {
     taskFieldSetter(kind)((prev) => prev.filter((_, i) => i !== fieldIdx));
   }
-  function updateTaskField(kind: 'inputs' | 'outputs', fieldIdx: number, patch: Partial<TaskDefField>) {
-    taskFieldSetter(kind)((prev) => prev.map((f, i) => (i === fieldIdx ? { ...f, ...patch } : f)));
-  }
   // task-73f6304ffb94 — drop a field's SavedQuery binding (key/label/type kept).
-  function clearTaskFieldSource(kind: 'inputs' | 'outputs', fieldIdx: number) {
+  function clearTaskFieldSource(kind: FieldKind, fieldIdx: number) {
     taskFieldSetter(kind)((prev) =>
       prev.map((f, i) => {
         if (i !== fieldIdx) return f;
@@ -2091,6 +1815,188 @@ export function TaskComposer(props: Props) {
     () => ({ id: 'task', name: title.trim() || 'Task', inputs: taskInputs, outputs: taskOutputs }),
     [title, taskInputs, taskOutputs],
   );
+
+  // ── Field-definition sub-walk (task-342f3e151d99) ───────────────────────
+  // Adding an input/output is `i`/`o` (from the MAIN window handler — see the
+  // keydown handler below), then a per-field Typeform sub-walk, ONE question
+  // per step, living in the SAME activeIdx walk as the rest of the form (no
+  // nested cursor, no stopPropagation). `fieldDraft` is the field currently
+  // being added or edited; it's held ONLY in memory and written into
+  // taskInputs/taskOutputs at commitFieldDraft — so Escape mid-walk is just
+  // discarding this state (nothing was ever inserted to "remove").
+  const [fieldDraft, setFieldDraft] = useState<FieldDraft | null>(null);
+  // Where to land activeIdx once QUESTIONS has re-derived after a commit/
+  // cancel (taskInputs/taskOutputs changing is what grows/shrinks the field
+  // rows in QUESTIONS — see mainQuestions below) — mirrors the pendingFocus
+  // ref pattern the old grid editor used for its own row-focus bookkeeping.
+  const pendingFieldFocusRef = useRef<QuestionId | null>(null);
+
+  // task-342f3e151d99 — the INPUT "source" step's option list: "Custom" is
+  // always option 1, then one option per field exposed by an approved
+  // SavedQuery (task-73f6304ffb94's catalog). This is a thin stand-in for the
+  // FieldSourcePicker component described in task-342f3e151d99 (existingKeys/
+  // onPick/onCustom/onCancel/autoFocus) — that component is being built in
+  // parallel; when it lands, swap it in here and drop sourceStepOptions/
+  // pickSourceStepOption (the option-question rendering + digit/Enter wiring
+  // below stays the same either way, since the source step is walked exactly
+  // like every other option question).
+  const { catalog: fieldCatalog } = useQueryCatalog();
+  const sourceCatalogGroups = useMemo(() => catalogPickerGroups(fieldCatalog), [fieldCatalog]);
+  type SourceStepOption =
+    | { kind: 'custom'; label: string }
+    | { kind: 'catalog'; groupId: string; field: { name: string; type: string }; label: string; hint: string };
+  const sourceStepOptions = useMemo<SourceStepOption[]>(() => {
+    const out: SourceStepOption[] = [{ kind: 'custom', label: 'Custom (type a key)' }];
+    for (const g of sourceCatalogGroups) {
+      for (const f of g.fields) {
+        out.push({ kind: 'catalog', groupId: g.id, field: f, label: f.name, hint: g.name });
+      }
+    }
+    return out;
+  }, [sourceCatalogGroups]);
+  const [fieldDraftHighlight, setFieldDraftHighlight] = useState(0);
+
+  function startFieldDraft(kind: FieldKind) {
+    if (fieldDraft) return; // one draft at a time
+    setFieldDraftHighlight(0);
+    if (kind === 'inputs') {
+      setFieldDraft({ kind, editIdx: null, field: { key: '', label: '', type: 'text' }, step: 'source' });
+    } else {
+      setFieldDraft({ kind, editIdx: null, field: { key: '', label: '', type: 'text' }, step: 'key' });
+    }
+    pendingFieldFocusRef.current = 'field-draft';
+  }
+  function startEditFieldRow(kind: FieldKind, idx: number) {
+    if (fieldDraft) return;
+    const field = (kind === 'inputs' ? taskInputs : taskOutputs)[idx];
+    if (!field) return;
+    setFieldDraftHighlight(0);
+    setFieldDraft({ kind, editIdx: idx, field: { ...field }, step: 'key' });
+    pendingFieldFocusRef.current = 'field-draft';
+  }
+  function pickSourceStepOption(i: number) {
+    if (!fieldDraft || fieldDraft.step !== 'source') return;
+    const opt = sourceStepOptions[i];
+    if (!opt) return;
+    setFieldDraftHighlight(0);
+    if (opt.kind === 'custom') {
+      setFieldDraft((d) => (d ? { ...d, field: { key: '', label: '', type: 'text' }, step: 'key' } : d));
+      return;
+    }
+    const entry = fieldCatalog.find((c) => c.id === opt.groupId);
+    const built = entry
+      ? fieldFromCatalog(entry, opt.field, taskInputs.map((f) => f.key).filter(Boolean))
+      : null;
+    setFieldDraft((d) =>
+      d ? { ...d, field: built ?? { key: '', label: '', type: 'text' }, step: 'key' } : d,
+    );
+  }
+  function updateFieldDraft(patch: Partial<TaskDefField>) {
+    setFieldDraft((d) => (d ? { ...d, field: { ...d.field, ...patch } } : d));
+  }
+  // task-342f3e151d99 — commit a SPECIFIC draft snapshot (not necessarily the
+  // latest `fieldDraft` state, which React hasn't applied yet mid-handler) —
+  // chooseFieldDraftRequired needs this so its just-picked value is what
+  // actually gets written, not whatever `fieldDraft` still reads at call time.
+  function commitFieldDraftWith(d: FieldDraft) {
+    const cleaned: TaskDefField = { ...d.field, key: d.field.key.trim(), label: d.field.label.trim() };
+    const idx = d.editIdx ?? (d.kind === 'inputs' ? taskInputs.length : taskOutputs.length);
+    if (d.editIdx === null) {
+      taskFieldSetter(d.kind)((prev) => [...prev, cleaned]);
+    } else {
+      taskFieldSetter(d.kind)((prev) => prev.map((f, i) => (i === d.editIdx ? cleaned : f)));
+    }
+    pendingFieldFocusRef.current = fieldRowQId(d.kind, idx);
+    setFieldDraft(null);
+  }
+  function commitFieldDraft() {
+    if (fieldDraft) commitFieldDraftWith(fieldDraft);
+  }
+  // Digits 1–5 pick a TYPE on the 'type' step (mirrors every other
+  // digit-picked option question), then advance. Changing type can grow/
+  // shrink the remaining steps (e.g. picking 'select' adds an 'options'
+  // step) — computed from the JUST-PICKED type directly (not the stale
+  // `fieldDraft` closure, which React hasn't applied this pick to yet) so a
+  // select→advance in the same keystroke lands on 'options', not skips it.
+  function chooseFieldDraftType(i: number) {
+    if (!fieldDraft) return;
+    const t = FIELD_TYPE_OPTIONS[i];
+    if (!t) return;
+    const field: TaskDefField = { ...fieldDraft.field, type: t, ...(t !== 'select' ? { options: undefined } : {}) };
+    const next = nextFieldDraftStep(fieldDraft.kind, t, 'type');
+    setFieldDraftHighlight(0);
+    if (next) setFieldDraft({ ...fieldDraft, field, step: next });
+    else commitFieldDraftWith({ ...fieldDraft, field });
+  }
+  const FIELD_REQUIRED_OPTIONS: { value: boolean; label: string }[] = [
+    { value: false, label: 'No' },
+    { value: true, label: 'Yes — evidence' },
+  ];
+  // How many options the CURRENT step's list has — 0 for the free-text steps
+  // (key/label/options), so moveDown/moveUp can tell "move the highlight" from
+  // "advance/retreat the sub-walk" the same way every other option question
+  // does (mirrors whoOptions.length/START_OPTIONS.length/etc. elsewhere).
+  function fieldDraftOptionCount(): number {
+    if (!fieldDraft) return 0;
+    if (fieldDraft.step === 'source') return sourceStepOptions.length;
+    if (fieldDraft.step === 'type') return FIELD_TYPE_OPTIONS.length;
+    if (fieldDraft.step === 'required') return FIELD_REQUIRED_OPTIONS.length;
+    return 0;
+  }
+  // 'required' is always the LAST sub-walk step (see fieldDraftSteps), so
+  // picking it commits immediately — same stale-closure care as the type step.
+  function chooseFieldDraftRequired(i: number) {
+    if (!fieldDraft) return;
+    const opt = FIELD_REQUIRED_OPTIONS[i];
+    if (!opt) return;
+    setFieldDraftHighlight(0);
+    commitFieldDraftWith({ ...fieldDraft, field: { ...fieldDraft.field, required: opt.value } });
+  }
+  // Enter/↓ on the current step: commit the step's value and move on, or
+  // (on the last step) commit the WHOLE field into the list — same "advance
+  // off the last question" convention as fieldAdvance/goNext elsewhere. Only
+  // used by the free-text steps (key/label/options); type/required commit
+  // themselves (see above) since they need the just-picked value.
+  function advanceFieldDraft() {
+    if (!fieldDraft) return;
+    if (fieldDraft.step === 'source') return; // source step advances via pickSourceStepOption
+    const next = nextFieldDraftStep(fieldDraft.kind, fieldDraft.field.type, fieldDraft.step);
+    setFieldDraftHighlight(0);
+    if (next) setFieldDraft((d) => (d ? { ...d, step: next } : d));
+    else commitFieldDraft();
+  }
+  // ↑ on the current step: step back, or (on the first step) exit the
+  // sub-walk — cancelling a NEW field (nothing was ever inserted) or
+  // discarding in-progress edits to an EXISTING one (the original row is
+  // untouched, since edits only land on commit).
+  function retreatFieldDraft() {
+    if (!fieldDraft) return;
+    setFieldDraftHighlight(0);
+    if (fieldDraft.step === 'source') { cancelFieldDraft(); return; }
+    if (fieldDraft.step === 'key') {
+      if (fieldDraft.editIdx === null && fieldDraft.kind === 'inputs') {
+        setFieldDraft((d) => (d ? { ...d, step: 'source' } : d));
+      } else {
+        cancelFieldDraft();
+      }
+      return;
+    }
+    const prev = prevFieldDraftStep(fieldDraft.kind, fieldDraft.field.type, fieldDraft.step);
+    if (prev) setFieldDraft((d) => (d ? { ...d, step: prev } : d));
+  }
+  // task-342f3e151d99 — Escape mid-walk "removes the half-built row": since a
+  // draft is only ever WRITTEN into the real list at commitFieldDraft, there
+  // is never actually a half-built row in taskInputs/taskOutputs to remove —
+  // cancelling is just discarding this in-memory draft.
+  function cancelFieldDraft() {
+    const d = fieldDraft;
+    if (!d) return;
+    pendingFieldFocusRef.current =
+      d.editIdx !== null ? fieldRowQId(d.kind, d.editIdx) : d.kind === 'inputs' ? 'fields' : 'outputs';
+    setFieldDraft(null);
+  }
+  // task-342f3e151d99 — the pendingFieldFocusRef → activeIdx effect lives
+  // further down (after QUESTIONS is derived, since it depends on it).
 
   // task-fe8c822c3838 — a user typing "Input: X / Output: Y" as PROSE in
   // notes gets NO structured fields today (data_keys:[]/output_schema:[]),
@@ -2143,12 +2049,11 @@ export function TaskComposer(props: Props) {
   // A chained job is a THIN container flow (name + chain, no task-form
   // questions); a plain task keeps its full flow plus the optional fields step.
   const isMinimalChain = hasChainOption && templateChoice === 'chain';
-  // The read-only outputs summary shows for any chain, or for a plain task that
-  // actually defined outputs.
-  // task-a7214605a998 — the read-only outputs summary shows only for a plain
-  // task that actually defined outputs; a chain's outputs live in its templates,
-  // so the chain flow no longer has an outputs step.
-  const showOutputsStep = hasChainOption && definedOutputsCount > 0;
+  // task-342f3e151d99 — Inputs & Outputs are two ALWAYS-present sections for a
+  // plain (non-chained) TypeBuild create — even with zero fields defined yet,
+  // so `i`/`o` have somewhere to add the first one. A chain's outputs live in
+  // its templates, so the chain flow still has no outputs step.
+  const showFieldsSteps = hasChainOption && templateChoice === 'blank';
 
   // task-899af8b03aa6 — the "Make this a template" step shows for the TypeBuild
   // target only (templates are a TypeBuild concept): on a PLAIN create (not a
@@ -2226,17 +2131,26 @@ export function TaskComposer(props: Props) {
       return [...main.slice(0, pIdx + 1), 'chain'];
     }
     // task-2fd63b922beb correction (Part A) — a plain task's OWN optional
-    // input/output fields. task-0d63c7b0ebdb — the 'fields' step DEFINES the
-    // fields; values are filled later. Any outputs still add the read-only
-    // summary step. task-899af8b03aa6 — the "Make this a template" step follows
-    // the fields it describes (those inputs/outputs become the template's
-    // variables), before body/notes.
+    // input/output fields. task-342f3e151d99 — INPUTS and OUTPUTS are now two
+    // SEPARATE, always-present sections (not one combined "fields" step gated
+    // on whether outputs exist) — each with its own explainer, its own `i`/`o`
+    // add shortcut, and one walkable question per already-defined field
+    // (field-row) plus the in-progress add/edit slot (field-draft) when one is
+    // open. task-899af8b03aa6 — "Make this a template" follows the fields it
+    // describes (those inputs/outputs become the template's variables), before
+    // body/notes.
     const wIdx = main.indexOf('who');
-    const extra: QuestionId[] = ['fields'];
-    if (definedOutputsCount > 0) extra.push('outputs');
+    const extra: QuestionId[] = [
+      'fields',
+      ...taskInputs.map((_, i) => fieldRowQId('inputs', i)),
+      ...(fieldDraft && fieldDraft.kind === 'inputs' ? (['field-draft'] as QuestionId[]) : []),
+      'outputs',
+      ...taskOutputs.map((_, i) => fieldRowQId('outputs', i)),
+      ...(fieldDraft && fieldDraft.kind === 'outputs' ? (['field-draft'] as QuestionId[]) : []),
+    ];
     if (templateStepAvailable) extra.push('template');
     return [...main.slice(0, wIdx + 1), ...extra, ...main.slice(wIdx + 1)];
-  }, [questionSplit, hasChainOption, templateChoice, definedOutputsCount, templateStepAvailable]);
+  }, [questionSplit, hasChainOption, templateChoice, taskInputs, taskOutputs, fieldDraft, templateStepAvailable]);
 
   // task-f5a318566148 — the ADVANCED block, only walked into when the section
   // is expanded. 'flags' is relevant only to Claude tasks (hidden when manual).
@@ -2290,6 +2204,23 @@ export function TaskComposer(props: Props) {
   // (adds/removes field + outputs questions), so we never index past the end
   // and strand the keyboard cursor.
   const active = QUESTIONS[Math.min(activeIdx, QUESTIONS.length - 1)];
+
+  // task-342f3e151d99 — land activeIdx on whatever pendingFieldFocusRef asked
+  // for (set by startFieldDraft/commitFieldDraft/cancelFieldDraft above), once
+  // QUESTIONS has re-derived to include that target id. taskInputs/taskOutputs
+  // changing is what grows/shrinks the field-row/field-draft entries in
+  // mainQuestions, so this has to run AFTER QUESTIONS, not inline with the
+  // setState calls that triggered it.
+  useEffect(() => {
+    const target = pendingFieldFocusRef.current;
+    if (!target) return;
+    const idx = QUESTIONS.indexOf(target);
+    if (idx >= 0) {
+      pendingFieldFocusRef.current = null;
+      setActiveIdx(idx);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [QUESTIONS]);
 
   // task-f5a318566148 — when a question becomes active, sync its option-list
   // highlight to the currently-chosen value so Enter picks the current
@@ -2375,10 +2306,9 @@ export function TaskComposer(props: Props) {
   const createBtnRef = useRef<HTMLButtonElement>(null);
   const startDateRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
-  // task-330b2e31e9d3 — the plain-task 'fields' step's FieldEditors container,
-  // focused when the question activates so its i/o/↑↓/type/remove keyboard
-  // model is live immediately (LIST-NAV mode).
-  const taskFieldsRef = useRef<HTMLDivElement | null>(null);
+  // task-342f3e151d99 — the field-draft sub-walk's single text input (key/
+  // label/options steps); one ref suffices since only one draft is ever open.
+  const fieldDraftInputRef = useRef<HTMLInputElement | null>(null);
 
   // Stand down the global keyboard handler while composer is open.
   useEffect(() => {
@@ -2402,10 +2332,15 @@ export function TaskComposer(props: Props) {
       if (!props.embedded) titleRef.current?.select();
     } else if (active === 'notes') {
       notesRef.current?.focus();
-    } else if (active === 'fields') {
-      // task-330b2e31e9d3 — land in the FieldEditors container (LIST-NAV) so
-      // i/o add, ↑/↓ row nav and the type/remove shortcuts work at once.
-      taskFieldsRef.current?.focus();
+    } else if (
+      active === 'field-draft' &&
+      fieldDraft &&
+      (fieldDraft.step === 'key' || fieldDraft.step === 'label' || fieldDraft.step === 'options')
+    ) {
+      // task-342f3e151d99 — the key/label/options sub-walk steps are free
+      // text, same as title/notes: focus the input immediately.
+      fieldDraftInputRef.current?.focus();
+      fieldDraftInputRef.current?.select();
     } else if (isFieldQuestion(active) && !isFieldOptionType(fieldEntryFor(active)?.field ?? { key: '', label: '', type: 'text' })) {
       // task-04ea172532c0 — a free-entry (text/number/date) template field
       // focuses its own input, same as title/notes; select/bool fields fall
@@ -2774,13 +2709,33 @@ export function TaskComposer(props: Props) {
       tryAdvanceChain();
       return;
     }
-    // The plain-task fields step is optional — ↓ just advances.
-    if (active === 'fields') {
+    // task-342f3e151d99 — the Inputs/Outputs section headers are optional —
+    // ↓ just advances (into the first field-row, if any, else the next
+    // question — QUESTIONS already has them spliced in between).
+    if (active === 'fields' || active === 'outputs') {
       goNext();
       return;
     }
-    if (active === 'outputs') {
+    // A field-row is a plain review item, no option list of its own —
+    // ↓ walks to the next row / the draft slot / the next real question.
+    if (isFieldRowQuestion(active)) {
       goNext();
+      return;
+    }
+    // task-342f3e151d99 — the field-draft sub-walk. Option steps (source/
+    // type/required) move the highlight like every other option question,
+    // only advancing off the LAST option (Enter/digit picks + advances
+    // explicitly — see the keydown handler); free-text steps (key/label/
+    // options) advance straight through, same as 'notes'.
+    if (active === 'field-draft' && fieldDraft) {
+      const n = fieldDraftOptionCount();
+      if (n === 0) {
+        advanceFieldDraft();
+      } else if (fieldDraftHighlight >= n - 1) {
+        if (fieldDraft.step !== 'source') advanceFieldDraft(); // source: must pick explicitly
+      } else {
+        setFieldDraftHighlight((h) => h + 1);
+      }
       return;
     }
     if (isFieldQuestion(active)) {
@@ -2865,12 +2820,21 @@ export function TaskComposer(props: Props) {
       goBack();
       return;
     }
-    if (active === 'fields') {
+    if (active === 'fields' || active === 'outputs') {
       goBack();
       return;
     }
-    if (active === 'outputs') {
+    if (isFieldRowQuestion(active)) {
       goBack();
+      return;
+    }
+    if (active === 'field-draft' && fieldDraft) {
+      const n = fieldDraftOptionCount();
+      if (n === 0 || fieldDraftHighlight === 0) {
+        retreatFieldDraft();
+      } else {
+        setFieldDraftHighlight((h) => h - 1);
+      }
       return;
     }
     if (isFieldQuestion(active)) {
@@ -3047,9 +3011,9 @@ export function TaskComposer(props: Props) {
         // `data`/`data_keys` (non-PHI keys, empty values) so the from-template
         // flow, the drawer's Inputs editor, and the "Press F to fill inputs
         // now" escape hatch (saveFillValues) have keys to populate later. Keys
-        // are author-specified in the field editor (the FieldRowEditor `key`
-        // input) — no label→key derivation step exists in this composer, so we
-        // transport them verbatim, dropping only unnamed rows.
+        // are author-specified in the field-def sub-walk's `key` step
+        // (task-342f3e151d99) — no label→key derivation step exists in this
+        // composer, so we transport them verbatim, dropping only unnamed rows.
         const inputKeys: Record<string, string> = {};
         for (const f of taskInputs) {
           // task-f9a723379aa8 + task-0d63c7b0ebdb merged: normalize the key
@@ -3403,6 +3367,17 @@ export function TaskComposer(props: Props) {
         if (!key) continue;
         keys.push(key);
         upsert[key] = templateValues[fieldRef('task', key)] ?? '';
+        // task-73f6304ffb94 / task-e085ebbdb23f — a source-backed field's pick
+        // also carries the opaque record ref on a sibling `<key>.ref` entry
+        // (see FieldValueEditor's onSelectSource); this was previously
+        // dropped here, so the filled task pointed only at the typed-looking
+        // LABEL, never the real record (part of the reported "wrong type"
+        // fill bug — saveFromTemplate already did this correctly).
+        const refVal = templateValues[fieldRef('task', `${key}.ref`)];
+        if (refVal) {
+          keys.push(`${key}.ref`);
+          upsert[`${key}.ref`] = refVal;
+        }
       }
       const res = await fm.typebuild.taskData.patch(createdTaskId, upsert, [], keys);
       if (!res.ok) {
@@ -3528,6 +3503,12 @@ export function TaskComposer(props: Props) {
     // input VALUES onto the created task (saveFillValues), not create a task.
     const submitNow = () => void (fillMode ? saveFillValues() : save());
 
+    // task-342f3e151d99 — Escape while a field is being added/edited cancels
+    // JUST that draft (never inserted, or edits discarded — see
+    // cancelFieldDraft), not the whole composer. Must run before the
+    // composer-wide Escape-Escape-cancels handling below.
+    if (fieldDraft && e.key === 'Escape') { e.preventDefault(); cancelFieldDraft(); return; }
+
     if (e.key === 'Escape') { e.preventDefault(); tryCancel(); return; }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -3593,6 +3574,20 @@ export function TaskComposer(props: Props) {
       const ti = QUESTIONS.indexOf('template');
       if (ti >= 0) setActiveIdx(ti);
       return;
+    }
+
+    // task-342f3e151d99 — `i` adds an input, `o` adds an output, from THIS
+    // (the MAIN) window handler — not a nested one — anywhere in the
+    // Inputs/Outputs region (the header, an existing row being reviewed, or
+    // while a draft's OPTION steps — source/type/required — are active; text
+    // steps already returned above via inText()). Mirrors A/T's bare-letter
+    // safety: text inputs are already handled, no option question binds i/o.
+    if (
+      !e.metaKey && !e.ctrlKey && !e.altKey &&
+      (active === 'fields' || active === 'outputs' || isFieldRowQuestion(active) || active === 'field-draft')
+    ) {
+      if (e.key === 'i' || e.key === 'I') { e.preventDefault(); startFieldDraft('inputs'); return; }
+      if (e.key === 'o' || e.key === 'O') { e.preventDefault(); startFieldDraft('outputs'); return; }
     }
 
     if (active === 'folder') {
@@ -3781,25 +3776,91 @@ export function TaskComposer(props: Props) {
       }
       return;
     }
-    // The plain-task fields step is a rich sub-form (like 'chain'); Enter on
-    // the section wrapper just advances (inputs/outputs are optional).
-    if (active === 'fields') {
+    // task-342f3e151d99 — the Inputs/Outputs section headers are just an
+    // explainer + the `i`/`o` shortcut (handled above); Enter advances into
+    // the first field-row (if any) or the next real question, same as ↓.
+    if (active === 'fields' || active === 'outputs') {
       if (e.key === 'Enter') {
         e.preventDefault();
-        goNext();
+        if (QUESTIONS.indexOf(active) >= QUESTIONS.length - 1) enterCommitPhase();
+        else goNext();
         return;
       }
       return;
     }
-    // Outputs is a read-only summary — Enter advances (or commits when it's the
-    // last question, i.e. the minimal chain flow).
-    if (active === 'outputs') {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (QUESTIONS.indexOf('outputs') >= QUESTIONS.length - 1) enterCommitPhase();
-        else goNext();
+    // task-342f3e151d99 — a field-row REVIEWS an already-defined field; Enter
+    // steps into its sub-walk to edit it (⌘/Ctrl+⌫ removes it outright — same
+    // accelerator the old grid used). No option list, no digit picking here —
+    // that's the field-draft's job below.
+    if (isFieldRowQuestion(active)) {
+      const row = parseFieldRowQId(active);
+      if (row) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          startEditFieldRow(row.kind, row.idx);
+          return;
+        }
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Backspace') {
+          e.preventDefault();
+          removeTaskField(row.kind, row.idx);
+          return;
+        }
+      }
+      return;
+    }
+    // task-342f3e151d99 — the field-DEFINITION sub-walk. The 'source' step
+    // (inputs only, new fields only) and 'type'/'required' steps are OPTION
+    // questions (digits/Enter pick, same grammar as everywhere else); 'key'/
+    // 'label'/'options' are free text, handled by field-draft's own <input
+    // onKeyDown> below (the inText() guard above already returned for them).
+    if (active === 'field-draft' && fieldDraft) {
+      if (fieldDraft.step === 'source') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          pickSourceStepOption(fieldDraftHighlight);
+          return;
+        }
+        const n = parseInt(e.key, 10);
+        if (!Number.isNaN(n) && n >= 1 && n <= sourceStepOptions.length) {
+          e.preventDefault();
+          pickSourceStepOption(n - 1);
+          return;
+        }
         return;
       }
+      if (fieldDraft.step === 'type') {
+        // chooseFieldDraftType both sets the type AND advances (same
+        // "choose picks + advances" convention as chooseWho/chooseFolderPreset
+        // etc. elsewhere) — it has to, since the NEXT step depends on the type
+        // just picked (see its own comment on the stale-closure hazard).
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          chooseFieldDraftType(fieldDraftHighlight);
+          return;
+        }
+        const n = parseInt(e.key, 10);
+        if (!Number.isNaN(n) && n >= 1 && n <= FIELD_TYPE_OPTIONS.length) {
+          e.preventDefault();
+          chooseFieldDraftType(n - 1);
+          return;
+        }
+        return;
+      }
+      if (fieldDraft.step === 'required') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          chooseFieldDraftRequired(fieldDraftHighlight);
+          return;
+        }
+        const n = parseInt(e.key, 10);
+        if (!Number.isNaN(n) && n >= 1 && n <= FIELD_REQUIRED_OPTIONS.length) {
+          e.preventDefault();
+          chooseFieldDraftRequired(n - 1);
+          return;
+        }
+        return;
+      }
+      // 'key' / 'label' / 'options' — free text, own <input onKeyDown> below.
       return;
     }
     // One aggregated task-def INPUT field. select/bool are option questions
@@ -3928,7 +3989,16 @@ export function TaskComposer(props: Props) {
     if (q === 'fields') return fieldsSummary();
     if (q === 'outputs') return outputsSummary();
     if (isFieldQuestion(q)) return fieldAnswer(q);
+    if (isFieldRowQuestion(q)) return fieldRowAnswer(q);
     return '';
+  }
+  // task-342f3e151d99 — one field-row's inert summary: "key (type)".
+  function fieldRowAnswer(q: QuestionId): string {
+    const row = parseFieldRowQId(q);
+    if (!row) return '';
+    const field = (row.kind === 'inputs' ? taskInputs : taskOutputs)[row.idx];
+    if (!field) return '';
+    return `${field.key || field.label || '(unnamed)'} (${field.type})`;
   }
 
   // task-2fd63b922beb / task-a7214605a998 — chain/field/outputs summaries. The
@@ -3937,19 +4007,16 @@ export function TaskComposer(props: Props) {
     if (chainTemplates.length === 0) return 'No templates added yet';
     return chainTemplates.map((t) => t.name).join(' → ');
   }
-  // task-2fd63b922beb correction (Part A) — the plain task's own field counts.
+  // task-342f3e151d99 — Inputs and Outputs are now separate sections, each
+  // summarized by its own count (was one combined "N inputs, N outputs").
   function fieldsSummary(): string {
     const ni = taskInputs.filter((f) => f.key.trim()).length;
-    const no = taskOutputs.filter((f) => f.key.trim()).length;
-    if (ni === 0 && no === 0) return 'None';
-    const parts: string[] = [];
-    if (ni > 0) parts.push(`${ni} input${ni === 1 ? '' : 's'}`);
-    if (no > 0) parts.push(`${no} output${no === 1 ? '' : 's'}`);
-    return parts.join(', ');
+    if (ni === 0) return 'None yet — press i to add one';
+    return `${ni} input${ni === 1 ? '' : 's'}`;
   }
   function outputsSummary(): string {
     const total = definedOutputsCount;
-    if (total === 0) return 'No outputs defined';
+    if (total === 0) return 'None yet — press o to add one';
     const across =
       templateChoice === 'chain'
         ? ` across ${fieldsDefs.length} step${fieldsDefs.length === 1 ? '' : 's'}`
@@ -3984,11 +4051,15 @@ export function TaskComposer(props: Props) {
     if (q === 'flags') return 'flags';
     if (q === 'notes') return 'notes';
     if (q === 'chain') return 'chain';
-    if (q === 'fields') return 'fields';
+    if (q === 'fields') return 'inputs';
     if (q === 'outputs') return 'outputs';
     if (isFieldQuestion(q)) {
       const entry = fieldEntryFor(q);
       return entry ? `${entry.taskDef.name} · ${entry.field.label}` : null;
+    }
+    if (isFieldRowQuestion(q)) {
+      const row = parseFieldRowQId(q);
+      return row ? (row.kind === 'inputs' ? 'input' : 'output') : null;
     }
     return null;
   }
@@ -4015,13 +4086,34 @@ export function TaskComposer(props: Props) {
     // task-2fd63b922beb / task-a7214605a998 — a chain is an ordered list of
     // saved templates.
     if (q === 'chain') return 'Add templates to the chain, in order';
-    if (q === 'fields') return 'Inputs & outputs? (optional)';
-    if (q === 'outputs') return 'What the agent will produce';
+    // task-342f3e151d99 — INPUTS and OUTPUTS are now two separate, explained
+    // sections (task-342f3e151d99's "field-def walk").
+    if (q === 'fields') {
+      return 'Inputs — placeholders this task needs each time it runs (e.g. patient, date). You name them now; you fill them when you run the task.';
+    }
+    if (q === 'outputs') {
+      return 'Outputs — what the agent must return as evidence when it finishes (e.g. confirmation number).';
+    }
     if (isFieldQuestion(q)) {
       const entry = fieldEntryFor(q);
       return entry?.field.label ?? '';
     }
+    if (isFieldRowQuestion(q)) return 'Reviewing a field — press ↵ to edit it.';
+    if (q === 'field-draft' && fieldDraft) return fieldDraftPrompt(fieldDraft);
     return '';
+  }
+  // task-342f3e151d99 — the sub-walk's per-step question text.
+  function fieldDraftPrompt(d: FieldDraft): string {
+    const noun = d.kind === 'inputs' ? 'input' : 'output';
+    switch (d.step) {
+      case 'source': return `Where does this ${noun}'s value come from?`;
+      case 'key': return `What's the key for this ${noun}? (used in the task data)`;
+      case 'label': return `What should we call it?`;
+      case 'type': return 'What type is it?';
+      case 'options': return 'Options, comma-separated';
+      case 'required': return 'Is this required as evidence?';
+      default: return '';
+    }
   }
 
   function sectionClasses(id: QuestionId): string {
@@ -4056,6 +4148,8 @@ export function TaskComposer(props: Props) {
     if (id === 'when') return executor === 'claude' ? 'When it runs' : 'Due date';
     // task-04ea172532c0 — grouped/labeled by owning task-def, e.g. "Intake · Customer".
     if (isFieldQuestion(id)) return labelFor(id);
+    // task-342f3e151d99 — the sub-walk's step label, e.g. "Input · key".
+    if (id === 'field-draft' && fieldDraft) return `${fieldDraft.kind === 'inputs' ? 'Input' : 'Output'} · ${fieldDraft.step}`;
     const short = labelFor(id);
     return short ? short.charAt(0).toUpperCase() + short.slice(1) : null;
   }
@@ -4087,14 +4181,14 @@ export function TaskComposer(props: Props) {
   }
 
   // task-0d63c7b0ebdb — one input field's VALUE question. Rendered only in the
-  // escape hatch's fill walk (creation never asks these). text/number/date are
-  // free entry; select/bool are option questions (digits/↵). Grouped/labeled by
-  // owning def ("Task · Customer") via FieldLabel/promptFor.
+  // escape hatch's fill walk (creation never asks these). Uses the SAME
+  // FieldValueEditor (task-e085ebbdb23f) the New-from-Template 'values' phase
+  // uses below — this is the fix for the reported bug where a source-bound
+  // field rendered as a bare text box here (no `source` branch existed) instead
+  // of the SourceTypeahead the template-fill phase always had.
   function renderFieldQuestion(taskDef: TaskDef, field: TaskDefField) {
     const ref = fieldRef(taskDef.id, field.key);
     const qid = fieldQId(taskDef.id, field.key);
-    const optionType = isFieldOptionType(field);
-    const opts = optionType ? fieldOptionList(field) : [];
     const highlight = templateFieldHighlight[ref] ?? 0;
     const value = templateValues[ref] ?? '';
     return (
@@ -4108,54 +4202,297 @@ export function TaskComposer(props: Props) {
           <div className="composer__q-active-body">
             <FieldLabel id={qid} />
             <div className="composer__q-prompt">{promptFor(qid)}</div>
-            {optionType ? (
-              <ul className="composer__options" role="listbox">
-                {opts.map((o, i) => (
-                  <li key={o.value}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={i === highlight}
-                      className={
-                        'composer__option' +
-                        (i === highlight ? ' composer__option--active' : '')
-                      }
-                      onMouseEnter={() =>
-                        setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }))
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        chooseFieldOption(ref, opts, i);
-                      }}
-                    >
-                      <kbd className="composer__option-key">{i + 1}</kbd>
-                      <span className="composer__option-label">{o.label}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <input
-                ref={setFieldInputRef(ref)}
-                className="composer__path-input"
-                type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-                value={value}
-                onChange={(e) => setTemplateValue(ref, e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-                    e.preventDefault();
-                    (e.target as HTMLInputElement).blur();
-                    fieldAdvance();
-                  }
-                }}
-                spellCheck={false}
-                autoComplete="off"
-              />
-            )}
+            <FieldValueEditor
+              field={field}
+              value={value}
+              highlight={highlight}
+              inputRef={setFieldInputRef(ref)}
+              onSelectOption={(opts, i) => chooseFieldOption(ref, opts, i)}
+              onHighlightOption={(i) => setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }))}
+              onChangeText={(v) => setTemplateValue(ref, v)}
+              onSubmitText={() => fieldAdvance()}
+              onSelectSource={(label, qref) => {
+                setTemplateValue(ref, label);
+                // task-73f6304ffb94 — the opaque record ref rides a sibling
+                // `<key>.ref` key, same convention saveFromTemplate/the values
+                // phase use, so saveFillValues (fixed alongside this) can
+                // thread it into the data-bag patch instead of dropping it.
+                setTemplateValue(fieldRef(taskDef.id, `${field.key}.ref`), JSON.stringify(qref));
+                fieldAdvance();
+              }}
+            />
           </div>
         ) : (
           renderInert(qid)
         )}
+      </section>
+    );
+  }
+
+  // task-e085ebbdb23f — the ONE field-VALUE renderer shared by the fill-mode
+  // walk (renderFieldQuestion above) and the New-from-Template 'values' phase
+  // below, killing the near-verbatim duplication between them (option list /
+  // SourceTypeahead / typed input, each with its own digit-key rendering).
+  // State stays separate (templateValues/templateFillValues, different highlight
+  // maps, different advance semantics) — only the RENDERING + option/typeahead
+  // behavior is consolidated, via callbacks.
+  function FieldValueEditor({
+    field,
+    value,
+    highlight,
+    autoFocus,
+    inputRef,
+    onSelectOption,
+    onHighlightOption,
+    onChangeText,
+    onSubmitText,
+    onSelectSource,
+  }: {
+    field: TaskDefField;
+    value: string;
+    highlight: number;
+    autoFocus?: boolean;
+    inputRef?: (el: HTMLInputElement | null) => void;
+    onSelectOption: (opts: { value: string; label: string }[], i: number) => void;
+    onHighlightOption: (i: number) => void;
+    onChangeText: (v: string) => void;
+    onSubmitText: () => void;
+    onSelectSource: (label: string, qref: QueryRef) => void;
+  }) {
+    const optionType = isFieldOptionType(field);
+    if (optionType) {
+      const opts = fieldOptionList(field);
+      return (
+        <ul className="composer__options" role="listbox">
+          {opts.map((o, i) => (
+            <li key={o.value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={i === highlight}
+                className={'composer__option' + (i === highlight ? ' composer__option--active' : '')}
+                onMouseEnter={() => onHighlightOption(i)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectOption(opts, i);
+                }}
+              >
+                <kbd className="composer__option-key">{i + 1}</kbd>
+                <span className="composer__option-label">{o.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    if (field.source) {
+      // task-73f6304ffb94 — search the bound SavedQuery live; picking a row
+      // records the display label as the value AND the opaque ref on a
+      // sibling `<key>.ref` entry (the caller's onSelectSource threads it).
+      return <SourceTypeahead field={field} display={value || undefined} onSelect={onSelectSource} />;
+    }
+    return (
+      <input
+        ref={inputRef}
+        className="composer__path-input"
+        type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+        value={value}
+        autoFocus={autoFocus}
+        onChange={(e) => onChangeText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+            onSubmitText();
+          }
+        }}
+        spellCheck={false}
+        autoComplete="off"
+      />
+    );
+  }
+
+  // task-342f3e151d99 — one already-defined field, walkable in the main
+  // activeIdx cursor via its `field-row:<kind>:<idx>` QuestionId. Enter steps
+  // into its sub-walk (startEditFieldRow, wired in the keydown handler); this
+  // component only renders — FieldRowSummary is the presentational shell.
+  function FieldRowQuestion({
+    kind,
+    idx,
+    field,
+    onRemove,
+    onClearSource,
+  }: {
+    kind: FieldKind;
+    idx: number;
+    field: TaskDefField;
+    onRemove: () => void;
+    onClearSource: () => void;
+  }) {
+    const qid = fieldRowQId(kind, idx);
+    return (
+      <section
+        key={qid}
+        ref={sectionRefFor(qid)}
+        className={sectionClasses(qid)}
+        onClick={() => setActiveIdx(QUESTIONS.indexOf(qid))}
+      >
+        {isActiveSection(qid) ? (
+          <div className="composer__q-active-body">
+            <FieldLabel id={qid} />
+            <div className="composer__q-prompt">{promptFor(qid)}</div>
+            <FieldRowSummary
+              field={field}
+              showRequired={kind === 'outputs'}
+              active
+              onRemove={onRemove}
+              onClearSource={onClearSource}
+            />
+          </div>
+        ) : (
+          renderInert(qid)
+        )}
+      </section>
+    );
+  }
+
+  // task-342f3e151d99 — the field-definition sub-walk's single slot. One
+  // question per internal step (source/key/label/type/options/required — see
+  // fieldDraftSteps in taskSchema.mjs); step transitions are driven by the
+  // keydown handler + advanceFieldDraft/retreatFieldDraft/pickSourceStepOption/
+  // chooseFieldDraftType/chooseFieldDraftRequired above. Renders only while a
+  // draft is open — the caller guards on `fieldDraft`.
+  function FieldDraftQuestion() {
+    if (!fieldDraft) return null;
+    const d = fieldDraft;
+    return (
+      <section
+        ref={sectionRefFor('field-draft')}
+        className={sectionClasses('field-draft')}
+        onClick={() => setActiveIdx(QUESTIONS.indexOf('field-draft'))}
+      >
+        <div className="composer__q-active-body">
+          <FieldLabel id="field-draft" />
+          <div className="composer__q-prompt">{promptFor('field-draft')}</div>
+          {d.step === 'source' && (
+            <ul className="composer__options" role="listbox">
+              {sourceStepOptions.map((o, i) => (
+                <li key={o.kind === 'custom' ? 'custom' : `${o.groupId}:${o.field.name}`}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={i === fieldDraftHighlight}
+                    className={
+                      'composer__option' + (i === fieldDraftHighlight ? ' composer__option--active' : '')
+                    }
+                    onMouseEnter={() => setFieldDraftHighlight(i)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pickSourceStepOption(i);
+                    }}
+                  >
+                    <kbd className="composer__option-key">{i + 1}</kbd>
+                    <span className="composer__option-label">{o.label}</span>
+                    {o.kind === 'catalog' && <span className="composer__option-hint">{o.hint}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {(d.step === 'key' || d.step === 'label') && (
+            <input
+              ref={fieldDraftInputRef}
+              className="composer__path-input"
+              type="text"
+              placeholder={d.step === 'key' ? 'key' : 'label'}
+              value={d.step === 'key' ? d.field.key : d.field.label}
+              onChange={(e) =>
+                updateFieldDraft(d.step === 'key' ? { key: e.target.value } : { label: e.target.value })
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                  e.preventDefault();
+                  advanceFieldDraft();
+                }
+              }}
+              spellCheck={false}
+              autoComplete="off"
+            />
+          )}
+          {d.step === 'type' && (
+            <ul className="composer__options" role="listbox">
+              {FIELD_TYPE_OPTIONS.map((t, i) => (
+                <li key={t}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={i === fieldDraftHighlight}
+                    className={
+                      'composer__option' + (i === fieldDraftHighlight ? ' composer__option--active' : '')
+                    }
+                    onMouseEnter={() => setFieldDraftHighlight(i)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      chooseFieldDraftType(i);
+                    }}
+                  >
+                    <kbd className="composer__option-key">{i + 1}</kbd>
+                    <span className="composer__option-label">{t}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {d.step === 'options' && (
+            <input
+              ref={fieldDraftInputRef}
+              className="composer__path-input"
+              type="text"
+              placeholder="options, comma-separated"
+              value={(d.field.options ?? []).join(', ')}
+              onChange={(e) =>
+                updateFieldDraft({
+                  options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
+                })
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                  e.preventDefault();
+                  advanceFieldDraft();
+                }
+              }}
+              spellCheck={false}
+              autoComplete="off"
+            />
+          )}
+          {d.step === 'required' && (
+            <ul className="composer__options" role="listbox">
+              {FIELD_REQUIRED_OPTIONS.map((o, i) => (
+                <li key={String(o.value)}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={i === fieldDraftHighlight}
+                    className={
+                      'composer__option' + (i === fieldDraftHighlight ? ' composer__option--active' : '')
+                    }
+                    onMouseEnter={() => setFieldDraftHighlight(i)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      chooseFieldDraftRequired(i);
+                    }}
+                  >
+                    <kbd className="composer__option-key">{i + 1}</kbd>
+                    <span className="composer__option-label">{o.label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="composer__field-editors-hint" aria-hidden="true">
+            ↵ next · ↑ back · esc cancel
+          </div>
+        </div>
       </section>
     );
   }
@@ -4319,11 +4656,11 @@ export function TaskComposer(props: Props) {
                     </div>
                   ) : (
                     templateEntryFieldEntries.map(({ field, ref }, i) => {
-                      const optionType = isFieldOptionType(field);
-                      const opts = optionType ? fieldOptionList(field) : [];
                       const highlight = templateFillHighlight[ref] ?? 0;
                       const value = templateFillValues[ref] ?? '';
                       const isActive = i === templateFillActiveIdx;
+                      const advance = () =>
+                        setTemplateFillActiveIdx((n) => Math.min(n + 1, templateEntryFieldEntries.length - 1));
                       return (
                         <section
                           key={ref}
@@ -4337,73 +4674,38 @@ export function TaskComposer(props: Props) {
                               <div className="composer__q-prompt">
                                 {field.label || field.key}
                               </div>
-                              {optionType ? (
-                                <ul className="composer__options" role="listbox">
-                                  {opts.map((o, oi) => (
-                                    <li key={o.value}>
-                                      <button
-                                        type="button"
-                                        role="option"
-                                        aria-selected={oi === highlight}
-                                        className={
-                                          'composer__option' +
-                                          (oi === highlight ? ' composer__option--active' : '')
-                                        }
-                                        onMouseEnter={() =>
-                                          setTemplateFillHighlight((prev) => ({ ...prev, [ref]: oi }))
-                                        }
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setTemplateFillValue(ref, o.value);
-                                          setTemplateFillActiveIdx((n) => Math.min(n + 1, templateEntryFieldEntries.length - 1));
-                                        }}
-                                      >
-                                        <kbd className="composer__option-key">{oi + 1}</kbd>
-                                        <span className="composer__option-label">{o.label}</span>
-                                      </button>
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : field.source ? (
-                                // Source-backed: search the bound SavedQuery live.
-                                // Picking a row records the display label as the
-                                // field's value AND the opaque ref on a sibling
-                                // `<key>.ref` entry (mirroring the drawer), which
-                                // saveFromTemplate threads into instantiate.
-                                <SourceTypeahead
-                                  field={field}
-                                  display={value || undefined}
-                                  onSelect={(label: string, qref: QueryRef) => {
-                                    setTemplateFillValue(ref, label);
-                                    if (templateEntry) {
-                                      setTemplateFillValue(
-                                        fieldRef(templateEntry.id, `${field.key}.ref`),
-                                        JSON.stringify(qref),
-                                      );
-                                    }
-                                    setTemplateFillActiveIdx((n) =>
-                                      Math.min(n + 1, templateEntryFieldEntries.length - 1),
+                              {/* task-e085ebbdb23f — the SAME field-VALUE renderer
+                                  the fill-mode walk uses (renderFieldQuestion),
+                                  so a source-bound variable gets the SAME
+                                  SourceTypeahead here as everywhere else. */}
+                              <FieldValueEditor
+                                field={field}
+                                value={value}
+                                highlight={highlight}
+                                autoFocus
+                                onSelectOption={(opts, oi) => {
+                                  setTemplateFillValue(ref, opts[oi]?.value ?? '');
+                                  advance();
+                                }}
+                                onHighlightOption={(oi) =>
+                                  setTemplateFillHighlight((prev) => ({ ...prev, [ref]: oi }))
+                                }
+                                onChangeText={(v) => setTemplateFillValue(ref, v)}
+                                onSubmitText={() => {
+                                  if (i >= templateEntryFieldEntries.length - 1) void saveFromTemplate();
+                                  else advance();
+                                }}
+                                onSelectSource={(label, qref) => {
+                                  setTemplateFillValue(ref, label);
+                                  if (templateEntry) {
+                                    setTemplateFillValue(
+                                      fieldRef(templateEntry.id, `${field.key}.ref`),
+                                      JSON.stringify(qref),
                                     );
-                                  }}
-                                />
-                              ) : (
-                                <input
-                                  className="composer__path-input"
-                                  type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-                                  value={value}
-                                  autoFocus
-                                  onChange={(e) => setTemplateFillValue(ref, e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
-                                      e.preventDefault();
-                                      if (i >= templateEntryFieldEntries.length - 1) void saveFromTemplate();
-                                      else setTemplateFillActiveIdx(i + 1);
-                                    }
-                                  }}
-                                  spellCheck={false}
-                                  autoComplete="off"
-                                />
-                              )}
+                                  }
+                                  advance();
+                                }}
+                              />
                             </div>
                           ) : (
                             <div className="composer__q-inert">
@@ -5076,12 +5378,13 @@ export function TaskComposer(props: Props) {
           </section>
           )}
 
-          {/* Plain-task fields — task-2fd63b922beb correction (Part A). The
-              TASK form owns its OWN optional input/output fields (single def,
-              id 'task'); no neededWhen (chain-only). Same shared editors as the
-              chain builder. Only for a plain (non-chained) TypeBuild create;
-              empty = a no-op, byte-identical to today (NON-REGRESSION). */}
-          {hasChainOption && templateChoice === 'blank' && (
+          {/* task-342f3e151d99 — INPUTS. A separate, explained section (was a
+              combined "Inputs & outputs?" grid step) — `i` (or the "+ input"
+              button) opens the field-def sub-walk (FieldValueEditor's
+              definition-time sibling, see FieldDraftQuestion below); already-
+              defined inputs review as field-rows, walkable in the SAME
+              activeIdx cursor as the rest of the form (task-342f3e151d99). */}
+          {showFieldsSteps && (
             <section
               ref={sectionRefFor('fields')}
               className={sectionClasses('fields')}
@@ -5091,50 +5394,38 @@ export function TaskComposer(props: Props) {
                 <div className="composer__q-active-body">
                   <FieldLabel id="fields" />
                   <div className="composer__q-prompt">{promptFor('fields')}</div>
-                  <div className="composer__task-fields">
-                    <FieldEditors
-                      inputs={taskInputs}
-                      outputs={taskOutputs}
-                      onAdd={(kind) => addTaskField(kind)}
-                      onAddField={(kind, field) => addTaskFieldFull(kind, field)}
-                      onUpdate={(kind, fi, patch) => updateTaskField(kind, fi, patch)}
-                      onRemove={(kind, fi) => removeTaskField(kind, fi)}
-                      onClearSource={(kind, fi) => clearTaskFieldSource(kind, fi)}
-                      onExitUp={() => goBack()}
-                      onExitDown={() => goNext()}
-                      containerRef={taskFieldsRef}
-                    />
-                    <div className="composer__chain-footer">
-                      <span />
-                      <button
-                        type="button"
-                        className="composer__chain-continue-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          goNext();
-                        }}
-                      >
-                        Continue →
-                      </button>
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    className="composer__chain-add-btn"
+                    title="Add input (i)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startFieldDraft('inputs');
+                    }}
+                  >
+                    + input
+                  </button>
                 </div>
               ) : (
                 renderInert('fields')
               )}
             </section>
           )}
+          {showFieldsSteps &&
+            taskInputs.map((field, idx) => (
+              <FieldRowQuestion
+                key={`inputs:${idx}`}
+                kind="inputs"
+                idx={idx}
+                field={field}
+                onRemove={() => removeTaskField('inputs', idx)}
+                onClearSource={() => clearTaskFieldSource('inputs', idx)}
+              />
+            ))}
+          {showFieldsSteps && fieldDraft?.kind === 'inputs' && <FieldDraftQuestion />}
 
-          {/* task-0d63c7b0ebdb — input VALUE questions are NOT part of the
-              creation walk. Creation DEFINES fields (the 'fields' step above);
-              values are collected later by the from-template flow, the drawer's
-              Inputs editor, or the "Press F to fill inputs now" escape hatch
-              (the fill overlay, which reuses renderFieldQuestion). */}
-
-          {/* Outputs summary — task-2fd63b922beb. Read-only: per def, the output
-              fields the agent will produce, `required` marked as evidence. Shows
-              for any chain, or for a plain task that defined outputs. */}
-          {showOutputsStep && (
+          {/* task-342f3e151d99 — OUTPUTS. Same shape as Inputs above, `o` adds. */}
+          {showFieldsSteps && (
             <section
               ref={sectionRefFor('outputs')}
               className={sectionClasses('outputs')}
@@ -5144,33 +5435,35 @@ export function TaskComposer(props: Props) {
                 <div className="composer__q-active-body">
                   <FieldLabel id="outputs" />
                   <div className="composer__q-prompt">{promptFor('outputs')}</div>
-                  <ul className="composer__outputs-list">
-                    {fieldsDefs.map((def) => (
-                      <li key={def.id} className="composer__outputs-group">
-                        <div className="composer__outputs-group-name">{def.name}</div>
-                        {(def.outputs ?? []).length === 0 ? (
-                          <div className="composer__outputs-empty">no outputs defined</div>
-                        ) : (
-                          <ul className="composer__outputs-fields">
-                            {(def.outputs ?? []).map((f) => (
-                              <li key={f.key}>
-                                the agent will produce: {f.label}
-                                {f.required && (
-                                  <span className="composer__outputs-required"> — required (evidence)</span>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  <button
+                    type="button"
+                    className="composer__chain-add-btn"
+                    title="Add output (o)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startFieldDraft('outputs');
+                    }}
+                  >
+                    + output
+                  </button>
                 </div>
               ) : (
                 renderInert('outputs')
               )}
             </section>
           )}
+          {showFieldsSteps &&
+            taskOutputs.map((field, idx) => (
+              <FieldRowQuestion
+                key={`outputs:${idx}`}
+                kind="outputs"
+                idx={idx}
+                field={field}
+                onRemove={() => removeTaskField('outputs', idx)}
+                onClearSource={() => clearTaskFieldSource('outputs', idx)}
+              />
+            ))}
+          {showFieldsSteps && fieldDraft?.kind === 'outputs' && <FieldDraftQuestion />}
 
           {/* task-899af8b03aa6 — "Make this a template". A yes/no step (mirrors
               Pin) plus inline explanatory copy: the declared input/output fields

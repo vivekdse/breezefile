@@ -21,6 +21,9 @@ import {
   isValidFieldKey,
   effectiveFieldKey,
   inferFieldsFromProse,
+  fieldDraftSteps,
+  nextFieldDraftStep,
+  prevFieldDraftStep,
 } from '../src/components/newhome/taskSchema.mjs';
 
 // ── fieldRef ───────────────────────────────────────────────────────────────
@@ -783,4 +786,46 @@ test('inferFieldsFromProse: every returned field satisfies the TaskDefField shap
     assert.equal(typeof f.label, 'string');
     assert.ok(['text', 'number', 'date', 'select', 'bool'].includes(f.type));
   }
+});
+
+// ── field-definition sub-walk (task-342f3e151d99) ──────────────────────────
+test('fieldDraftSteps: input, non-select — key/label/type only', () => {
+  assert.deepEqual(fieldDraftSteps('inputs', 'text'), ['key', 'label', 'type']);
+});
+
+test('fieldDraftSteps: input, select — adds options', () => {
+  assert.deepEqual(fieldDraftSteps('inputs', 'select'), ['key', 'label', 'type', 'options']);
+});
+
+test('fieldDraftSteps: output, non-select — adds required, not options', () => {
+  assert.deepEqual(fieldDraftSteps('outputs', 'bool'), ['key', 'label', 'type', 'required']);
+});
+
+test('fieldDraftSteps: output, select — options then required', () => {
+  assert.deepEqual(fieldDraftSteps('outputs', 'select'), ['key', 'label', 'type', 'options', 'required']);
+});
+
+test('nextFieldDraftStep walks the input sub-walk to null at the end', () => {
+  assert.equal(nextFieldDraftStep('inputs', 'text', 'key'), 'label');
+  assert.equal(nextFieldDraftStep('inputs', 'text', 'label'), 'type');
+  assert.equal(nextFieldDraftStep('inputs', 'text', 'type'), null);
+});
+
+test('nextFieldDraftStep on the type step branches by current type (select grows the walk)', () => {
+  assert.equal(nextFieldDraftStep('inputs', 'select', 'type'), 'options');
+  assert.equal(nextFieldDraftStep('outputs', 'select', 'type'), 'options');
+  assert.equal(nextFieldDraftStep('outputs', 'text', 'type'), 'required');
+  assert.equal(nextFieldDraftStep('outputs', 'select', 'options'), 'required');
+  assert.equal(nextFieldDraftStep('outputs', 'select', 'required'), null);
+});
+
+test('nextFieldDraftStep returns null for an unknown step (defensive, never throws)', () => {
+  assert.equal(nextFieldDraftStep('inputs', 'text', 'bogus'), null);
+});
+
+test('prevFieldDraftStep walks back to null before the first step', () => {
+  assert.equal(prevFieldDraftStep('inputs', 'text', 'key'), null);
+  assert.equal(prevFieldDraftStep('inputs', 'text', 'label'), 'key');
+  assert.equal(prevFieldDraftStep('outputs', 'select', 'required'), 'options');
+  assert.equal(prevFieldDraftStep('outputs', 'text', 'required'), 'type');
 });

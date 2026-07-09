@@ -143,3 +143,21 @@ export function deriveTemplateEntry(
     outputSchema?: TaskDefField[];
   } | null,
 ): TemplateEntry | null;
+
+// ── Field-definition sub-walk (task-342f3e151d99) ──────────────────────────
+export type FieldDraftKind = 'inputs' | 'outputs';
+export type FieldDraftStep = 'key' | 'label' | 'type' | 'options' | 'required';
+export function fieldDraftSteps(
+  kind: FieldDraftKind,
+  fieldType: TaskDefField['type'],
+): FieldDraftStep[];
+export function nextFieldDraftStep(
+  kind: FieldDraftKind,
+  fieldType: TaskDefField['type'],
+  step: FieldDraftStep,
+): FieldDraftStep | null;
+export function prevFieldDraftStep(
+  kind: FieldDraftKind,
+  fieldType: TaskDefField['type'],
+  step: FieldDraftStep,
+): FieldDraftStep | null;
