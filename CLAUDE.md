@@ -81,6 +81,12 @@ Development work for this repo is tracked in **TypeBuild**, via the TypeBuild MC
   as a client task or a loose note. Cross-reference the originating client task/PR
   in the body. (General rule: resolve each repo → its TypeBuild project via
   `resolve_project_folder` and anchor the task to that `project_id`.)
+- **Scope boundary — other repos are task-only.** Work touching ANY other repo
+  (`task_manager_api` or anything else) must ONLY be **filed as a TypeBuild task**
+  against that repo's project — never implemented, committed, deployed, or
+  otherwise executed from a session in this repo — unless Vivek **explicitly
+  authorizes it in that conversation**. Other repos may have their own active
+  sessions; crossing the boundary creates conflicts.
 - Do **not** use `bd`, TodoWrite, or markdown TODO lists for tracking.
 - Task titles/bodies may be **PHI** — keep them in the conversation; never write
   them to files, notes, or logs.
