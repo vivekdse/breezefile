@@ -12,6 +12,11 @@ export type WireOutputSchemaField = {
   type: 'text' | 'number' | 'date' | 'select' | 'bool';
   options?: string[];
   required?: boolean;
+  // task-73f6304ffb94 — an INPUT def may bind a SavedQuery, so the field fills
+  // via the live typeahead instead of a text box. Rides template `variables`
+  // (mapOutputSchema filters, never rebuilds, so the binding survives the wire).
+  // Absent on output defs. NON-PHI: ids only.
+  source?: { savedQueryId: string; version?: number; entityType?: string };
 };
 
 export type WireAgent = {

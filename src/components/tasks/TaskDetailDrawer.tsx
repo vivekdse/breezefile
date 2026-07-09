@@ -529,7 +529,7 @@ export function TaskDetailDrawer({
   // through to the text path), but we map all inputs so labels/types are right.
   // Degrades to unset (plain text) when: no roster, no parent, the parent block
   // is legacy/absent, or this task carries no own `task-fields` def id.
-  const sourceFieldDefs = useMemo<Record<string, TaskDefField> | undefined>(() => {
+  const chainFieldDefs = useMemo<Record<string, TaskDefField> | undefined>(() => {
     const myDefId = ownFieldsBlock?.taskDefId;
     if (!myDefId || !task.parentTaskId || !roster || !roster.length) return undefined;
     const parent = roster.find((t) => t.id === task.parentTaskId);
@@ -543,6 +543,39 @@ export function TaskDetailDrawer({
     for (const f of myDef.inputs ?? []) map[f.key] = f;
     return Object.keys(map).length ? map : undefined;
   }, [ownFieldsBlock, task.parentTaskId, roster]);
+  // A PLAIN (non-chained) task has no parent block to describe it — its input
+  // defs live on the TEMPLATE it was created from / registered as (the server
+  // stamps `template_id` on that origin task). Fetch that template's
+  // `variables` so a source-backed key renders as the typeahead here too,
+  // instead of silently degrading to a text box. Only when the chain path
+  // above found nothing; unset on any failure (plain text, NON-REGRESSION).
+  // NON-PHI: field DEFINITIONS only — the fetch never returns values.
+  const [templateFieldDefs, setTemplateFieldDefs] = useState<
+    Record<string, TaskDefField> | undefined
+  >(undefined);
+  const templateId = task.templateId;
+  useEffect(() => {
+    if (chainFieldDefs || !templateId) {
+      setTemplateFieldDefs(undefined);
+      return;
+    }
+    let cancelled = false;
+    void fm.typebuild.templates
+      .get(templateId)
+      .then((tmpl) => {
+        if (cancelled || !tmpl) return;
+        const map: Record<string, TaskDefField> = {};
+        for (const f of tmpl.variables ?? []) map[f.key] = f as TaskDefField;
+        setTemplateFieldDefs(Object.keys(map).length ? map : undefined);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplateFieldDefs(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [templateId, chainFieldDefs]);
+  const sourceFieldDefs = chainFieldDefs ?? templateFieldDefs;
   // task-f26e7745eda6 — def id → the child's LIVE server status, consulted by
   // the runnable walk + step chips (cancelled excluded/shown; failed shown).
   const pipelineChildStatus = useMemo<Record<string, ChildStatusLike>>(
