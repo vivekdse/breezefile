@@ -1,35 +1,53 @@
-// task-73f6304ffb94 — the source-aware key picker: the ONE "+ input"
-// affordance shared by BOTH authoring surfaces (TaskComposer's FieldEditors and
-// TemplateEditPanel's FieldRows). Template authoring is key-centric — instead
-// of only adding a blank row, the user gets a menu of FIELDS EXPOSED BY APPROVED
-// EXTERNAL APIs (SavedQueries, grouped per query) plus "Other (custom key)".
+// task-342f3e151d99 (builds on task-73f6304ffb94) — the source-aware key
+// picker: the ONE "+ input" affordance shared by BOTH authoring surfaces
+// (TaskComposer's FieldEditors and TemplateEditPanel's FieldRows). Template
+// authoring is key-centric — instead of only adding a blank row, the user
+// gets a menu of FIELDS EXPOSED BY APPROVED EXTERNAL APIs (SavedQueries) plus
+// a freeform "Custom" key.
+//
+// Redesigned keyboard-first (task-342f3e151d99) to mirror the composer's
+// OPTION QUESTION idiom (see TaskComposer.tsx's project/who/agent questions):
+// a `<ul role="listbox">` of `<button>` options, each with a digit `<kbd>`
+// hint, ↑/↓ to move a highlight, Enter to pick, and typing to filter — see
+// FieldSourcePicker below, which renders INLINE so a caller (the composer)
+// can drop it straight into a question section instead of behind a mouse
+// popup. FieldKeyPicker (the original button+popup affordance) is now a thin
+// wrapper: it opens a floating menu and renders FieldSourcePicker inside it,
+// so existing call sites (TemplateEditPanel.tsx) keep working unmodified.
 //
 //   - Picking an API field adds a field row bound to that SavedQuery: `key` =
 //     the field name (normalized + deduped, still user-editable), `label` =
 //     humanized name, `type` mapped from the catalog type, and a `source`
 //     binding — all computed by the PURE fieldCatalog.mjs (testable under node).
-//   - Picking "Other" adds a blank row, exactly like today.
+//   - Picking "Custom" adds a blank row, exactly like today.
 //
 // Degrade-gracefully: the catalog is fetched ONCE per app run (module cache,
 // swallows errors → []). If it's empty (signed out / offline / no approved
-// queries), the button is a plain blank-add — the editor stays fully usable.
+// queries), the picker's option list collapses to just "Custom" — the editor
+// stays fully usable.
 //
 // NON-PHI: the catalog is field NAMES + TYPES only; safe to hold in state. No
 // task VALUES ever pass through here.
 import { useEffect, useRef, useState } from 'react';
+import type { JSX } from 'react';
 import type { TaskDefField } from './types';
 import { describeQueries, type QueryCatalogEntry } from '../../copilot/savedQueries';
 import {
   blankCustomField,
   catalogPickerGroups,
+  catalogTypeToFieldType,
   fieldFromCatalog,
+  fieldOptionsForSource,
+  pickerOptions,
+  sourceOptions,
+  type PickerOption,
 } from './fieldCatalog.mjs';
 import './FieldKeyPicker.css';
 
 // Module-level single-flight cache: the catalog is the same for every picker on
 // screen and rarely changes within a session, so fetch it at most once and
 // share the promise. Errors resolve to [] (never reject) so the hook always
-// settles and the picker degrades to "Other".
+// settles and the picker degrades to "Custom".
 let catalogPromise: Promise<QueryCatalogEntry[]> | null = null;
 export function loadQueryCatalog(): Promise<QueryCatalogEntry[]> {
   if (!catalogPromise) catalogPromise = describeQueries();
@@ -38,7 +56,7 @@ export function loadQueryCatalog(): Promise<QueryCatalogEntry[]> {
 
 /** Fetch-once hook over the SavedQuery catalog. `{ catalog: [], loading }`
  *  until it settles; `catalog` is [] on any failure so callers never special-
- *  case errors — an empty catalog just means "Other" is the only option. */
+ *  case errors — an empty catalog just means "Custom" is the only option. */
 export function useQueryCatalog(): { catalog: QueryCatalogEntry[]; loading: boolean } {
   const [catalog, setCatalog] = useState<QueryCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,12 +74,249 @@ export function useQueryCatalog(): { catalog: QueryCatalogEntry[]; loading: bool
   return { catalog, loading };
 }
 
-/** The add-input affordance. Renders a button; clicking it opens a menu of
- *  catalog fields (grouped per query) + "Other (custom key)" — unless the
- *  catalog is empty and settled, in which case the button adds a blank row
- *  directly (today's behavior). `onPick` receives the fully-formed new field
- *  (a `source`-bound field for a catalog pick, a blank field for "Other"); the
- *  caller simply appends it. `existingKeys` is deduped against. */
+type Step = 'top' | 'browse-source' | 'browse-field';
+
+function optionKey(o: PickerOption): string {
+  switch (o.kind) {
+    case 'custom':
+      return 'custom';
+    case 'browse':
+      return 'browse';
+    case 'source':
+      return `src:${o.entry.id}`;
+    case 'field':
+      return `field:${o.entry.id}:${o.field.name}`;
+  }
+}
+
+function optionLabel(o: PickerOption): string {
+  switch (o.kind) {
+    case 'custom':
+      return 'Custom (name your own key)';
+    case 'browse':
+      return 'Browse all…';
+    case 'source':
+    case 'field':
+      return o.label;
+  }
+}
+
+/** task-342f3e151d99 — the inline, keyboard-first field-source picker. Renders
+ *  a `role="listbox"` option list (NOT a floating popup) so a caller can
+ *  embed it directly inside a question section, matching how the composer's
+ *  other option questions (project/who/agent) render.
+ *
+ *  Top step: `{kind:'custom'}` first (always option 1), then the top
+ *  source-backed fields (pure logic in fieldCatalog.mjs's `pickerOptions`),
+ *  then `{kind:'browse'}` when the catalog was truncated (>6 fields or >1
+ *  source). Picking `browse` drills into a two-step SOURCE → FIELD walk
+ *  (`sourceOptions` / `fieldOptionsForSource`), each step the same idiom.
+ *
+ *  Keyboard: ↑/↓ move the highlight, Enter picks it, digits 1-9 jump straight
+ *  to that option, typing any other printable character appends to a live
+ *  search buffer that filters the CURRENT step's list (re-numbering the digit
+ *  hints) — Backspace edits that buffer, and once it's empty, Backspace (like
+ *  Esc) steps back: browse-field → browse-source → top → `onCancel()`.
+ *
+ *  `onPick` receives a fully-formed source-bound TaskDefField built by the
+ *  pure `fieldFromCatalog`. `onCustom` signals the "Custom" pick — the caller
+ *  (composer) then walks key/label/type itself, exactly like today's blank
+ *  add. Digits are reserved for option-select, not the search buffer — field
+ *  names are rarely numeric-only, so this trade-off keeps single-keystroke
+ *  jumps working even mid-search. */
+export function FieldSourcePicker({
+  existingKeys,
+  onPick,
+  onCustom,
+  onCancel,
+  autoFocus,
+}: {
+  existingKeys: string[];
+  onPick: (field: TaskDefField) => void;
+  onCustom: () => void;
+  onCancel: () => void;
+  autoFocus?: boolean;
+}): JSX.Element {
+  const { catalog, loading } = useQueryCatalog();
+  const [step, setStep] = useState<Step>('top');
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const [browseEntry, setBrowseEntry] = useState<QueryCatalogEntry | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (autoFocus) rootRef.current?.focus();
+  }, [autoFocus]);
+
+  const options: PickerOption[] =
+    step === 'top'
+      ? pickerOptions(catalog, { query })
+      : step === 'browse-source'
+        ? sourceOptions(catalog, { query })
+        : fieldOptionsForSource(browseEntry, { query });
+  const clampedHighlight = Math.min(highlight, Math.max(0, options.length - 1));
+
+  const toTop = () => {
+    setStep('top');
+    setQuery('');
+    setHighlight(0);
+    setBrowseEntry(null);
+  };
+  const toSourceStep = () => {
+    setStep('browse-source');
+    setQuery('');
+    setHighlight(0);
+    setBrowseEntry(null);
+  };
+
+  const pickIndex = (i: number) => {
+    const o = options[i];
+    if (!o) return;
+    if (o.kind === 'custom') {
+      onCustom();
+      return;
+    }
+    if (o.kind === 'browse') {
+      toSourceStep();
+      return;
+    }
+    if (o.kind === 'source') {
+      setBrowseEntry(o.entry);
+      setStep('browse-field');
+      setQuery('');
+      setHighlight(0);
+      return;
+    }
+    // o.kind === 'field'
+    const built = fieldFromCatalog(o.entry, o.field, existingKeys);
+    // fieldFromCatalog only returns null on a malformed entry/field the list
+    // wouldn't have surfaced; fall back to a blank row so a pick never no-ops.
+    onPick(built ?? blankCustomField());
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight((h) => Math.min(options.length - 1, h + 1));
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight((h) => Math.max(0, h - 1));
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      pickIndex(clampedHighlight);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (step === 'browse-field') {
+        toSourceStep();
+      } else if (step === 'browse-source') {
+        toTop();
+      } else {
+        onCancel();
+      }
+      return;
+    }
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      if (query) {
+        setQuery((q) => q.slice(0, -1));
+        setHighlight(0);
+        return;
+      }
+      // Empty buffer: Backspace steps back too (spec: "Esc / Backspace at
+      // step 2 returns to step 1").
+      if (step === 'browse-field') toSourceStep();
+      else if (step === 'browse-source') toTop();
+      return;
+    }
+    if (/^[0-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const n = Number(e.key);
+      if (n >= 1 && n <= 9 && n <= options.length) {
+        e.preventDefault();
+        pickIndex(n - 1);
+      }
+      return;
+    }
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // Any other printable character — letters, punctuation, space —
+      // extends the live search buffer.
+      e.preventDefault();
+      setQuery((q) => q + e.key);
+      setHighlight(0);
+    }
+  };
+
+  return (
+    <div
+      className="fsp"
+      ref={rootRef}
+      tabIndex={0}
+      role="listbox"
+      aria-label="Pick an input source"
+      onKeyDown={onKeyDown}
+    >
+      {step !== 'top' && (
+        <div className="fsp__crumb">
+          {step === 'browse-source' ? 'Browse sources' : (browseEntry?.name ?? browseEntry?.id ?? '')}
+        </div>
+      )}
+      {(query || loading) && (
+        <div className="fsp__query">
+          {query ? (
+            <>
+              Search: {query}
+              <span className="fsp__query-caret" aria-hidden="true">▍</span>
+            </>
+          ) : (
+            'Loading fields…'
+          )}
+        </div>
+      )}
+      <ul className="fsp__options">
+        {options.map((o, i) => (
+          <li key={optionKey(o)}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={i === clampedHighlight}
+              className={
+                'fsp__option' +
+                (i === clampedHighlight ? ' fsp__option--active' : '') +
+                (o.kind === 'custom' ? ' fsp__option--custom' : '') +
+                (o.kind === 'browse' ? ' fsp__option--browse' : '')
+              }
+              onMouseEnter={() => setHighlight(i)}
+              onClick={(e) => {
+                e.stopPropagation();
+                pickIndex(i);
+              }}
+            >
+              {i < 9 && <kbd className="fsp__option-key">{i + 1}</kbd>}
+              <span className="fsp__option-label">{optionLabel(o)}</span>
+              {o.kind === 'field' && (
+                <span className="fsp__option-hint">{catalogTypeToFieldType(o.field.type)}</span>
+              )}
+            </button>
+          </li>
+        ))}
+        {options.length === 0 && <li className="fsp__empty">No matches</li>}
+      </ul>
+    </div>
+  );
+}
+
+/** The add-input affordance (button + floating menu). Clicking it opens a
+ *  menu — the keyboard-first FieldSourcePicker rendered inside a positioned
+ *  popup — unless the catalog is empty and settled, in which case the button
+ *  adds a blank row directly (today's behavior). `onPick` receives the
+ *  fully-formed new field (a `source`-bound field for a catalog pick, a blank
+ *  field for "Custom"); the caller simply appends it. `existingKeys` is
+ *  deduped against. */
 export function FieldKeyPicker({
   existingKeys,
   onPick,
@@ -74,14 +329,15 @@ export function FieldKeyPicker({
   buttonLabel?: string;
   buttonClassName?: string;
   buttonTitle?: string;
-}) {
+}): JSX.Element {
   const { catalog, loading } = useQueryCatalog();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const groups = catalogPickerGroups(catalog);
-  const hasCatalog = groups.length > 0;
+  const hasCatalog = catalogPickerGroups(catalog).length > 0;
 
-  // Close on outside click / Escape.
+  // Close on outside click / Escape (FieldSourcePicker also handles Escape
+  // internally via onCancel when it's already at the top step — this is the
+  // backstop for the popup shell itself).
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -102,13 +358,6 @@ export function FieldKeyPicker({
     onPick(blankCustomField());
     setOpen(false);
   };
-  const pickCatalog = (entry: QueryCatalogEntry, field: { name: string; type: string }) => {
-    const built = fieldFromCatalog(entry, field, existingKeys);
-    // fieldFromCatalog only returns null on a malformed entry/field the menu
-    // wouldn't have surfaced; fall back to a blank row so a click never no-ops.
-    onPick(built ?? blankCustomField());
-    setOpen(false);
-  };
 
   const onButtonClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -126,48 +375,24 @@ export function FieldKeyPicker({
         type="button"
         className={buttonClassName}
         title={buttonTitle ?? 'Add an input field'}
-        aria-haspopup="menu"
+        aria-haspopup="listbox"
         aria-expanded={open}
         onClick={onButtonClick}
       >
         {buttonLabel}
       </button>
       {open && (
-        <div className="fkp__menu" role="menu">
-          {loading && !hasCatalog && <div className="fkp__hint">Loading fields…</div>}
-          {groups.map((g) => (
-            <div className="fkp__group" key={g.id}>
-              <div className="fkp__group-head">{g.name}</div>
-              {g.fields.map((f) => {
-                // Preview the key/label the pick will produce.
-                const preview = fieldFromCatalog(
-                  catalog.find((c) => c.id === g.id),
-                  f,
-                  existingKeys,
-                );
-                return (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="fkp__opt"
-                    key={f.name}
-                    onClick={() =>
-                      pickCatalog(
-                        catalog.find((c) => c.id === g.id) as QueryCatalogEntry,
-                        f,
-                      )
-                    }
-                  >
-                    <span className="fkp__opt-label">{preview?.label ?? f.name}</span>
-                    <span className="fkp__opt-type">{preview?.type ?? 'text'}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-          <button type="button" role="menuitem" className="fkp__opt fkp__opt--other" onClick={pickCustom}>
-            Other (custom key)
-          </button>
+        <div className="fkp__menu">
+          <FieldSourcePicker
+            existingKeys={existingKeys}
+            onPick={(field) => {
+              onPick(field);
+              setOpen(false);
+            }}
+            onCustom={pickCustom}
+            onCancel={() => setOpen(false)}
+            autoFocus
+          />
         </div>
       )}
     </div>
@@ -185,7 +410,7 @@ export function SourceBadge({
 }: {
   source: NonNullable<TaskDefField['source']>;
   onClear: () => void;
-}) {
+}): JSX.Element {
   const { catalog } = useQueryCatalog();
   const entry = catalog.find((c) => c.id === source.savedQueryId);
   const name = entry?.name ?? source.entityType ?? 'API field';
