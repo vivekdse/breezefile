@@ -86,11 +86,10 @@ import { agentOptionHint } from './tasks/agent.mjs';
 import type { TaskDef, TaskDefField } from './newhome/types';
 // task-73f6304ffb94 — the source-aware key picker + source-binding badge, the
 // ONE shared "+ input" affordance (also used by TemplateEditPanel).
-// task-342f3e151d99 — `useQueryCatalog` is the shared seam a FieldSourcePicker
-// component will eventually wrap (see sourceStepOptions below); it already
+// task-342f3e151d99 — FieldSourcePicker renders the INPUT source step: Custom
+// first, top source fields, then a searchable browse-all drill-down. It
 // lives here so both surfaces share ONE catalog fetch.
-import { SourceBadge, useQueryCatalog } from './newhome/FieldKeyPicker';
-import { catalogPickerGroups, fieldFromCatalog } from './newhome/fieldCatalog.mjs';
+import { FieldSourcePicker, SourceBadge } from './newhome/FieldKeyPicker';
 import { instantiateChain } from './newhome/newHomePrefs';
 import {
   aggregateInputs,
@@ -1831,29 +1830,10 @@ export function TaskComposer(props: Props) {
   // ref pattern the old grid editor used for its own row-focus bookkeeping.
   const pendingFieldFocusRef = useRef<QuestionId | null>(null);
 
-  // task-342f3e151d99 — the INPUT "source" step's option list: "Custom" is
-  // always option 1, then one option per field exposed by an approved
-  // SavedQuery (task-73f6304ffb94's catalog). This is a thin stand-in for the
-  // FieldSourcePicker component described in task-342f3e151d99 (existingKeys/
-  // onPick/onCustom/onCancel/autoFocus) — that component is being built in
-  // parallel; when it lands, swap it in here and drop sourceStepOptions/
-  // pickSourceStepOption (the option-question rendering + digit/Enter wiring
-  // below stays the same either way, since the source step is walked exactly
-  // like every other option question).
-  const { catalog: fieldCatalog } = useQueryCatalog();
-  const sourceCatalogGroups = useMemo(() => catalogPickerGroups(fieldCatalog), [fieldCatalog]);
-  type SourceStepOption =
-    | { kind: 'custom'; label: string }
-    | { kind: 'catalog'; groupId: string; field: { name: string; type: string }; label: string; hint: string };
-  const sourceStepOptions = useMemo<SourceStepOption[]>(() => {
-    const out: SourceStepOption[] = [{ kind: 'custom', label: 'Custom (type a key)' }];
-    for (const g of sourceCatalogGroups) {
-      for (const f of g.fields) {
-        out.push({ kind: 'catalog', groupId: g.id, field: f, label: f.name, hint: g.name });
-      }
-    }
-    return out;
-  }, [sourceCatalogGroups]);
+  // task-342f3e151d99 — the INPUT "source" step is rendered by the shared
+  // FieldSourcePicker (Custom first, then top source fields, then "Browse all…"
+  // → pick source → pick field, all searchable). It owns its own keys while
+  // focused, so the sub-walk keeps no highlight state for that step.
   const [fieldDraftHighlight, setFieldDraftHighlight] = useState(0);
 
   function startFieldDraft(kind: FieldKind) {
@@ -1873,23 +1853,6 @@ export function TaskComposer(props: Props) {
     setFieldDraftHighlight(0);
     setFieldDraft({ kind, editIdx: idx, field: { ...field }, step: 'key' });
     pendingFieldFocusRef.current = 'field-draft';
-  }
-  function pickSourceStepOption(i: number) {
-    if (!fieldDraft || fieldDraft.step !== 'source') return;
-    const opt = sourceStepOptions[i];
-    if (!opt) return;
-    setFieldDraftHighlight(0);
-    if (opt.kind === 'custom') {
-      setFieldDraft((d) => (d ? { ...d, field: { key: '', label: '', type: 'text' }, step: 'key' } : d));
-      return;
-    }
-    const entry = fieldCatalog.find((c) => c.id === opt.groupId);
-    const built = entry
-      ? fieldFromCatalog(entry, opt.field, taskInputs.map((f) => f.key).filter(Boolean))
-      : null;
-    setFieldDraft((d) =>
-      d ? { ...d, field: built ?? { key: '', label: '', type: 'text' }, step: 'key' } : d,
-    );
   }
   function updateFieldDraft(patch: Partial<TaskDefField>) {
     setFieldDraft((d) => (d ? { ...d, field: { ...d.field, ...patch } } : d));
@@ -1938,7 +1901,7 @@ export function TaskComposer(props: Props) {
   // does (mirrors whoOptions.length/START_OPTIONS.length/etc. elsewhere).
   function fieldDraftOptionCount(): number {
     if (!fieldDraft) return 0;
-    if (fieldDraft.step === 'source') return sourceStepOptions.length;
+    if (fieldDraft.step === 'source') return 0; // FieldSourcePicker owns its own highlight
     if (fieldDraft.step === 'type') return FIELD_TYPE_OPTIONS.length;
     if (fieldDraft.step === 'required') return FIELD_REQUIRED_OPTIONS.length;
     return 0;
@@ -1959,7 +1922,7 @@ export function TaskComposer(props: Props) {
   // themselves (see above) since they need the just-picked value.
   function advanceFieldDraft() {
     if (!fieldDraft) return;
-    if (fieldDraft.step === 'source') return; // source step advances via pickSourceStepOption
+    if (fieldDraft.step === 'source') return; // FieldSourcePicker advances via onPick/onCustom
     const next = nextFieldDraftStep(fieldDraft.kind, fieldDraft.field.type, fieldDraft.step);
     setFieldDraftHighlight(0);
     if (next) setFieldDraft((d) => (d ? { ...d, step: next } : d));
@@ -3815,17 +3778,10 @@ export function TaskComposer(props: Props) {
     // onKeyDown> below (the inText() guard above already returned for them).
     if (active === 'field-draft' && fieldDraft) {
       if (fieldDraft.step === 'source') {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          pickSourceStepOption(fieldDraftHighlight);
-          return;
-        }
-        const n = parseInt(e.key, 10);
-        if (!Number.isNaN(n) && n >= 1 && n <= sourceStepOptions.length) {
-          e.preventDefault();
-          pickSourceStepOption(n - 1);
-          return;
-        }
+        // The focused FieldSourcePicker owns this step's keys (arrows/digits/
+        // Enter/Escape/type-to-search). Yield rather than double-handle — its
+        // React onKeyDown preventDefaults but still bubbles to this window
+        // listener. Its onCancel() is what cancels the draft on Escape.
         return;
       }
       if (fieldDraft.step === 'type') {
@@ -4375,29 +4331,27 @@ export function TaskComposer(props: Props) {
           <FieldLabel id="field-draft" />
           <div className="composer__q-prompt">{promptFor('field-draft')}</div>
           {d.step === 'source' && (
-            <ul className="composer__options" role="listbox">
-              {sourceStepOptions.map((o, i) => (
-                <li key={o.kind === 'custom' ? 'custom' : `${o.groupId}:${o.field.name}`}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={i === fieldDraftHighlight}
-                    className={
-                      'composer__option' + (i === fieldDraftHighlight ? ' composer__option--active' : '')
-                    }
-                    onMouseEnter={() => setFieldDraftHighlight(i)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      pickSourceStepOption(i);
-                    }}
-                  >
-                    <kbd className="composer__option-key">{i + 1}</kbd>
-                    <span className="composer__option-label">{o.label}</span>
-                    {o.kind === 'catalog' && <span className="composer__option-hint">{o.hint}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            // task-342f3e151d99 — the real picker: Custom is always option 1,
+            // then the top source-backed fields, then "Browse all…" (pick a
+            // source → pick its field) once the list outgrows a flat menu or
+            // more than one source exists. Typing searches across every source,
+            // exactly like the project question's "top few, search for the
+            // rest". It owns the keys WHILE FOCUSED — the window walk yields
+            // for this step (see the `step === 'source'` early-return), so
+            // there is still only one live handler at a time.
+            <FieldSourcePicker
+              existingKeys={taskInputs.map((f) => f.key).filter(Boolean)}
+              autoFocus
+              onPick={(built) =>
+                setFieldDraft((prev) => (prev ? { ...prev, field: built, step: 'key' } : prev))
+              }
+              onCustom={() =>
+                setFieldDraft((prev) =>
+                  prev ? { ...prev, field: { key: '', label: '', type: 'text' }, step: 'key' } : prev,
+                )
+              }
+              onCancel={() => cancelFieldDraft()}
+            />
           )}
           {(d.step === 'key' || d.step === 'label') && (
             <input
