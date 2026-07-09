@@ -811,54 +811,6 @@
   text-decoration: none;
 }
 
-/* task-04ea172532c0 — Task Templates: the read-only outputs summary step
-   ("the agent will produce: …"). One group per task-def, indented field
-   list underneath, required outputs (evidence) called out. */
-.composer__outputs-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.composer__outputs-group-name {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-.composer__outputs-fields {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 15px;
-  color: var(--ink);
-}
-.composer__outputs-empty {
-  font-size: 13px;
-  color: var(--muted);
-  font-style: italic;
-  padding-left: 4px;
-}
-.composer__outputs-required {
-  color: var(--accent);
-  font-weight: 500;
-}
-
-/* task-2fd63b922beb correction (Part A) — the plain Task form's own optional
-   input/output fields. Stacks the shared FieldListEditors + a Continue row. */
-.composer__task-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
 /* task-2fd63b922beb (R2) — the inline chain builder. A structured sub-form
    (buttons/inputs, not the digit-select option pattern) for defining a
    chain's task-defs right in the composer: add/remove/reorder steps,
@@ -992,21 +944,6 @@ span.composer__chain-step-name {
   outline: none;
   border-color: var(--accent);
 }
-.composer__chain-fieldgroup {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.composer__chain-fieldgroup-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
 .composer__chain-add-btn {
   font-size: 12px;
   border: 1px dashed var(--rule);
@@ -1023,85 +960,57 @@ span.composer__chain-step-name {
   color: var(--accent);
   border-color: var(--accent);
 }
-/* task-330b2e31e9d3 — keyboard-driven Inputs+Outputs editor. The container is
-   focusable (LIST-NAV mode); a subtle ring marks it, and the row cursor is
-   highlighted so keyboard edits (type/remove/evidence) have a visible target. */
-.composer__field-editors {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  outline: none;
-}
-.composer__field-editors:focus-visible {
-  box-shadow: 0 0 0 2px var(--accent, #4a90d9);
-  border-radius: 8px;
-}
+/* task-342f3e151d99 — the field-def walk's hint line (shared by the FieldDraft
+   sub-walk); also used to be the old grid editor's footer hint. */
 .composer__field-editors-hint {
   font-size: 11px;
   color: var(--muted);
   opacity: 0.75;
   letter-spacing: 0.02em;
 }
-.composer__chain-field-row {
+/* task-342f3e151d99 — FieldRowSummary: one already-defined field, reviewed as
+   a single line in the main question walk (replaces the old editable grid
+   row — key/label/type/options/required are now edited via the sub-walk). */
+.composer__field-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  border-radius: 6px;
-}
-.composer__chain-field-row--active {
-  box-shadow: 0 0 0 2px var(--accent, #4a90d9);
-}
-.composer__chain-field-key {
-  width: 110px;
+  gap: 8px;
   font-size: 13px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: transparent;
+  padding: 2px 0;
+}
+.composer__field-row--active {
   color: var(--ink);
-  padding: 4px 6px;
 }
-.composer__chain-field-label {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: transparent;
+.composer__field-row-key {
+  font-weight: 600;
   color: var(--ink);
-  padding: 4px 6px;
 }
-.composer__chain-field-type {
-  font-size: 13px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--ink);
-  padding: 4px 6px;
-}
-.composer__chain-field-options {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink);
-  padding: 4px 6px;
-}
-.composer__chain-field-key:focus,
-.composer__chain-field-label:focus,
-.composer__chain-field-type:focus,
-.composer__chain-field-options:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.composer__chain-field-required {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
+.composer__field-row-label {
   color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.composer__field-row-type {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.composer__field-row-required {
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  padding: 1px 6px;
+}
+.composer__field-row-hint {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.7;
 }
 .composer__chain-neededwhen {
   display: flex;

@@ -667,3 +667,45 @@ export function deriveTemplateEntry(task, detail) {
     updatedAt: task.updated_at ?? 0,
   };
 }
+
+// ── Field-definition sub-walk (task-342f3e151d99) ──────────────────────────
+// Adding an input/output FIELD DEFINITION (not a value) is its own Typeform-
+// style sub-walk inside the composer's single question-by-question walk: one
+// step per question — key -> label -> type -> [options, select only] ->
+// [required, OUTPUTS only] — same Enter-advances/↑↓-move grammar as every
+// other question. These pure step-sequence helpers are the ONE place that
+// decides the step order (and whether a step is skipped), so the composer's
+// keyboard handler and this module's tests share a single contract instead of
+// each re-deriving "outputs get a required step" / "only select gets options"
+// logic. NON-PHI: field key/label/type/options are configuration, not values.
+
+/** The ordered sub-walk steps for one field definition. `kind` is 'inputs' or
+ *  'outputs' (outputs get a trailing 'required' step); `fieldType` skips the
+ *  'options' step unless it's 'select'. Pure — looked up fresh from the
+ *  field's CURRENT type each call, so changing type mid-walk (on the 'type'
+ *  step) correctly grows/shrinks the remaining steps. */
+export function fieldDraftSteps(kind, fieldType) {
+  const steps = ['key', 'label', 'type'];
+  if (fieldType === 'select') steps.push('options');
+  if (kind === 'outputs') steps.push('required');
+  return steps;
+}
+
+/** The step after `step` in this field's sub-walk, or null when `step` is the
+ *  LAST one — the caller should commit the field to the list, same as
+ *  advancing off the last real question hops to the commit footer. */
+export function nextFieldDraftStep(kind, fieldType, step) {
+  const steps = fieldDraftSteps(kind, fieldType);
+  const i = steps.indexOf(step);
+  if (i < 0 || i >= steps.length - 1) return null;
+  return steps[i + 1];
+}
+
+/** The step before `step`, or null when `step` is the FIRST one — the caller
+ *  should exit the sub-walk back to the field it was reviewing/adding. */
+export function prevFieldDraftStep(kind, fieldType, step) {
+  const steps = fieldDraftSteps(kind, fieldType);
+  const i = steps.indexOf(step);
+  if (i <= 0) return null;
+  return steps[i - 1];
+}
