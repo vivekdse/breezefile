@@ -52,7 +52,7 @@
   font-size: var(--fs-sm);
 }
 .tep__error {
-  color: var(--nh-failed, #d9483b);
+  color: var(--nh-failed, var(--err));
 }
 .tep__row {
   display: flex;
@@ -177,7 +177,7 @@
   border-radius: 6px;
 }
 .tep-field__del:hover {
-  color: var(--nh-failed, #d9483b);
+  color: var(--nh-failed, var(--err));
   background: var(--panel-2, var(--bg-2));
 }
 
@@ -188,27 +188,5 @@
   margin-top: auto;
   padding-top: var(--sp-2);
 }
-.tep__cancel,
-.tep__save {
-  appearance: none;
-  font: inherit;
-  font-size: var(--fs-sm);
-  padding: 6px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.tep__cancel {
-  background: transparent;
-  color: var(--muted-on-panel, var(--fg-2));
-  border-color: var(--rule-on-panel, var(--border-1));
-}
-.tep__save {
-  background: var(--accent);
-  color: var(--accent-ink, #fff);
-}
-.tep__save:disabled,
-.tep__cancel:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
+/* Cancel/Save now use the shared .btn/.btn--secondary/.btn--primary classes
+   (src/styles/buttons.css) instead of bespoke button CSS. */

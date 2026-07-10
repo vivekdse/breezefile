@@ -413,7 +413,7 @@ export function ProjectDialog({ project, projects, defaultGroupId, onClose, onSa
               />
               <button
                 type="button"
-                className="nh__btn"
+                className="btn btn--secondary"
                 onClick={() => void handleAddFolder()}
                 disabled={folderBusy || !newFolder.trim()}
               >
@@ -426,12 +426,12 @@ export function ProjectDialog({ project, projects, defaultGroupId, onClose, onSa
         </div>
 
         <div className="nh-pdlg__foot">
-          <button type="button" className="nh__btn" onClick={onClose} disabled={saving}>
+          <button type="button" className="btn btn--secondary" onClick={onClose} disabled={saving}>
             Cancel
           </button>
           <button
             type="button"
-            className="nh__btn nh__btn--primary"
+            className="btn btn--primary"
             onClick={() => void handleSave()}
             disabled={saving || !name.trim() || (!isEdit && !groupId)}
           >

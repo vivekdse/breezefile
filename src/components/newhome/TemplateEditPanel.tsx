@@ -244,10 +244,10 @@ export function TemplateEditPanel({
           {saveError && <div className="tep__error">{saveError}</div>}
 
           <div className="tep__actions">
-            <button type="button" className="tep__cancel" onClick={onClose} disabled={saving}>
+            <button type="button" className="btn btn--secondary" onClick={onClose} disabled={saving}>
               Cancel
             </button>
-            <button type="button" className="tep__save" onClick={() => void save()} disabled={saving}>
+            <button type="button" className="btn btn--primary" onClick={() => void save()} disabled={saving}>
               {saving ? 'Saving…' : 'Save changes'}
             </button>
           </div>

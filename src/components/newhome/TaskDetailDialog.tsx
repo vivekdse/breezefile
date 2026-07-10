@@ -930,7 +930,7 @@ export function TaskDetailDialog({
             <div className="nh-dialog__section-title">Talk back</div>
             <div className="nh-dialog__talkback">
               {session ? (
-                <button type="button" className="nh-dialog__btn" onClick={openSession}>
+                <button type="button" className="btn btn--secondary" onClick={openSession}>
                   Open session
                 </button>
               ) : (
@@ -955,7 +955,7 @@ export function TaskDetailDialog({
               <div className="nh-dialog__talkback-row">
                 <button
                   type="button"
-                  className="nh-dialog__btn"
+                  className="btn btn--secondary"
                   disabled={sendingMessage || !messageDraft.trim()}
                   onClick={() => void sendMessage()}
                 >
@@ -968,7 +968,7 @@ export function TaskDetailDialog({
                   // headless resume-on-answer plumbing wakes daemons).
                   <button
                     type="button"
-                    className="nh-dialog__btn"
+                    className="btn btn--secondary"
                     disabled={sendingMessage || !messageDraft.trim()}
                     onClick={() => void sendMessage(true)}
                   >
@@ -987,12 +987,12 @@ export function TaskDetailDialog({
         </div>
 
         <div className="nh-dialog__footer">
-          <button type="button" className="nh-dialog__btn nh-dialog__btn--danger" onClick={cancelTask}>
+          <button type="button" className="btn btn--danger" onClick={cancelTask}>
             Cancel Task
           </button>
           <button
             type="button"
-            className="nh-dialog__btn"
+            className="btn btn--secondary"
             disabled={sendingMessage || !messageDraft.trim()}
             onClick={() => void sendMessage()}
           >
@@ -1005,7 +1005,7 @@ export function TaskDetailDialog({
           {startAction && status !== 'needs' && status !== 'failed' && (
             <button
               type="button"
-              className="nh-dialog__btn nh-dialog__btn--start"
+              className="btn btn--primary nh-dialog__footer-push"
               disabled={!startAction.enabled}
               title={startAction.tooltip}
               onClick={startTask}
@@ -1016,18 +1016,18 @@ export function TaskDetailDialog({
           {status === 'needs' && pendingQuestion ? (
             <button
               type="button"
-              className="nh-dialog__btn nh-dialog__btn--primary"
+              className="btn btn--primary nh-dialog__footer-push"
               disabled={!canSubmitAnswer(draftAnswer, answering)}
               onClick={() => void submitAnswer(draftAnswer)}
             >
               {answering ? 'Submitting…' : 'Submit Answer'}
             </button>
           ) : status === 'failed' ? (
-            <button type="button" className="nh-dialog__btn nh-dialog__btn--warn" onClick={retry}>
+            <button type="button" className="btn nh-dialog__btn--warn nh-dialog__footer-push" onClick={retry}>
               Retry
             </button>
           ) : (
-            <button type="button" className="nh-dialog__btn nh-dialog__btn--primary" onClick={onClose}>
+            <button type="button" className="btn btn--primary nh-dialog__footer-push" onClick={onClose}>
               Close
             </button>
           )}

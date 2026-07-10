@@ -15,21 +15,27 @@
   align-items: center;
   gap: 6px;
   font-weight: 500;
+  color: var(--text-on-panel);
 }
+/* task-… (composer visual grammar unification) — an underline input matching
+   composer__path-input's chrome (transparent, bottom rule, accent on focus)
+   instead of a boxed input, so a source-bound field reads as part of the same
+   form as every other composer control. */
 .nh-typeahead__input {
   appearance: none;
-  border: 1px solid var(--border-1);
-  background: var(--bg-1);
-  color: var(--text-1);
-  border-radius: var(--r-sm);
-  padding: 5px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--rule-on-panel);
+  background: transparent;
+  color: var(--text-on-panel);
+  border-radius: 0;
+  padding: 5px 0;
   font: inherit;
   font-size: var(--fs-sm);
   width: 100%;
 }
 .nh-typeahead__input:focus {
   outline: none;
-  border-color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 .nh-typeahead__menu {
   position: absolute;
@@ -37,38 +43,41 @@
   left: 0;
   right: 0;
   z-index: 20;
-  margin-top: 2px;
-  background: var(--bg-2, var(--bg-1));
-  border: 1px solid var(--border-1);
-  border-radius: var(--r-sm);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  margin-top: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
   max-height: 220px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  padding: 4px;
 }
+/* Same hover treatment as composer__option: color shifts to accent, no
+   background fill — reads as the same option-row idiom as who/template/etc. */
 .nh-typeahead__opt {
   appearance: none;
   border: none;
   background: transparent;
-  color: var(--text-1);
+  color: var(--text-on-panel);
   text-align: left;
-  padding: 7px 10px;
+  padding: 6px 8px;
   cursor: pointer;
   font: inherit;
   font-size: var(--fs-sm);
+  border-radius: var(--r-sm);
 }
 .nh-typeahead__opt:hover,
 .nh-typeahead__opt:focus {
-  background: var(--accent);
-  color: var(--text-on-accent);
+  color: var(--accent);
   outline: none;
 }
 .nh-typeahead__hint {
-  padding: 7px 10px;
-  color: var(--text-2, var(--text-1));
+  padding: 7px 8px;
+  color: var(--muted-on-panel);
   font-size: var(--fs-sm);
-  opacity: 0.75;
+  opacity: 0.85;
 }
 .nh-typeahead__hint--err {
   color: var(--err);

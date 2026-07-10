@@ -452,7 +452,7 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.nh-dialog__pipeline-start:hover:not(:disabled) { background: var(--accent); color: var(--bg-1); }
+.nh-dialog__pipeline-start:hover:not(:disabled) { background: var(--accent); color: var(--text-on-accent); }
 .nh-dialog__pipeline-start:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── attachments ───────────────────────────────────────────────────────── */
@@ -514,52 +514,34 @@
   flex-wrap: wrap;
 }
 
-.nh-dialog__btn {
-  appearance: none;
-  border: 1px solid var(--border-2);
-  background: var(--bg-1);
-  color: var(--text-on-panel);
-  border-radius: var(--r-md);
-  padding: 6px 14px;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--fs-sm);
-}
-.nh-dialog__btn:hover:not(:disabled) {
-  background: var(--bg-3);
-}
-.nh-dialog__btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.nh-dialog__btn--primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--text-on-accent);
+/* Footer actions now use the shared .btn / .btn--primary / .btn--secondary /
+   .btn--danger variants (src/styles/buttons.css) instead of bespoke button
+   CSS, so this surface speaks the same visual language as every other dialog.
+   Only the parts buttons.css doesn't cover — right-alignment plumbing and the
+   one "warn" (Retry) color, which has no shared variant yet — live here. */
+
+/* Push a footer button to the right edge. When TWO push buttons sit next to
+   each other (▶ Start + Close, both start/non-failed-status only), flexbox's
+   `margin-left: auto` would split the leftover space between both auto
+   margins and separate them — the adjacent-sibling rule below collapses the
+   second one back to a normal small gap so they read as one right-aligned
+   cluster instead of two independently-pushed buttons. */
+.nh-dialog__footer-push {
   margin-left: auto;
 }
-.nh-dialog__btn--danger {
-  background: transparent;
-  border-color: var(--nh-failed);
-  color: var(--nh-failed);
+.nh-dialog__footer-push + .nh-dialog__footer-push {
+  margin-left: var(--sp-2);
 }
-.nh-dialog__btn--danger:hover:not(:disabled) {
-  background: var(--nh-failed-soft);
-}
+
+/* Retry — no shared "warn" button variant exists yet (buttons.css only has
+   primary/secondary/ghost/danger). Built on the same --nh-needs status token
+   the rest of this dialog's "needs attention" chrome uses, layered on top of
+   the shared .btn base for consistent sizing/hover/focus mechanics. */
 .nh-dialog__btn--warn {
   background: var(--nh-needs);
   border-color: var(--nh-needs);
   color: var(--text-on-accent);
-  margin-left: auto;
 }
-.nh-dialog__btn--start {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--text-on-accent);
-  margin-left: auto;
-}
-/* When Start sits alongside a right-aligned primary (e.g. "Close"), only the
-   first right-pushed button needs the auto margin; the sibling hugs it. */
-.nh-dialog__btn--start + .nh-dialog__btn--primary {
-  margin-left: var(--sp-2);
+.nh-dialog__btn--warn:hover:not(:disabled) {
+  filter: brightness(1.06);
 }

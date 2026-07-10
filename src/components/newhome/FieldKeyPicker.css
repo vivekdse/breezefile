@@ -15,19 +15,18 @@
   min-width: 240px;
   max-height: 320px;
   overflow-y: auto;
-  background: var(--bg-2, var(--bg-1, #fff));
-  border: 1px solid var(--border-1, var(--rule, #ccc));
-  border-radius: var(--r-sm, 6px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  background: var(--bg-2);
+  border: 1px solid var(--rule-on-panel);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
   padding: 4px;
 }
 
-/* task-342f3e151d99 — FieldSourcePicker: the inline, keyboard-first option
-   list. Deliberately self-styled (`.fsp*`, not `.composer__*`) so it works
-   standalone wherever it's dropped — inside the `.fkp__menu` popup above, or
-   directly inline in a composer question section — without depending on
-   TaskComposer.css being loaded. Visually mirrors the composer's option-list
-   idiom (digit kbd + label + hint, active-row highlight). */
+/* task-342f3e151d99 — FieldSourcePicker's option list now renders with the
+   SHARED composer__options/composer__option classes (TaskComposer.css) —
+   see FieldKeyPicker.tsx — so it reads as the same form as who/template/type.
+   Only the wrapper chrome below (breadcrumb + live search buffer) keeps its
+   own minimal styling, since it has no composer equivalent. */
 .fsp {
   display: flex;
   flex-direction: column;
@@ -36,16 +35,16 @@
 }
 .fsp__crumb {
   padding: 2px 6px 4px;
-  font-size: var(--fs-xs, 11px);
+  font-size: var(--fs-2xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-2, var(--muted, #888));
+  letter-spacing: var(--tracking-caps);
+  color: var(--muted-on-panel);
 }
 .fsp__query {
   padding: 2px 6px 6px;
-  font-size: var(--fs-sm, 13px);
-  color: var(--text-2, var(--muted, #888));
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
 }
 .fsp__query-caret {
   margin-left: 1px;
@@ -57,69 +56,19 @@
     opacity: 0;
   }
 }
-.fsp__options {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  max-height: 300px;
-  overflow-y: auto;
-}
-.fsp__option {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--text-1, inherit);
-  text-align: left;
-  padding: 6px 8px;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--fs-sm, 13px);
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  border-radius: var(--r-sm, 4px);
-}
-.fsp__option--active,
-.fsp__option:hover,
-.fsp__option:focus {
-  background: var(--accent, #4a90d9);
-  color: var(--text-on-accent, #fff);
-  outline: none;
-}
-.fsp__option-key {
-  flex: 0 0 auto;
-  min-width: 14px;
-  text-align: center;
-  font-size: var(--fs-xs, 11px);
-  opacity: 0.7;
-}
-.fsp__option-label {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fsp__option-hint {
-  flex: 0 0 auto;
-  font-size: var(--fs-xs, 11px);
-  opacity: 0.65;
-}
-.fsp__option--custom {
-  font-style: italic;
-}
-.fsp__option--browse {
-  border-top: 1px solid var(--border-1, var(--rule, #ddd));
-  margin-top: 2px;
-  padding-top: 8px;
-}
 .fsp__empty {
   padding: 7px 8px;
-  color: var(--text-2, var(--muted, #888));
-  font-size: var(--fs-sm, 13px);
+  color: var(--muted-on-panel);
+  font-size: var(--fs-sm);
   opacity: 0.8;
+}
+/* The "Browse all…" option sits below the top picks — a hairline divider
+   marks it as a step-down, same idea as composer__option--other's italic
+   marking "Custom" as the freeform escape hatch. */
+.composer__option--browse {
+  border-top: 1px solid var(--rule-on-panel);
+  margin-top: 2px;
+  padding-top: 8px;
 }
 
 /* Source binding badge on a field row. */
@@ -129,10 +78,10 @@
   gap: 3px;
   padding: 1px 4px 1px 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent, #4a90d9) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent, #4a90d9) 40%, transparent);
-  color: var(--accent, #4a90d9);
-  font-size: var(--fs-xs, 11px);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
   font-weight: 500;
   max-width: 160px;
 }
@@ -154,22 +103,4 @@
 }
 .fkp-badge__clear:hover {
   opacity: 1;
-}
-
-/* task-342f3e151d99 — the digit hint must LOOK like a key, exactly as the
-   composer's other option lists render theirs (boxed <kbd>), otherwise the
-   shortcut reads as decoration and the user never tries it. */
-.fsp__option-key {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  min-width: 18px;
-  padding: 1px 5px;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  opacity: 1;
-  color: var(--muted);
-}
-.fsp__option--active .fsp__option-key {
-  border-color: var(--accent);
-  color: var(--ink);
 }

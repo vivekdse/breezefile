@@ -4515,7 +4515,7 @@ export function TaskComposer(props: Props) {
     return (
       <section
         ref={sectionRefFor('field-draft')}
-        className={sectionClasses('field-draft')}
+        className={sectionClasses('field-draft') + ' composer__q--fields'}
         onClick={() => setActiveIdx(QUESTIONS.indexOf('field-draft'))}
       >
         <div className="composer__q-active-body">
@@ -5463,36 +5463,42 @@ export function TaskComposer(props: Props) {
           {showFieldsSteps && (
             <section
               ref={sectionRefFor('fields')}
-              className={sectionClasses('fields')}
+              className={sectionClasses('fields') + ' composer__q--fields'}
               onClick={() => setActiveIdx(QUESTIONS.indexOf('fields'))}
             >
               {isActiveSection('fields') ? (
                 <div className="composer__q-active-body">
                   <FieldLabel id="fields" />
                   <div className="composer__q-prompt">{promptFor('fields')}</div>
-                  <button
-                    type="button"
-                    className="composer__chain-add-btn"
-                    title="Add input (i)"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startFieldDraft('inputs');
-                    }}
-                  >
-                    + input
-                  </button>
-                  {/* task-342f3e151d99 — every other question advertises its
-                      keys; this one must too, or `i` is a secret. */}
-                  <div className="composer__field-hint">
-                    <kbd>i</kbd> add an input · <kbd>↵</kbd> next question
-                    {taskInputs.length > 0 && (
-                      <>
-                        {' · '}
-                        <kbd>↑</kbd>
-                        <kbd>↓</kbd> review a field
-                      </>
-                    )}
-                  </div>
+                  {/* task-342f3e151d99 (visual grammar unification) — "+ input"
+                      renders as an option ROW, exactly like who/template/type:
+                      a boxed key-chip on the left (the letter it's bound to,
+                      same idiom as the digit chips), the affordance as the
+                      label, and the rest of the keyboard grammar as a trailing
+                      hint — same position who's rows put "assign to them".
+                      This row is ALWAYS present (never disappears once a field
+                      is added) so there is always a visible way to add another. */}
+                  <ul className="composer__options" role="listbox">
+                    <li>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        className="composer__option composer__option--add"
+                        title="Add input (i)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startFieldDraft('inputs');
+                        }}
+                      >
+                        <kbd className="composer__option-key">i</kbd>
+                        <span className="composer__option-label">+ input</span>
+                        <span className="composer__option-hint">
+                          {taskInputs.length > 0 ? '↑ ↓ review a field · ↵ next question' : '↵ next question'}
+                        </span>
+                      </button>
+                    </li>
+                  </ul>
                 </div>
               ) : (
                 renderInert('fields')
@@ -5515,34 +5521,34 @@ export function TaskComposer(props: Props) {
           {showFieldsSteps && (
             <section
               ref={sectionRefFor('outputs')}
-              className={sectionClasses('outputs')}
+              className={sectionClasses('outputs') + ' composer__q--fields'}
               onClick={() => setActiveIdx(QUESTIONS.indexOf('outputs'))}
             >
               {isActiveSection('outputs') ? (
                 <div className="composer__q-active-body">
                   <FieldLabel id="outputs" />
                   <div className="composer__q-prompt">{promptFor('outputs')}</div>
-                  <button
-                    type="button"
-                    className="composer__chain-add-btn"
-                    title="Add output (o)"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startFieldDraft('outputs');
-                    }}
-                  >
-                    + output
-                  </button>
-                  <div className="composer__field-hint">
-                    <kbd>o</kbd> add an output · <kbd>↵</kbd> next question
-                    {taskOutputs.length > 0 && (
-                      <>
-                        {' · '}
-                        <kbd>↑</kbd>
-                        <kbd>↓</kbd> review a field
-                      </>
-                    )}
-                  </div>
+                  <ul className="composer__options" role="listbox">
+                    <li>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={false}
+                        className="composer__option composer__option--add"
+                        title="Add output (o)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startFieldDraft('outputs');
+                        }}
+                      >
+                        <kbd className="composer__option-key">o</kbd>
+                        <span className="composer__option-label">+ output</span>
+                        <span className="composer__option-hint">
+                          {taskOutputs.length > 0 ? '↑ ↓ review a field · ↵ next question' : '↵ next question'}
+                        </span>
+                      </button>
+                    </li>
+                  </ul>
                 </div>
               ) : (
                 renderInert('outputs')

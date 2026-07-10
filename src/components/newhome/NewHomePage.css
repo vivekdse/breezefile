@@ -98,7 +98,19 @@
   cursor: pointer;
   transition: background var(--motion-hover), border-color var(--motion-hover);
 }
-.nh__btn:hover {
+/* task-dark-on-dark-plum-primary — scoped OFF the filled variants
+   (--primary/--danger/--active) below: this rule and each variant's own
+   :hover rule share specificity (one class + :hover), so whichever comes
+   later in source wins PER PROPERTY. Previously nh__btn--primary/--danger
+   didn't re-declare `background` on hover, so this neutral-bg swap won —
+   filled accent buttons went dark-on-hover while their text stayed the
+   accent-ink token tuned for the accent fill, not for --bg-3 (plum's
+   --bg-3 is inherited un-overridden dark alpine blue, so --text-on-accent's
+   dark plum ink landed on a near-black background: dark-on-dark). Excluding
+   the filled variants here, and having each restate its own hover fill
+   below, makes every variant's hover state self-contained regardless of
+   source order. */
+.nh__btn:hover:not(.nh__btn--primary):not(.nh__btn--danger):not(.nh__btn--active) {
   background: var(--bg-3);
 }
 /* Customize button while its inline panel is open (task-7bdb94445321). */
@@ -107,22 +119,35 @@
   color: var(--accent);
   background: var(--accent-soft);
 }
+.nh__btn--active:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+/* Primary — filled accent, same theme-safe contract as .btn--primary in
+   buttons.css: --accent fill + --text-on-accent label, hover via
+   filter/brightness only (never a background swap, which is what let a
+   theme-safe accent-ink land on an unrelated dark surface — see above). */
 .nh__btn--primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--text-on-accent);
 }
 .nh__btn--primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
   filter: brightness(1.06);
 }
 /* task-a9841cfc0e1b — destructive project action (Delete). Same shape as
-   nh__btn, red instead of accent. */
+   nh__btn, red instead of accent. Outline-only at rest; hover fills with
+   the theme-safe soft-err tint (same "soft chip" pattern as the roster's
+   status pills) rather than a neutral --bg-* swap. */
 .nh__btn--danger {
   border-color: var(--nh-failed);
   color: var(--nh-failed);
 }
 .nh__btn--danger:hover {
   background: var(--nh-failed-soft);
+  border-color: var(--nh-failed);
 }
 
 /* task-a9841cfc0e1b — "Show archived" toggle next to the picker. */
@@ -250,7 +275,11 @@
   transition: background var(--motion-hover), border-color var(--motion-hover),
     color var(--motion-hover);
 }
-.nh__icon-btn:hover {
+/* Scoped off --danger below (see the nh__btn:hover comment above for why a
+   shared neutral hover rule that a filled/tinted variant doesn't re-declare
+   is fragile): keeps the danger tint self-contained regardless of source
+   order. */
+.nh__icon-btn:hover:not(.nh__icon-btn--danger) {
   background: var(--bg-3);
 }
 .nh__icon-btn:disabled {
@@ -263,6 +292,7 @@
 }
 .nh__icon-btn--danger:hover {
   background: var(--nh-failed-soft);
+  border-color: var(--nh-failed);
 }
 
 /* task-5c8ca16e8e46 — hover-to-edit on the hero title/description. The text is

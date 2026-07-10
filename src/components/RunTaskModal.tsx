@@ -170,7 +170,7 @@ export function RunTaskModal({ cwd, onClose }: Props) {
             <div className="run-task__empty-actions">
               <button
                 type="button"
-                className="run-task__empty-cta"
+                className="btn btn--primary run-task__empty-cta"
                 onClick={() => {
                   onClose();
                   window.dispatchEvent(
@@ -184,7 +184,7 @@ export function RunTaskModal({ cwd, onClose }: Props) {
               </button>
               <button
                 type="button"
-                className="run-task__empty-link"
+                className="btn btn--ghost run-task__empty-link"
                 onClick={() => {
                   onClose();
                   window.dispatchEvent(

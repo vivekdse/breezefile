@@ -123,7 +123,13 @@ function optionLabel(o: PickerOption): string {
  *  (composer) then walks key/label/type itself, exactly like today's blank
  *  add. Digits are reserved for option-select, not the search buffer — field
  *  names are rarely numeric-only, so this trade-off keeps single-keystroke
- *  jumps working even mid-search. */
+ *  jumps working even mid-search.
+ *
+ *  The option list itself renders with the composer's shared
+ *  `composer__options`/`composer__option` classes (TaskComposer.css) — the
+ *  same ones the who/template/type steps use — so this step reads as the
+ *  SAME form, not a bespoke dark popup. Only the wrapper chrome (`.fsp`,
+ *  the breadcrumb, the live search buffer) keeps its own minimal styling. */
 export function FieldSourcePicker({
   existingKeys,
   onPick,
@@ -277,7 +283,13 @@ export function FieldSourcePicker({
           )}
         </div>
       )}
-      <ul className="fsp__options">
+      {/* task-… (composer visual grammar unification) — the source picker's
+          option rows now reuse the SAME composer__options/composer__option
+          classes the who/template/type steps render, instead of a bespoke
+          `.fsp__option*` box — so this step reads as part of the same form,
+          not a different product (numbered kbd chip on the left, hover/active
+          treatment, typography all shared with TaskComposer.css). */}
+      <ul className="composer__options" role="listbox">
         {options.map((o, i) => (
           <li key={optionKey(o)}>
             <button
@@ -285,10 +297,10 @@ export function FieldSourcePicker({
               role="option"
               aria-selected={i === clampedHighlight}
               className={
-                'fsp__option' +
-                (i === clampedHighlight ? ' fsp__option--active' : '') +
-                (o.kind === 'custom' ? ' fsp__option--custom' : '') +
-                (o.kind === 'browse' ? ' fsp__option--browse' : '')
+                'composer__option' +
+                (i === clampedHighlight ? ' composer__option--active' : '') +
+                (o.kind === 'custom' ? ' composer__option--other' : '') +
+                (o.kind === 'browse' ? ' composer__option--browse' : '')
               }
               onMouseEnter={() => setHighlight(i)}
               onClick={(e) => {
@@ -296,10 +308,14 @@ export function FieldSourcePicker({
                 pickIndex(i);
               }}
             >
-              {i < 9 && <kbd className="fsp__option-key">{i + 1}</kbd>}
-              <span className="fsp__option-label">{optionLabel(o)}</span>
+              {i < 9 ? (
+                <kbd className="composer__option-key">{i + 1}</kbd>
+              ) : (
+                <span className="composer__option-key" aria-hidden="true" />
+              )}
+              <span className="composer__option-label">{optionLabel(o)}</span>
               {o.kind === 'field' && (
-                <span className="fsp__option-hint">{catalogTypeToFieldType(o.field.type)}</span>
+                <span className="composer__option-hint">{catalogTypeToFieldType(o.field.type)}</span>
               )}
             </button>
           </li>

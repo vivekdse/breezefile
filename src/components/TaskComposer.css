@@ -98,6 +98,14 @@
   opacity: 1;
   cursor: default;
 }
+/* task-342f3e151d99 — Inputs / Outputs / field sub-walk must read as part of
+   the form, not a darker sub-panel. Drop the filled active box and align the
+   left edge with the inert rows above/below so the whole flow reads as one
+   left-aligned column. */
+.composer__q--fields.composer__q--active {
+  padding: 14px 14px 16px;
+  background: transparent;
+}
 
 /* ── Inert rows (past answer / future prompt) ──────────────────────── */
 /* No labels, no questions for past — just the answer in the same large
@@ -189,7 +197,7 @@
 .composer__template-hint kbd {
   font: inherit;
   padding: 1px 5px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+  border: 1px solid var(--rule-on-panel);
   border-radius: 4px;
   background: var(--bg-3);
 }
@@ -512,11 +520,11 @@
 .composer__prose-suggestion-accept {
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: var(--accent-ink, #04201c);
+  color: var(--text-on-accent);
   font-weight: 600;
 }
 .composer__prose-suggestion-dismiss {
-  border: 1px solid var(--border);
+  border: 1px solid var(--rule-on-panel);
   background: transparent;
   color: var(--muted);
 }
@@ -585,7 +593,7 @@
 .composer__fill-intro kbd {
   font-family: inherit;
   font-weight: 600;
-  color: var(--fg, inherit);
+  color: var(--text-on-canvas);
 }
 
 .composer__cancel-btn,
@@ -671,7 +679,7 @@
   flex-wrap: wrap;
   gap: 14px;
   padding: 8px 20px;
-  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.2));
+  border-top: 1px solid var(--rule-on-panel);
   font-size: 13px;
 }
 .composer__flag {
@@ -704,7 +712,7 @@
   padding: 10px 20px;
   background: transparent;
   border: none;
-  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.2));
+  border-top: 1px solid var(--rule-on-panel);
   color: var(--muted);
   font: inherit;
   font-size: 13px;
@@ -713,7 +721,7 @@
   text-align: left;
 }
 .composer__advanced-toggle:hover {
-  color: var(--fg, inherit);
+  color: var(--text-on-canvas);
 }
 .composer__advanced-caret {
   display: inline-block;
@@ -724,17 +732,17 @@
   flex: 1 1 auto;
 }
 .composer__advanced-toggle--open .composer__advanced-title {
-  color: var(--fg, inherit);
+  color: var(--text-on-canvas);
 }
 .composer__advanced-kbd {
   font-size: 11px;
   padding: 1px 6px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--rule-on-panel);
   border-radius: 4px;
   opacity: 0.7;
 }
 .composer__advanced-body {
-  border-left: 2px solid var(--border, rgba(128, 128, 128, 0.2));
+  border-left: 2px solid var(--rule-on-panel);
 }
 
 /* task-f5a318566148 — launch flags rendered as a multi-select option question:
@@ -827,10 +835,10 @@
 .composer__chain-copyfrom-select {
   font-size: 13px;
   padding: 4px 8px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 6px;
-  background: var(--surface);
-  color: var(--ink);
+  background: var(--bg-2, var(--panel));
+  color: var(--text-on-panel);
 }
 .composer__chain-steps {
   list-style: none;
@@ -841,13 +849,13 @@
   gap: 16px;
 }
 .composer__chain-step {
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 10px;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: var(--surface);
+  background: var(--bg-2, var(--panel));
 }
 .composer__chain-step-head {
   display: flex;
@@ -857,7 +865,7 @@
 .composer__chain-step-num {
   font-size: 12px;
   font-weight: 600;
-  color: var(--muted);
+  color: var(--muted-on-panel);
   width: 18px;
   text-align: center;
   flex-shrink: 0;
@@ -867,9 +875,9 @@
   font-size: 15px;
   font-weight: 600;
   border: none;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-on-panel);
   background: transparent;
-  color: var(--ink);
+  color: var(--text-on-panel);
   padding: 3px 2px;
 }
 .composer__chain-step-name:focus {
@@ -889,7 +897,7 @@ span.composer__chain-step-name {
 /* task-a7214605a998 — chain builder empty state + inline template picker. */
 .composer__chain-empty {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--muted-on-panel);
   line-height: 1.5;
   padding: 8px 2px;
 }
@@ -897,11 +905,11 @@ span.composer__chain-step-name {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 10px;
   padding: 10px;
   margin-top: 12px;
-  background: var(--surface);
+  background: var(--bg-2, var(--panel));
 }
 .composer__chain-step-actions {
   display: flex;
@@ -911,15 +919,15 @@ span.composer__chain-step-name {
 .composer__chain-icon-btn {
   font-size: 12px;
   line-height: 1;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 5px;
-  background: var(--surface);
-  color: var(--muted);
+  background: var(--bg-2, var(--panel));
+  color: var(--muted-on-panel);
   padding: 4px 6px;
   cursor: pointer;
 }
 .composer__chain-icon-btn:hover:not(:disabled) {
-  color: var(--ink);
+  color: var(--text-on-panel);
   border-color: var(--accent);
 }
 .composer__chain-icon-btn:disabled {
@@ -944,22 +952,6 @@ span.composer__chain-step-name {
   outline: none;
   border-color: var(--accent);
 }
-.composer__chain-add-btn {
-  font-size: 12px;
-  border: 1px dashed var(--rule);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  padding: 2px 8px;
-  cursor: pointer;
-  text-transform: none;
-  letter-spacing: normal;
-  font-weight: 500;
-}
-.composer__chain-add-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
 /* task-342f3e151d99 — the field-def walk's hint line (shared by the FieldDraft
    sub-walk); also used to be the old grid editor's footer hint. */
 .composer__field-editors-hint {
@@ -970,16 +962,24 @@ span.composer__chain-step-name {
 }
 /* task-342f3e151d99 — FieldRowSummary: one already-defined field, reviewed as
    a single line in the main question walk (replaces the old editable grid
-   row — key/label/type/options/required are now edited via the sub-walk). */
+   row — key/label/type/options/required are now edited via the sub-walk).
+   (visual grammar unification) — same row rhythm as composer__option (14px,
+   6px/8px padding, 4px radius) and the same active treatment the section
+   band itself uses (accent-soft background), so a defined field reads as
+   part of the same form as the option rows around it, not a denser table.
+   No background of its own — the SECTION's own active band (composer__q--
+   active) already supplies that highlight, so this only needs to color the
+   key to echo it, not paint a second overlapping tint. */
 .composer__field-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  padding: 2px 0;
+  gap: 10px;
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 4px;
 }
-.composer__field-row--active {
-  color: var(--ink);
+.composer__field-row--active .composer__field-row-key {
+  color: var(--accent);
 }
 .composer__field-row-key {
   font-weight: 600;
@@ -1109,18 +1109,16 @@ span.composer__chain-step-name {
 .composer__draft-row-body { min-width: 0; }
 .composer__draft-row-body .composer__q-prompt { margin-bottom: 6px; }
 
-/* The keyboard affordance under the Inputs/Outputs prompts — every other
-   question advertises its keys, so these must too. */
-.composer__field-hint {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted);
+/* task-342f3e151d99 (visual grammar unification) — "+ input"/"+ output" are
+   now option ROWS (composer__option), not a bespoke button+hint pair — see
+   the 'fields'/'outputs' sections in TaskComposer.tsx. `--add` only tweaks the
+   label to read as an affordance rather than a value (dashed accent-tinted
+   look on hover, like the old add-button), everything else — padding, the
+   kbd key-chip, hover color, trailing hint — comes from .composer__option. */
+.composer__option--add .composer__option-label {
+  font-weight: 500;
 }
-.composer__field-hint kbd {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 1px 5px;
-  margin: 0 2px;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
+.composer__option--add:hover .composer__option-key,
+.composer__option--add.composer__option--active .composer__option-key {
+  border-style: dashed;
 }
