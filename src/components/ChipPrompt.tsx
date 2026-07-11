@@ -183,6 +183,7 @@ type Verb =
   | 'projects'
   | 'new-home'
   | 'groups'
+  | 'connections'
   | 'files'
   | 'new-task'
   | 'new-from-template'
@@ -1924,6 +1925,24 @@ export const VERBS: VerbDef[] = [
     execute: (_c, _p, api) => {
       api.closeOverlay();
       window.dispatchEvent(new CustomEvent('fm:openGroups'));
+    },
+  },
+  {
+    // task-62a5b4324954 — Connections: register an external service (a REST
+    // API like QuickBooks, or an MCP server) with its credentials. The
+    // credential goes to the SERVER vault (client -> server) and is never
+    // stored on this machine. Modal panel (mirrors :secrets), not a tab.
+    id: 'connections',
+    label: 'Connections',
+    aliases: ['connections', 'connection', 'apis', 'integrations'],
+    icon: '🔌',
+    describe: () =>
+      'Open Connections — register external API / MCP credentials the agent can use',
+    isAvailable: () => ({ ok: true }),
+    slots: [],
+    execute: (_c, _p, api) => {
+      api.closeOverlay();
+      window.dispatchEvent(new CustomEvent('fm:openConnections'));
     },
   },
   {

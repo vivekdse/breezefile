@@ -66,7 +66,13 @@ import { humanizeError } from '../errorMessages';
 // the New-from-Template fill walk offers the SAME live typeahead the task
 // drawer does, instead of a bare text box. One widget, both surfaces.
 import { SourceTypeahead } from './newhome/SourceTypeahead';
-import type { QueryRef } from '../copilot/savedQueries';
+import type { ConnectionLookupRow, ConnectionRef, QueryRef } from '../copilot/savedQueries';
+// task-8f27d842f14d — the Connection-form field-source snapshot: fan a picked
+// row's bundle fields into `<fieldKey>.*` data-bag sibling keys (+
+// provenance), and the delete-side helper that cleans up stale sibling keys
+// on a re-pick/clear. Pure logic lives in fieldCatalog.mjs; see its comments
+// for the exact key scheme.
+import { connectionBundleKeys, snapshotConnectionRow } from './newhome/fieldCatalog.mjs';
 import {
   type RecurrenceForm,
   buildCronFromForm,
@@ -1726,11 +1732,26 @@ export function TaskComposer(props: Props) {
         const key = effectiveFieldKey(f);
         if (!key) continue;
         values[key] = templateFillValues[fieldRef(entry.id, f.key)] ?? '';
-        // task-73f6304ffb94 — a source-backed pick also carries its opaque
-        // record ref on a sibling `<key>.ref` key, so the instantiated task's
-        // data bag points at the REAL record, not just the typed-looking label.
-        const refVal = templateFillValues[fieldRef(entry.id, `${f.key}.ref`)];
-        if (refVal) values[`${key}.ref`] = refVal;
+        if (f.source && 'connectionId' in f.source) {
+          // task-8f27d842f14d — Connection form: sweep every `<f.key>.*`
+          // sibling the onSelectSource handler fanned onto templateFillValues
+          // (ref/connection_id/connection_version/picked_at + bundle fields)
+          // onto the instantiate call's `values`, keyed by the EFFECTIVE
+          // server key (mirrors the plain value above, not f.key raw).
+          const prefix = fieldRef(entry.id, `${f.key}.`);
+          for (const [ref, v] of Object.entries(templateFillValues)) {
+            if (!ref.startsWith(prefix)) continue;
+            const suffix = ref.slice(fieldRef(entry.id, f.key).length + 1);
+            values[`${key}.${suffix}`] = v;
+          }
+        } else {
+          // task-73f6304ffb94 — a source-backed pick also carries its opaque
+          // record ref on a sibling `<key>.ref` key, so the instantiated
+          // task's data bag points at the REAL record, not just the
+          // typed-looking label.
+          const refVal = templateFillValues[fieldRef(entry.id, `${f.key}.ref`)];
+          if (refVal) values[`${key}.ref`] = refVal;
+        }
       }
       const result = await fm.typebuild.templates.instantiate(
         entry.id,
@@ -3343,16 +3364,32 @@ export function TaskComposer(props: Props) {
         if (!key) continue;
         keys.push(key);
         upsert[key] = templateValues[fieldRef('task', key)] ?? '';
-        // task-73f6304ffb94 / task-e085ebbdb23f — a source-backed field's pick
-        // also carries the opaque record ref on a sibling `<key>.ref` entry
-        // (see FieldValueEditor's onSelectSource); this was previously
-        // dropped here, so the filled task pointed only at the typed-looking
-        // LABEL, never the real record (part of the reported "wrong type"
-        // fill bug — saveFromTemplate already did this correctly).
-        const refVal = templateValues[fieldRef('task', `${key}.ref`)];
-        if (refVal) {
-          keys.push(`${key}.ref`);
-          upsert[`${key}.ref`] = refVal;
+        if (f.source && 'connectionId' in f.source) {
+          // task-8f27d842f14d — Connection form: the onSelectSource handler
+          // already fanned the picked row's bundle into `<key>.*` sibling
+          // entries on templateValues (ref/connection_id/connection_version/
+          // picked_at + every bundled field) — sweep every `<key>.` prefixed
+          // entry so it rides the SAME patch call, not a second write.
+          const prefix = fieldRef('task', `${key}.`);
+          for (const [ref, v] of Object.entries(templateValues)) {
+            if (!ref.startsWith(prefix)) continue;
+            const suffix = ref.slice(fieldRef('task', key).length + 1); // "<key>." dropped
+            keys.push(`${key}.${suffix}`);
+            upsert[`${key}.${suffix}`] = v;
+          }
+        } else {
+          // task-73f6304ffb94 / task-e085ebbdb23f — a source-backed field's
+          // pick also carries the opaque record ref on a sibling `<key>.ref`
+          // entry (see FieldValueEditor's onSelectSource); this was
+          // previously dropped here, so the filled task pointed only at the
+          // typed-looking LABEL, never the real record (part of the reported
+          // "wrong type" fill bug — saveFromTemplate already did this
+          // correctly).
+          const refVal = templateValues[fieldRef('task', `${key}.ref`)];
+          if (refVal) {
+            keys.push(`${key}.ref`);
+            upsert[`${key}.ref`] = refVal;
+          }
         }
       }
       const res = await fm.typebuild.taskData.patch(createdTaskId, upsert, [], keys);
@@ -4194,13 +4231,28 @@ export function TaskComposer(props: Props) {
               onHighlightOption={(i) => setTemplateFieldHighlight((prev) => ({ ...prev, [ref]: i }))}
               onChangeText={(v) => setTemplateValue(ref, v)}
               onSubmitText={() => fieldAdvance()}
-              onSelectSource={(label, qref) => {
+              onSelectSource={(label, qref, row) => {
                 setTemplateValue(ref, label);
-                // task-73f6304ffb94 — the opaque record ref rides a sibling
-                // `<key>.ref` key, same convention saveFromTemplate/the values
-                // phase use, so saveFillValues (fixed alongside this) can
-                // thread it into the data-bag patch instead of dropping it.
-                setTemplateValue(fieldRef(taskDef.id, `${field.key}.ref`), JSON.stringify(qref));
+                if (row && field.source && 'connectionId' in field.source) {
+                  // task-8f27d842f14d — Connection form: fan the WHOLE picked
+                  // row's bundle into `<fieldKey>.*` sibling keys (+
+                  // provenance), same taskData.patch upsert saveFillValues
+                  // reads back below. Clear any stale sibling from a PRIOR
+                  // pick first so a changed bundle/row shape never leaves an
+                  // orphan (connectionBundleKeys covers both this pick and any
+                  // earlier one via prefix, not just today's field names).
+                  const stale = connectionBundleKeys(field.key, Object.keys(templateValues).map((k) => k.slice(taskDef.id.length + 1)));
+                  for (const k of stale) setTemplateValue(fieldRef(taskDef.id, k), '');
+                  const { upsert } = snapshotConnectionRow(field.key, field.source, row);
+                  for (const [k, v] of Object.entries(upsert)) setTemplateValue(fieldRef(taskDef.id, k), v);
+                } else {
+                  // task-73f6304ffb94 — SavedQuery form: the opaque record ref
+                  // rides a sibling `<key>.ref` key, same convention
+                  // saveFromTemplate/the values phase use, so saveFillValues
+                  // (fixed alongside this) can thread it into the data-bag
+                  // patch instead of dropping it.
+                  setTemplateValue(fieldRef(taskDef.id, `${field.key}.ref`), JSON.stringify(qref));
+                }
                 fieldAdvance();
               }}
             />
@@ -4240,7 +4292,11 @@ export function TaskComposer(props: Props) {
     onHighlightOption: (i: number) => void;
     onChangeText: (v: string) => void;
     onSubmitText: () => void;
-    onSelectSource: (label: string, qref: QueryRef) => void;
+    // task-8f27d842f14d — `row` carries the WHOLE picked row (ref + every
+    // declared field) for a Connection-bound field, so callers can snapshot
+    // its bundle into `<fieldKey>.*` sibling keys; undefined for the
+    // SavedQuery form (only `ref` is durable there, unchanged behavior).
+    onSelectSource: (label: string, ref: QueryRef | ConnectionRef, row?: ConnectionLookupRow) => void;
   }) {
     const optionType = isFieldOptionType(field);
     if (optionType) {
@@ -4771,13 +4827,33 @@ export function TaskComposer(props: Props) {
                                   if (i >= templateEntryFieldEntries.length - 1) void saveFromTemplate();
                                   else advance();
                                 }}
-                                onSelectSource={(label, qref) => {
+                                onSelectSource={(label, qref, row) => {
                                   setTemplateFillValue(ref, label);
                                   if (templateEntry) {
-                                    setTemplateFillValue(
-                                      fieldRef(templateEntry.id, `${field.key}.ref`),
-                                      JSON.stringify(qref),
-                                    );
+                                    if (row && field.source && 'connectionId' in field.source) {
+                                      // task-8f27d842f14d — Connection form:
+                                      // fan the bundle into `<fieldKey>.*`
+                                      // sibling keys (+ provenance); clear any
+                                      // stale sibling from a prior pick first.
+                                      const stale = connectionBundleKeys(
+                                        field.key,
+                                        Object.keys(templateFillValues).map((k) =>
+                                          k.slice(templateEntry.id.length + 1),
+                                        ),
+                                      );
+                                      for (const k of stale) {
+                                        setTemplateFillValue(fieldRef(templateEntry.id, k), '');
+                                      }
+                                      const { upsert } = snapshotConnectionRow(field.key, field.source, row);
+                                      for (const [k, v] of Object.entries(upsert)) {
+                                        setTemplateFillValue(fieldRef(templateEntry.id, k), v);
+                                      }
+                                    } else {
+                                      setTemplateFillValue(
+                                        fieldRef(templateEntry.id, `${field.key}.ref`),
+                                        JSON.stringify(qref),
+                                      );
+                                    }
                                   }
                                   advance();
                                 }}

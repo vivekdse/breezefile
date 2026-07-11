@@ -1,4 +1,4 @@
-import type { Agent, ChainDef, Entry, Group, GroupDetail, GroupInvite, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Agent, CallSpec, ChainDef, ConnectionCredential, ConnectionLookupRow, ConnectionRegisterInput, ConnectionSummary, Entry, Group, GroupDetail, GroupInvite, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 import type { TaskDefField } from './components/newhome/types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
@@ -794,6 +794,55 @@ type Fm = {
       ) => Promise<{ ok: boolean; unsupported?: true }>;
       invites: () => Promise<GroupInvite[]>;
       respondToInvite: (groupId: string, accept: boolean) => Promise<void>;
+    };
+    // docs/connections-design.md §B/§C — Connections: register an external
+    // service (a REST API like QuickBooks, or an MCP server) with its
+    // credentials. The CREDENTIAL is sent to the SERVER vault and never
+    // stored/echoed on this machine — `list`/`get` return a creds-STRIPPED
+    // ConnectionSummary (`credentialDisplay` carries only non-secret
+    // metadata). Server endpoints are not deployed yet, so every method
+    // degrades gracefully (list/get → []/null, mutations → a structured
+    // { ok:false } rather than throwing) — see electron/sources/typebuild.ts
+    // for the feature-detect. This task builds the registry + capture
+    // surface only — no operator-tool mounting or field-binding (separate
+    // tasks).
+    connections: {
+      list: () => Promise<ConnectionSummary[]>;
+      get: (id: string) => Promise<ConnectionSummary | null>;
+      register: (input: ConnectionRegisterInput) => Promise<ConnectionSummary>;
+      update: (
+        id: string,
+        patch: Partial<Omit<ConnectionRegisterInput, 'credential'>>,
+      ) => Promise<
+        { ok: true; connection: ConnectionSummary } | { ok: false; reason: string; status: number }
+      >;
+      remove: (
+        id: string,
+      ) => Promise<{ ok: true } | { ok: false; reason: string; status: number }>;
+      setCredential: (
+        id: string,
+        credential: ConnectionCredential,
+      ) => Promise<{ ok: true } | { ok: false; reason: string; status: number }>;
+      // Re-fetch/re-hash the OpenAPI/MCP spec at `spec.url` (clears
+      // 'needs_attention' status on success). Returns the refreshed projection.
+      refreshSpec: (id: string) => Promise<ConnectionSummary>;
+      // task-8f27d842f14d — field-source use of a Connection (docs/connections-
+      // design.md §D.2): run ONE declarative `lookup` CallSpec CLIENT-DIRECT
+      // against the Connection's external API (never through
+      // general.typebuild.com — the server only ever brokers the credential,
+      // §A/§C) and return the rows per `lookup.output.shape === 'rows'`. THIN
+      // renderer-side call: the actual client-direct HTTP + credential
+      // brokering happens in TypeBuildTaskSource.lookupConnection
+      // (electron/sources/typebuild.ts), delegating to the parallel
+      // operator-tools task's interpreter (electron/typebuild/connection-exec.ts,
+      // task-df205c19d40c). `params` fills the CallSpec's `{inputKey}` slots
+      // (the typed search term rides `params.q`, mirroring `queries.execute`'s
+      // `{ q }`).
+      lookup: (
+        connectionId: string,
+        callSpec: CallSpec,
+        params: Record<string, string>,
+      ) => Promise<ConnectionLookupRow[]>;
     };
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (

@@ -106,6 +106,109 @@ export function blankCustomField() {
   return { key: '', label: '', type: 'text' };
 }
 
+// task-8f27d842f14d — Connection-binding counterparts to
+// sourceFromCatalogEntry/fieldFromCatalog. No Connection-browsing catalog UI
+// exists yet (a separate task builds the picker); these exist so any caller
+// that already holds a Connection id + a declarative lookup CallSpec
+// (docs/connections-design.md §D.2) can build a well-formed `source` /
+// TaskDefField the same way the SavedQuery form does, instead of hand-rolling
+// the shape at each call site.
+
+/** Build the Connection-form `source` binding: `bundle` defaults to `'all'`
+ *  (snapshot every field the lookup's `output.fields` declares) unless the
+ *  caller narrows it to an explicit `{ fields: [...] }` list. */
+export function sourceFromConnection(connectionId, connectionVersion, lookup, opts = {}) {
+  const source = {
+    connectionId,
+    connectionVersion,
+    lookup,
+    bundle: opts.bundle ?? 'all',
+  };
+  if (typeof opts.entityType === 'string' && opts.entityType) source.entityType = opts.entityType;
+  return source;
+}
+
+/** Build a new TaskDefField bound to a Connection lookup. Mirrors
+ *  fieldFromCatalog's key-dedup behavior; unlike the catalog form there is no
+ *  external "field name" to derive a key from (a Connection lookup's row
+ *  shape isn't known ahead of a live call), so the caller supplies key/label/
+ *  type directly. Returns null when `key` normalizes to empty. */
+export function fieldFromConnection(key, label, type, connectionId, connectionVersion, lookup, opts = {}) {
+  const base = normalizeFieldKey(key);
+  if (!base) return null;
+  const source = sourceFromConnection(connectionId, connectionVersion, lookup, opts);
+  return {
+    key: dedupeKey(base, opts.existingKeys ?? []),
+    label: label || humanizeFieldName(key) || key,
+    type: type || 'text',
+    source,
+  };
+}
+
+// task-8f27d842f14d — docs/connections-design.md §D.2 step 3/4: turn a picked
+// Connection-lookup ROW into the `<fieldKey>.*` sibling entries that ride the
+// task `data` bag alongside the existing `<fieldKey>` (label) and
+// `<fieldKey>.ref` (JSON ref) convention. Pure + side-effect-free (like the
+// rest of this module) so TaskComposer's write path and any future consumer
+// (a resolved-fresh fill, once the lazy mode in D.2 is built) share ONE
+// definition of "what does a Connection pick snapshot."
+//
+// String -> string only, per typebuild-data-field-contract.md §1: a
+// structured row-field VALUE (object/array) is JSON-encoded into its string
+// slot; the consumer parses. Values are read off `row` by the bundle's `from`
+// name (the CallSpec output.fields key the row was mapped under, NOT
+// `row.ref`, which is handled separately below).
+//
+// Returns `{ upsert, keys }` — `upsert` is ready to merge into a
+// fm.typebuild.taskData.patch call's upsert map (prefixed `${fieldKey}.`),
+// `keys` is the full list of sibling keys written (bundle fields +
+// `.ref`/`.connection_id`/`.connection_version`/`.picked_at`) so the caller
+// can pass them as knownSiblingKeys/deleteKeys on a re-pick or clear (see
+// connectionBundleKeys below for the "what to DELETE on clear" half).
+export function snapshotConnectionRow(fieldKey, source, row, pickedAt = new Date().toISOString()) {
+  const upsert = {};
+  const keys = [];
+  const setField = (k, v) => {
+    const full = `${fieldKey}.${k}`;
+    const str = typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v);
+    upsert[full] = str;
+    keys.push(full);
+  };
+  const bundle = source && source.bundle;
+  const fieldsToWrite =
+    bundle === 'all' || !bundle
+      ? Object.keys(row).filter((k) => k !== 'ref')
+      : Array.isArray(bundle.fields)
+        ? bundle.fields
+        : [];
+  if (bundle === 'all' || !bundle) {
+    for (const from of fieldsToWrite) setField(from, row[from]);
+  } else {
+    for (const { from, key } of fieldsToWrite) {
+      if (from in row) setField(key, row[from]);
+    }
+  }
+  setField('ref', JSON.stringify(row.ref));
+  setField('connection_id', (source && source.connectionId) || '');
+  setField('connection_version', (source && source.connectionVersion) || '');
+  setField('picked_at', pickedAt);
+  return { upsert, keys };
+}
+
+// task-8f27d842f14d — the DELETE-side counterpart of snapshotConnectionRow:
+// given a field's CURRENT source binding + the full task-data bag (key ->
+// value) already known to the caller, return every `<fieldKey>.*` key that a
+// bundle snapshot may have written previously, so a re-pick or an explicit
+// clear can pass them as deleteKeys and leave no orphan sibling when the
+// bundle map (or the picked row's shape) changes between picks. Prefix-based
+// (not bundle-shape-based) so it also cleans up keys from a PRIOR bundle
+// definition, not just the current one — a changed `bundle.fields` list, or a
+// switch from 'all' to a narrower list, still fully cleans up.
+export function connectionBundleKeys(fieldKey, existingDataKeys = []) {
+  const prefix = `${fieldKey}.`;
+  return Array.from(existingDataKeys).filter((k) => k.startsWith(prefix));
+}
+
 // task-342f3e151d99 — shared normalization step for everything below that
 // walks the catalog: drops entries with no usable id or no usable fields, and
 // resolves the display name once. Keeps catalogPickerGroups/pickerOptions/

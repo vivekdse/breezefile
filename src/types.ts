@@ -583,6 +583,126 @@ export type GroupInvite = {
   invitedBy: string | null;
 };
 
+// docs/connections-design.md §B/§C/§E — Connections: a registered external
+// service (a REST API like QuickBooks, or an MCP server) the agent can use.
+// The CREDENTIAL is stored server-side in the TypeBuild vault and NEVER
+// crosses back to the client — this projection is creds-STRIPPED;
+// `credentialDisplay` carries only non-secret metadata (e.g. "connected as
+// billing@acme.com"). Mirrors electron/sources/typebuild.ts `ConnectionSummary`.
+export type ConnectionScope =
+  | { type: 'project'; projectId: string }
+  | { type: 'group'; groupId: string };
+
+// How the service's shape is known — §B `ConnectionSpec`. The summary
+// projection (below) never carries `normalized`, only the hash.
+export type ConnectionSpecMode = 'live_url' | 'inline';
+export type ConnectionSummarySpec = {
+  mode: ConnectionSpecMode;
+  hash: string;
+  fetchedAt: string;
+  specUrl?: string; // only when mode === 'live_url'
+};
+
+export type ConnectionStatus = 'active' | 'needs_attention' | 'disabled';
+
+export type ConnectionSummary = {
+  id: string;
+  name: string;
+  kind: 'rest' | 'mcp';
+  endpoint: string;
+  scope: ConnectionScope;
+  spec?: ConnectionSummarySpec;
+  status: ConnectionStatus;
+  /** Non-secret display metadata copied from ConnectionCredentialRef.display
+   *  (e.g. "connected as billing@acme.com", "expires 2026-09-01"). */
+  credentialDisplay?: Record<string, string>;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+// The WRITE-side credential shapes, keyed by connection `kind` — §B
+// `ConnectionCredentialRef.kind` / §C write path. Only ever sent TO the
+// server (register/setCredential) — never read back.
+export type ConnectionCredentialKind = 'api_key' | 'oauth2' | 'basic' | 'bearer' | 'mcp_token';
+export type ConnectionCredential =
+  | { kind: 'api_key'; value: string; header?: string }
+  | { kind: 'bearer'; value: string }
+  | { kind: 'basic'; username: string; password: string }
+  | { kind: 'oauth2'; accessToken: string; refreshToken?: string; tokenType?: string }
+  | { kind: 'mcp_token'; value: string };
+
+// §C Responses — the broker GET response, keyed by `kind`. No caller yet
+// (operator-tools task); defined here so that work imports the right shape.
+export type ConnectionCredentialResolved =
+  | { kind: 'api_key'; value: string; header?: string }
+  | { kind: 'bearer'; value: string }
+  | { kind: 'basic'; username: string; password: string }
+  | { kind: 'oauth2'; accessToken: string; tokenType?: string }
+  | { kind: 'mcp_token'; value: string };
+
+// The registration/edit-input spec — §B `ConnectionSpec`'s two write-side
+// variants (server fills in `normalized`/`hash`/`fetchedAt`).
+export type ConnectionSpecInput =
+  | { mode: 'live_url'; specUrl: string }
+  | { mode: 'inline'; raw: string };
+
+export type ConnectionRegisterInput = {
+  name: string;
+  kind: 'rest' | 'mcp';
+  endpoint: string;
+  scope?: ConnectionScope;
+  spec?: ConnectionSpecInput;
+  credential?: ConnectionCredential;
+};
+
+// docs/connections-design.md §E — a single declarative REST call. No code —
+// every dynamic part is a named slot filled from typed inputs, resolved
+// client-side, applied to a plain HTTP request. Not wired to anything yet;
+// exported so the operator-tools/field-snapshot work can import it.
+export type CallSpec = {
+  method: 'GET' | 'POST';
+  path: string;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+  output: CallOutputMapping;
+  limits?: { timeoutMs?: number };
+};
+
+export type CallOutputMapping =
+  | {
+      shape: 'rows';
+      rowsPath: string;
+      ref: { entityType: string; externalIdPath: string };
+      fields: Record<string, string>;
+    }
+  | {
+      shape: 'value';
+      fields: Record<string, string>;
+    };
+
+// docs/connections-design.md §D.2 — the durable pointer a field-source
+// lookup's row carries, renamed from SavedQuery's `{sourceId, entityType,
+// externalId}` (see src/copilot/savedQueries.ts `QueryRef`) to
+// `connectionId`. Opaque ids only — NON-PHI, safe to persist as a task `data`
+// value (JSON-encoded onto `<fieldKey>.ref`).
+export type ConnectionRef = {
+  connectionId: string;
+  entityType: string;
+  externalId: string;
+};
+
+// One row returned by a client-direct CallSpec lookup (output.shape:'rows') —
+// the field-source counterpart of `copilot/savedQueries.ts`'s `QueryRow`. The
+// non-`ref` fields are whatever `CallSpec.output.fields` declared and MAY
+// carry PHI (memory-only until a selection snapshots the picked row's fields
+// into the task data bag — task-8f27d842f14d).
+export type ConnectionLookupRow = {
+  ref: ConnectionRef;
+  [field: string]: unknown;
+};
+
 export type TaskUpdate = Partial<{
   title: string;
   notes: string | null;

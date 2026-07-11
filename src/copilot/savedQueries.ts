@@ -19,6 +19,9 @@
 // threaded onto a created task, as placeholder KEYS in the task `data` bag.
 
 import { fm } from '../bridge';
+import type { CallSpec, ConnectionLookupRow, ConnectionRef } from '../types';
+
+export type { CallSpec, ConnectionLookupRow, ConnectionRef };
 
 /** The durable pointer to an external resource a selected row carries. Opaque
  *  ids only — NON-PHI, safe to persist as a task `data` value (JSON-encoded). */
@@ -55,6 +58,23 @@ export async function executeQuery(
   version?: number,
 ): Promise<QueryRow[]> {
   return fm.typebuild.queries.execute(savedQueryId, { q }, version);
+}
+
+// task-8f27d842f14d — docs/connections-design.md §D.2: the field-source
+// Connection form's typeahead counterpart to executeQuery above. Runs ONE
+// declarative `lookup` CallSpec CLIENT-DIRECT (never through
+// general.typebuild.com — see fm.typebuild.connections.lookup's doc in
+// src/bridge.ts), via TypeBuildTaskSource.lookupConnection ->
+// connection-exec.ts's interpreter. Resolves to [] on any failure (unknown
+// connection, transport error, shape-mismatch drift) — SourceTypeahead
+// already treats [] the same as a swallowed executeQuery error ("no
+// matches"), so this degrades cleanly either way.
+export async function lookupConnection(
+  connectionId: string,
+  callSpec: CallSpec,
+  q: string,
+): Promise<ConnectionLookupRow[]> {
+  return fm.typebuild.connections.lookup(connectionId, callSpec, { q });
 }
 
 /** List approved SavedQueries visible to the signed-in principal, for the
@@ -166,7 +186,7 @@ export async function newQueryVersion(
  *  declared `display` field order when known, else the first string field, else
  *  the externalId. Kept here so the typeahead and the `lookup_record` copilot
  *  action render rows identically (one lookup, two UIs). */
-export function rowLabel(row: QueryRow, displayFields?: string[]): string {
+export function rowLabel(row: QueryRow | ConnectionLookupRow, displayFields?: string[]): string {
   const fields = displayFields?.length
     ? displayFields
     : Object.keys(row).filter((k) => k !== 'ref');

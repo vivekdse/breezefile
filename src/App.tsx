@@ -46,6 +46,7 @@ import { handleTagControl, isTagControl, type TagControlReq } from './tagControl
 import { Tutorial } from './components/Tutorial';
 import { HelpTour, type HelpSlideId } from './components/HelpTour';
 import { SecretsPanel } from './components/SecretsPanel';
+import { ConnectionsPanel } from './components/ConnectionsPanel';
 import { TerminalSplit } from './components/TerminalSplit';
 import { TypebuildSessionBanner } from './components/TypebuildSessionBanner';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
@@ -152,6 +153,7 @@ function Shell() {
   const [helpOpen, setHelpOpen] = useState<{ slide?: HelpSlideId } | null>(null);
   // :secrets — the user's credential vault (NPI, Tax ID, login IDs). Server-backed.
   const [secretsOpen, setSecretsOpen] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
   // fm-nmt — task create/edit dialog. Opened via 'task' verb, the T
   // keybind, or programmatically from the (future) sidebar/page.
   const [taskDialog, setTaskDialog] = useState<TaskComposerRequest | null>(null);
@@ -1255,6 +1257,9 @@ function Shell() {
     function onSecrets() {
       setSecretsOpen(true);
     }
+    function onOpenConnections() {
+      setConnectionsOpen(true);
+    }
     function onOpenTask(e: Event) {
       const detail = (e as CustomEvent).detail as TaskComposerRequest | undefined;
       if (detail) setTaskDialog(detail);
@@ -1359,6 +1364,7 @@ function Shell() {
     window.addEventListener('fm:tagPicker', onTagPicker);
     window.addEventListener('fm:openHelp', onHelp);
     window.addEventListener('fm:openSecrets', onSecrets);
+    window.addEventListener('fm:openConnections', onOpenConnections);
     window.addEventListener('fm:openWelcome', onWelcome);
     window.addEventListener('fm:openTask', onOpenTask);
     window.addEventListener('fm:openTasksPage', onOpenTasksPage);
@@ -1390,6 +1396,7 @@ function Shell() {
       window.removeEventListener('fm:tagPicker', onTagPicker);
       window.removeEventListener('fm:openHelp', onHelp);
       window.removeEventListener('fm:openSecrets', onSecrets);
+      window.removeEventListener('fm:openConnections', onOpenConnections);
       window.removeEventListener('fm:openWelcome', onWelcome);
       window.removeEventListener('fm:openTask', onOpenTask);
       window.removeEventListener('fm:openTasksPage', onOpenTasksPage);
@@ -1778,6 +1785,9 @@ function Shell() {
         />
       )}
       {secretsOpen && <SecretsPanel onClose={() => setSecretsOpen(false)} />}
+      {connectionsOpen && (
+        <ConnectionsPanel onClose={() => setConnectionsOpen(false)} />
+      )}
       {runHistoryFor && (
         <RunHistoryDialog
           taskId={runHistoryFor}

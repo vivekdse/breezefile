@@ -18,6 +18,45 @@ export function fieldFromCatalog(
   existingKeys?: Iterable<string>,
 ): TaskDefField | null;
 export function blankCustomField(): TaskDefField;
+// task-8f27d842f14d — the Connection-binding counterpart to
+// sourceFromCatalogEntry/fieldFromCatalog above. No Connection-browsing
+// catalog UI exists yet (that's a separate task); this builder exists so any
+// caller that already has a ConnectionSummary + a declarative lookup CallSpec
+// (docs/connections-design.md §D.2) can produce a well-formed `source`/
+// TaskDefField without hand-rolling the shape. `bundle` defaults to `'all'`.
+export function sourceFromConnection(
+  connectionId: string,
+  connectionVersion: string,
+  lookup: import('../../types').CallSpec,
+  opts?: { entityType?: string; bundle?: { fields: Array<{ from: string; key: string }> } | 'all' },
+): NonNullable<TaskDefField['source']>;
+export function fieldFromConnection(
+  key: string,
+  label: string,
+  type: TaskDefField['type'],
+  connectionId: string,
+  connectionVersion: string,
+  lookup: import('../../types').CallSpec,
+  opts?: {
+    entityType?: string;
+    bundle?: { fields: Array<{ from: string; key: string }> } | 'all';
+    existingKeys?: Iterable<string>;
+  },
+): TaskDefField | null;
+
+// task-8f27d842f14d — the picked-row -> data-bag-sibling-keys mapping
+// (docs/connections-design.md §D.2 step 3/4) and its delete-side
+// counterpart. See fieldCatalog.mjs for the full contract.
+export function snapshotConnectionRow(
+  fieldKey: string,
+  source: NonNullable<TaskDefField['source']> | undefined,
+  row: import('../../copilot/savedQueries').ConnectionLookupRow,
+  pickedAt?: string,
+): { upsert: Record<string, string>; keys: string[] };
+export function connectionBundleKeys(
+  fieldKey: string,
+  existingDataKeys?: Iterable<string>,
+): string[];
 export type CatalogPickerGroup = { id: string; name: string; fields: QueryCatalogField[] };
 export function catalogPickerGroups(
   catalog: QueryCatalogEntry[] | null | undefined,

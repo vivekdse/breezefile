@@ -53,6 +53,17 @@
 //                               (the human-gated-submit rule — pass it only on a
 //                               confirmed submit).
 //
+//   ── CONNECTIONS (docs/connections-design.md §D.1c — no browser tab needed) ──
+//   connections                 list this job's mounted kind:'rest' Connections
+//                               ({connectionId, name, endpoint}, no credential)
+//   connection-call <connectionId> <callSpecJson> [paramsJson]
+//                               execute a declarative CallSpec (§E) against a
+//                               mounted Connection. Main resolves the connection
+//                               CLIENT-DIRECT with the already-brokered credential
+//                               (never re-broker, never this process); the
+//                               credential itself never crosses into this CLI or
+//                               the agent's context. Prints the mapped result JSON.
+//
 // Output goes to stdout (plain text or JSON); errors to stderr with exit 1.
 // The process always detaches cleanly (browser.close() drops the CDP client;
 // it does NOT close Breeze or the tab).
@@ -66,6 +77,7 @@ import {
   listPages,
   loc,
   resolveDataRef as resolveDataRefShared,
+  readApi,
 } from './connect.mjs';
 import { scrubError } from './scrub.mjs';
 import { observeNetwork, replayRequest } from './net.mjs';
@@ -119,9 +131,80 @@ async function resolveDataRef(ref) {
   }
 }
 
+// docs/connections-design.md §D.1(c). Both verbs talk ONLY to the localhost
+// control API (electron/api-server.ts /app/connections, /app/connection-call)
+// — no browser page, no CDP — since a REST Connection call is a plain HTTP
+// request main makes on the agent's behalf, not a browser action. The
+// session token comes from $BREEZE_CONNECTIONS_SESSION (injected at PTY
+// spawn for a TypeBuild launch); the brokered credential itself never
+// reaches this process.
+async function controlFetch(pathAndQuery, init) {
+  const api = readApi();
+  if (!api) fail(`cannot read ${path.join(process.env.HOME || '', '.breezefile', 'api.json')} — is Breeze running?`);
+  let res;
+  try {
+    res = await fetch(`http://127.0.0.1:${api.port}${pathAndQuery}`, {
+      ...init,
+      headers: { ...(init?.headers ?? {}), authorization: `Bearer ${api.token}` },
+    });
+  } catch (e) {
+    fail(`connections request failed: ${e.message}`);
+  }
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    fail(`connections request returned non-JSON (${res.status}): ${text.slice(0, 200)}`);
+  }
+  if (!res.ok) fail(`connections request failed (${res.status}): ${JSON.stringify(body)}`);
+  return body;
+}
+
+function connectionsSessionToken() {
+  const token = (process.env.BREEZE_CONNECTIONS_SESSION || '').trim();
+  if (!token) fail('connections/connection-call require $BREEZE_CONNECTIONS_SESSION (TypeBuild sessions only)');
+  return token;
+}
+
 async function main() {
   const [verb, ...rest] = process.argv.slice(2);
   if (!verb) fail('usage: cli.mjs <verb> [args...]  (try: pages | snapshot | goto <url>)');
+
+  // `connections` / `connection-call` never touch the browser page — handle
+  // and return before any CDP connect attempt.
+  if (verb === 'connections') {
+    const session = connectionsSessionToken();
+    const body = await controlFetch(`/app/connections?session=${encodeURIComponent(session)}`);
+    process.stdout.write(JSON.stringify(body.connections ?? [], null, 2) + '\n');
+    return;
+  }
+  if (verb === 'connection-call') {
+    const [connectionId, callSpecJson, paramsJson] = rest;
+    if (!connectionId || !callSpecJson) {
+      fail('connection-call needs <connectionId> <callSpecJson> [paramsJson]');
+    }
+    let call;
+    let params;
+    try {
+      call = JSON.parse(callSpecJson);
+    } catch (e) {
+      fail(`callSpecJson is not valid JSON: ${e.message}`);
+    }
+    try {
+      params = paramsJson ? JSON.parse(paramsJson) : {};
+    } catch (e) {
+      fail(`paramsJson is not valid JSON: ${e.message}`);
+    }
+    const session = connectionsSessionToken();
+    const body = await controlFetch('/app/connection-call', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ session, connectionId, call, params }),
+    });
+    process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+    return;
+  }
 
   // `open` reaches Breeze BEFORE attaching over CDP: ask it to create the tab,
   // then attach + wait for the new page to show up.

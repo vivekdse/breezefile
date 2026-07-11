@@ -428,8 +428,14 @@ export function SourceBadge({
   onClear: () => void;
 }): JSX.Element {
   const { catalog } = useQueryCatalog();
-  const entry = catalog.find((c) => c.id === source.savedQueryId);
-  const name = entry?.name ?? source.entityType ?? 'API field';
+  // task-8f27d842f14d — `source` is now additive over two binding forms (see
+  // TaskDefField.source in newhome/types.ts); only the SavedQuery form has a
+  // catalog entry to resolve a friendly name from. The Connection form has no
+  // browsing catalog yet (separate task) — fall back to entityType/a generic
+  // label, same degrade fieldFromCatalog's callers already tolerate.
+  const isConnection = 'connectionId' in source;
+  const entry = isConnection ? undefined : catalog.find((c) => c.id === source.savedQueryId);
+  const name = entry?.name ?? source.entityType ?? (isConnection ? 'Connection field' : 'API field');
   return (
     <span className="fkp-badge" title={`Bound to ${name} — click ✕ to unbind`}>
       <span className="fkp-badge__name">↪ {name}</span>

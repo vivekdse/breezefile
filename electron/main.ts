@@ -26,6 +26,7 @@ import { registerTypebuildVaultIpc } from './typebuild/ipc-vault';
 import { registerTypebuildTaskDataIpc } from './typebuild/ipc-task-data';
 import { registerTypebuildCredentialsIpc } from './typebuild/ipc-credentials';
 import { registerTypebuildProjectsIpc } from './typebuild/ipc-projects';
+import { registerTypebuildConnectionsIpc } from './typebuild/ipc-connections';
 import { registerTypebuildDetectIpc } from './typebuild/detect';
 import {
   getAuthState,
@@ -344,6 +345,11 @@ app.whenReady().then(() => {
   // task-ab1d7955e23f — TypeBuild Projects IPC (list/get/resolve/create).
   timeSync('boot:registerTypebuildProjectsIpc', () =>
     registerTypebuildProjectsIpc(),
+  );
+  // task-62a5b4324954 — Connections IPC (register/list/edit an external REST
+  // API or MCP server + its server-vaulted credential).
+  timeSync('boot:registerTypebuildConnectionsIpc', () =>
+    registerTypebuildConnectionsIpc(),
   );
   // fm-b5at.3 — TypeBuild onboarding prerequisite detection IPC.
   timeSync('boot:registerTypebuildDetectIpc', () => registerTypebuildDetectIpc());

@@ -62,6 +62,72 @@ type GroupInvite = {
   invitedBy: string | null;
 };
 
+// docs/connections-design.md §B/§C — a Connection as it crosses the bridge
+// (creds-STRIPPED projection; mirrors src/types.ts `ConnectionSummary`).
+// Inlined like Project (preload carries no shared-type imports). NON-PHI: the
+// credential VALUE never crosses this bridge in either direction —
+// `credentialDisplay` carries only non-secret metadata.
+type ConnectionScope =
+  | { type: 'project'; projectId: string }
+  | { type: 'group'; groupId: string };
+type ConnectionSummarySpec = {
+  mode: 'live_url' | 'inline';
+  hash: string;
+  fetchedAt: string;
+  specUrl?: string;
+};
+type ConnectionSummary = {
+  id: string;
+  name: string;
+  kind: 'rest' | 'mcp';
+  endpoint: string;
+  scope: ConnectionScope;
+  spec?: ConnectionSummarySpec;
+  status: 'active' | 'needs_attention' | 'disabled';
+  credentialDisplay?: Record<string, string>;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+type ConnectionCredential =
+  | { kind: 'api_key'; value: string; header?: string }
+  | { kind: 'bearer'; value: string }
+  | { kind: 'basic'; username: string; password: string }
+  | { kind: 'oauth2'; accessToken: string; refreshToken?: string; tokenType?: string }
+  | { kind: 'mcp_token'; value: string };
+type ConnectionSpecInput =
+  | { mode: 'live_url'; specUrl: string }
+  | { mode: 'inline'; raw: string };
+type ConnectionRegisterInput = {
+  name: string;
+  kind: 'rest' | 'mcp';
+  endpoint: string;
+  scope?: ConnectionScope;
+  spec?: ConnectionSpecInput;
+  credential?: ConnectionCredential;
+};
+
+// docs/connections-design.md §E — a single declarative REST call (no code —
+// every dynamic part is a named slot). Inlined here for the same reason as
+// the Connection types above; mirrors src/types.ts `CallSpec`/
+// `CallOutputMapping`. task-8f27d842f14d (field-source lookup).
+type CallOutputMapping =
+  | { shape: 'rows'; rowsPath: string; ref: { entityType: string; externalIdPath: string }; fields: Record<string, string> }
+  | { shape: 'value'; fields: Record<string, string> };
+type CallSpec = {
+  method: 'GET' | 'POST';
+  path: string;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+  body?: Record<string, unknown>;
+  output: CallOutputMapping;
+  limits?: { timeoutMs?: number };
+};
+// §D.2 — the durable pointer + row shape a client-direct lookup returns.
+// Mirrors src/types.ts `ConnectionRef`/`ConnectionLookupRow`.
+type ConnectionRef = { connectionId: string; entityType: string; externalId: string };
+type ConnectionLookupRow = { ref: ConnectionRef; [field: string]: unknown };
+
 // One credential-vault entry as it crosses the bridge (NAMES only — never a
 // value). `key` is the "me."-prefixed field; `secret` marks write-only fields
 // (ssn/dob/bank_account) the server's resolver refuses to reveal. Inlined here
@@ -1122,6 +1188,59 @@ const fm = {
           groupId,
           accept,
         ) as Promise<void>,
+    },
+    // task-62a5b4324954 — Connections: register an external service (REST API
+    // or MCP server) with its credentials. The credential is sent to the
+    // SERVER vault and never stored/echoed on this machine; `list`/`get`
+    // return a creds-stripped ConnectionSummary. Server endpoints are not
+    // deployed yet, so list/get degrade to []/null and mutations return a
+    // structured { ok:false } (see electron/sources/typebuild.ts).
+    connections: {
+      list: () =>
+        ipcRenderer.invoke('typebuild:connections:list') as Promise<ConnectionSummary[]>,
+      get: (id: string) =>
+        ipcRenderer.invoke('typebuild:connections:get', id) as Promise<
+          ConnectionSummary | null
+        >,
+      register: (input: ConnectionRegisterInput) =>
+        ipcRenderer.invoke('typebuild:connections:register', input) as Promise<
+          ConnectionSummary
+        >,
+      update: (
+        id: string,
+        patch: Partial<Omit<ConnectionRegisterInput, 'credential'>>,
+      ) =>
+        ipcRenderer.invoke('typebuild:connections:update', id, patch) as Promise<
+          | { ok: true; connection: ConnectionSummary }
+          | { ok: false; reason: string; status: number }
+        >,
+      remove: (id: string) =>
+        ipcRenderer.invoke('typebuild:connections:remove', id) as Promise<
+          { ok: true } | { ok: false; reason: string; status: number }
+        >,
+      setCredential: (id: string, credential: ConnectionCredential) =>
+        ipcRenderer.invoke(
+          'typebuild:connections:setCredential',
+          id,
+          credential,
+        ) as Promise<{ ok: true } | { ok: false; reason: string; status: number }>,
+      refreshSpec: (id: string) =>
+        ipcRenderer.invoke('typebuild:connections:refreshSpec', id) as Promise<
+          ConnectionSummary
+        >,
+      // task-8f27d842f14d — field-source use of a Connection (docs/
+      // connections-design.md §D.2): run ONE declarative lookup CLIENT-DIRECT
+      // and return its rows. THIN pass-through — the client-direct HTTP +
+      // credential brokering lives in TypeBuildTaskSource.lookupConnection
+      // (electron/sources/typebuild.ts), which delegates to the parallel
+      // operator-tools task's interpreter (connection-exec.ts).
+      lookup: (connectionId: string, callSpec: CallSpec, params: Record<string, string>) =>
+        ipcRenderer.invoke(
+          'typebuild:connections:lookup',
+          connectionId,
+          callSpec,
+          params,
+        ) as Promise<ConnectionLookupRow[]>,
     },
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
     // structured-result contract as projects.patch.

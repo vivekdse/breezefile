@@ -386,6 +386,69 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       return sendJson(res, 200, out);
     }
 
+    // docs/connections-design.md §D.1(c) — the kind:'rest' operator-tool
+    // surface. The agent's spawned session holds no Firebase token and no
+    // brokered credential directly (both stay in MAIN's memory); it presents
+    // its opaque $BREEZE_CONNECTIONS_SESSION (injected at PTY spawn by
+    // electron/sources/typebuild.ts launchSessionInner) to ask main to run a
+    // declarative CallSpec against one of THIS launch's mounted Connections.
+    // Mirrors /app/task-data's shape: the value-bearing hop is this ONE
+    // localhost call (already 127.0.0.1 + bearer-token authed), never logged.
+    //
+    // GET  /app/connections?session=<token>
+    //   -> { connections: [{ connectionId, name, endpoint }] }  discovery,
+    //      no credential involved — lets the helper CLI list what's callable.
+    if (p === '/app/connections' && m === 'GET') {
+      const session = url.searchParams.get('session') ?? '';
+      if (!session) throw Object.assign(new Error('session required'), { status: 400 });
+      const { listMountedRestConnections } = await import('./typebuild/connection-mount');
+      return sendJson(res, 200, { connections: listMountedRestConnections(session) });
+    }
+    // POST /app/connection-call
+    //   body: { session, connectionId, call: CallSpec, params?: Record<string,string> }
+    //   -> 200 { ok:true, status, data } | 200 { ok:false, reason, status? }
+    // `call` is a CallSpec (docs/connections-design.md §E) the caller builds
+    // for a Connection it already knows the shape of — declarative only, no
+    // code executes. Executes CLIENT-DIRECT against the Connection's OWN
+    // endpoint (never general.typebuild.com) with the brokered credential
+    // this launch already resolved at job start (never re-brokered here).
+    // REGRESSION GUARD: never log the request/response body — both can carry
+    // the Connection's data (possibly PHI) or its credential.
+    if (p === '/app/connection-call' && m === 'POST') {
+      const body = await readJson<{
+        session?: string;
+        connectionId?: string;
+        call?: unknown;
+        params?: Record<string, string>;
+      }>(req);
+      if (!body.session || !body.connectionId || !body.call) {
+        throw Object.assign(
+          new Error('session, connectionId, and call are required'),
+          { status: 400 },
+        );
+      }
+      const { lookupMountedRestConnection } = await import('./typebuild/connection-mount');
+      const mounted = lookupMountedRestConnection(body.session, body.connectionId);
+      if (!mounted) {
+        // Not mounted for this session — either out of scope, an unknown
+        // session token, or the Connection isn't kind:'rest'. Same envelope
+        // shape as a failed call so the helper CLI doesn't need two error
+        // paths; the reason string is diagnostic, never a credential/value.
+        return sendJson(res, 200, {
+          ok: false,
+          reason: 'connection not mounted for this session',
+        });
+      }
+      const { executeConnectionCall } = await import('./typebuild/connection-exec');
+      const result = await executeConnectionCall(
+        { id: mounted.connectionId, endpoint: mounted.endpoint, kind: 'rest' },
+        body.call as import('../src/types').CallSpec,
+        body.params ?? {},
+        mounted.cred,
+      );
+      return sendJson(res, 200, result);
+    }
+
     // fm-awii — tagging API. Tags live in the renderer store, so every route
     // proxies through the control bridge to the focused window.
     if (p === '/tags' && m === 'GET') {

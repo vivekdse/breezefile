@@ -66,6 +66,11 @@ import { mintMcpToken } from '../typebuild/mcp-token';
 import { fetchWithTimeout } from '../typebuild/http';
 import { startTiming, timing } from '../core/launch-timing';
 import { clearSession, registerSession } from '../typebuild/sessions';
+// docs/connections-design.md §D.1(c) — clears the per-PTY in-memory REST
+// Connection mount registry on session exit; the other connection-mount
+// helpers are imported lazily inline (mirrors this file's existing
+// lazy-import style for pre-spawn-only modules like task-context-bundle).
+import { clearConnectionSession } from '../typebuild/connection-mount';
 // task-6fc9e503623e — the pure, unit-tested liveness classifier (shared .mjs).
 // Keeping the runtime on the SAME helper the tests assert means the exit-code
 // tagged error + recorded note can never drift from the tested contract.
@@ -106,6 +111,14 @@ import {
   buildTemplatePatchPayload,
 } from './typebuild-wire.mjs';
 import type { WireOutputSchemaField } from './typebuild-wire.d.mts';
+// docs/connections-design.md §C — the broker response shape, keyed by
+// credential kind. Imported from src/types.ts (the reconciled Connection*
+// types), not redefined — this file's own ConnectionSummary/etc. above are
+// the pre-existing (pre-reconciliation) local types; only the NEW broker
+// method below uses the canonical shared type.
+import type { CallSpec, ConnectionCredentialResolved, ConnectionLookupRow } from '../../src/types';
+export type { CallSpec, ConnectionLookupRow } from '../../src/types';
+import { executeConnectionCall } from '../typebuild/connection-exec';
 
 const API_BASE = 'https://general.typebuild.com';
 const POLL_INTERVAL_MS = 30_000;
@@ -434,6 +447,144 @@ export type GroupInvite = {
   role: 'admin' | 'member';
   invitedBy: string | null;
 };
+
+// ─── Connections (docs/connections-design.md §B/§C) ────────────────────────
+// A registered external service (a REST API like QuickBooks, or an MCP
+// server) the agent can use. The CREDENTIAL is stored SERVER-side in the
+// TypeBuild vault and never crosses back to this client — every read method
+// below returns a creds-STRIPPED projection (`credentialDisplay` carries only
+// non-secret metadata, e.g. "connected as billing@acme.com"). Base path:
+// /chromeext/connections. The server route is NOT deployed yet, so every
+// method degrades gracefully: readers (list/get) swallow a fetch failure into
+// []/null so the UI is usable before the server lands; mutations return a
+// structured { ok:false, reason:'unsupported', status } on a 404 so the
+// caller can show "not available yet" instead of a raw crash. NON-PHI:
+// name/kind/endpoint/scope/spec are service metadata, not patient data — but
+// the credential VALUE (write-only, never echoed) still must never be logged.
+export type ConnectionScope =
+  | { type: 'project'; projectId: string }
+  | { type: 'group'; groupId: string };
+export type ConnectionSummarySpec = {
+  mode: 'live_url' | 'inline';
+  hash: string;
+  fetchedAt: string;
+  specUrl?: string;
+};
+export type ConnectionStatus = 'active' | 'needs_attention' | 'disabled';
+export type ConnectionSummary = {
+  id: string;
+  name: string;
+  kind: 'rest' | 'mcp';
+  endpoint: string;
+  scope: ConnectionScope;
+  spec?: ConnectionSummarySpec;
+  status: ConnectionStatus;
+  credentialDisplay?: Record<string, string>;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+export type ConnectionCredential =
+  | { kind: 'api_key'; value: string; header?: string }
+  | { kind: 'bearer'; value: string }
+  | { kind: 'basic'; username: string; password: string }
+  | { kind: 'oauth2'; accessToken: string; refreshToken?: string; tokenType?: string }
+  | { kind: 'mcp_token'; value: string };
+export type ConnectionSpecInput =
+  | { mode: 'live_url'; specUrl: string }
+  | { mode: 'inline'; raw: string };
+export type ConnectionRegisterInput = {
+  name: string;
+  kind: 'rest' | 'mcp';
+  endpoint: string;
+  scope?: ConnectionScope;
+  spec?: ConnectionSpecInput;
+  credential?: ConnectionCredential;
+};
+type ConnectionRow = {
+  id?: string;
+  name?: string;
+  kind?: string;
+  endpoint?: string;
+  scope?: { type?: string; project_id?: string | null; group_id?: string | null } | null;
+  spec?: {
+    mode?: string;
+    spec_url?: string | null;
+    hash?: string | null;
+    fetched_at?: string | null;
+  } | null;
+  status?: string;
+  credential_display?: Record<string, string> | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+function mapConnectionScope(
+  s: ConnectionRow['scope'],
+): ConnectionScope | null {
+  if (!s) return null;
+  if (s.type === 'group' && s.group_id) return { type: 'group', groupId: s.group_id };
+  if (s.project_id) return { type: 'project', projectId: s.project_id };
+  if (s.group_id) return { type: 'group', groupId: s.group_id };
+  return null;
+}
+function mapConnectionRow(r: ConnectionRow): ConnectionSummary | null {
+  if (!r || typeof r.id !== 'string' || !r.id) return null;
+  const kind = r.kind === 'mcp' ? 'mcp' : 'rest';
+  const scope = mapConnectionScope(r.scope) ?? { type: 'project', projectId: '' };
+  const status: ConnectionStatus =
+    r.status === 'needs_attention' || r.status === 'disabled' ? r.status : 'active';
+  const out: ConnectionSummary = {
+    id: r.id,
+    name: typeof r.name === 'string' && r.name.trim() ? r.name : r.id,
+    kind,
+    endpoint: typeof r.endpoint === 'string' ? r.endpoint : '',
+    scope,
+    status,
+  };
+  if (r.spec && (r.spec.mode === 'live_url' || r.spec.mode === 'inline')) {
+    out.spec = {
+      mode: r.spec.mode,
+      hash: typeof r.spec.hash === 'string' ? r.spec.hash : '',
+      fetchedAt: typeof r.spec.fetched_at === 'string' ? r.spec.fetched_at : '',
+      ...(r.spec.mode === 'live_url' && r.spec.spec_url ? { specUrl: r.spec.spec_url } : {}),
+    };
+  }
+  if (r.credential_display && typeof r.credential_display === 'object') {
+    out.credentialDisplay = r.credential_display;
+  }
+  if (typeof r.created_by === 'string') out.createdBy = r.created_by;
+  if (typeof r.created_at === 'string') out.createdAt = r.created_at;
+  if (typeof r.updated_at === 'string') out.updatedAt = r.updated_at;
+  return out;
+}
+function connectionPayload(input: {
+  name?: string;
+  kind?: 'rest' | 'mcp';
+  endpoint?: string;
+  scope?: ConnectionScope;
+  spec?: ConnectionSpecInput;
+  credential?: ConnectionCredential;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (input.name !== undefined) body.name = input.name;
+  if (input.kind !== undefined) body.kind = input.kind;
+  if (input.endpoint !== undefined) body.endpoint = input.endpoint;
+  if (input.scope !== undefined) {
+    body.scope =
+      input.scope.type === 'project'
+        ? { type: 'project', project_id: input.scope.projectId }
+        : { type: 'group', group_id: input.scope.groupId };
+  }
+  if (input.spec !== undefined) {
+    body.spec =
+      input.spec.mode === 'live_url'
+        ? { mode: 'live_url', spec_url: input.spec.specUrl }
+        : { mode: 'inline', raw: input.spec.raw };
+  }
+  if (input.credential !== undefined) body.credential = input.credential;
+  return body;
+}
 
 // Normalize a free-form server role/status into the closed set the UI switches
 // on. Anything unrecognized collapses to the LEAST-privileged / safest value:
@@ -1722,6 +1873,274 @@ export class TypeBuildTaskSource implements TaskSource {
       `/chromeext/groups/${encodeURIComponent(groupId)}/invites/${verb}`,
     );
     if (!res.ok) throw new Error(await groupError(res, `${verb} invite`));
+  }
+
+  // ─── connections (task-62a5b4324954) ─────────────────────────────────────
+  // GET /chromeext/connections → { connections: [...] }. NON-PHI (creds
+  // never included). The route isn't deployed yet — a 404 (or any fetch
+  // failure) degrades to [] rather than throwing, mirroring listGroups'
+  // list-and-degrade readers, so the panel is usable before the server lands.
+  async listConnections(): Promise<ConnectionSummary[]> {
+    try {
+      const res = await this.request('GET', '/chromeext/connections');
+      if (!res.ok) return [];
+      const data = (await res.json().catch(() => ({}))) as {
+        connections?: ConnectionRow[];
+      };
+      const rows = Array.isArray(data.connections) ? data.connections : [];
+      const out: ConnectionSummary[] = [];
+      for (const r of rows) {
+        const mapped = mapConnectionRow(r);
+        if (mapped) out.push(mapped);
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  // GET /chromeext/connections/{id} → { connection }. 404 → null (not an
+  // error — same convention as getProject).
+  async getConnection(id: string): Promise<ConnectionSummary | null> {
+    try {
+      const res = await this.request(
+        'GET',
+        `/chromeext/connections/${encodeURIComponent(id)}`,
+      );
+      if (res.status === 404) {
+        await res.json().catch(() => ({}));
+        return null;
+      }
+      if (!res.ok) return null;
+      const data = (await res.json().catch(() => ({}))) as { connection?: ConnectionRow };
+      return data.connection ? mapConnectionRow(data.connection) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // POST /chromeext/connections → 201 { connection }. Registration: name,
+  // kind, endpoint, scope, spec (url or inline), and the credential (sent
+  // once, stored server-side, never echoed back). Throws on failure — this is
+  // a user-initiated create the form must show, not swallow.
+  async registerConnection(input: ConnectionRegisterInput): Promise<ConnectionSummary> {
+    const res = await this.request(
+      'POST',
+      '/chromeext/connections',
+      connectionPayload(input),
+    );
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reason?: string;
+      };
+      const detail = data.reason ?? data.error ?? '';
+      throw new Error(
+        `typebuild: register connection failed (${res.status})${detail ? `: ${detail}` : ''}`,
+      );
+    }
+    const data = (await res.json().catch(() => ({}))) as { connection?: ConnectionRow };
+    const mapped = data.connection ? mapConnectionRow(data.connection) : null;
+    if (!mapped) throw new Error('typebuild: register connection returned no connection');
+    return mapped;
+  }
+
+  // PATCH /chromeext/connections/{id} — name/kind/endpoint/scope/spec (never
+  // the credential; use setCredential for that). Structured result (same
+  // convention as updateProject) so the panel shows a message instead of
+  // crashing on 403/404/422, and 'unsupported' on a 404 ROUTE (server not
+  // deployed yet) vs a 404 RESOURCE both surface the same way to this caller.
+  async updateConnection(
+    id: string,
+    patch: Partial<Omit<ConnectionRegisterInput, 'credential'>>,
+  ): Promise<
+    { ok: true; connection: ConnectionSummary } | { ok: false; reason: string; status: number }
+  > {
+    const res = await this.request(
+      'PATCH',
+      `/chromeext/connections/${encodeURIComponent(id)}`,
+      connectionPayload(patch),
+    );
+    if (res.status === 200) {
+      const data = (await res.json().catch(() => ({}))) as { connection?: ConnectionRow };
+      const mapped = data.connection ? mapConnectionRow(data.connection) : null;
+      if (!mapped) throw new Error('typebuild: update connection returned no connection');
+      return { ok: true, connection: mapped };
+    }
+    if (res.status === 403 || res.status === 404 || res.status === 422) {
+      const data = (await res.json().catch(() => ({}))) as {
+        reason?: string;
+        error?: string;
+      };
+      const reason =
+        data.reason ??
+        data.error ??
+        (res.status === 403 ? 'not_owner' : res.status === 422 ? 'invalid' : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    return { ok: false, reason: 'unsupported', status: res.status };
+  }
+
+  // DELETE /chromeext/connections/{id}. Same structured-result convention as
+  // deleteProject.
+  async deleteConnection(
+    id: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const res = await this.request(
+      'DELETE',
+      `/chromeext/connections/${encodeURIComponent(id)}`,
+    );
+    if (res.status === 200 || res.status === 204) {
+      await res.json().catch(() => ({}));
+      return { ok: true };
+    }
+    if (res.status === 403 || res.status === 404 || res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 403 ? 'not_owner' : res.status === 409 ? 'in_use' : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    return { ok: false, reason: 'unsupported', status: res.status };
+  }
+
+  // POST /chromeext/connections/{id}/credential — the ONLY way a credential
+  // value ever leaves this process; it goes straight to the server vault and
+  // is never read back, logged, or persisted locally. Structured result so a
+  // 422 (bad shape for the connection's kind/credential kind) shows inline.
+  async setConnectionCredential(
+    id: string,
+    credential: ConnectionCredential,
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const res = await this.request(
+      'POST',
+      `/chromeext/connections/${encodeURIComponent(id)}/credential`,
+      { credential },
+    );
+    if (res.status === 200 || res.status === 204) {
+      await res.json().catch(() => ({}));
+      return { ok: true };
+    }
+    if (res.status === 403 || res.status === 404 || res.status === 422) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 403 ? 'not_owner' : res.status === 422 ? 'invalid' : 'not_visible');
+      return { ok: false, reason, status: res.status };
+    }
+    return { ok: false, reason: 'unsupported', status: res.status };
+  }
+
+  // POST /chromeext/connections/{id}/refresh-spec — re-fetch/re-hash the
+  // OpenAPI/MCP spec at `spec.specUrl` server-side (clears 'needs_attention'
+  // status on success). Throws on failure — the caller is an explicit user
+  // action ("Refresh") that should surface an error, not silently no-op.
+  async refreshConnectionSpec(id: string): Promise<ConnectionSummary> {
+    const res = await this.request(
+      'POST',
+      `/chromeext/connections/${encodeURIComponent(id)}/refresh-spec`,
+    );
+    if (!res.ok) {
+      throw new Error(`typebuild: refresh connection spec failed (${res.status})`);
+    }
+    const data = (await res.json().catch(() => ({}))) as { connection?: ConnectionRow };
+    const mapped = data.connection ? mapConnectionRow(data.connection) : null;
+    if (!mapped) throw new Error('typebuild: refresh connection spec returned no connection');
+    return mapped;
+  }
+
+  // GET /chromeext/connections/{id}/credential — docs/connections-design.md §C,
+  // the credential-broker handshake. ONE credential per call, held by the
+  // caller in MEMORY ONLY (never disk/logs/argv) and re-fetched every job — no
+  // cross-job cache lives here or anywhere downstream. The route is not
+  // deployed yet (§I item 2 is a cross-repo dependency), so this degrades to
+  // `null` on ANY failure (404 route-not-found, 401/403/404 resource-level,
+  // network/timeout) — the job-start mounting waterfall (typebuild.ts
+  // launchSessionInner) treats a null as "mount nothing for this Connection"
+  // and proceeds with the job exactly as if it had no in-scope Connections.
+  // Never logs the resolved value; the 401/403/404/409 branches below log
+  // nothing beyond the fact that they occurred (no response body, no value).
+  async resolveConnectionCredential(id: string): Promise<ConnectionCredentialResolved | null> {
+    try {
+      const res = await this.request(
+        'GET',
+        `/chromeext/connections/${encodeURIComponent(id)}/credential`,
+      );
+      if (!res.ok) {
+        // 401/403/404/409 (unauthenticated/not_in_scope/not_found/credential_missing)
+        // or a route-not-deployed 404 — all degrade the same way for this
+        // best-effort broker call. Drain the body without ever reading/logging
+        // it into a variable that could be printed.
+        await res.json().catch(() => ({}));
+        return null;
+      }
+      const data = (await res.json().catch(() => null)) as
+        | { kind?: string; value?: string; header?: string; username?: string; password?: string;
+            accessToken?: string; tokenType?: string }
+        | null;
+      if (!data || typeof data.kind !== 'string') return null;
+      switch (data.kind) {
+        case 'api_key':
+          return typeof data.value === 'string'
+            ? { kind: 'api_key', value: data.value, ...(data.header ? { header: data.header } : {}) }
+            : null;
+        case 'bearer':
+          return typeof data.value === 'string' ? { kind: 'bearer', value: data.value } : null;
+        case 'basic':
+          return typeof data.username === 'string' && typeof data.password === 'string'
+            ? { kind: 'basic', username: data.username, password: data.password }
+            : null;
+        case 'oauth2':
+          return typeof data.accessToken === 'string'
+            ? {
+                kind: 'oauth2',
+                accessToken: data.accessToken,
+                ...(data.tokenType ? { tokenType: data.tokenType } : {}),
+              }
+            : null;
+        case 'mcp_token':
+          return typeof data.value === 'string' ? { kind: 'mcp_token', value: data.value } : null;
+        default:
+          return null;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  // docs/connections-design.md §D.2 — field-source use of a Connection: run
+  // ONE declarative `lookup` CallSpec CLIENT-DIRECT against the Connection's
+  // external API and return its rows (per `callSpec.output.shape === 'rows'`)
+  // for the renderer's typeahead (SourceTypeahead). Client-direct means the
+  // response NEVER round-trips through general.typebuild.com — only the
+  // credential (resolveConnectionCredential above) is ever brokered through
+  // the server, per §A. Delegates the actual HTTP + JSON-path mapping to
+  // electron/typebuild/connection-exec.ts's executeConnectionCall (the
+  // parallel operator-tools task's interpreter, task-df205c19d40c) — this
+  // method's own job is just: look up the Connection's endpoint/kind, broker
+  // its credential (re-fetched every call, never cached — same discipline as
+  // §C's per-job brokering), run the call, and unwrap rows for the renderer.
+  // Fails soft to `[]` on every error path (unknown connection, non-'rest'
+  // kind, malformed lookup, transport failure, shape-mismatch drift) —
+  // SourceTypeahead already treats an empty/failed lookup as "no matches",
+  // matching executeQuery's swallow-and-show-nothing behavior for SavedQuery.
+  async lookupConnection(
+    connectionId: string,
+    callSpec: CallSpec,
+    params: Record<string, string>,
+  ): Promise<ConnectionLookupRow[]> {
+    if (callSpec.output.shape !== 'rows') return [];
+    const summary = await this.getConnection(connectionId).catch(() => null);
+    if (!summary || summary.kind !== 'rest') return [];
+    const cred = await this.resolveConnectionCredential(connectionId).catch(() => null);
+    const result = await executeConnectionCall(
+      { id: summary.id, endpoint: summary.endpoint, kind: summary.kind },
+      callSpec,
+      params,
+      cred,
+    );
+    if (!result.ok || !Array.isArray(result.data)) return [];
+    return result.data as ConnectionLookupRow[];
   }
 
   // ─── templates (task-e112d60a3b7c) ───────────────────────────────────────
@@ -3411,8 +3830,20 @@ export class TypeBuildTaskSource implements TaskSource {
         (v) => { timing(tflow, `wave1 ${label} resolved`); return v; },
         (e) => { timing(tflow, `wave1 ${label} REJECTED`); throw e; },
       );
+    // docs/connections-design.md §C/§D.1 — in-scope Connections mount as
+    // agent tools at job start. Scope resolves to the launching task's
+    // project (+ that project's group), reusing the SAME cached projectId
+    // resolveLaunchContext reads (this.cache.get(id)?.projectId) — no extra
+    // fetch to learn it. Best-effort like every other wave1 leg: any failure
+    // (listConnections/getProject/broker all degrade internally already)
+    // resolves to the empty plan, so a launch with zero in-scope Connections
+    // — the common case while the server route is undeployed — mounts
+    // nothing and proceeds exactly as before this feature existed.
+    const { resolveConnectionMountPlan } = await import('../typebuild/connection-mount');
+    const launchProjectId = this.cache.get(id)?.projectId ?? null;
+
     timing(tflow, 'wave1 dispatch');
-    const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail] =
+    const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail, connectionPlan] =
       await Promise.all([
         probe('mint', mintMcpToken()),
         probe('operator-instructions', fetchOperatorInstructions('global')
@@ -3427,6 +3858,13 @@ export class TypeBuildTaskSource implements TaskSource {
               .catch(() => '')),
         probe('project', this.resolveLaunchContext(id)),
         probe('getTask', opts.resume ? Promise.resolve(null) : this.getTask(id).catch(() => null)),
+        probe(
+          'connections',
+          resolveConnectionMountPlan(this, { projectId: launchProjectId }).catch(() => ({
+            mcp: [],
+            rest: [],
+          })),
+        ),
       ]);
     timing(tflow, 'wave1 all settled');
     const runCwd = projectCtx.cwd ?? tasksCwd;
@@ -3522,6 +3960,28 @@ export class TypeBuildTaskSource implements TaskSource {
       }
     }
 
+    // docs/connections-design.md §D.1 — fold the mounted kind:'mcp'
+    // Connections into a PER-LAUNCH copy of the inline MCP config (the base
+    // `typebuild` entry is always present, untouched) and register the
+    // mounted kind:'rest' Connections under a fresh session token for the
+    // control endpoint. Both no-op cleanly to "just the typebuild server" /
+    // "empty session" when connectionPlan is empty (server route undeployed,
+    // no in-scope Connections, or every broker call failed) — NON-REGRESSION
+    // for every launch that predates this feature.
+    const { buildMcpServerEntries, buildMcpEnvEntries, registerConnectionSession } =
+      await import('../typebuild/connection-mount');
+    const baseMcpConfig = JSON.parse(MCP_INLINE_CONFIG) as {
+      mcpServers: Record<string, unknown>;
+    };
+    const mcpConfig = JSON.stringify({
+      mcpServers: {
+        ...baseMcpConfig.mcpServers,
+        ...buildMcpServerEntries(connectionPlan.mcp),
+      },
+    });
+    const mcpConnectionEnv = buildMcpEnvEntries(connectionPlan.mcp);
+    const connectionsSessionToken = registerConnectionSession(connectionPlan.rest);
+
     let ptyId = 0;
     timing(tflow, 'runTaskInteractive call');
     const res = await runTaskInteractive(synthetic, {
@@ -3584,7 +4044,13 @@ export class TypeBuildTaskSource implements TaskSource {
         // per-launch override so the user's global default model isn't burned
         // on routine browser work.
         '--model', 'claude-sonnet-5',
-        '--strict-mcp-config', '--mcp-config', MCP_INLINE_CONFIG,
+        // docs/connections-design.md §D.1 — extend the inline mcpServers map
+        // with one entry per in-scope, brokered kind:'mcp' Connection
+        // (mcpConfig below), still argv-safe: each entry carries a ${VAR}
+        // REFERENCE (connection-mount.ts buildMcpServerEntries), never the
+        // token itself. --strict-mcp-config still applies, so an
+        // out-of-scope Connection stays unreachable even if referenced.
+        '--strict-mcp-config', '--mcp-config', mcpConfig,
         // task-aaa1bf931e32 — the GLOBAL operator instructions used to be appended
         // HERE (extraArgs) AND independently re-fetched + re-appended inside
         // runTaskInteractive (interactive.ts) because the `playwright` flag is
@@ -3612,12 +4078,27 @@ export class TypeBuildTaskSource implements TaskSource {
         // Breeze main to resolve a `data` placeholder for THIS task. Env only —
         // never argv (/proc/<pid>/cmdline is world-readable); never a title/body.
         BREEZE_TYPEBUILD_TASK_ID: id,
+        // docs/connections-design.md §D.1 — one env var per mounted kind:'mcp'
+        // Connection, carrying its brokered bearer token (PTY env only, never
+        // argv — mirrors MCP_TOKEN_ENV). Empty object spreads to nothing when
+        // no MCP Connections are in scope (the common case today).
+        ...mcpConnectionEnv,
+        // docs/connections-design.md §D.1(c) — the opaque session token the
+        // agent's control-endpoint helper presents to `/app/connection-call`
+        // so main can look up THIS launch's mounted kind:'rest' Connections
+        // (connection-mount.ts registerConnectionSession) without
+        // re-brokering. Env only; the brokered creds themselves never leave
+        // main's memory. Always set (even with zero mounted rest
+        // Connections) so the control endpoint has a consistent, harmless
+        // "no connections" answer rather than an absent env var.
+        BREEZE_CONNECTIONS_SESSION: connectionsSessionToken,
       },
       onExit: () => {
         // Drop the session from the expiry registry, then run the
         // refresh/release-prompt flow. `ptyId` is assigned synchronously
         // below before any exit can fire.
         clearSession(ptyId);
+        clearConnectionSession(connectionsSessionToken);
         void this.onSessionExit(id);
       },
     });

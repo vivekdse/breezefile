@@ -1,0 +1,348 @@
+/* ConnectionsPanel — task-62a5b4324954. Mirrors SecretsPanel's modal chrome
+   (overlay + rounded panel), using ONLY the token palette from
+   src/styles/tokens.css. The create/edit form reuses the nh-dialog / nh-pdlg
+   shell (TaskDetailDialog.css / ProjectDialog.css) for visual consistency
+   with the rest of the app's dialogs. */
+
+.connections-panel {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-6) var(--sp-6) var(--sp-5);
+  width: min(760px, 94vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  color: var(--text-on-panel);
+  animation: connections-panel-in 200ms var(--ease-out, ease-out) both;
+}
+
+@keyframes connections-panel-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+.connections-panel__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  color: var(--muted-on-panel);
+  font-size: var(--fs-xl);
+  cursor: pointer;
+  transition: background var(--motion-hover), color var(--motion-hover);
+}
+.connections-panel__close:hover {
+  background: var(--border-1);
+  color: var(--text-on-panel);
+}
+
+.connections-panel__eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--fs-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--muted-on-panel);
+  font-weight: 600;
+}
+
+.connections-panel__title {
+  margin: 4px 0 8px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--fs-xl);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-on-panel);
+  line-height: 1.1;
+}
+
+.connections-panel__lede {
+  margin: 0 0 var(--sp-4);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--muted-on-panel);
+}
+
+.connections-panel__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 var(--sp-3);
+}
+
+.connections-panel__search {
+  flex: 1;
+  box-sizing: border-box;
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+}
+.connections-panel__search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.connections-panel__status,
+.connections-panel__empty {
+  margin: var(--sp-2) 0 var(--sp-4);
+  padding: var(--sp-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  color: var(--muted-on-panel);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-md);
+}
+
+.connections-panel__error {
+  margin: var(--sp-2) 0;
+  font-family: var(--font-sans);
+  color: var(--err, #d94a4a);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.connections-panel__list {
+  list-style: none;
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.connections-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--r-md);
+  font-family: var(--font-sans);
+}
+
+.connections-panel__row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.connections-panel__kind-badge {
+  flex-shrink: 0;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: var(--tracking-caps);
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.connections-panel__kind-badge[data-kind='mcp'] {
+  background: var(--bg-3);
+  color: var(--text-on-panel);
+}
+
+.connections-panel__row-text {
+  min-width: 0;
+}
+
+.connections-panel__row-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-on-panel);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.connections-panel__attention {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--warn, #d9a94a);
+}
+
+.connections-panel__row-endpoint {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
+}
+
+.connections-panel__row-meta {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: 2px;
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+}
+
+.connections-panel__cred {
+  color: var(--muted-on-panel);
+}
+.connections-panel__cred--set {
+  color: var(--accent);
+}
+
+.connections-panel__row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+.connections-panel__icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+  border-radius: var(--r-md);
+  color: var(--muted-on-panel);
+  font-size: var(--fs-md);
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--motion-hover), border-color var(--motion-hover);
+}
+.connections-panel__icon:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.connections-panel__icon:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.connections-panel__icon--danger:hover:not(:disabled) {
+  background: rgba(217, 74, 74, 0.12);
+  border-color: var(--err, #d94a4a);
+}
+
+.connections-panel__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.connections-panel__confirm-q {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+}
+.connections-panel__btn {
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-on-panel);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.connections-panel__btn--danger {
+  color: var(--err, #d94a4a);
+  border-color: rgba(217, 74, 74, 0.4);
+}
+.connections-panel__btn--danger:hover:not(:disabled) {
+  background: rgba(217, 74, 74, 0.12);
+}
+
+.connections-panel__signin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-8) var(--sp-2);
+  text-align: center;
+}
+.connections-panel__signin-btn {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  padding: 7px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+}
+.connections-panel__signin-btn:hover {
+  filter: brightness(1.08);
+}
+
+.connections-panel__privacy {
+  margin: 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+  color: var(--muted-on-panel);
+}
+
+/* ── The create/edit form (nh-dialog shell + connections-form specifics) ── */
+.connections-form__sub-select {
+  margin-top: var(--sp-2);
+}
+
+.connections-form__radio-row {
+  display: flex;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-2);
+}
+.connections-form__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-on-panel);
+  cursor: pointer;
+}
+
+.connections-form__secret-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.connections-form__secret-row .nh-pdlg__input {
+  flex: 1;
+}
+
+.connections-form__eye {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  border-radius: var(--r-md);
+  color: var(--muted-on-panel);
+  cursor: pointer;
+}
+.connections-form__eye:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.connections-form__stacked {
+  margin-top: var(--sp-2);
+}

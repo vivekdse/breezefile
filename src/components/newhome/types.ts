@@ -18,7 +18,7 @@
 // placeholder field ids (non-PHI); only the VALUES a user/agent fills in can
 // carry PHI.
 
-import type { Task } from '../../types';
+import type { Task, CallSpec } from '../../types';
 import type { PendingQuestion } from '../tasks/taskAnswer.d.mts';
 
 // Re-exported so downstream New Home files import one thing from one place.
@@ -97,11 +97,48 @@ export type TaskDefField = {
   options?: string[]; // select only
   required?: boolean; // OUTPUT fields: required === evidence
   /** task-e713f307c422 (reintroduced) — when set, this INPUT field is backed by
-   *  a live external-API query (a SavedQuery). The value-fill UI renders it as a
-   *  typeahead (see SourceTypeahead) instead of a plain input; selecting a row
-   *  records the row's opaque ref into the task data bag. Rides the self-
-   *  describing TaskDef (NOT a project pref) — consistent with the R3 model. */
-  source?: { savedQueryId: string; version?: number; entityType?: string };
+   *  a live external-API query. The value-fill UI renders it as a typeahead
+   *  (see SourceTypeahead) instead of a plain input; selecting a row records
+   *  the row's opaque ref (+ a bundle snapshot, for the Connection form — see
+   *  below) into the task data bag. Rides the self-describing TaskDef (NOT a
+   *  project pref) — consistent with the R3 model.
+   *
+   *  Two independent binding forms, distinguished by which id is present —
+   *  additive rather than a union so every existing SavedQuery-bound field
+   *  (`savedQueryId` only) keeps working unmodified (task-8f27d842f14d):
+   *   - SavedQuery form (original): `savedQueryId` (+ optional `version`/
+   *     `entityType`). Server-executed lookup, `SourceTypeahead` today.
+   *   - Connection form (docs/connections-design.md §D.2, new): `connectionId`
+   *     + `connectionVersion` (the spec `hash` the binding was authored
+   *     against — pins drift the same way `version` pins a SavedQuery) +
+   *     `lookup` (a declarative `CallSpec` that MUST produce `output.shape ===
+   *     'rows'`) + `bundle` (which of the row's declared fields get
+   *     snapshotted into `<fieldKey>.*` sibling keys on selection — see
+   *     TaskComposer's onSelectSource/save path). `bundle: 'all'` (the
+   *     default `fieldFromCatalog`/FieldSourcePicker binding builders
+   *     produce) snapshots every field the lookup's `output.fields` declares;
+   *     an explicit `{ fields: [...] }` list narrows it to named `from`
+   *     (row-field-name) → `key` (data-bag suffix) pairs.
+   *
+   *  RESERVED for a future lazy/fresh-at-execution mode (doc D.2, explicitly
+   *  NOT built yet): today's Connection pick is always an eager snapshot
+   *  (the whole row captured at selection time, never re-fetched). A later
+   *  `resolveMode?: 'snapshot' | 'lazy'` marker here (default 'snapshot')
+   *  would let a 'lazy' field store only the ref and re-resolve fresh at
+   *  fill/execution time via a new `conn.<connectionId>.<key>` ref-class in
+   *  electron/typebuild/task-data.ts's resolver (parallel to the existing
+   *  `me.*` class-2 prefix) — the schema below already carries everything
+   *  (`connectionId`, the row `ref.externalId`) that mode would need, so
+   *  adding the marker later needs no rework of this shape. */
+  source?:
+    | { savedQueryId: string; version?: number; entityType?: string }
+    | {
+        connectionId: string;
+        connectionVersion: string;
+        lookup: CallSpec;
+        entityType?: string;
+        bundle: { fields: Array<{ from: string; key: string }> } | 'all';
+      };
 };
 
 /** task-8b694714b13c — a conditional gate on a downstream TaskDef, keyed off

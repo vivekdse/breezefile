@@ -24,7 +24,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fm } from '../../bridge';
 import { SourceTypeahead } from '../newhome/SourceTypeahead';
-import type { QueryRef } from '../../copilot/savedQueries';
+import type { ConnectionLookupRow, ConnectionRef, QueryRef } from '../../copilot/savedQueries';
+// task-8f27d842f14d — the Connection-form field-source snapshot: fan a picked
+// row's bundle into `<fieldKey>.*` sibling values (+ provenance) the exact
+// same way TaskComposer's onSelectSource does, so this drawer's Inputs editor
+// (edit-mode on an already-created task) stays consistent with create-time.
+import { connectionBundleKeys, snapshotConnectionRow } from '../newhome/fieldCatalog.mjs';
 import {
   normalizeDataKey,
   isValidDataKey,
@@ -188,11 +193,34 @@ export function TaskDataInputs({
   // sibling key is folded into sessionKnownKeys so it renders and, more
   // importantly, is included in the save's known-key set. The ref is NON-PHI;
   // the label is a short display snapshot (memory-only, never logged).
-  const selectSource = (key: string, label: string, ref: QueryRef) => {
-    const refKey = `${key}.ref`;
+  const selectSource = (
+    key: string,
+    label: string,
+    ref: QueryRef | ConnectionRef,
+    source?: import('../newhome/types').TaskDefField['source'],
+    row?: ConnectionLookupRow,
+  ) => {
     editValue(key, label);
-    editValue(refKey, JSON.stringify(ref));
-    setSessionKnownKeys((k) => (k.includes(refKey) ? k : [...k, refKey]));
+    if (row && source && 'connectionId' in source) {
+      // task-8f27d842f14d — Connection form: fan the WHOLE picked row's
+      // bundle into `<key>.*` sibling values (+ provenance). Clear any stale
+      // sibling from a PRIOR pick first (a re-pick can change which fields
+      // get written, e.g. a different bundle or a row missing a field the
+      // last pick had) so a changed selection never leaves an orphan.
+      const stale = connectionBundleKeys(key, [...Object.keys(values), ...keys]);
+      for (const k of stale) editValue(k, '');
+      const { upsert, keys: newKeys } = snapshotConnectionRow(key, source, row);
+      for (const [k, v] of Object.entries(upsert)) editValue(k, v);
+      setSessionKnownKeys((prev) => {
+        const merged = new Set(prev);
+        for (const k of [...stale, ...newKeys]) merged.add(k);
+        return Array.from(merged);
+      });
+    } else {
+      const refKey = `${key}.ref`;
+      editValue(refKey, JSON.stringify(ref));
+      setSessionKnownKeys((k) => (k.includes(refKey) ? k : [...k, refKey]));
+    }
   };
 
   const removeKey = (key: string) => {
@@ -360,7 +388,7 @@ export function TaskDataInputs({
                       <SourceTypeahead
                         field={sourceDef}
                         display={value ?? ''}
-                        onSelect={(label, ref) => selectSource(key, label, ref)}
+                        onSelect={(label, ref, row) => selectSource(key, label, ref, sourceDef.source, row)}
                       />
                     ) : value === undefined ? (
                       <button

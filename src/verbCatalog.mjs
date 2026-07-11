@@ -131,6 +131,7 @@ export const VERB_CATALOG = [
   { id: 'new-project', label: 'New project', category: 'Tools', inMenu: false, help: 'create a project / sub-project via TypeBuild' },
   { id: 'settings', label: 'Settings', category: 'Tools', help: 'view & rebind keys · per-launcher settings · notifications' },
   { id: 'secrets', label: 'Secrets', category: 'Tools', inMenu: false, help: 'manage saved credentials the agent fills into forms' },
+  { id: 'connections', label: 'Connections', category: 'Tools', inMenu: false, help: 'register external API / MCP credentials the agent can use' },
   { id: 'permissions', label: 'Permissions', category: 'Tools', help: 'see and grant access to protected folders' },
   { id: 'upgrade', label: 'Upgrade', category: 'Tools', menuLabel: 'Check for Update', help: 'upgrade TypeBuild and relaunch' },
 
