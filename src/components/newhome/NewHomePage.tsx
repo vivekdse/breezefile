@@ -29,6 +29,7 @@
 // to disk/logs (see docs/typebuild-data-field-contract.md).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useStore } from '../../store';
 import { useNewHomeData } from './useNewHomeData';
 import { compileTaskQuery, runTaskQuery } from './taskQuery';
 import type { NewHomeStatus } from './types';
@@ -169,6 +170,30 @@ export function NewHomePage() {
   }
   const [filter, setFilter] = useState<FilterState>('all');
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+
+  // ":" opens command mode so the chip-prompt verbs work from Home. The global
+  // useKeyboard handler bails out for non-folder tabs, so every page surface
+  // wires its own ":" (TasksPage and ProjectsPage do the same) — without this,
+  // no verb could be started from New Home. NewHomePage only mounts while its
+  // tab is active (App.tsx renders it conditionally), so a window listener
+  // here can't leak onto other surfaces.
+  const { dispatch } = useStore();
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable;
+      if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === ':') {
+        e.preventDefault();
+        dispatch({ type: 'setMode', mode: 'command', buffer: '' });
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dispatch]);
   // task-7ea59baaea6c — tracks the project id as of the last run of the
   // close-detail-pane effect below, so that effect can tell "the selection
   // just changed" (real project switch — close the pane) apart from "this is
