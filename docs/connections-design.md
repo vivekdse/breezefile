@@ -649,3 +649,81 @@ Item 2 is the only cross-repo dependency; items 3–8 are sequential-ish within
 this repo but 6 and 7 can proceed in parallel once 3–4 land, since ambient
 tool-mounting and field-source binding share the broker (§C) and `CallSpec`
 interpreter (§E) but touch disjoint UI surfaces.
+
+---
+
+## J. Admin-curated catalog + user authorization (the Okta model)
+
+**Status:** shipped client-side 2026-07-11; server work filed as
+`task-7c45ba74047e` (task_manager_api) depending on `task-ca51be2f261b`
+(authkit).
+
+§§A–I assume the person opening the panel both authors the Connection and
+supplies its credential. Most users can't (and shouldn't) do that. This
+section adds the layer above: an **ADMIN provisions the available
+connections centrally**, and the end user's whole job is *select + authorize*
+— Okta-style tiles. The manual registration path (§H) is retained but
+demoted behind an "Advanced: register a custom connection" disclosure.
+
+### J.1 Model
+
+- A **catalog entry** is an admin-provisioned "this service is available to
+  connect" record: `{ id, toolkit, name, description?, kind: 'rest'|'mcp',
+  icon_url?, auth: 'oauth'|'admin_managed', scope? }`. It lives server-side
+  (task_manager_api, backed by authkit's connector layer — Composio outbound
+  OAuth with per-toolkit token vault). The client never authors catalog
+  entries; admin provisioning is a server/authkit surface.
+- `auth: 'oauth'` — each user authorizes their OWN account: Connect →
+  authorize URL opens in the system browser → OAuth consent → the server
+  vaults the token. `auth: 'admin_managed'` — the admin supplied one shared
+  credential centrally; users see "Managed by your admin" and there is
+  nothing to authorize or disconnect.
+- `status` is **per-caller**: `available` → `pending` (authorize opened, not
+  yet completed) → `connected` (+ `connected_as`, `connected_at`,
+  `connection_id`).
+- **On `connected` the server materializes a normal Connection record**
+  (§B) whose credential resolves from the connector token vault as
+  `kind:'oauth2'`. Everything downstream — the broker (§C), operator
+  mounting (§D.1, including the MCP mount's oauth2→bearer mapping in
+  `connection-mount.ts`), CallSpec execution (§E), field binding (§D.2) —
+  works unchanged. The catalog is only a new way for a Connection to come
+  into existence.
+
+### J.2 Wire contract (client ↔ task_manager_api)
+
+Same base + Firebase bearer auth as `/chromeext/connections`. All four
+routes degrade gracefully client-side until deployed (list → `[]`, mutations
+→ structured `{ok:false}`, status → `null`).
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/chromeext/connections/catalog` | `{ catalog: [entry] }` — entry as J.1, snake_case, plus per-caller `status`, `connection_id?`, `connected_as?`, `connected_at?` |
+| POST | `/chromeext/connections/catalog/:entryId/connect` | `{ redirect_url?, connection_id?, status }` — `redirect_url` is the OAuth authorize URL; structured error on 403/404/409 |
+| GET | `/chromeext/connections/catalog/:entryId/status` | `{ status, connected_as?, connection_id? }` — polled while pending |
+| DELETE | `/chromeext/connections/catalog/:entryId/connection` | 200/204 — disconnects the CALLER's connection for that entry |
+
+### J.3 Client flow (shipped)
+
+`ConnectionsPanel` leads with **Available connections** (catalog tiles):
+Connect → `catalog.connect(id)` → open `redirectUrl` via the system browser
+→ tile flips to "Waiting for authorization…" → poll `catalog.status(id)`
+every 3s for up to 3 minutes → on `connected`, refresh both the catalog and
+the registered list; on timeout, revert with a retry hint. Connected oauth
+entries get Disconnect (confirm-inline, like delete); `admin_managed`
+entries show "Managed by your admin" with no actions. **Your connections**
+(the §H registry list) follows, and the §H create/edit form sits behind the
+Advanced disclosure. Wire layer: `electron/sources/typebuild.ts`
+(`listConnectionCatalog` / `connectCatalogEntry` / `getCatalogEntryStatus` /
+`disconnectCatalogEntry`) → `ipc-connections.ts`
+(`typebuild:connections:catalog:*`) → preload → `fm.typebuild.connections.catalog.*`.
+
+### J.4 Server-side split (filed, not built)
+
+- **authkit (`task-ca51be2f261b`):** the catalog registry table, admin-gated
+  CRUD (platform-admin / group-admin), the caller-scoped catalog listing
+  joined with per-user connector state, and closing the any-user-any-toolkit
+  hole in `POST /connectors/{toolkit}/connect`.
+- **task_manager_api (`task-7c45ba74047e`):** mount/adapt the authkit
+  catalog to the J.2 routes, and materialize the Connection record on
+  `connected` so the §C broker serves oauth2 credentials from the connector
+  vault (force-refreshing expired tokens server-side).

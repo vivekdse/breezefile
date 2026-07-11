@@ -132,8 +132,17 @@ export async function resolveConnectionMountPlan(
       // 401 inside the agent's session instead of cleanly not offering the
       // tool. Skip it; the job proceeds without that one Connection.
       if (!cred) continue;
+      // An OAuth-authorized MCP Connection (§J catalog Connect flow) resolves
+      // to an oauth2 credential — map its accessToken to the mount bearer token
+      // so it mounts alongside the mcp_token/bearer shapes.
       const token =
-        cred.kind === 'mcp_token' ? cred.value : cred.kind === 'bearer' ? cred.value : null;
+        cred.kind === 'mcp_token'
+          ? cred.value
+          : cred.kind === 'bearer'
+            ? cred.value
+            : cred.kind === 'oauth2'
+              ? cred.accessToken
+              : null;
       if (!token) continue;
       mcp.push({
         connectionId: connection.id,

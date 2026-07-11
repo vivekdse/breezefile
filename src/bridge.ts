@@ -1,4 +1,4 @@
-import type { Agent, CallSpec, ChainDef, ConnectionCredential, ConnectionLookupRow, ConnectionRegisterInput, ConnectionSummary, Entry, Group, GroupDetail, GroupInvite, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
+import type { Agent, CallSpec, ChainDef, ConnectionCatalogEntry, ConnectionCatalogStatus, ConnectionCredential, ConnectionLookupRow, ConnectionRegisterInput, ConnectionSummary, Entry, Group, GroupDetail, GroupInvite, GroupMember, Project, RemoteSchedule, Task, TaskAuditEvent, TaskCreate, TaskFilter, TaskRun, TaskRunWithTitle, TaskSourceInfo, TaskUpdate, TaskUser } from './types';
 import type { TaskDefField } from './components/newhome/types';
 import type { Tag as DslTag, TagCreate as DslTagCreate, TagUpdate as DslTagUpdate } from './tagStore.d.mts';
 
@@ -843,6 +843,36 @@ type Fm = {
         callSpec: CallSpec,
         params: Record<string, string>,
       ) => Promise<ConnectionLookupRow[]>;
+      // docs/connections-design.md §J — admin-curated catalog (Okta model).
+      // An admin provisions the "available connections"; the end user clicks
+      // Connect → OAuth in the system browser → the server materializes a
+      // normal Connection (which then also appears in `list` above). Server
+      // routes are not deployed yet, so every method degrades gracefully
+      // (list → [], connect/disconnect → structured { ok:false }, status →
+      // null) — see electron/sources/typebuild.ts.
+      catalog: {
+        list: () => Promise<ConnectionCatalogEntry[]>;
+        connect: (
+          entryId: string,
+        ) => Promise<
+          | {
+              ok: true;
+              redirectUrl?: string;
+              connectionId?: string;
+              status: ConnectionCatalogStatus;
+            }
+          | { ok: false; reason: string; status: number }
+        >;
+        status: (
+          entryId: string,
+        ) => Promise<
+          | { status: ConnectionCatalogStatus; connectedAs?: string; connectionId?: string }
+          | null
+        >;
+        disconnect: (
+          entryId: string,
+        ) => Promise<{ ok: true } | { ok: false; reason: string; status: number }>;
+      };
     };
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note).
     taskNote: (

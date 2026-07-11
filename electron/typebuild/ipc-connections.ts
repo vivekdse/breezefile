@@ -13,6 +13,12 @@
 //   typebuild:connections:refreshSpec    (id)             -> ConnectionSummary
 //   typebuild:connections:lookup     (id, callSpec, params) -> ConnectionLookupRow[]
 //
+//   Admin-curated catalog (docs/connections-design.md §J, Okta model):
+//   typebuild:connections:catalog:list       ()        -> ConnectionCatalogEntry[]
+//   typebuild:connections:catalog:connect    (entryId) -> { ok, redirectUrl?, connectionId?, status | reason }
+//   typebuild:connections:catalog:status     (entryId) -> { status, connectedAs?, connectionId? } | null
+//   typebuild:connections:catalog:disconnect (entryId) -> { ok, reason?, status? }
+//
 // The server endpoints (/chromeext/connections...) are NOT deployed yet — the
 // source degrades gracefully (list/get -> []/null, mutations -> a structured
 // { ok:false, reason:'unsupported' }) so this surface is usable before the
@@ -29,6 +35,7 @@ import { ipcMain } from 'electron';
 import { getTaskSource } from '../sources/registry';
 import type {
   CallSpec,
+  ConnectionCatalogEntry,
   ConnectionCredential,
   ConnectionLookupRow,
   ConnectionRegisterInput,
@@ -96,5 +103,25 @@ export function registerTypebuildConnectionsIpc(): void {
       callSpec: CallSpec,
       params: Record<string, string>,
     ): Promise<ConnectionLookupRow[]> => source().lookupConnection(connectionId, callSpec, params),
+  );
+
+  // ── Admin-curated catalog (docs/connections-design.md §J). Thin delegation
+  // to the source's catalog methods, which degrade gracefully until the server
+  // routes land — same pattern as the connection methods above.
+  ipcMain.handle(
+    'typebuild:connections:catalog:list',
+    (_e): Promise<ConnectionCatalogEntry[]> => source().listConnectionCatalog(),
+  );
+  ipcMain.handle(
+    'typebuild:connections:catalog:connect',
+    (_e, entryId: string) => source().connectCatalogEntry(entryId),
+  );
+  ipcMain.handle(
+    'typebuild:connections:catalog:status',
+    (_e, entryId: string) => source().getCatalogEntryStatus(entryId),
+  );
+  ipcMain.handle(
+    'typebuild:connections:catalog:disconnect',
+    (_e, entryId: string) => source().disconnectCatalogEntry(entryId),
   );
 }

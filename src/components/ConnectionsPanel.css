@@ -287,6 +287,57 @@
   filter: brightness(1.08);
 }
 
+/* ── Catalog (docs/connections-design.md §J) — the "Available connections"
+   tiles + the demoted Advanced manual-registration disclosure. ── */
+.connections-panel__section {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-on-panel);
+}
+.connections-panel__section:first-of-type {
+  margin-top: 0;
+}
+
+.connections-panel__pending {
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  animation: connections-panel-pending 1.4s ease-in-out infinite;
+}
+@keyframes connections-panel-pending {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.connections-panel__advanced {
+  margin: var(--sp-3) 0 var(--sp-4);
+}
+.connections-panel__advanced-toggle {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  cursor: pointer;
+}
+.connections-panel__advanced-toggle:hover {
+  color: var(--text-on-panel);
+}
+.connections-panel__advanced-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.connections-panel__advanced-body .connections-panel__status {
+  margin: 0;
+}
+
 .connections-panel__privacy {
   margin: 0;
   padding-top: var(--sp-3);

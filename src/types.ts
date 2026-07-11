@@ -656,6 +656,33 @@ export type ConnectionRegisterInput = {
   credential?: ConnectionCredential;
 };
 
+// docs/connections-design.md §J — admin-curated catalog (Okta model). An admin
+// provisions "available connections" centrally (server-side, authkit connectors
+// / Composio); the end user just sees tiles and clicks Connect → OAuth in the
+// system browser → the server materializes a normal Connection (which then also
+// shows up in the ConnectionSummary registry above). `status` is PER-CALLER.
+// NON-PHI service metadata. Mirrors electron/sources/typebuild.ts.
+export type ConnectionCatalogStatus = 'available' | 'pending' | 'connected';
+export type ConnectionCatalogAuth = 'oauth' | 'admin_managed';
+export type ConnectionCatalogScope =
+  | { type: 'none' }
+  | { type: 'project'; projectId: string }
+  | { type: 'group'; groupId: string };
+export type ConnectionCatalogEntry = {
+  id: string;
+  toolkit: string;
+  name: string;
+  description?: string;
+  kind: 'rest' | 'mcp';
+  iconUrl?: string;
+  auth: ConnectionCatalogAuth;
+  scope?: ConnectionCatalogScope;
+  status: ConnectionCatalogStatus;
+  connectionId?: string;
+  connectedAs?: string;
+  connectedAt?: string;
+};
+
 // docs/connections-design.md §E — a single declarative REST call. No code —
 // every dynamic part is a named slot filled from typed inputs, resolved
 // client-side, applied to a plain HTTP request. Not wired to anything yet;

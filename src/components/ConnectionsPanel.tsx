@@ -1,26 +1,26 @@
 /*
- * ConnectionsPanel — the Connections surface (task-62a5b4324954). A modal
- * panel (mirrors SecretsPanel's structure/security discipline, NOT a
- * full-screen tab) for registering an external service — a REST API (e.g.
- * QuickBooks) or an MCP server — that the agent can later use.
+ * ConnectionsPanel — the Connections surface. CATALOG-FIRST (docs/
+ * connections-design.md §J, the Okta model): the default view shows
+ * "Available connections" that an ADMIN provisioned centrally — the end user
+ * just clicks Connect → OAuth in the system browser → the server materializes a
+ * normal Connection (which then also appears under "Your connections"). No
+ * credential is ever typed for a catalog Connect; the OAuth handshake happens
+ * in the browser and the token lives server-side.
  *
- * THE CREDENTIAL GOES TO THE SERVER. Registration/edit sends the credential
- * value to fm.typebuild.connections.register/setCredential and it is NEVER
- * stored on this machine, never logged, and never echoed back — every read
- * (list/get) returns a creds-STRIPPED ConnectionSummary whose
- * `credentialDisplay` carries only non-secret metadata, never a value. A
- * captured secret lives only in this component's
- * transient form state and is dropped on submit/unmount, the same discipline
- * SecretsPanel and SavePasswordPrompt use for the values they touch.
- *
- * This task builds the registry (list) + create/edit + credential capture
- * only. Operator-tool mounting and field-binding are separate tasks and are
- * NOT wired here.
+ * The manual registration form (a REST API or MCP server + a pasted/typed
+ * credential) is retained but DEMOTED behind an "Advanced" disclosure — most
+ * users never need it. When used, THE CREDENTIAL GOES TO THE SERVER: it is sent
+ * to fm.typebuild.connections.register/setCredential and NEVER stored on this
+ * machine, never logged, never echoed back — every read (list/get) returns a
+ * creds-STRIPPED ConnectionSummary whose `credentialDisplay` carries only
+ * non-secret metadata. A captured secret lives only in this component's
+ * transient form state and is dropped on submit/unmount.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fm } from '../bridge';
 import type {
+  ConnectionCatalogEntry,
   ConnectionCredential,
   ConnectionCredentialKind,
   ConnectionRegisterInput,
@@ -139,6 +139,18 @@ function formatReason(reason: string): string {
   return `Failed: ${reason}`;
 }
 
+function formatCatalogReason(reason: string): string {
+  if (reason === 'not_in_scope') return 'You don’t have access to this connection.';
+  if (reason === 'not_found') return 'This connection is no longer available.';
+  if (reason === 'conflict') return 'This connection is already being set up.';
+  if (reason === 'in_use') return 'This connection is in use and can’t be disconnected.';
+  if (reason === 'unsupported') return 'Connections aren’t available on the server yet.';
+  return `Failed: ${reason}`;
+}
+
+const POLL_INTERVAL_MS = 3_000;
+const POLL_TIMEOUT_MS = 180_000;
+
 export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
   const { exit, state } = useOverlayExit(onClose);
   const { signedIn } = useTypebuildAuth();
@@ -163,14 +175,38 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Admin-curated catalog (docs/connections-design.md §J). `pendingIds` tracks
+  // entries whose OAuth authorize we opened and are polling; an entry may also
+  // arrive already `status:'pending'` from the server (a poll started on
+  // another machine), so the tile treats either as pending.
+  const [catalog, setCatalog] = useState<ConnectionCatalogEntry[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [catalogBusyId, setCatalogBusyId] = useState<string | null>(null);
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState<string | null>(null);
+
+  // Manual (custom) registration is demoted behind this disclosure — collapsed
+  // by default; connections are usually provisioned by an admin.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const mounted = useRef(true);
-  useEffect(
-    () => () => {
+  // One live poll per pending entry (interval id keyed by entry id). Cleared on
+  // connect/timeout and, wholesale, on unmount so no timer outlives the panel.
+  const pollTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  useEffect(() => {
+    // Reset on EVERY run, not just at ref init: StrictMode (dev) runs
+    // mount → cleanup → mount on the same fiber, so a cleanup-only flag
+    // stays false after the simulated remount and every mounted-guarded
+    // setState silently no-ops (the panel hangs at "Loading…").
+    mounted.current = true;
+    return () => {
       mounted.current = false;
-    },
-    [],
-  );
+      for (const t of pollTimers.current.values()) clearInterval(t);
+      pollTimers.current.clear();
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -190,6 +226,128 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const refreshCatalog = useCallback(async () => {
+    setCatalogLoading(true);
+    try {
+      const list = await fm.typebuild.connections.catalog.list();
+      if (!mounted.current) return;
+      setCatalog([...list].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch {
+      // The route degrades to [] in the source; a throw here is unexpected —
+      // treat it as "nothing provisioned" rather than blocking the panel.
+      if (mounted.current) setCatalog([]);
+    } finally {
+      if (mounted.current) setCatalogLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCatalog();
+  }, [refreshCatalog]);
+
+  const clearPoll = useCallback((entryId: string) => {
+    const t = pollTimers.current.get(entryId);
+    if (t) {
+      clearInterval(t);
+      pollTimers.current.delete(entryId);
+    }
+  }, []);
+
+  const dropPending = useCallback((entryId: string) => {
+    setPendingIds((prev) => {
+      if (!prev.has(entryId)) return prev;
+      const next = new Set(prev);
+      next.delete(entryId);
+      return next;
+    });
+  }, []);
+
+  // Poll an entry's status every 3s for up to 3 minutes while its OAuth
+  // authorize is pending. On `connected` refresh both the catalog and the
+  // registered-connections list (the server has materialized a Connection);
+  // on timeout revert to available with a gentle note.
+  const startPoll = useCallback(
+    (entryId: string) => {
+      clearPoll(entryId);
+      const started = Date.now();
+      const timer = setInterval(() => {
+        void (async () => {
+          if (Date.now() - started > POLL_TIMEOUT_MS) {
+            clearPoll(entryId);
+            if (!mounted.current) return;
+            dropPending(entryId);
+            setCatalogError('Authorization timed out. Click Connect to try again.');
+            return;
+          }
+          const st = await fm.typebuild.connections.catalog.status(entryId).catch(() => null);
+          if (!mounted.current) return;
+          if (st && st.status === 'connected') {
+            clearPoll(entryId);
+            dropPending(entryId);
+            await refreshCatalog();
+            await refresh();
+          }
+        })();
+      }, POLL_INTERVAL_MS);
+      pollTimers.current.set(entryId, timer);
+    },
+    [clearPoll, dropPending, refresh, refreshCatalog],
+  );
+
+  async function handleConnect(entry: ConnectionCatalogEntry) {
+    if (catalogBusyId) return;
+    setCatalogBusyId(entry.id);
+    setCatalogError(null);
+    try {
+      const res = await fm.typebuild.connections.catalog.connect(entry.id);
+      if (!res.ok) {
+        setCatalogError(formatCatalogReason(res.reason));
+        return;
+      }
+      if (res.redirectUrl) {
+        // Hand the OAuth authorize URL to the system browser; then poll.
+        await fm.openUrl(res.redirectUrl);
+        setPendingIds((prev) => new Set(prev).add(entry.id));
+        startPoll(entry.id);
+      } else if (res.status === 'connected') {
+        // Admin-managed / already-authorized — no browser hop needed.
+        await refreshCatalog();
+        await refresh();
+      } else {
+        // Pending with no redirect (e.g. admin_managed provisioning) — poll.
+        setPendingIds((prev) => new Set(prev).add(entry.id));
+        startPoll(entry.id);
+      }
+    } catch (err) {
+      setCatalogError(err instanceof Error ? err.message : 'Could not start the connection.');
+    } finally {
+      setCatalogBusyId(null);
+    }
+  }
+
+  function handleCancelPending(entryId: string) {
+    clearPoll(entryId);
+    dropPending(entryId);
+  }
+
+  async function handleCatalogDisconnect(entryId: string) {
+    setCatalogBusyId(entryId);
+    try {
+      const res = await fm.typebuild.connections.catalog.disconnect(entryId);
+      if (!res.ok) {
+        setCatalogError(formatCatalogReason(res.reason));
+        return;
+      }
+      setConfirmingDisconnect(null);
+      await refreshCatalog();
+      await refresh();
+    } catch (err) {
+      setCatalogError(err instanceof Error ? err.message : 'Could not disconnect.');
+    } finally {
+      setCatalogBusyId(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -410,8 +568,9 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
           Connections
         </h2>
         <p className="connections-panel__lede">
-          Register an external API or MCP server. The credential is stored encrypted
-          on TypeBuild — never on this machine.
+          Connect the services your admin has provisioned — click Connect and finish
+          the sign-in in your browser. Credentials stay on TypeBuild, never on this
+          machine.
         </p>
 
         {!signedIn ? (
@@ -429,6 +588,122 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <>
+            <h3 className="connections-panel__section">Available connections</h3>
+            {catalogError && (
+              <p className="connections-panel__error" role="alert">
+                {catalogError}
+              </p>
+            )}
+            {catalogLoading ? (
+              <p className="connections-panel__status" aria-live="polite">
+                Loading…
+              </p>
+            ) : catalog.length === 0 ? (
+              <p className="connections-panel__empty">No admin-provisioned connections yet.</p>
+            ) : (
+              <ul className="connections-panel__list connections-panel__catalog">
+                {catalog.map((entry) => {
+                  const isPending = pendingIds.has(entry.id) || entry.status === 'pending';
+                  const isBusy = catalogBusyId === entry.id;
+                  const isConfirming = confirmingDisconnect === entry.id;
+                  return (
+                    <li key={entry.id} className="connections-panel__row">
+                      <div className="connections-panel__row-main">
+                        <span className="connections-panel__kind-badge" data-kind={entry.kind}>
+                          {entry.kind === 'mcp' ? 'MCP' : 'REST'}
+                        </span>
+                        <div className="connections-panel__row-text">
+                          <div className="connections-panel__row-name">{entry.name}</div>
+                          {entry.description && (
+                            <div
+                              className="connections-panel__row-endpoint"
+                              title={entry.description}
+                            >
+                              {entry.description}
+                            </div>
+                          )}
+                          {entry.status === 'connected' && (
+                            <div className="connections-panel__row-meta">
+                              <span className="connections-panel__cred connections-panel__cred--set">
+                                Connected{entry.connectedAs ? ` as ${entry.connectedAs}` : ''}
+                              </span>
+                              {entry.auth === 'admin_managed' && (
+                                <span>Managed by your admin</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="connections-panel__row-actions">
+                        {isPending ? (
+                          <span className="connections-panel__confirm">
+                            <span
+                              className="connections-panel__pending"
+                              role="status"
+                              aria-live="polite"
+                            >
+                              Waiting for authorization…
+                            </span>
+                            <button
+                              type="button"
+                              className="connections-panel__btn"
+                              onClick={() => handleCancelPending(entry.id)}
+                              aria-label={`Cancel connecting ${entry.name}`}
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : entry.status === 'connected' ? (
+                          entry.auth === 'admin_managed' ? null : isConfirming ? (
+                            <span className="connections-panel__confirm">
+                              <span className="connections-panel__confirm-q">Disconnect?</span>
+                              <button
+                                type="button"
+                                className="connections-panel__btn connections-panel__btn--danger"
+                                onClick={() => void handleCatalogDisconnect(entry.id)}
+                                disabled={isBusy}
+                                aria-label={`Confirm disconnect ${entry.name}`}
+                              >
+                                {isBusy ? 'Disconnecting…' : 'Disconnect'}
+                              </button>
+                              <button
+                                type="button"
+                                className="connections-panel__btn"
+                                onClick={() => setConfirmingDisconnect(null)}
+                                aria-label="Cancel disconnect"
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="connections-panel__btn"
+                              onClick={() => setConfirmingDisconnect(entry.id)}
+                              aria-label={`Disconnect ${entry.name}`}
+                            >
+                              Disconnect
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn--primary"
+                            onClick={() => void handleConnect(entry)}
+                            disabled={isBusy}
+                            aria-label={`Connect ${entry.name}`}
+                          >
+                            {isBusy ? 'Connecting…' : 'Connect'}
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <h3 className="connections-panel__section">Your connections</h3>
             {loadError && (
               <p className="connections-panel__error" role="alert">
                 {loadError}
@@ -446,9 +721,6 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
                 spellCheck={false}
                 aria-label="Search connections"
               />
-              <button type="button" className="btn btn--primary" onClick={openCreate}>
-                + New connection
-              </button>
             </div>
 
             {loading ? (
@@ -457,7 +729,9 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
               </p>
             ) : filtered.length === 0 ? (
               <p className="connections-panel__empty">
-                {q ? 'No matching connections.' : 'No connections yet — register one above.'}
+                {q
+                  ? 'No matching connections.'
+                  : 'No connections yet — connect one above, or register a custom one below.'}
               </p>
             ) : (
               <ul className="connections-panel__list">
@@ -574,6 +848,27 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
                 })}
               </ul>
             )}
+            <div className="connections-panel__advanced">
+              <button
+                type="button"
+                className="connections-panel__advanced-toggle"
+                onClick={() => setAdvancedOpen((v) => !v)}
+                aria-expanded={advancedOpen}
+              >
+                {advancedOpen ? '▾' : '▸'} Advanced: register a custom connection
+              </button>
+              {advancedOpen && (
+                <div className="connections-panel__advanced-body">
+                  <p className="connections-panel__status">
+                    Connections are usually provisioned by your admin. Register one
+                    manually only if you hold the credential yourself.
+                  </p>
+                  <button type="button" className="btn btn--primary" onClick={openCreate}>
+                    + New connection
+                  </button>
+                </div>
+              )}
+            </div>
           </>
         )}
 

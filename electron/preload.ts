@@ -107,6 +107,29 @@ type ConnectionRegisterInput = {
   credential?: ConnectionCredential;
 };
 
+// docs/connections-design.md §J — admin-curated catalog (Okta model). Inlined
+// like the other Connection types; mirrors src/types.ts `ConnectionCatalogEntry`.
+// NON-PHI service metadata; `status` is per-caller.
+type ConnectionCatalogStatus = 'available' | 'pending' | 'connected';
+type ConnectionCatalogScope =
+  | { type: 'none' }
+  | { type: 'project'; projectId: string }
+  | { type: 'group'; groupId: string };
+type ConnectionCatalogEntry = {
+  id: string;
+  toolkit: string;
+  name: string;
+  description?: string;
+  kind: 'rest' | 'mcp';
+  iconUrl?: string;
+  auth: 'oauth' | 'admin_managed';
+  scope?: ConnectionCatalogScope;
+  status: ConnectionCatalogStatus;
+  connectionId?: string;
+  connectedAs?: string;
+  connectedAt?: string;
+};
+
 // docs/connections-design.md §E — a single declarative REST call (no code —
 // every dynamic part is a named slot). Inlined here for the same reason as
 // the Connection types above; mirrors src/types.ts `CallSpec`/
@@ -1241,6 +1264,34 @@ const fm = {
           callSpec,
           params,
         ) as Promise<ConnectionLookupRow[]>,
+      // docs/connections-design.md §J — admin-curated catalog (Okta model).
+      // Degrades gracefully until the server routes land (see
+      // electron/sources/typebuild.ts).
+      catalog: {
+        list: () =>
+          ipcRenderer.invoke('typebuild:connections:catalog:list') as Promise<
+            ConnectionCatalogEntry[]
+          >,
+        connect: (entryId: string) =>
+          ipcRenderer.invoke('typebuild:connections:catalog:connect', entryId) as Promise<
+            | {
+                ok: true;
+                redirectUrl?: string;
+                connectionId?: string;
+                status: ConnectionCatalogStatus;
+              }
+            | { ok: false; reason: string; status: number }
+          >,
+        status: (entryId: string) =>
+          ipcRenderer.invoke('typebuild:connections:catalog:status', entryId) as Promise<
+            | { status: ConnectionCatalogStatus; connectedAs?: string; connectionId?: string }
+            | null
+          >,
+        disconnect: (entryId: string) =>
+          ipcRenderer.invoke('typebuild:connections:catalog:disconnect', entryId) as Promise<
+            { ok: true } | { ok: false; reason: string; status: number }
+          >,
+      },
     },
     // task-fdf3dc6b3c5c — TASK-scope teach write-back (per-task note). Same
     // structured-result contract as projects.patch.

@@ -501,6 +501,31 @@ export type ConnectionRegisterInput = {
   spec?: ConnectionSpecInput;
   credential?: ConnectionCredential;
 };
+// docs/connections-design.md §J — admin-curated catalog (Okta model). An admin
+// provisions entries centrally (server-side, backed by authkit connectors /
+// Composio); the end user just sees tiles and clicks Connect → OAuth in the
+// system browser → the server materializes a normal Connection record. `status`
+// is PER-CALLER (available/pending/connected). NON-PHI service metadata.
+export type ConnectionCatalogStatus = 'available' | 'pending' | 'connected';
+export type ConnectionCatalogAuth = 'oauth' | 'admin_managed';
+export type ConnectionCatalogScope =
+  | { type: 'none' }
+  | { type: 'project'; projectId: string }
+  | { type: 'group'; groupId: string };
+export type ConnectionCatalogEntry = {
+  id: string;
+  toolkit: string;
+  name: string;
+  description?: string;
+  kind: 'rest' | 'mcp';
+  iconUrl?: string;
+  auth: ConnectionCatalogAuth;
+  scope?: ConnectionCatalogScope;
+  status: ConnectionCatalogStatus;
+  connectionId?: string;
+  connectedAs?: string;
+  connectedAt?: string;
+};
 type ConnectionRow = {
   id?: string;
   name?: string;
@@ -556,6 +581,51 @@ function mapConnectionRow(r: ConnectionRow): ConnectionSummary | null {
   if (typeof r.created_by === 'string') out.createdBy = r.created_by;
   if (typeof r.created_at === 'string') out.createdAt = r.created_at;
   if (typeof r.updated_at === 'string') out.updatedAt = r.updated_at;
+  return out;
+}
+// docs/connections-design.md §J — one catalog entry as it arrives on the wire
+// (snake_case), mapped to the camelCase ConnectionCatalogEntry above.
+type ConnectionCatalogRow = {
+  id?: string;
+  toolkit?: string;
+  name?: string;
+  description?: string | null;
+  kind?: string;
+  icon_url?: string | null;
+  auth?: string;
+  scope?: { type?: string; project_id?: string | null; group_id?: string | null } | null;
+  status?: string;
+  connection_id?: string | null;
+  connected_as?: string | null;
+  connected_at?: string | null;
+};
+function mapCatalogScope(s: ConnectionCatalogRow['scope']): ConnectionCatalogScope {
+  if (!s || s.type === 'none') return { type: 'none' };
+  if (s.type === 'group' && s.group_id) return { type: 'group', groupId: s.group_id };
+  if (s.type === 'project' && s.project_id) return { type: 'project', projectId: s.project_id };
+  return { type: 'none' };
+}
+function mapCatalogRow(r: ConnectionCatalogRow): ConnectionCatalogEntry | null {
+  if (!r || typeof r.id !== 'string' || !r.id) return null;
+  const kind = r.kind === 'mcp' ? 'mcp' : 'rest';
+  const auth: ConnectionCatalogAuth = r.auth === 'admin_managed' ? 'admin_managed' : 'oauth';
+  const status: ConnectionCatalogStatus =
+    r.status === 'pending' || r.status === 'connected' ? r.status : 'available';
+  const out: ConnectionCatalogEntry = {
+    id: r.id,
+    toolkit: typeof r.toolkit === 'string' ? r.toolkit : r.id,
+    name: typeof r.name === 'string' && r.name.trim() ? r.name : r.id,
+    kind,
+    auth,
+    status,
+  };
+  if (typeof r.description === 'string' && r.description.trim()) out.description = r.description;
+  if (typeof r.icon_url === 'string' && r.icon_url.trim()) out.iconUrl = r.icon_url;
+  const scope = mapCatalogScope(r.scope);
+  if (scope.type !== 'none') out.scope = scope;
+  if (typeof r.connection_id === 'string') out.connectionId = r.connection_id;
+  if (typeof r.connected_as === 'string') out.connectedAs = r.connected_as;
+  if (typeof r.connected_at === 'string') out.connectedAt = r.connected_at;
   return out;
 }
 function connectionPayload(input: {
@@ -2141,6 +2211,133 @@ export class TypeBuildTaskSource implements TaskSource {
     );
     if (!result.ok || !Array.isArray(result.data)) return [];
     return result.data as ConnectionLookupRow[];
+  }
+
+  // ─── connection catalog (docs/connections-design.md §J) ──────────────────
+  // Admin-curated "available connections" (Okta model): an admin provisions
+  // entries centrally; the end user sees tiles and clicks Connect → OAuth in
+  // the system browser. The four routes below are NOT deployed yet, so each
+  // degrades exactly like the connection methods above (list → [], mutations →
+  // a structured { ok:false, reason }). NON-PHI: only service metadata crosses.
+
+  // GET /chromeext/connections/catalog → { catalog: [...] }. `status` is
+  // per-caller. 404/network → [] (the panel shows a quiet "nothing provisioned"
+  // hint), mirroring listConnections' list-and-degrade reader.
+  async listConnectionCatalog(): Promise<ConnectionCatalogEntry[]> {
+    try {
+      const res = await this.request('GET', '/chromeext/connections/catalog');
+      if (!res.ok) return [];
+      const data = (await res.json().catch(() => ({}))) as {
+        catalog?: ConnectionCatalogRow[];
+      };
+      const rows = Array.isArray(data.catalog) ? data.catalog : [];
+      const out: ConnectionCatalogEntry[] = [];
+      for (const r of rows) {
+        const mapped = mapCatalogRow(r);
+        if (mapped) out.push(mapped);
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  // POST /chromeext/connections/catalog/{entryId}/connect → 200
+  // { redirect_url?, connection_id?, status }. For auth:'oauth' the redirect_url
+  // is the authorize URL the client opens in the system browser. Structured
+  // result (same convention as updateConnection) so a 403/404/409 shows inline.
+  async connectCatalogEntry(
+    entryId: string,
+  ): Promise<
+    | { ok: true; redirectUrl?: string; connectionId?: string; status: ConnectionCatalogStatus }
+    | { ok: false; reason: string; status: number }
+  > {
+    const res = await this.request(
+      'POST',
+      `/chromeext/connections/catalog/${encodeURIComponent(entryId)}/connect`,
+    );
+    if (res.status === 200) {
+      const data = (await res.json().catch(() => ({}))) as {
+        redirect_url?: string;
+        connection_id?: string;
+        status?: string;
+      };
+      const status: ConnectionCatalogStatus =
+        data.status === 'pending' || data.status === 'connected' ? data.status : 'pending';
+      return {
+        ok: true,
+        status,
+        ...(typeof data.redirect_url === 'string' ? { redirectUrl: data.redirect_url } : {}),
+        ...(typeof data.connection_id === 'string' ? { connectionId: data.connection_id } : {}),
+      };
+    }
+    if (res.status === 403 || res.status === 404 || res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string; error?: string };
+      const reason =
+        data.reason ??
+        data.error ??
+        (res.status === 403 ? 'not_in_scope' : res.status === 409 ? 'conflict' : 'not_found');
+      return { ok: false, reason, status: res.status };
+    }
+    return { ok: false, reason: 'unsupported', status: res.status };
+  }
+
+  // GET /chromeext/connections/catalog/{entryId}/status → 200
+  // { status, connected_as?, connection_id? } — polled while an authorize is
+  // pending. Degrades to `null` on any failure (route not deployed, transport)
+  // so the poller treats it as "no change yet", same soft-fail as getConnection.
+  async getCatalogEntryStatus(
+    entryId: string,
+  ): Promise<{ status: ConnectionCatalogStatus; connectedAs?: string; connectionId?: string } | null> {
+    try {
+      const res = await this.request(
+        'GET',
+        `/chromeext/connections/catalog/${encodeURIComponent(entryId)}/status`,
+      );
+      if (!res.ok) {
+        await res.json().catch(() => ({}));
+        return null;
+      }
+      const data = (await res.json().catch(() => null)) as {
+        status?: string;
+        connected_as?: string;
+        connection_id?: string;
+      } | null;
+      if (!data || typeof data.status !== 'string') return null;
+      const status: ConnectionCatalogStatus =
+        data.status === 'pending' || data.status === 'connected' ? data.status : 'available';
+      return {
+        status,
+        ...(typeof data.connected_as === 'string' ? { connectedAs: data.connected_as } : {}),
+        ...(typeof data.connection_id === 'string' ? { connectionId: data.connection_id } : {}),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // DELETE /chromeext/connections/catalog/{entryId}/connection → 200/204 —
+  // disconnects the CALLER's connection for that entry. Structured result, same
+  // convention as deleteConnection.
+  async disconnectCatalogEntry(
+    entryId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+    const res = await this.request(
+      'DELETE',
+      `/chromeext/connections/catalog/${encodeURIComponent(entryId)}/connection`,
+    );
+    if (res.status === 200 || res.status === 204) {
+      await res.json().catch(() => ({}));
+      return { ok: true };
+    }
+    if (res.status === 403 || res.status === 404 || res.status === 409) {
+      const data = (await res.json().catch(() => ({}))) as { reason?: string };
+      const reason =
+        data.reason ??
+        (res.status === 403 ? 'not_owner' : res.status === 409 ? 'in_use' : 'not_found');
+      return { ok: false, reason, status: res.status };
+    }
+    return { ok: false, reason: 'unsupported', status: res.status };
   }
 
   // ─── templates (task-e112d60a3b7c) ───────────────────────────────────────
