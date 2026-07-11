@@ -65,6 +65,16 @@
   --copilot-sidebar-width: clamp(320px, 33vw, 480px);
 }
 
+/* The app body sets `user-select: none` (styles/base.css); CopilotKit inherits
+   it, which made chat replies AND its error banner (with API failure details)
+   impossible to select/copy. Unscoped on purpose: the error banner portals out
+   of .copilot-dock to document.body, so a dock-scoped rule would miss it. */
+[data-copilotkit],
+[data-copilotkit] * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 [data-copilotkit] {
   --background: var(--panel, var(--bg-1));
   --card: var(--panel, var(--bg-1));

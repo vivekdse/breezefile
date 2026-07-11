@@ -62,6 +62,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // first, IPv6 still used when that's all a host has.
 dns.setDefaultResultOrder('ipv4first');
 
+// dns.lookup and fs.* share libuv's threadpool (default 4 threads). A file
+// manager keeps that pool busy — stat storms, thumbnails, sshfs-backed dirs —
+// and when all 4 threads are occupied, every queued dns.lookup stalls, so
+// undici fetches to ANY host die with UND_ERR_CONNECT_TIMEOUT (its connect
+// window includes the DNS phase) even though the network is fine. Seen live
+// 2026-07-11: Copilot chat + typebuild:audit both timing out from a running
+// instance while a fresh Electron process reached the same hosts in <200ms.
+// Must be set before the first threadpool use; module top-level qualifies.
+if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '16';
+
 // package.json's `name` is the npm-style slug "file-manager"; Electron
 // reads that for app.getName() in dev (before the bundle is built) and
 // the default `role: 'appMenu'` uses it for the About / Hide / Quit

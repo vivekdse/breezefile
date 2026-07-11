@@ -1934,7 +1934,7 @@ export const VERBS: VerbDef[] = [
     // stored on this machine. Modal panel (mirrors :secrets), not a tab.
     id: 'connections',
     label: 'Connections',
-    aliases: ['connections', 'connection', 'apis', 'integrations'],
+    aliases: ['connections', 'connection', 'apis', 'integrations', 'register', 'registration'],
     icon: '🔌',
     describe: () =>
       'Open Connections — register external API / MCP credentials the agent can use',
