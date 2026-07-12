@@ -1,6 +1,15 @@
 /* fm-294 — confirm dialog. Reuses .overlay / .overlay__box base styles
    from App.css for the backdrop, blur, and enter/exit animation. */
 
+/* task-9b748c587d55 — ConfirmDialog is mounted earlier in App.tsx's DOM
+   than the open-task surfaces (TaskDetailDrawer / NewHome TaskDetailDialog),
+   so with the shared .overlay z-index (--z-overlay) they tie and the
+   later-painted task form wins, burying the confirm dialog. Raise the
+   confirm overlay above --z-overlay so it always wins the stack. */
+.confirm-overlay {
+  z-index: var(--z-confirm);
+}
+
 .confirm {
   /* Slightly tighter than the input overlays — this is read, not typed. */
   position: relative;

@@ -94,6 +94,7 @@
   /* Z */
   --z-chrome: 10;
   --z-overlay: 100;
+  --z-confirm: 200;
 
   /* ------------- Text on surfaces (theme-safe) -------------
      Why these exist: individual themes define different palette tokens.
