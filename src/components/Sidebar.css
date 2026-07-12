@@ -605,16 +605,33 @@ button.sidebar__link:hover .sidebar__unpin {
    (Terminal.css `tabbar-attn-pulse-go`) so users see the same visual
    language across both surfaces. */
 .sidebar__task-lead {
+  position: relative;
   color: var(--text-on-panel, #fff);
 }
 .sidebar__task-lead--running {
   color: #34c759;
   border-radius: 50%;
+}
+/* Ambient pulse — the glow rides a ::after layer whose OPACITY animates,
+   not the icon's box-shadow. box-shadow is not compositor-animatable: an
+   infinite box-shadow keyframe here forces a main-thread style recalc +
+   repaint every frame for as long as the auto run is in flight (can be
+   hours). Opacity runs on the GPU compositor and costs the main thread
+   nothing. See src/copilot/copilot-theme.css section 4 for the reference
+   implementation this mirrors. */
+.sidebar__task-lead--running::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.30);
+  opacity: 0;
+  pointer-events: none;
   animation: sidebar-task-lead-pulse 1.4s ease-in-out infinite;
 }
 @keyframes sidebar-task-lead-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.30); }
-  50%      { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.06); }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
 .sidebar__task--pinned .sidebar__task-title,
 .sidebar__task--overdue .sidebar__task-title {

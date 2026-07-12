@@ -121,6 +121,7 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
 .tdd__live--neutral   { color: var(--fg-3); }
 
 .tdd__pulse {
+  position: relative;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -129,16 +130,33 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
 }
 .tdd__pulse--working {
   background: var(--accent);
-  animation: tddPulse 1.6s ease-in-out infinite;
 }
 .tdd__pulse--needs-you { background: var(--warn); }
 .tdd__pulse--blocked   { background: var(--err); }
 .tdd__pulse--done      { background: var(--ok); }
 .tdd__pulse--neutral   { background: var(--fg-3); }
 
+/* Ambient pulse — the glow rides a ::after layer whose OPACITY animates,
+   not the dot's box-shadow. box-shadow is not compositor-animatable: an
+   infinite box-shadow keyframe here forces a main-thread style recalc +
+   repaint every frame for as long as the drawer shows "working" (can be
+   hours for a long-running agent). Opacity runs on the GPU compositor and
+   costs the main thread nothing. See src/copilot/copilot-theme.css
+   section 4 for the reference implementation this mirrors. */
+.tdd__pulse--working::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px var(--accent-glow);
+  opacity: 0;
+  pointer-events: none;
+  animation: tddPulse 1.6s ease-in-out infinite;
+}
+
 @keyframes tddPulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
-  50%      { box-shadow: 0 0 0 5px transparent; }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
 
 /* task-b0e424ef9803 — the working pulse is the drawer leg of the consistent
@@ -147,7 +165,8 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
    'working'). Respect prefers-reduced-motion: the accent dot + "Working" label
    still carry the state, so only the motion is dropped. */
 @media (prefers-reduced-motion: reduce) {
-  .tdd__pulse--working { animation: none; }
+  .tdd__pulse--working::after { animation: none; }
+  .tdd__step-dot--live::after { animation: none; }
 }
 
 .tdd__badge {
@@ -566,6 +585,7 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
 }
 .tdd__step:last-child::before { display: none; }
 .tdd__step-dot {
+  position: relative;
   width: 9px;
   height: 9px;
   border-radius: 50%;
@@ -574,7 +594,21 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   background: var(--fg-3);
   z-index: 1;
 }
-.tdd__step-dot--live { background: var(--accent); animation: tddPulse 1.6s ease-in-out infinite; }
+.tdd__step-dot--live { background: var(--accent); }
+/* Same compositor-friendly ::after-opacity pulse as .tdd__pulse--working
+   above (shares the tddPulse keyframe) — box-shadow is not compositor-
+   animatable, so the glow lives on a pseudo-element instead of the dot's
+   own box-shadow. */
+.tdd__step-dot--live::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px var(--accent-glow);
+  opacity: 0;
+  pointer-events: none;
+  animation: tddPulse 1.6s ease-in-out infinite;
+}
 .tdd__step--succeeded .tdd__step-dot { background: var(--ok); }
 .tdd__step--failed .tdd__step-dot { background: var(--err); }
 .tdd__step--cancelled .tdd__step-dot { background: var(--fg-3); }

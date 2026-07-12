@@ -36,6 +36,7 @@
    accent ring so the tile reads as a placeholder for files in flight. The
    floating cursor chip carries the icon + name. */
 .tile--dragging {
+  position: relative;
   opacity: 0.4;
   background: var(--accent-soft) !important;
   border-color: var(--accent);
@@ -43,11 +44,36 @@
   outline-offset: -3px;
   transform: translateY(-1px);
   box-shadow: 0 6px 18px -10px var(--accent);
-  animation: gpDragPulse var(--dur-xslow) var(--ease-in-out) infinite;
+}
+/* Ambient drag pulse — the glow rides a ::after layer whose OPACITY
+   animates, not the tile's box-shadow. box-shadow is not compositor-
+   animatable: an infinite box-shadow keyframe here forces a main-thread
+   style recalc + repaint every frame for as long as the drag lasts.
+   Opacity runs on the GPU compositor and costs the main thread nothing.
+   See src/copilot/copilot-theme.css section 4 for the reference
+   implementation this mirrors. Uses its OWN keyframe (gpTileDragPulse)
+   rather than the shared gpDragPulse in src/styles/motion.css: that
+   keyframe still animates box-shadow directly and is shared with
+   FileRow.css's .row--dragging, which is out of scope for this pass. */
+.tile--dragging::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 6px var(--accent-soft, rgba(0, 0, 0, 0.1));
+  opacity: 0;
+  pointer-events: none;
+  animation: gpTileDragPulse var(--dur-xslow) var(--ease-in-out) infinite;
+}
+@keyframes gpTileDragPulse {
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tile--dragging {
     transform: none;
+  }
+  .tile--dragging::after {
     animation: none;
   }
 }

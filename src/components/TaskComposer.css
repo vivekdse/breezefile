@@ -627,6 +627,7 @@
 }
 
 .composer__create-btn {
+  position: relative;
   background: var(--accent);
   color: var(--accent-ink, white);
   border: 1px solid var(--accent);
@@ -639,14 +640,27 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-/* Subtle "ready to commit" pulse once the user has picked a schedule
-   and focus has hopped to the button. */
-.composer__create-btn--ready {
+/* Subtle "ready to commit" pulse once the user has picked a schedule and
+   focus has hopped to the button. The glow rides a ::after layer whose
+   OPACITY animates, not the button's box-shadow. box-shadow is not
+   compositor-animatable: an infinite box-shadow keyframe here forces a
+   main-thread style recalc + repaint every frame for as long as the
+   composer sits in the "ready" state. Opacity runs on the GPU compositor
+   and costs the main thread nothing. See src/copilot/copilot-theme.css
+   section 4 for the reference implementation this mirrors. */
+.composer__create-btn--ready::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 6px var(--accent-glow, rgba(127, 212, 199, 0.30));
+  opacity: 0;
+  pointer-events: none;
   animation: composerCreateReady 1100ms ease-in-out infinite;
 }
 @keyframes composerCreateReady {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow, rgba(127, 212, 199, 0)); }
-  50%      { box-shadow: 0 0 0 6px var(--accent-glow, rgba(127, 212, 199, 0.30)); }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
 
 .composer__flash {

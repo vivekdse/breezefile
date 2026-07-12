@@ -54,6 +54,7 @@
      BEL / OSC9 pings, which the launcher chose to send precisely because
      they want eyes on the tab right now. */
 .tabbar__attn {
+  position: relative;
   display: inline-block;
   width: 8px;
   height: 8px;
@@ -67,7 +68,6 @@
   /* GENERATING — green = "go / running". Pulses continuously while the
      hook signal says claude is working. */
   background: #34c759;
-  animation: tabbar-attn-pulse-go 1.4s ease-in-out infinite;
 }
 .tabbar__attn--idle,
 .tabbar__attn--bell {
@@ -75,13 +75,40 @@
      the eye can find it across the tabbar even when the tab is far off
      to the side. */
   background: #ff3b30;
+}
+/* Ambient pulses — the glow rides a ::after layer whose OPACITY animates,
+   not the dot's box-shadow. box-shadow is not compositor-animatable: an
+   infinite box-shadow keyframe here forces a main-thread style recalc +
+   repaint every frame for as long as the tab is busy/waiting (can be
+   hours for a long-running agent). Opacity runs on the GPU compositor and
+   costs the main thread nothing. See src/copilot/copilot-theme.css
+   section 4 for the reference implementation this mirrors. */
+.tabbar__attn--busy::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  animation: tabbar-attn-pulse-go 1.4s ease-in-out infinite;
+}
+.tabbar__attn--idle::after,
+.tabbar__attn--bell::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 6px rgba(255, 59, 48, 0.3);
+  opacity: 0;
+  pointer-events: none;
   animation: tabbar-attn-pulse-stop 1.4s ease-in-out infinite;
 }
 @keyframes tabbar-attn-pulse-go {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.3); }
-  50%      { box-shadow: 0 0 0 6px rgba(52, 199, 89, 0.06); }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
 @keyframes tabbar-attn-pulse-stop {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.3); }
-  50%      { box-shadow: 0 0 0 6px rgba(255, 59, 48, 0.06); }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 1; }
 }
