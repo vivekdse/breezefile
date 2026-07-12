@@ -54,7 +54,17 @@ export default defineConfig({
           build: {
             rollupOptions: {
               output: {
-                inlineDynamicImports: false,
+                // vite-plugin-electron >=1.x re-derives `inlineDynamicImports`
+                // from `codeSplitting` on every internal config merge pass
+                // (see setBuildOptions in its utils chunk); setting
+                // `inlineDynamicImports` directly gets clobbered back to
+                // `true` by that re-derivation. `codeSplitting: true` is the
+                // key the library treats as the source of truth, so use it
+                // instead to keep the two preload entries in separate chunks.
+                // Not part of Rollup's typed `OutputOptions` — it's a
+                // vite-plugin-electron-only convention read via duck-typing —
+                // hence the cast.
+                ...({ codeSplitting: true } as Record<string, unknown>),
                 entryFileNames: '[name].mjs',
               },
             },
