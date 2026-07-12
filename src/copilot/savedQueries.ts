@@ -162,6 +162,23 @@ export async function listDataSources(): Promise<DataSourceSummary[]> {
   return out;
 }
 
+/** Register an external API as a DataSource, minting the sourceId a SavedQuery
+ *  is authored against (task-a586c9ac4c90 — the missing first half of the
+ *  "register an API + author a query over it" flow). `auth` carries the
+ *  credential and is sent ONCE; the resolved projection is creds-stripped
+ *  (id/name/baseUrl/entityTypes — the same NON-creds shape as listDataSources).
+ *  Throws on transport / signed-out errors — the authoring card surfaces the
+ *  message. */
+export async function registerDataSource(input: {
+  name: string;
+  baseUrl: string;
+  entityTypes: string[];
+  spec?: unknown;
+  auth?: unknown;
+}): Promise<DataSourceSummary> {
+  return fm.typebuild.datasources.register(input);
+}
+
 /** Create a DRAFT SavedQuery (v1) authored by the copilot. Returns the new
  *  draft's id + version. Draft is author-only until approved. NON-PHI. */
 export async function createDraftQuery(input: {

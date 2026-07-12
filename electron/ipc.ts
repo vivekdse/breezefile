@@ -3314,6 +3314,29 @@ end tell`;
     if (!src) throw new Error('typebuild: signed out');
     return src.listDataSources();
   });
+  // task-a586c9ac4c90 — DataSource REGISTRATION (the missing first half of
+  // "register an API + author a SavedQuery over it"). Mirrors the signed-out
+  // discipline of the create/approve handlers above (reject when signed out;
+  // the copilot card surfaces the error string). The `auth` credential rides
+  // the input INTO the source method only — the projection returned to the
+  // renderer is creds-stripped by createDataSource and never logged here.
+  ipcMain.handle(
+    'typebuild:datasources:register',
+    (
+      _e,
+      input: {
+        name: string;
+        baseUrl: string;
+        entityTypes: string[];
+        spec?: unknown;
+        auth?: unknown;
+      },
+    ) => {
+      const src = typebuildSource();
+      if (!src) throw new Error('typebuild: signed out');
+      return src.createDataSource(input);
+    },
+  );
   ipcMain.handle(
     'typebuild:queries:create',
     (

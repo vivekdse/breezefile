@@ -37,6 +37,7 @@ import {
   getQuery,
   listDataSources,
   newQueryVersion,
+  registerDataSource,
   rowLabel,
   type DataSourceSummary,
   type QueryRow,
@@ -148,6 +149,118 @@ export function SavedQueryAuthoringActions() {
         );
       } catch (e) {
         return `Failed to list DataSources: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+  });
+
+  // ─── register_data_source — register an external API (confirmedAction) ────
+  // task-a586c9ac4c90 — the FIRST half of "register an API + author a query
+  // over it": mints the sourceId draft_saved_query needs. It is a side-effecting
+  // write that may carry a CREDENTIAL (auth), so it is confirmed-gated — the
+  // human approves the exact name/base_url/entity_types before it is created,
+  // and perform() runs only on Approve. On success we refresh the DataSource
+  // list so the new source is immediately groundable for authoring in THIS same
+  // conversation. The auth blob is never rendered in the card or logged; only
+  // its presence is acknowledged.
+  confirmedAction({
+    name: 'register_data_source',
+    available: onNewHome,
+    description:
+      'Register an external REST API as a DataSource so SavedQueries can be authored against it. ' +
+      'This mints a sourceId you then pass to draft_saved_query. Provide a short name, the API base ' +
+      'URL, and the entity types it exposes (e.g. patient, appointment). If the API needs a ' +
+      'credential, pass `auth` as a JSON string (e.g. {"type":"bearer","token":"..."}); it is sent ' +
+      'once and stored server-side, never echoed back. Always requires the human to click Approve.',
+    parameters: z.object({
+      name: z.string().describe('Short human name for the source, e.g. "Scheduling API".'),
+      baseUrl: z
+        .string()
+        .describe('The API base URL, e.g. "https://sched.example.com/api". Queries fetch relative to it.'),
+      entityTypes: z
+        .string()
+        .describe('Comma-separated entity types the API exposes, e.g. "patient, appointment".'),
+      spec: z
+        .string()
+        .optional()
+        .describe('Optional JSON string describing the API spec (endpoints/shape) for grounding.'),
+      auth: z
+        .string()
+        .optional()
+        .describe('Optional JSON string credential, e.g. {"type":"bearer","token":"..."}. Sent once, never echoed.'),
+    }),
+    title: 'Register external DataSource?',
+    summary: ({ name, baseUrl, entityTypes, auth }) => {
+      const types = (entityTypes ?? '')
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      return (
+        <>
+          Register <strong>{(name ?? '').trim() || '(unnamed)'}</strong> as a DataSource? SavedQueries
+          will be authored against it.
+          <div className="ck-confirm-note" style={{ marginTop: 6 }}>
+            Base URL: <code>{(baseUrl ?? '').trim() || '(unset)'}</code>
+            <br />
+            Entities: {types.length ? types.join(', ') : '(none)'}
+            <br />
+            Credential: {auth && auth.trim() ? 'provided (stored server-side, not shown)' : 'none'}
+          </div>
+        </>
+      );
+    },
+    confirmLabel: 'Register',
+    rejectLabel: 'Cancel',
+    rejectedMessage: 'Not registered — no DataSource was created.',
+    validate: ({ name, baseUrl, entityTypes, spec, auth }) => {
+      if (!(name ?? '').trim()) return 'Failed: a source name is required.';
+      if (!(baseUrl ?? '').trim()) return 'Failed: a base URL is required.';
+      if (!(entityTypes ?? '').trim()) return 'Failed: at least one entity type is required.';
+      // Fail fast on malformed JSON so the human never approves an unparseable
+      // spec/auth (parsed again in perform, but this keeps the card honest).
+      try {
+        if (spec) JSON.parse(spec);
+        if (auth) JSON.parse(auth);
+      } catch {
+        return 'Failed: spec/auth, when provided, must be valid JSON.';
+      }
+      return null;
+    },
+    perform: async ({ name, baseUrl, entityTypes, spec, auth }) => {
+      const types = entityTypes
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      let parsedSpec: unknown;
+      let parsedAuth: unknown;
+      try {
+        if (spec) parsedSpec = JSON.parse(spec);
+        if (auth) parsedAuth = JSON.parse(auth);
+      } catch {
+        return 'Failed: spec/auth, when provided, must be valid JSON.';
+      }
+      try {
+        const ds = await registerDataSource({
+          name: name.trim(),
+          baseUrl: baseUrl.trim(),
+          entityTypes: types,
+          spec: parsedSpec,
+          auth: parsedAuth,
+        });
+        // Refresh grounding so the new source is usable for authoring right away.
+        try {
+          const refreshed = await listDataSources();
+          setDataSources(refreshed);
+          setDsError(null);
+        } catch {
+          /* non-fatal: the source is registered; grounding refresh can retry */
+        }
+        return (
+          `Registered DataSource "${ds.name}" (id: ${ds.id}) — base ${ds.baseUrl || '(unset)'} — ` +
+          `entities: ${ds.entityTypes.length ? ds.entityTypes.join(', ') : '(none declared)'}. ` +
+          `Author a SavedQuery over it with draft_saved_query using sourceId ${ds.id}.`
+        );
+      } catch (e) {
+        return `Failed to register DataSource: ${e instanceof Error ? e.message : String(e)}`;
       }
     },
   });

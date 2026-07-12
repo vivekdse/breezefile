@@ -3435,6 +3435,72 @@ export class TypeBuildTaskSource implements TaskSource {
       }));
   }
 
+  // task-a586c9ac4c90 — DataSource REGISTRATION. POST /chromeext/datasources
+  //   { name, base_url, entity_types, spec?, auth? } → the new DataSource dict.
+  //   Registering an external API is the FIRST half of the "register an API +
+  //   author a SavedQuery over it" flow: it mints the sourceId that createQuery
+  //   above requires. Wire casing matches the LIST reader (base_url,
+  //   entity_types) so the create/list pair speaks one dialect.
+  //
+  //   `auth` carries the credential (api key / bearer / basic). Like a
+  //   Connection credential (registerConnection above), it is sent ONCE, stored
+  //   server-side, and NEVER echoed back — the server's _ds_public projection
+  //   strips it. The projection we return to the renderer therefore mirrors the
+  //   creds-stripped listDataSources() shape EXACTLY (id/name/baseUrl/
+  //   entityTypes) and can never carry auth, even if a future server leaked it.
+  //   The request body (which holds the secret) is never logged.
+  //   Throws on failure — this is a user-initiated create the copilot card must
+  //   surface, not swallow.
+  async createDataSource(input: {
+    name: string;
+    baseUrl: string;
+    entityTypes: string[];
+    spec?: unknown;
+    auth?: unknown;
+  }): Promise<{ id: string; name: string; baseUrl: string; entityTypes: string[] }> {
+    const body: Record<string, unknown> = {
+      name: input.name,
+      base_url: input.baseUrl,
+      entity_types: input.entityTypes,
+    };
+    if (input.spec !== undefined) body.spec = input.spec;
+    if (input.auth !== undefined) body.auth = input.auth;
+    const res = await this.request('POST', '/chromeext/datasources', body);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      const phi = res.status === 422 ? ' (rejected by PHI guard)' : '';
+      throw new Error(
+        `typebuild: datasource register failed (${res.status})${detail ? `: ${detail}` : ''}${phi}`,
+      );
+    }
+    // The server may wrap the record as { data_source } / { datasource } or
+    // return it at the top level; unwrap defensively (same resilience as
+    // createQuery's `.query` unwrap). Only NON-creds fields are projected.
+    const payload = (await res.json().catch(() => ({}))) as {
+      data_source?: Record<string, unknown>;
+      datasource?: Record<string, unknown>;
+    } & Record<string, unknown>;
+    const d = (payload.data_source ?? payload.datasource ?? payload) as {
+      id?: string;
+      name?: string;
+      base_url?: string;
+      baseUrl?: string;
+      entity_types?: string[];
+      entityTypes?: string[];
+    };
+    if (!d.id) throw new Error('typebuild: datasource register returned no id');
+    return {
+      id: d.id,
+      name: d.name ?? d.id,
+      baseUrl: d.base_url ?? d.baseUrl ?? input.baseUrl,
+      entityTypes: Array.isArray(d.entity_types)
+        ? d.entity_types
+        : Array.isArray(d.entityTypes)
+          ? d.entityTypes
+          : input.entityTypes,
+    };
+  }
+
   // POST /chromeext/queries { name, source_id, inputs, code, output_schema,
   //   limits, project_id?, group_id? } → the new DRAFT query dict (v1). Returns
   //   the id + version so Copilot can chain test/approve.

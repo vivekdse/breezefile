@@ -615,11 +615,24 @@ type Fm = {
       ) => Promise<{ effects: Record<string, unknown>; version: number }>;
     };
     // task-d8a0b081eb93 — DataSource registry (the "API spec" grounding context
-    // for the authoring LLM: name + base_url + entity_types; NO creds). Read-only.
+    // for the authoring LLM: name + base_url + entity_types; NO creds). `list`
+    // is read-only. task-a586c9ac4c90 adds `register`: mint a new DataSource
+    // (and its sourceId) from a user-described external API, completing the
+    // "register an API + author a SavedQuery over it" flow client-side. `auth`
+    // (the credential) is sent once and never echoed; the resolved projection
+    // is creds-stripped (id/name/baseUrl/entityTypes) — the same discipline as
+    // the list projection and the Connections credential vault.
     datasources: {
       list: () => Promise<
         Array<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>
       >;
+      register: (input: {
+        name: string;
+        baseUrl: string;
+        entityTypes: string[];
+        spec?: unknown;
+        auth?: unknown;
+      }) => Promise<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>;
     };
     // task-e112d60a3b7c — first-class Task Templates (the "New from Template"
     // picker). `list` enumerates project + global templates (NON-PHI; []

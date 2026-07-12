@@ -1463,6 +1463,24 @@ const fm = {
         ipcRenderer.invoke('typebuild:datasources:list') as Promise<
           Array<{ id: string; name: string; baseUrl: string; entityTypes: string[] }>
         >,
+      // task-a586c9ac4c90 — register an external API as a DataSource, minting
+      // the sourceId a SavedQuery is authored against. `auth` (the credential)
+      // crosses INTO the main process once; the resolved projection is
+      // creds-stripped (id/name/baseUrl/entityTypes) — never auth. Rejects when
+      // signed out, mirroring queries.create/connections.register.
+      register: (input: {
+        name: string;
+        baseUrl: string;
+        entityTypes: string[];
+        spec?: unknown;
+        auth?: unknown;
+      }) =>
+        ipcRenderer.invoke('typebuild:datasources:register', input) as Promise<{
+          id: string;
+          name: string;
+          baseUrl: string;
+          entityTypes: string[];
+        }>,
     },
     // task-e112d60a3b7c — first-class Task Templates (the "New from Template"
     // picker). `list` enumerates project + global templates (NON-PHI: names +
