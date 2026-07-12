@@ -1783,6 +1783,27 @@ export function TaskComposer(props: Props) {
         useTitle,
         entry.projectId || undefined,
       );
+      // Full-record persistence (QA 2026-07-12): the live instantiate endpoint
+      // only accepts DECLARED variable keys — every `<key>.*` sibling (record
+      // ref + the picked row's full bundle: dob/address/insurance/…) gets
+      // stripped by the unknown_keys retry in the source layer, so the created
+      // task carried only the label. The data PATCH endpoint has no such gate,
+      // so re-apply the siblings onto the fresh task. Best-effort + async: the
+      // task exists either way, and once the server accepts dotted subkeys on
+      // instantiate (task-124de5943d99) this writes the same values it already
+      // stored. PHI stays in memory → encrypted request body only.
+      const siblingValues: Record<string, string> = {};
+      const declaredKeys: string[] = [];
+      for (const [k, v] of Object.entries(values)) {
+        if (k.includes('.')) siblingValues[k] = v;
+        else declaredKeys.push(k);
+      }
+      if (Object.keys(siblingValues).length > 0) {
+        void fm.typebuild.taskData.patch(result.id, siblingValues, [], declaredKeys).catch(() => {
+          // Non-fatal: the task was created; the drawer's Inputs editor can
+          // re-attach the record by re-picking if this enrichment ever fails.
+        });
+      }
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTaskId = result.id;
       (window as unknown as { __fmFlashTaskId?: string; __fmFlashTs?: number }).__fmFlashTs = Date.now();
       window.dispatchEvent(new CustomEvent('fm:taskFlash', { detail: { taskId: result.id } }));

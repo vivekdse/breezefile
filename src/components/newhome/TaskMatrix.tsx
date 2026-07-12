@@ -366,7 +366,10 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     () =>
       steps.map((step, index) => {
         const d = detail.get(step.id);
-        const inputs = d?.dataKeys ?? [];
+        // Dotted subkeys (a pick's full-record snapshot — `.ref`, `.insurance`,
+        // `.picked_at`, …) don't get a column each; the detail drawer lists
+        // them. Mirrors rosterGroups.mjs's input-column rule.
+        const inputs = (d?.dataKeys ?? []).filter((k) => !k.includes('.'));
         const outputs: OutputField[] = d?.outputSchema ?? [];
         return {
           index,

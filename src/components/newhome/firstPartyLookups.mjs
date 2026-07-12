@@ -49,7 +49,21 @@ export const FIRST_PARTY_LOOKUPS = {
             shape: 'rows',
             rowsPath: 'customers',
             ref: { entityType: 'customer', externalIdPath: 'id' },
-            fields: { name: 'name', phone: 'phone', email: 'email' },
+            // The FULL record the search returns (scheduling_api customer
+            // search, 2026-07-12) — a pick snapshots ALL of these onto the
+            // task's `<key>.*` data-bag siblings (snapshotConnectionRow
+            // JSON-encodes the nested address object / insurance array), so
+            // the task carries the whole patient object, not just the label.
+            fields: {
+              name: 'name',
+              phone: 'phone',
+              email: 'email',
+              dob: 'dob',
+              sex: 'sex',
+              address: 'address',
+              insurance: 'insurance',
+              preferred_resource_id: 'preferred_resource_id',
+            },
           },
         }),
       },
