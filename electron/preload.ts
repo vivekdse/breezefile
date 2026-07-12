@@ -122,12 +122,13 @@ type ConnectionCatalogEntry = {
   description?: string;
   kind: 'rest' | 'mcp';
   iconUrl?: string;
-  auth: 'oauth' | 'admin_managed';
+  auth: 'oauth' | 'admin_managed' | 'first_party_mcp';
   scope?: ConnectionCatalogScope;
   status: ConnectionCatalogStatus;
   connectionId?: string;
   connectedAs?: string;
   connectedAt?: string;
+  serviceUrl?: string;
 };
 
 // docs/connections-design.md §E — a single declarative REST call (no code —

@@ -727,3 +727,24 @@ Advanced disclosure. Wire layer: `electron/sources/typebuild.ts`
   catalog to the J.2 routes, and materialize the Connection record on
   `connected` so the §C broker serves oauth2 credentials from the connector
   vault (force-refreshing expired tokens server-side).
+
+### J.5 `first_party_mcp` (added 2026-07-12, server-led)
+
+The server shipped a third auth mode beyond J.1's two:
+`auth: 'first_party_mcp'` — a **first-party TypeBuild service** (first
+instances: the Scheduler tiles pointing at `scheduling.typebuild.com`).
+Semantics:
+
+- **Always `connected`** for every caller: no OAuth dance, no broker, no
+  materialized Connection record. The catalog entry carries a new
+  `service_url` field (client: `serviceUrl`) — the endpoint itself.
+- **Mounting:** `kind:'mcp'` first-party entries are folded into the mount
+  plan straight from the CATALOG (`connection-mount.ts`), with the
+  `mcpServers` Authorization header referencing the already-injected
+  minted-token env var (`TYPEBUILD_MCP_TOKEN`) — the user's existing
+  TypeBuild identity is the credential, so no extra secret is plumbed.
+  Entries may carry a J.1 scope; unscoped entries mount into every job.
+  `kind:'rest'` first-party tiles are display-only for now — REST tool
+  derivation needs a spec (§E), which catalog entries don't carry.
+- **UI:** the tile shows Connected · "Included with your account", with no
+  Connect/Disconnect actions.

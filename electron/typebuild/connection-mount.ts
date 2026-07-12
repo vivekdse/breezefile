@@ -46,8 +46,11 @@ export type MountedMcpConnection = {
    *  references via `${envVar}` — unique per connection so multiple mounted
    *  MCP Connections never collide. */
   envVar: string;
-  /** The bearer value to inject under `envVar`. Memory only. */
-  token: string;
+  /** The bearer value to inject under `envVar`. Memory only. `null` ONLY for
+   *  a first-party tile (§J first_party_mcp), whose envVar names the
+   *  ALREADY-injected minted-token var (TYPEBUILD_MCP_TOKEN) — there is no
+   *  extra value to inject, so buildMcpEnvEntries skips it. */
+  token: string | null;
 };
 
 /** One in-scope, brokered `kind:'rest'` Connection, held for the lifetime of
@@ -97,20 +100,65 @@ export async function resolveConnectionMountPlan(
     groupId = null;
   }
 
+  // §J first_party_mcp — first-party TypeBuild services (e.g. the Scheduler)
+  // ride the CATALOG, not the Connection registry: always connected, no
+  // materialized record, no broker. Mount each entry's serviceUrl under the
+  // minted-token env var the caller already injects (TYPEBUILD_MCP_TOKEN) —
+  // same identity, no extra secret plumbing. Fetched alongside the registry;
+  // a catalog failure just yields no first-party mounts.
+  const firstPartyPromise = source
+    .listConnectionCatalog()
+    .then((entries) =>
+      entries.filter(
+        (e) =>
+          e.auth === 'first_party_mcp' &&
+          e.kind === 'mcp' &&
+          typeof e.serviceUrl === 'string' &&
+          !!e.serviceUrl &&
+          // Catalog visibility is already caller-scoped server-side; a
+          // project/group-scoped entry additionally only mounts into jobs of
+          // that project/group (mirrors the registry filter below). Unscoped
+          // entries mount everywhere.
+          (!e.scope ||
+            e.scope.type === 'none' ||
+            (e.scope.type === 'project'
+              ? e.scope.projectId === projectId
+              : e.scope.groupId === groupId)),
+      ),
+    )
+    .catch(() => []);
+
   let all: ConnectionSummary[];
   try {
     all = await source.listConnections();
   } catch {
-    return EMPTY_PLAN;
+    all = [];
   }
-  if (!all.length) return EMPTY_PLAN;
+  const firstParty = await firstPartyPromise;
+  if (!all.length && !firstParty.length) return EMPTY_PLAN;
+
+  const mcp: MountedMcpConnection[] = [];
+  const rest: MountedRestConnection[] = [];
+
+  for (const e of firstParty) {
+    mcp.push({
+      connectionId: e.id,
+      name: e.name,
+      endpoint: e.serviceUrl as string,
+      // The minted-token env var (typebuild.ts MCP_TOKEN_ENV) — already in the
+      // PTY env for the `typebuild` MCP entry itself; first-party services
+      // accept the same identity, so the mcpServers entry just references it.
+      envVar: 'TYPEBUILD_MCP_TOKEN',
+      token: null,
+    });
+  }
 
   const inScope = all.filter((c) => {
     if (c.status === 'disabled') return false;
     if (c.scope.type === 'project') return c.scope.projectId === projectId;
     return groupId !== null && c.scope.groupId === groupId;
   });
-  if (!inScope.length) return EMPTY_PLAN;
+  if (!inScope.length) return { mcp, rest };
 
   // Broker one credential per in-scope Connection, concurrently. A rejected
   // or null-returning broker call just drops that Connection from the plan —
@@ -122,8 +170,6 @@ export async function resolveConnectionMountPlan(
     }),
   );
 
-  const mcp: MountedMcpConnection[] = [];
-  const rest: MountedRestConnection[] = [];
   for (const { connection, cred } of settled) {
     if (connection.kind === 'mcp') {
       // An MCP Connection with no brokered credential yet (server not
@@ -189,7 +235,9 @@ export function buildMcpServerEntries(
  *  only, never argv (mirrors MCP_TOKEN_ENV). */
 export function buildMcpEnvEntries(mounted: MountedMcpConnection[]): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const m of mounted) out[m.envVar] = m.token;
+  // token:null = first-party tile riding the already-injected minted-token
+  // var — nothing extra to inject (and never overwrite that var here).
+  for (const m of mounted) if (m.token !== null) out[m.envVar] = m.token;
   return out;
 }
 

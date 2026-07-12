@@ -507,7 +507,10 @@ export type ConnectionRegisterInput = {
 // system browser → the server materializes a normal Connection record. `status`
 // is PER-CALLER (available/pending/connected). NON-PHI service metadata.
 export type ConnectionCatalogStatus = 'available' | 'pending' | 'connected';
-export type ConnectionCatalogAuth = 'oauth' | 'admin_managed';
+// 'first_party_mcp' — a first-party TypeBuild service (e.g. the Scheduler at
+// scheduling.typebuild.com): always `connected`, no OAuth and no broker; the
+// client mounts `serviceUrl` with the user's EXISTING minted TypeBuild token.
+export type ConnectionCatalogAuth = 'oauth' | 'admin_managed' | 'first_party_mcp';
 export type ConnectionCatalogScope =
   | { type: 'none' }
   | { type: 'project'; projectId: string }
@@ -525,6 +528,9 @@ export type ConnectionCatalogEntry = {
   connectionId?: string;
   connectedAs?: string;
   connectedAt?: string;
+  /** first_party_mcp only — the endpoint the client mounts directly (there is
+   *  no materialized Connection record for a first-party tile). */
+  serviceUrl?: string;
 };
 type ConnectionRow = {
   id?: string;
@@ -598,6 +604,7 @@ type ConnectionCatalogRow = {
   connection_id?: string | null;
   connected_as?: string | null;
   connected_at?: string | null;
+  service_url?: string | null;
 };
 function mapCatalogScope(s: ConnectionCatalogRow['scope']): ConnectionCatalogScope {
   if (!s || s.type === 'none') return { type: 'none' };
@@ -608,9 +615,16 @@ function mapCatalogScope(s: ConnectionCatalogRow['scope']): ConnectionCatalogSco
 function mapCatalogRow(r: ConnectionCatalogRow): ConnectionCatalogEntry | null {
   if (!r || typeof r.id !== 'string' || !r.id) return null;
   const kind = r.kind === 'mcp' ? 'mcp' : 'rest';
-  const auth: ConnectionCatalogAuth = r.auth === 'admin_managed' ? 'admin_managed' : 'oauth';
+  const auth: ConnectionCatalogAuth =
+    r.auth === 'admin_managed' || r.auth === 'first_party_mcp' ? r.auth : 'oauth';
+  // A first-party tile is connected BY DEFINITION (no OAuth, no broker) —
+  // force it even if a server row omits/mangles status.
   const status: ConnectionCatalogStatus =
-    r.status === 'pending' || r.status === 'connected' ? r.status : 'available';
+    auth === 'first_party_mcp'
+      ? 'connected'
+      : r.status === 'pending' || r.status === 'connected'
+        ? r.status
+        : 'available';
   const out: ConnectionCatalogEntry = {
     id: r.id,
     toolkit: typeof r.toolkit === 'string' ? r.toolkit : r.id,
@@ -626,6 +640,7 @@ function mapCatalogRow(r: ConnectionCatalogRow): ConnectionCatalogEntry | null {
   if (typeof r.connection_id === 'string') out.connectionId = r.connection_id;
   if (typeof r.connected_as === 'string') out.connectedAs = r.connected_as;
   if (typeof r.connected_at === 'string') out.connectedAt = r.connected_at;
+  if (typeof r.service_url === 'string' && r.service_url.trim()) out.serviceUrl = r.service_url;
   return out;
 }
 function connectionPayload(input: {

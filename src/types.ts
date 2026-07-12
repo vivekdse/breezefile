@@ -663,7 +663,9 @@ export type ConnectionRegisterInput = {
 // shows up in the ConnectionSummary registry above). `status` is PER-CALLER.
 // NON-PHI service metadata. Mirrors electron/sources/typebuild.ts.
 export type ConnectionCatalogStatus = 'available' | 'pending' | 'connected';
-export type ConnectionCatalogAuth = 'oauth' | 'admin_managed';
+// 'first_party_mcp' — a first-party TypeBuild service: always connected, no
+// OAuth/broker; the client mounts `serviceUrl` with the user's minted token.
+export type ConnectionCatalogAuth = 'oauth' | 'admin_managed' | 'first_party_mcp';
 export type ConnectionCatalogScope =
   | { type: 'none' }
   | { type: 'project'; projectId: string }
@@ -681,6 +683,8 @@ export type ConnectionCatalogEntry = {
   connectionId?: string;
   connectedAs?: string;
   connectedAt?: string;
+  /** first_party_mcp only — the endpoint the client mounts directly. */
+  serviceUrl?: string;
 };
 
 // docs/connections-design.md §E — a single declarative REST call. No code —

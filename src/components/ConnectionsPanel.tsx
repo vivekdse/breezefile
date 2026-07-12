@@ -630,6 +630,9 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
                               {entry.auth === 'admin_managed' && (
                                 <span>Managed by your admin</span>
                               )}
+                              {entry.auth === 'first_party_mcp' && (
+                                <span>Included with your account</span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -654,7 +657,10 @@ export function ConnectionsPanel({ onClose }: { onClose: () => void }) {
                             </button>
                           </span>
                         ) : entry.status === 'connected' ? (
-                          entry.auth === 'admin_managed' ? null : isConfirming ? (
+                          // Only a user-authorized (oauth) connection can be
+                          // disconnected here; admin_managed is the admin's,
+                          // and first_party_mcp has nothing to revoke.
+                          entry.auth !== 'oauth' ? null : isConfirming ? (
                             <span className="connections-panel__confirm">
                               <span className="connections-panel__confirm-q">Disconnect?</span>
                               <button
