@@ -2563,7 +2563,7 @@ export class TypeBuildTaskSource implements TaskSource {
       payload.title_override = titleOverride.trim();
     }
     if (projectId) payload.project_id = projectId;
-    const res = await this.request(
+    let res = await this.request(
       'POST',
       `/chromeext/templates/${encodeURIComponent(templateId)}/instantiate`,
       payload,
@@ -2572,12 +2572,45 @@ export class TypeBuildTaskSource implements TaskSource {
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         reason?: string;
+        keys?: string[];
       };
-      throw new Error(
-        `typebuild: instantiate failed (${res.status})${
-          data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
-        }`,
-      );
+      // The server only accepts value keys declared in the template's
+      // `variables`; the composer also fans sibling keys (`<key>.ref`,
+      // connection `<key>.*` bundles) into `values`, which a server that
+      // predates dotted-subkey support rejects wholesale. It names the
+      // offenders, so drop exactly those and retry once — the task is worth
+      // more than the linkage keys. (Key NAMES are placeholders, never PHI.)
+      if (
+        data.reason === 'unknown_keys' &&
+        Array.isArray(data.keys) &&
+        data.keys.length > 0
+      ) {
+        const stripped = { ...(values ?? {}) };
+        for (const k of data.keys) delete stripped[k];
+        payload.values = stripped;
+        res = await this.request(
+          'POST',
+          `/chromeext/templates/${encodeURIComponent(templateId)}/instantiate`,
+          payload,
+        );
+        if (!res.ok) {
+          const retry = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            reason?: string;
+          };
+          throw new Error(
+            `typebuild: instantiate failed (${res.status})${
+              retry.reason ? `: ${retry.reason}` : retry.error ? `: ${retry.error}` : ''
+            }`,
+          );
+        }
+      } else {
+        throw new Error(
+          `typebuild: instantiate failed (${res.status})${
+            data.reason ? `: ${data.reason}` : data.error ? `: ${data.error}` : ''
+          }`,
+        );
+      }
     }
     const data = (await res.json().catch(() => ({}))) as {
       id?: string;
