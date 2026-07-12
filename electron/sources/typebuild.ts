@@ -2215,6 +2215,51 @@ export class TypeBuildTaskSource implements TaskSource {
     params: Record<string, string>,
   ): Promise<ConnectionLookupRow[]> {
     if (callSpec.output.shape !== 'rows') return [];
+    // §J.5 — a first-party catalog tile (cat-*) never materializes a registry
+    // Connection or a broker credential: the endpoint is the entry's
+    // serviceUrl and the credential is the user's OWN minted token (session-
+    // cached; memory only). Still client-direct through the same executor —
+    // the server never proxies the data.
+    if (connectionId.startsWith('cat-')) {
+      const entry = (await this.listConnectionCatalogCached()).find((e) => e.id === connectionId);
+      // Diagnostics below are PHI/value-free: ids, reasons and kinds only —
+      // never a token, row, or response body.
+      if (
+        !entry ||
+        entry.auth !== 'first_party_mcp' ||
+        entry.kind !== 'rest' ||
+        !entry.serviceUrl
+      ) {
+        console.error(
+          `[connections] cat lookup ${connectionId}: no usable catalog entry (found=${!!entry})`,
+        );
+        return [];
+      }
+      // First-party REST services verify the SAME Firebase identity the
+      // TypeBuild client signs in with (authkit require_user) — the taskapi
+      // MCP mint is a different issuer/secret and 401s here, so the bearer is
+      // the (auto-refreshing) Firebase ID token, not a minted MCP token.
+      const idToken = await getIdToken().catch((e) => {
+        console.error(
+          `[connections] cat lookup ${connectionId}: id-token failed (${e instanceof Error ? e.message : 'error'})`,
+        );
+        return null;
+      });
+      if (!idToken) return [];
+      const result = await executeConnectionCall(
+        { id: entry.id, endpoint: entry.serviceUrl, kind: 'rest' },
+        callSpec,
+        params,
+        { kind: 'bearer', value: idToken },
+      );
+      if (!result.ok || !Array.isArray(result.data)) {
+        console.error(
+          `[connections] cat lookup ${connectionId}: exec failed (${result.ok ? 'non-rows data' : result.reason})`,
+        );
+        return [];
+      }
+      return result.data as ConnectionLookupRow[];
+    }
     const summary = await this.getConnection(connectionId).catch(() => null);
     if (!summary || summary.kind !== 'rest') return [];
     const cred = await this.resolveConnectionCredential(connectionId).catch(() => null);
@@ -2226,6 +2271,19 @@ export class TypeBuildTaskSource implements TaskSource {
     );
     if (!result.ok || !Array.isArray(result.data)) return [];
     return result.data as ConnectionLookupRow[];
+  }
+
+  // Short-TTL catalog cache for the per-keystroke lookup path above — the
+  // catalog is admin-provisioned metadata that changes rarely; 60s staleness
+  // is invisible while saving one server round-trip per typeahead burst.
+  private catalogCache: { at: number; entries: ConnectionCatalogEntry[] } | null = null;
+  private async listConnectionCatalogCached(): Promise<ConnectionCatalogEntry[]> {
+    if (this.catalogCache && Date.now() - this.catalogCache.at < 60_000) {
+      return this.catalogCache.entries;
+    }
+    const entries = await this.listConnectionCatalog();
+    this.catalogCache = { at: Date.now(), entries };
+    return entries;
   }
 
   // ─── connection catalog (docs/connections-design.md §J) ──────────────────

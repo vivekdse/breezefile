@@ -748,3 +748,25 @@ Semantics:
   derivation needs a spec (§E), which catalog entries don't carry.
 - **UI:** the tile shows Connected · "Included with your account", with no
   Connect/Disconnect actions.
+
+### J.6 Client-direct first-party field sources (2026-07-12)
+
+The "+ input" picker also lists first-party catalog tiles as field sources
+(no SavedQuery, no server executor — §C client-direct all the way):
+
+- `src/components/newhome/firstPartyLookups.mjs` holds per-toolkit lookup
+  templates (the first: `scheduling-api` → "Scheduler · Patient name",
+  business-scoped `/customers/search` with `{q}`). First-party services may
+  ship their templates in the first-party client; third-party lookups are
+  still authored per-binding or spec-derived.
+- The picker (FieldKeyPicker) projects connected tiles through the same
+  QueryCatalogEntry shape as SavedQuery fields; picking one resolves the
+  caller's scope rows (e.g. `/businesses`, first row binds) and builds a
+  §D.2 Connection-form field via `fieldFromConnection` with
+  `connectionVersion: 'first-party'`.
+- `lookupConnection` (main) resolves `cat-*` ids from the catalog (60s TTL
+  cache) and executes against the tile's `serviceUrl` with the user's
+  **Firebase ID token** as bearer — NOT the taskapi MCP mint, which is a
+  different issuer and 401s. **Pending:** scheduling REST must accept
+  Firebase ID tokens (task-875dbab9e106) — until then the typeahead
+  degrades to no rows.

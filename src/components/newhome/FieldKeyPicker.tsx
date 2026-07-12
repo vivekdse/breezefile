@@ -31,17 +31,24 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { TaskDefField } from './types';
-import { describeQueries, type QueryCatalogEntry } from '../../copilot/savedQueries';
+import { describeQueries, lookupConnection, type QueryCatalogEntry } from '../../copilot/savedQueries';
+import { fm } from '../../bridge';
 import {
   blankCustomField,
   catalogPickerGroups,
   catalogTypeToFieldType,
   fieldFromCatalog,
+  fieldFromConnection,
   fieldOptionsForSource,
   pickerOptions,
   sourceOptions,
   type PickerOption,
 } from './fieldCatalog.mjs';
+import {
+  firstPartyTemplateFor,
+  FIRST_PARTY_CONNECTION_VERSION,
+  type FirstPartyTemplate,
+} from './firstPartyLookups.mjs';
 import './FieldKeyPicker.css';
 
 // Module-level single-flight cache: the catalog is the same for every picker on
@@ -54,6 +61,46 @@ export function loadQueryCatalog(): Promise<QueryCatalogEntry[]> {
   return catalogPromise;
 }
 
+// docs/connections-design.md §J.5 — CONNECTED first-party catalog tiles this
+// client has a lookup template for (firstPartyLookups.mjs), projected into
+// the SAME QueryCatalogEntry shape the pure picker fns consume, so a
+// first-party service ("Scheduler · Patient Name") lists beside SavedQuery
+// fields with zero special-casing until pick time. `__connection` is the
+// pick-time marker: those options build a Connection-form source binding
+// (fieldFromConnection) instead of a SavedQuery one. Same fetch-once/degrade-
+// to-[] discipline as loadQueryCatalog above.
+type ConnectionFieldEntry = QueryCatalogEntry & {
+  __connection: { entryId: string; template: FirstPartyTemplate };
+};
+let connectionSourcesPromise: Promise<ConnectionFieldEntry[]> | null = null;
+function loadConnectionFieldSources(): Promise<ConnectionFieldEntry[]> {
+  if (!connectionSourcesPromise) {
+    connectionSourcesPromise = fm.typebuild.connections.catalog
+      .list()
+      .then((entries) =>
+        entries
+          .filter((e) => e.kind === 'rest' && e.status === 'connected' && !!e.serviceUrl)
+          .flatMap((e) => {
+            const template = firstPartyTemplateFor(e.toolkit);
+            if (!template) return [];
+            return [
+              {
+                id: e.id,
+                name: template.sourceLabel,
+                version: 0,
+                status: 'connection',
+                entityType: template.fields[0]?.entityType,
+                fields: template.fields.map((f) => ({ name: f.name, type: f.type })),
+                __connection: { entryId: e.id, template },
+              } satisfies ConnectionFieldEntry,
+            ];
+          }),
+      )
+      .catch(() => []);
+  }
+  return connectionSourcesPromise;
+}
+
 /** Fetch-once hook over the SavedQuery catalog. `{ catalog: [], loading }`
  *  until it settles; `catalog` is [] on any failure so callers never special-
  *  case errors — an empty catalog just means "Custom" is the only option. */
@@ -62,9 +109,11 @@ export function useQueryCatalog(): { catalog: QueryCatalogEntry[]; loading: bool
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
-    loadQueryCatalog().then((c) => {
+    // Both legs degrade to [] independently, so a signed-out / catalog-less
+    // session still gets the other's entries (or just "Custom").
+    Promise.all([loadQueryCatalog(), loadConnectionFieldSources()]).then(([queries, conns]) => {
       if (cancelled) return;
-      setCatalog(c);
+      setCatalog([...queries, ...conns]);
       setLoading(false);
     });
     return () => {
@@ -194,9 +243,52 @@ export function FieldSourcePicker({
       return;
     }
     // o.kind === 'field'
+    const conn = (o.entry as Partial<ConnectionFieldEntry>).__connection;
+    if (conn) {
+      void pickConnectionField(conn, o.field.name);
+      return;
+    }
     const built = fieldFromCatalog(o.entry, o.field, existingKeys);
     // fieldFromCatalog only returns null on a malformed entry/field the list
     // wouldn't have surfaced; fall back to a blank row so a pick never no-ops.
+    onPick(built ?? blankCustomField());
+  };
+
+  // §J.5 — build a Connection-form field from a first-party template pick.
+  // The lookup paths are scope-parameterized (e.g. business-scoped), so
+  // resolve the caller's scope rows once at pick time and bind the FIRST one
+  // (single-tenant is today's shape; a multi-scope chooser can slot in here
+  // when a caller actually has several). Any miss degrades to a blank custom
+  // row — a pick never no-ops, same rule as fieldFromCatalog above.
+  const pickConnectionField = async (
+    conn: ConnectionFieldEntry['__connection'],
+    fieldName: string,
+  ) => {
+    const tplField = conn.template.fields.find((f) => f.name === fieldName);
+    if (!tplField) {
+      onPick(blankCustomField());
+      return;
+    }
+    let scopeId = '';
+    if (conn.template.scopeLookup) {
+      const rows = await lookupConnection(conn.entryId, conn.template.scopeLookup, '').catch(
+        () => [],
+      );
+      scopeId = rows[0]?.ref?.externalId ?? '';
+      if (!scopeId) {
+        onPick(blankCustomField());
+        return;
+      }
+    }
+    const built = fieldFromConnection(
+      tplField.name,
+      tplField.label,
+      tplField.type,
+      conn.entryId,
+      FIRST_PARTY_CONNECTION_VERSION,
+      tplField.buildLookup(scopeId),
+      { entityType: tplField.entityType, existingKeys },
+    );
     onPick(built ?? blankCustomField());
   };
 

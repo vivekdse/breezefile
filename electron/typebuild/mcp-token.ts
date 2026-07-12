@@ -153,3 +153,4 @@ export async function mintMcpToken(): Promise<MintedMcpToken> {
 
   return { accessToken, expiresAt: Date.now() + ttlMs };
 }
+
