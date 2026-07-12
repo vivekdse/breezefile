@@ -133,9 +133,12 @@ async function registerClient(redirectUri: string): Promise<string> {
         // matched against this exact name (regression task-0e1722518273 —
         // an unlisted name silently downgrades /token to a bare OAuth
         // response and every fresh sign-in dies at 'server-pending').
-        // The deployed allowlist carries 'Breezefile,TypeBuild'; any rename
-        // here must land on the server's allowlist FIRST.
-        client_name: 'TypeBuild',
+        // 'Breezefile' is the only value VERIFIED to pass the deployed
+        // allowlist: a fresh 'TypeBuild' registration on 2026-07-12 still
+        // came back with all firebase_* fields absent despite the allowlist
+        // reportedly carrying both names. Do not rename until a TypeBuild
+        // registration is verified end-to-end against the live server.
+        client_name: 'Breezefile',
         redirect_uris: [redirectUri],
         token_endpoint_auth_method: 'none',
         grant_types: ['authorization_code', 'refresh_token'],

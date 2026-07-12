@@ -115,3 +115,16 @@ Development work for this repo is tracked in **TypeBuild**, via the TypeBuild MC
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+
+## Dev & stable environments (this box)
+
+Two instances run side-by-side from separate checkouts, isolated by profile
+(own userData, state dir, CDP port — see `electron/core/profile.mjs`):
+
+- **Dev — build here.** This checkout (`~/data_scripts/git_repos/breezefile`),
+  tmux session `breeze`, `npm run dev`, CDP 9223, amber stripe + "DEV" chip.
+  All development happens against this instance.
+- **Stable — pull-only.** `~/git_repos/breeze_stable`, tmux session
+  `breeze_stable`, `npm run stable`, CDP 9222, no stripe. Never commit there;
+  when asked to update it: `git pull --rebase && npm run stable` inside the
+  tmux session (Ctrl-C the running instance first).
