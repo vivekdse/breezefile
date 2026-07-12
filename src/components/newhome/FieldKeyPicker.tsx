@@ -55,11 +55,38 @@ import './FieldKeyPicker.css';
 // screen and rarely changes within a session, so fetch it at most once and
 // share the promise. Errors resolve to [] (never reject) so the hook always
 // settles and the picker degrades to "Custom".
+//
+// task-c978d7d7bafc — that "once per app run" cache went stale across auth
+// changes: a user signing IN after launch, or a mid-session SavedQuery
+// approval, never showed up in the picker until restart, even on remount
+// (the cache is module-scoped, not component-scoped). Fix: clear both
+// module caches whenever fm.typebuild.onAuthChanged fires, and bump
+// `catalogVersion` so mounted useQueryCatalog/pickers actually re-fetch
+// instead of silently keeping their already-resolved empty/stale state.
 let catalogPromise: Promise<QueryCatalogEntry[]> | null = null;
 export function loadQueryCatalog(): Promise<QueryCatalogEntry[]> {
   if (!catalogPromise) catalogPromise = describeQueries();
   return catalogPromise;
 }
+
+let catalogVersion = 0;
+const catalogVersionListeners = new Set<(v: number) => void>();
+
+function invalidateQueryCatalog(): void {
+  catalogPromise = null;
+  connectionSourcesPromise = null;
+  catalogVersion += 1;
+  for (const cb of catalogVersionListeners) cb(catalogVersion);
+}
+
+// Subscribe once at module init, following the same fm.typebuild.onAuthChanged
+// pattern used elsewhere (e.g. src/tasks.ts's sign-in status hook) — no new
+// IPC channel, just reuse the existing auth-change signal from the bridge.
+// Any sign-in/sign-out/account switch invalidates the shared catalog so the
+// next read re-fetches against the current session.
+fm.typebuild.onAuthChanged(() => {
+  invalidateQueryCatalog();
+});
 
 // docs/connections-design.md §J.5 — CONNECTED first-party catalog tiles this
 // client has a lookup template for (firstPartyLookups.mjs), projected into
@@ -101,14 +128,31 @@ function loadConnectionFieldSources(): Promise<ConnectionFieldEntry[]> {
   return connectionSourcesPromise;
 }
 
-/** Fetch-once hook over the SavedQuery catalog. `{ catalog: [], loading }`
- *  until it settles; `catalog` is [] on any failure so callers never special-
- *  case errors — an empty catalog just means "Custom" is the only option. */
+/** Fetch-once-per-catalog-version hook over the SavedQuery catalog.
+ *  `{ catalog: [], loading }` until it settles; `catalog` is [] on any
+ *  failure so callers never special-case errors — an empty catalog just
+ *  means "Custom" is the only option.
+ *
+ *  task-c978d7d7bafc — re-runs whenever `catalogVersion` bumps (auth
+ *  change invalidates the module cache above), so a picker already mounted
+ *  when the user signs in — or when a SavedQuery gets approved mid-session —
+ *  picks up the fresh catalog without an app restart. */
 export function useQueryCatalog(): { catalog: QueryCatalogEntry[]; loading: boolean } {
   const [catalog, setCatalog] = useState<QueryCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [version, setVersion] = useState(catalogVersion);
+
+  useEffect(() => {
+    const onVersion = (v: number) => setVersion(v);
+    catalogVersionListeners.add(onVersion);
+    return () => {
+      catalogVersionListeners.delete(onVersion);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     // Both legs degrade to [] independently, so a signed-out / catalog-less
     // session still gets the other's entries (or just "Custom").
     Promise.all([loadQueryCatalog(), loadConnectionFieldSources()]).then(([queries, conns]) => {
@@ -119,7 +163,8 @@ export function useQueryCatalog(): { catalog: QueryCatalogEntry[]; loading: bool
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [version]);
+
   return { catalog, loading };
 }
 
