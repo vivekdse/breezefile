@@ -187,7 +187,7 @@ function MatrixCell({
 
   return (
     <div
-      className="tm-cell"
+      className={`tm-cell${isEmpty && !editing ? ' tm-cell--empty' : ''}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => {
         setHovered(false);

@@ -351,6 +351,7 @@
 }
 .tm-cell-td--na {
   color: var(--muted-on-panel);
+  text-align: center;
   background-image: repeating-linear-gradient(
     45deg,
     transparent,
@@ -375,6 +376,12 @@
 }
 .tm-cell--placeholder {
   min-width: 0;
+}
+/* An EMPTY cell's — / —✳ indicator centers in its column (QA: left-hugging
+   dashes read as misaligned data); a filled value stays left-aligned. */
+.tm-cell--empty {
+  width: 100%;
+  justify-content: center;
 }
 .tm-val {
   color: var(--text-on-panel);
