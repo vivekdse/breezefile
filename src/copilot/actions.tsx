@@ -24,8 +24,15 @@ import { z } from 'zod';
 import { fm } from '../bridge';
 import { compileTaskQuery, TASK_QUERY_FIELDS } from '../components/newhome/taskQuery';
 import { useTasks } from '../tasks';
+import { useNewHomeData } from '../components/newhome/useNewHomeData';
 import { inferFieldsFromProse, parseTaskTemplateBlock } from '../components/newhome/taskSchema.mjs';
-import type { TaskDefField } from '../components/newhome/types';
+import {
+  runQueryPlan,
+  formatPlanResult,
+  QUERY_PLAN_FIELDS,
+} from '../components/newhome/queryPlan.mjs';
+import type { NewHomeTask, TaskDefField } from '../components/newhome/types';
+import type { Project } from '../types';
 import { useNewHomeContext } from './newHomeContext';
 import { confirmedAction, immediateAction } from './actionKit';
 
@@ -108,6 +115,55 @@ function resolveProjectRef(
   return { ok: true, id: match.id, name: match.name };
 }
 
+// task-64815d2ed7b9 — reduce a live roster row / project to the PHI-SAFE
+// METADATA record shape the queryPlan executor operates over. This is the PHI
+// firewall for run_query_plan: only ids, titles, status, assignee/who, opaque
+// ids, and COUNTS cross into the query engine — never decrypted task bodies,
+// custom-field VALUES, or data-bag contents. `dataKeys`/`outputSchema` are
+// reduced to their COUNTS (their names are metadata but the values behind them
+// are PHI, so we expose only how many exist). Titles are already surfaced by
+// the copilot's other read tools (query_data/find_tasks), so they ride here
+// too; nothing below can leak a decrypted value.
+function toTaskRecord(t: NewHomeTask): Record<string, unknown> {
+  const raw = t.raw as {
+    assignedTo?: string | null;
+    parentTaskId?: string | null;
+    templateId?: string | null;
+    repeatable?: unknown;
+    dataKeys?: unknown[];
+    outputSchema?: unknown[];
+    source?: string | null;
+  } | undefined;
+  return {
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    who: t.who,
+    projectId: t.projectId ?? null,
+    assignedTo: raw?.assignedTo ?? null,
+    parentTaskId: raw?.parentTaskId ?? null,
+    templateId: t.templateId ?? raw?.templateId ?? null,
+    live: !!t.live,
+    repeatable: !!raw?.repeatable,
+    dataKeyCount: raw?.dataKeys?.length ?? 0,
+    outputCount: raw?.outputSchema?.length ?? 0,
+    source: raw?.source ?? null,
+  };
+}
+
+function toProjectRecord(p: Project): Record<string, unknown> {
+  return {
+    id: p.id,
+    name: p.name,
+    // folders are non-PHI container paths; the engine derives `repo`/`repoDir`
+    // from folders[0] and the safe-field projection drops the raw array from
+    // any row output (see queryPlan.mjs PROJECT_FIELDS).
+    folders: p.folders,
+    folderCount: p.folders.length,
+    archived: !!p.archived,
+  };
+}
+
 /** Mount once inside the CopilotKit provider (CopilotDock.tsx). Registers
  *  every action available app-wide plus the grounding readable. */
 export function CopilotActions() {
@@ -119,13 +175,24 @@ export function CopilotActions() {
   const nhRef = useRef(nh);
   nhRef.current = nh;
 
+  // task-64815d2ed7b9 — the live roster + project list that back run_query_plan.
+  // Same hook query_data reads (NewHomeTask rows carry the derived status/who/
+  // live fields; projects carry folders for repo derivation). Read through a
+  // ref (stale-closure guard, as every once-registered action here does) so the
+  // handler always sees the current inventory, never the first render's empties.
+  const homeData = useNewHomeData();
+  const homeDataRef = useRef(homeData);
+  homeDataRef.current = homeData;
+
   useAgentContext({
     description:
       "Home grounding: which surface is focused, the currently selected Home project (if any), " +
       "the FULL list of projects the picker offers (availableProjects: id+name — use these with select_home_project), " +
       "roster status counts, the titles+ids of tasks that need a human right now (NOT full task bodies), " +
       "and `rosterFilter` — the roster's current status bucket + free-text search. Use set_roster_filter to change " +
-      "either the status filter or the free-text search. A project carries no separate configuration — a chain is " +
+      "either the status filter or the free-text search. For ANALYTICAL questions (grouping, counting, aggregating, " +
+      "cross-entity rollups like 'group projects by repo' or 'which repo has the most failed tasks') use run_query_plan; " +
+      "scope it to project.id above when the user means 'here'. A project carries no separate configuration — a chain is " +
       "defined inline when a task is created (or copied from an existing chained task), never edited via a project panel.",
     value: nh,
   });
@@ -616,6 +683,96 @@ export function CopilotActions() {
       }
       window.dispatchEvent(new CustomEvent(OPEN_TASK_EVENT, { detail: { taskId } }));
       return `Opened task ${taskId}.`;
+    },
+  });
+
+  // task-64815d2ed7b9 — the ONE composable analytics tool. Supersedes the query
+  // half of task-cba37063ce2f (which imagined bespoke per-question reads):
+  // instead the model fills a declarative PLAN and this executes it by composing
+  // the pure primitives in queryEngine.mjs (via queryPlan.mjs). This is the
+  // GROUP/AGGREGATE/JOIN capability the existing DSL reads (query_data /
+  // query_roster / set_roster_filter) structurally cannot provide — those only
+  // FILTER rows. Read-only, so no confirmedAction gate; the plan is validated
+  // DEFENSIVELY in queryPlan.mjs so a malformed plan returns a typed error
+  // string to the model and never throws into the copilot UI. PHI: the datasets
+  // are reduced to metadata by toTaskRecord/toProjectRecord before they reach
+  // the engine (see the firewall note there) — bodies/values never enter.
+  immediateAction({
+    name: 'run_query_plan',
+    description:
+      "Answer ANALYTICAL questions about the user's OWN work data by composing a query PLAN — grouping, counting, " +
+      'aggregating, and joining that the free-text/DSL reads (query_data, query_roster, set_roster_filter) structurally ' +
+      'CANNOT do. Use this for "group X by Y", "count/sum/avg per Z", "which W has the most V", and cross-entity rollups. ' +
+      'READ-ONLY; returns METADATA only (ids, titles, status, assignee, counts — never task bodies or field values). ' +
+      'Plan shape: {source, join?, where?, groupBy?, aggregate?, sort?, limit?}. ' +
+      `source ∈ ${QUERY_PLAN_FIELDS.sources.join('|')}. ` +
+      `tasks fields: ${QUERY_PLAN_FIELDS.tasks.join(', ')}. ` +
+      `Set join="project" to also group/filter tasks by their project — adds fields ${QUERY_PLAN_FIELDS.taskJoinProject.join(', ')} ` +
+      '(repo = the git-repo basename derived from the project\'s folder path); join="parent" adds ' +
+      `${QUERY_PLAN_FIELDS.taskJoinParent.join(', ')}. ` +
+      `projects fields: ${QUERY_PLAN_FIELDS.projects.join(', ')} (repo/repoDir are DERIVED from the project folder path). ` +
+      `where: array of {field, op, value} clauses, ANDed; op ∈ ${QUERY_PLAN_FIELDS.ops.join(' ')} ` +
+      '(~ = case-insensitive contains, in needs an array value, exists tests presence). ' +
+      'groupBy: a field name OR an array of field names (composite/nested grouping). ' +
+      `aggregate: {kind, field?, as?}, kind ∈ ${QUERY_PLAN_FIELDS.aggregateKinds.join('|')} ` +
+      '(count ignores field; sum/avg/min/max need a numeric field like dataKeyCount/outputCount/folderCount). ' +
+      'A groupBy with no aggregate defaults to a count per group. ' +
+      'sort: {by, desc?} where by is a field, "key", or "value" (the aggregate column); limit caps rows. ' +
+      'Examples — "group projects by repo": {"source":"projects","groupBy":"repo"}; ' +
+      '"which repo has the most failed tasks": {"source":"tasks","join":"project","where":[{"field":"status","op":"=","value":"failed"}],"groupBy":"repo","aggregate":{"kind":"count","as":"failed"},"sort":{"by":"value","desc":true},"limit":1}; ' +
+      '"count tasks per assignee grouped by project": {"source":"tasks","groupBy":["projectId","assignedTo"],"aggregate":{"kind":"count"}}. ' +
+      'To scope to the currently selected Home project, add {"field":"projectId","op":"=","value":"<project.id from context>"}.',
+    parameters: z.object({
+      plan: z
+        .object({
+          source: z.string().describe('tasks | projects'),
+          join: z
+            .string()
+            .nullable()
+            .optional()
+            .describe('tasks only: "project" or "parent" to attach related records.'),
+          where: z
+            .array(
+              z.object({
+                field: z.string(),
+                op: z.string(),
+                value: z
+                  .union([
+                    z.string(),
+                    z.number(),
+                    z.boolean(),
+                    z.array(z.union([z.string(), z.number(), z.boolean()])),
+                  ])
+                  .optional(),
+              }),
+            )
+            .optional()
+            .describe('Filter clauses, ANDed.'),
+          groupBy: z
+            .union([z.string(), z.array(z.string())])
+            .optional()
+            .describe('Field name or list of field names.'),
+          aggregate: z
+            .object({
+              kind: z.string(),
+              field: z.string().optional(),
+              as: z.string().optional(),
+            })
+            .optional(),
+          sort: z.object({ by: z.string(), desc: z.boolean().optional() }).optional(),
+          limit: z.number().optional(),
+        })
+        .describe('The query plan to validate and execute.'),
+    }),
+    perform: ({ plan }) => {
+      const data = homeDataRef.current;
+      const tasks = data.tasks.map(toTaskRecord);
+      const projects = data.projects.map(toProjectRecord);
+      // runQueryPlan validates the plan shape itself and never throws — a bad
+      // plan comes back as { ok:false, error }, which formatPlanResult renders
+      // as a "Failed: ..." string the model can correct against.
+      const result = runQueryPlan(plan, { tasks, projects });
+      return formatPlanResult(result);
     },
   });
 
