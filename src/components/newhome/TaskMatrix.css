@@ -306,6 +306,20 @@
   cursor: default;
   filter: none;
 }
+/* ↻ Retry — a cancelled/failed run's second chance: accent-toned but hollow,
+   so it reads as "recoverable action", one notch quieter than the ▶ primary. */
+.tm-icon-btn--retry {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.tm-icon-btn--retry:hover {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.tm-icon-btn--retry:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 /* ↗ Open — quiet ghost icon. */
 .tm-icon-btn--open {
   background: transparent;

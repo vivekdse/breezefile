@@ -1174,6 +1174,12 @@ export function RosterTable({
           onStartChild={(cid) => {
             void startAction.run(cid, { kind: 'start', run: () => onStart(cid) });
           }}
+          // QA round 3 — a cancelled/failed run's ↻ routes through the SAME
+          // composite retry (reopen → claim → launch) the roster rows use,
+          // wrapped for optimistic pending/error keyed on the run id.
+          onRetryRun={(rid) => {
+            void startAction.run(rid, { kind: 'start', run: () => onRetry(rid) });
+          }}
           // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Feed the SAME useStartAction
           // wrapper's per-child pending/error into the matrix so its ▶ Run /
           // ▶ Start step show an instant "Starting…" (disabled) on click and a

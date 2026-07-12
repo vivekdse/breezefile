@@ -38,6 +38,12 @@ export interface TaskMatrixProps {
   onClose: () => void;
   onOpenTask: (taskId: string) => void; // open a task's detail
   onStartChild: (childId: string) => void; // start a step (caller already wraps feedback)
+  // QA round 3 — a CANCELLED/FAILED run has no runnable step (every child is
+  // terminal), which left the row with no action at all: no way to run it
+  // again. onRetryRun routes to the composite retry (reopen → claim → launch,
+  // useTaskActions().retry) the roster rows already use. Optional so older
+  // call sites compile; absent → the ↻ affordance is simply not shown.
+  onRetryRun?: (runId: string) => void;
   // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH feedback for the matrix's ▶ Run / ▶
   // Start step. The caller routes onStartChild through the shared useStartAction
   // wrapper (RosterTable); these read that wrapper's per-child pending/error so a
@@ -503,11 +509,18 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                       // simply the done icon now, not a separate note. Errors
                       // (the only thing worth a second line) drop below.
                       const next = firstRunnableChild(rowChildren);
+                      // QA round 3 — a run whose steps are all terminal but
+                      // that ISN'T done (cancelled/failed) gets ↻ Retry
+                      // (reopen → claim → launch) so it's never action-less.
+                      const p = pillFor(run.status, run.rawStatus);
+                      const retryable =
+                        !next && props.onRetryRun && (p.label === 'Cancelled' || p.kind === 'failed');
                       // task-1b3eeb1aae1f — the row's ▶ targets the run's NEXT
                       // runnable step; its pending/error drive the immediate
-                      // "starting" state and the visible failure line.
-                      const pending = next ? pendingFor(next.id) : false;
-                      const err = next ? errorFor(next.id) : null;
+                      // "starting" state and the visible failure line. A ↻
+                      // retry is keyed on the RUN itself.
+                      const pending = next ? pendingFor(next.id) : retryable ? pendingFor(run.id) : false;
+                      const err = next ? errorFor(next.id) : retryable ? errorFor(run.id) : null;
                       return (
                         <>
                           <div className="tm-lead-inner">
@@ -524,6 +537,22 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                                   disabled={pending}
                                 >
                                   {pending ? '…' : '▶'}
+                                </button>
+                              )}
+                              {retryable && (
+                                <button
+                                  type="button"
+                                  className="tm-icon-btn tm-icon-btn--retry"
+                                  title={
+                                    pending
+                                      ? 'Retrying…'
+                                      : `${p.label} — Retry will reopen and run this again`
+                                  }
+                                  aria-label="Retry"
+                                  onClick={() => props.onRetryRun?.(run.id)}
+                                  disabled={pending}
+                                >
+                                  {pending ? '…' : '↻'}
                                 </button>
                               )}
                               <button
