@@ -691,33 +691,62 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
 
 /* task-4045bcee23cb (U3a #3) — Pipeline rollup row layout + the per-step
    ▶ Start that appears only on the one runnable step (same eligibility rule
-   as the roster's row Start / group-header chips). */
-.tdd__pipeline { display: flex; flex-direction: column; gap: var(--sp-1); list-style: none; padding: 0; margin: 0; }
+   as the roster's row Start / group-header chips).
+   task-df41bfd4291c — reconciled with TaskDetailDialog's polished pipeline
+   treatment (.nh-dialog__pipeline*): boxed rows (border + radius, not just a
+   hairline list), roomier row padding, pill-shaped status chips with soft-
+   tinted backgrounds instead of bare colored text, and a filled-on-hover
+   ▶ Start button. Kept on THIS surface's own status tokens (--ok/--warn/
+   --err/--accent + their *-soft tints, --fg-2/--fg-3) rather than the
+   dialog's .nh-scoped --nh-* vars, which aren't defined here. */
+.tdd__pipeline { display: flex; flex-direction: column; gap: var(--sp-2); list-style: none; padding: 0; margin: 0; }
 .tdd__pipeline-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: 4px 0;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
 }
 .tdd__pipeline-row--clickable { cursor: pointer; }
 .tdd__pipeline-row--clickable:hover { background: var(--bg-2); }
-.tdd__pipeline-idx { color: var(--fg-2); font-size: var(--fs-xs); }
-.tdd__pipeline-name { flex: 1 1 auto; }
-.tdd__pipeline-outcome { color: var(--fg-2); font-size: var(--fs-sm); }
+.tdd__pipeline-idx { color: var(--fg-3); font-size: var(--fs-xs); min-width: 1.2em; }
+.tdd__pipeline-name { flex: 1 1 auto; color: var(--fg-1); font-weight: 500; }
+.tdd__pipeline-outcome {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  max-width: 40%;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* task-f26e7745eda6 — per-step status pill (incl. merged child server status).
+   task-df41bfd4291c — soft-tinted pill per status, matching the dialog's
+   nh-dialog__pipeline-pill treatment (background tint + matching ink),
+   mapped onto this surface's own tokens: done→ok, active→accent (working),
+   pending→warn (queued, matches the roster's queued hue), skip→neutral,
    cancelled: grey + strikethrough (dead-but-real, ≠ n/a); failed: failed hue. */
 .tdd__pipeline-pill {
+  display: inline-flex;
+  align-items: center;
   font-size: var(--fs-2xs);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  padding: 1px 6px;
-  border-radius: 999px;
+  letter-spacing: var(--tracking-caps, 0.02em);
+  padding: 2px 8px;
+  border-radius: var(--r-pill, 999px);
+  white-space: nowrap;
 }
-.tdd__pipeline-pill--cancelled { color: var(--fg-2); text-decoration: line-through; }
-.tdd__pipeline-pill--failed { color: var(--err, #c0392b); }
+.tdd__pipeline-pill--done { background: var(--ok-soft); color: var(--ok); }
+.tdd__pipeline-pill--active { background: var(--accent-soft); color: var(--accent-strong, var(--accent)); }
+.tdd__pipeline-pill--pending { background: var(--warn-soft); color: var(--warn); }
+.tdd__pipeline-pill--skip { background: var(--bg-3); color: var(--fg-3); }
+.tdd__pipeline-pill--cancelled { background: var(--bg-3); color: var(--fg-3); text-decoration: line-through; }
+.tdd__pipeline-pill--failed { background: var(--err-soft); color: var(--err); }
 /* task-48cd46a0e2da — per-step start error, inline (never a silent no-op). */
-.tdd__pipeline-error { color: var(--err, #c0392b); font-size: var(--fs-xs); font-weight: 600; cursor: help; }
+.tdd__pipeline-error { color: var(--err); font-size: var(--fs-xs); font-weight: 600; cursor: help; }
 .tdd__pipeline-start {
   appearance: none;
   border: 1px solid var(--accent);
@@ -728,8 +757,9 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   padding: 2px 8px;
   border-radius: var(--r-md);
   cursor: pointer;
+  white-space: nowrap;
 }
-.tdd__pipeline-start:hover:not(:disabled) { background: var(--accent); color: var(--bg-1); }
+.tdd__pipeline-start:hover:not(:disabled) { background: var(--accent); color: var(--text-on-accent); }
 .tdd__pipeline-start:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* task-a763ca5be676 — the PINNED pending-question card at the top of the body.
