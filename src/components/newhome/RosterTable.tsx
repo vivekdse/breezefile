@@ -928,6 +928,21 @@ export function RosterTable({
   const [matrixGroupKey, setMatrixGroupKey] = useState<string | null>(null);
   const onViewGroup = (group: RosterGroup) => setMatrixGroupKey(group.key);
 
+  // task-9b7a342d0a60 — NewHomePage dispatches this when selectedProjectId
+  // changes (same reset point/event-bridge pattern as fm:closeTaskDetail from
+  // 7ea59baaea6c), so a project switch always returns the roster to Level-1
+  // instead of leaving the Level-2 matrix rendering the PREVIOUS project's
+  // task. The drill-in selection lives here (not lifted to NewHomePage)
+  // because it's purely a RosterTable presentation concern.
+  useEffect(() => {
+    function onCloseMatrixDrillIn() {
+      setMatrixParentId(null);
+      setMatrixGroupKey(null);
+    }
+    window.addEventListener('fm:closeMatrixDrillIn', onCloseMatrixDrillIn);
+    return () => window.removeEventListener('fm:closeMatrixDrillIn', onCloseMatrixDrillIn);
+  }, []);
+
   // task-ecabeafa41e1 — "▶ Run all": start every runnable run in the group
   // through the shared start wrapper (optimistic + de-duped).
   const runAllGroup = (group: RosterGroup) => {

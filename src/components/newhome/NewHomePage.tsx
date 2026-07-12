@@ -725,11 +725,21 @@ export function NewHomePage() {
   // app-wide drawer in App.tsx — the fm:closeTaskDetail event that drawer
   // listens for. Skips the very first render (prevProjectId ref starts
   // unset) so mounting New Home doesn't spuriously fire a close.
+  //
+  // task-9b7a342d0a60 — same reset point, extended: also close the Level-2
+  // matrix drill-in (RosterTable's local matrixParentId/matrixGroupKey
+  // state), which 7ea59baaea6c's fix missed. Without this, switching
+  // projects while a template group's matrix view is open leaves it
+  // rendering the PREVIOUS project's task until the user clicks ← Back. The
+  // drill-in selection lives inside RosterTable (not lifted here), so it's
+  // reset the same way the detail drawer is — via a dedicated window event
+  // RosterTable listens for — rather than lifting/duplicating that state.
   useEffect(() => {
     if (prevProjectIdRef.current === selectedProjectId) return;
     prevProjectIdRef.current = selectedProjectId;
     setOpenTaskId(null);
     window.dispatchEvent(new CustomEvent('fm:closeTaskDetail'));
+    window.dispatchEvent(new CustomEvent('fm:closeMatrixDrillIn'));
   }, [selectedProjectId]);
 
   return (
