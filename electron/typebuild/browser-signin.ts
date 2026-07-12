@@ -489,6 +489,20 @@ async function completeExchange(
   const idToken = String(tokenData.firebase_id_token ?? '');
   const refreshToken = String(tokenData.firebase_refresh_token ?? '');
   const email = String(tokenData.email ?? '');
+  // Value-free response-shape diagnostic (task-0e1722518273): the exchange
+  // runs in MAIN (no DevTools Network tab can see it), and "absent field" vs
+  // "present-but-empty" distinguishes the server's is_breezefile merge not
+  // firing from a blank Google refresh token. Keys + presence only — never
+  // token values.
+  const shape = (k: string) => {
+    if (!(k in tokenData)) return `${k}:absent`;
+    const v = tokenData[k];
+    return `${k}:${typeof v === 'string' ? (v ? `present(${v.length})` : 'empty') : typeof v}`;
+  };
+  console.error(
+    `[signin-debug] /token ${tokenRes.status} keys=[${Object.keys(tokenData).join(',')}] ` +
+      ['firebase_id_token', 'firebase_refresh_token', 'email'].map(shape).join(' '),
+  );
   if (!idToken || !refreshToken) {
     throw new BrowserAuthError(
       'server-pending',
