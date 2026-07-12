@@ -2,27 +2,8 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { visibleEntries } from '../actions';
 import { formatSize } from '../sort';
-import { fm } from '../bridge';
+import { loadAppInfo, type AppInfo } from '../appInfo';
 import './Statusbar.css';
-
-// Instance identity (which window am I in?) — fetched once per app run and
-// shared by every Statusbar mount. Alongside the chip, stamp
-// <html data-profile="…"> so CSS can mark the whole dev window (the amber
-// top stripe in base.css) — alt-tab alone couldn't tell dev from stable.
-type AppInfo = { profile: string; version: string; sha: string };
-let appInfoPromise: Promise<AppInfo | null> | null = null;
-function loadAppInfo(): Promise<AppInfo | null> {
-  if (!appInfoPromise) {
-    appInfoPromise = fm
-      .appInfo()
-      .then((info) => {
-        document.documentElement.dataset.profile = info.profile;
-        return info;
-      })
-      .catch(() => null);
-  }
-  return appInfoPromise;
-}
 
 function useAppInfo(): AppInfo | null {
   const [info, setInfo] = useState<AppInfo | null>(null);

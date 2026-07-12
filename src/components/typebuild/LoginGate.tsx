@@ -82,6 +82,8 @@ function friendlyError(code: string): string {
       return 'TypeBuild server update pending — please try again shortly.';
     case 'rejected':
       return 'Sign-in was rejected. Please try again.';
+    case 'timeout':
+      return 'Sign-in timed out — the sign-in page never completed. Try again.';
     default:
       return 'Sign-in failed. Please try again.';
   }

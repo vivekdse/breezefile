@@ -252,6 +252,8 @@ function browserFriendlyError(code: string): string {
       return "Couldn't reach TypeBuild. Check your connection and try again.";
     case 'rejected':
       return 'Sign-in was rejected. Please try again.';
+    case 'timeout':
+      return 'Sign-in timed out — the sign-in page never completed. Try again.';
     default:
       return 'Sign-in failed. Please try again.';
   }

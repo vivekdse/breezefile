@@ -62,7 +62,8 @@ const TOKEN_URL = `${SERVER_BASE}/token`;
 const FLOW_TIMEOUT_MS = 5 * 60 * 1000;
 
 export type BrowserAuthErrorCode =
-  | 'cancelled' // user closed the browser / timed out / aborted
+  | 'cancelled' // user closed the browser / aborted — the ONLY code the UI may hide
+  | 'timeout' // the flow expired with no callback (stuck login window, dead client_id, …)
   | 'unreachable' // network failure reaching the TypeBuild server / loopback bind failed
   | 'rejected' // the server refused registration / authorization / the code
   | 'server-pending'; // sign-in worked but the server didn't return firebase_* yet
@@ -371,7 +372,10 @@ export function signInViaBrowser(): Promise<AuthState> {
       const redirectUri = redirectUriFor(server);
 
       timer = setTimeout(() => {
-        fail(new BrowserAuthError('cancelled', 'Sign-in timed out.'));
+        // Distinct from 'cancelled': the UI hides user-cancels, but a timeout
+        // (stuck login window, stale client_id, contended profile) must show —
+        // it silently bounced users back to a blank login screen (2026-07-12).
+        fail(new BrowserAuthError('timeout', 'Sign-in timed out.'));
       }, FLOW_TIMEOUT_MS);
       // Don't keep the event loop alive on this timer alone.
       if (typeof timer.unref === 'function') timer.unref();

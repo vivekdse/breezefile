@@ -16,6 +16,11 @@ import './styles/typography.css';
 // once in the default (paper) palette and then swap — a visible flash.
 applyTheme(getStoredTheme());
 
+// Stamp <html data-profile> at boot (dev amber stripe, styles/base.css) —
+// component-mounted stamping missed the LoginGate screen, exactly where a
+// user can't tell the dev and stable windows apart.
+void import('./appInfo').then(({ loadAppInfo }) => void loadAppInfo());
+
 // task-f730389afa8a — the operator session window loads this same bundle with
 // `#operator=<ptyId>&view=<id>` (or bare `#operator` for the no-agent
 // open-browser verb). It renders the split-pane chrome (browser LEFT + Claude

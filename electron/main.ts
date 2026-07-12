@@ -89,6 +89,21 @@ if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '16';
 // encrypted DB, or settings. 'default' → "TypeBuild"; 'dev' → "TypeBuild Dev";
 // any other profile → "TypeBuild (<name>)".
 const profile = profileName();
+// Profile isolation for Electron's OWN state (cookies, Chromium caches,
+// IndexedDB, safeStorage, the OAuth client cache): profile.mjs isolates
+// ~/.breezefile* and the CDP port, but userData stayed the shared
+// ~/.config/file-manager — so dev + stable ran two live Chromium instances
+// on ONE profile dir, corrupting each other's databases (seen 2026-07-12:
+// stable's sign-in window hung to timeout while dev signed in fine;
+// "Failed to delete the database: Database IO error" in its log). 'default'
+// keeps the historical dir so the stable instance retains its state; every
+// other profile gets its own sibling dir. Must run before 'ready'.
+if (profile !== 'default') {
+  app.setPath(
+    'userData',
+    path.join(app.getPath('appData'), `file-manager-${profile}`),
+  );
+}
 app.setName(
   profile === 'default'
     ? 'TypeBuild'
