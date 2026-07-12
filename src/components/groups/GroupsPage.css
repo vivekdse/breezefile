@@ -426,6 +426,10 @@
   border: 1px solid var(--border-1);
   border-radius: var(--r-md);
 }
+.grp__invite-form .grp__input {
+  flex: 1 1 16rem;
+  min-width: 16rem;
+}
 .grp__select {
   background: var(--bg-2);
   color: var(--text-on-panel);
