@@ -81,9 +81,38 @@ function pillFor(status?: TaskStatus, rawStatus?: string): { kind: PillKind; lab
   }
 }
 
-function StatusChip({ status, rawStatus }: { status?: TaskStatus; rawStatus?: string }): JSX.Element {
+// Layout-cleanup round 2: the lead column shows status as a colored ICON
+// (tooltip + aria-label carry the word) instead of a text pill — one glyph
+// per roster status kind, plus a distinct ⊘ for Cancelled (which shares the
+// 'queued' color kind but must not read as "waiting").
+function statusGlyph(kind: PillKind, label: string): string {
+  if (label === 'Cancelled') return '⊘';
+  switch (kind) {
+    case 'done':
+      return '✓';
+    case 'progress':
+      return '◐';
+    case 'needs':
+      return '!';
+    case 'failed':
+      return '✕';
+    default:
+      return '○';
+  }
+}
+
+function StatusIcon({ status, rawStatus }: { status?: TaskStatus; rawStatus?: string }): JSX.Element {
   const { kind, label } = pillFor(status, rawStatus);
-  return <span className={`tm-pill tm-pill--${kind}`}>{label}</span>;
+  return (
+    <span
+      className={`tm-status tm-status--${kind}${label === 'Cancelled' ? ' tm-status--cancelled' : ''}`}
+      title={label}
+      aria-label={label}
+      role="img"
+    >
+      {statusGlyph(kind, label)}
+    </span>
+  );
 }
 
 // ①②③ … circled step markers; falls back to "(n)" past the circled range.
@@ -467,54 +496,55 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
               return (
                 <tr key={run.id}>
                   <td className="tm-lead-td">
-                    <div className="tm-lead-inner">
-                      <span className="tm-run-title">{runLabel}</span>
-                      <StatusChip status={run.status} rawStatus={run.rawStatus} />
-                    </div>
-                    <div className="tm-lead-actions">
-                      {(() => {
-                        const next = firstRunnableChild(rowChildren);
-                        // No runnable step left: '✓ complete' ONLY when the run
-                        // actually finished — a cancelled run's chip already
-                        // says Cancelled, and pairing it with '✓ complete' read
-                        // as a contradiction (QA round).
-                        if (!next)
-                          return run.status === 'done' ? (
-                            <span className="tm-run-done">✓ Complete</span>
-                          ) : null;
-                        // task-1b3eeb1aae1f — the row's ▶ Run targets the run's
-                        // NEXT runnable step; read that child's pending/error so
-                        // the click shows an IMMEDIATE "Starting…" (disabled) and
-                        // a failure surfaces instead of a silent no-op.
-                        const pending = pendingFor(next.id);
-                        const err = errorFor(next.id);
-                        return (
-                          <>
-                            <button
-                              type="button"
-                              className="tm-run-btn"
-                              title="Run the next step of this run"
-                              onClick={() => onStartChild(next.id)}
-                              disabled={pending}
-                            >
-                              {pending ? 'Starting…' : '▶ Run'}
-                            </button>
-                            {err && (
-                              <span className="tm-run-error" title={err}>
-                                ⚠ {err}
-                              </span>
-                            )}
-                          </>
-                        );
-                      })()}
-                      <button
-                        type="button"
-                        className="tm-open-btn"
-                        onClick={() => onOpenTask(run.id)}
-                      >
-                        ↗ Open
-                      </button>
-                    </div>
+                    {(() => {
+                      // Layout-cleanup round 2: ONE line per run — colored
+                      // status icon + "Run N" + compact icon actions. The
+                      // status word rides the icon's tooltip; '✓ Complete' is
+                      // simply the done icon now, not a separate note. Errors
+                      // (the only thing worth a second line) drop below.
+                      const next = firstRunnableChild(rowChildren);
+                      // task-1b3eeb1aae1f — the row's ▶ targets the run's NEXT
+                      // runnable step; its pending/error drive the immediate
+                      // "starting" state and the visible failure line.
+                      const pending = next ? pendingFor(next.id) : false;
+                      const err = next ? errorFor(next.id) : null;
+                      return (
+                        <>
+                          <div className="tm-lead-inner">
+                            <StatusIcon status={run.status} rawStatus={run.rawStatus} />
+                            <span className="tm-run-title">{runLabel}</span>
+                            <span className="tm-lead-actions">
+                              {next && (
+                                <button
+                                  type="button"
+                                  className="tm-icon-btn tm-icon-btn--run"
+                                  title={pending ? 'Starting…' : 'Run the next step of this run'}
+                                  aria-label="Run"
+                                  onClick={() => onStartChild(next.id)}
+                                  disabled={pending}
+                                >
+                                  {pending ? '…' : '▶'}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="tm-icon-btn tm-icon-btn--open"
+                                title="Open this run"
+                                aria-label="Open"
+                                onClick={() => onOpenTask(run.id)}
+                              >
+                                ↗
+                              </button>
+                            </span>
+                          </div>
+                          {err && (
+                            <div className="tm-run-error" title={err}>
+                              ⚠ {err}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
                   {stepGroups.map((g) => {
                     // task-dc5ad168cd3a — same alternating band as the headers so

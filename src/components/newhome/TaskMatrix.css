@@ -226,6 +226,8 @@
   color: var(--muted-on-panel);
   font-weight: 700;
 }
+/* Layout-cleanup round 2: ONE line per run — [status icon] Run N …… [▶][↗].
+   The status word rides the icon tooltip; actions are compact icon buttons. */
 .tm-lead-inner {
   display: flex;
   align-items: center;
@@ -239,71 +241,92 @@
   white-space: nowrap;
   max-width: 220px;
 }
-/* Row-level run actions, visible (not hover-hidden) beneath the run identity. */
-.tm-lead-actions {
-  display: flex;
-  gap: var(--sp-2);
-  margin-top: 7px;
+/* Colored status glyph — same --nh-* status vocabulary as the roster pills,
+   rendered as a small filled disc so the color reads at a glance. */
+.tm-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
 }
-.tm-run-btn {
+.tm-status--done { color: var(--nh-done); background: var(--nh-done-soft); }
+.tm-status--progress { color: var(--nh-progress); background: var(--nh-progress-soft); }
+.tm-status--queued { color: var(--nh-queued); background: var(--nh-queued-soft); }
+.tm-status--needs { color: var(--nh-needs); background: var(--nh-needs-soft); }
+.tm-status--failed { color: var(--nh-failed); background: var(--nh-failed-soft); }
+/* Cancelled shares the queued (muted) palette but its ⊘ glyph reads slightly
+   dimmer so it can't be mistaken for a waiting run. */
+.tm-status--cancelled { opacity: 0.75; }
+
+/* Icon actions, right-aligned on the same line. */
+.tm-lead-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.tm-icon-btn {
   appearance: none;
   border: none;
-  border-radius: var(--r-sm);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
   font: inherit;
-  font-size: var(--fs-2xs);
-  font-weight: 700;
-  padding: 3px 11px;
+  font-size: 10px;
+  line-height: 1;
   cursor: pointer;
+  transition: filter var(--motion-hover), color var(--motion-hover), background var(--motion-hover);
+}
+.tm-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* ▶ Run — the one primary action, accent-filled. */
+.tm-icon-btn--run {
   background: var(--accent);
   color: var(--text-on-accent);
 }
-.tm-run-btn:hover {
+.tm-icon-btn--run:hover {
   filter: brightness(1.08);
 }
-/* task-1b3eeb1aae1f — optimistic "Starting…" state: dim + not-allowed so a
-   clicked ▶ Run reads as in-flight and can't be double-fired. */
-.tm-run-btn:disabled {
+/* task-1b3eeb1aae1f — optimistic "starting" state: dim + inert so a clicked
+   ▶ reads as in-flight and can't be double-fired. */
+.tm-icon-btn--run:disabled {
   opacity: 0.6;
   cursor: default;
   filter: none;
 }
-/* A launch failure for the row's next step — same failed vocabulary as the
-   cell error, aligned inline with the ▶ Run button. */
+/* ↗ Open — quiet ghost icon. */
+.tm-icon-btn--open {
+  background: transparent;
+  color: var(--muted-on-panel);
+}
+.tm-icon-btn--open:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+/* A launch failure for the row's next step — the only thing worth a second
+   line under the run row. */
 .tm-run-error {
   font-size: var(--fs-2xs);
   font-weight: 600;
   color: var(--nh-failed);
   cursor: help;
-  align-self: center;
+  margin-top: 4px;
   max-width: 14rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* Layout-cleanup (QA round): Open is the secondary, always-available action —
-   a quiet text link, so the one primary ▶ Run button carries the row. */
-.tm-open-btn {
-  appearance: none;
-  background: transparent;
-  border: none;
-  border-radius: var(--r-sm);
-  font: inherit;
-  font-size: var(--fs-2xs);
-  padding: 3px 4px;
-  cursor: pointer;
-  color: var(--muted-on-panel);
-}
-.tm-open-btn:hover {
-  color: var(--accent);
-}
-.tm-open-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.tm-run-done {
-  font-size: var(--fs-2xs);
-  color: var(--nh-done);
-  align-self: center;
 }
 
 /* Status pills — same vocabulary/tokens as the roster. */
