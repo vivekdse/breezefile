@@ -157,6 +157,15 @@ export type TaskComposerRequest =
        *  match from a copilot utterance). Ignored unless initialKind is
        *  'template'. */
       templateTaskId?: string;
+      /** task-e41ce7bf62fb — New Home roster's per-section "+ New run": the
+       *  server doesn't emit template_id on tasks yet (see the edit-mode
+       *  reflection above and rosterGroups.mjs), so the roster only knows the
+       *  section's template NAME, not its first-class Template.id. Same
+       *  identity signal listTemplates keys on elsewhere — matched against
+       *  the loaded candidate list by exact name once it resolves. Ignored
+       *  unless initialKind is 'template'; templateTaskId (an id match) wins
+       *  if both are somehow set. */
+      initialTemplateName?: string;
     }
   | { mode: 'edit'; task: Task };
 
@@ -1596,13 +1605,28 @@ export function TaskComposer(props: Props) {
   }, [templateCandidates, templatePickQuery]);
 
   // copilot parity / row-shortcut: a pre-selected template id (props.templateTaskId)
-  // skips straight past the picker into the title step.
+  // skips straight past the picker into the title step. task-e41ce7bf62fb —
+  // the New Home roster's "+ New run" only knows the section's template NAME
+  // (no template_id from the server yet), so it sets initialTemplateName
+  // instead; matched by exact name (case-insensitive) against the same
+  // candidate list, same skip-the-picker effect. Runs once templateCandidates
+  // resolves (async fetch) since neither preselect fires until then.
   useEffect(() => {
     if (!isFromTemplateMode) return;
     if (templateEntry) return;
     const preselectId = props.mode === 'create' ? props.templateTaskId : undefined;
-    if (!preselectId) return;
-    const found = templateCandidates.find((c) => c.id === preselectId);
+    if (preselectId) {
+      const found = templateCandidates.find((c) => c.id === preselectId);
+      if (found) {
+        chooseTemplateEntry(found);
+        return;
+      }
+    }
+    const preselectName = props.mode === 'create' ? props.initialTemplateName : undefined;
+    if (!preselectName) return;
+    const q = preselectName.trim().toLowerCase();
+    if (!q) return;
+    const found = templateCandidates.find((c) => c.name.trim().toLowerCase() === q);
     if (found) chooseTemplateEntry(found);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFromTemplateMode, templateCandidates, templateEntry]);

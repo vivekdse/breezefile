@@ -884,11 +884,19 @@ export function RosterTable({
 
   const rowsById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
-  const onNewRun = (_group: RosterGroup) => {
+  const onNewRun = (group: RosterGroup) => {
     // task-b8fa34a80a34 — open the canonical New-from-Template flow.
-    // Pre-picking THIS template isn't wired yet; this opens the picker.
+    // task-e41ce7bf62fb — pre-select THIS section's template so the picker is
+    // skipped straight into title/values, instead of opening unfiltered. The
+    // server doesn't emit template_id on tasks yet (rosterGroups.mjs), so
+    // group.name (the section heading — templateName || shared title) is the
+    // only identity signal available; TaskComposer matches it by exact name
+    // against its loaded template list (initialTemplateName), the same
+    // name-based identity the edit-mode template reflection already uses.
     window.dispatchEvent(
-      new CustomEvent('fm:openTask', { detail: { mode: 'create', initialKind: 'template' } }),
+      new CustomEvent('fm:openTask', {
+        detail: { mode: 'create', initialKind: 'template', initialTemplateName: group.name },
+      }),
     );
     window.dispatchEvent(new CustomEvent('fm:openCopilotChat'));
   };
