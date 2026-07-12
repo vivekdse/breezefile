@@ -89,28 +89,63 @@ export async function instantiateChain(opts: {
 
   const parent = await createParent({ title: name, ...(projectId ? { projectId } : {}) });
 
+  // task-1b70093cc04e perf — instantiate + link in PARALLEL, not one serial
+  // await-chain. The old loop did `1 + 2N` sequential round-trips (instantiate,
+  // then link, per template), which made saving a multi-step chain feel like it
+  // hung. The templates are independent (each instantiated with empty values),
+  // and depends_on is a pure function of the ORDERED child ids — so we can
+  // instantiate them all at once, then, once every id is known, link them all at
+  // once. Ordering is preserved by array index, not by threading a predecessor
+  // through the serial chain. Wall-clock drops to ~2 round-trips regardless of N.
+  const created = await Promise.allSettled(
+    refs.map((ref) =>
+      instantiateTemplate(ref.templateId, { ...(projectId ? { projectId } : {}) }),
+    ),
+  );
+
+  // Collect every child that WAS created (across the whole parallel batch) so
+  // the error carries the full partial-job for cleanup/resume, then surface the
+  // first failure. Position i in `created` maps to refs[i].
   const childIds: string[] = [];
-  let predecessorId: string | undefined;
-  for (const ref of refs) {
-    try {
-      const child = await instantiateTemplate(ref.templateId, {
-        ...(projectId ? { projectId } : {}),
-      });
-      await linkTask(child.id, {
-        parentTaskId: parent.id,
-        ...(predecessorId ? { dependsOn: [predecessorId] } : {}),
-      });
-      childIds.push(child.id);
-      predecessorId = child.id;
-    } catch (err) {
-      throw new InstantiateChainError(
-        `instantiateChain: failed instantiating template "${ref.templateId}" ` +
-          `(${childIds.length} of ${refs.length} children created before failure)`,
-        parent.id,
-        childIds,
-        err,
-      );
+  let firstFail = -1;
+  for (let i = 0; i < created.length; i++) {
+    const outcome = created[i];
+    if (outcome.status === 'fulfilled') {
+      childIds.push(outcome.value.id);
+    } else if (firstFail === -1) {
+      firstFail = i;
     }
+  }
+  if (firstFail !== -1) {
+    const bad = created[firstFail] as PromiseRejectedResult;
+    throw new InstantiateChainError(
+      `instantiateChain: failed instantiating template "${refs[firstFail].templateId}" ` +
+        `(${childIds.length} of ${refs.length} children created)`,
+      parent.id,
+      childIds,
+      bad.reason,
+    );
+  }
+
+  const linked = await Promise.allSettled(
+    childIds.map((id, i) =>
+      linkTask(id, {
+        parentTaskId: parent.id,
+        // depends_on = the immediately-preceding child, so the chain runs in
+        // order. First child has no predecessor.
+        ...(i > 0 ? { dependsOn: [childIds[i - 1]] } : {}),
+      }),
+    ),
+  );
+  const linkFail = linked.findIndex((o) => o.status === 'rejected');
+  if (linkFail !== -1) {
+    throw new InstantiateChainError(
+      `instantiateChain: failed linking child ${linkFail + 1} of ${childIds.length} ` +
+        `to the chain parent`,
+      parent.id,
+      childIds,
+      (linked[linkFail] as PromiseRejectedResult).reason,
+    );
   }
 
   return { parentId: parent.id, childIds };

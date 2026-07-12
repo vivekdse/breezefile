@@ -1140,3 +1140,40 @@ span.composer__chain-step-name {
 .composer__option--add.composer__option--active .composer__option-key {
   border-style: dashed;
 }
+
+/* task-1b70093cc04e — chain template-picker footer: a keyboard hint + a clear
+   labelled Done control, replacing the old tiny icon button. */
+.composer__chain-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 2px;
+}
+.composer__chain-picker-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+.composer__chain-picker-hint kbd {
+  font-family: inherit;
+  font-size: 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--ink);
+}
+.composer__chain-picker-done {
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 5px 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.composer__chain-picker-done:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

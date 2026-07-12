@@ -54,7 +54,12 @@ function makeStubs(calls, { failOn } = {}) {
 
 // ── parent-first + ordered instantiate + parent/predecessor linkage ─────────
 
-test('instantiateChain creates a thin parent, then instantiates each template in order, linking parent + predecessor', async () => {
+// task-1b70093cc04e perf — instantiate + link now run in PARALLEL (all
+// templates instantiated, THEN all links), not interleaved one-by-one, so the
+// order is: parent, [inst × N] (in template order), [link × N] (in child
+// order). Ordering/linkage semantics are unchanged — depends_on still chains
+// each child to its predecessor.
+test('instantiateChain creates a thin parent, instantiates all templates in order, then links parent + predecessor', async () => {
   const calls = [];
   const result = await instantiateChain({
     name: 'Order #42',
@@ -70,13 +75,16 @@ test('instantiateChain creates a thin parent, then instantiates each template in
   // parent FIRST — a thin { title, projectId } container.
   assert.deepEqual(calls[0], ['parent', { title: 'Order #42', projectId: 'proj-1' }]);
 
-  // then instantiate each template IN ORDER, each immediately linked.
+  // then instantiate every template IN ORDER (parallel batch, recorded in
+  // template order).
   assert.deepEqual(calls[1], ['inst', 't-a', { projectId: 'proj-1' }]);
-  // first child: parent link only, no predecessor.
-  assert.deepEqual(calls[2], ['link', 'c1', { parentTaskId: 'p1' }]);
-  assert.deepEqual(calls[3], ['inst', 't-b', { projectId: 'proj-1' }]);
-  assert.deepEqual(calls[4], ['link', 'c2', { parentTaskId: 'p1', dependsOn: ['c1'] }]);
-  assert.deepEqual(calls[5], ['inst', 't-c', { projectId: 'proj-1' }]);
+  assert.deepEqual(calls[2], ['inst', 't-b', { projectId: 'proj-1' }]);
+  assert.deepEqual(calls[3], ['inst', 't-c', { projectId: 'proj-1' }]);
+
+  // then link each child to the parent + its predecessor (parallel batch, in
+  // child order). First child: parent link only, no predecessor.
+  assert.deepEqual(calls[4], ['link', 'c1', { parentTaskId: 'p1' }]);
+  assert.deepEqual(calls[5], ['link', 'c2', { parentTaskId: 'p1', dependsOn: ['c1'] }]);
   assert.deepEqual(calls[6], ['link', 'c3', { parentTaskId: 'p1', dependsOn: ['c2'] }]);
 
   assert.equal(result.parentId, 'p1');
@@ -115,7 +123,7 @@ test('instantiateChain with one template creates parent + one linked child', asy
 
 // ── failure propagation ──────────────────────────────────────────────────────
 
-test('instantiateChain throws InstantiateChainError with parentId + partial childIds when a template fails midway', async () => {
+test('instantiateChain throws InstantiateChainError with parentId + all created childIds when a template fails', async () => {
   const calls = [];
   await assert.rejects(
     () =>
@@ -127,17 +135,21 @@ test('instantiateChain throws InstantiateChainError with parentId + partial chil
     (err) => {
       assert.ok(err instanceof InstantiateChainError);
       assert.equal(err.parentId, 'p1');
-      assert.deepEqual(err.childIds, ['c1']); // t-a succeeded before t-b failed
+      // Parallel batch: t-a AND t-c both instantiated before we surface t-b's
+      // failure — the error carries every child that WAS created (for
+      // cleanup/resume), not just the ones before the failing index.
+      assert.deepEqual(err.childIds, ['c1', 'c2']);
       assert.match(err.message, /t-b/);
       assert.ok(err.cause instanceof Error);
       assert.match(err.cause.message, /boom t-b/);
       return true;
     },
   );
-  // parent + first child (inst + link) created; t-c never attempted.
+  // parent + the two succeeding instantiates; NO links (we throw before the
+  // link pass once any instantiate failed).
   assert.deepEqual(
     calls.map((c) => c[0]),
-    ['parent', 'inst', 'link'],
+    ['parent', 'inst', 'inst'],
   );
 });
 

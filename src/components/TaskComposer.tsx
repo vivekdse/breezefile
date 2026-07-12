@@ -2235,6 +2235,28 @@ export function TaskComposer(props: Props) {
   // and strand the keyboard cursor.
   const active = QUESTIONS[Math.min(activeIdx, QUESTIONS.length - 1)];
 
+  // task-1b70093cc04e UX — auto-open the template picker the moment the user
+  // lands on the chain step with nothing added yet, so they can start typing a
+  // template name immediately (no hunting for "+ add template" first). Guarded
+  // by a ref so it fires ONCE per visit and never fights the user re-closing it.
+  const chainPickerAutoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (active !== 'chain') {
+      chainPickerAutoOpenedRef.current = false;
+      return;
+    }
+    if (
+      !chainPickerAutoOpenedRef.current &&
+      templates.length > 0 &&
+      chainTemplates.length === 0 &&
+      !chainPickerOpen
+    ) {
+      chainPickerAutoOpenedRef.current = true;
+      setChainPickerOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, templates.length, chainTemplates.length]);
+
   // task-342f3e151d99 — land activeIdx on whatever pendingFieldFocusRef asked
   // for (set by startFieldDraft/commitFieldDraft/cancelFieldDraft above), once
   // QUESTIONS has re-derived to include that target id. taskInputs/taskOutputs
@@ -2451,6 +2473,10 @@ export function TaskComposer(props: Props) {
       return;
     }
     setError(null);
+    // task-1b70093cc04e — close the picker as we advance; the user never has to
+    // click "Done" to dismiss it before continuing — Continue just works.
+    setChainPickerOpen(false);
+    setChainPickerQuery('');
     goNext();
   }
 
@@ -3846,6 +3872,15 @@ export function TaskComposer(props: Props) {
         tryAdvanceChain();
         return;
       }
+      // task-1b70093cc04e UX — 'a' opens the template picker so you can add
+      // templates from the keyboard without reaching for "+ add template".
+      if ((e.key === 'a' || e.key === 'A') && !chainPickerOpen && templates.length > 0) {
+        e.preventDefault();
+        setChainPickerQuery('');
+        setChainPickerHighlight(0);
+        setChainPickerOpen(true);
+        return;
+      }
       return;
     }
     // task-342f3e151d99 — the Inputs/Outputs section headers are just an
@@ -4230,7 +4265,12 @@ export function TaskComposer(props: Props) {
     // current value — the user is here to inspect/change it, not to
     // re-walk a guided flow. In create mode keep the original behavior
     // (past = answer, future = prompt) so the flow feels stepwise.
-    const isPast = QUESTIONS.indexOf(q) < activeIdx;
+    // task-1b70093cc04e fix — once we're in the commit phase EVERY answered
+    // section is "past" (matches sectionClasses' own `phase === 'commit'`
+    // rule). Without this the chain step — the LAST question in the minimal
+    // chain flow, so activeIdx never moves past it — collapsed to a bare dim
+    // prompt on Continue, making the added templates look lost.
+    const isPast = phase === 'commit' || QUESTIONS.indexOf(q) < activeIdx;
     const showAnswer = props.mode === 'edit' || isPast;
     if (!showAnswer) {
       return <div className="composer__inert">{promptFor(q)}</div>;
@@ -5471,18 +5511,28 @@ export function TaskComposer(props: Props) {
                                   ))
                                 )}
                               </ul>
-                              <button
-                                type="button"
-                                className="composer__chain-icon-btn"
-                                title="Close picker"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setChainPickerOpen(false);
-                                  setChainPickerQuery('');
-                                }}
-                              >
-                                Done
-                              </button>
+                              {/* task-1b70093cc04e — a clear labelled control +
+                                  keyboard hint instead of a tiny icon button.
+                                  Continue auto-closes the picker (see
+                                  tryAdvanceChain), so Done is never required. */}
+                              <div className="composer__chain-picker-foot">
+                                <span className="composer__chain-picker-hint">
+                                  <kbd>↵</kbd> add · <kbd>Esc</kbd> close · added
+                                  templates appear above
+                                </span>
+                                <button
+                                  type="button"
+                                  className="composer__chain-picker-done"
+                                  title="Close picker"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setChainPickerOpen(false);
+                                    setChainPickerQuery('');
+                                  }}
+                                >
+                                  Done
+                                </button>
+                              </div>
                             </div>
                           );
                         })()
