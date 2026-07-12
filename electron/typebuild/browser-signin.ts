@@ -128,13 +128,14 @@ async function registerClient(redirectUri: string): Promise<string> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // LOAD-BEARING, not just display copy: the server's token endpoint
-        // keys its firebase_* desktop-handoff merge (is_breezefile) off this
-        // exact name — renaming it to 'TypeBuild' (2026-07-12) silently
-        // dropped the handoff and broke every fresh sign-in
-        // (task-0e1722518273). Keep 'Breezefile' until the server matches on
-        // something sturdier; the consent-page copy fix rides the same task.
-        client_name: 'Breezefile',
+        // LOAD-BEARING, not just display copy: the server gates the
+        // firebase_* desktop-handoff on AUTHKIT_OAUTH_CLIENT_ALLOWLIST,
+        // matched against this exact name (regression task-0e1722518273 —
+        // an unlisted name silently downgrades /token to a bare OAuth
+        // response and every fresh sign-in dies at 'server-pending').
+        // The deployed allowlist carries 'Breezefile,TypeBuild'; any rename
+        // here must land on the server's allowlist FIRST.
+        client_name: 'TypeBuild',
         redirect_uris: [redirectUri],
         token_endpoint_auth_method: 'none',
         grant_types: ['authorization_code', 'refresh_token'],
