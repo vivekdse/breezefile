@@ -26,7 +26,7 @@
 import http, { IncomingMessage, ServerResponse } from 'node:http';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../electron/core/profile.mjs';
 import {
   writeFileSync,
   unlinkSync,
@@ -61,7 +61,7 @@ import { registerBreezeHooks } from '../electron/hooks-register';
 import { runStopBackstop } from '../electron/claude-stop-backstop';
 import type { StopSignal } from '../electron/claude-stop-backstop';
 
-const DIR = path.join(os.homedir(), '.breezefile');
+const DIR = stateDir();
 const API_FILE = path.join(DIR, 'api.json');
 // Working directory for headless TypeBuild runs. A stable, app-owned cwd
 // (never the user's home) keeps unattended sessions out of arbitrary folders.

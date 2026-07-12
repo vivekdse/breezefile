@@ -15,7 +15,7 @@
 // current URL. This keeps the repository self-describing — drop a folder in and
 // it's discoverable; delete it and it's gone — with no index to keep in sync.
 
-import os from 'node:os';
+import { stateDir } from '../../core/profile.mjs';
 import path from 'node:path';
 import {
   readFileSync,
@@ -30,7 +30,7 @@ import {
 
 /** Root of the tool repository. Override with $BREEZE_TOOLS_DIR (tests use it). */
 export function toolsDir() {
-  return process.env.BREEZE_TOOLS_DIR || path.join(os.homedir(), '.breezefile', 'tools');
+  return process.env.BREEZE_TOOLS_DIR || path.join(stateDir(), 'tools');
 }
 
 /** A tool id is also its directory name, so it must be a safe path segment.

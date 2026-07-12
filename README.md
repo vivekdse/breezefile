@@ -104,6 +104,28 @@ CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --mac
 # → release/Breezefile-<version>-arm64.dmg + .zip + Intel variants
 ```
 
+### Running two instances: stable vs dev
+
+The client runs under a **profile** — an isolated slice of state so you can keep
+a stable instance running while hacking on an experimental one, side by side on
+the same machine:
+
+- **Packaged app** → profile `default`. Userdata `TypeBuild`, state `~/.breezefile`,
+  CDP port `9222`. This is the stable instance you rely on day to day.
+- **`npm run dev`** → profile `dev`, automatically. Its own userData
+  (`TypeBuild Dev`), its own `~/.breezefile-dev`, CDP port `9223`, and the window
+  title carries a **Dev** suffix. Because it no longer shares the stable
+  instance's auth token / encrypted DB / settings, the **dev instance starts
+  signed-out the first time** — sign in again there.
+- **`BREEZE_PROFILE=foo npm run dev`** → an arbitrary extra profile `foo`
+  (`~/.breezefile-foo`, a derived CDP port in 9224–9299). Any child process the
+  app spawns (agent CLIs, hooks) inherits the profile through the environment.
+
+Note the **scheduler runs in every instance**. If both the stable and dev
+profiles are signed into the *same* TypeBuild account, both will try to claim and
+run scheduled agents — you'll see duplicate claims. Sign the dev profile into a
+**test account** (or expect the duplication) when running both at once.
+
 ## Linux
 
 Linux is supported via `npm run dev`. A packaged Linux binary (AppImage)

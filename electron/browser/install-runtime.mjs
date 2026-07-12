@@ -21,6 +21,7 @@
 // force a refresh, the same "you own it once it lands" rule as the seed tools.
 
 import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -36,7 +37,7 @@ import {
 export function automationDir() {
   return (
     process.env.BREEZE_AUTOMATION_DIR ||
-    path.join(os.homedir(), '.breezefile', 'automation')
+    path.join(stateDir(), 'automation')
   );
 }
 
@@ -60,6 +61,9 @@ function sourceRoot() {
 // drifts — add new modules HERE, not just in the import statement.
 const HELPERS = [
   ['bin', 'breeze-tools.mjs'],
+  // Profile module (state-dir + CDP resolution) — imported by connect.mjs and
+  // the tool helpers, so it must land at the install destination too.
+  ['electron', 'core', 'profile.mjs'],
   ['electron', 'browser', 'cli.mjs'],
   ['electron', 'browser', 'connect.mjs'],
   ['electron', 'browser', 'net.mjs'],

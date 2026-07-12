@@ -12,6 +12,7 @@ import { startTaskReminders, setTaskReminderMode } from './task-reminders';
 import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
 import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
+import { profileName, cdpPort } from './core/profile.mjs';
 // fm-m7q / task-1bf3ce50575a — native menu derives its verb rows from the SAME
 // build-safe metadata module the renderer registry uses. Pure data (no React),
 // so the electron-main Rollup build can bundle it.
@@ -72,12 +73,29 @@ dns.setDefaultResultOrder('ipv4first');
 // Must be set before the first threadpool use; module top-level qualifies.
 if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = '16';
 
+// Profile isolation: the packaged app is the stable 'default' profile; every
+// `npm run dev` instance is 'dev' (own userData, own ~/.breezefile-dev, own
+// CDP port). The defaulting itself lives in electron/core/profile.mjs as a
+// module side-effect — it must run before hoisted imports evaluate their
+// module-level stateDir() consts, which main.ts's body is too late for.
+
 // package.json's `name` is the npm-style slug "file-manager"; Electron
 // reads that for app.getName() in dev (before the bundle is built) and
 // the default `role: 'appMenu'` uses it for the About / Hide / Quit
-// labels. Force the display name so the menu says "TypeBuild"
-// everywhere, dev and packaged alike.
-app.setName('TypeBuild');
+// labels. Force the display name so the menu says "TypeBuild".
+//
+// The name also fixes userData: each profile gets its OWN userData dir so an
+// experimental 'dev' instance can't touch the stable instance's auth token,
+// encrypted DB, or settings. 'default' → "TypeBuild"; 'dev' → "TypeBuild Dev";
+// any other profile → "TypeBuild (<name>)".
+const profile = profileName();
+app.setName(
+  profile === 'default'
+    ? 'TypeBuild'
+    : profile === 'dev'
+      ? 'TypeBuild Dev'
+      : `TypeBuild (${profile})`,
+);
 
 // ─── Fail-soft safety net ────────────────────────────────────────────────────
 // A network / TLS / auth failure deep in an async path (a TypeBuild mint or
@@ -118,7 +136,7 @@ app.on(
 // ─── SPIKE (spike/playwright-cdp): expose CDP so Playwright can drive an
 // embedded WebContentsView over the wire. Must be set before app is ready.
 // Remove this whole block (and the spikeView code in createWindow) to revert.
-app.commandLine.appendSwitch('remote-debugging-port', '9222');
+app.commandLine.appendSwitch('remote-debugging-port', String(cdpPort()));
 
 // Linux: Electron only auto-detects the OS keyring on GNOME/KDE. On other
 // desktops (LXQt, etc.) safeStorage.isEncryptionAvailable() returns false even
@@ -227,6 +245,25 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+
+  // Non-default profiles carry their suffix in the window title so a 'dev'
+  // (or arbitrary) instance is visually distinct from the stable one on the
+  // taskbar / window switcher. The renderer overwrites document.title (see
+  // index.html), which fires 'page-title-updated'; re-append the suffix there
+  // so it survives every renderer-set title. 'default' leaves the title as-is.
+  const titleSuffix =
+    profile === 'default'
+      ? ''
+      : profile === 'dev'
+        ? ' Dev'
+        : ` (${profile})`;
+  if (titleSuffix) {
+    win.on('page-title-updated', (e, title) => {
+      if (title.endsWith(titleSuffix)) return;
+      e.preventDefault();
+      win?.setTitle(title + titleSuffix);
+    });
+  }
 
   // Only forward real external links to the OS. A naive forward calls
   // shell.openExternal('about:blank') for empty / placeholder anchors

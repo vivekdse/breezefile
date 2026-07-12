@@ -9,17 +9,18 @@
 // Chromium already running inside Breeze (electron/main.ts exposes
 // --remote-debugging-port). playwright-core ships no browser binaries.
 
-import os from 'node:os';
+import { stateDir, cdpUrl } from '../core/profile.mjs';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
 
-/** CDP endpoint Breeze exposes. Override with $BREEZE_CDP_URL. */
-export const CDP_URL = process.env.BREEZE_CDP_URL || 'http://localhost:9222';
+/** CDP endpoint Breeze exposes. Profile-aware default (BREEZE_PROFILE inherited
+ *  from the app that spawned this CLI). Override with $BREEZE_CDP_URL. */
+export const CDP_URL = process.env.BREEZE_CDP_URL || cdpUrl();
 
-/** Breeze's localhost control API handshake: ~/.breezefile/api.json holds
+/** Breeze's localhost control API handshake: <profile state dir>/api.json holds
  *  {port, token, pid}. Written by electron/api-server.ts on startup. */
-export const API_FILE = path.join(os.homedir(), '.breezefile', 'api.json');
+export const API_FILE = path.join(stateDir(), 'api.json');
 
 /** Read the api.json handshake. Returns null (never throws) when Breeze isn't
  *  running so callers can produce their own actionable error. */

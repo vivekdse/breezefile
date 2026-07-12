@@ -21,7 +21,7 @@
 // dates.
 
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { breezeHost } from './core/host';
 import * as tasks from './tasks';
@@ -67,7 +67,7 @@ function tomorrowISO(now = new Date()): string {
 
 // ── remote dedupe state (JSON; survives restarts) ───────────────────────────
 function statePath(): string {
-  return path.join(os.homedir(), '.breezefile', 'reminder-state.json');
+  return path.join(stateDir(), 'reminder-state.json');
 }
 
 function readRemoteState(): Record<string, string> {

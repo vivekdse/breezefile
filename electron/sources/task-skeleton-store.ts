@@ -25,7 +25,7 @@
 
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import { existsSync, mkdirSync } from 'node:fs';
 import {
   SKELETON_TABLE_SQL,
@@ -94,7 +94,7 @@ type SkelRow = {
 let db: Database.Database | null = null;
 
 function dbPath(): string {
-  return path.join(os.homedir(), '.breezefile', 'typebuild-skeleton.db');
+  return path.join(stateDir(), 'typebuild-skeleton.db');
 }
 
 function ensureDir(): void {

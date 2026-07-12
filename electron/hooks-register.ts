@@ -19,6 +19,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import {
   readFileSync,
   writeFileSync,
@@ -48,7 +49,7 @@ function backupPath(): string {
 }
 
 function hookScriptPath(): string {
-  return path.join(os.homedir(), '.breezefile', 'claude-hook.sh');
+  return path.join(stateDir(), 'claude-hook.sh');
 }
 
 export const HOOK_SCRIPT = `#!/bin/sh

@@ -15,11 +15,11 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import crypto from 'node:crypto';
-import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import path from 'node:path';
 import { HOOK_SCRIPT } from './hooks-register';
 
-const STATE_DIR = path.join(os.homedir(), '.breezefile');
+const STATE_DIR = stateDir();
 const STATE_FILE = path.join(STATE_DIR, 'remote-installs.json');
 
 type State = Record<string, { hash: string; at: number }>;

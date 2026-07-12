@@ -25,7 +25,7 @@
 // source so non-GUI paths that never open the PHI DB don't pull it in.
 
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 // The SQLCipher-backed, drop-in fork of better-sqlite3 (same synchronous API,
 // adds PRAGMA key). ONLY this store uses it; the three NON-PHI DBs stay on stock
@@ -80,7 +80,7 @@ let memoryFallback: Map<string, PhiRow> | null = null;
 let openInFlight: Promise<InstanceType<typeof Database> | null> | null = null;
 
 function dbDir(): string {
-  return path.join(os.homedir(), '.breezefile');
+  return stateDir();
 }
 
 function dbPath(principal: string): string {

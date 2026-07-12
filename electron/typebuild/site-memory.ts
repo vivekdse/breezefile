@@ -37,13 +37,13 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import { API_BASE, typebuildFetch } from './task-data';
 
 /** Root of the local cache (mirrors memory.mjs memoryDir()). Override with
  *  $BREEZE_MEMORY_DIR (tests). Server is canonical; this is the offline read. */
 function memoryDir(): string {
-  return process.env.BREEZE_MEMORY_DIR || path.join(os.homedir(), '.breezefile', 'memory');
+  return process.env.BREEZE_MEMORY_DIR || path.join(stateDir(), 'memory');
 }
 
 /** Which keying dimension a cached bucket lives under. `site` buckets cache

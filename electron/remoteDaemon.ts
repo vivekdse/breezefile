@@ -17,11 +17,12 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import path from 'node:path';
 import net from 'node:net';
 import { app } from 'electron';
 
-const STATE_DIR = path.join(os.homedir(), '.breezefile');
+const STATE_DIR = stateDir();
 const STATE_FILE = path.join(STATE_DIR, 'remote-daemon-installs.json');
 
 /** better-sqlite3 semver from the app's package.json, normalized to the

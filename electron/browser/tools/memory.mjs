@@ -33,7 +33,7 @@
 // WHAT ("the SSN is …"). The agent prompt enforces this; callers must too. The
 // server PHI-guards every site-memory write (422) as a second line of defense.
 
-import os from 'node:os';
+import { stateDir } from '../../core/profile.mjs';
 import path from 'node:path';
 import {
   readFileSync,
@@ -49,7 +49,7 @@ const SCOPES = { site: 'sites', task: 'tasks' };
 
 /** Root of the memory store. Override with $BREEZE_MEMORY_DIR (tests use it). */
 export function memoryDir() {
-  return process.env.BREEZE_MEMORY_DIR || path.join(os.homedir(), '.breezefile', 'memory');
+  return process.env.BREEZE_MEMORY_DIR || path.join(stateDir(), 'memory');
 }
 
 function isoNow() {

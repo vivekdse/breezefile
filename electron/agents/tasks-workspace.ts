@@ -12,11 +12,11 @@
 // prompt carries only the task (or, for ad-hoc, nothing task-specific at all).
 
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { browserCliAllowRules, browserPlaybookMarkdown } from '../browser/automation';
 
-export const TASKS_DIR = path.join(os.homedir(), '.breezefile', 'tasks');
+export const TASKS_DIR = path.join(stateDir(), 'tasks');
 const TASKS_SETTINGS = path.join(TASKS_DIR, '.claude', 'settings.json');
 // The browser playbook lives HERE as project memory rather than in the injected
 // prompt: a session launched with cwd=TASKS_DIR auto-loads it, so the prompt we

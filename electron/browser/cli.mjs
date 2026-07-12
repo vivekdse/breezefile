@@ -12,7 +12,8 @@
 // playwright-core ships no browser binaries; we reuse Electron's Chromium.
 //
 // Resolution:
-//   CDP endpoint  ← $BREEZE_CDP_URL        (default http://localhost:9222)
+//   CDP endpoint  ← $BREEZE_CDP_URL        (default: this profile's CDP port —
+//                   9222 stable / 9223 dev; electron/core/profile.mjs)
 //   target page   ← first attached page that is NOT the Breeze renderer or
 //                   DevTools; override/disambiguate with $BREEZE_BROWSER_TARGET
 //                   (a substring matched against the page URL or title).
@@ -78,6 +79,7 @@ import {
   loc,
   resolveDataRef as resolveDataRefShared,
   readApi,
+  API_FILE,
 } from './connect.mjs';
 import { scrubError } from './scrub.mjs';
 import { observeNetwork, replayRequest } from './net.mjs';
@@ -140,7 +142,7 @@ async function resolveDataRef(ref) {
 // reaches this process.
 async function controlFetch(pathAndQuery, init) {
   const api = readApi();
-  if (!api) fail(`cannot read ${path.join(process.env.HOME || '', '.breezefile', 'api.json')} — is Breeze running?`);
+  if (!api) fail(`cannot read ${API_FILE} — is Breeze running?`);
   let res;
   try {
     res = await fetch(`http://127.0.0.1:${api.port}${pathAndQuery}`, {

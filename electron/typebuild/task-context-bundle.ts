@@ -52,7 +52,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import { API_BASE, typebuildFetch } from './task-data';
 
 /** The shape the launcher consumes. `body` is rendered NON-PHI Markdown ready to
@@ -74,7 +74,7 @@ export interface TaskContextBundle {
  *  the task body is never written here. */
 function cacheFile(taskId: string): string {
   const root =
-    process.env.BREEZE_MEMORY_DIR || path.join(os.homedir(), '.breezefile', 'memory');
+    process.env.BREEZE_MEMORY_DIR || path.join(stateDir(), 'memory');
   const safe = String(taskId || 'unknown').replace(/[^a-z0-9._-]/gi, '_');
   return path.join(root, 'task-context-bundle', safe + '.md');
 }

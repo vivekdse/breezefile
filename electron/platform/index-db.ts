@@ -13,6 +13,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import { promises as fs, existsSync, mkdirSync } from 'node:fs';
 
 const SKIP_NAMES = new Set([
@@ -30,7 +31,7 @@ let db: Database.Database | null = null;
 let walkInFlight: Promise<void> | null = null;
 
 function dbPath(): string {
-  return path.join(os.homedir(), '.breezefile', 'index.db');
+  return path.join(stateDir(), 'index.db');
 }
 
 function ensureDir() {

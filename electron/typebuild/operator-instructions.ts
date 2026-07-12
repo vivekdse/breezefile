@@ -24,13 +24,13 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import { API_BASE, typebuildFetch } from './task-data';
 
 /** On-disk cache of the last-synced operator instructions, by scope. Override the
  *  root with $BREEZE_MEMORY_DIR (tests). This is the OFFLINE fallback only. */
 function cacheFile(scope: string): string {
-  const root = process.env.BREEZE_MEMORY_DIR || path.join(os.homedir(), '.breezefile', 'memory');
+  const root = process.env.BREEZE_MEMORY_DIR || path.join(stateDir(), 'memory');
   const safe = String(scope || 'global').replace(/[^a-z0-9._-]/gi, '_');
   return path.join(root, 'operator-instructions', safe + '.md');
 }

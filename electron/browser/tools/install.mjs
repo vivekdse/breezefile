@@ -10,7 +10,7 @@
 // (or the agent) owns it; we won't overwrite their edits on the next launch.
 // To force a refresh of the bundled seeds, delete the tool's folder.
 
-import os from 'node:os';
+import { stateDir } from '../../core/profile.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -25,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Destination repo. Honors $BREEZE_TOOLS_DIR (kept in sync with registry.mjs). */
 export function toolsDir() {
-  return process.env.BREEZE_TOOLS_DIR || path.join(os.homedir(), '.breezefile', 'tools');
+  return process.env.BREEZE_TOOLS_DIR || path.join(stateDir(), 'tools');
 }
 
 /** Locate the bundled seed directory across dev + packaged layouts.

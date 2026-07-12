@@ -18,7 +18,7 @@
 
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import { existsSync, mkdirSync } from 'node:fs';
 import { nextFireFromExpr, parseCron } from './cron';
 import { breezeHost } from './core/host';
@@ -37,7 +37,7 @@ export type RemoteSchedule = {
 let db: Database.Database | null = null;
 
 function dbPath(): string {
-  return path.join(os.homedir(), '.breezefile', 'tasks.db');
+  return path.join(stateDir(), 'tasks.db');
 }
 
 function open(): Database.Database {

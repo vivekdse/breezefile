@@ -14,7 +14,7 @@
 import http, { IncomingMessage, ServerResponse } from 'node:http';
 import { AddressInfo } from 'node:net';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import { writeFileSync, unlinkSync, chmodSync, mkdirSync, existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
@@ -31,7 +31,7 @@ import { createTaskApi, sendJson, send, readJson } from './core/task-http';
 import { getTaskSource } from './sources/registry';
 import { runStopBackstop, type StopSignal, type BackstopSource } from './claude-stop-backstop.ts';
 
-const API_FILE_DIR = path.join(os.homedir(), '.breezefile');
+const API_FILE_DIR = stateDir();
 const API_FILE = path.join(API_FILE_DIR, 'api.json');
 
 let server: http.Server | null = null;

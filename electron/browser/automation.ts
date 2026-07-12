@@ -6,15 +6,17 @@
 // (electron/agents/interactive.ts) and the TypeBuild source
 // (electron/sources/typebuild.ts) so the two run styles stay in sync.
 
-import os from 'node:os';
 import path from 'node:path';
+import { stateDir, cdpUrl } from '../core/profile.mjs';
 
-/** CDP endpoint Breeze exposes (electron/main.ts --remote-debugging-port). */
-export const CDP_URL = 'http://localhost:9222';
+/** CDP endpoint Breeze exposes (electron/main.ts --remote-debugging-port).
+ *  Profile-aware (electron/core/profile.mjs): the stable instance is 9222, dev
+ *  9223, other profiles a derived port. Override with $BREEZE_CDP_URL. */
+export const CDP_URL = cdpUrl();
 
 /** Stable, user-owned dir the automation helpers are INSTALLED into on launch
  *  (electron/browser/install-runtime.mjs copies them there + a bundled
- *  playwright-core). os.homedir()-based on purpose:
+ *  playwright-core). stateDir()-based (profile-aware) on purpose:
  *   - the path is correct regardless of WHEN this module evaluates — it no
  *     longer depends on process.env.APP_ROOT, which main.ts sets only AFTER
  *     this module is first imported (the old repo-relative consts resolved to a
@@ -25,7 +27,7 @@ export const CDP_URL = 'http://localhost:9222';
 function automationDir(): string {
   return (
     process.env.BREEZE_AUTOMATION_DIR ||
-    path.join(os.homedir(), '.breezefile', 'automation')
+    path.join(stateDir(), 'automation')
   );
 }
 

@@ -4,7 +4,7 @@
 // belongs to the scheduler so it stays in one place.
 
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import crypto from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import * as tasks from '../tasks';
@@ -19,7 +19,7 @@ import { breezeHost } from '../core/host';
 // under `node --test` with no Electron in the loop.
 import { renderTaskOutputsInstructions } from '../typebuild/task-outputs-instructions.mjs';
 
-const RUNS_ROOT = path.join(os.homedir(), '.breezefile', 'runs');
+const RUNS_ROOT = path.join(stateDir(), 'runs');
 
 export type ExecuteOptions = {
   /** Caller-supplied. If omitted, we pick the task's auto_agent or the

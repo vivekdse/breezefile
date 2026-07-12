@@ -7,7 +7,7 @@
 
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { nextFireFromExpr } from './cron';
@@ -284,7 +284,7 @@ export type TaskFilter = {
 let db: Database.Database | null = null;
 
 function dbPath(): string {
-  return path.join(os.homedir(), '.breezefile', 'tasks.db');
+  return path.join(stateDir(), 'tasks.db');
 }
 
 /** Check whether a tasks DB already exists on disk. Used by the
@@ -785,7 +785,7 @@ function broadcastChange() {
 // machine fields parseable; the markdown body is what humans + LLMs
 // actually read.
 export function writeActiveTaskSidecar(task: Task): string {
-  const dir = path.join(os.homedir(), '.breezefile', 'active-tasks');
+  const dir = path.join(stateDir(), 'active-tasks');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${task.id}.md`);
   const fm: string[] = [

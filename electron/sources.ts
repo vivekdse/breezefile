@@ -9,7 +9,7 @@
 // the app reconnects them on next launch.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
+import { stateDir } from './core/profile.mjs';
 import path from 'node:path';
 import { BrowserWindow } from 'electron';
 import {
@@ -19,7 +19,7 @@ import {
 } from './remoteDaemon';
 import { resolveRemote } from './remoteRoute';
 
-const STATE_DIR = path.join(os.homedir(), '.breezefile');
+const STATE_DIR = stateDir();
 const SOURCES_FILE = path.join(STATE_DIR, 'sources.json');
 
 type Remote = {

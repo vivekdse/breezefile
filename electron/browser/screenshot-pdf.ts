@@ -7,12 +7,12 @@
 
 import fs from 'node:fs/promises';
 import { existsSync, mkdirSync } from 'node:fs';
-import os from 'node:os';
+import { stateDir } from '../core/profile.mjs';
 import path from 'node:path';
 import type { WebContentsView } from 'electron';
 import { PDFDocument } from 'pdf-lib';
 
-const SCREENSHOTS_DIR = path.join(os.homedir(), '.breezefile', 'screenshots');
+const SCREENSHOTS_DIR = path.join(stateDir(), 'screenshots');
 const MAX_SHOTS = 40; // guards against runaway/infinite-scroll pages
 const SETTLE_MS = 150; // let lazy content/reflow catch up after each scroll
 
