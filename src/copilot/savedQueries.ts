@@ -128,9 +128,38 @@ export type DataSourceSummary = {
 
 /** List the DataSources visible to the signed-in principal, to ground the
  *  authoring copilot. NON-PHI (no patient data, no creds). Throws on transport
- *  / signed-out errors — the authoring component surfaces the message. */
+ *  / signed-out errors — the authoring component surfaces the message.
+ *
+ *  docs/connections-design.md §A supersedes the standalone DataSource
+ *  registry: a Connection IS the registration of an external service, so the
+ *  copilot's grounding is the UNION of the legacy /chromeext/datasources list
+ *  (kept while anything still registers there) and the queryable REST
+ *  Connections — registry rows plus connected catalog tiles (§J; a
+ *  first-party tile like the Scheduler API never materializes a registry
+ *  row, so without the catalog leg the copilot reports "no DataSources"
+ *  while the Connections panel says Connected). */
 export async function listDataSources(): Promise<DataSourceSummary[]> {
-  return fm.typebuild.datasources.list();
+  const [legacy, connections, catalog] = await Promise.all([
+    fm.typebuild.datasources.list().catch(() => []),
+    fm.typebuild.connections.list().catch(() => []),
+    fm.typebuild.connections.catalog.list().catch(() => []),
+  ]);
+  const out: DataSourceSummary[] = [...legacy];
+  const seen = new Set(out.map((d) => d.id));
+  for (const c of connections) {
+    if (c.kind !== 'rest' || seen.has(c.id)) continue;
+    seen.add(c.id);
+    out.push({ id: c.id, name: c.name, baseUrl: c.endpoint, entityTypes: [] });
+  }
+  for (const e of catalog) {
+    if (e.kind !== 'rest' || e.status !== 'connected' || !e.serviceUrl) continue;
+    // A catalog entry whose Connection is already materialized shows up in
+    // the registry leg above — skip the duplicate tile.
+    if (seen.has(e.id) || (e.connectionId && seen.has(e.connectionId))) continue;
+    seen.add(e.id);
+    out.push({ id: e.id, name: e.name, baseUrl: e.serviceUrl, entityTypes: [] });
+  }
+  return out;
 }
 
 /** Create a DRAFT SavedQuery (v1) authored by the copilot. Returns the new
