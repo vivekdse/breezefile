@@ -10,6 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(here);
@@ -21,6 +22,21 @@ function run(args, toolsDir) {
     encoding: 'utf8',
     timeout: 20000,
     env: { ...process.env, BREEZE_TOOLS_DIR: toolsDir },
+  });
+}
+
+// A port number nothing is listening on: bind to port 0 (OS assigns a free
+// ephemeral port), read it back, then close — the port is guaranteed free at
+// the moment of the check and, being ephemeral, exceedingly unlikely to be
+// grabbed by anything else before the test's brief CLI run connects to it.
+function deadPort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    srv.on('error', reject);
   });
 }
 
@@ -314,11 +330,24 @@ test('converted web-form-login dry-run shows the 2-step plan (locate-fields → 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('run with no live browser exits with a precondition/timeout code', () => {
+test('run with no live browser exits with a precondition/timeout code', async () => {
   const dir = freshRepoWithSeeds();
   try {
+    // Point the tool at a guaranteed-dead CDP endpoint instead of the
+    // machine's default port: on a box where a real Breeze/Chrome CDP
+    // instance happens to be up on the default port, the tool would connect
+    // to a live page, find no table, and exit 5 (selector_not_found) instead
+    // of the precondition code this test is about. BREEZE_CDP_URL (read in
+    // electron/browser/connect.mjs via electron/core/profile.mjs) overrides
+    // the endpoint so this test is hermetic regardless of what's running.
+    const port = await deadPort();
+    const cdpUrl = `http://127.0.0.1:${port}`;
     // gmail tool needs no required params; with no app/CDP it cannot connect.
-    const r = run(['run', 'extract-table'], dir);
+    const r = spawnSync('node', [cli, 'run', 'extract-table'], {
+      encoding: 'utf8',
+      timeout: 20000,
+      env: { ...process.env, BREEZE_TOOLS_DIR: dir, BREEZE_CDP_URL: cdpUrl },
+    });
     // 3 = timeout/connection-refused, 7 = no browser window. Either is a
     // graceful, structured failure (not a crash).
     assert.ok([3, 7].includes(r.status), `unexpected exit ${r.status}: ${r.stdout}${r.stderr}`);
