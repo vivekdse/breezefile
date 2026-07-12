@@ -119,6 +119,14 @@ export type InteractiveRunOptions = {
    *  caller's extraArgs. When UNDEFINED (the plain `claude` path), the launcher
    *  fetches the doc itself for a playwright run, exactly as before. NON-PHI. */
   operatorInstructions?: string;
+  /** Host this session's terminal in the OPERATOR window even when the run
+   *  style isn't `playwright` (QA 2026-07-12: every TypeBuild task launch is
+   *  operator-hosted — one consistent surface; the left pane sits on the
+   *  splash until/unless the agent actually opens a page there). The main
+   *  window then never opens a task tab for this session (payload.operator
+   *  suppresses it), so the confusing terminal-beside-copilot layout and the
+   *  "operator opened later without my terminal" hole both disappear. */
+  hostInOperator?: boolean;
 };
 
 export type InteractiveRunResult = {
@@ -369,9 +377,10 @@ export async function runTaskInteractive(
     title: opts.label?.trim() || task.title,
     cwd,
     ...(opts.source ? { source: opts.source } : {}),
-    // Playwright sessions are hosted in the operator window (opened below); the
-    // terminal there adopts the pty directly, so suppress the main-window tab.
-    ...(playwright ? { operator: true } : {}),
+    // Operator-hosted sessions (playwright runs, and any caller passing
+    // hostInOperator — every TypeBuild task launch) adopt the pty in the
+    // operator window below, so suppress the main-window tab.
+    ...(playwright || opts.hostInOperator ? { operator: true } : {}),
   };
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send('tasks:interactiveRun', payload);
@@ -389,7 +398,7 @@ export async function runTaskInteractive(
   // the first REAL navigation via the helper's `goto`. We used to pass a literal
   // 'https://example.com' here, which made task start flash that meaningless
   // placeholder instead of the splash — never do that.
-  if (playwright) openBrowserWindow(undefined, ptyId);
+  if (playwright || opts.hostInOperator) openBrowserWindow(undefined, ptyId);
 
   // task-6fc9e503623e — LIVENESS GATE. When the caller asked, wait for the
   // verdict: the child must stay alive (or emit first output) within the grace

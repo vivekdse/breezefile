@@ -4009,23 +4009,17 @@ export class TypeBuildTaskSource implements TaskSource {
     // closes the splash while it is still pty-less (closeSessionStartingSplash is
     // guarded on operatorPtyId == null) so a failed launch never leaves a window
     // spinning; the renderer surfaces the typed reason on the row.
-    // task-47919c5fd866 — NEUTRAL START: only pop the operator window + browser
-    // splash for a BROWSER task (server flags include 'chrome'/'playwright').
-    // A terminal/API task starts as a plain task-tab terminal with no browser
-    // pane and no "setting up the browser" splash. Same signal launchSessionInner
-    // uses to decide whether to force the 'playwright' run style.
-    const cachedForKind = this.cache.get(id);
-    const kindFlags = cachedForKind?.flags ?? [];
-    const isBrowserTask =
-      kindFlags.includes('chrome') || kindFlags.includes('playwright');
+    // QA 2026-07-12 — EVERY task launch is operator-hosted now (see
+    // hostInOperator in launchSessionInner's runTaskInteractive call), so the
+    // optimistic splash pops for every Start, not just browser-flagged tasks.
     const { openSessionStartingSplash, closeSessionStartingSplash } = await import(
       '../browser/window'
     );
-    if (isBrowserTask) openSessionStartingSplash();
+    openSessionStartingSplash();
     try {
       return await this.launchSessionInner(id, opts);
     } catch (err) {
-      if (isBrowserTask) closeSessionStartingSplash();
+      closeSessionStartingSplash();
       throw err;
     }
   }
@@ -4317,6 +4311,13 @@ export class TypeBuildTaskSource implements TaskSource {
     timing(tflow, 'runTaskInteractive call');
     const res = await runTaskInteractive(synthetic, {
       agentId: 'claude',
+      // QA 2026-07-12 — EVERY TypeBuild task session is hosted in the operator
+      // window (terminal right, page pane left on the splash until the agent
+      // opens something). Supersedes task-47919c5fd866's terminal-tasks-in-a-
+      // main-tab behavior: the tab sat beside the TypeBuild copilot chat
+      // (confusing), and a mid-run browser open popped the operator WITHOUT
+      // the terminal (invisible session).
+      hostInOperator: true,
       // task-3f0c6a6abe41 — the resolved live MAIN window (see above). undefined
       // falls through to runTaskInteractive's own hostable-window resolution.
       window: hostWindow,
