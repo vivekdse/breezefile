@@ -127,7 +127,9 @@ async function registerClient(redirectUri: string): Promise<string> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        client_name: 'Breezefile',
+        // User-facing on the server's consent page — say what the person is
+        // actually connecting (the TypeBuild client), not the repo slug.
+        client_name: 'TypeBuild',
         redirect_uris: [redirectUri],
         token_endpoint_auth_method: 'none',
         grant_types: ['authorization_code', 'refresh_token'],
