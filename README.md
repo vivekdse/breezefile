@@ -126,6 +126,22 @@ profiles are signed into the *same* TypeBuild account, both will try to claim an
 run scheduled agents — you'll see duplicate claims. Sign the dev profile into a
 **test account** (or expect the duplication) when running both at once.
 
+**On Linux** (no packaged binary yet) both instances run from source, so use
+**two checkouts, two profiles** — stable pinned to `main`, experimental wherever
+you're hacking:
+
+```sh
+git worktree add ../breezefile-stable main   # once; then npm install there
+(cd ../breezefile-stable && npm run stable)  # profile 'default' — the instance you USE
+npm run dev                                  # profile 'dev' — the instance you hack on
+```
+
+`npm run stable` is `BREEZE_PROFILE=default vite`: the same hot-reload runner,
+but pinned code and the stable profile's state. Run the two from *different*
+checkouts — `predev`/`prestable` kill any prior Electron from the same checkout,
+and a single checkout would mean the "stable" instance runs your half-edited
+code anyway. Vite auto-bumps its port for the second instance.
+
 ## Linux
 
 Linux is supported via `npm run dev`. A packaged Linux binary (AppImage)

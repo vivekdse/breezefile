@@ -8,6 +8,8 @@
   "scripts": {
     "predev": "node -e \"try{if(process.platform!=='win32')require('child_process').execSync('pkill -f \\\"'+process.cwd()+'/node_modules/electron/dist/electron\\\"',{stdio:'ignore'})}catch{}\"",
     "dev": "vite",
+    "prestable": "npm run predev",
+    "stable": "BREEZE_PROFILE=default vite",
     "build:native": "node -e \"if(process.platform==='darwin'){require('child_process').execSync('make -C native/sharer',{stdio:'inherit'})}else{console.log('build:native: skipped on '+process.platform)}\"",
     "build": "npm run build:native && tsc -b && vite build",
     "build:daemon": "node daemon/build.mjs",
