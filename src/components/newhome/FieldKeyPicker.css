@@ -62,6 +62,14 @@
   font-size: var(--fs-sm);
   opacity: 0.8;
 }
+/* task-9fdd9acee736 — inline failure for a connection-source pick (scope
+   lookup 401/timeout). Reuses the .fsp__query slot's spacing/type scale but
+   in the danger color so it reads as an error, not a status line. */
+.fsp__error {
+  padding: 2px 6px 6px;
+  font-size: var(--fs-sm);
+  color: var(--err, #c0392b);
+}
 /* The "Browse all…" option sits below the top picks — a hairline divider
    marks it as a step-down, same idea as composer__option--other's italic
    marking "Custom" as the freeform escape hatch. */

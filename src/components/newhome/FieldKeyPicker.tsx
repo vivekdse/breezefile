@@ -197,6 +197,11 @@ export function FieldSourcePicker({
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const [browseEntry, setBrowseEntry] = useState<QueryCatalogEntry | null>(null);
+  // task-9fdd9acee736 — pick-time failure (e.g. the scope lookup 401s/times
+  // out) must be VISIBLE, not silently degraded to an unbound blank field.
+  // Cleared on every fresh pick attempt; the picker stays open so the user
+  // consciously retries or falls back to Custom.
+  const [pickError, setPickError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -216,26 +221,31 @@ export function FieldSourcePicker({
     setQuery('');
     setHighlight(0);
     setBrowseEntry(null);
+    setPickError(null);
   };
   const toSourceStep = () => {
     setStep('browse-source');
     setQuery('');
     setHighlight(0);
     setBrowseEntry(null);
+    setPickError(null);
   };
 
   const pickIndex = (i: number) => {
     const o = options[i];
     if (!o) return;
     if (o.kind === 'custom') {
+      setPickError(null);
       onCustom();
       return;
     }
     if (o.kind === 'browse') {
+      setPickError(null);
       toSourceStep();
       return;
     }
     if (o.kind === 'source') {
+      setPickError(null);
       setBrowseEntry(o.entry);
       setStep('browse-field');
       setQuery('');
@@ -243,6 +253,7 @@ export function FieldSourcePicker({
       return;
     }
     // o.kind === 'field'
+    setPickError(null);
     const conn = (o.entry as Partial<ConnectionFieldEntry>).__connection;
     if (conn) {
       void pickConnectionField(conn, o.field.name);
@@ -258,15 +269,21 @@ export function FieldSourcePicker({
   // The lookup paths are scope-parameterized (e.g. business-scoped), so
   // resolve the caller's scope rows once at pick time and bind the FIRST one
   // (single-tenant is today's shape; a multi-scope chooser can slot in here
-  // when a caller actually has several). Any miss degrades to a blank custom
-  // row — a pick never no-ops, same rule as fieldFromCatalog above.
+  // when a caller actually has several).
+  //
+  // task-9fdd9acee736 — a failed/empty scope lookup used to silently degrade
+  // to blankCustomField(), shipping a normal-looking text field with NO
+  // binding and no sign anything went wrong. Instead: surface an inline error
+  // and keep the picker open at THIS step so the user can retry the same pick
+  // or consciously fall back to Custom — a pick never no-ops, but it also
+  // never silently downgrades.
   const pickConnectionField = async (
     conn: ConnectionFieldEntry['__connection'],
     fieldName: string,
   ) => {
     const tplField = conn.template.fields.find((f) => f.name === fieldName);
     if (!tplField) {
-      onPick(blankCustomField());
+      setPickError(`Couldn't bind "${fieldName}" — try again or add a custom field.`);
       return;
     }
     let scopeId = '';
@@ -276,7 +293,9 @@ export function FieldSourcePicker({
       );
       scopeId = rows[0]?.ref?.externalId ?? '';
       if (!scopeId) {
-        onPick(blankCustomField());
+        setPickError(
+          `Couldn't reach ${conn.template.sourceLabel} — field not bound; try again or add a custom field.`,
+        );
         return;
       }
     }
@@ -289,7 +308,11 @@ export function FieldSourcePicker({
       tplField.buildLookup(scopeId),
       { entityType: tplField.entityType, existingKeys },
     );
-    onPick(built ?? blankCustomField());
+    if (!built) {
+      setPickError(`Couldn't bind "${fieldName}" — try again or add a custom field.`);
+      return;
+    }
+    onPick(built);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -373,6 +396,15 @@ export function FieldSourcePicker({
           ) : (
             'Loading fields…'
           )}
+        </div>
+      )}
+      {/* task-9fdd9acee736 — a failed connection-source pick (e.g. the scope
+          lookup 401s/times out) surfaces HERE instead of silently downgrading
+          to an unbound custom field. The picker stays open on the same step
+          so the same option is still one Enter away to retry. */}
+      {pickError && (
+        <div className="fsp__error" role="alert">
+          {pickError}
         </div>
       )}
       {/* task-… (composer visual grammar unification) — the source picker's
