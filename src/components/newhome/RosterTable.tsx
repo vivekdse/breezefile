@@ -1091,8 +1091,28 @@ export function RosterTable({
         .map((t) => t.id),
     [flatRows, childrenByParentId],
   );
-  const outcomeDetails = useOutcomeDetails(finishedPlainIds);
   const finishedPlainIdSet = useMemo(() => new Set(finishedPlainIds), [finishedPlainIds]);
+  // task-3b290d420607 — a runCount==1 template-group row lost the plain row's
+  // inline outcome line when its single fielded run lifted into the group. To
+  // restore it we must fetch the SAME lazy detail (getTask → output schema) for
+  // that lone finished run, so reuse the very same useOutcomeDetails machinery:
+  // merge the single-run group ids into its fetch set rather than standing up a
+  // parallel fetch ('unify, don't mirror').
+  const singleRunGroupOutcomeIds = useMemo(
+    () =>
+      templateGroups
+        .filter((g) => g.rows.length === 1)
+        .map((g) => g.rows[0])
+        .filter((r) => r.status === 'done' || r.status === 'failed')
+        .map((r) => r.taskId),
+    [templateGroups],
+  );
+  const outcomeDetails = useOutcomeDetails(
+    useMemo(
+      () => [...finishedPlainIds, ...singleRunGroupOutcomeIds],
+      [finishedPlainIds, singleRunGroupOutcomeIds],
+    ),
+  );
 
   // task-ecabeafa41e1 — Level-2 matrix takes over the roster surface when a
   // "View →" is clicked; Back (onClose) returns to the list. Two entry points:
@@ -1323,6 +1343,30 @@ export function RosterTable({
                 statusCounts.queued + statusCounts.needs + statusCounts.failed + statusCounts.progress > 0;
               const runAllPending = runAllPendingFor(g);
               const assigneeTitle = assignees.length > 0 ? assignees.join(', ') : 'Unassigned';
+              // task-3b290d420607 — a group with EXACTLY ONE run is the same
+              // work a plain row would show; restore the two affordances the
+              // plain row had before it lifted into this group:
+              //   (1) the run's own primary action (Answer/Retry/▶ Start) as an
+              //       inline button — computed by the SAME startActionFor +
+              //       RowAction the flat rows use, so no parallel action impl;
+              //   (2) its finished outcome one-liner under the group title.
+              // For runCount>1 nothing changes. The run's NewHomeTask comes from
+              // rowsById (same map the group's Last Run reads).
+              const singleRun = runCount === 1 ? rowsById.get(g.rows[0].taskId) ?? null : null;
+              const singleRunStart = singleRun ? startActionFor(singleRun) : null;
+              // Only surface a primary button when the run actually has one:
+              // Answer (needs), Retry (failed), or ▶ Start (start-eligible). A
+              // done/cancelled/in-flight run adds nothing beyond the existing
+              // View → , so we leave the cell untouched for it.
+              const singleRunHasAction =
+                !!singleRun &&
+                (singleRun.status === 'needs' ||
+                  singleRun.status === 'failed' ||
+                  !!singleRunStart);
+              const singleRunOutcome =
+                singleRun && (singleRun.status === 'done' || singleRun.status === 'failed')
+                  ? summarizeOutcome(singleRun, outcomeDetails.get(singleRun.id))
+                  : '';
               return (
                 <tr
                   key={`group-${g.key}`}
@@ -1333,6 +1377,13 @@ export function RosterTable({
                     <div className="nh-roster__title nh-roster__title--group" title="A template — each run is one instance">
                       {g.name}
                     </div>
+                    {/* task-3b290d420607 — single-run group: same finished
+                        outcome one-liner a plain finished row shows. */}
+                    {singleRunOutcome && (
+                      <div className="nh-roster__outcome" title={singleRunOutcome}>
+                        {singleRunOutcome}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <StatusBreakdown counts={statusCounts} />
@@ -1350,6 +1401,28 @@ export function RosterTable({
                   <td className="nh-roster__runs">{runCount}</td>
                   <td className="nh-roster__action-cell">
                     <span className="nh-roster__action-wrap">
+                      {/* task-3b290d420607 — single-run group: the run's own
+                          primary action (Answer/Retry/▶ Start), rendered by the
+                          SAME RowAction the flat rows use and routed through the
+                          SAME shared start wrapper (never bypass startAction.run).
+                          Its buttons stopPropagation, so click-to-open-matrix on
+                          the row is preserved. View → + ⋮ below are unchanged. */}
+                      {singleRun && singleRunHasAction && (
+                        <RowAction
+                          task={singleRun}
+                          onOpenTask={onOpenTask}
+                          onRetry={(id) => {
+                            void startAction.run(id, { kind: 'start', run: () => onRetry(id) });
+                          }}
+                          onStart={(id) => {
+                            void startAction.run(id, { kind: 'start', run: () => onStart(id) });
+                          }}
+                          startEligible={singleRunStart}
+                          viewableDetail={false}
+                          pending={startAction.pendingFor(singleRun.id)}
+                          error={startAction.errorFor(singleRun.id)}
+                        />
+                      )}
                       <button
                         type="button"
                         className="nh-roster__action nh-roster__action--view"
