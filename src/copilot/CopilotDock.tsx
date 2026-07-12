@@ -82,6 +82,62 @@ function ChatOpenBridge() {
   return null;
 }
 
+// task-fa67c4a873c3 — the floating ✨ launcher (the FAB that toggles the
+// sidebar, and the disabled-state SetupHintToggle chip) used to be visible
+// all the time. The chat itself stays fully reachable via '/' (ChatHotkey
+// above) and fm:openCopilotChat (ChatOpenBridge above); the FAB is a debug/
+// inspect affordance, not a primary way in, so it's now hidden by default
+// and revealed only behind this localStorage flag. Follows the same
+// localStorage-boolean-flag pattern as TipsChip's ENABLED_KEY.
+const LAUNCHER_DEBUG_KEY = 'breeze.copilotLauncher';
+
+export function isCopilotLauncherVisible(): boolean {
+  try {
+    return localStorage.getItem(LAUNCHER_DEBUG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setCopilotLauncherVisible(on: boolean): void {
+  try {
+    localStorage.setItem(LAUNCHER_DEBUG_KEY, on ? '1' : '0');
+  } catch {
+    /* noop */
+  }
+  window.dispatchEvent(new CustomEvent('fm:copilotLauncherToggled'));
+}
+
+// Ctrl/Cmd+Shift+/ toggles the FAB's visibility — a debug chord, deliberately
+// distinct from the plain '/' chat-open shortcut above so the two never
+// collide. Capture-phase like ChatHotkey, for the same reason (beat
+// useKeyboard's window-level bubble handler).
+function useCopilotLauncherDebugToggle(): boolean {
+  const [visible, setVisible] = useState(isCopilotLauncherVisible);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== '/' || !e.shiftKey || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setVisible((prev) => {
+        const next = !prev;
+        setCopilotLauncherVisible(next);
+        return next;
+      });
+    }
+    function onToggled() {
+      setVisible(isCopilotLauncherVisible());
+    }
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('fm:copilotLauncherToggled', onToggled);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('fm:copilotLauncherToggled', onToggled);
+    };
+  }, []);
+  return visible;
+}
+
 function CopilotGrounding() {
   const { state } = useStore();
   const tabKind = state.tabs[state.activeTab]?.kind ?? 'folder';
@@ -135,6 +191,11 @@ function CopilotGrounding() {
 
 function SetupHintToggle() {
   const [open, setOpen] = useState(false);
+  // Visibility is CSS-gated by the parent's copilot-dock--launcher-hidden
+  // class (see CopilotDock below) so both the disabled chip here and the
+  // configured CopilotKit FAB share one visibility rule. There's no
+  // configured copilot in this branch (no API key), so there's no '/' chat
+  // to fall back on — the debug chord (Ctrl/Cmd+Shift+/) is the only way in.
   return (
     <div className="copilot-dock__standalone">
       <button
@@ -170,6 +231,11 @@ export function CopilotDock({ children }: { children: ReactNode }) {
   // ancestor, a class the app never sets) on dark palettes like dusk/plum.
   const [theme] = useTheme();
   const dockClass = isDarkTheme(theme) ? 'copilot-dock dark' : 'copilot-dock';
+  // Debug reveal for the floating ✨ FAB — see useCopilotLauncherDebugToggle
+  // above. Hooked once here (not inside SetupHintToggle/CopilotGrounding
+  // individually) so both render paths share the same live toggle state.
+  const launcherVisible = useCopilotLauncherDebugToggle();
+  const launcherClass = launcherVisible ? '' : ' copilot-dock--launcher-hidden';
 
   if (!info) return <>{children}</>;
 
@@ -177,7 +243,7 @@ export function CopilotDock({ children }: { children: ReactNode }) {
     return (
       <>
         {children}
-        <div className={`${dockClass} copilot-dock--disabled`}>
+        <div className={`${dockClass} copilot-dock--disabled${launcherClass}`}>
           <SetupHintToggle />
         </div>
       </>
@@ -189,7 +255,7 @@ export function CopilotDock({ children }: { children: ReactNode }) {
   return (
     <CopilotKit runtimeUrl={runtimeUrl} useSingleEndpoint>
       {children}
-      <div className={dockClass}>
+      <div className={`${dockClass}${launcherClass}`}>
         <CopilotGrounding />
       </div>
     </CopilotKit>

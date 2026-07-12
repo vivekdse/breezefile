@@ -385,6 +385,28 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0)
   z-index: var(--z-chrome);
 }
 
+/* task-fa67c4a873c3 — the floating ✨ launcher is a debug/inspect affordance,
+   not a primary way in (the chat opens via '/' or fm:openCopilotChat
+   regardless), so it's hidden by default and revealed only via the
+   Ctrl/Cmd+Shift+/ debug chord (CopilotDock.tsx, useCopilotLauncherDebugToggle).
+   `display: none` (not just opacity) so it never eats a click or shows up in
+   tab order while hidden. Covers both FAB implementations: our own
+   .copilot-dock__launcher chip (disabled/no-API-key state) and CopilotKit
+   v2's own toggle button (configured state, [data-testid='copilot-chat-toggle']
+   / .copilotKitButton) — both live under .copilot-dock. */
+.copilot-dock--launcher-hidden .copilot-dock__launcher,
+.copilot-dock--launcher-hidden .copilotKitButton,
+.copilot-dock--launcher-hidden [data-testid='copilot-chat-toggle'] {
+  display: none !important;
+}
+/* Unscoped fallback, same reasoning as the [data-copilotkit] bridge above: if
+   v2 ever portals the toggle button itself to document.body (today only the
+   sidebar panel and error banner do), a dock-scoped selector alone would miss
+   it and leak the FAB back in. body:has() keys off the SAME hidden marker. */
+body:has(.copilot-dock--launcher-hidden) [data-testid='copilot-chat-toggle'] {
+  display: none !important;
+}
+
 .copilot-dock__standalone {
   position: relative;
 }
