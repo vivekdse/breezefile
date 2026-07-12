@@ -354,6 +354,21 @@ export function NewHomePage() {
       void refresh();
     }
   }
+  // task-e7053415e88f — Cancel from the row ⋯ menu. Mirrors startTask's
+  // resolve-raw-then-refresh pattern; backed by the SAME sourceAction(task,
+  // 'cancel') verb the detail drawer/dialog already call (TaskDetailDrawer.tsx,
+  // TaskDetailDialog.tsx), so the roster's Cancel is consistent with those
+  // surfaces. sourceAction never throws — failures surface via its own status
+  // line — so this just needs to resolve the raw Task and refresh after.
+  async function cancelTask(id: string): Promise<void> {
+    const raw = tasks.find((x) => x.id === id)?.raw ?? null;
+    if (!raw) return;
+    try {
+      await actions.sourceAction(raw, 'cancel');
+    } finally {
+      void refresh();
+    }
+  }
   // task-ef961d60dc1b — "+ New Task" opens the CANONICAL Task form (the
   // globally-mounted TaskComposer, via fm:openTask — the same form the task
   // verb / Sidebar / copilot create_task open) AND pops the copilot chat, so
@@ -1064,6 +1079,7 @@ export function NewHomePage() {
           onSearch={setSearch}
           onRetry={startTask}
           onStart={startTask}
+          onCancel={cancelTask}
         />
 
         {/* Roster footer: pagination + the recency cutoff toggle. Only rendered

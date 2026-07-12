@@ -580,6 +580,7 @@ export function RosterTable({
   onOpenTask,
   onRetry,
   onStart,
+  onCancel,
   onFilter,
   onSearch,
   loading,
@@ -614,6 +615,12 @@ export function RosterTable({
    *  Resolves with the StartOutcome (never throws) so the chain auto-continue
    *  effect can verify a session actually spawned (task-c141c7765aa4). */
   onStart: (id: string) => Promise<StartOutcome>;
+  /** task-e7053415e88f — Cancel a non-terminal task from the row ⋯ menu.
+   *  Threaded from NewHomePage, which resolves the raw Task and calls the
+   *  SAME sourceAction(task,'cancel') verb the detail drawer/dialog use.
+   *  Optional so older call sites still compile; when absent the Cancel item
+   *  is simply not shown. */
+  onCancel?: (id: string) => void;
   /** Used by the empty state's "Clear filter" (the status filter itself now
    *  lives only on the HeroStats cards — the redundant pill bar is gone). */
   onFilter?: (f: 'all' | NewHomeStatus) => void;
@@ -1550,7 +1557,28 @@ export function RosterTable({
                       />
                       <ActionsMenu
                         label={`Actions for ${t.title}`}
-                        items={[{ label: '↗ Open task', onClick: () => onOpenTask(t.id) }]}
+                        items={[
+                          { label: '↗ Open task', onClick: () => onOpenTask(t.id) },
+                          ...(startActionFor(t)
+                            ? [
+                                {
+                                  label: '▶ Run',
+                                  onClick: () => {
+                                    void startAction.run(t.id, {
+                                      kind: 'start',
+                                      run: () => onStart(t.id),
+                                    });
+                                  },
+                                },
+                              ]
+                            : []),
+                          // task-e7053415e88f — Cancel: same non-terminal gate
+                          // as TaskDetailDrawer's canCancel (done/cancelled are
+                          // terminal for NewHomeStatus).
+                          ...(onCancel && t.status !== 'done' && t.status !== 'cancelled'
+                            ? [{ label: 'Cancel', onClick: () => onCancel(t.id) }]
+                            : []),
+                        ]}
                       />
                     </span>
                   </td>
