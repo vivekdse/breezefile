@@ -1579,10 +1579,125 @@ export class TypeBuildTaskSource implements TaskSource {
   // (children) + sourceAction('patch') for parent_task_id/depends_on linkage —
   // the last of which patchFields now forwards (see below).
 
-  updateTask(_id: string, _patch: TaskUpdate): never {
-    // Edits go through sourceAction('patch') (fm-j7w0/S4), not the local-style
-    // updateTask path — canEdit is false for this source.
-    throw unsupported('updateTask — use the patch source action for TypeBuild');
+  // task-e11b8a8b033c — the ONE write path for a TypeBuild edit. Previously this
+  // threw and every caller hand-rolled a snake_case sourceAction('patch'), which
+  // let edit mode drift out of parity with create. Now updateTask accepts the
+  // widened camelCase TaskUpdate (full TaskCreate parity) and maps it to the
+  // server's PATCH /chromeext/<id> body, MIRRORING buildCreatePayload's field set
+  // + casing exactly (title/task/due_at/defer_until/priority/project_id/agent_id/
+  // assigned_to/parent_task_id/depends_on/recurrence/output_schema/data). The one
+  // difference from create is UPDATE semantics: we key on PRESENCE (`in`), not
+  // truthiness, so a field the caller omitted is left untouched and an explicit
+  // '' CLEARS a clearable field server-side (the composer's "None"/clear picks
+  // rely on this). We build a parallel PHI-safe cache patch (routing fields only —
+  // titles/bodies ride in memory, never to disk) so the row reflects the edit
+  // before the next poll, then PATCH via the shared patchTask. A soft 409/400
+  // rejection is re-thrown as a `[typebuild-patch:<reason>]`-tagged Error (IPC
+  // strips custom Error props, so the reason rides the message) for the renderer
+  // to humanize — the same channel deleteTask uses.
+  //
+  // Deliberately NOT mapped (mirrors buildCreatePayload): `groupId` (task-
+  // 464e739dc9fa — the server derives group from the project and 422s a
+  // client-sent group_id); `status` (there is no generic status PATCH — status
+  // changes ride the dedicated complete/cancel/reopen verbs, see useTaskActions
+  // applyTaskPatch); and `folder`/`pinned`/`cron`/`start_at`/`next_run_at`/
+  // `auto_*` (local-only fields the server's task PATCH doesn't accept).
+  async updateTask(id: string, patch: TaskUpdate): Promise<SourcedTask> {
+    const body: Record<string, unknown> = {};
+    const cachePatch: Partial<SourcedTask> = {};
+
+    if ('title' in patch && typeof patch.title === 'string') {
+      // title is the one PHI field held in the cache (memory only); reflect it.
+      body.title = patch.title;
+      cachePatch.title = patch.title;
+    }
+    if ('notes' in patch) {
+      // notes → the server's decrypted `task` body. null/'' both clear it.
+      const v = patch.notes ?? '';
+      body.task = v;
+      cachePatch.notes = v === '' ? null : v;
+    }
+    if ('assignedTo' in patch) {
+      const s = typeof patch.assignedTo === 'string' ? patch.assignedTo : '';
+      body.assigned_to = s;
+      cachePatch.assignedTo = s === '' ? null : s;
+    }
+    if ('priority' in patch && typeof patch.priority === 'number') {
+      body.priority = patch.priority;
+      cachePatch.priority = patch.priority;
+    }
+    if ('due_at' in patch) {
+      const s = typeof patch.due_at === 'string' ? patch.due_at : '';
+      body.due_at = s;
+      // The cached row normalizes due_at to the day-only shape; '' clears it.
+      cachePatch.due_at = s === '' ? null : dateOnly(s);
+    }
+    if ('deferUntil' in patch) {
+      const s = typeof patch.deferUntil === 'string' ? patch.deferUntil : '';
+      body.defer_until = s;
+      cachePatch.deferUntil = s === '' ? null : s;
+    }
+    if ('projectId' in patch) {
+      const s = typeof patch.projectId === 'string' ? patch.projectId : '';
+      body.project_id = s;
+      cachePatch.projectId = s === '' ? null : s;
+    }
+    if ('agentId' in patch) {
+      const s = typeof patch.agentId === 'string' ? patch.agentId : '';
+      body.agent_id = s;
+      cachePatch.agentId = s === '' ? null : s;
+    }
+    if ('parentTaskId' in patch) {
+      const s = typeof patch.parentTaskId === 'string' ? patch.parentTaskId : '';
+      body.parent_task_id = s;
+      cachePatch.parentTaskId = s === '' ? null : s;
+    }
+    if ('dependsOn' in patch) {
+      // Full-replace list; a DetailRow-only field with no routing-cache slot, so
+      // it is forwarded to the server but not mirrored into the cache.
+      const v = patch.dependsOn;
+      body.depends_on = Array.isArray(v)
+        ? v.filter((d): d is string => typeof d === 'string')
+        : [];
+    }
+    if ('recurrence' in patch) {
+      // NON-PHI RRULE-lite ('<n><unit>'); '' clears the repeat server-side. No
+      // routing-cache slot, so forwarded but not mirrored.
+      body.recurrence = typeof patch.recurrence === 'string' ? patch.recurrence : '';
+    }
+    if ('outputSchema' in patch) {
+      // NON-PHI field definitions; null/[] clears server-side.
+      const v = patch.outputSchema;
+      const schema = Array.isArray(v) ? v : null;
+      body.output_schema = schema;
+      cachePatch.outputSchema =
+        schema && schema.length > 0 ? (schema as SourcedTask['outputSchema']) : undefined;
+    }
+    if ('data' in patch) {
+      // PHI form-fill value bag; full-bag replace server-side. Never cached —
+      // SourcedTask carries no `data` field (same discipline as every PHI field).
+      const v = patch.data;
+      body.data = v && typeof v === 'object' ? v : {};
+    }
+
+    // Nothing recognized changed — no-op rather than a wasted round-trip. Return
+    // the current cached row so the Promise<SourcedTask> contract still holds.
+    if (Object.keys(body).length === 0) {
+      const row = this.cache.get(id);
+      if (row) return row;
+      throw new Error('typebuild: nothing to update');
+    }
+
+    const res = (await this.patchTask(id, body, cachePatch)) as
+      | { ok: true }
+      | { ok: false; reason?: string; claimedBy?: string | null };
+    if (res && res.ok === false) {
+      throw new Error(`[typebuild-patch:${res.reason ?? 'rejected'}]`);
+    }
+    // patchTask already applied cachePatch + broadcast; hand back the fresh row.
+    const row = this.cache.get(id);
+    if (row) return row;
+    throw new Error('typebuild: updated task not in cache');
   }
 
   // ─── delete (fm-iwlc/S6) ─────────────────────────────────────────────────

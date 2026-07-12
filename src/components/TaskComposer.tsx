@@ -61,7 +61,7 @@ import {
   useTasks,
   useTypebuildAuth,
 } from '../tasks';
-import { humanizeError } from '../errorMessages';
+import { formatSourceReason, humanizeError } from '../errorMessages';
 // task-73f6304ffb94 — a template variable may bind a SavedQuery (`source`), so
 // the New-from-Template fill walk offers the SAME live typeahead the task
 // drawer does, instead of a bare text box. One widget, both surfaces.
@@ -3214,46 +3214,43 @@ export function TaskComposer(props: Props) {
         const t = await createTask(payload as TaskCreate, target);
         savedId = t.id;
       } else if (isTypebuild) {
-        // task-ab1d7955e23f / task-b30e546672db — TypeBuild edits don't go
-        // through updateTask (canEdit is false / the source throws); the
-        // management fields the server's PATCH /chromeext/<id> verb accepts ride
-        // the 'patch' source action. Collect everything that CHANGED into one
-        // patch ('' clears a clearable field) so the embedded "Task details"
-        // editor persists its edits in a single round-trip.
+        // task-e11b8a8b033c — TypeBuild edits now save through the ONE widened
+        // updateTask write path (a camelCase TaskUpdate), symmetric with how a
+        // create flows through createTask — no more bespoke snake_case
+        // sourceAction('patch') here. TaskUpdate reached full TaskCreate parity,
+        // so every field this composer can CREATE it can now EDIT through the
+        // same door; updateTask maps the camelCase patch → the server's PATCH
+        // body (mirroring buildCreatePayload). Collect everything that CHANGED
+        // into the patch ('' clears a clearable field) so the embedded "Task
+        // details" editor persists in a single round-trip.
         //
-        // task-63b936d69127 — title + body/notes ARE editable now: the v2
-        // management verb accepts `title` and `task` (re-encrypted at rest),
-        // and the source's patch whitelist forwards them. PHI rides the request
-        // body to be encrypted server-side (allowed — the invariant only forbids
-        // LOCAL persistence of decrypted content, never the encrypting POST).
-        const patch: Record<string, unknown> = {};
+        // task-63b936d69127 — title + body/notes ride as `title`/`notes`
+        // (the source maps notes → the server's re-encrypted `task`). PHI rides
+        // the request body to be encrypted server-side (allowed — the invariant
+        // only forbids LOCAL persistence of decrypted content, never the POST).
+        const patch: TaskUpdate = {};
         // title — send only a real change. save() already guards a blank title,
         // so we never emit an empty title (which would clear it server-side).
         if (title.trim() !== (initial?.title ?? '')) {
           patch.title = title.trim();
         }
-        // body/notes → the server's `task` field. '' clears it server-side.
+        // body/notes — '' clears it server-side (updateTask maps notes → `task`).
         if ((trimmedNotes || '') !== (initial?.notes ?? '')) {
-          patch.task = trimmedNotes;
+          patch.notes = trimmedNotes;
         }
         if (projectId !== (initial?.projectId ?? '')) {
-          patch.project_id = projectId;
+          patch.projectId = projectId;
         }
         // task-896f3f7f5e75 — agent assignment (scalar). '' clears it
         // server-side. The initial value comes from the resolved block's id or
         // the scalar agentId; only send a real change.
         if (agentId !== (initial?.agent?.id ?? initial?.agentId ?? '')) {
-          patch.agent_id = agentId;
+          patch.agentId = agentId;
         }
         // task-fd1be6f6b22d — human assignee (server `assigned_to`). '' clears
-        // it (Claude Code / unassigned); only send a real change. The patch
-        // whitelist in the TypeBuild source already accepts assigned_to.
+        // it (Claude Code / unassigned); only send a real change.
         if (assignedTo !== (initial?.assignedTo ?? '')) {
-          patch.assigned_to = assignedTo;
-        }
-        // status — the PATCH verb accepts it; only send a real change.
-        if (status !== (initial?.status ?? 'pending')) {
-          patch.status = status;
+          patch.assignedTo = assignedTo;
         }
         // priority — '' (Unset) leaves the server default; only send a change.
         if (parsedPriority !== undefined && parsedPriority !== (initial?.priority ?? undefined)) {
@@ -3265,10 +3262,29 @@ export function TaskComposer(props: Props) {
         }
         // defer_until — the composer's "start" pick maps onto defer for TB.
         if ((resolvedStart ?? '') !== (initial?.deferUntil ?? '')) {
-          patch.defer_until = resolvedStart ?? '';
+          patch.deferUntil = resolvedStart ?? '';
         }
+        // NOTE: `status` is intentionally NOT sent here. The server has no
+        // generic status PATCH (updateTask deliberately omits it, mirroring
+        // create); the OLD sourceAction('patch') path also silently dropped it
+        // (the source's patch whitelist has no status branch), so removing it is
+        // behavior-preserving. Status changes ride the dedicated lifecycle verbs
+        // (complete/cancel/reopen) elsewhere.
         if (Object.keys(patch).length > 0) {
-          await taskSourceAction(target, props.task.id, 'patch', patch);
+          // task-e11b8a8b033c — updateTask re-throws a soft (409/400) server
+          // rejection as a `[typebuild-patch:<reason>]`-tagged Error. Translate
+          // it to a human sentence so save()'s catch shows "Only the task's
+          // creator can do that", not the bare token. (The OLD sourceAction
+          // path swallowed rejections silently, which was worse — the user
+          // thought the edit stuck.)
+          try {
+            await updateTask(props.task.id, patch, target);
+          } catch (e) {
+            const raw = e instanceof Error ? e.message : String(e);
+            const m = /\[typebuild-patch:([a-z_ ]+)\]/.exec(raw);
+            if (m) throw new Error(formatSourceReason(m[1]));
+            throw e;
+          }
         }
         savedId = props.task.id;
       } else {

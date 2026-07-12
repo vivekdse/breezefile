@@ -21,8 +21,8 @@ import {
   getTypebuildAudit,
   listTypebuildUsers,
   postTaskMessage,
-  taskSourceAction,
   todayISO,
+  updateTask,
   useTaskRuns,
 } from '../../tasks';
 import { useStore } from '../../store';
@@ -56,10 +56,24 @@ import type {
   TaskAuditEvent,
   TaskSourceCapabilities,
   TaskStatus,
+  TaskUpdate,
   TaskUser,
 } from '../../types';
 
 const NOTES_COLLAPSE_LINES = 8;
+
+// task-e11b8a8b033c — the widened TypeBuild updateTask re-throws a soft
+// (409/400) rejection as a `[typebuild-patch:<reason>]`-tagged Error (IPC strips
+// custom Error props, so the machine reason rides the message). Pull it out so
+// the caller can route it through formatSourceReason instead of surfacing the
+// bare tag. Mirrors useTaskActions' deleteReason. Returns null for any other
+// error. The reason vocabulary is snake_case but includes 'not visible' (a
+// space), so the class allows spaces.
+function patchReason(err: unknown): string | null {
+  const raw = err instanceof Error ? err.message : String(err);
+  const m = /\[typebuild-patch:([a-z_ ]+)\]/.exec(raw);
+  return m ? m[1] : null;
+}
 
 export function TaskDetailPanel({
   task,
@@ -613,26 +627,25 @@ function AgentDetail({
       });
   }, [task.id]);
 
-  // fm-j7w0 (S4) — write a whitelisted field edit (assigned_to/priority/...)
-  // via the generic 'patch' source action. The typebuild source patches its
-  // cache + broadcasts on success, so the row re-pulls; a rejection comes back
-  // as { ok:false, reason } which we humanize into the status line.
+  // task-e11b8a8b033c — a field edit (assignee/priority/…) now flows through the
+  // ONE widened updateTask write path (camelCase TaskUpdate → the server's
+  // PATCH), symmetric with how a create flows through createTask — no more
+  // bespoke snake_case sourceAction('patch') here. updateTask patches the
+  // source's cache + broadcasts on success (the row re-pulls); a soft rejection
+  // is thrown as a `[typebuild-patch:<reason>]`-tagged Error, which we pull the
+  // reason out of and humanize into the status line.
   const patchField = useCallback(
-    async (fields: Record<string, unknown>, label: string) => {
+    async (patch: TaskUpdate, label: string) => {
       try {
-        const res = (await taskSourceAction(
-          'typebuild',
-          task.id,
-          'patch',
-          fields,
-        )) as { ok?: boolean; reason?: string; claimedBy?: string | null } | undefined;
-        if (res && res.ok === false) {
-          say(`couldn’t update · ${formatSourceReason(res.reason, { claimedBy: res.claimedBy })}`);
-          return;
-        }
+        await updateTask(task.id, patch, 'typebuild');
         say(label);
       } catch (e) {
-        say(formatOpError('update', e));
+        const reason = patchReason(e);
+        say(
+          reason
+            ? `couldn’t update · ${formatSourceReason(reason)}`
+            : formatOpError('update', e),
+        );
       }
     },
     [task.id, say],
@@ -782,7 +795,7 @@ function AgentDetail({
               myEmail={myEmail}
               onChange={(principal) =>
                 void patchField(
-                  { assigned_to: principal },
+                  { assignedTo: principal },
                   principal ? `assigned to ${principal}` : 'assignee cleared',
                 )
               }

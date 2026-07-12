@@ -734,20 +734,20 @@ export type ConnectionLookupRow = {
   [field: string]: unknown;
 };
 
-export type TaskUpdate = Partial<{
-  title: string;
-  notes: string | null;
-  status: TaskStatus;
-  folder: string;
-  start_at: string | null;
-  due_at: string | null;
-  pinned: boolean;
-  cron: string | null;
-  next_run_at: number | null;
-  auto_mode: boolean;
-  auto_agent: string | null;
-  auto_prompt: string | null;
-}>;
+// task-e11b8a8b033c — TaskUpdate is now FULL TaskCreate parity (every create
+// field is editable). The client's update type previously carried a strict
+// SUBSET (title/notes/status/folder/dates/pin/auto_*) — missing projectId,
+// agentId, priority, deferUntil, dependsOn, parentTaskId, recurrence,
+// assignedTo, outputSchema, variables, data — which forced TaskDetailPanel + the
+// composer's edit mode onto a divergent, bespoke sourceAction('patch') path
+// instead of the one updateTask write path. The server's update_task already
+// accepts all of these, so we model update as `Partial<TaskCreate>`: one source
+// of truth, and a create field can never again be un-editable. `folder`/`title`
+// become optional (an update touches only what changed); the TypeBuild source's
+// updateTask maps exactly the create-mapped subset (it omits status/folder/pin/
+// auto_* and — per task-464e739dc9fa — group, which the server derives from the
+// project). The local source ignores fields outside its own set, as it always has.
+export type TaskUpdate = Partial<TaskCreate>;
 
 // fm-zf3m — task run history (one row per agent-execution attempt).
 export type TaskRunStatus =
