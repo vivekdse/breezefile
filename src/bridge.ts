@@ -126,6 +126,9 @@ type Fm = {
   extract: (archives: string[], cwd: string) => Promise<string[]>;
   open: (p: string, appPath?: string) => Promise<void>;
   openUrl: (url: string) => Promise<void>;
+  // Instance identity: profile ('default' = stable, 'dev' = npm run dev),
+  // package version, checkout git sha ('' when unavailable).
+  appInfo: () => Promise<{ profile: string; version: string; sha: string }>;
   windowToggleMaximize: () => Promise<void>;
   windowToggleFullscreen: () => Promise<void>;
   // fm-dly3 — grow/restore the OS window when the chat panel opens/closes

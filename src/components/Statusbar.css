@@ -72,3 +72,23 @@
   color: #fff9ea;
   border-color: var(--accent);
 }
+
+/* Which instance is this window? Stable shows a quiet version chip; a
+   non-default profile (dev, experiments) shows a LOUD amber chip — pairs
+   with the html[data-profile] top stripe in base.css so alt-tab and a
+   glance at any window both answer "dev or stable?". */
+.statusbar__instance {
+  margin-left: 12px;
+  padding: 2px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, var(--fg-2));
+  white-space: nowrap;
+}
+.statusbar__instance:not([data-profile='default']) {
+  color: #3b2a00;
+  background: var(--warn, #ffd28a);
+  border-color: var(--warn, #ffd28a);
+}

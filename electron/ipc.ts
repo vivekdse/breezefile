@@ -60,6 +60,30 @@ import {
   reBroadcastState,
 } from './browser/views';
 import { suggest as suggestUrls, type Suggestion } from './browser/history-store';
+import { profileName } from './core/profile.mjs';
+import { execSync } from 'node:child_process';
+
+// One-shot instance identity for the 'app:info' IPC below. Sha is read from
+// the working tree the instance runs from; never throws (packaged app / no
+// git → '').
+let appInfoCache: { profile: string; version: string; sha: string } | null = null;
+function appInfo() {
+  if (!appInfoCache) {
+    let sha = '';
+    try {
+      sha = execSync('git rev-parse --short HEAD', {
+        cwd: app.getAppPath(),
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .toString()
+        .trim();
+    } catch {
+      sha = '';
+    }
+    appInfoCache = { profile: profileName(), version: app.getVersion(), sha };
+  }
+  return appInfoCache;
+}
 
 // ─── Per-extension "Open With" bindings ─────────────────────────────
 // Persisted as JSON at userData/openwith.json; loaded on startup and
@@ -998,6 +1022,14 @@ export function registerIpc() {
     }
     await shell.openPath(abs);
   });
+
+  // Which instance am I? profile ('default' = stable, 'dev' = npm run dev),
+  // package version, and the checkout's git sha (dev/stable both run from a
+  // working tree on Linux today). Renderer shows it as the Statusbar identity
+  // chip + stamps <html data-profile> so the two windows are visually
+  // unmistakable (user request: alt-tab couldn't tell dev from stable).
+  // Sha computed once, best-effort — a packaged app without git yields ''.
+  ipcMain.handle('app:info', () => appInfo());
 
   // Open an http/https URL in the user's default browser. Used by xterm's
   // WebLinksAddon so we route link clicks through a known-good IPC path

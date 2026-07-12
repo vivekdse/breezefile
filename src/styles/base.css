@@ -158,3 +158,20 @@ select optgroup {
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Instance marker (Statusbar.tsx stamps html[data-profile] from app:info):
+   any NON-default profile gets an unmissable amber stripe across the very
+   top of the window, so a dev window is identifiable the moment it's
+   focused — alt-tab titles carry " Dev", this covers "which one am I
+   typing in right now". Stable ('default') stays clean. */
+html[data-profile]:not([data-profile='default']) body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--warn, #ffd28a);
+  z-index: 99999;
+  pointer-events: none;
+}

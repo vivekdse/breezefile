@@ -1,9 +1,45 @@
+import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { visibleEntries } from '../actions';
 import { formatSize } from '../sort';
+import { fm } from '../bridge';
 import './Statusbar.css';
 
+// Instance identity (which window am I in?) — fetched once per app run and
+// shared by every Statusbar mount. Alongside the chip, stamp
+// <html data-profile="…"> so CSS can mark the whole dev window (the amber
+// top stripe in base.css) — alt-tab alone couldn't tell dev from stable.
+type AppInfo = { profile: string; version: string; sha: string };
+let appInfoPromise: Promise<AppInfo | null> | null = null;
+function loadAppInfo(): Promise<AppInfo | null> {
+  if (!appInfoPromise) {
+    appInfoPromise = fm
+      .appInfo()
+      .then((info) => {
+        document.documentElement.dataset.profile = info.profile;
+        return info;
+      })
+      .catch(() => null);
+  }
+  return appInfoPromise;
+}
+
+function useAppInfo(): AppInfo | null {
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void loadAppInfo().then((i) => {
+      if (!cancelled) setInfo(i);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return info;
+}
+
 export function Statusbar() {
+  const appInfo = useAppInfo();
   const { state, activeTab } = useStore();
   if (!activeTab) return null;
 
@@ -81,6 +117,19 @@ export function Statusbar() {
           {h.label}
         </span>
       ))}
+      {appInfo && (
+        <span
+          className="statusbar__instance"
+          data-profile={appInfo.profile}
+          title={`profile: ${appInfo.profile}${appInfo.sha ? ` · ${appInfo.sha}` : ''}`}
+        >
+          {appInfo.profile === 'default'
+            ? `v${appInfo.version}`
+            : appInfo.profile === 'dev'
+              ? `DEV v${appInfo.version}`
+              : `${appInfo.profile} v${appInfo.version}`}
+        </span>
+      )}
       <button
         type="button"
         className="statusbar__help"

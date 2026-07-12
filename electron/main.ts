@@ -251,12 +251,14 @@ function createWindow() {
   // taskbar / window switcher. The renderer overwrites document.title (see
   // index.html), which fires 'page-title-updated'; re-append the suffix there
   // so it survives every renderer-set title. 'default' leaves the title as-is.
+  // Em-dash + caps so the suffix is scannable in a crowded alt-tab list
+  // (a lowercase " Dev" was easy to miss next to the stable window).
   const titleSuffix =
     profile === 'default'
       ? ''
       : profile === 'dev'
-        ? ' Dev'
-        : ` (${profile})`;
+        ? ' — DEV'
+        : ` — ${profile.toUpperCase()}`;
   if (titleSuffix) {
     win.on('page-title-updated', (e, title) => {
       if (title.endsWith(titleSuffix)) return;

@@ -361,6 +361,10 @@ const fm = {
     ipcRenderer.invoke('shell:extract', archives, cwd) as Promise<string[]>,
   open: (p: string, appPath?: string) => ipcRenderer.invoke('app:open', p, appPath),
   openUrl: (url: string) => ipcRenderer.invoke('app:openUrl', url) as Promise<void>,
+  // Instance identity (profile/version/sha) — Statusbar chip + <html
+  // data-profile> stamp so dev and stable windows are distinguishable.
+  appInfo: () =>
+    ipcRenderer.invoke('app:info') as Promise<{ profile: string; version: string; sha: string }>,
   windowToggleMaximize: () =>
     ipcRenderer.invoke('window:toggleMaximize') as Promise<void>,
   windowToggleFullscreen: () =>
