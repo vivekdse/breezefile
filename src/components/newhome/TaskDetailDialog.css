@@ -515,10 +515,10 @@
 }
 
 /* Footer actions now use the shared .btn / .btn--primary / .btn--secondary /
-   .btn--danger variants (src/styles/buttons.css) instead of bespoke button
-   CSS, so this surface speaks the same visual language as every other dialog.
-   Only the parts buttons.css doesn't cover — right-alignment plumbing and the
-   one "warn" (Retry) color, which has no shared variant yet — live here. */
+   .btn--danger / .btn--warn variants (src/styles/buttons.css) instead of
+   bespoke button CSS, so this surface speaks the same visual language as
+   every other dialog. Only the part buttons.css doesn't cover — right-
+   alignment plumbing — lives here. */
 
 /* Push a footer button to the right edge. When TWO push buttons sit next to
    each other (▶ Start + Close, both start/non-failed-status only), flexbox's
@@ -531,17 +531,4 @@
 }
 .nh-dialog__footer-push + .nh-dialog__footer-push {
   margin-left: var(--sp-2);
-}
-
-/* Retry — no shared "warn" button variant exists yet (buttons.css only has
-   primary/secondary/ghost/danger). Built on the same --nh-needs status token
-   the rest of this dialog's "needs attention" chrome uses, layered on top of
-   the shared .btn base for consistent sizing/hover/focus mechanics. */
-.nh-dialog__btn--warn {
-  background: var(--nh-needs);
-  border-color: var(--nh-needs);
-  color: var(--text-on-accent);
-}
-.nh-dialog__btn--warn:hover:not(:disabled) {
-  filter: brightness(1.06);
 }

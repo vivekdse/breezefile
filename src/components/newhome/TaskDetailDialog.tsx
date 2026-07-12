@@ -1023,7 +1023,7 @@ export function TaskDetailDialog({
               {answering ? 'Submitting…' : 'Submit Answer'}
             </button>
           ) : status === 'failed' ? (
-            <button type="button" className="btn nh-dialog__btn--warn nh-dialog__footer-push" onClick={retry}>
+            <button type="button" className="btn btn--warn nh-dialog__footer-push" onClick={retry}>
               Retry
             </button>
           ) : (

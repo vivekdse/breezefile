@@ -23,7 +23,7 @@
   width: 100%;
   margin: 0;
   padding: 0 24px;
-  color: var(--ink);
+  color: var(--text-on-canvas);
   font-family: var(--font-sans, -apple-system, system-ui, sans-serif);
   outline: none;
   flex: 1 1 auto;
@@ -57,7 +57,7 @@
 }
 .composer__crumb {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   flex: 1 1 auto;
@@ -117,11 +117,11 @@
   font-weight: 500;
   letter-spacing: -0.01em;
   line-height: 1.3;
-  color: var(--ink);
+  color: var(--text-on-canvas);
   padding: 4px 2px;
 }
-.composer__q--past .composer__inert { color: var(--ink); }
-.composer__q--future .composer__inert { color: var(--muted); font-weight: 400; }
+.composer__q--past .composer__inert { color: var(--text-on-canvas); }
+.composer__q--future .composer__inert { color: var(--muted-on-canvas); font-weight: 400; }
 
 /* Small caption that prefixes the answer in collapsed/past rows
    ("start: today", "end: tomorrow", "status: pending"). Anchored to
@@ -132,7 +132,7 @@
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   background: var(--panel-2, rgba(127, 127, 127, 0.08));
   padding: 2px 8px;
   border-radius: 999px;
@@ -158,14 +158,14 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--accent, var(--ink));
+  color: var(--accent, var(--text-on-canvas));
   margin-bottom: -6px;
 }
 .composer__q-prompt {
   font-size: 18px;
   font-weight: 500;
   letter-spacing: -0.01em;
-  color: var(--ink);
+  color: var(--text-on-canvas);
   line-height: 1.3;
   margin: 0 0 4px;
 }
@@ -176,22 +176,22 @@
 .composer__template-explainer {
   font-size: 13px;
   line-height: 1.5;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   margin: 2px 0 10px;
   max-width: 60ch;
 }
-.composer__template-explainer strong { color: var(--ink); font-weight: 600; }
-.composer__template-explainer em { font-style: italic; color: var(--ink); }
+.composer__template-explainer strong { color: var(--text-on-canvas); font-weight: 600; }
+.composer__template-explainer em { font-style: italic; color: var(--text-on-canvas); }
 .composer__template-note {
   font-size: 12.5px;
   line-height: 1.45;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   margin: 8px 0 4px;
   max-width: 60ch;
 }
 .composer__template-hint {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   margin: 8px 0 0;
 }
 .composer__template-hint kbd {
@@ -214,7 +214,7 @@
   flex: 1 1 auto;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-on-panel);
   border-radius: 0;
   padding: 6px 0;
   font-size: 20px;
@@ -229,7 +229,7 @@
   outline: none;
   box-shadow: none;
 }
-.composer__title-input::placeholder { color: var(--muted); opacity: 0.55; }
+.composer__title-input::placeholder { color: var(--muted-on-canvas); opacity: 0.55; }
 
 .composer__title-enter {
   flex: 0 0 auto;
@@ -237,8 +237,8 @@
   font-size: 14px;
   padding: 3px 9px;
   border-radius: 4px;
-  border: 1px solid var(--rule);
-  color: var(--muted);
+  border: 1px solid var(--rule-on-panel);
+  color: var(--muted-on-canvas);
   line-height: 1;
   opacity: 0.5;
   transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease,
@@ -273,7 +273,7 @@
   text-align: left;
   font-family: inherit;
   font-size: 14px;
-  color: var(--ink);
+  color: var(--text-on-canvas);
   cursor: pointer;
   transition: color 80ms ease;
 }
@@ -290,8 +290,8 @@
   padding: 1px 6px;
   border-radius: 3px;
   background: transparent;
-  border: 1px solid var(--rule);
-  color: var(--muted);
+  border: 1px solid var(--rule-on-panel);
+  color: var(--muted-on-canvas);
   flex: 0 0 auto;
   min-width: 20px;
   text-align: center;
@@ -303,7 +303,7 @@
   border-color: var(--accent);
 }
 .composer__option-label { flex: 0 0 auto; font-weight: 500; }
-.composer__option-hint { flex: 1 1 auto; font-size: 12px; color: var(--muted); }
+.composer__option-hint { flex: 1 1 auto; font-size: 12px; color: var(--muted-on-canvas); }
 
 /* task-41e5fc25ed2b — "Chain" badge marking a ChainDef row in the from-template
    picker (a multi-step workflow vs a single template). */
@@ -325,7 +325,7 @@
 
 .composer__or {
   font-size: 10px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   margin: 6px 0 0;
@@ -340,7 +340,7 @@
 }
 .composer__quickpicks-label {
   font-size: 10px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
@@ -349,7 +349,7 @@
   align-items: center;
   gap: 6px;
   background: transparent;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 999px;
   color: inherit;
   padding: 3px 10px 3px 6px;
@@ -380,14 +380,14 @@
   color: var(--accent);
   font-weight: 600;
 }
-.composer__attached-note { color: var(--muted); }
+.composer__attached-note { color: var(--muted-on-canvas); }
 
 .composer__path-input {
   width: 100%;
   background: transparent;
   color: inherit;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-on-panel);
   border-radius: 0;
   padding: 5px 0;
   font-size: 12px;
@@ -409,14 +409,14 @@
   gap: 8px;
   margin-top: 4px;
   padding-top: 8px;
-  border-top: 1px dashed var(--rule);
+  border-top: 1px dashed var(--rule-on-panel);
 }
 .composer__project-search-list {
   max-height: 240px;
   overflow-y: auto;
 }
 .composer__project-search-empty {
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   font-size: 12px;
   padding: 6px 2px;
 }
@@ -431,7 +431,7 @@
 }
 .composer__date-input {
   background: transparent;
-  color: var(--ink);
+  color: var(--text-on-canvas);
   border: 0;
   border-bottom: 1px solid var(--accent);
   border-radius: 0;
@@ -448,7 +448,7 @@
 }
 .composer__date-hint {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
 }
 
 /* ── Notes question ───────────────────────────────────────────────────
@@ -461,7 +461,7 @@
 .composer__notes-input {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule-on-panel);
   border-radius: 0;
   padding: 6px 0;
   font-size: 16px;
@@ -481,10 +481,10 @@
   outline: none;
   box-shadow: none;
 }
-.composer__notes-input::placeholder { color: var(--muted); opacity: 0.55; }
+.composer__notes-input::placeholder { color: var(--muted-on-canvas); opacity: 0.55; }
 .composer__notes-help {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   line-height: 1.4;
   margin-top: -4px;
 }
@@ -526,7 +526,7 @@
 .composer__prose-suggestion-dismiss {
   border: 1px solid var(--rule-on-panel);
   background: transparent;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
 }
 
 /* ── Footer ────────────────────────────────────────────────────────── */
@@ -583,11 +583,11 @@
   font-weight: 600;
 }
 .composer__flash-dim {
-  color: var(--muted);
+  color: var(--muted-on-canvas);
 }
 .composer__fill-intro {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   padding: 4px 2px 12px;
 }
 .composer__fill-intro kbd {
@@ -613,13 +613,13 @@
 }
 .composer__cancel-btn {
   background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--rule);
+  color: var(--muted-on-canvas);
+  border: 1px solid var(--rule-on-panel);
   margin-left: auto;
 }
 .composer__cancel-btn:hover {
-  color: var(--ink);
-  border-color: var(--ink);
+  color: var(--text-on-canvas);
+  border-color: var(--text-on-canvas);
 }
 .composer__cancel-btn--armed {
   color: var(--err, #c0392b);
@@ -727,7 +727,7 @@
   background: transparent;
   border: none;
   border-top: 1px solid var(--rule-on-panel);
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   font: inherit;
   font-size: 13px;
   letter-spacing: 0.04em;
@@ -740,7 +740,7 @@
 .composer__advanced-caret {
   display: inline-block;
   width: 1em;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
 }
 .composer__advanced-title {
   flex: 1 1 auto;
@@ -782,25 +782,25 @@
 }
 .composer__target-label {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .composer__target-btn {
   background: transparent;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 6px;
   padding: 4px 12px;
   font-family: inherit;
   font-size: 12px;
   font-weight: 500;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   cursor: pointer;
   transition: color 80ms ease, border-color 80ms ease, background 80ms ease;
 }
 .composer__target-btn:hover {
-  color: var(--ink);
-  border-color: var(--ink);
+  color: var(--text-on-canvas);
+  border-color: var(--text-on-canvas);
 }
 .composer__target-btn--active {
   background: var(--accent);
@@ -823,7 +823,7 @@
   width: auto;
   gap: 8px;
   padding: 5px 10px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 6px;
 }
 .composer__option--compact.composer__option--active {
@@ -844,7 +844,7 @@
   gap: 8px;
   margin-bottom: 14px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
 }
 .composer__chain-copyfrom-select {
   font-size: 13px;
@@ -954,10 +954,10 @@ span.composer__chain-step-name {
 }
 .composer__chain-step-notes {
   font-size: 13px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 6px;
   background: transparent;
-  color: var(--ink);
+  color: var(--text-on-canvas);
   padding: 6px 8px;
   resize: vertical;
   font-family: inherit;
@@ -970,7 +970,7 @@ span.composer__chain-step-name {
    sub-walk); also used to be the old grid editor's footer hint. */
 .composer__field-editors-hint {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   opacity: 0.75;
   letter-spacing: 0.02em;
 }
@@ -997,10 +997,10 @@ span.composer__chain-step-name {
 }
 .composer__field-row-key {
   font-weight: 600;
-  color: var(--ink);
+  color: var(--text-on-canvas);
 }
 .composer__field-row-label {
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1009,8 +1009,8 @@ span.composer__chain-step-name {
 }
 .composer__field-row-type {
   font-size: 11px;
-  color: var(--muted);
-  border: 1px solid var(--rule);
+  color: var(--muted-on-canvas);
+  border: 1px solid var(--rule-on-panel);
   border-radius: 5px;
   padding: 1px 6px;
 }
@@ -1023,7 +1023,7 @@ span.composer__chain-step-name {
 }
 .composer__field-row-hint {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   opacity: 0.7;
 }
 .composer__chain-neededwhen {
@@ -1032,13 +1032,13 @@ span.composer__chain-step-name {
   gap: 6px;
   font-size: 13px;
   padding-top: 4px;
-  border-top: 1px dashed var(--rule);
+  border-top: 1px dashed var(--rule-on-panel);
 }
 .composer__chain-neededwhen-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   cursor: pointer;
 }
 .composer__chain-neededwhen-row {
@@ -1054,10 +1054,10 @@ span.composer__chain-step-name {
 }
 .composer__chain-add-step-btn {
   font-size: 13px;
-  border: 1px dashed var(--rule);
+  border: 1px dashed var(--rule-on-panel);
   border-radius: 8px;
   background: transparent;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
   padding: 6px 14px;
   cursor: pointer;
 }
@@ -1106,16 +1106,16 @@ span.composer__chain-step-name {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--muted-on-canvas);
 }
 .composer__draft-row--done { cursor: pointer; }
 .composer__draft-row--done:hover { background: var(--surface-band); }
 .composer__draft-row--done .composer__draft-row-answer {
-  color: var(--ink);
+  color: var(--text-on-canvas);
   font-weight: 500;
 }
 .composer__draft-row--future { opacity: 0.45; }
-.composer__draft-row-todo { color: var(--muted); font-size: 13px; }
+.composer__draft-row-todo { color: var(--muted-on-canvas); font-size: 13px; }
 .composer__draft-row--active {
   border-left-color: var(--accent);
   /* The SAME focus-band surface as the main walk's active question ("Who runs

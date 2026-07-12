@@ -16,6 +16,8 @@
      btn--primary    filled accent, white text; one per surface, the
                     "what we expect you to do next" action.
      btn--danger     filled error, white text; destructive actions only.
+     btn--warn       filled warn (--warn/--warn-ink), theme-safe ink; "needs
+                    attention" actions like Retry.
      btn--card       vertical multi-line button with icon/label/sub; for
                     action grids (TaskShell launcher zone, future
                     project dashboard cards).
@@ -133,6 +135,20 @@
   border-color: var(--err, #c0392b);
 }
 .btn--danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+/* Warn — "needs attention, retry-this" actions (e.g. TaskDetailDialog's
+   Retry on a failed task). Routes through --warn-ink, NOT --text-on-accent:
+   --text-on-accent is tuned per-theme for --accent's specific hue/lightness,
+   and --warn is a different color each theme tunes independently (see
+   tokens.css ~line 209 for why a dedicated --warn-ink token exists). */
+.btn--warn {
+  color: var(--warn-ink, #2d1e0a);
+  background: var(--warn, #b8862e);
+  border-color: var(--warn, #b8862e);
+}
+.btn--warn:hover:not(:disabled) {
   filter: brightness(1.06);
 }
 
