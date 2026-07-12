@@ -34,6 +34,7 @@ import {
   formatMessageSendReason,
 } from '../tasks';
 import { useTaskActions } from '../components/tasks/useTaskActions';
+import { classifyStartFeedback } from '../components/tasks/startFeedback.mjs';
 import type { Task } from '../types';
 import { confirmedAction } from './actionKit';
 
@@ -206,9 +207,26 @@ export function AgentActions() {
     perform: async ({ taskId }) => {
       const task = find(taskId);
       if (!task) return `No task found with id "${taskId}".`;
-      // Same call the roster/dialog Retry buttons make. start() surfaces any
-      // contested-claim / mint failure to the statusbar itself and resolves.
-      await live.current.actions.start(task);
+      // fm-bq86 (S3) — a parent/container with non-terminal children can't be
+      // started (the server won't hand it out until they resolve); mirrors the
+      // `hasOpenChildren` gate primaryActionFor uses to keep the roster/dialog
+      // Start button from making the same doomed call.
+      const hasOpenChildren = live.current.tasks.some(
+        (t) => t.parentTaskId === task.id && t.status !== 'done' && t.status !== 'cancelled',
+      );
+      if (hasOpenChildren) {
+        return `Couldn't start "${task.title}": it has unfinished child tasks — open it to start the next step.`;
+      }
+      // Same call the roster/dialog Retry buttons make. start() never throws —
+      // it resolves a StartOutcome describing whether a session actually
+      // spawned. classifyStartFeedback is the SAME pure classifier the roster's
+      // useStartAction uses, so the copilot's narration matches the statusbar
+      // wording instead of always claiming success.
+      const outcome = await live.current.actions.start(task);
+      const feedback = classifyStartFeedback({ kind: 'start' }, outcome);
+      if (feedback.state === 'error') {
+        return `Couldn't start "${task.title}": ${feedback.reason}`;
+      }
       return `Starting "${task.title}".`;
     },
   });
