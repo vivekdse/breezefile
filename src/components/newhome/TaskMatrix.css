@@ -212,9 +212,12 @@
   z-index: 2;
   background: var(--bg-1);
   border-right: 1px solid var(--border-2);
-  min-width: 200px;
+  /* Layout-cleanup (QA round): the lead cell now holds "Run N" + chip +
+     compact actions, not a repeated template title — keep it lean. */
+  min-width: 150px;
 }
-.tm-lead-th {
+.tm-lead-th,
+.tm-field-row .tm-lead-th {
   background: var(--bg-2);
   z-index: 3;
   font-size: var(--fs-2xs);
@@ -277,20 +280,25 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Layout-cleanup (QA round): Open is the secondary, always-available action —
+   a quiet text link, so the one primary ▶ Run button carries the row. */
 .tm-open-btn {
   appearance: none;
   background: transparent;
-  border: 1px solid var(--border-2);
+  border: none;
   border-radius: var(--r-sm);
   font: inherit;
   font-size: var(--fs-2xs);
-  padding: 3px 11px;
+  padding: 3px 4px;
   cursor: pointer;
-  color: var(--text-on-panel);
+  color: var(--muted-on-panel);
 }
 .tm-open-btn:hover {
-  border-color: var(--accent);
   color: var(--accent);
+}
+.tm-open-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .tm-run-done {
   font-size: var(--fs-2xs);

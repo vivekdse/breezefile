@@ -347,6 +347,14 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     [idKey, detail],
   );
 
+  // Layout-cleanup (QA round): a SINGLE-step matrix (every simple-template
+  // group, plus one-step chains whose step just repeats the panel title) gets
+  // no step-group header row — the panel header already names the template, so
+  // "① <same name>" was pure noise. Multi-step chains keep the numbered bands.
+  const showGroupHeader =
+    stepGroups.length > 1 ||
+    (stepGroups.length === 1 && stepGroups[0].title !== chainTitle && runs.some((r) => childrenOf(r.id).length > 0));
+
   const inputValue = (childId: string, key: string): string | undefined =>
     dataValues.get(childId)?.[key];
   const outputValue = (childId: string, key: string): string | undefined => {
@@ -389,24 +397,28 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
       <div className="tm-scroll">
         <table className="tm-table">
           <thead>
-            {/* Group header: each step title spans its field columns. */}
-            <tr className="tm-group-row">
-              <th className="tm-lead-th" rowSpan={2}>
-                Run
-              </th>
-              {stepGroups.map((g) => (
-                <th
-                  key={`g${g.index}`}
-                  className={`tm-group-th${g.index % 2 ? ' tm-band' : ''}`}
-                  colSpan={g.span}
-                >
-                  <span className="tm-group-marker">{stepMarker(g.index)}</span>
-                  <span className="tm-group-name">{g.title}</span>
+            {/* Group header: each step title spans its field columns. Skipped
+                for single-step matrices — the panel header already names it. */}
+            {showGroupHeader && (
+              <tr className="tm-group-row">
+                <th className="tm-lead-th" rowSpan={2}>
+                  Run
                 </th>
-              ))}
-            </tr>
+                {stepGroups.map((g) => (
+                  <th
+                    key={`g${g.index}`}
+                    className={`tm-group-th${g.index % 2 ? ' tm-band' : ''}`}
+                    colSpan={g.span}
+                  >
+                    <span className="tm-group-marker">{stepMarker(g.index)}</span>
+                    <span className="tm-group-name">{g.title}</span>
+                  </th>
+                ))}
+              </tr>
+            )}
             {/* Field header: input keys (IN) then output fields (OUT + ✳). */}
             <tr className="tm-field-row">
+              {!showGroupHeader && <th className="tm-lead-th">Run</th>}
               {stepGroups.map((g) => {
                 // task-dc5ad168cd3a — mild per-step-group banding: alternating
                 // groups carry a --surface-band tint so each step's columns read
@@ -442,19 +454,34 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {runs.map((run) => {
+            {runs.map((run, runIndex) => {
               const rowChildren = stepsOf(run.id);
+              // Layout-cleanup (QA round): every run of a template shares the
+              // template's name, so repeating the title per row said nothing.
+              // Identify a run by its NUMBER; a custom title (differs from the
+              // panel title) is real information and still shows.
+              const runLabel =
+                run.title && run.title.trim() && run.title.trim() !== chainTitle.trim()
+                  ? run.title
+                  : `Run ${runIndex + 1}`;
               return (
                 <tr key={run.id}>
                   <td className="tm-lead-td">
                     <div className="tm-lead-inner">
-                      <span className="tm-run-title">{run.title}</span>
+                      <span className="tm-run-title">{runLabel}</span>
                       <StatusChip status={run.status} rawStatus={run.rawStatus} />
                     </div>
                     <div className="tm-lead-actions">
                       {(() => {
                         const next = firstRunnableChild(rowChildren);
-                        if (!next) return <span className="tm-run-done">✓ complete</span>;
+                        // No runnable step left: '✓ complete' ONLY when the run
+                        // actually finished — a cancelled run's chip already
+                        // says Cancelled, and pairing it with '✓ complete' read
+                        // as a contradiction (QA round).
+                        if (!next)
+                          return run.status === 'done' ? (
+                            <span className="tm-run-done">✓ Complete</span>
+                          ) : null;
                         // task-1b3eeb1aae1f — the row's ▶ Run targets the run's
                         // NEXT runnable step; read that child's pending/error so
                         // the click shows an IMMEDIATE "Starting…" (disabled) and
