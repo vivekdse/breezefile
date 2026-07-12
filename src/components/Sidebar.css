@@ -190,7 +190,7 @@ button.sidebar__link:focus-visible {
 }
 .sidebar__drive--active {
   background: var(--chip);
-  color: var(--panel-ink, var(--ink-1));
+  color: var(--text-on-panel);
 }
 .sidebar__drive--drop {
   border-color: var(--accent);
@@ -387,7 +387,7 @@ button.sidebar__link:hover .sidebar__unpin {
   border-radius: 8px;
   border: 1px solid rgba(255, 159, 10, 0.45);
   background: rgba(255, 159, 10, 0.12);
-  color: var(--panel-ink, var(--ink-1));
+  color: var(--text-on-panel);
   font-family: inherit;
   font-size: 12px;
   text-align: left;

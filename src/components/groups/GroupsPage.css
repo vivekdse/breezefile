@@ -7,8 +7,6 @@
    uses. NON-PHI throughout: group names, emails, roles are safe to render. */
 .grp {
   --grp-admin: var(--accent);
-  --grp-danger: var(--err);
-  --grp-danger-soft: var(--err-soft);
 
   height: 100%;
   display: flex;
@@ -232,11 +230,11 @@
   filter: brightness(1.06);
 }
 .grp__btn--danger {
-  border-color: var(--grp-danger);
-  color: var(--grp-danger);
+  border-color: var(--err);
+  color: var(--err);
 }
 .grp__btn--danger:hover:not(:disabled) {
-  background: var(--grp-danger-soft);
+  background: var(--err-soft);
 }
 .grp__btn--ghost {
   border-color: transparent;
@@ -268,9 +266,9 @@
     border-color var(--motion-hover);
 }
 .grp__icon-btn:hover:not(:disabled) {
-  background: var(--grp-danger-soft);
-  color: var(--grp-danger);
-  border-color: var(--grp-danger);
+  background: var(--err-soft);
+  color: var(--err);
+  border-color: var(--err);
 }
 .grp__icon-btn:disabled {
   opacity: 0.4;
@@ -477,15 +475,15 @@
 
 /* confirm-delete card */
 .grp__confirm {
-  border: 1px solid var(--grp-danger);
-  background: var(--grp-danger-soft);
+  border: 1px solid var(--err);
+  background: var(--err-soft);
   border-radius: var(--r-md);
   padding: var(--sp-4);
   margin-bottom: var(--sp-5);
 }
 .grp__confirm-title {
   font-weight: 700;
-  color: var(--grp-danger);
+  color: var(--err);
   margin-bottom: var(--sp-2);
 }
 .grp__confirm-body {
@@ -518,9 +516,9 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  background: var(--grp-danger-soft);
-  border: 1px solid var(--grp-danger);
-  color: var(--grp-danger);
+  background: var(--err-soft);
+  border: 1px solid var(--err);
+  color: var(--err);
   border-radius: var(--r-md);
   padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-xs);

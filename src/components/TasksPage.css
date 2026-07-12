@@ -48,7 +48,7 @@
   border: none;
   border-radius: 0;
   box-shadow: none;
-  background: var(--canvas, var(--panel));
+  background: var(--panel);
   color: var(--text-on-panel);
 }
 
@@ -1226,7 +1226,7 @@
   margin: 0 0 var(--sp-2);
   padding: 8px var(--sp-3);
   border: 1px solid var(--err, #c0392b);
-  border-radius: var(--radius-sm, 6px);
+  border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--err, #c0392b) 8%, transparent);
   color: var(--err, #c0392b);
   font-size: var(--fs-sm);
@@ -1696,8 +1696,8 @@
   padding: 2px 4px;
   font: inherit;
   font-size: var(--fs-sm);
-  color: var(--fg-on-panel);
-  background: var(--field-bg, transparent);
+  color: var(--text-on-panel);
+  background: var(--panel-2, transparent);
   border: 1px solid var(--rule-on-panel);
   border-radius: 4px;
 }
@@ -1716,7 +1716,7 @@
   border: 1px solid var(--rule-on-panel);
   border-radius: 4px;
   background: transparent;
-  color: var(--fg-on-panel);
+  color: var(--text-on-panel);
   cursor: pointer;
 }
 .tasks__priority-step:hover:not(:disabled) {
@@ -1769,7 +1769,7 @@
   white-space: nowrap;
 }
 .tasks__history-actor {
-  color: var(--fg-on-panel);
+  color: var(--text-on-panel);
 }
 .tasks__history-action {
   white-space: nowrap;
@@ -1823,7 +1823,7 @@
   margin-top: 3px;
   border-radius: 50%;
   background: var(--muted-on-panel);
-  box-shadow: 0 0 0 2px var(--panel-bg, var(--bg));
+  box-shadow: 0 0 0 2px var(--panel);
 }
 .tasks__tl-node--created {
   background: var(--muted-on-panel);
@@ -1850,7 +1850,7 @@
 }
 .tasks__tl-label {
   font-size: var(--fs-sm);
-  color: var(--fg-on-panel);
+  color: var(--text-on-panel);
   font-weight: 500;
 }
 .tasks__tl-time {

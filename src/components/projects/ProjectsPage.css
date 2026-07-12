@@ -18,7 +18,7 @@
   overflow: auto;
   /* task-5b833baa7a5e — match the file-manager plate: the recessed surface
      colour + inset framing shadow read as the same "plate" as .shell__main. */
-  background: var(--canvas, var(--panel));
+  background: var(--panel);
   box-shadow:
     inset 0 8px 14px -10px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 rgba(255, 255, 255, 0.02);
@@ -543,7 +543,7 @@
 .qsw__scrim {
   position: fixed;
   inset: 0;
-  background: var(--scrim, rgba(0, 0, 0, 0.4));
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -558,7 +558,7 @@
   background: var(--panel-2, var(--panel));
   border: 1px solid var(--rule-on-panel);
   border-radius: var(--r-xl);
-  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.35));
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 .qsw__input {
@@ -741,7 +741,7 @@
   color: var(--fg-2);
   background: var(--bg-2);
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-2);
+  border-radius: var(--r-md);
   padding: var(--sp-1) var(--sp-3);
   cursor: pointer;
 }
@@ -926,7 +926,7 @@
   border: 1px solid var(--rule-on-panel);
   border-radius: var(--r-lg);
   padding: var(--sp-2) var(--sp-3);
-  background: var(--canvas, var(--bg-1));
+  background: var(--bg-1);
   color: var(--text-on-panel);
   outline: 0;
 }

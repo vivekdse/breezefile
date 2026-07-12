@@ -741,7 +741,7 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   border: 1px solid var(--warn);
   border-left: 3px solid var(--warn);
   border-radius: 8px;
-  background: var(--warn-bg, color-mix(in srgb, var(--warn) 8%, transparent));
+  background: var(--warn-soft);
 }
 .tdd__ask-head {
   display: flex;
@@ -880,7 +880,7 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
   border-radius: var(--r-sm);
   padding: 5px 12px;
   background: var(--accent, var(--bg-1));
-  color: var(--fg-on-accent, var(--fg-1));
+  color: var(--text-on-accent);
   cursor: pointer;
 }
 .tdd__inputs-save:disabled { opacity: 0.6; cursor: default; }

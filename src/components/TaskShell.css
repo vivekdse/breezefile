@@ -12,7 +12,7 @@
   min-height: 0;
   padding: var(--sp-5, 20px) var(--sp-6, 28px);
   gap: var(--sp-5, 20px);
-  background: var(--bg, var(--canvas));
+  background: var(--bg);
   color: var(--text-on-canvas);
   overflow: auto;
 }
@@ -37,7 +37,7 @@
   flex-direction: column;
   gap: var(--sp-3, 12px);
   padding: var(--sp-5, 20px) var(--sp-5, 20px) var(--sp-4, 16px);
-  background: var(--panel, var(--panel-1));
+  background: var(--panel);
   color: var(--text-on-panel);
   border: 1px solid var(--rule-on-panel, var(--rule));
   border-radius: 12px;
@@ -67,7 +67,7 @@
 .taskshell__title {
   flex: 1 1 auto;
   margin: 0;
-  font-size: var(--fs-2xl, 22px);
+  font-size: var(--fs-xl, 22px);
   font-weight: 700;
   line-height: 1.25;
   color: var(--text-on-panel);
@@ -328,7 +328,7 @@
   font-size: var(--fs-sm, 13px);
   color: var(--muted-on-canvas, var(--text-on-canvas));
   padding: var(--sp-4, 16px);
-  border: 1px dashed var(--rule, var(--rule-on-canvas));
+  border: 1px dashed var(--rule);
   border-radius: 10px;
   text-align: center;
 }
@@ -340,7 +340,7 @@
   align-items: center;
   gap: var(--sp-2, 8px);
   padding: var(--sp-2, 8px) var(--sp-3, 12px);
-  border-top: 1px solid var(--rule, var(--rule-on-canvas));
+  border-top: 1px solid var(--rule);
   font-size: var(--fs-xs, 11px);
   color: var(--muted-on-canvas, var(--text-on-canvas));
   opacity: 0.85;
@@ -375,7 +375,7 @@
 }
 .taskshell__folder-label--btn:hover:not(:disabled) {
   color: var(--accent);
-  border-color: var(--rule, var(--rule-on-canvas));
+  border-color: var(--rule);
 }
 .taskshell__folder-label--btn:focus-visible {
   outline: 2px solid var(--accent);
@@ -390,7 +390,7 @@
   font-size: var(--fs-xs, 11px);
   cursor: pointer;
   border-radius: 6px;
-  border: 1px solid var(--rule, var(--rule-on-canvas));
+  border: 1px solid var(--rule);
   background: transparent;
   color: var(--muted-on-canvas, var(--text-on-canvas));
   padding: 4px 10px;

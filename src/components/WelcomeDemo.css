@@ -23,7 +23,7 @@
   border-bottom: 1px solid var(--rule);
   margin-bottom: 8px;
   letter-spacing: 0.02em;
-  transition: color var(--motion-fast, 160ms ease);
+  transition: color var(--motion-hover);
 }
 
 .demo__rows {

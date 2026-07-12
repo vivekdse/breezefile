@@ -148,7 +148,7 @@
   color: var(--text-on-accent);
 }
 .task-run-indicator__glyph--succeeded {
-  background: var(--ok-soft, color-mix(in srgb, var(--ok) 20%, transparent));
+  background: var(--ok-soft);
   color: var(--ok);
 }
 .task-run-indicator__glyph--queued {

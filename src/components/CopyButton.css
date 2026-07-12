@@ -6,7 +6,7 @@
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--fg-3);
+  color: var(--muted-on-panel);
   font-size: var(--fs-sm, 12px);
   line-height: 1;
   padding: 3px 8px;
@@ -24,7 +24,7 @@
 .copy-btn:hover {
   background: var(--bg-3);
   border-color: var(--border-2);
-  color: var(--fg-1);
+  color: var(--text-on-panel);
 }
 .copy-btn--copied {
   color: var(--accent-strong, var(--accent));
