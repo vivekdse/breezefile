@@ -94,7 +94,7 @@
 }
 .composer__q--active {
   padding: 22px 24px 24px;
-  background: var(--accent-soft, rgba(127, 212, 199, 0.12));
+  background: var(--surface-focus);
   opacity: 1;
   cursor: default;
 }
@@ -1095,7 +1095,7 @@ span.composer__chain-step-name {
   color: var(--muted);
 }
 .composer__draft-row--done { cursor: pointer; }
-.composer__draft-row--done:hover { background: var(--bg-1); }
+.composer__draft-row--done:hover { background: var(--surface-band); }
 .composer__draft-row--done .composer__draft-row-answer {
   color: var(--ink);
   font-weight: 500;
@@ -1104,7 +1104,11 @@ span.composer__chain-step-name {
 .composer__draft-row-todo { color: var(--muted); font-size: 13px; }
 .composer__draft-row--active {
   border-left-color: var(--accent);
-  background: var(--bg-1);
+  /* The SAME focus-band surface as the main walk's active question ("Who runs
+     this?") — the canonical styling for a focused chooser. Raw --bg-1 here
+     rendered a near-black sub-panel on dusk (design-system rule: --surface-focus,
+     see tokens.css). */
+  background: var(--surface-focus);
 }
 .composer__draft-row-body { min-width: 0; }
 .composer__draft-row-body .composer__q-prompt { margin-bottom: 6px; }

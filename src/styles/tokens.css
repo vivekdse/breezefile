@@ -143,6 +143,16 @@
      zebra stripes. Contrast stays a whisper against every --bg-1 surface. */
   --surface-band: color-mix(in srgb, var(--text-on-panel) 4%, transparent);
 
+  /* The FOCUS BAND — the ONE canonical surface for an ACTIVE question or
+     chooser (the soft accent-tinted band behind the composer's "Who runs
+     this?"). Any focused walk step, sub-walk row, dropdown, or option
+     chooser must use THIS token — never a raw --bg-* surface. Raw --bg-1
+     resolves to an off-palette near-black on themes that don't override the
+     legacy scale (the recurring "too-dark picker" bug: Input·Source sub-walk,
+     dialogs). Stays on-hue in every theme because it derives from that
+     theme's own --accent-soft. */
+  --surface-focus: var(--accent-soft, rgba(127, 212, 199, 0.12));
+
   /* ------------- Default theme: Alpine dusk ------------- */
   /* A twilight mountain lake — pre-dawn indigo sky, glacier teal,
      twilight violet, alpenglow pink. Cold, still, cinematic. */
@@ -663,6 +673,24 @@
   --term-bright-magenta: #e6c0ec;
   --term-bright-cyan:    #a3e2d8;
   --term-bright-white:   #f5e8ec;
+
+  /* Legacy-scale aliases — same treatment the paper-family block above gives
+     the 8 light themes. Dusk historically defined only --bg/--bg-2/--panel…,
+     leaving --bg-0/-1/-3/-4, --fg-*, and --border-* at the cold alpine :root
+     values — so every surface still reading the legacy scale (ProjectDialog
+     cards, composer sub-walk rows, inputs, hovers) rendered off-palette
+     NEAR-BLACK on dusk's warm plum. Alias them onto dusk's own palette so the
+     legacy scale resolves in-theme. */
+  --bg-0: var(--bg);         /* page — deep plum */
+  --bg-1: var(--bg-2);       /* raised — matches cards */
+  --bg-3: var(--panel);      /* hover */
+  --bg-4: var(--panel-2);    /* pressed */
+  --fg-1: var(--ink);
+  --fg-2: var(--ink-2);
+  --fg-3: var(--muted);
+  --fg-dim: var(--muted);
+  --border-1: var(--rule-soft);
+  --border-2: var(--rule);
 }
 
 /* Respect user's motion preference — collapse all durations to ~instant.
