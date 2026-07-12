@@ -613,11 +613,22 @@ type TaskDetail = {
   notes: string | null;
   result: unknown;
   outputSchema?: import('../../types').Task['outputSchema'];
+  // Input data-bag KEYS (names only, never values — NON-PHI). Detail-only,
+  // same as outputSchema: mapListRow never sets dataKeys, so the roster's
+  // template grouping (RosterTable groupableInputs → rosterGroups.mjs) can
+  // only learn a task's input fields from THIS fetch. Without it an
+  // input-only template instance (dataKeys but no outputSchema) classifies
+  // plain and never groups under its template header.
+  dataKeys?: string[];
 };
 
 export function useChainedRoster(opts: { jobIds: string[] }): {
   resolveJob: (jobId: string) => ChainedJobResolution;
   saveInput: (childId: string, key: string, value: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Input data-bag KEY NAMES from the fetched detail (NON-PHI; null until
+   *  that job's detail lands). The list row never carries dataKeys, so this
+   *  is the roster's only source for input-field grouping. */
+  dataKeysFor: (jobId: string) => string[] | null;
 } {
   const { jobIds } = opts;
   // Full, UNFILTERED roster — independent of the parent's filtered `tasks`
@@ -681,7 +692,14 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
             // 'fielded' case can read it. NON-PHI (field defs only).
             results.push([
               t.id,
-              full ? { notes: full.notes, result: full.result ?? null, outputSchema: full.outputSchema } : null,
+              full
+                ? {
+                    notes: full.notes,
+                    result: full.result ?? null,
+                    outputSchema: full.outputSchema,
+                    dataKeys: full.dataKeys,
+                  }
+                : null,
             ]);
           } catch {
             fetchedAtRef.current.delete(t.id);
@@ -935,7 +953,12 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
         // dropping it here would blank out a fielded resolution the instant a
         // sibling input is saved (harmless today since children never resolve
         // fielded, but a latent inconsistency with the real detail shape).
-        next.set(childId, { notes: newBody, result: detail.result, outputSchema: detail.outputSchema });
+        next.set(childId, {
+          notes: newBody,
+          result: detail.result,
+          outputSchema: detail.outputSchema,
+          dataKeys: detail.dataKeys,
+        });
         return next;
       });
       try {
@@ -954,7 +977,12 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
     [details, fullTasks],
   );
 
-  return { resolveJob, saveInput };
+  const dataKeysFor = useCallback(
+    (jobId: string): string[] | null => details.get(jobId)?.dataKeys ?? null,
+    [details],
+  );
+
+  return { resolveJob, saveInput, dataKeysFor };
 }
 
 // ─── task-b8fa34a80a34 — lazy task DATA-BAG value resolver ──────────────────

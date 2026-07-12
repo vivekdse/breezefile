@@ -835,7 +835,12 @@ export function RosterTable({
         res && res.status === 'fielded' ? res.defs[0]?.outputs ?? [] : [];
       const rawOutputs = t.raw.outputSchema ?? [];
       const outputSchema = fieldedOutputs.length > 0 ? fieldedOutputs : rawOutputs;
-      const dataKeys = t.raw.dataKeys ?? [];
+      // dataKeys are DETAIL-ONLY (mapListRow never sets them — same story as
+      // outputSchema, round-18): read them from useChainedRoster's fetched
+      // detail, else an input-only template instance (patient pick, no output
+      // schema) never groups and renders as N identical plain title rows.
+      const dataKeys =
+        (t.raw.dataKeys?.length ? t.raw.dataKeys : chained.dataKeysFor(t.id)) ?? [];
       // Not field-bearing → a plain row.
       if (outputSchema.length === 0 && dataKeys.length === 0) continue;
       out.push({
@@ -851,7 +856,7 @@ export function RosterTable({
       });
     }
     return out;
-  }, [visibleRows, resolutions]);
+  }, [visibleRows, resolutions, chained]);
 
   const { groups: templateGroups } = useMemo(
     () => buildRosterGroups(groupableInputs),
