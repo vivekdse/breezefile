@@ -3873,18 +3873,40 @@ export class TypeBuildTaskSource implements TaskSource {
     }
 
     // Claim over REST unless I already hold it. claim() returns a structured
-    // { ok:false, ... } on 409/404 (someone raced us / not visible); propagate
-    // that so the renderer shows the same friendly inline message.
+    // { ok:false, ... } on 409/404 (someone raced us / not visible).
+    //
+    // LAUNCH-FIRST (QA 2026-07-12): a STATE-shaped claim rejection (e.g.
+    // not_claimable — a cancelled task with an open pending question) must NOT
+    // dead-end the Start with an inline error the human then has to untangle
+    // by hand. The operator agent holds the TypeBuild MCP tools to untangle it
+    // (reopen, answer the question, claim) — so launch the session anyway,
+    // NOT preclaimed, and hand it the rejection reason (a NON-PHI machine
+    // token). The ONE hard stop kept: a task genuinely held by someone else —
+    // a teammate's claim is theirs to release, never ours to steamroll.
     const alreadyMine = !!me && cached?.claimedBy === me;
+    let claimError: string | null = null;
     if (!alreadyMine) {
-      const claimed = (await this.claim(id)) as { ok?: boolean };
-      if (!claimed?.ok) return claimed;
+      const claimed = (await this.claim(id)) as {
+        ok?: boolean;
+        reason?: string;
+        claimedBy?: string | null;
+      };
+      if (!claimed?.ok) {
+        const holder = claimed?.claimedBy ?? null;
+        if (holder && holder !== me) return claimed;
+        claimError = claimed?.reason ?? 'claim failed';
+      }
     }
 
-    // We hold the claim now (either freshly or from before). Launch the
-    // session pre-claimed so it does NOT re-claim.
+    // Launch. Normally pre-claimed (the session must not re-claim); on a
+    // state-shaped claim failure the session starts UNCLAIMED, carrying the
+    // rejection reason so the agent resolves the task state itself.
     try {
-      const res = await this.launchSession(id, { resume: false, preclaimed: true });
+      const res = await this.launchSession(id, {
+        resume: false,
+        preclaimed: !claimError,
+        claimError: claimError ?? undefined,
+      });
       // task-3f0c6a6abe41 — launchSession only returns after res.launched was
       // verified true and a real ptyId was assigned; a 0/absent ptyId here
       // would mean "claimed but no session", the exact phantom we must never
@@ -3967,7 +3989,7 @@ export class TypeBuildTaskSource implements TaskSource {
   // the IPC layer surface the same in-app messages.
   private async launchSession(
     id: string,
-    opts: { resume: boolean; preclaimed?: boolean },
+    opts: { resume: boolean; preclaimed?: boolean; claimError?: string },
   ): Promise<{ ptyId: number }> {
     // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Pop the operator window showing the
     // "task starting" splash NOW, before the entire pre-spawn waterfall below
@@ -4010,7 +4032,7 @@ export class TypeBuildTaskSource implements TaskSource {
 
   private async launchSessionInner(
     id: string,
-    opts: { resume: boolean; preclaimed?: boolean },
+    opts: { resume: boolean; preclaimed?: boolean; claimError?: string },
   ): Promise<{ ptyId: number }> {
     // task fix/launch-latency-debug — timing probes. Flow keyed by task id so
     // concurrent launches don't interleave. Labels carry only phase names +
@@ -4176,9 +4198,15 @@ export class TypeBuildTaskSource implements TaskSource {
     // session must NOT re-claim (the in-session claim is conditional on
     // status=open and would 409 now). Tell the agent the task is already mine
     // and to run /work without claiming. ONLY the opaque task id — no PHI.
-    const basePrompt = opts.preclaimed
-      ? `Task ${id} is already claimed by me. Run /typebuild:typebuild-work for task ${id} — do not claim it again.`
-      : `Run /typebuild:typebuild-work and claim task ${id}`;
+    // LAUNCH-FIRST (QA 2026-07-12) — when the Start's claim was rejected for a
+    // STATE reason, the session opens unclaimed with the rejection token and
+    // explicit marching orders: fix the task's state via the MCP tools, then
+    // work it. `claimError` is a NON-PHI machine token (e.g. 'not_claimable').
+    const basePrompt = opts.claimError
+      ? `Starting task ${id} failed to claim it: "${opts.claimError}". Diagnose and resolve the task's state yourself using the TypeBuild MCP tools — get_task first; if it is cancelled/failed, reopen it (update_task status open); if it has a pending question you can answer from context, answer it, otherwise ask me. Then claim task ${id} and run /typebuild:typebuild-work for it.`
+      : opts.preclaimed
+        ? `Task ${id} is already claimed by me. Run /typebuild:typebuild-work for task ${id} — do not claim it again.`
+        : `Run /typebuild:typebuild-work and claim task ${id}`;
     // Prepend the project's effective instructions (NON-PHI) as context so the
     // agent operates with the project's cascading guidance from the first turn.
     const withInstructions = projectCtx.instructions

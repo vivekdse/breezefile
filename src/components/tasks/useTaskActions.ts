@@ -420,22 +420,28 @@ export function useTaskActions(): TaskActions {
           | { ok?: boolean; reason?: string; claimedBy?: string | null }
           | undefined;
         if (res && res.ok === false) {
-          // fm-alfz (S1) vocabulary — humanize the reopen rejection (e.g. the
-          // raw 'not_claimable' token) instead of showing it bare, and STOP
-          // here: no claim was attempted, so there is nothing to release.
-          const message = formatSourceReason(res.reason, { claimedBy: res.claimedBy });
-          say(`couldn’t reopen · ${message} · ${task.title}`);
-          return { ok: false, spawned: false, message: `Reopen failed: ${message}`, released: false };
+          // A teammate's hold stays a hard stop — never launch over it.
+          if (res.claimedBy) {
+            const message = formatSourceReason(res.reason, { claimedBy: res.claimedBy });
+            say(`couldn’t reopen · ${message} · ${task.title}`);
+            return { ok: false, spawned: false, message: `Reopen failed: ${message}`, released: false };
+          }
+          // LAUNCH-FIRST (QA 2026-07-12) — any other reopen rejection (e.g.
+          // not_claimable: a cancelled run holding an open pending question)
+          // no longer dead-ends here. Fall THROUGH to start(): its claim will
+          // fail the same way, and runNow now launches the operator anyway
+          // with the rejection reason so the agent resolves the state itself.
+          say(`reopen rejected — starting the operator to resolve it · ${task.title}`);
         }
       } catch (e) {
         const message = formatOpError('reopen', e).replace(/^reopen failed — /, '');
         say(`couldn’t reopen · ${message} · ${task.title}`);
         return { ok: false, spawned: false, message: `Reopen failed: ${message}`, released: false };
       }
-      // Reopened. Chain straight into the same claim-then-launch path Start
-      // uses — it already owns the pending/error/rollback contract (a failed
-      // claim or launch here is reported and, for a launch failure, releases
-      // the claim it just took).
+      // Chain into the same claim-then-launch path Start uses — it owns the
+      // pending/error/rollback contract, and (launch-first) a state-shaped
+      // claim failure now launches the operator with the error instead of
+      // aborting.
       return start(task);
     },
     [start, say],
