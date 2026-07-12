@@ -71,6 +71,10 @@ import {
   fieldedSchemaSource,
 } from '../newhome/pipelineRoster.mjs';
 import type { ChildStatusLike } from '../newhome/pipelineRoster.mjs';
+// task-e8ee401916ef — the SAME live per-child detail fetch + scoped
+// active-chain poll the New-Home roster uses; reused (not mirrored) to give
+// this drawer's Pipeline rollup real, live-updating child values.
+import { useChainedRoster } from '../newhome/useNewHomeData';
 import type { MergedStepStatus } from '../newhome/taskSchema.mjs';
 import type { TaskDef, TaskDefField } from '../newhome/types';
 import '../TasksPage.css';
@@ -619,18 +623,68 @@ export function TaskDetailDrawer({
     };
   }, [templateId, chainFieldDefs]);
   const sourceFieldDefs = chainFieldDefs ?? templateFieldDefs;
+
+  // task-e8ee401916ef — LIVE child resolution for the Pipeline rollup.
+  //
+  // WHY: the `roster` prop is a FROZEN list-scope snapshot passed at
+  // drawer-open (App.tsx taskDetail via fm:openTaskDetail). Its child rows
+  // carry a live STATUS but `notes: null` and no `result` (mapListRow,
+  // electron/sources/typebuild.ts) — so `childByDefId`/`pipelineValuesByRef`
+  // above, which parse those child bodies, can never resolve a child's real
+  // INPUT/OUTPUT values. The rollup showed empty outcome cells and no runnable
+  // ▶, and never moved as steps completed.
+  //
+  // FIX: reuse useChainedRoster — the SAME per-child detail fetch (getTask),
+  // scoped active-chain poll (CHAIN_ACTIVE_POLL_MS), and resolveJob shape the
+  // New-Home roster uses — to OVERLAY real, live-updating values. "Unify,
+  // don't mirror": no second fetch loop here. Gated on this task actually
+  // being a chain parent (a parsed template block with defs) so a plain task's
+  // drawer triggers no extra fetching. The frozen path stays the INSTANT first
+  // paint (the def rows render immediately from `templateBlock`); the live
+  // values overlay once the fetch lands — no flash of empty.
+  //
+  // PHI: child bodies/values live ONLY in the hook's in-memory React state —
+  // never logged, persisted, or surfaced beyond the rendered cells.
+  const isChainParent = !!templateBlock && pipelineDefs.length > 0;
+  const chainedRoster = useChainedRoster({ jobIds: isChainParent ? [task.id] : [] });
+  const chainResolution = chainedRoster.resolveJob(task.id);
+  // roster child rows carry LIVE status/identity (only notes/result are null),
+  // so reuse them for the Task objects the render needs (Start action,
+  // open-on-click, server-status pill), keyed via the hook's LIVE
+  // childIdByDefId rather than a parse of the (null) child notes. A child the
+  // roster filter dropped simply resolves no Task object — its value cell still
+  // fills from the hook, which reads its OWN unfiltered task list.
+  const rosterById = useMemo(
+    () => new Map((roster ?? []).map((t) => [t.id, t] as const)),
+    [roster],
+  );
+  const liveChildByDefId = useMemo<Map<string, Task> | null>(() => {
+    if (chainResolution.status !== 'chained') return null;
+    const m = new Map<string, Task>();
+    for (const [defId, childId] of Object.entries(chainResolution.childIdByDefId)) {
+      const t = rosterById.get(childId);
+      if (t) m.set(defId, t);
+    }
+    return m;
+  }, [chainResolution, rosterById]);
+  // Prefer the LIVE resolution once it lands; fall back to the frozen-snapshot
+  // derivations (empty at list scope) for the instant first paint.
+  const effectiveChildByDefId = liveChildByDefId ?? childByDefId;
+  const effectivePipelineValues =
+    chainResolution.status === 'chained' ? chainResolution.valuesByRef : pipelineValuesByRef;
+
   // task-f26e7745eda6 — def id → the child's LIVE server status, consulted by
   // the runnable walk + step chips (cancelled excluded/shown; failed shown).
   const pipelineChildStatus = useMemo<Record<string, ChildStatusLike>>(
-    () => childStatusMap(childByDefId.entries(), (c) => c),
-    [childByDefId],
+    () => childStatusMap(effectiveChildByDefId.entries(), (c) => c),
+    [effectiveChildByDefId],
   );
   // task-4045bcee23cb (U3a #3) — the SAME "which step is runnable next" rule
   // the roster's group-header chips and parent Start-chain use, so this
   // rollup's ▶ never drifts from the roster's.
   const pipelineRunnableId = useMemo(
-    () => runnableStepId(pipelineDefs, pipelineValuesByRef, pipelineChildStatus),
-    [pipelineDefs, pipelineValuesByRef, pipelineChildStatus],
+    () => runnableStepId(pipelineDefs, effectivePipelineValues, pipelineChildStatus),
+    [pipelineDefs, effectivePipelineValues, pipelineChildStatus],
   );
 
   // ── effective instruction set (foundation resolver) ───────────────────────
@@ -1379,18 +1433,20 @@ export function TaskDetailDrawer({
                   <div className="tdd__sect-h">Pipeline</div>
                   <ol className="tdd__pipeline">
                     {pipelineDefs.map((def, i) => {
-                      const child = childByDefId.get(def.id);
+                      // task-e8ee401916ef — read the LIVE-preferred child + values
+                      // (frozen snapshot for first paint, hook overlay once landed).
+                      const child = effectiveChildByDefId.get(def.id);
                       // task-f26e7745eda6 — merge child server status (cancelled
                       // → grey; failed/blocked → 'Failed'; not "Queued").
                       const defStatus: MergedStepStatus = mergeChildStatus(
-                        taskDefStatus(def, pipelineValuesByRef),
+                        taskDefStatus(def, effectivePipelineValues),
                         toChildStatus(child),
                       );
                       const firstOutput = def.outputs.find((f) =>
-                        hasValue(pipelineValuesByRef[fieldRef(def.id, f.key)]),
+                        hasValue(effectivePipelineValues[fieldRef(def.id, f.key)]),
                       );
                       const outcome = firstOutput
-                        ? `${firstOutput.label}=${pipelineValuesByRef[fieldRef(def.id, firstOutput.key)]}`
+                        ? `${firstOutput.label}=${effectivePipelineValues[fieldRef(def.id, firstOutput.key)]}`
                         : null;
                       const clickable = !!child && !!onOpenTask;
                       // task-4045bcee23cb (U3a #3) — same actionsFor
