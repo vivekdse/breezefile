@@ -453,6 +453,19 @@ export function TaskDetailDrawer({
   // changes the DEFAULT so completing a task never silently drops the user
   // into "edit this task's definition" as if the row-click's purpose were to
   // revise a finished task's title/routing.
+  //
+  // task-44366b09af80 — this decision RACES the async detail fetch. The
+  // drawer is opened from a roster/list row (a `Task` with no `result`); the
+  // real result only exists once `refreshBody` above resolves and populates
+  // `detailResult`. `hasActivity` above already reads the resolved/fetched
+  // values (resolvedResult / detailResult), never the raw list-row `task`
+  // prop — so the ONLY thing missing was re-running this decision once that
+  // fetch lands. The `useState` initializer below only runs on the very
+  // first mount, so a done task with no cached detail cold-opened on
+  // 'details' (hasActivity=false at mount) and never moved even after
+  // hasActivity flipped true. Fixed with the effect below, gated by
+  // `userTouchedTab` so a manual tab click is NEVER overridden.
+  const userTouchedTab = useRef(false);
   const [tab, setTab] = useState<DrawerTab>(
     normalizeTab(initialTab) ??
       (isDone(task) && hasActivity
@@ -461,6 +474,25 @@ export function TaskDetailDrawer({
           ? 'activity'
           : 'details'),
   );
+  // Reset the "user touched tabs" gate whenever we switch to a different task
+  // (a fresh drawer open should re-run the default-tab decision from scratch).
+  useEffect(() => {
+    userTouchedTab.current = false;
+  }, [task.id]);
+  // Re-evaluate the default once the fetched detail resolves and hasActivity
+  // flips false → true (e.g. the async getTask() lands, or a cached detail
+  // was threaded in late) — but ONLY if the user hasn't manually picked a
+  // tab yet, and only when no explicit `initialTab` was requested by the
+  // caller (that's its own deliberate navigation, not a default to revise).
+  useEffect(() => {
+    if (userTouchedTab.current) return;
+    if (normalizeTab(initialTab)) return;
+    if (isDone(task) && hasActivity) setTab('activity');
+  }, [task, hasActivity, initialTab]);
+  function selectTab(id: DrawerTab) {
+    userTouchedTab.current = true;
+    setTab(id);
+  }
   // If the Activity tab disappears (e.g. a run is cleared) while it's selected,
   // fall back to Details so we never sit on a hidden tab.
   useEffect(() => {
@@ -995,13 +1027,13 @@ export function TaskDetailDrawer({
       // tabs so numbering stays contiguous when Activity is hidden.
       const order = visibleTabs;
       const n = parseInt(e.key, 10);
-      if (!Number.isNaN(n) && n >= 1 && n <= order.length) setTab(order[n - 1]);
+      if (!Number.isNaN(n) && n >= 1 && n <= order.length) selectTab(order[n - 1]);
       else if (e.key === 'l' || e.key === 'ArrowRight') {
         const i = order.indexOf(tab);
-        setTab(order[Math.min(order.length - 1, i + 1)]);
+        selectTab(order[Math.min(order.length - 1, i + 1)]);
       } else if (e.key === 'h' || e.key === 'ArrowLeft') {
         const i = order.indexOf(tab);
-        setTab(order[Math.max(0, i - 1)]);
+        selectTab(order[Math.max(0, i - 1)]);
       } else if (e.key === 's' && canStop) {
         void stop();
       } else if (e.key === 'e' && canEnterThread) {
@@ -1096,7 +1128,7 @@ export function TaskDetailDrawer({
               role="tab"
               aria-selected={tab === id}
               className={['tdd__tab', tab === id && 'tdd__tab--on'].filter(Boolean).join(' ')}
-              onClick={() => setTab(id)}
+              onClick={() => selectTab(id)}
             >
               {id === 'details'
                 ? 'Task details'
