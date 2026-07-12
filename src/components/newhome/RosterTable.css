@@ -335,6 +335,42 @@
   100% { background-position: 0 50%; }
 }
 
+/* task-8b43f588e3a9 (cold-load flicker) — quiet 'resolving…' affordance shown
+   in a candidate row's status area while useChainedRoster is still fetching
+   that job's own detail (fix 3), plus the subtle shimmer placeholder on a
+   chain parent's status cell while it resolves (fix 2). Both are design-tokened
+   and muted so they read as "settling", never as a real status. */
+.nh-roster__resolving {
+  display: inline-block;
+  font-size: var(--fs-2xs);
+  font-style: italic;
+  font-weight: 500;
+  color: var(--muted-on-panel);
+  opacity: 0.8;
+}
+.nh-roster__resolving-bar {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 8px;
+  width: 44px;
+  height: 8px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(
+    90deg,
+    var(--bg-2) 25%,
+    var(--bg-3) 37%,
+    var(--bg-2) 63%
+  );
+  background-size: 400% 100%;
+  animation: nh-roster-shimmer 1.4s ease infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nh-roster__resolving-bar {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
 .nh-roster__footnote {
   border-top: 1px solid var(--border-1);
   padding: var(--sp-2) var(--sp-3);

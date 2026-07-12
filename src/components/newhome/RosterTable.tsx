@@ -801,6 +801,25 @@ export function RosterTable({
     return map;
   }, [candidateJobIds, chained]);
 
+  // task-8b43f588e3a9 (cold-load flicker, fix 2 — PARENT-ID GROUPING DURING
+  // RESOLUTION) — a rows-only parent→children index, built purely from the
+  // LIST rows' own `parentTaskId`. Unlike childrenByParentId (which is derived
+  // from RosterTable's SEPARATE `allTasks` fetch and lands a beat later than
+  // the `tasks` prop on cold load), this is available the instant `rows`
+  // exists, so children can be grouped under their parent BEFORE any detail
+  // fetch — or even the allTasks fetch — resolves.
+  const rowChildrenByParent = useMemo(() => {
+    const m = new Map<string, NewHomeTask[]>();
+    for (const t of rows) {
+      const p = t.raw.parentTaskId ?? null;
+      if (!p) continue;
+      const arr = m.get(p);
+      if (arr) arr.push(t);
+      else m.set(p, [t]);
+    }
+    return m;
+  }, [rows]);
+
   // A chained job's children are folded into its aggregate row — don't ALSO
   // give them their own top-level row. This now covers THIN-parent chains too:
   // since every parent-with-children renders as an aggregate chain row
@@ -816,10 +835,26 @@ export function RosterTable({
         for (const cid of Object.values(res.childIdByDefId)) set.add(cid);
       }
     }
+    // Top-level parents present in the current (filtered) rows.
+    const topLevelIds = new Set(
+      rows.filter((t) => !(t.raw.parentTaskId ?? null)).map((t) => t.id),
+    );
     for (const t of rows) {
       if (t.raw.parentTaskId ?? null) continue; // only top-level parents fold
       const kids = childrenByParentId.get(t.id);
       if (kids) for (const c of kids) set.add(c.id);
+    }
+    // task-8b43f588e3a9 (fix 2) — the cold-load leak: before allTasks (and thus
+    // childrenByParentId) lands, the loop above folds nothing, so a chain's
+    // step children — which ARE in `rows` and DO carry parentTaskId — surfaced
+    // as separate top-level rows for the seconds until resolution caught up.
+    // Fold each child the moment its parent is a visible top-level row, keyed
+    // off the child's OWN list-row parentTaskId — no detail/allTasks fetch
+    // needed. Same "parent must be present" gate keeps a filtered-out parent's
+    // children surfacing (the documented "filter to failed" behavior).
+    for (const t of rows) {
+      const pid = t.raw.parentTaskId ?? null;
+      if (pid && topLevelIds.has(pid)) set.add(t.id);
     }
     return set;
   }, [resolutions, rows, childrenByParentId]);
@@ -980,7 +1015,14 @@ export function RosterTable({
       }
       return ids;
     }
-    return (childrenByParentId.get(t.id) ?? []).map((c) => c.id);
+    // task-8b43f588e3a9 (fix 2) — prefer the full-roster child index (covers
+    // done children hidden by the status filter, for accurate counts), but
+    // fall back to the rows-only index so a container is recognized as a chain
+    // — and renders its aggregate row instead of a raw 'Queued' plain row —
+    // the instant `rows` exists, before allTasks/childrenByParentId lands.
+    const fromAll = childrenByParentId.get(t.id);
+    if (fromAll && fromAll.length > 0) return fromAll.map((c) => c.id);
+    return (rowChildrenByParent.get(t.id) ?? []).map((c) => c.id);
   };
   const chainCounts = (childIds: string[]): Record<StatusBucket, number> => {
     // task-c0edffef25c6 — `cancelled` counted separately so a chain of
@@ -1461,6 +1503,12 @@ export function RosterTable({
               const resolution = resolutions.get(t.id);
               const chainedRes =
                 resolution && resolution.status === 'chained' ? resolution : null;
+              // task-8b43f588e3a9 (fix 2/3) — this candidate's own body hasn't
+              // been fetched yet (or is mid-fetch), so we don't yet know whether
+              // it's plain/fielded/chained. `undefined` here means it isn't even
+              // a resolution candidate (e.g. a folded child), which is NOT a
+              // loading state — only an explicit 'loading' resolution is.
+              const resolving = resolution?.status === 'loading';
               const childIds = chainChildIds(t);
               const isChain = childIds.length > 0;
               const rowTint =
@@ -1511,6 +1559,19 @@ export function RosterTable({
                         <span className="nh-roster__live-dot" aria-hidden="true" title={liveTooltip(t)} />
                       )}
                       <StatusBreakdown counts={counts} />
+                      {/* task-8b43f588e3a9 (fix 2) — subtle placeholder while
+                          this job's own detail resolves: the child-status
+                          breakdown above is already correct (derived from the
+                          list rows), but the step pipeline is still settling,
+                          so a quiet shimmer signals "not done loading" without
+                          hiding the useful counts. */}
+                      {resolving && (
+                        <span
+                          className="nh-roster__resolving-bar"
+                          aria-label="resolving…"
+                          title="resolving…"
+                        />
+                      )}
                     </td>
                     <td className="nh-roster__last-action" title={t.lastActionDetail}>
                       {t.lastAction}
@@ -1623,9 +1684,23 @@ export function RosterTable({
                     {t.live && (
                       <span className="nh-roster__live-dot" aria-hidden="true" title={liveTooltip(t)} />
                     )}
-                    <span className={`nh-roster__pill nh-roster__pill--${t.status}`}>
-                      {STATUS_LABEL[t.status]}
-                    </span>
+                    {/* task-8b43f588e3a9 (fix 3 — 'RESOLVING…' AFFORDANCE) —
+                        while this top-level candidate's own body is still being
+                        fetched we don't yet know if it's a plain task, a fielded
+                        single-task, or a chain about to sprout a subtable, so
+                        the raw status chip ('Queued') is misleading. Show a
+                        quiet, muted 'resolving…' hint until the resolution lands
+                        (a beat later, at which point the real pill — or the
+                        chain/group aggregate — renders). */}
+                    {resolving ? (
+                      <span className="nh-roster__resolving" title="Loading this task's details…">
+                        resolving…
+                      </span>
+                    ) : (
+                      <span className={`nh-roster__pill nh-roster__pill--${t.status}`}>
+                        {STATUS_LABEL[t.status]}
+                      </span>
+                    )}
                   </td>
                   <td className="nh-roster__last-action" title={t.lastActionDetail}>
                     {t.lastAction}

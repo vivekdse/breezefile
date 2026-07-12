@@ -680,11 +680,10 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
 
     void (async () => {
       let idx = 0;
-      const results: Array<[string, TaskDetail | null]> = [];
+      const results: Array<[string, number, TaskDetail | null]> = [];
       async function worker() {
         while (idx < due.length) {
           const t = due[idx++];
-          fetchedAtRef.current.set(t.id, t.updated_at);
           try {
             const full = await getTask(t.id, t.source);
             // task-ce4b4c8ca955 (round-18) — capture the server outputSchema
@@ -692,6 +691,7 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
             // 'fielded' case can read it. NON-PHI (field defs only).
             results.push([
               t.id,
+              t.updated_at,
               full
                 ? {
                     notes: full.notes,
@@ -702,18 +702,33 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
                 : null,
             ]);
           } catch {
-            fetchedAtRef.current.delete(t.id);
-            results.push([t.id, null]);
+            results.push([t.id, t.updated_at, null]);
           }
         }
       }
       await Promise.all(
         Array.from({ length: Math.min(PIPELINE_FETCH_CONCURRENCY, due.length) }, () => worker()),
       );
+      // task-8b43f588e3a9 (cold-load flicker, fix 1 — EAGER RESOLUTION) — mark
+      // fetchedAtRef ONLY after a successful commit, never before the await.
+      // The old code set fetchedAtRef optimistically at the top of the worker;
+      // if this effect run was then SUPERSEDED mid-flight (a sibling useTasks
+      // update re-identities `visibleJobs`, re-running this effect while the
+      // getTask calls were still in flight), the `if (cancelled) return` below
+      // discarded the results — but the ids were already marked fetched, so the
+      // superseding run saw due=[] and NEVER re-fetched. Resolution then sat on
+      // 'loading' until the row's updated_at moved (a 30s poll, or a user
+      // interaction's refresh) — the reported "resolution only starts after a
+      // row interaction" cold-load stall. Now a superseded run leaves
+      // fetchedAtRef untouched, so the next run re-fetches and commits (at worst
+      // one transient duplicate fetch during rapid cold-load re-renders).
       if (cancelled) return;
+      for (const [id, updatedAt, detail] of results) {
+        if (detail) fetchedAtRef.current.set(id, updatedAt);
+      }
       setDetails((prev) => {
         const next = new Map(prev);
-        for (const [id, detail] of results) {
+        for (const [id, , detail] of results) {
           if (detail) next.set(id, detail);
         }
         return next;
@@ -763,29 +778,37 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
 
     void (async () => {
       let idx = 0;
-      const results: Array<[string, TaskDetail | null]> = [];
+      const results: Array<[string, number, TaskDetail | null]> = [];
       async function worker() {
         while (idx < due.length) {
           const c = due[idx++];
-          fetchedAtRef.current.set(c.id, c.updated_at);
           try {
             const full = await getTask(c.id, c.source);
-            results.push([c.id, full ? { notes: full.notes, result: full.result ?? null } : null]);
+            results.push([
+              c.id,
+              c.updated_at,
+              full ? { notes: full.notes, result: full.result ?? null } : null,
+            ]);
           } catch {
             // Signed out / offline / server error — leave this child unresolved;
             // its cells show the loading em-dash and retry on the next change.
-            fetchedAtRef.current.delete(c.id);
-            results.push([c.id, null]);
+            results.push([c.id, c.updated_at, null]);
           }
         }
       }
       await Promise.all(
         Array.from({ length: Math.min(PIPELINE_FETCH_CONCURRENCY, due.length) }, () => worker()),
       );
+      // task-8b43f588e3a9 (fix 1) — same deferred fetchedAtRef marking as the
+      // Stage-1 effect above: mark ONLY on a committed result so a superseded
+      // run can't strand children as "fetched" and stall their resolution.
       if (cancelled) return;
+      for (const [id, updatedAt, detail] of results) {
+        if (detail) fetchedAtRef.current.set(id, updatedAt);
+      }
       setDetails((prev) => {
         const next = new Map(prev);
-        for (const [id, detail] of results) {
+        for (const [id, , detail] of results) {
           if (detail) next.set(id, detail);
         }
         return next;
