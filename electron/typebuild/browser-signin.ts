@@ -128,9 +128,13 @@ async function registerClient(redirectUri: string): Promise<string> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // User-facing on the server's consent page — say what the person is
-        // actually connecting (the TypeBuild client), not the repo slug.
-        client_name: 'TypeBuild',
+        // LOAD-BEARING, not just display copy: the server's token endpoint
+        // keys its firebase_* desktop-handoff merge (is_breezefile) off this
+        // exact name — renaming it to 'TypeBuild' (2026-07-12) silently
+        // dropped the handoff and broke every fresh sign-in
+        // (task-0e1722518273). Keep 'Breezefile' until the server matches on
+        // something sturdier; the consent-page copy fix rides the same task.
+        client_name: 'Breezefile',
         redirect_uris: [redirectUri],
         token_endpoint_auth_method: 'none',
         grant_types: ['authorization_code', 'refresh_token'],
