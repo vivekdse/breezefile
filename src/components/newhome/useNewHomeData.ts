@@ -8,11 +8,15 @@
 // the SAME pure, tested "what needs attention" predicate the existing Home
 // ranks projects with — rather than re-deriving blocked/failed/asked rules
 // here and risking drift:
-//   done     — task.status === 'done'.
-//   failed   — task.status === 'cancelled' (didn't complete cleanly — TODO
-//              (New Home follow-up): give cancelled its own bucket if the
-//              roster UX wants to distinguish "failed" from "cancelled"),
-//              OR classify().failed (attempts exhausted / rawStatus 'failed').
+//   done      — task.status === 'done'.
+//   cancelled — task.status === 'cancelled' (task-c0edffef25c6): a cancelled
+//               task was deliberately withdrawn, not a failure — kept OUT of
+//               the 'failed' bucket so it doesn't inflate the Failed stat or
+//               offer Retry. This is the single derivation point that feeds
+//               roster row chips, hero stats, AND (via rosterGroups.mjs
+//               statusBucket, which mirrors this mapping) chain-parent
+//               breakdown counts — fix here once, all three surfaces agree.
+//   failed    — classify().failed (attempts exhausted / rawStatus 'failed').
 //   needs    — classify().asked (a pending question — human-only unblock),
 //              OR classify().blocked (rawStatus 'blocked'/'failed'), OR
 //              classify().stalled (an in_progress row with no live worker).
@@ -66,7 +70,11 @@ import { filterByGroup } from './groupScope.mjs';
 // record — not a parallel heuristic invented here.
 function deriveStatus(t: Task, c: ReturnType<typeof classify>): NewHomeStatus {
   if (t.status === 'done') return 'done';
-  if (t.status === 'cancelled') return 'failed';
+  // task-c0edffef25c6 — cancelled ≠ failed: a deliberately-withdrawn task
+  // must not collapse into 'failed' (inflated Failed stat, spurious Retry).
+  // Checked before classify().failed so a cancelled task can never be
+  // reclassified 'failed' by an unrelated attempts/rawStatus signal.
+  if (t.status === 'cancelled') return 'cancelled';
   if (c.failed) return 'failed';
   if (c.asked || c.blocked || c.stalled) return 'needs';
   // "In Progress" means an agent is actively on it — a live in_progress
@@ -480,7 +488,16 @@ export function useNewHomeData(
   }, [rawTasks, scopeIds]);
 
   const counts = useMemo(() => {
-    const c: Record<NewHomeStatus, number> = { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 };
+    // task-c0edffef25c6 — `cancelled` counted separately from `failed` so the
+    // Failed hero stat/filter never includes a deliberately-withdrawn task.
+    const c: Record<NewHomeStatus, number> = {
+      done: 0,
+      progress: 0,
+      queued: 0,
+      needs: 0,
+      failed: 0,
+      cancelled: 0,
+    };
     for (const t of tasks) c[t.status] += 1;
     return c;
   }, [tasks]);

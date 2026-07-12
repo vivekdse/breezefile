@@ -82,6 +82,7 @@ const STATUS_LABEL: Record<NewHomeStatus, string> = {
   queued: 'Queued',
   needs: 'Needs You',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = {
@@ -90,6 +91,7 @@ const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = {
   queued: 'queued',
   needs: 'needs you',
   failed: 'failed',
+  cancelled: 'cancelled',
 };
 
 const BASE_COLUMN_COUNT = 6; // Title, Status, Last Run, Who, Runs, Actions
@@ -497,6 +499,26 @@ function RowAction({
         </button>
         {error && <span className="nh-roster__action-error" role="alert" title={error}>{`⚠ ${error}`}</span>}
       </span>
+    );
+  }
+  // task-c0edffef25c6 — a cancelled task was deliberately withdrawn, not a
+  // failure: no Retry (that would invite re-running work someone cancelled
+  // on purpose). "View →" still opens it when there's something to see;
+  // otherwise a plain em-dash, same as any other row with no action.
+  if (task.status === 'cancelled') {
+    return viewableDetail ? (
+      <button
+        type="button"
+        className="nh-roster__action nh-roster__action--view"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenTask(task.id);
+        }}
+      >
+        View →
+      </button>
+    ) : (
+      <span className="nh-roster__action-empty">{'—'}</span>
     );
   }
   // ▶ Start — the SAME claim-then-launch path the old Tasks page's play button
@@ -926,12 +948,15 @@ export function RosterTable({
     return (childrenByParentId.get(t.id) ?? []).map((c) => c.id);
   };
   const chainCounts = (childIds: string[]): Record<StatusBucket, number> => {
+    // task-c0edffef25c6 — `cancelled` counted separately so a chain of
+    // deliberately-cancelled steps reads "2 cancelled", not "2 failed".
     const counts: Record<StatusBucket, number> = {
       done: 0,
       progress: 0,
       queued: 0,
       needs: 0,
       failed: 0,
+      cancelled: 0,
     };
     for (const cid of childIds) {
       // Prefer the DERIVED New Home status (rowsById) — it already folds in

@@ -135,7 +135,9 @@ test('buildRosterGroups: tolerates empty / malformed input', () => {
 });
 
 // ── task-ecabeafa41e1: Level-1 group summary (status buckets + assignees) ─────
-test('statusBucket: raw/coarse statuses map onto the five buckets', () => {
+// task-c0edffef25c6 — cancelled got its own bucket, split out of the old
+// queued catch-all, so it never gets counted as (or confused with) failed.
+test('statusBucket: raw/coarse statuses map onto the six buckets', () => {
   assert.equal(statusBucket('done'), 'done');
   assert.equal(statusBucket('completed'), 'done');
   assert.equal(statusBucket('succeeded'), 'done');
@@ -150,18 +152,20 @@ test('statusBucket: raw/coarse statuses map onto the five buckets', () => {
   assert.equal(statusBucket('needs_review'), 'needs');
   assert.equal(statusBucket('blocked'), 'needs');
   assert.equal(statusBucket('asked'), 'needs');
-  // pending/queued/cancelled/unknown/empty all fall to queued
+  // cancelled/canceled are their own bucket — NOT failed, NOT queued.
+  assert.equal(statusBucket('cancelled'), 'cancelled');
+  assert.equal(statusBucket('canceled'), 'cancelled');
+  // pending/queued/unknown/empty all fall to queued
   assert.equal(statusBucket('queued'), 'queued');
   assert.equal(statusBucket('pending'), 'queued');
   assert.equal(statusBucket('deferred'), 'queued');
-  assert.equal(statusBucket('cancelled'), 'queued');
   assert.equal(statusBucket('something-odd'), 'queued');
   assert.equal(statusBucket(undefined), 'queued');
   assert.equal(statusBucket(null), 'queued');
 });
 
-test('STATUS_BUCKETS lists the five buckets in display order', () => {
-  assert.deepEqual(STATUS_BUCKETS, ['done', 'progress', 'queued', 'needs', 'failed']);
+test('STATUS_BUCKETS lists the six buckets in display order', () => {
+  assert.deepEqual(STATUS_BUCKETS, ['done', 'progress', 'queued', 'needs', 'failed', 'cancelled']);
 });
 
 test('summarizeGroupRows: counts runs, buckets statuses, and de-dups assignees', () => {
@@ -173,8 +177,16 @@ test('summarizeGroupRows: counts runs, buckets statuses, and de-dups assignees',
     { status: 'queued' }, // missing assignee → not counted
   ]);
   assert.equal(s.runCount, 5);
-  assert.deepEqual(s.statusCounts, { done: 2, progress: 1, queued: 1, needs: 0, failed: 1 });
+  assert.deepEqual(s.statusCounts, { done: 2, progress: 1, queued: 1, needs: 0, failed: 1, cancelled: 0 });
   assert.deepEqual([...s.assignees].sort(), ['a@x.com', 'b@x.com']); // 2 distinct
+});
+
+test('summarizeGroupRows: a cancelled run counts as cancelled, not failed', () => {
+  const s = summarizeGroupRows([
+    { status: 'cancelled', assignee: 'a@x.com' },
+    { status: 'failed', assignee: 'b@x.com' },
+  ]);
+  assert.deepEqual(s.statusCounts, { done: 0, progress: 0, queued: 0, needs: 0, failed: 1, cancelled: 1 });
 });
 
 test('summarizeGroupRows: multiple distinct assignees across chain-like runs (can exceed 1)', () => {
@@ -189,7 +201,7 @@ test('summarizeGroupRows: multiple distinct assignees across chain-like runs (ca
 test('summarizeGroupRows: empty input yields zeroed summary, no throw', () => {
   const s = summarizeGroupRows([]);
   assert.equal(s.runCount, 0);
-  assert.deepEqual(s.statusCounts, { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 });
+  assert.deepEqual(s.statusCounts, { done: 0, progress: 0, queued: 0, needs: 0, failed: 0, cancelled: 0 });
   assert.deepEqual(s.assignees, []);
   // defensive: non-array
   const s2 = summarizeGroupRows(undefined);

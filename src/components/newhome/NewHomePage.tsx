@@ -102,12 +102,17 @@ function groupLabel(id: string, names: Map<string, string>): string {
 }
 
 // Human-readable label per status bucket for the active-filter chip.
+// task-c0edffef25c6 — 'cancelled' has no HeroStats card of its own (it isn't
+// a filter a user picks from that grid), but the Record must stay exhaustive
+// over NewHomeStatus, and a cancelled row is still reachable via the "all"
+// filter, so this label is here for completeness / any future entry point.
 const FILTER_LABELS: Record<Exclude<FilterState, 'all'>, string> = {
   done: 'Done',
   progress: 'In Progress',
   queued: 'Queued',
   needs: 'Needs You',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 // Heuristic: does this input look like a STRUCTURED query (vs. plain words)?

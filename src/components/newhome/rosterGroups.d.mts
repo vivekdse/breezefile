@@ -57,7 +57,7 @@ export type OtherRow = { taskId: string; title: string; status: string | undefin
 
 export type RosterGroups = { groups: RosterGroup[]; other: OtherRow[] };
 
-export type StatusBucket = 'done' | 'progress' | 'queued' | 'needs' | 'failed';
+export type StatusBucket = 'done' | 'progress' | 'queued' | 'needs' | 'failed' | 'cancelled';
 
 export type GroupSummary = {
   runCount: number;

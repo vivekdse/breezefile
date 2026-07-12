@@ -26,8 +26,12 @@ export type { PendingQuestion };
 
 /** Coarse status bucket New Home renders/filters on. Derived from the
  *  underlying Task in useNewHomeData — see that file for the derivation
- *  rules (marked TODO where the mapping is approximate today). */
-export type NewHomeStatus = 'done' | 'progress' | 'queued' | 'needs' | 'failed';
+ *  rules. `cancelled` (task-c0edffef25c6) is DISTINCT from `failed`: a
+ *  cancelled task was deliberately withdrawn, not a failure — it renders as
+ *  a muted chip with no Retry action and is excluded from the Failed stat/
+ *  filter and from chain-parent breakdown "failed" counts. Mirrors the same
+ *  cancelled-vs-failed split task-f26e7745eda6 made for step chips. */
+export type NewHomeStatus = 'done' | 'progress' | 'queued' | 'needs' | 'failed' | 'cancelled';
 
 /** New Home's view-model for one task row. `raw` carries the full
  *  underlying Task so a stub needing a field not yet promoted to the
