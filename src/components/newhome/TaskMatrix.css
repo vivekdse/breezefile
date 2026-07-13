@@ -233,12 +233,29 @@
   align-items: center;
   gap: var(--sp-2);
 }
+/* Run identity stacks vertically: the "Run N" (or custom title) on top and a
+   muted relative time under it, so a reviewer sees at a glance when the run
+   happened. task-run-order */
+.tm-run-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
 .tm-run-title {
   font-weight: 600;
   color: var(--text-on-panel);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 220px;
+}
+.tm-run-when {
+  font-size: var(--fs-2xs);
+  color: var(--muted-on-panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   max-width: 220px;
 }
 /* Colored status glyph — same --nh-* status vocabulary as the roster pills,
@@ -443,12 +460,15 @@
   background: var(--accent-soft);
 }
 
-/* ── Hover popup: one floating menu per cell, opens downward ─────────────── */
+/* ── Hover popup: one floating menu per cell ─────────────────────────────────
+   task-hover-menu — PORTALED to <body> and positioned:fixed (top/left set
+   inline from the cell's viewport rect). This escapes the .tm-scroll overflow
+   clip (which used to hide the menu on the last row) and the sticky column's
+   stacking context (which used to bury it under other cells). It flips to open
+   upward — `.tm-menu--up` — when there isn't room below. */
 .tm-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 20;
+  position: fixed;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
   min-width: 132px;
@@ -461,6 +481,13 @@
 }
 @keyframes tm-menu-in {
   from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tm-menu--up {
+  animation: tm-menu-in-up 90ms ease;
+}
+@keyframes tm-menu-in-up {
+  from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .tm-menu-item {

@@ -16,7 +16,8 @@
 // PHI: input/output VALUES (dataValues, result payloads, titles) may carry
 // patient data — render in memory only, never persist/log. Only field key/label
 // DEFINITIONS are non-PHI.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { JSX } from 'react';
 import type { Task, TaskStatus } from '../../types';
 import { fm } from '../../bridge';
@@ -55,6 +56,25 @@ export interface TaskMatrixProps {
 
 type OutputField = NonNullable<Task['outputSchema']>[number];
 type PillKind = 'done' | 'progress' | 'queued' | 'needs' | 'failed';
+
+// task-run-order — a run's created stamp, as "5 minutes ago", so a reviewer
+// knows when a run happened (and thus when it's worth reviewing) instead of a
+// meaningless "Run N" alone. Returns '' when we have no usable stamp.
+function relativeTime(createdAt: number | undefined, now: number): string {
+  if (typeof createdAt !== 'number' || !Number.isFinite(createdAt) || createdAt <= 0) return '';
+  const secs = Math.round((now - createdAt) / 1000);
+  if (secs < 45) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
+  const years = Math.round(months / 12);
+  return `${years} year${years === 1 ? '' : 's'} ago`;
+}
 
 // ── Status → pill mapping ────────────────────────────────────────────────
 // Prefer the server rawStatus (richer) and fall back to the coarse local
@@ -172,6 +192,65 @@ function MatrixCell({
   const [override, setOverride] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // task-hover-menu — the menu is portaled to <body> so it can't be clipped by
+  // the scroll container or slip under the sticky column. We keep it open while
+  // the cursor is over the cell OR the menu, with a short grace period so
+  // crossing between them never flickers it shut. `menuPos` is the fixed-
+  // viewport rect we anchor to; recomputed on open (and on scroll while open).
+  const cellRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; drop: boolean } | null>(null);
+
+  const openMenu = (): void => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setHovered(true);
+  };
+  const scheduleClose = (): void => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setHovered(false), 120);
+  };
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
+
+  const menuOpen = hovered && !editing;
+
+  // Position the portaled menu from the cell's viewport rect. Prefer dropping
+  // BELOW; flip ABOVE when there isn't room (the last-row case). Recompute while
+  // open in case the matrix scrolls under it.
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setMenuPos(null);
+      return;
+    }
+    const place = (): void => {
+      const el = cellRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const menuH = menuRef.current?.offsetHeight ?? 120;
+      const spaceBelow = window.innerHeight - r.bottom;
+      const drop = spaceBelow >= menuH + 8 || spaceBelow >= r.top;
+      setMenuPos({
+        top: drop ? r.bottom + 4 : r.top - 4 - menuH,
+        left: r.left,
+        drop,
+      });
+    };
+    place();
+    // Re-place after the menu has measured its real height, then on scroll.
+    const raf = requestAnimationFrame(place);
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [menuOpen]);
 
   const display = override ?? value ?? '';
   const isEmpty = display === '';
@@ -193,11 +272,10 @@ function MatrixCell({
 
   return (
     <div
+      ref={cellRef}
       className={`tm-cell${isEmpty && !editing ? ' tm-cell--empty' : ''}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => {
-        setHovered(false);
-      }}
+      onMouseEnter={openMenu}
+      onMouseLeave={scheduleClose}
     >
       {editing ? (
         <InlineEditor initial={display} onCommit={commit} onCancel={() => setEditing(false)} />
@@ -217,35 +295,50 @@ function MatrixCell({
           {error ?? startError}
         </span>
       )}
-      {hovered && !editing && (
-        <div className="tm-menu" role="menu">
-          {io === 'in' && (
+      {menuOpen &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={`tm-menu${menuPos && !menuPos.drop ? ' tm-menu--up' : ''}`}
+            role="menu"
+            style={{
+              // Hidden (off-screen) for the first frame until we've measured a
+              // real position, so it never flashes at 0,0.
+              top: menuPos ? menuPos.top : -9999,
+              left: menuPos ? menuPos.left : -9999,
+              visibility: menuPos ? 'visible' : 'hidden',
+            }}
+            onMouseEnter={openMenu}
+            onMouseLeave={scheduleClose}
+          >
+            {io === 'in' && (
+              <button
+                type="button"
+                className="tm-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setError(null);
+                  setEditing(true);
+                }}
+              >
+                ✎ Enter value
+              </button>
+            )}
             <button
               type="button"
               className="tm-menu-item"
               role="menuitem"
-              onClick={() => {
-                setError(null);
-                setEditing(true);
-              }}
+              onClick={onStart}
+              disabled={startPending}
             >
-              ✎ Enter value
+              {startPending ? 'Starting…' : '▶ Start step'}
             </button>
-          )}
-          <button
-            type="button"
-            className="tm-menu-item"
-            role="menuitem"
-            onClick={onStart}
-            disabled={startPending}
-          >
-            {startPending ? 'Starting…' : '▶ Start step'}
-          </button>
-          <button type="button" className="tm-menu-item" role="menuitem" onClick={onOpen}>
-            ↗ Open run
-          </button>
-        </div>
-      )}
+            <button type="button" className="tm-menu-item" role="menuitem" onClick={onOpen}>
+              ↗ Open run
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -307,6 +400,32 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
       return self ? [self] : [];
     };
   }, [childrenOf, runs]);
+
+  // task-run-order — the caller hands runs oldest-first. Show them NEWEST-first
+  // (latest run to review is at the top), but keep each run's "Run N" number
+  // stable in CHRONOLOGICAL order (Run 1 = the first run ever), so a run's
+  // number never shifts as new runs arrive. We also stamp each with a relative
+  // time for the left column.
+  //   `now` ticks once a minute so "5 minutes ago" stays honest without a
+  //   per-render churn.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const orderedRuns = useMemo(() => {
+    // Chronological index (oldest = 1), assigned before reversing for display.
+    const chrono = [...runs].sort(
+      (a, b) => (a.created_at ?? 0) - (b.created_at ?? 0),
+    );
+    const numberOf = new Map<string, number>();
+    chrono.forEach((r, i) => numberOf.set(r.id, i + 1));
+    // Display newest-first.
+    return [...chrono].reverse().map((run) => ({
+      run,
+      runNumber: numberOf.get(run.id) ?? 0,
+    }));
+  }, [runs]);
 
   // Every step id across every run (primitive key so effects re-run only when
   // the SET of steps actually changes, not on each parent render). For a simple
@@ -498,7 +617,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {runs.map((run, runIndex) => {
+            {orderedRuns.map(({ run, runNumber }) => {
               const rowChildren = stepsOf(run.id);
               // Layout-cleanup (QA round): every run of a template shares the
               // template's name, so repeating the title per row said nothing.
@@ -507,7 +626,10 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
               const runLabel =
                 run.title && run.title.trim() && run.title.trim() !== chainTitle.trim()
                   ? run.title
-                  : `Run ${runIndex + 1}`;
+                  : `Run ${runNumber}`;
+              // task-run-order — when this run ran, so a reviewer knows what's
+              // fresh. Sits under the run label as a muted second line.
+              const runWhen = relativeTime(run.created_at, now);
               return (
                 <tr key={run.id}>
                   <td className="tm-lead-td">
@@ -534,7 +656,10 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                         <>
                           <div className="tm-lead-inner">
                             <StatusIcon status={run.status} rawStatus={run.rawStatus} />
-                            <span className="tm-run-title">{runLabel}</span>
+                            <span className="tm-run-id">
+                              <span className="tm-run-title">{runLabel}</span>
+                              {runWhen && <span className="tm-run-when">{runWhen}</span>}
+                            </span>
                             <span className="tm-lead-actions">
                               {next && (
                                 <button
