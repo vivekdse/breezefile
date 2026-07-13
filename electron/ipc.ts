@@ -46,6 +46,9 @@ import {
 } from './sources/registry';
 import { unsupported } from './core/task-source';
 import type { TypeBuildTaskSource } from './sources/typebuild';
+// task-24cd55d8a607 — origin circuit-breaker state (slow-episode resilience).
+// The renderer subscribes to this to defer enrichment waves while degraded.
+import { isOriginDegraded, onOriginHealthChange } from './typebuild/http';
 // task-3abb663aba25 — DB-skeleton terminal (done/cancelled) counts so Home rolls
 // up exact numbers without materializing the done archive in the renderer.
 import { terminalCountsByProject } from './sources/task-skeleton-store';
@@ -3104,6 +3107,20 @@ end tell`;
   ipcMain.handle('claude:unregister-hooks', async () => {
     const { unregisterBreezeHooks } = await import('./hooks-register');
     return unregisterBreezeHooks();
+  });
+
+  // task-24cd55d8a607 — TypeBuild origin health. The circuit breaker in
+  // typebuild/http.ts opens after N consecutive origin timeouts; the renderer
+  // reads this (synchronous getter for the initial value) AND subscribes to the
+  // 'typebuild:health' broadcast (below) so it can show "responding slowly" and
+  // defer the non-essential enrichment waves without collapsing the cached view.
+  ipcMain.handle('typebuild:health', () => ({ degraded: isOriginDegraded() }));
+  onOriginHealthChange((degraded) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) {
+        w.webContents.send('typebuild:health', { degraded });
+      }
+    }
   });
 
   ipcMain.handle('tasks:list', async (_e, filter?: TaskFilter) => {

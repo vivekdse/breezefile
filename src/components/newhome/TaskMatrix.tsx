@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import type { Task, TaskStatus } from '../../types';
 import { fm } from '../../bridge';
-import { getTask } from '../../tasks';
+import { getTask, useOriginHealth } from '../../tasks';
 import { useTaskDataValues } from './useNewHomeData';
 import { resultFields } from './taskSchema.mjs';
 import { TemplateEditPanel } from './TemplateEditPanel';
@@ -319,8 +319,13 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
 
   // DETAIL for every child (getTask): outputSchema / dataKeys / result / status.
   const [detail, setDetail] = useState<Map<string, Task>>(new Map());
+  // task-24cd55d8a607 — defer this matrix enrichment wave while the origin
+  // breaker is open; already-fetched details persist so the matrix keeps
+  // rendering last-known cells.
+  const { degraded } = useOriginHealth();
   useEffect(() => {
     let cancelled = false;
+    if (degraded) return; // origin slow — defer matrix child-detail enrichment
     const ids = idKey ? idKey.split(',') : [];
     const missing = ids.filter((id) => !detail.has(id));
     if (missing.length === 0) return;
@@ -344,9 +349,10 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     return () => {
       cancelled = true;
     };
-    // idKey encodes the child set; re-run only when it moves.
+    // idKey encodes the child set; re-run when it moves OR when the origin
+    // breaker clears so a deferred fetch resumes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idKey]);
+  }, [idKey, degraded]);
 
   // INPUT values (data bag) — lazy/bounded/cached; one call at top level.
   const dataRequests = useMemo(() => {

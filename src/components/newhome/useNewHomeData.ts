@@ -53,7 +53,7 @@
 //           else 'agent' by default.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getTask, taskSourceAction, useTasks } from '../../tasks';
+import { getTask, taskSourceAction, useOriginHealth, useTasks } from '../../tasks';
 import { fm } from '../../bridge';
 import { buildProjectTree, classify, descendantProjectIds, todayKey } from '../../projects/index.mjs';
 import { useRunningSessions } from '../tasks/useRunningSessions';
@@ -253,6 +253,12 @@ const AUDIT_CONCURRENCY = 4;
 
 function useLatestAuditByTask(tasks: Task[]): Map<string, LatestAudit> {
   const [byTask, setByTask] = useState<Map<string, LatestAudit>>(new Map());
+  // task-24cd55d8a607 — audit is a NON-ESSENTIAL per-task enrichment wave. When
+  // the origin breaker is open, DEFER it so a slow server only has to serve the
+  // core list poll (deriveWho/deriveLastAction fall back to their heuristic in
+  // the meantime — a non-regression, exactly the no-audit case). The KEPT audit
+  // hints stay in state, so nothing that already resolved disappears.
+  const { degraded } = useOriginHealth();
   // Cache of the `updated_at` we last fetched audit for, per task id — the
   // refetch-key described above. A ref (not state) since it's bookkeeping,
   // not something that should itself trigger a render.
@@ -268,6 +274,8 @@ function useLatestAuditByTask(tasks: Task[]): Map<string, LatestAudit> {
 
   useEffect(() => {
     let cancelled = false;
+    // Origin is slow — hold off the enrichment wave until it recovers.
+    if (degraded) return;
     const due = tasks.filter((t) => fetchedAtRef.current.get(t.id) !== t.updated_at);
     if (due.length === 0) return;
 
@@ -309,7 +317,9 @@ function useLatestAuditByTask(tasks: Task[]): Map<string, LatestAudit> {
     return () => {
       cancelled = true;
     };
-  }, [taskKey, tasks]);
+    // `degraded` gates the wave; when it clears the effect re-runs and the
+    // still-`due` tasks (their fetched-at never advanced while deferred) fill in.
+  }, [taskKey, tasks, degraded]);
 
   return byTask;
 }
@@ -411,7 +421,12 @@ export function useNewHomeData(
       const list = await fm.typebuild.projects.list(includeArchived);
       setProjects(list);
     } catch {
-      setProjects([]);
+      // task-24cd55d8a607 — CORE UX BUG FIX: during a slow episode this fetch
+      // times out. Clearing to [] collapsed the picker to "All projects" and
+      // destroyed the project tree + group scoping — the stripped-down view
+      // that LOOKS like data loss. RETAIN the last-known projects instead; the
+      // roster keeps its cached tasks (useTasks does the same on poll failure),
+      // so the whole surface persists through the episode and refills on recovery.
     }
   }, [includeArchived]);
 
@@ -430,7 +445,8 @@ export function useNewHomeData(
         if (!cancelled) setAgents(list);
       })
       .catch(() => {
-        if (!cancelled) setAgents([]);
+        // task-24cd55d8a607 — retain the last-known agents through a slow
+        // episode rather than blanking assignee names to []; refills on recovery.
       });
     return () => {
       cancelled = true;
@@ -634,6 +650,13 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
   // Full, UNFILTERED roster — independent of the parent's filtered `tasks`
   // prop, so a job's children in any status resolve (see header note).
   const { tasks: fullTasks } = useTasks({ includeDone: true });
+  // task-24cd55d8a607 — the per-row getTask detail fetches (job own-body +
+  // children) and the fast active-chain poll are the heaviest per-item
+  // enrichment wave. DEFER them while the origin breaker is open so a slow
+  // server only serves the core list poll; already-fetched details stay cached
+  // (the matrix keeps rendering last-known cells), and the waves resume when the
+  // breaker closes. This is exactly the "pile-up on every 30s poll" the fix targets.
+  const { degraded } = useOriginHealth();
 
   // Fetched task bodies/results, keyed by task id — holds BOTH candidate
   // jobs' own details and (once known chained) their children's details;
@@ -675,6 +698,7 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
 
   useEffect(() => {
     let cancelled = false;
+    if (degraded) return; // origin slow — defer job-detail enrichment
     const due = visibleJobs.filter((t) => fetchedAtRef.current.get(t.id) !== t.updated_at);
     if (due.length === 0) return;
 
@@ -738,7 +762,7 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
     return () => {
       cancelled = true;
     };
-  }, [jobKey, visibleJobs]);
+  }, [jobKey, visibleJobs, degraded]);
 
   // Which visible jobs are known-chained (v2 block, defs present) once their
   // own detail has landed.
@@ -771,6 +795,7 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
 
   useEffect(() => {
     let cancelled = false;
+    if (degraded) return; // origin slow — defer child-detail enrichment
     const due = visibleChildren.filter(
       (c) => fetchedAtRef.current.get(c.id) !== c.updated_at,
     );
@@ -818,7 +843,7 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
     return () => {
       cancelled = true;
     };
-  }, [childKey, visibleChildren]);
+  }, [childKey, visibleChildren, degraded]);
 
   // task-6a14190fb2f7 — ROOT CAUSE of "chain stops, nothing surfaces": the
   // child-detail refetch above is keyed ONLY off the list row's `updated_at`,
@@ -852,7 +877,9 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
   }, [chainedJobIdKey, details, childrenByParent]);
 
   useEffect(() => {
-    if (!anyChainActive || visibleChildren.length === 0) return;
+    // Also suspended while the origin breaker is open — the fast poll is the
+    // single heaviest recurring wave, so it's the first thing to stop.
+    if (degraded || !anyChainActive || visibleChildren.length === 0) return;
     const timer = setInterval(() => {
       void (async () => {
         const targets = visibleChildren;
@@ -884,7 +911,7 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
       })();
     }, CHAIN_ACTIVE_POLL_MS);
     return () => clearInterval(timer);
-  }, [anyChainActive, visibleChildren]);
+  }, [anyChainActive, visibleChildren, degraded]);
 
   const resolveJob = useCallback(
     (jobId: string): ChainedJobResolution => {
@@ -1029,6 +1056,10 @@ export function useTaskDataValues(
   requests: { taskId: string; keys: string[] }[],
 ): Map<string, Record<string, string>> {
   const [byTask, setByTask] = useState<Map<string, Record<string, string>>>(new Map());
+  // task-24cd55d8a607 — per-key data-bag value resolves are a NON-ESSENTIAL
+  // enrichment wave; defer them while the origin breaker is open. Already-
+  // resolved values stay in state (input cells keep their last-known value).
+  const { degraded } = useOriginHealth();
   // "taskId\0key" pairs we've already resolved (or attempted) — the cache/dedupe
   // key. A ref (not state) since it's bookkeeping, not a render input.
   const fetchedRef = useRef<Set<string>>(new Set());
@@ -1047,6 +1078,7 @@ export function useTaskDataValues(
 
   useEffect(() => {
     let cancelled = false;
+    if (degraded) return; // origin slow — defer data-bag value resolves
     const due: { taskId: string; key: string }[] = [];
     for (const r of requests) {
       for (const k of r.keys) {
@@ -1092,9 +1124,10 @@ export function useTaskDataValues(
     return () => {
       cancelled = true;
     };
-    // reqKey encodes the full content of `requests`; re-run only when it moves.
+    // reqKey encodes the full content of `requests`; re-run when it moves OR
+    // when the origin breaker clears (`degraded`) so deferred resolves resume.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reqKey]);
+  }, [reqKey, degraded]);
 
   return byTask;
 }

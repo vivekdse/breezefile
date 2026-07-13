@@ -811,6 +811,17 @@ const fm = {
     ipcRenderer.on('tasks:sourceError', handler);
     return () => ipcRenderer.off('tasks:sourceError', handler);
   },
+  // task-24cd55d8a607 — TypeBuild origin health (circuit-breaker state). The
+  // renderer reads the initial value once (getter) and subscribes to
+  // transitions so it can show "responding slowly" and defer enrichment waves
+  // during a slow episode without collapsing the cached view.
+  typebuildHealth: () =>
+    ipcRenderer.invoke('typebuild:health') as Promise<{ degraded: boolean }>,
+  onTypebuildHealth: (cb: (e: { degraded: boolean }) => void) => {
+    const handler = (_: unknown, payload: { degraded: boolean }) => cb(payload);
+    ipcRenderer.on('typebuild:health', handler);
+    return () => ipcRenderer.off('typebuild:health', handler);
+  },
   // ─── Task runs (fm-zf3m) ──────────────────────────────────────────
   tasksRunsList: (taskId: string, limit?: number) =>
     ipcRenderer.invoke('tasks:runsList', taskId, limit),

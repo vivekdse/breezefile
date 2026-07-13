@@ -60,7 +60,7 @@ import type { ChainedJobResolution } from './useNewHomeData';
 // path: primaryActionFor (the single source of truth for which primary action a
 // row offers) decides eligibility, and useTaskActions().start (→ runTaskNow) is
 // the same claim-then-launch IPC the old play button fires. No new launch path.
-import { getTask, taskSourceAction, useTasks, useTypebuildReadiness } from '../../tasks';
+import { getTask, taskSourceAction, useOriginHealth, useTasks, useTypebuildReadiness } from '../../tasks';
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { useStartAction } from '../tasks/useStartAction';
@@ -247,8 +247,13 @@ function summarizeOutcome(task: NewHomeTask, detailTask: Task | null | undefined
 function useOutcomeDetails(finishedIds: string[]): Map<string, Task> {
   const idKey = useMemo(() => [...finishedIds].sort().join(','), [finishedIds]);
   const [detailById, setDetailById] = useState<Map<string, Task>>(new Map());
+  // task-24cd55d8a607 — the per-finished-row outcome detail fetch is another
+  // non-essential enrichment wave; defer it while the origin breaker is open
+  // (the summary falls back to the list row). Already-fetched details persist.
+  const { degraded } = useOriginHealth();
   useEffect(() => {
     let cancelled = false;
+    if (degraded) return; // origin slow — defer outcome-detail enrichment
     const ids = idKey ? idKey.split(',') : [];
     const missing = ids.filter((id) => !detailById.has(id));
     if (missing.length === 0) return;
@@ -272,9 +277,10 @@ function useOutcomeDetails(finishedIds: string[]): Map<string, Task> {
     return () => {
       cancelled = true;
     };
-    // idKey encodes the finished-task id set; re-run only when it moves.
+    // idKey encodes the finished-task id set; re-run when it moves OR when the
+    // origin breaker clears so a deferred fetch resumes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idKey]);
+  }, [idKey, degraded]);
   return detailById;
 }
 

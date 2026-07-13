@@ -41,7 +41,7 @@ import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import { fm } from '../../bridge';
-import { getTask } from '../../tasks';
+import { getTask, useOriginHealth } from '../../tasks';
 import type { Project } from '../../types';
 import { ancestorChain, buildProjectTree } from '../../projects/index.mjs';
 import { buildSubprojectSections } from './subprojectSections.mjs';
@@ -238,6 +238,11 @@ export function NewHomePage() {
       cancelled = true;
     };
   }, []);
+  // task-24cd55d8a607 — origin slow-episode state. When the breaker is open we
+  // show a calm "responding slowly" banner AND (in useNewHomeData / the
+  // enrichment hooks) retain cached groups/projects/tasks + defer enrichment,
+  // so the surface degrades to slower, not to the stripped-down empty view.
+  const { degraded: originDegraded } = useOriginHealth();
   const { tasks, counts, projects, groups, loading, refresh, refreshProjects } = useNewHomeData(
     selectedProjectId,
     // task-group-scope-picker — pass the group scope into the data layer so it
@@ -744,6 +749,18 @@ export function NewHomePage() {
 
   return (
     <div className="nh">
+      {/* task-24cd55d8a607 — slow-episode banner. The origin circuit breaker is
+          open (N consecutive timeouts): the roster keeps its CACHED groups /
+          projects / tasks and enrichment waves are paused, so this is a calm
+          status note, not an error — nothing was lost, the server is just slow.
+          It clears itself the moment a request succeeds (breaker closes). */}
+      {originDegraded && (
+        <div className="nh__slow-banner" role="status" aria-live="polite">
+          <span className="nh__slow-banner-dot" aria-hidden="true" />
+          TypeBuild is responding slowly — showing your last-loaded work; details
+          will refresh once it recovers.
+        </div>
+      )}
       <div className="nh__topbar">
         <div className="nh__topbar-left">
           {/* task-group-scope-picker — compact GROUP scope, mirroring the

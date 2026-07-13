@@ -358,6 +358,40 @@
   margin-bottom: var(--sp-3);
 }
 
+/* task-24cd55d8a607 — slow-episode status banner. WARN-toned (not error): the
+   origin is slow but the cached view is intact, so this reassures rather than
+   alarms. Sits above the topbar; clears itself when the breaker closes. */
+.nh__slow-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--nh-needs-soft);
+  border: 1px solid var(--nh-needs);
+  color: var(--nh-needs);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+  margin-bottom: var(--sp-3);
+}
+.nh__slow-banner-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nh-needs);
+  /* A slow, calm pulse so the banner reads as "working on it", not an error. */
+  animation: nh-slow-pulse 1.6s ease-in-out infinite;
+}
+@keyframes nh-slow-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Shared "this is a stub" affordance — every placeholder component (until a
    follow-up task fills it in) renders this small caption so it's obvious in
    the running app which pieces are real vs. scaffolded. */

@@ -390,6 +390,13 @@ type Fm = {
   onTaskSourceError: (
     cb: (e: { source: string; message: string }) => void,
   ) => () => void;
+  // task-24cd55d8a607 — TypeBuild origin health (circuit-breaker state). The
+  // breaker opens after N consecutive origin timeouts; the renderer defers
+  // enrichment waves + shows "responding slowly" while degraded, and RETAINS
+  // cached groups/projects/tasks so a slow episode doesn't strip the view.
+  // PHI-free: a single boolean, no URLs/bodies.
+  typebuildHealth: () => Promise<{ degraded: boolean }>;
+  onTypebuildHealth: (cb: (e: { degraded: boolean }) => void) => () => void;
   // fm-zf3m — task runs
   tasksRunsList: (taskId: string, limit?: number) => Promise<TaskRun[]>;
   tasksRunsListAll: (limit?: number) => Promise<TaskRunWithTitle[]>;

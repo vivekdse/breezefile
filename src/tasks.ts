@@ -558,6 +558,37 @@ export function useTypebuildReadiness(): {
   };
 }
 
+// task-24cd55d8a607 — TypeBuild origin health for slow-episode resilience.
+// `degraded` mirrors the MAIN circuit breaker (typebuild/http.ts): true after N
+// consecutive origin timeouts, back to false on the first success. Callers use
+// it to (a) DEFER the non-essential enrichment waves — per-task audit fetches,
+// per-key data-bag resolves, chained-child detail refetch — so only the core
+// list poll + user actions keep hitting a slow server, and (b) show a calm
+// "responding slowly" banner instead of the stripped-down empty view. Reads the
+// current value once on mount, then tracks transitions via the broadcast.
+export function useOriginHealth(): { degraded: boolean } {
+  const [degraded, setDegraded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void fm
+      .typebuildHealth()
+      .then((h) => {
+        if (!cancelled) setDegraded(!!h.degraded);
+      })
+      .catch(() => {
+        /* best-effort; default to healthy */
+      });
+    const off = fm.onTypebuildHealth((h) => {
+      if (!cancelled) setDegraded(!!h.degraded);
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+  return { degraded };
+}
+
 // fm-zf3m — runs API + hooks for the renderer.
 // fm-v0rc (Phase B4): return the source's run result instead of void. The
 // local source returns { run, result }; TypeBuild's Start returns a
