@@ -4187,20 +4187,32 @@ export class TypeBuildTaskSource implements TaskSource {
     // launchSession, so by the time we open the splash the claim already
     // succeeded (a contested claim never reaches here). The remaining in-session
     // failure modes (mint error, no hostable window) throw below — the catch
-    // closes the splash while it is still pty-less (closeSessionStartingSplash is
-    // guarded on operatorPtyId == null) so a failed launch never leaves a window
-    // spinning; the renderer surfaces the typed reason on the row.
+    // flips the still-pty-less window to the FAILED-LAUNCH card
+    // (failSessionStartingSplash, guarded on operatorPtyId == null) so a failed
+    // launch never leaves a window spinning OR silently vanishing; the renderer
+    // still surfaces the typed reason on the row.
     // QA 2026-07-12 — EVERY task launch is operator-hosted now (see
     // hostInOperator in launchSessionInner's runTaskInteractive call), so the
     // optimistic splash pops for every Start, not just browser-flagged tasks.
-    const { openSessionStartingSplash, closeSessionStartingSplash } = await import(
+    const { openSessionStartingSplash, failSessionStartingSplash } = await import(
       '../browser/window'
     );
     openSessionStartingSplash();
     try {
       return await this.launchSessionInner(id, opts);
     } catch (err) {
-      closeSessionStartingSplash();
+      // QA 2026-07-13 — a pre-pty failure used to CLOSE the splash window,
+      // which read as "the operator crashed" while the reason hid on the
+      // roster row. Flip the window to the error card instead and rethrow so
+      // the row still gets its typed error. NON-PHI: humanized machine reason
+      // only, never task content.
+      const raw = err instanceof Error ? err.message : String(err);
+      const human = raw.includes('typebuild-mint:unreachable')
+        ? 'TypeBuild is not responding right now (the session token could not be minted, even after a retry).'
+        : raw.includes('typebuild-mint:')
+          ? 'TypeBuild declined to start a session — sign in again from Settings if this persists.'
+          : 'The session could not be launched.';
+      failSessionStartingSplash(human);
       throw err;
     }
   }
@@ -4345,7 +4357,18 @@ export class TypeBuildTaskSource implements TaskSource {
     timing(tflow, 'wave1 dispatch');
     const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail, connectionPlan] =
       await Promise.all([
-        probe('mint', mintMcpToken()),
+        // QA 2026-07-13 — one bounded retry on a transient 'unreachable' mint
+        // (the server has episodes of multi-second stalls; a single 8s-timeout
+        // strike used to fail the whole Start). Only the unreachable code
+        // retries — an auth/permission rejection is deterministic and retrying
+        // it would just delay the real error.
+        probe('mint', mintMcpToken().catch(async (e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!msg.includes('typebuild-mint:unreachable')) throw e;
+          timing(tflow, 'mint unreachable — retrying once in 2.5s');
+          await new Promise((r) => setTimeout(r, 2500));
+          return mintMcpToken();
+        })),
         probe('operator-instructions', fetchOperatorInstructions('global')
           .then((oi) => oi.body.trim())
           .catch(() => '')),

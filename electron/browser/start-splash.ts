@@ -86,16 +86,23 @@ const SPLASH_SENTINEL = 'breeze-operator-splash';
 // without ever issuing a real `goto` (see markSessionEnded in window.ts).
 // Same palette/layout as the starting card so the swap reads as a state
 // change, not a different screen.
-function splashHtml(theme: SplashTheme, done = false): string {
+//
+// QA 2026-07-13 — `errorMessage` renders the FAILED-LAUNCH variant: with
+// operator-always hosting the splash window pops for every Start, so a launch
+// that dies pre-pty (token mint timeout) used to CLOSE the window — which read
+// as "the operator crashed" — while the real reason hid on the roster row.
+// The window now flips to this card and stays up. `errorMessage` must be
+// NON-PHI (a humanized machine reason, never task content).
+function splashHtml(theme: SplashTheme, done = false, errorMessage = ''): string {
   const p = PALETTES[theme];
   // Fonts mirror tokens.css --font-serif / --font-sans heads, degrading to
   // system fonts (the page view has no access to the bundled webfonts).
   return `<!doctype html>
-<html lang="en" data-theme="${theme}" class="${SPLASH_SENTINEL}${done ? ' breeze-operator-splash--done' : ''}">
+<html lang="en" data-theme="${theme}" class="${SPLASH_SENTINEL}${done ? ' breeze-operator-splash--done' : ''}${errorMessage ? ' breeze-operator-splash--error' : ''}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${done ? 'Task finished' : 'Starting your task…'}</title>
+<title>${errorMessage ? 'Task didn’t start' : done ? 'Task finished' : 'Starting your task…'}</title>
 <style>
   :root {
     --panel: ${p.panel};
@@ -207,13 +214,18 @@ function splashHtml(theme: SplashTheme, done = false): string {
 </style>
 </head>
 <body>
-  <main class="card" role="status" aria-live="polite">
+  <main class="card" role="${errorMessage ? 'alert' : 'status'}" aria-live="polite">
     ${
-      done
-        ? `<div class="check" aria-hidden="true">&#10003;</div>
+      errorMessage
+        ? `<div class="check" aria-hidden="true" style="background:color-mix(in srgb,#c0392b 16%,transparent);color:#c0392b">&#9888;</div>
+    <h1 class="title">The task didn&#8217;t start</h1>
+    <p class="sub">${escapeSplashText(errorMessage)}</p>
+    <p class="sub">Nothing was lost &#8212; the task went back to Queued. Close this window and press &#9654; Run to try again.</p>`
+        : done
+          ? `<div class="check" aria-hidden="true">&#10003;</div>
     <h1 class="title">Task finished</h1>
     <p class="sub">This session didn't use the browser.</p>`
-        : `<div class="ring"><div class="spinner"></div></div>
+          : `<div class="ring"><div class="spinner"></div></div>
     <h1 class="title">Starting your task<span class="dots"></span></h1>
     <p class="sub">Setting up the browser. This will begin in just a moment.</p>`
     }
@@ -230,6 +242,23 @@ export function splashDataUrl(theme: string | undefined, done = false): string {
   const resolved = resolveSplashTheme(theme);
   // encodeURIComponent keeps the data URL valid (the HTML has #, quotes, etc.).
   return `data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(resolved, done))}`;
+}
+
+// Minimal HTML-escape for the error message interpolated into the splash —
+// the message is a client-built, NON-PHI sentence, but escaping keeps the
+// data-URL document inert regardless of what a future caller passes.
+function escapeSplashText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** The FAILED-LAUNCH splash (QA 2026-07-13): shown in place of tearing the
+ *  optimistic starting window down when a Start dies before a pty attached —
+ *  the vanish read as "the operator crashed" and hid the reason. Carries the
+ *  same sentinel, so a subsequent Start's openSessionStartingSplash refreshes
+ *  it straight back to the live "starting" card. `message` must be NON-PHI. */
+export function errorSplashDataUrl(theme: string | undefined, message: string): string {
+  const resolved = resolveSplashTheme(theme);
+  return `data:text/html;charset=utf-8,${encodeURIComponent(splashHtml(resolved, false, message))}`;
 }
 
 // The meaningless placeholder the browser surface USED to land on before the

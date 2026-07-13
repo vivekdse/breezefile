@@ -31,6 +31,7 @@ import { createBrowserView, getBrowserView, destroyBrowserView } from './views';
 // navigation (task-3a49fb5adf24) — replaces the old example.com placeholder.
 import {
   splashDataUrl,
+  errorSplashDataUrl,
   isSplashUrl,
   resolveStartUrl,
   SPLASH_DEFAULT_THEME,
@@ -277,6 +278,30 @@ export function closeSessionStartingSplash(): void {
   if (!win) return;
   if (operatorPtyId != null) return;
   win.close();
+}
+
+// QA 2026-07-13 — the failed-launch counterpart: with operator-always hosting
+// the splash pops for EVERY Start, so tearing it down on a pre-pty launch
+// failure (mint timeout, no hostable window) read as "the operator crashed"
+// and the reason hid on the roster row. Instead, flip the still-splash-only
+// window to the error card and LEAVE IT UP — same guard as close (never
+// touches a window already hosting a session), and the error card carries the
+// splash sentinel so the next Start's openSessionStartingSplash refreshes it
+// back to the live "starting" card. `message` must be NON-PHI (humanized
+// machine reason, never task content).
+export function failSessionStartingSplash(message: string): void {
+  const win = getBrowserWindow();
+  if (!win) return;
+  if (operatorPtyId != null) return;
+  const wc = (operatorViewId != null ? getBrowserView(operatorViewId) : null)?.webContents;
+  if (!wc || wc.isDestroyed()) {
+    win.close();
+    return;
+  }
+  const fresh = errorSplashDataUrl(splashTheme, message);
+  pendingUrl = fresh;
+  void wc.loadURL(fresh);
+  win.focus();
 }
 
 // Load (or reload) the operator React chrome with the `#operator=<ptyId>&view=<id>`
