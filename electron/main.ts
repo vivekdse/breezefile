@@ -13,6 +13,7 @@ import { setBreezeHost } from './core/host';
 import { ElectronBreezeHost } from './core/electron-host';
 import { setTaskNotifyVerbosity } from './core/notify-settings.mjs';
 import { profileName, cdpPort } from './core/profile.mjs';
+import { cleanChromeUserAgent } from './browser/user-agent';
 // fm-m7q / task-1bf3ce50575a — native menu derives its verb rows from the SAME
 // build-safe metadata module the renderer registry uses. Pure data (no React),
 // so the electron-main Rollup build can bundle it.
@@ -347,6 +348,14 @@ function createWindow() {
 
 app.whenReady().then(() => {
   mark('whenReady:enter');
+  // Global clean-Chrome UA fallback. Electron's default UA carries
+  // `TypeBuild/<ver>` and `Electron/<ver>` tokens that no real Chrome emits;
+  // aggressive WAFs (Akamai/Imperva-class, seen on Cigna's login proxy)
+  // deny-list on those. Strip them so every view that doesn't set its own UA
+  // still presents as stock Chrome. Per-view override in
+  // electron/browser/views.ts is the primary defense; this is the backstop.
+  // Derived from the live UA so the Chrome version stays accurate on upgrade.
+  app.userAgentFallback = cleanChromeUserAgent(app.userAgentFallback);
   // asset:///<absolute-path> → stream the file from disk. We delegate to
   // Electron's `net.fetch` with a file:// URL so we get proper range-request
   // and streaming semantics for large media, then patch Content-Type.

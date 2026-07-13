@@ -19,6 +19,7 @@ import { currentRecording as currentBrowserRecording } from './record.ts';
 import { wireCredentialCapture } from './credential-capture';
 import { resolveStartUrl, resolveGeneralStartUrl } from './start-splash';
 import { recordVisit } from './history-store';
+import { cleanChromeUserAgent } from './user-agent';
 
 // This chunk is bundled into dist-electron/ (same dir as the built preloads),
 // so record-preload.mjs resolves here exactly as it does from ipc.ts/window.ts.
@@ -93,6 +94,15 @@ export function createBrowserView(
   view.setVisible(false);
   win.contentView.addChildView(view);
   const wc = view.webContents;
+  // Present a clean Chrome UA on the agent-driven browser view. Electron's
+  // default UA self-identifies as a non-browser runtime (`TypeBuild/<ver>`,
+  // `Electron/<ver>`), which WAFs (Akamai/Imperva-class — observed rejecting
+  // Cigna's login proxy) deny-list. The deep fingerprint is already clean; this
+  // string was the leak. Set BEFORE the first loadURL below so the very first
+  // request goes out clean. Chromium derives Sec-CH-UA client hints from this
+  // UA, so stripping the tokens fixes the hints too. Backstopped by the global
+  // app.userAgentFallback in electron/main.ts.
+  wc.setUserAgent(cleanChromeUserAgent(wc.getUserAgent()));
   const emit = () => {
     if (win.webContents.isDestroyed()) return;
     win.webContents.send('browser:state', {
