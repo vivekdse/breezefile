@@ -4353,9 +4353,16 @@ export class TypeBuildTaskSource implements TaskSource {
     // nothing and proceeds exactly as before this feature existed.
     const { resolveConnectionMountPlan } = await import('../typebuild/connection-mount');
     const launchProjectId = this.cache.get(id)?.projectId ?? null;
+    // The operator's startup prompt runs `/typebuild:typebuild-work`, a PLUGIN
+    // skill not shipped in the client. Ensure it's installed + current at user
+    // scope (server-hosted, fetched from taskapi — see plugin-bootstrap.ts /
+    // task-a65d87c82650) BEFORE the operator spawns. Memoized so only the first
+    // launch of the session pays the cost; best-effort so failure never blocks
+    // the launch (the leg resolves to a status we only log).
+    const { ensureTypebuildPlugin } = await import('../typebuild/plugin-bootstrap');
 
     timing(tflow, 'wave1 dispatch');
-    const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail, connectionPlan] =
+    const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail, connectionPlan, pluginBoot] =
       await Promise.all([
         // QA 2026-07-13 — one bounded retry on a transient 'unreachable' mint
         // (the server has episodes of multi-second stalls; a single 8s-timeout
@@ -4388,8 +4395,10 @@ export class TypeBuildTaskSource implements TaskSource {
             rest: [],
           })),
         ),
+        probe('plugin', ensureTypebuildPlugin()),
       ]);
     timing(tflow, 'wave1 all settled');
+    timing(tflow, `typebuild-work plugin: ${pluginBoot.status} (v${pluginBoot.version ?? '?'})`);
     const runCwd = projectCtx.cwd ?? tasksCwd;
 
     // Pre-claimed Start (fm-v0rc): we already hold the claim over REST, so the
