@@ -349,11 +349,11 @@ export function buildTaskWorkBundle(
   // — otherwise it opens with a redundant get_task (the exact waste this fixes).
   parts.push(
     task.preclaimed
-      ? `Run the TypeBuild work loop (the typebuild-work skill) for task ${task.id} NOW.` +
+      ? `Run /typebuild:typebuild-work for task ${task.id} NOW.` +
           ' It is already claimed by me — do NOT claim it again (claim_task/claim_next_task)' +
           ' and do NOT call get_task; the full body, inputs and required outputs are all' +
           ` below. When finished, call submit_task / submit_task_result with task id ${task.id}.`
-      : `Run the TypeBuild work loop (the typebuild-work skill) for task ${task.id} NOW.` +
+      : `Run /typebuild:typebuild-work for task ${task.id} NOW.` +
           ' Claim it (claim_task) first, then work it using the context below — you do NOT' +
           ' need get_task; the full body, inputs and required outputs are all below.' +
           ` When finished, call submit_task / submit_task_result with task id ${task.id}.`,
