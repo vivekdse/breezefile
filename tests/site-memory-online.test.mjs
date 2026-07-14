@@ -118,6 +118,11 @@ test('site get → online recall maps server notes to entries', async () => {
   assert.equal(r.entries.length, 1);
   assert.equal(r.entries[0].text, 'h1 is a.story');
   assert.ok(r.entries[0].id, 'entry carries the note id for later delete');
+  assert.equal(
+    r.covers,
+    'recall_site',
+    'site get advertises the MCP tool it already covers (no double lookup)',
+  );
 });
 
 test('task scope → online POST/GET round-trips via task_tag (task-f2639aa68585)', async () => {
@@ -132,6 +137,7 @@ test('task scope → online POST/GET round-trips via task_tag (task-f2639aa68585
 
   const g = await mem.getMemoryOnline('task', 'task-xyz');
   assert.equal(g.online, true);
+  assert.equal(g.covers, 'recall_task', 'task get covers the recall_task MCP tool');
   assert.equal(g.entries.length, 1, 'recall by task_tag finds only this task bucket');
   assert.equal(g.entries[0].text, 'click queue tab first');
   assert.ok(g.entries[0].id, 'entry carries the note id for later delete');

@@ -229,13 +229,27 @@ function cacheEntries(scope, key, entries) {
   }
 }
 
+/** The TypeBuild MCP tool that reads the SAME shared bucket this scope keys into.
+ *  `site` ⇄ recall_site (keyed by domain); `task` ⇄ recall_task (keyed by
+ *  task_tag). Both this CLI path and that MCP tool resolve to the one
+ *  server-canonical /chromeext/site-memory store — so one lookup covers both.
+ *  Surfaced on the `get` result as `covers` so the agent does NOT ALSO call the
+ *  MCP tool for the same key (task-28c6c1d085f9: kill the double lookup). */
+function coveredMcpTool(scope) {
+  return scope === 'task' ? 'recall_task' : 'recall_site';
+}
+
 /** Read a scope/key's notes ONLINE (with local-cache fallback when Breeze isn't
  *  running). Both scopes round-trip: `site` by ?domain=, `task` by ?task_tag=.
- *  Returns { scope, key, entries, online }. */
+ *  This CLI path and the TypeBuild MCP recall_site/recall_task tool read the SAME
+ *  shared store, so the result carries `covers` naming the MCP tool this one call
+ *  already satisfies — the agent must not double-query it.
+ *  Returns { scope, key, entries, online, covers }. */
 export async function getMemoryOnline(scope, key) {
   const k = safeKey(scope, key);
   const okey = onlineKey(scope, key);
   const param = scope === 'task' ? 'task_tag' : 'domain';
+  const covers = coveredMcpTool(scope);
   try {
     const data = await callMain(
       'GET',
@@ -243,9 +257,9 @@ export async function getMemoryOnline(scope, key) {
     );
     const entries = Array.isArray(data.notes) ? data.notes.map(noteToEntry) : [];
     cacheEntries(scope, key, entries);
-    return { scope, key: data[param] || k, entries, online: !data.offline };
+    return { scope, key: data[param] || k, entries, online: !data.offline, covers };
   } catch (e) {
-    if (e.offline) return { ...getMemory(scope, key), online: false };
+    if (e.offline) return { ...getMemory(scope, key), online: false, covers };
     throw e;
   }
 }
