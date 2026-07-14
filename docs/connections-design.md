@@ -732,7 +732,13 @@ Advanced disclosure. Wire layer: `electron/sources/typebuild.ts`
 
 The server shipped a third auth mode beyond J.1's two:
 `auth: 'first_party_mcp'` — a **first-party TypeBuild service** (first
-instances: the Scheduler tiles pointing at `scheduling.typebuild.com`).
+instances: the Scheduler tiles pointing at `scheduling.typebuild.com`,
+and — confirmed live 2026-07-14 — the Composio-backed connectors catalog
+at `connectors.typebuild.com/mcp`, exposing `list_catalog`/
+`list_connections`/`connect`/`poll`/`disconnect`/`list_actions`/
+`describe_action`/`execute`/`call` for third-party services like Gmail
+and Google Drive, each user authorizing their own account per J.1's
+`auth:'oauth'` semantics one layer down inside that server).
 Semantics:
 
 - **Always `connected`** for every caller: no OAuth dance, no broker, no

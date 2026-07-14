@@ -2404,9 +2404,11 @@ export class TypeBuildTaskSource implements TaskSource {
   // ─── connection catalog (docs/connections-design.md §J) ──────────────────
   // Admin-curated "available connections" (Okta model): an admin provisions
   // entries centrally; the end user sees tiles and clicks Connect → OAuth in
-  // the system browser. The four routes below are NOT deployed yet, so each
-  // degrades exactly like the connection methods above (list → [], mutations →
-  // a structured { ok:false, reason }). NON-PHI: only service metadata crosses.
+  // the system browser. Deployed 2026-07-14 (confirmed live: the
+  // connectors.typebuild.com/mcp first_party_mcp entry, §J.5). Each method
+  // still degrades exactly like the connection methods above (list → [],
+  // mutations → a structured { ok:false, reason }) for any environment where
+  // the catalog isn't reachable. NON-PHI: only service metadata crosses.
 
   // GET /chromeext/connections/catalog → { catalog: [...] }. `status` is
   // per-caller. 404/network → [] (the panel shows a quiet "nothing provisioned"
