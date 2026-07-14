@@ -36,7 +36,7 @@ const { code } = esbuild.transformSync(source, { loader: 'ts', format: 'esm', ta
 
 const tmpFile = path.join(tmpdir(), `task-work-bundle.${process.pid}.${Date.now()}.mjs`);
 writeFileSync(tmpFile, code);
-const { buildTaskWorkBundle } = await import(pathToFileURL(tmpFile).href);
+const { buildTaskWorkBundle, buildTaskReentryBundle } = await import(pathToFileURL(tmpFile).href);
 rmSync(tmpFile, { force: true });
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -135,6 +135,62 @@ test('buildTaskWorkBundle: malformed/unknown-shaped skills entries are skipped, 
   const out = buildTaskWorkBundle(withJunk, FIXTURE_VALUES);
   assert.doesNotMatch(out, /undefined/);
   assert.match(out, /A plain-string skill note/);
+});
+
+// ── task-reenter: the RE-ENTRY bundle (review a finished task) ──────────────
+
+const REENTRY_CTX = {
+  status: 'partial',
+  result: {
+    type: 'fields',
+    payload: { confirmation_number: 'CPT-30140-OK', notes: 'no auth needed for this CPT' },
+  },
+  messages: [
+    { text: 'Claimed and logged into the payer portal.', by: 'agent-smith', at: '2026-07-13T10:00:00Z' },
+    { text: 'Confirmed CPT 30140 needs no prior auth; saved the screenshot.', by: 'agent-smith', at: '2026-07-13T10:05:00Z' },
+    { text: 'Great — can you also grab the fax cover?', by: 'vivekdse@gmail.com', at: '2026-07-13T10:06:00Z' },
+  ],
+  agentName: 'agent-smith',
+};
+
+test('buildTaskReentryBundle: framing says RE-ENTERING, status, and do-not-restart', () => {
+  const out = buildTaskReentryBundle(FIXTURE_TASK, REENTRY_CTX, FIXTURE_VALUES);
+  const firstLine = out.split('\n')[0];
+  assert.match(firstLine, /RE-ENTERING/);
+  assert.match(firstLine, /task-fixture-0001/);
+  assert.match(firstLine, /PARTIAL/);
+  assert.match(firstLine, /Do NOT restart/i);
+  assert.match(firstLine, /WAIT for the human/);
+});
+
+test('buildTaskReentryBundle: prior result payload is included', () => {
+  const out = buildTaskReentryBundle(FIXTURE_TASK, REENTRY_CTX, FIXTURE_VALUES);
+  assert.match(out, /Result submitted so far/);
+  assert.match(out, /confirmation_number: CPT-30140-OK/);
+  assert.match(out, /notes: no auth needed for this CPT/);
+});
+
+test('buildTaskReentryBundle: full conversation thread is included, agent turns labelled', () => {
+  const out = buildTaskReentryBundle(FIXTURE_TASK, REENTRY_CTX, FIXTURE_VALUES);
+  assert.match(out, /Conversation so far/);
+  assert.match(out, /Claimed and logged into the payer portal/);
+  assert.match(out, /agent-smith \(agent\)/);
+  assert.match(out, /vivekdse@gmail.com: Great/);
+});
+
+test('buildTaskReentryBundle: still carries title, body, inputs, and required outputs (for editing)', () => {
+  const out = buildTaskReentryBundle(FIXTURE_TASK, REENTRY_CTX, FIXTURE_VALUES);
+  assert.match(out, /# Submit prior-auth for patient X/);
+  assert.match(out, /patient\.member_id: MBR-999-SECRET/);
+  assert.match(out, /Required task outputs \(evidence\)/);
+});
+
+test('buildTaskReentryBundle: empty result + empty thread degrade cleanly (no headers)', () => {
+  const out = buildTaskReentryBundle(FIXTURE_TASK, { status: 'done' }, FIXTURE_VALUES);
+  assert.match(out, /RE-ENTERING/);
+  assert.doesNotMatch(out, /Result submitted so far/);
+  assert.doesNotMatch(out, /Conversation so far/);
+  assert.doesNotMatch(out, /undefined/);
 });
 
 // ── PHI/leak-surface assertions (the load-bearing constraint) ───────────────

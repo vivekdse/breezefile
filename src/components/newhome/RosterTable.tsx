@@ -467,7 +467,7 @@ function RowAction({
   /** When non-null, this row is start-eligible per primaryActionFor (the OLD
    *  Tasks page's state machine). `enabled` gates on TypeBuild readiness;
    *  `tooltip` is the same hover text the old play button shows. */
-  startEligible: { enabled: boolean; tooltip?: string } | null;
+  startEligible: { enabled: boolean; tooltip?: string; reentry?: boolean } | null;
   /** task-4f1e8f45bf0e — a DONE, non-chain, childless single task carrying a
    *  fielded result: "View →" opens the task-detail drawer (which defaults a
    *  done task to its Activity/Outputs read view). */
@@ -542,7 +542,7 @@ function RowAction({
             onStart(task.id);
           }}
         >
-          {pending ? 'Starting…' : '▶ Start'}
+          {pending ? 'Starting…' : startEligible.reentry ? '▶ Open operator' : '▶ Start'}
         </button>
         {error && <span className="nh-roster__action-error" role="alert" title={error}>{`⚠ ${error}`}</span>}
       </span>
@@ -667,7 +667,7 @@ export function RosterTable({
   const [matrixParentId, setMatrixParentId] = useState<string | null>(null);
   const startActionFor = (
     t: NewHomeTask,
-  ): { enabled: boolean; tooltip?: string } | null => {
+  ): { enabled: boolean; tooltip?: string; reentry?: boolean } | null => {
     const pa = primaryActionFor(t.raw, {
       caps: actions.caps(t.raw),
       tbReady,
@@ -675,7 +675,9 @@ export function RosterTable({
       session: sessions.get(t.id),
       hasOpenChildren: openChildParentIds.has(t.id),
     });
-    return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
+    return pa.kind === 'start'
+      ? { enabled: pa.enabled, tooltip: pa.tooltip, reentry: pa.reentry }
+      : null;
   };
 
   // task-f26e7745eda6 — def id → the runnable child's LIVE server status, so

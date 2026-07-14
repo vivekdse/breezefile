@@ -106,10 +106,23 @@ export function primaryActionFor(task, ctx) {
   // ── TypeBuild ─────────────────────────────────────────────────────────
   if (isTypebuild) {
     if (isTerminal(task)) {
-      // In DONE. Reopen-from-done/partial/cancelled/failed is a kebab/detail
-      // action now (PATCH {status:'open'}), not the row's primary — keep the
-      // primary `none` so the row stays calm in the collapsed DONE section.
-      return { kind: 'none' };
+      // task-reenter — LAUNCH-FIRST re-entry. A done/partial/cancelled task
+      // KEEPS its play button so the human can re-open the operator at ANY
+      // time — to see what happened, ask what was done, or have the agent edit
+      // the result. runNow is launch-first: claiming a terminal task fails for
+      // state reasons, so it launches the operator UNCLAIMED and hands the
+      // agent the reason to resolve. The task's terminal status is NOT
+      // disturbed unless the agent reopens it. `reentry` lets the button label
+      // read "Open operator" instead of "Start". Reopen (PATCH {status:'open'})
+      // remains a separate kebab/detail action for actually re-activating it.
+      const reason = startBlockedReason(ctx && ctx.tbReady);
+      return {
+        kind: 'start',
+        reentry: true,
+        enabled: reason === null,
+        tooltip:
+          reason ?? 'Open the operator — inspect, ask, or edit the result',
+      };
     }
     // task-457dd1cc6c8b — a blocked TypeBuild task can't be relaunched by a
     // plain reopen: the server needs reopen → claim → launch in sequence, and

@@ -418,7 +418,9 @@ export function TaskDetailDialog({
       session,
       hasOpenChildren,
     });
-    return pa.kind === 'start' ? { enabled: pa.enabled, tooltip: pa.tooltip } : null;
+    return pa.kind === 'start'
+      ? { enabled: pa.enabled, tooltip: pa.tooltip, reentry: pa.reentry }
+      : null;
   }, [raw, actions, tbReady, session, hasOpenChildren]);
 
   // ── task-templates: this task's own output DEFINITIONS + submitted VALUES ─
@@ -1010,7 +1012,7 @@ export function TaskDetailDialog({
               title={startAction.tooltip}
               onClick={startTask}
             >
-              {'▶ Start'}
+              {startAction.reentry ? '▶ Open operator' : '▶ Start'}
             </button>
           )}
           {status === 'needs' && pendingQuestion ? (

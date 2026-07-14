@@ -4439,11 +4439,26 @@ export class TypeBuildTaskSource implements TaskSource {
     // --append-system-prompt strings above. They live in this function's stack
     // only, on the way into runTaskInteractive's workBundle option, which
     // writes them straight into the pty's stdin fd.
+    // task-reenter — a launch against a task that is ALREADY terminal
+    // (done/partial/cancelled) is a RE-ENTRY: the human opened the operator to
+    // review/ask/edit, not to re-run. Detected from the freshly-fetched detail
+    // so it needs no new flag threaded from the UI. Drives a review-framed
+    // bundle (result + full conversation) instead of the "claim and work" one.
+    const reentry =
+      !!detail &&
+      (detail.status === 'done' ||
+        detail.status === 'cancelled' ||
+        detail.rawStatus === 'done' ||
+        detail.rawStatus === 'partial' ||
+        detail.rawStatus === 'cancelled');
+
     let workBundle = '';
     if (!opts.resume && detail) {
       try {
         const { resolveTaskDataRef } = await import('../typebuild/task-data');
-        const { buildTaskWorkBundle } = await import('../typebuild/task-work-bundle');
+        const { buildTaskWorkBundle, buildTaskReentryBundle } = await import(
+          '../typebuild/task-work-bundle'
+        );
         {
           const dataKeys = detail.dataKeys ?? [];
           // task-aaa1bf931e32 — BATCH the per-key PHI value resolves. There is no
@@ -4470,19 +4485,28 @@ export class TypeBuildTaskSource implements TaskSource {
             (r): r is { key: string; value: string } => r !== null,
           );
           const rawSkills = (detail as unknown as { skills?: unknown }).skills;
-          workBundle = buildTaskWorkBundle(
-            {
-              id,
-              title: detail.title,
-              body: detail.notes ?? null,
-              dataKeys,
-              outputSchema: detail.outputSchema,
-              projectInstructions: projectCtx.instructions,
-              skills: rawSkills,
-              preclaimed: opts.preclaimed,
-            },
-            resolvedInputs,
-          );
+          const bundleTask = {
+            id,
+            title: detail.title,
+            body: detail.notes ?? null,
+            dataKeys,
+            outputSchema: detail.outputSchema,
+            projectInstructions: projectCtx.instructions,
+            skills: rawSkills,
+            preclaimed: opts.preclaimed,
+          };
+          workBundle = reentry
+            ? buildTaskReentryBundle(
+                bundleTask,
+                {
+                  status: detail.rawStatus ?? detail.status,
+                  result: detail.result,
+                  messages: detail.messages,
+                  agentName: detail.agent?.name ?? null,
+                },
+                resolvedInputs,
+              )
+            : buildTaskWorkBundle(bundleTask, resolvedInputs);
         }
       } catch {
         /* best-effort — the /work-claim prompt fallback still runs the task */

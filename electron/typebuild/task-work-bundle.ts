@@ -173,6 +173,155 @@ function renderInputsSection(
   return lines.join('\n');
 }
 
+/** task-reenter — one message of the task's message THREAD. Same wire shape as
+ *  SourcedTask.messages (electron/sources/typebuild-wire mapMessages). `text`
+ *  is decrypted PHI; `by` is an email principal or the agent's name; `at` is an
+ *  ISO timestamp. */
+export interface BundleMessage {
+  text: string;
+  by: string;
+  at: string;
+}
+
+/** task-reenter — the extra, already-done context a RE-ENTRY into a finished
+ *  (done/partial/cancelled) task carries beyond the plain work bundle: the
+ *  task's terminal status, the result submitted so far, and the full user-
+ *  facing conversation. All PHI-in-memory-only, same channel as the body. */
+export interface ReentryContext {
+  /** The task's terminal status word (done | partial | cancelled). */
+  status?: string | null;
+  /** The structured result submitted so far (submit_task_result). */
+  result?: { type?: unknown; payload?: unknown } | null;
+  /** The user-facing message thread, oldest-first. */
+  messages?: BundleMessage[];
+  /** The resolved agent's display name, so the thread can label who spoke. */
+  agentName?: string | null;
+}
+
+/** Render the "result submitted so far" section from a structured result.
+ *  Best-effort across the known result shapes ({type:'fields'|'table'|'text'});
+ *  anything else falls back to pretty JSON so the agent always sees SOMETHING.
+ *  PHI: payload values may be patient data — stays on the stdin channel only. */
+function renderResultSection(result: ReentryContext['result']): string {
+  if (!result || typeof result !== 'object') return '';
+  const { type, payload } = result as { type?: unknown; payload?: unknown };
+  const lines = ['# Result submitted so far', ''];
+  if (type === 'fields' && payload && typeof payload === 'object') {
+    for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
+      lines.push(`  - ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+    }
+  } else if (type === 'table' && Array.isArray(payload)) {
+    for (const row of payload as unknown[]) {
+      lines.push(`  - ${typeof row === 'string' ? row : JSON.stringify(row)}`);
+    }
+  } else if (type === 'text' && isNonEmptyString(payload)) {
+    lines.push(payload.trim());
+  } else if (payload !== undefined && payload !== null) {
+    lines.push('```json', JSON.stringify(payload, null, 2), '```');
+  } else {
+    return '';
+  }
+  return lines.join('\n');
+}
+
+/** Render the conversation thread (oldest-first) so the re-entering agent sees
+ *  exactly what was said/done. Each line is `at — by: text`; the agent's own
+ *  turns are marked so it can tell its prior voice from the human's. */
+function renderConversationSection(
+  messages: BundleMessage[] | undefined,
+  agentName: string | null | undefined,
+): string {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+  const lines = ['# Conversation so far (oldest first)', ''];
+  for (const m of messages) {
+    if (!isNonEmptyString(m?.text)) continue;
+    const who = agentName && m.by === agentName ? `${m.by} (agent)` : m.by || 'user';
+    const at = isNonEmptyString(m.at) ? m.at : '';
+    lines.push(at ? `  - [${at}] ${who}: ${m.text.trim()}` : `  - ${who}: ${m.text.trim()}`);
+  }
+  // Only the header + at least one real turn is worth emitting.
+  return lines.length > 2 ? lines.join('\n') : '';
+}
+
+/** task-reenter — assemble the first-turn message for RE-ENTERING a finished
+ *  task. Unlike buildTaskWorkBundle (which tells the agent to claim and DO the
+ *  work), this frames the session as a review/continue: the task is already
+ *  done/partial/cancelled, here is everything that happened, recap it in one
+ *  line and WAIT for the human — do not restart or re-claim. The human opened
+ *  the operator to inspect, ask, or edit the result.
+ *
+ *  PHI DISCIPLINE: identical to buildTaskWorkBundle — the returned text (body,
+ *  input values, result payload, message text) is injected over the pty's
+ *  stdin ONLY, never argv/disk/--append-system-prompt. */
+export function buildTaskReentryBundle(
+  task: TaskWorkBundleInput,
+  ctx: ReentryContext,
+  resolvedInputs: ResolvedInput[] = [],
+): string {
+  const parts: string[] = [];
+  const statusWord = isNonEmptyString(ctx.status) ? ctx.status.trim() : 'finished';
+
+  parts.push(
+    `You are RE-ENTERING task ${task.id}, which is already ${statusWord.toUpperCase()}. ` +
+      'The human opened the operator to review, ask about, or edit this task — NOT to run it again. ' +
+      'Do NOT restart the work loop, do NOT re-claim it, and do NOT call get_task; ' +
+      'the full body, everything submitted so far, and the entire conversation are below. ' +
+      'Open with a ONE-LINE recap of what was accomplished and what (if anything) is outstanding, ' +
+      'then WAIT for the human. ' +
+      `If they ask you to change or add an output, call submit_task_result with task id ${task.id}; ` +
+      `to re-activate a done/cancelled task first update_task(${task.id}, status="open") and claim_task(${task.id}). ` +
+      'Otherwise just answer from the context below.',
+  );
+
+  parts.push('');
+  parts.push(`# ${task.title}`);
+  const body = (task.body ?? '').trim();
+  if (body) {
+    parts.push('');
+    parts.push(body);
+  }
+
+  const inputsSection = renderInputsSection(task.dataKeys, resolvedInputs);
+  if (inputsSection) {
+    parts.push('');
+    parts.push(inputsSection);
+  }
+
+  const resultSection = renderResultSection(ctx.result);
+  if (resultSection) {
+    parts.push('');
+    parts.push(resultSection);
+  }
+
+  const conversationSection = renderConversationSection(ctx.messages, ctx.agentName);
+  if (conversationSection) {
+    parts.push('');
+    parts.push(conversationSection);
+  }
+
+  const outputsSection = renderOutputSchemaSection(task.outputSchema);
+  if (outputsSection) {
+    parts.push('');
+    parts.push(outputsSection);
+  }
+
+  const instructions = (task.projectInstructions ?? '').trim();
+  if (instructions) {
+    parts.push('');
+    parts.push('# Project instructions');
+    parts.push('');
+    parts.push(instructions);
+  }
+
+  const skillsSection = renderSkillsSection(task.skills);
+  if (skillsSection) {
+    parts.push('');
+    parts.push(skillsSection);
+  }
+
+  return parts.join('\n');
+}
+
 /** Assemble the ONE pre-fetched, PHI-bearing first message for an interactive
  *  session. Pure function: given a task detail + its resolved input values,
  *  returns the exact text to write into the pty's stdin as the agent's first

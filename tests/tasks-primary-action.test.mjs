@@ -118,27 +118,38 @@ test('typebuild blocked with attempts/maxAttempts → reason includes N/N', () =
   assert.match(a.reason, /Blocked after 2\/3 attempts/);
 });
 
-test('typebuild done/partial → none (lives in DONE)', () => {
-  assert.equal(
-    primaryActionFor(task({ source: 'typebuild', rawStatus: 'done' }), {}).kind,
-    'none',
-  );
-  assert.equal(
-    primaryActionFor(task({ source: 'typebuild', rawStatus: 'partial' }), {}).kind,
-    'none',
-  );
+// task-reenter — a terminal TypeBuild task keeps a launch-first play button
+// (re-entry) so the operator can be re-opened at any time to inspect/ask/edit.
+// The button reads "Open operator" (kind:'start', reentry:true), and is enabled
+// only when TypeBuild is ready to launch.
+test('typebuild done/partial → start (re-entry, launch-first)', () => {
+  for (const rawStatus of ['done', 'partial']) {
+    const a = primaryActionFor(
+      task({ source: 'typebuild', rawStatus }),
+      { tbReady: READY },
+    );
+    assert.equal(a.kind, 'start', rawStatus);
+    assert.equal(a.reentry, true, rawStatus);
+    assert.equal(a.enabled, true, rawStatus);
+  }
 });
 
-// fm-alfz (S1) — cancelled is terminal; the primary stays `none` (Reopen is a
-// kebab/detail action, not the row's primary).
-test('typebuild cancelled → none (reopen-from-done is a kebab action)', () => {
-  assert.equal(
-    primaryActionFor(
-      task({ source: 'typebuild', rawStatus: 'cancelled', status: 'cancelled' }),
-      {},
-    ).kind,
-    'none',
+test('typebuild terminal re-entry is disabled until TypeBuild is ready', () => {
+  const a = primaryActionFor(task({ source: 'typebuild', rawStatus: 'done' }), {});
+  assert.equal(a.kind, 'start');
+  assert.equal(a.reentry, true);
+  assert.equal(a.enabled, false);
+  assert.match(a.tooltip, /Sign in to TypeBuild/);
+});
+
+// fm-alfz (S1) — cancelled is terminal; it too gets the re-entry play button.
+test('typebuild cancelled → start (re-entry)', () => {
+  const a = primaryActionFor(
+    task({ source: 'typebuild', rawStatus: 'cancelled', status: 'cancelled' }),
+    { tbReady: READY },
   );
+  assert.equal(a.kind, 'start');
+  assert.equal(a.reentry, true);
 });
 
 test('typebuild failed (unclaimed) → start', () => {

@@ -854,13 +854,13 @@ export function TaskDetailDrawer({
   const raw = (task.rawStatus ?? task.status).toLowerCase();
   const isTerminal = raw === 'done' || raw === 'partial' || raw === 'cancelled' || raw === 'succeeded';
   const canStop = running || (!isTerminal && (raw === 'in_progress' || raw === 'working' || raw === 'claimed'));
-  // Enter-thread is offered when there's an agent thread to get into: a live
-  // session tab, or an in_progress / waiting TypeBuild task, or a completed run
-  // with a conversation to resume.
-  const canEnterThread =
-    !!session ||
-    (isTypebuild && (raw === 'in_progress' || raw === 'working' || raw === 'claimed' || raw === 'waiting')) ||
-    !!latestRun?.conversation_id;
+  // Enter-thread is offered whenever there's an agent thread to get into. For a
+  // TypeBuild task that is ALWAYS (task-reenter): a live session tab to focus,
+  // an in_progress/waiting session to (re)join, or — even for a done/partial
+  // task — the launch-first path re-opens the operator so the human can inspect
+  // or edit the result at any time. Non-TypeBuild falls back to a resumable
+  // conversation.
+  const canEnterThread = !!session || isTypebuild || !!latestRun?.conversation_id;
 
   // task-31b382ab2e4c — the row's ONE primary affordance (Start/run, claim,
   // run-now, open-session, reopen, done-toggle) carried into the drawer header
@@ -960,16 +960,19 @@ export function TaskDetailDrawer({
       exit();
       return;
     }
-    if (isTypebuild && (raw === 'in_progress' || raw === 'working' || raw === 'claimed' || raw === 'waiting')) {
-      // Re-enter the agent thread by (re)starting the claim-then-launch path,
-      // which lands the user in the live TypeBuild session.
-      void actions.start(task);
-      say('entering thread…');
+    if (latestRun?.conversation_id) {
+      // We have the exact past conversation — resume it in a terminal tab.
+      void openResumeInTab(task.folder || null, latestRun.conversation_id, task.title);
       exit();
       return;
     }
-    if (latestRun?.conversation_id) {
-      void openResumeInTab(task.folder || null, latestRun.conversation_id, task.title);
+    if (isTypebuild) {
+      // task-reenter — any TypeBuild task (running OR terminal). (Re)run the
+      // launch-first claim-then-launch path, which lands the user in the
+      // operator; on a done/partial task the claim fails for state reasons and
+      // the operator opens anyway so the agent can pick up where it left off.
+      void actions.start(task);
+      say('entering thread…');
       exit();
     }
   }

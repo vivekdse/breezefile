@@ -22,7 +22,10 @@ export interface PrimaryActionCtx {
 
 export type PrimaryAction =
   | { kind: 'done-toggle'; done: boolean }
-  | { kind: 'start'; enabled: boolean; tooltip?: string }
+  /** `reentry` marks a launch-first re-open of a terminal (done/partial/
+   *  cancelled) task — same launch path, but the button reads "Open operator"
+   *  rather than "Start". */
+  | { kind: 'start'; enabled: boolean; tooltip?: string; reentry?: boolean }
   | { kind: 'open-session'; tabIndex: number }
   | { kind: 'reopen' }
   /** task-457dd1cc6c8b — a blocked TypeBuild task: Retry runs the composite

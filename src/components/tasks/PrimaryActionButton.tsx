@@ -63,7 +63,10 @@ export function PrimaryActionButton({
           {isRow ? '↺' : '↺ Retry'}
         </button>
       );
-    case 'start':
+    case 'start': {
+      // task-reenter — a re-entry start (terminal task) reads "Open operator"
+      // so the play button never looks like it will restart finished work.
+      const label = action.reentry ? 'Open operator' : 'Start';
       return (
         <button
           type="button"
@@ -71,11 +74,12 @@ export function PrimaryActionButton({
           onClick={() => action.enabled && onInvoke(action)}
           disabled={!action.enabled}
           title={action.tooltip}
-          aria-label="Start"
+          aria-label={label}
         >
-          {isRow ? '▸' : '▸ Start'}
+          {isRow ? '▸' : `▸ ${label}`}
         </button>
       );
+    }
     case 'open-session':
       return (
         <button

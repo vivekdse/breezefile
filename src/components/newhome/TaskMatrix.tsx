@@ -646,12 +646,28 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                       const p = pillFor(run.status, run.rawStatus);
                       const retryable =
                         !next && props.onRetryRun && (p.label === 'Cancelled' || p.kind === 'failed');
+                      // task-reenter — a DONE/PARTIAL run has no runnable next
+                      // step and isn't retryable, so it used to offer only
+                      // "↗ Open". Give it a launch-first ▶ that re-opens the
+                      // operator on the run itself (inspect / ask / edit the
+                      // result) WITHOUT disturbing its terminal status — the
+                      // same play button the roster rows now show for a
+                      // finished task.
+                      const rs = run.rawStatus;
+                      const isTerminalRun =
+                        run.status === 'done' ||
+                        run.status === 'cancelled' ||
+                        rs === 'done' ||
+                        rs === 'partial' ||
+                        rs === 'cancelled';
+                      const canReenter = isTerminalRun && !next && !retryable;
                       // task-1b3eeb1aae1f — the row's ▶ targets the run's NEXT
                       // runnable step; its pending/error drive the immediate
                       // "starting" state and the visible failure line. A ↻
-                      // retry is keyed on the RUN itself.
-                      const pending = next ? pendingFor(next.id) : retryable ? pendingFor(run.id) : false;
-                      const err = next ? errorFor(next.id) : retryable ? errorFor(run.id) : null;
+                      // retry (and the re-entry ▶) are keyed on the RUN itself.
+                      const runKeyed = retryable || canReenter;
+                      const pending = next ? pendingFor(next.id) : runKeyed ? pendingFor(run.id) : false;
+                      const err = next ? errorFor(next.id) : runKeyed ? errorFor(run.id) : null;
                       return (
                         <>
                           <div className="tm-lead-inner">
@@ -687,6 +703,22 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                                   disabled={pending}
                                 >
                                   {pending ? '…' : '↻'}
+                                </button>
+                              )}
+                              {canReenter && (
+                                <button
+                                  type="button"
+                                  className="tm-icon-btn tm-icon-btn--run"
+                                  title={
+                                    pending
+                                      ? 'Opening…'
+                                      : 'Open the operator — inspect, ask, or edit the result'
+                                  }
+                                  aria-label="Open operator"
+                                  onClick={() => onStartChild(run.id)}
+                                  disabled={pending}
+                                >
+                                  {pending ? '…' : '▶'}
                                 </button>
                               )}
                               <button
