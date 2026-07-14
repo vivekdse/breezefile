@@ -260,6 +260,10 @@ export function NewHomePage() {
   >(null);
   const [projectActionError, setProjectActionError] = useState<string | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState(false);
+  // Instructions are often long-form reference text (prior-auth policies,
+  // entity lookups, etc.) — clamp to 2 lines inline and let "Read more" open
+  // a full-text modal with roomier type, rather than pushing the hero tall.
+  const [instructionsExpanded, setInstructionsExpanded] = useState(false);
   // Nesting (spec §4): a project's indent in the picker reflects its depth in
   // the parent/child forest — the SAME pure, tested tree builder the
   // Projects attention rollup uses (src/projects/tree.mjs), not a re-derived
@@ -962,9 +966,47 @@ export function NewHomePage() {
               </div>
             )}
             {selectedProject?.instructions && (
-              <div className="nh__hero-instructions" title="Agent instructions">
+              <div className="nh__hero-instructions">
                 <span className="nh__hero-instructions-label">Agent instructions:</span>{' '}
-                {selectedProject.instructions}
+                <span className="nh__hero-instructions-text">{selectedProject.instructions}</span>{' '}
+                <button
+                  type="button"
+                  className="nh__hero-instructions-more"
+                  onClick={() => setInstructionsExpanded(true)}
+                >
+                  Read more
+                </button>
+              </div>
+            )}
+            {instructionsExpanded && selectedProject?.instructions && (
+              <div
+                className="nh-dialog-backdrop"
+                onClick={() => setInstructionsExpanded(false)}
+              >
+                <div
+                  className="nh-dialog nh__instructions-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="nh-instructions-dialog-title"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="nh-dialog__head">
+                    <div id="nh-instructions-dialog-title" className="nh-dialog__title">
+                      Agent instructions
+                    </div>
+                    <button
+                      type="button"
+                      className="nh__icon-btn"
+                      onClick={() => setInstructionsExpanded(false)}
+                      title="Close"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="nh-dialog__body nh__instructions-dialog-body">
+                    {selectedProject.instructions}
+                  </div>
+                </div>
               </div>
             )}
           </div>
