@@ -312,6 +312,7 @@ type Fm = {
       origin: string;
       username: string;
       password: string;
+      human?: boolean;
     }) => void,
   ) => () => void;
   launchersList: () => Promise<Launcher[]>;

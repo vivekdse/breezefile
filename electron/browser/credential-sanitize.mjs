@@ -8,10 +8,10 @@
 
 /**
  * Validate + normalize a pulled credential object. Returns
- * { origin, username, password } or null for anything we will not surface
- * (no origin, a "null" origin string, or no password).
+ * { origin, username, password, human } or null for anything we will not
+ * surface (no origin, a "null" origin string, or no password).
  * @param {unknown} raw
- * @returns {{origin:string, username:string, password:string}|null}
+ * @returns {{origin:string, username:string, password:string, human:boolean}|null}
  */
 export function sanitizeCapturedCredential(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -21,5 +21,6 @@ export function sanitizeCapturedCredential(raw) {
   const password = typeof r.password === 'string' ? r.password : '';
   // A capture is only meaningful with a real origin and a non-empty password.
   if (!origin || origin === 'null' || !password) return null;
-  return { origin, username, password };
+  // task-reenter-savepw — carry the human-typed marker through (default false).
+  return { origin, username, password, human: r.human === true };
 }

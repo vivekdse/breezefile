@@ -65,6 +65,10 @@ export interface CapturedCredential {
   origin: string;
   username: string;
   password: string;
+  /** task-reenter-savepw — a human typed this login (trusted input), vs an
+   *  agent/Playwright fill. Lets the renderer still offer to save a human
+   *  login inside the operator, where agent-driven captures are suppressed. */
+  human?: boolean;
 }
 
 // A per-injection nonce keeps the sentinel from being spoofable by page script
@@ -132,7 +136,13 @@ function captureScript(nonce: string, sentinel: string): string {
         var cred = {
           origin: W.location.origin,
           username: userEl && userEl.value ? String(userEl.value) : '',
-          password: String(pwEl.value)
+          password: String(pwEl.value),
+          // task-reenter-savepw — true when a HUMAN typed into a field on this
+          // page (a TRUSTED input/keydown). Playwright .fill()/our own autofill
+          // set values via UNtrusted events, so they stay false. The renderer
+          // uses this to still offer "Save password?" for a human-typed login
+          // inside the operator (where agent-driven captures are suppressed).
+          human: W.__bfHuman === true
         };
         // Stash on a NON-enumerable global so the page's own enumeration / JSON
         // serialization of window won't sweep it up, and main can pull it.
@@ -177,6 +187,23 @@ function captureScript(nonce: string, sentinel: string): string {
       }
       return document;
     }
+
+    // ── HUMAN-INPUT MARKER ──────────────────────────────────────────────
+    // Record whether a real person typed into a field this page-load. Only
+    // TRUSTED events count (ev.isTrusted) — Playwright .fill() and our own
+    // autofill mutate values with UNtrusted/synthetic events, so an agent- or
+    // autofill-driven login leaves this false. Bounds the operator-mode save
+    // suppression to genuinely agent-driven logins (task-reenter-savepw).
+    function markHuman(ev) {
+      try {
+        if (!ev || !ev.isTrusted) return;
+        var el = ev.target;
+        var tag = (el && el.tagName ? el.tagName : '').toUpperCase();
+        if (tag === 'INPUT' || tag === 'TEXTAREA') W.__bfHuman = true;
+      } catch (e) { /* never throw into the page */ }
+    }
+    document.addEventListener('input', markHuman, true);
+    document.addEventListener('keydown', markHuman, true);
 
     // ── 1. CLASSIC <form> submit (capture phase, survives stopPropagation) ──
     function onSubmit(ev) {

@@ -143,6 +143,9 @@ export function createBrowserView(
       origin: cred.origin,
       username: cred.username,
       password: cred.password,
+      // task-reenter-savepw — a human-typed login still prompts inside the
+      // operator; an agent/autofill capture stays suppressed there.
+      human: cred.human === true,
     });
   });
   // Open target=_blank / window.open in the same view rather than spawning a

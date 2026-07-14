@@ -68,6 +68,15 @@ async function saveCapturedCredential(cred: CapturedCredential): Promise<void> {
   });
 }
 
+// Short host label for a saved-login origin (task-reenter-savepw).
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host || origin;
+  } catch {
+    return origin;
+  }
+}
+
 export function BrowserSurface({
   tabId,
   url,
@@ -146,6 +155,16 @@ export function BrowserSurface({
   // Whether the manual fill-confirm dialog is open (opened by the key button).
   const [fillDialogOpen, setFillDialogOpen] = useState(false);
   const [autofilling, setAutofilling] = useState(false);
+  // task-reenter-savepw — the current page's origin (reactive), so the 🔑 key is
+  // always available on a real site and the "add a login here" form can prefill
+  // it. Lets the user save a login for THIS page inline (one click on the key),
+  // covering sites whose login submit our capture can't auto-detect (SPA/SSO).
+  const [currentOrigin, setCurrentOrigin] = useState('');
+  const [addLoginOpen, setAddLoginOpen] = useState(false);
+  const [addUser, setAddUser] = useState('');
+  const [addPass, setAddPass] = useState('');
+  const [addingLogin, setAddingLogin] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   // The origin we last queried the vault for, so a re-render or in-page nav
   // doesn't re-query the SAME origin within one page visit. Reset on every
   // committed navigation (did-navigate) so a sign-out / fresh load RE-OFFERS the
@@ -209,10 +228,15 @@ export function BrowserSurface({
       }
       if (!origin || origin === 'null') {
         setSavedLogin(null);
+        setCurrentOrigin('');
+        setAddLoginOpen(false);
         checkedOrigin.current = '';
         lastUrl.current = '';
         return;
       }
+      // task-reenter-savepw — a real http(s) origin: the 🔑 key is now always
+      // available here (fill a saved login OR add one for this page).
+      setCurrentOrigin(origin);
       // RE-OFFER discipline (task-ef6d465816b3): a committed navigation to a new
       // URL — including a same-origin sign-out (…/account → …/login) — should let
       // the saved login be offered AGAIN, not just once per mount. So we key the
@@ -225,6 +249,7 @@ export function BrowserSurface({
       if (urlChanged) {
         // A fresh page: close any left-open dialog so the next offer is explicit.
         setFillDialogOpen(false);
+        setAddLoginOpen(false);
       }
       if (origin === checkedOrigin.current) return;
       checkedOrigin.current = origin;
@@ -259,10 +284,14 @@ export function BrowserSurface({
     const offCred = fm.onBrowserCredentialCaptured((c) => {
       if (c.id !== idRef.current) return;
       if (neverSaveOrigins.has(c.origin)) return;
-      // Agent sessions drive logins programmatically; a prompt there is noise
-      // (and no one to answer it). Suppress — the saved-login fill path already
-      // handles known logins; a genuinely new one can be saved from :secrets.
-      if (operatorMode) return;
+      // task-reenter-savepw — suppress the prompt ONLY for an AGENT-driven login
+      // in the operator (Playwright fill / our autofill — c.human is false):
+      // there's no human to answer and the fill path already handles known
+      // logins. But when a HUMAN typed the login inside the operator window
+      // (c.human), still offer to save it — the operator is the only browser, so
+      // the old blanket `if (operatorMode) return` meant a person could never
+      // save ANY new website password (regression from task-e550e3a1f512).
+      if (operatorMode && !c.human) return;
       // Compare-before-prompt. The verdict is computed in main; no stored
       // password crosses back. On any lookup hiccup match() returns 'absent',
       // so we fall back to the prior behaviour (prompt) rather than swallow a
@@ -458,6 +487,48 @@ export function BrowserSurface({
         setAutofilling(false);
         setFillDialogOpen(false);
       });
+  };
+
+  // task-reenter-savepw — save a login for the CURRENT page inline (the 🔑 key's
+  // "add" form). Prefilled origin = the page's origin; the password rides the
+  // same encrypted server-side vault as a captured save and is never persisted
+  // locally. On success we re-list this origin so the key + autofill reflect it.
+  const openAddLogin = (): void => {
+    setAddUser(savedLogin?.usernames[0] ?? '');
+    setAddPass('');
+    setAddError(null);
+    setFillDialogOpen(false);
+    setAddLoginOpen(true);
+  };
+  const addLoginForSite = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (addingLogin) return;
+    setAddError(null);
+    if (!currentOrigin) return;
+    if (!addPass) {
+      setAddError('Enter a password to save.');
+      return;
+    }
+    setAddingLogin(true);
+    try {
+      await fm.typebuild.credentials.save({
+        origin: currentOrigin,
+        username: addUser.trim(),
+        password: addPass,
+      });
+      setAddPass('');
+      setAddLoginOpen(false);
+      // Refresh the saved-login list for this origin so the key button reflects
+      // it immediately and return-visit autofill can offer it.
+      const creds = await fm.typebuild.credentials.list(currentOrigin);
+      if (idRef.current != null && creds.length > 0) {
+        setSavedLogin({ origin: currentOrigin, usernames: creds.map((c) => c.username) });
+      }
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'Could not save login.');
+    } finally {
+      setAddingLogin(false);
+    }
   };
 
   // Chromium-style browser shortcuts, SCOPED to this surface: the handler is
@@ -704,19 +775,23 @@ export function BrowserSurface({
             vault has a login for the current origin; click to open the fill
             confirm. Deliberately NOT auto-popped — matches the operator session
             and stops the per-visit "Fill saved password?" pestering. */}
+        {/* task-reenter-savepw — the 🔑 is now available on ANY real site: click
+            to fill a saved login when one exists, or to ADD a login for this
+            page when none is saved (covers sites whose login submit our capture
+            can't auto-detect). */}
         <button
           className="browser-pane__btn"
-          hidden={!savedLogin}
-          disabled={!savedLogin}
-          onClick={() => savedLogin && setFillDialogOpen(true)}
+          hidden={!currentOrigin}
+          disabled={!currentOrigin}
+          onClick={() => (savedLogin ? setFillDialogOpen(true) : openAddLogin())}
           title={
             savedLogin
               ? savedLogin.usernames.length > 1
-                ? `Fill a saved password (${savedLogin.usernames.length} logins)`
+                ? `Fill a saved password (${savedLogin.usernames.length} logins), or add one`
                 : `Fill saved password${
                     savedLogin.usernames[0] ? ` for ${savedLogin.usernames[0]}` : ''
-                  }`
-              : 'No saved login for this site'
+                  }, or add one`
+              : `Save a login for ${currentOrigin ? hostOf(currentOrigin) : 'this site'}`
           }
         >
           🔑
@@ -773,12 +848,78 @@ export function BrowserSurface({
               type="button"
               className="save-pw__btn"
               disabled={autofilling}
+              onClick={openAddLogin}
+              title="Save a different login for this site"
+            >
+              Add a login
+            </button>
+            <button
+              type="button"
+              className="save-pw__btn"
+              disabled={autofilling}
               onClick={() => setFillDialogOpen(false)}
             >
               Not now
             </button>
           </div>
         </div>
+      )}
+      {/* task-reenter-savepw — inline "add a login for THIS page" form, opened by
+          the 🔑 key. Prefilled with the current origin; saves to the same
+          encrypted server vault as a captured login. */}
+      {!pendingCred && addLoginOpen && currentOrigin && (
+        <form className="save-pw" role="dialog" aria-label="Add saved login" onSubmit={addLoginForSite}>
+          <div className="save-pw__head">
+            <span className="save-pw__key" aria-hidden="true">
+              🔑
+            </span>
+            <span className="save-pw__title">Save a login for {hostOf(currentOrigin)}</span>
+          </div>
+          <div className="save-pw__creds">
+            <input
+              className="save-pw__input"
+              type="text"
+              value={addUser}
+              onChange={(e) => setAddUser(e.target.value)}
+              placeholder="username"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="Login username"
+            />
+            <input
+              className="save-pw__input"
+              type="password"
+              value={addPass}
+              onChange={(e) => setAddPass(e.target.value)}
+              placeholder="password"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="Login password"
+            />
+          </div>
+          {addError && (
+            <p className="save-pw__error" role="alert">
+              {addError}
+            </p>
+          )}
+          <div className="save-pw__actions">
+            <button
+              type="submit"
+              className="save-pw__btn save-pw__btn--primary"
+              disabled={addingLogin}
+            >
+              {addingLogin ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              type="button"
+              className="save-pw__btn"
+              disabled={addingLogin}
+              onClick={() => setAddLoginOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
       {pendingCred && (
         <SavePasswordPrompt

@@ -642,6 +642,7 @@ const fm = {
       origin: string;
       username: string;
       password: string;
+      human?: boolean;
     }) => void,
   ) => {
     const handler = (_e: unknown, payload: Parameters<typeof cb>[0]) =>

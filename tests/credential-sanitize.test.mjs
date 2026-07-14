@@ -29,7 +29,34 @@ test('accepts a full credential (origin + username + password)', () => {
     origin: 'https://portal.example.com',
     username: 'alice@example.com',
     password: 'hunter2',
+    human: false,
   });
+});
+
+test('carries the human-typed marker through (default false, true when set)', () => {
+  const agent = sanitizeCapturedCredential({
+    origin: 'https://x.test',
+    username: 'a',
+    password: 'p',
+  });
+  assert.equal(agent.human, false, 'absent → false (agent/autofill)');
+
+  const typed = sanitizeCapturedCredential({
+    origin: 'https://x.test',
+    username: 'a',
+    password: 'p',
+    human: true,
+  });
+  assert.equal(typed.human, true, 'a real human-typed login is marked');
+
+  // Only a strict boolean true counts — a truthy non-boolean stays false.
+  const fuzzy = sanitizeCapturedCredential({
+    origin: 'https://x.test',
+    username: 'a',
+    password: 'p',
+    human: 'yes',
+  });
+  assert.equal(fuzzy.human, false);
 });
 
 test('accepts a password-only credential (username may be blank)', () => {
