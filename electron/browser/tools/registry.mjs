@@ -137,15 +137,21 @@ export const TOOL_SCHEMA = {
                     //   proven; promoted to 'active' after a run or two passes
                     //   (electron/browser/tools/promote.mjs promotionDecision).
     'version',      // semver-ish string; default '1.0'
-    'channel',      // 'browser' (default) | 'http' — NON-PHI LABEL, not a router.
-                    //   Tells the agent HOW the tool's steps get work done: 'browser'
+    'channel',      // 'browser' (default) | 'http' | 'mcp' — NON-PHI LABEL. Tells
+                    //   the runner HOW the tool's steps get work done: 'browser'
                     //   drives Playwright/DOM; 'http' means the steps ARE the site's
-                    //   own API call (ctx.replay/curl), so the browser can be skipped.
-                    //   Absent ⇒ 'browser' (every existing tool unchanged). The agent
-                    //   READS it to prefer the fast API path; nothing dispatches on it.
-                    //   Set by the promotion hook when a solve was an intercepted API
-                    //   call (electron/browser/tools/promote.mjs). See
-                    //   docs/execution-channel-architecture.md.
+                    //   own API call (ctx.replay/curl), so the browser can be
+                    //   skipped; 'mcp' means the steps call a first-party MCP
+                    //   catalog server (e.g. connectors, scheduling) over HTTP via
+                    //   ctx.mcpCall(tool, args) — ALSO skips the browser. Absent ⇒
+                    //   'browser' (every existing tool unchanged). Set by the
+                    //   promotion hook when a solve was an intercepted API call
+                    //   (electron/browser/tools/promote.mjs), or authored directly
+                    //   for an 'mcp' tool. See docs/execution-channel-architecture.md.
+    'service_url',  // 'mcp' channel only — the first-party MCP server's endpoint
+                    //   (e.g. "https://connectors.typebuild.com/mcp"), the same
+                    //   `serviceUrl` the client's own connection-mount.ts mounts
+                    //   from the Connections catalog. Required when channel:'mcp'.
     'params',       // { name: { required, type, description } }
     'output',       // { field: description } — shape of result on success
     'dependencies', // free-form notes
@@ -160,7 +166,7 @@ export const TOOL_SCHEMA = {
 };
 
 /** The allowed `channel` values. NON-PHI label; default is 'browser'. */
-export const CHANNELS = ['browser', 'http'];
+export const CHANNELS = ['browser', 'http', 'mcp'];
 
 /** A tool's execution channel — the NON-PHI label the agent reads to know the
  *  steps are HTTP (so the browser can be skipped). Defaults to 'browser' when a
@@ -398,6 +404,9 @@ export function validateTool(meta) {
   }
   if (meta.channel !== undefined && !CHANNELS.includes(String(meta.channel).toLowerCase())) {
     errors.push(`invalid channel: ${meta.channel} (use ${CHANNELS.join('|')})`);
+  }
+  if (toolChannel(meta) === 'mcp' && (typeof meta.service_url !== 'string' || !meta.service_url.trim())) {
+    errors.push("channel:'mcp' requires a non-empty service_url");
   }
   return { ok: errors.length === 0, errors };
 }

@@ -107,7 +107,7 @@ test('toolChannel defaults to browser when tool.json omits channel', () => {
   assert.equal(toolChannel({ channel: 'http' }), 'http');
   assert.equal(toolChannel({ channel: 'HTTP' }), 'http');
   assert.equal(toolChannel({ channel: 'nonsense' }), 'browser'); // unknown → default
-  assert.deepEqual(CHANNELS, ['browser', 'http']);
+  assert.deepEqual(CHANNELS, ['browser', 'http', 'mcp']);
 });
 
 test('validateTool accepts a valid channel and rejects a bad one', () => {

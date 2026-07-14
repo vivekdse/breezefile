@@ -348,6 +348,14 @@ async function cmdRun(args) {
   log.ok(`${t.meta.name} v${t.meta.version || '1.0'}`);
   if (plan.skip.length) log.ok(`resuming — skipping done steps: ${plan.skip.join(', ')}`);
 
+  // channel:'mcp' — the tool's steps call a first-party MCP catalog server
+  // (connectors, scheduling, …) over HTTP via ctx.mcpCall; there is no browser
+  // to connect to at all, so this runs BEFORE the CDP layer loads and returns
+  // without ever touching playwright-core.
+  if (toolChannel(t.meta) === 'mcp') {
+    return runMcpSteps(t, steps, plan, params, { started, nowIso, log });
+  }
+
   // Lazy-load the CDP layer (playwright-core) — only `run` needs a browser.
   let CDP_URL, connect, openBrowserTab, resolvePage, loc, resolveDataRef;
   let replayRequest;
@@ -489,6 +497,76 @@ async function cmdRun(args) {
   } finally {
     // Detach the CDP client only — never close Breeze or the tab.
     if (browser) await browser.close().catch(() => {});
+  }
+}
+
+/** Run a channel:'mcp' tool's steps — same step/resume/finish/promotion
+ *  contract as cmdRun's browser path, but ctx exposes ctx.mcpCall(tool, args)
+ *  (electron/browser/tools/mcp-client.mjs, HTTP to tool.meta.service_url using
+ *  TYPEBUILD_MCP_TOKEN from the PTY env) instead of a Playwright page. No CDP
+ *  connection is ever opened for this channel. */
+async function runMcpSteps(t, steps, plan, params, { started, nowIso, log }) {
+  const { callMcpTool } = await import('../electron/browser/tools/mcp-client.mjs');
+  const serviceUrl = t.meta.service_url;
+  const state = {};
+  const mcpCall = (toolName, toolArgs) => callMcpTool(serviceUrl, toolName, toolArgs);
+  const ctx = { log, EXIT, ToolError, params, state, mcpCall, serviceUrl };
+
+  const stepsDone = [...plan.skip];
+  const finish = (status, code, payload, extra = {}) => {
+    const duration = started ? Date.now() - started : null;
+    recordRun(t.runsPath, {
+      timestamp: nowIso(), status, code, duration_ms: duration,
+      params: redact(params, t.meta.params || {}),
+      steps_done: stepsDone,
+      failed_step: extra.failed_step ?? null,
+    });
+    out({
+      status, code, tool: t.id, version: t.meta.version || '1.0',
+      timestamp: nowIso(), duration_ms: duration, steps_done: stepsDone, ...payload,
+    });
+  };
+
+  try {
+    let lastResult = {};
+    for (let i = plan.startIndex; i < steps.length; i++) {
+      const step = steps[i];
+      const tag = `[${i + 1}/${steps.length}] ${step.name}${step.sideEffect ? ' (side-effect)' : ''}`;
+      if (step.pre) {
+        const okPre = await step.pre(ctx, params, state);
+        if (okPre === false) {
+          throw new ToolError('precondition_not_met', `pre-condition for step "${step.name}" not met`, { step: step.name });
+        }
+      }
+      log.step(tag);
+      const r = (await step.run(ctx, params, state)) ?? {};
+      if (step.post) {
+        const okPost = await step.post(ctx, params, state, r);
+        if (okPost === false) {
+          throw new ToolError('validation_failed', `post-condition for step "${step.name}" failed`, { step: step.name });
+        }
+      }
+      stepsDone.push(step.name);
+      lastResult = (r && typeof r === 'object') ? { ...lastResult, ...r } : lastResult;
+    }
+    log.ok(`SUCCESS${started ? ` (${Date.now() - started}ms)` : ''}`);
+    finish('success', EXIT.SUCCESS, { result: lastResult });
+    maybePromote(t, log);
+    return EXIT.SUCCESS;
+  } catch (e) {
+    const failedStep = steps[stepsDone.length === plan.skip.length ? plan.startIndex : steps.findIndex((s) => !stepsDone.includes(s.name))];
+    const failed_step = failedStep ? failedStep.name : null;
+    // mcp-client.mjs throws with a .category already drawn from the same
+    // ERROR_CATEGORY vocabulary a ToolError uses, so one lookup covers both.
+    const category = e.category || 'unexpected_state';
+    let code = ERROR_CATEGORY[category] !== undefined ? ERROR_CATEGORY[category] : EXIT.FAILURE;
+    const madeProgress = stepsDone.length > plan.skip.length;
+    if (madeProgress && steps.length > 1) code = EXIT.PARTIAL;
+    log.fail(`${category}: ${e.message}`);
+    finish(code === EXIT.PARTIAL ? 'partial' : 'failure', code,
+      { error: withCause({ category, message: e.message, ...(e.extra || {}) }), failed_step, resume_from: failed_step },
+      { failed_step });
+    return code;
   }
 }
 

@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,10 +71,10 @@ test('unknown command exits 64', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('installer seeds the three built-in tools, idempotently', () => {
+test('installer seeds the built-in tools, idempotently', () => {
   const dir = freshRepoWithSeeds();
   try {
-    for (const id of ['gmail-prefill-send', 'web-form-login', 'extract-table']) {
+    for (const id of ['gmail-prefill-send', 'web-form-login', 'extract-table', 'connectors-call']) {
       assert.ok(existsSync(join(dir, id, 'tool.json')), `${id}/tool.json missing`);
       assert.ok(existsSync(join(dir, id, 'tool.mjs')), `${id}/tool.mjs missing`);
     }
@@ -93,7 +93,7 @@ test('list shows seeded tools', () => {
     const r = run(['list', '--json'], dir);
     assert.equal(r.status, 0);
     const ids = JSON.parse(r.stdout).tools.map((t) => t.id).sort();
-    assert.deepEqual(ids, ['extract-table', 'gmail-prefill-send', 'web-form-login']);
+    assert.deepEqual(ids, ['connectors-call', 'extract-table', 'gmail-prefill-send', 'web-form-login']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -355,4 +355,163 @@ test('run with no live browser exits with a precondition/timeout code', async ()
     assert.equal(out.status, 'error');
     assert.ok(out.error && out.error.category);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ─── channel:'mcp' (connectors-call) ─────────────────────────────────────────
+// No CDP/browser involved for this channel — the runner (runMcpSteps in
+// bin/breeze-tools.mjs) calls a first-party MCP server over plain HTTP via
+// electron/browser/tools/mcp-client.mjs, authenticated with TYPEBUILD_MCP_TOKEN
+// from the PTY env. These tests stand up a tiny local JSON-RPC server instead
+// of hitting the real deployed connectors service.
+//
+// IMPORTANT: spawnSync BLOCKS this process's event loop until the child exits
+// — so a test whose CHILD calls back into a server running in THIS (parent)
+// process deadlocks (the parent can never service the request while blocked
+// waiting on the child). Those two tests use async spawn() + a promise
+// wrapper instead; the token/no-network test has no such round-trip and can
+// stay on spawnSync like the rest of the file.
+function spawnAsync(command, args, opts) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { ...opts });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.on('error', reject);
+    child.on('close', (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
+}
+
+test('connectors-call with no TYPEBUILD_MCP_TOKEN fails auth_failed (no network attempted)', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    const env = { ...process.env, BREEZE_TOOLS_DIR: dir };
+    delete env.TYPEBUILD_MCP_TOKEN;
+    const r = spawnSync('node', [cli, 'run', 'connectors-call', '--op', 'list_catalog'], {
+      encoding: 'utf8', timeout: 20000, env,
+    });
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.status, 'failure');
+    assert.equal(out.error.category, 'auth_failed');
+    assert.equal(out.error.likely_cause, 'auth');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('connectors-call redacts --args in runs.jsonl (may carry PHI, e.g. an email body)', async () => {
+  const { createServer: createHttpServer } = await import('node:http');
+  const dir = freshRepoWithSeeds();
+  const srv = createHttpServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        jsonrpc: '2.0', id: JSON.parse(body).id,
+        result: { structuredContent: { sent: true } },
+      }));
+    });
+  });
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
+  const { port } = srv.address();
+  try {
+    const toolJsonPath = join(dir, 'connectors-call', 'tool.json');
+    const meta = JSON.parse(readFileSync(toolJsonPath, 'utf8'));
+    meta.service_url = `http://127.0.0.1:${port}/mcp`;
+    writeFileSync(toolJsonPath, JSON.stringify(meta, null, 2));
+
+    const secretArgs = '{"to":"patient@example.com","body":"sensitive content"}';
+    const r = await spawnAsync('node', [cli, 'run', 'connectors-call', '--op', 'send_email', `--args=${secretArgs}`], {
+      env: { ...process.env, BREEZE_TOOLS_DIR: dir, TYPEBUILD_MCP_TOKEN: 'test-token-123' },
+    });
+    assert.equal(r.status, 0, `unexpected exit ${r.status}: ${r.stdout}${r.stderr}`);
+
+    const runsPath = join(dir, 'connectors-call', 'runs.jsonl');
+    const runsRaw = readFileSync(runsPath, 'utf8');
+    assert.ok(!runsRaw.includes('patient@example.com'), 'runs.jsonl must never persist --args (PHI-capable)');
+    assert.ok(!runsRaw.includes('sensitive content'), 'runs.jsonl must never persist --args (PHI-capable)');
+    const lastRun = JSON.parse(runsRaw.trim().split('\n').pop());
+    assert.equal(lastRun.params.args, '***');
+  } finally {
+    srv.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('connectors-call round-trips a tool call through a local fake MCP server', async () => {
+  const { createServer: createHttpServer } = await import('node:http');
+  const dir = freshRepoWithSeeds();
+  const srv = createHttpServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const rpc = JSON.parse(body);
+      assert.equal(rpc.method, 'tools/call');
+      assert.equal(rpc.params.name, 'list_catalog');
+      assert.equal(req.headers.authorization, 'Bearer test-token-123');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        jsonrpc: '2.0', id: rpc.id,
+        result: { structuredContent: { catalog: [{ toolkit: 'connectors', name: 'Connected Services' }] } },
+      }));
+    });
+  });
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
+  const { port } = srv.address();
+
+  try {
+    // Point the seeded tool at our fake server instead of the real one.
+    const toolJsonPath = join(dir, 'connectors-call', 'tool.json');
+    const meta = JSON.parse(readFileSync(toolJsonPath, 'utf8'));
+    meta.service_url = `http://127.0.0.1:${port}/mcp`;
+    writeFileSync(toolJsonPath, JSON.stringify(meta, null, 2));
+
+    const r = await spawnAsync('node', [cli, 'run', 'connectors-call', '--op', 'list_catalog'], {
+      env: { ...process.env, BREEZE_TOOLS_DIR: dir, TYPEBUILD_MCP_TOKEN: 'test-token-123' },
+    });
+    assert.equal(r.status, 0, `unexpected exit ${r.status}: ${r.stdout}${r.stderr}`);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.status, 'success');
+    assert.deepEqual(out.result.result.catalog, [{ toolkit: 'connectors', name: 'Connected Services' }]);
+  } finally {
+    srv.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('connectors-call surfaces an MCP tool error as unexpected_state (exit 1)', async () => {
+  const { createServer: createHttpServer } = await import('node:http');
+  const dir = freshRepoWithSeeds();
+  const srv = createHttpServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const rpc = JSON.parse(body);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        jsonrpc: '2.0', id: rpc.id,
+        result: { isError: true, content: [{ type: 'text', text: 'unknown toolkit: bogus' }] },
+      }));
+    });
+  });
+  await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
+  const { port } = srv.address();
+
+  try {
+    const toolJsonPath = join(dir, 'connectors-call', 'tool.json');
+    const meta = JSON.parse(readFileSync(toolJsonPath, 'utf8'));
+    meta.service_url = `http://127.0.0.1:${port}/mcp`;
+    writeFileSync(toolJsonPath, JSON.stringify(meta, null, 2));
+
+    const r = await spawnAsync('node', [cli, 'run', 'connectors-call', '--op', 'call', '--toolkit', 'bogus'], {
+      env: { ...process.env, BREEZE_TOOLS_DIR: dir, TYPEBUILD_MCP_TOKEN: 'test-token-123' },
+    });
+    assert.equal(r.status, 1);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.status, 'failure');
+    assert.equal(out.error.category, 'unexpected_state');
+    assert.match(out.error.message, /unknown toolkit: bogus/);
+  } finally {
+    srv.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
