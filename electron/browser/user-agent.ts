@@ -14,6 +14,16 @@
 // FIX: strip the two offending tokens so we present as the underlying Chrome.
 // We derive from the LIVE UA (not a hard-coded string) so the Chrome version
 // stays accurate across Electron upgrades instead of going stale.
+//
+// The actual string-munging is pure (no Electron/DOM deps) and lives in
+// user-agent-strip.mjs so it is unit-testable under plain `node --test`
+// without needing type-stripping or a live app — same split as
+// credential-sanitize.mjs/credential-capture.ts.
+
+import {
+  stripElectronTokens as stripElectronTokensImpl,
+  cleanChromeUserAgent as cleanChromeUserAgentImpl,
+} from './user-agent-strip.mjs';
 
 /**
  * Strip Electron's product tokens from a UA string, leaving a stock Chrome UA.
@@ -22,14 +32,7 @@
  * Idempotent and safe on an already-clean UA.
  */
 export function stripElectronTokens(ua: string, appProduct = 'TypeBuild'): string {
-  return ua
-    // `AppProduct/1.2.3` — anchored to a word boundary so it can't clip Chrome.
-    .replace(new RegExp(`\\b${appProduct}\\/[^\\s]+\\s*`, 'g'), '')
-    // `Electron/33.4.11`
-    .replace(/\bElectron\/[^\s]+\s*/g, '')
-    // Collapse any double-spaces the removals leave, and trim.
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  return stripElectronTokensImpl(ua, appProduct);
 }
 
 /**
@@ -38,12 +41,5 @@ export function stripElectronTokens(ua: string, appProduct = 'TypeBuild'): strin
  * composing one from `process.versions.chrome` if the passed UA is empty.
  */
 export function cleanChromeUserAgent(runtimeUa: string, appProduct = 'TypeBuild'): string {
-  if (runtimeUa && runtimeUa.trim()) return stripElectronTokens(runtimeUa, appProduct);
-  // Defensive fallback: build a plausible desktop-Linux Chrome UA from the
-  // Chromium version Electron reports. Only reached if the caller had no UA.
-  const chrome = process.versions.chrome || '130.0.0.0';
-  return (
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
-    `Chrome/${chrome} Safari/537.36`
-  );
+  return cleanChromeUserAgentImpl(runtimeUa, appProduct, process.versions.chrome || '130.0.0.0');
 }
