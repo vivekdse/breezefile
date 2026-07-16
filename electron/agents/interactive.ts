@@ -30,7 +30,7 @@ import {
   killManagedPty,
 } from '../ipc';
 import type { PtyLivenessVerdict } from '../ipc';
-import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
+import { browserCliEnv } from '../browser/automation';
 import { startTiming, timing } from '../core/launch-timing';
 
 export type InteractiveRunOptions = {
@@ -329,9 +329,9 @@ export async function runTaskInteractive(
       ...(run ? { BREEZE_RUN_ID: run.id } : {}),
       // SPIKE (spike/playwright-cdp): point the helper CLIs at Breeze's CDP.
       // BREEZE_TOOLS_CLI is the tool-repository CLI the agent consults first.
-      ...(playwright
-        ? { BREEZE_CDP_URL: CDP_URL, BREEZE_BROWSER_CLI: BROWSER_CLI, BREEZE_TOOLS_CLI: TOOLS_CLI }
-        : {}),
+      // The SAME env the on-demand escalation verb echoes back (browserCliEnv,
+      // task-63406211c0ee) so the start + escalate paths can't drift.
+      ...(playwright ? browserCliEnv() : {}),
       ...(opts.env ?? {}),
     },
     onExit: ({ exitCode, signal }) => {

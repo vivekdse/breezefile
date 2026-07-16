@@ -46,6 +46,31 @@ export function browserCliAllowRules(): string[] {
   return [`Bash(node ${BROWSER_CLI}:*)`, `Bash(node ${TOOLS_CLI}:*)`];
 }
 
+/** The PTY env that points an in-app claude session's helper CLIs at Breeze's
+ *  embedded browser over CDP. SHARED so the two wiring paths stay in sync:
+ *   - session START — the `playwright` flag lays this into the pty env at spawn
+ *     (electron/agents/interactive.ts);
+ *   - ON-DEMAND escalation (task-63406211c0ee) — a session that started
+ *     TERMINAL-only can't have new env injected into its already-spawned pty, so
+ *     the escalation verb echoes these SAME values back in its response body
+ *     (electron/api-server.ts `/app/escalate-to-browser`) for the helper to read
+ *     explicitly. The helpers ALREADY default to these profile-derived values
+ *     when the env is unset (electron/browser/connect.mjs CDP_URL fallback), so a
+ *     terminal session can drive the browser even without them — this keeps the
+ *     two start paths from drifting and gives the escalation response one source
+ *     of truth for the endpoint + CLI paths to report. */
+export function browserCliEnv(): {
+  BREEZE_CDP_URL: string;
+  BREEZE_BROWSER_CLI: string;
+  BREEZE_TOOLS_CLI: string;
+} {
+  return {
+    BREEZE_CDP_URL: CDP_URL,
+    BREEZE_BROWSER_CLI: BROWSER_CLI,
+    BREEZE_TOOLS_CLI: TOOLS_CLI,
+  };
+}
+
 /** The browser playbook prose (no leading separator / heading). The session
  *  drives the live browser DIRECTLY — no sub-agent delegation. Shared by the
  *  two delivery paths below: it normally rides a seeded CLAUDE.md in the task
@@ -141,6 +166,8 @@ function playbookBody(): string[] {
     '   only when no tool fits, or repair on an existing tool has been exhausted):',
     `  node ${C} <verb> [args]`,
     '  open [url] · goto <url> · snapshot [sel] · screenshot [path] · text [sel]',
+    '  escalate [url] (alias use-browser) — bring THIS session\'s browser pane up',
+    '     ON DEMAND if you started terminal-only and now need the browser.',
     '  click <sel> · fill <sel> <v> · type <sel> <v> · press <key> · wait <sel>',
     '  eval <js> · url | title | pages · fill-ref <sel> <ref> · type-ref <sel> <ref>',
     '  net-observe [urlFilter] · net-replay <url> [--method M] (the API shortcut)',

@@ -19,6 +19,10 @@
 //                   (a substring matched against the page URL or title).
 //
 // Usage:  node cli.mjs <verb> [args...]
+//   escalate [url]              bring THIS terminal-only session's operator
+//   (alias use-browser)         browser window up ON DEMAND mid-run, bound to
+//                               this session's own pty (task-63406211c0ee), then
+//                               drive it with the verbs below
 //   open [url]                  open/focus the Breeze browser window (via the
 //                               control API), wait for it, then drive it
 //   pages                       list attachable pages (debug)
@@ -205,6 +209,27 @@ async function main() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ session, connectionId, call, params }),
+    });
+    process.stdout.write(JSON.stringify(body, null, 2) + '\n');
+    return;
+  }
+
+  // task-63406211c0ee — ON-DEMAND BROWSER ESCALATION. A session that started
+  // TERMINAL-only (no browser pane) calls this to bring THIS session's operator
+  // window up mid-run so it can drive the browser. Talks only to the localhost
+  // control API (POST /app/escalate-to-browser) — no CDP yet — identifying
+  // itself by its own $BREEZE_PTY_ID (always set on a managed pty). Main binds
+  // the operator window to this pty (no takeover-confirm against itself — see
+  // the endpoint's comment) and echoes back the CDP endpoint + helper CLI paths.
+  // After this returns ok, the usual verbs (`goto`, `snapshot`, …) drive the
+  // now-open pane. Handled and returned BEFORE any CDP connect attempt.
+  if (verb === 'escalate' || verb === 'use-browser') {
+    const ptyId = (process.env.BREEZE_PTY_ID || '').trim();
+    if (!ptyId) fail('escalate needs $BREEZE_PTY_ID (set on every in-app session)');
+    const body = await controlFetch('/app/escalate-to-browser', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ptyId: Number(ptyId), url: rest[0] }),
     });
     process.stdout.write(JSON.stringify(body, null, 2) + '\n');
     return;

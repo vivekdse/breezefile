@@ -18,9 +18,10 @@ import { stateDir } from './core/profile.mjs';
 import { writeFileSync, unlinkSync, chmodSync, mkdirSync, existsSync } from 'node:fs';
 import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { dispatchTerminalFg } from './ipc';
+import { dispatchTerminalFg, isManagedPtyAlive } from './ipc';
 import { openBrowserWindow, getOperatorViewId } from './browser/window';
 import { getBrowserView } from './browser/views';
+import { browserCliEnv } from './browser/automation';
 import { capturePagePdf } from './browser/screenshot-pdf.ts';
 import {
   startRecording as startBrowserRecording,
@@ -263,6 +264,76 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       // window's existing session or opens a bare browser pane.
       await openBrowserWindow(body.url);
       return sendJson(res, 200, { ok: true });
+    }
+
+    // task-63406211c0ee — ON-DEMAND BROWSER ESCALATION. A task that started
+    // TERMINAL-only (no `chrome`/`playwright` flag → no browser pane, per
+    // task-47919c5fd866's neutral start) may LATER discover it needs the
+    // browser. It can't relaunch itself with the flag, and it can't get new env
+    // injected into its already-spawned pty — so it POSTs here to escalate the
+    // RUNNING session into the operator window mid-run.
+    //
+    // Unlike /app/open-browser (no ptyId — only ever navigates the window's
+    // existing session or a bare pane), this call BINDS the operator window to
+    // THIS session's own pty so the split view mirrors the escalating terminal.
+    // The caller identifies "this session" by its $BREEZE_PTY_ID (always set on
+    // every managed pty — electron/ipc.ts spawnManagedPty); the helper CLI reads
+    // it and passes `ptyId` here.
+    //
+    // TAKEOVER-GUARD INTERACTION (the crux — task-207afa3fcec2's guard in
+    // openBrowserWindow): escalating a session into a window IT ALREADY OWNS, or
+    // into NO window yet, must NEVER prompt a takeover-confirm against itself.
+    // It doesn't, because that guard only fires when the window exists AND the
+    // adopted pty DIFFERS from the one it currently mirrors AND that prior pty is
+    // still live:
+    //   - TypeBuild task (hostInOperator) — the window already mirrors THIS pty,
+    //     so ptyId === prevPtyId → guard skipped, the call just focuses + refreshes
+    //     the title (this is the common escalation path).
+    //   - Plain terminal `claude` with no operator window open — `existing` is
+    //     null → guard skipped, a fresh window is created bound to this pty.
+    //   - Only when a DIFFERENT live session already holds the singleton window
+    //     does the guard prompt — a GENUINE conflict, exactly the case it exists
+    //     for; the human decides, and a declined takeover returns hosted:false.
+    //
+    // Permission to run the helpers is a PRE-SPAWN concern (the seeded
+    // ~/.breezefile/tasks/.claude/settings.json already grants
+    // browserCliAllowRules() for every TypeBuild launch — ensureTasksWorkspace),
+    // so a running session already has it; a claude child can't reload settings
+    // mid-run, so we don't re-seed here. CDP wiring likewise can't be injected
+    // post-spawn, but the helpers DEFAULT to the profile's CDP endpoint when the
+    // env is unset (connect.mjs), so the terminal session can already drive the
+    // browser — we return browserCliEnv() so the agent knows the exact endpoint +
+    // CLI paths to use.
+    if (p === '/app/escalate-to-browser' && m === 'POST') {
+      const body = await readJson<{ ptyId?: number | string; url?: string }>(req).catch(
+        () => ({}) as { ptyId?: number | string; url?: string },
+      );
+      const ptyId = Number(body.ptyId);
+      if (!Number.isFinite(ptyId)) {
+        throw Object.assign(new Error('ptyId required (this session\'s $BREEZE_PTY_ID)'), {
+          status: 400,
+        });
+      }
+      // Escalation only makes sense for a LIVE session — a stale/dead pty id has
+      // no terminal to mirror. Reject rather than silently binding the window to
+      // a corpse (which would then take over any real session on the next launch).
+      if (!isManagedPtyAlive(ptyId)) {
+        throw Object.assign(new Error('no live session for that ptyId'), { status: 404 });
+      }
+      // Bind the operator window to THIS pty. Passing the pty is what makes the
+      // takeover-guard recognise "same session" (no self-prompt) vs. a genuine
+      // cross-session steal. hosted:false means the window was held by a
+      // different live session and the human declined the takeover.
+      const hosted = await openBrowserWindow(body.url, ptyId);
+      if (!hosted) {
+        return sendJson(res, 200, {
+          ok: false,
+          reason: 'operator window held by another session; takeover declined',
+        });
+      }
+      // Echo the CDP endpoint + helper CLI paths (browserCliEnv) so the agent has
+      // the exact values a `playwright`-flagged start would have received in env.
+      return sendJson(res, 200, { ok: true, ...browserCliEnv() });
     }
 
     // Full-page screenshot → PDF, callable by an external agent (Claude Code,
