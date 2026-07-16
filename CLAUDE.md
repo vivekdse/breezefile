@@ -121,7 +121,7 @@ Development work for this repo is tracked in **TypeBuild**, via the TypeBuild MC
 Two instances run side-by-side from separate checkouts, isolated by profile
 (own userData, state dir, CDP port — see `electron/core/profile.mjs`):
 
-- **Dev — build here.** This checkout (`~/data_scripts/git_repos/breezefile`),
+- **Dev — build here.** This checkout (`~/git_repos/breezefile`),
   tmux session `breeze`, `npm run dev`, CDP 9223, amber stripe + "DEV" chip.
   All development happens against this instance.
 - **Stable — pull-only.** `~/git_repos/breeze_stable`, tmux session
