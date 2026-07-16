@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { primaryActionFor, isInProgress } from '../src/components/tasks/primaryAction.mjs';
+import { primaryActionFor, isInProgress, actionsFor } from '../src/components/tasks/primaryAction.mjs';
 
 function task(over = {}) {
   return {
@@ -253,4 +253,96 @@ test('isInProgress: true when normalized status is in_progress (no rawStatus)', 
 test('isInProgress: false for an idle/open/done task', () => {
   assert.equal(isInProgress(task({ rawStatus: 'open', status: 'pending' })), false);
   assert.equal(isInProgress(task({ status: 'done' })), false);
+});
+
+// ── actionsFor (task-710003dbc2c6, U3) — the full ordered action list ──────
+
+function ids(list) {
+  return list.map((a) => a.id);
+}
+
+test('actionsFor: needs → answer leads the list', () => {
+  const a = actionsFor(task({ source: 'typebuild', status: 'needs' }), { tbReady: READY });
+  assert.equal(a[0].id, 'answer');
+  assert.equal(a[0].enabled, true);
+});
+
+test('actionsFor: a live local session → stop + open-session, no start', () => {
+  const a = actionsFor(
+    task({ source: 'typebuild', rawStatus: 'in_progress', claimedBy: 'me@x' }),
+    { tbReady: READY, myEmail: 'me@x', session: { ptyId: 1, tabIndex: 0 } },
+  );
+  assert.ok(ids(a).includes('stop'));
+  assert.ok(ids(a).includes('open-session'));
+  assert.ok(!ids(a).includes('start'));
+  const stop = a.find((x) => x.id === 'stop');
+  assert.equal(stop.enabled, true);
+  assert.match(stop.reason, /end this session/i);
+});
+
+test('actionsFor: in_progress with NO local session → stop (frees the claim), no ghost start', () => {
+  const a = actionsFor(task({ source: 'typebuild', rawStatus: 'in_progress' }), {
+    tbReady: READY,
+  });
+  assert.ok(ids(a).includes('stop'));
+  assert.ok(!ids(a).includes('start'));
+  const stop = a.find((x) => x.id === 'stop');
+  assert.match(stop.reason, /releases it server-side/i);
+});
+
+test('actionsFor: a local (non-typebuild) task never offers stop', () => {
+  const a = actionsFor(task({ source: 'local', auto_mode: true }), {});
+  assert.ok(!ids(a).includes('stop'));
+});
+
+test('actionsFor: open/free typebuild task → start, cancel; no stop', () => {
+  const a = actionsFor(task({ source: 'typebuild', rawStatus: 'open' }), { tbReady: READY });
+  assert.ok(ids(a).includes('start'));
+  assert.ok(ids(a).includes('cancel'));
+  assert.ok(!ids(a).includes('stop'));
+  const start = a.find((x) => x.id === 'start');
+  assert.equal(start.enabled, true);
+});
+
+test('actionsFor: blocked typebuild task → retry with a human reason, plus cancel', () => {
+  const a = actionsFor(
+    task({ source: 'typebuild', rawStatus: 'blocked', attempts: 1, maxAttempts: 3 }),
+    { tbReady: READY },
+  );
+  const retry = a.find((x) => x.id === 'retry');
+  assert.ok(retry);
+  assert.equal(retry.enabled, true);
+  assert.match(retry.reason, /1\/3 attempts/);
+  assert.ok(ids(a).includes('cancel'));
+});
+
+test('actionsFor: terminal typebuild task → reentry start, no cancel', () => {
+  const a = actionsFor(task({ source: 'typebuild', rawStatus: 'done' }), { tbReady: READY });
+  assert.ok(ids(a).includes('start'));
+  assert.ok(!ids(a).includes('cancel'));
+});
+
+test('actionsFor: claimed by someone else → no cancel, no stop, and a DISABLED ghost start with the reason', () => {
+  const a = actionsFor(
+    task({ source: 'typebuild', rawStatus: 'open', claimedBy: 'other@x' }),
+    { tbReady: READY, myEmail: 'me@x' },
+  );
+  assert.ok(!ids(a).includes('cancel'));
+  assert.ok(!ids(a).includes('stop'));
+  // A disabled control with a reason, not a silent gap (U3 acceptance:
+  // "disabled-with-reason tooltip when ineligible").
+  const start = a.find((x) => x.id === 'start');
+  assert.ok(start);
+  assert.equal(start.enabled, false);
+  assert.match(start.reason, /claimed by other@x/);
+});
+
+test('actionsFor: local manual open task → done-toggle only (no cancel/stop)', () => {
+  const a = actionsFor(task({ source: 'local' }), {});
+  assert.deepEqual(ids(a), ['done-toggle']);
+});
+
+test('actionsFor: local auto idle → run-now surfaced as start', () => {
+  const a = actionsFor(task({ source: 'local', auto_mode: true }), {});
+  assert.ok(ids(a).includes('start'));
 });

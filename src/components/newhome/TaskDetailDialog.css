@@ -514,6 +514,18 @@
   flex-wrap: wrap;
 }
 
+/* task-710003dbc2c6 (U3) — ■ Stop's outcome caption, same treatment as the
+   talk-back "Sent" confirmation. */
+.nh-dialog__stop-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.nh-dialog__stop-result {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
 /* Footer actions now use the shared .btn / .btn--primary / .btn--secondary /
    .btn--danger / .btn--warn variants (src/styles/buttons.css) instead of
    bespoke button CSS, so this surface speaks the same visual language as

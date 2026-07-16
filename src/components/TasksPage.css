@@ -281,6 +281,17 @@
   background: var(--err, #c0392b);
   color: var(--accent-ink);
 }
+/* task-710003dbc2c6 (U3) — ■ Stop reuses the "in progress" hue (--warn is the
+   same token TaskIndicators uses for in_progress), so it visually reads as
+   "this is running" rather than a destructive action. */
+.tasks__btn--warn {
+  border-color: var(--warn, #d9a441);
+  color: var(--warn, #d9a441);
+}
+.tasks__btn--warn:hover:not(:disabled) {
+  background: var(--warn, #d9a441);
+  color: var(--accent-ink);
+}
 
 /* fm-jw9m — the Tasks↔Runs view toggle was removed: runs are reached per-task
    from the detail panel, so the page no longer carries a top-level toggle. */

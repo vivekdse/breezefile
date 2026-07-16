@@ -64,8 +64,9 @@ import { getTask, taskSourceAction, useOriginHealth, useTasks, useTypebuildReadi
 import { useTaskActions } from '../tasks/useTaskActions';
 import type { StartOutcome } from '../tasks/useTaskActions';
 import { useStartAction } from '../tasks/useStartAction';
+import { useStopAction } from '../tasks/useStopAction';
 import { useRunningSessions } from '../tasks/useRunningSessions';
-import { primaryActionFor } from '../tasks/primaryAction.mjs';
+import { primaryActionFor, actionsFor } from '../tasks/primaryAction.mjs';
 import { isDone } from '../tasks/sections.mjs';
 import { normalizeTablePayload, coerceCell } from '../tasks/taskResult.mjs';
 import './RosterTable.css';
@@ -456,6 +457,9 @@ function RowAction({
   onRetry,
   onStart,
   startEligible,
+  stopEligible,
+  onStop,
+  stopPending,
   viewableDetail,
   pending,
   error,
@@ -468,6 +472,12 @@ function RowAction({
    *  Tasks page's state machine). `enabled` gates on TypeBuild readiness;
    *  `tooltip` is the same hover text the old play button shows. */
   startEligible: { enabled: boolean; tooltip?: string; reentry?: boolean } | null;
+  /** task-710003dbc2c6 (U3) — non-null when actionsFor deems this row
+   *  stop-eligible (a session is live locally, or the server says
+   *  in_progress). `reason` is the hover text. */
+  stopEligible: { reason?: string } | null;
+  onStop: (id: string) => void;
+  stopPending: boolean;
   /** task-4f1e8f45bf0e — a DONE, non-chain, childless single task carrying a
    *  fielded result: "View →" opens the task-detail drawer (which defaults a
    *  done task to its Activity/Outputs read view). */
@@ -476,6 +486,31 @@ function RowAction({
   pending: boolean;
   error: string | null;
 }) {
+  // STOP takes priority over every other row action: a running/claimed
+  // session is the one state where ending it is the ONLY sane next move (a
+  // second Start would just 409). Shown for any status once actionsFor says
+  // a session is plausibly live — including 'needs'/'failed' rows whose
+  // agent is still attached to a session even though the row reads as
+  // waiting-on-human or errored.
+  if (stopEligible) {
+    return (
+      <span className="nh-roster__action-wrap">
+        <button
+          type="button"
+          className="nh-roster__action nh-roster__action--stop"
+          disabled={stopPending}
+          title={stopEligible.reason}
+          onClick={(e) => {
+            e.stopPropagation();
+            onStop(task.id);
+          }}
+        >
+          {stopPending ? 'Stopping…' : '■ Stop'}
+        </button>
+        {error && <span className="nh-roster__action-error" role="alert" title={error}>{`⚠ ${error}`}</span>}
+      </span>
+    );
+  }
   if (task.status === 'needs') {
     return (
       <button
@@ -654,6 +689,10 @@ export function RosterTable({
   // this component routes through it, so none can be silent. It owns
   // pending/error UI keyed by the row/parent id.
   const startAction = useStartAction();
+  // task-710003dbc2c6 (U3) — the SHARED stop wrapper: every Stop click in
+  // this table (plain rows + the single-run group's inline action) routes
+  // through it, same never-silent contract as startAction.
+  const stopAction = useStopAction();
   const { tasks: allTasks } = useTasks({ includeDone: true });
   const openChildParentIds = useMemo(() => {
     const set = new Set<string>();
@@ -678,6 +717,22 @@ export function RosterTable({
     return pa.kind === 'start'
       ? { enabled: pa.enabled, tooltip: pa.tooltip, reentry: pa.reentry }
       : null;
+  };
+
+  // task-710003dbc2c6 (U3) — Stop eligibility: actionsFor is the ONE place
+  // that decides whether a session is plausibly live for this row (a local
+  // tab, or the server saying in_progress). Reused verbatim rather than
+  // re-deriving the same rule here.
+  const stopActionFor = (t: NewHomeTask): { reason?: string } | null => {
+    const session = sessions.get(t.id);
+    const list = actionsFor(t.raw, {
+      caps: actions.caps(t.raw),
+      tbReady,
+      myEmail: tbReady.email,
+      session,
+    });
+    const stop = list.find((a) => a.id === 'stop');
+    return stop ? { reason: stop.reason } : null;
   };
 
   // task-f26e7745eda6 — def id → the runnable child's LIVE server status, so
@@ -1404,15 +1459,18 @@ export function RosterTable({
               // rowsById (same map the group's Last Run reads).
               const singleRun = runCount === 1 ? rowsById.get(g.rows[0].taskId) ?? null : null;
               const singleRunStart = singleRun ? startActionFor(singleRun) : null;
+              // task-710003dbc2c6 (U3) — same Stop eligibility as a plain row.
+              const singleRunStop = singleRun ? stopActionFor(singleRun) : null;
               // Only surface a primary button when the run actually has one:
-              // Answer (needs), Retry (failed), or ▶ Start (start-eligible). A
-              // done/cancelled/in-flight run adds nothing beyond the existing
-              // View → , so we leave the cell untouched for it.
+              // Answer (needs), Retry (failed), Stop (running), or ▶ Start
+              // (start-eligible). A done/cancelled run adds nothing beyond the
+              // existing View → , so we leave the cell untouched for it.
               const singleRunHasAction =
                 !!singleRun &&
                 (singleRun.status === 'needs' ||
                   singleRun.status === 'failed' ||
-                  !!singleRunStart);
+                  !!singleRunStart ||
+                  !!singleRunStop);
               const singleRunOutcome =
                 singleRun && (singleRun.status === 'done' || singleRun.status === 'failed')
                   ? summarizeOutcome(singleRun, outcomeDetails.get(singleRun.id))
@@ -1468,9 +1526,12 @@ export function RosterTable({
                             void startAction.run(id, { kind: 'start', run: () => onStart(id) });
                           }}
                           startEligible={singleRunStart}
+                          stopEligible={singleRunStop}
+                          onStop={(id) => void stopAction.run(id, singleRun.raw, sessions.get(id))}
+                          stopPending={stopAction.pendingFor(singleRun.id)}
                           viewableDetail={false}
                           pending={startAction.pendingFor(singleRun.id)}
-                          error={startAction.errorFor(singleRun.id)}
+                          error={startAction.errorFor(singleRun.id) ?? stopAction.errorFor(singleRun.id)}
                         />
                       )}
                       <button
@@ -1731,6 +1792,9 @@ export function RosterTable({
                           void startAction.run(id, { kind: 'start', run: () => onStart(id) });
                         }}
                         startEligible={startActionFor(t)}
+                        stopEligible={stopActionFor(t)}
+                        onStop={(id) => void stopAction.run(id, t.raw, sessions.get(id))}
+                        stopPending={stopAction.pendingFor(t.id)}
                         // task-4f1e8f45bf0e — a DONE, non-chain, CHILDLESS single
                         // task whose lazy resolution found a fielded result gets
                         // "View →" into the detail drawer's read view.
@@ -1738,7 +1802,7 @@ export function RosterTable({
                           t.status === 'done' && resolution?.status === 'fielded'
                         }
                         pending={startAction.pendingFor(t.id)}
-                        error={startAction.errorFor(t.id)}
+                        error={startAction.errorFor(t.id) ?? stopAction.errorFor(t.id)}
                       />
                       <ActionsMenu
                         label={`Actions for ${t.title}`}

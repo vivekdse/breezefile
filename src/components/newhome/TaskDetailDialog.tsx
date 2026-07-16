@@ -41,7 +41,7 @@ import { useRunningSessions } from '../tasks/useRunningSessions';
 // task — the "▶ Start" footer button reuses the OLD Tasks page's exact launch
 // path: primaryActionFor decides eligibility, useTaskActions().start (→
 // runTaskNow) is the same claim-then-launch this dialog's Retry already calls.
-import { primaryActionFor } from '../tasks/primaryAction.mjs';
+import { primaryActionFor, actionsFor } from '../tasks/primaryAction.mjs';
 import { isDone } from '../tasks/sections.mjs';
 import { useOpenResumeInTab } from '../../openResumeInTab';
 import {
@@ -422,6 +422,38 @@ export function TaskDetailDialog({
       ? { enabled: pa.enabled, tooltip: pa.tooltip, reentry: pa.reentry }
       : null;
   }, [raw, actions, tbReady, session, hasOpenChildren]);
+
+  // task-710003dbc2c6 (U3) — STOP: mirrors the roster row's stopActionFor via
+  // the same pure actionsFor() rule (session live locally, or server says
+  // in_progress). Local pending/error state, same never-silent contract as
+  // Start/Retry (optimistic "Stopping…", visible error on failure).
+  const stopEligible = useMemo(() => {
+    if (!raw) return null;
+    const list = actionsFor(raw, {
+      caps: actions.caps(raw),
+      tbReady,
+      myEmail: tbReady.email,
+      session,
+    });
+    return list.find((a) => a.id === 'stop') ?? null;
+  }, [raw, actions, tbReady, session]);
+  const [stopping, setStopping] = useState(false);
+  const [stopMessage, setStopMessage] = useState<string | null>(null);
+  useEffect(() => {
+    setStopping(false);
+    setStopMessage(null);
+  }, [taskId]);
+  async function stopTask() {
+    if (!raw || stopping) return;
+    setStopping(true);
+    setStopMessage(null);
+    try {
+      const { message } = await actions.stop(raw, session);
+      setStopMessage(message);
+    } finally {
+      setStopping(false);
+    }
+  }
 
   // ── task-templates: this task's own output DEFINITIONS + submitted VALUES ─
   // A CHILD task's body carries `task-outputs` (definitions); once the agent
@@ -989,6 +1021,29 @@ export function TaskDetailDialog({
         </div>
 
         <div className="nh-dialog__footer">
+          {/* task-710003dbc2c6 (U3) — ■ Stop: the one footer action shown
+              whenever a session is plausibly live for this task (mirrors the
+              roster row's Stop). Kills the local pty (if any) then releases
+              the claim, so the task frees up instead of staying claimed but
+              dead. Never silent: stopMessage always renders the outcome. */}
+          {stopEligible && (
+            <span className="nh-dialog__stop-wrap">
+              <button
+                type="button"
+                className="btn btn--warn"
+                disabled={stopping}
+                title={stopEligible.reason}
+                onClick={() => void stopTask()}
+              >
+                {stopping ? 'Stopping…' : '■ Stop'}
+              </button>
+              {stopMessage && (
+                <span className="nh-dialog__stop-result" role="status">
+                  {stopMessage}
+                </span>
+              )}
+            </span>
+          )}
           <button type="button" className="btn btn--danger" onClick={cancelTask}>
             Cancel Task
           </button>

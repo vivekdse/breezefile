@@ -92,6 +92,10 @@ export function TaskDetailPanel({
   onSourceAction,
   onOpenRuns,
   onOpenDetail,
+  stopEligible,
+  onStop,
+  stopPending,
+  stopMessage,
 }: {
   task: Task | null;
   caps?: TaskSourceCapabilities;
@@ -110,6 +114,12 @@ export function TaskDetailPanel({
   onOpenRuns: () => void;
   // task-5e9d866a377f — open the full detail DRAWER (Trace · Config · Session).
   onOpenDetail: (tab?: 'trace' | 'config' | 'session') => void;
+  /** task-710003dbc2c6 (U3) — non-null when actionsFor deems this task
+   *  stop-eligible (TypeBuild only — see AgentDetail). */
+  stopEligible?: { reason?: string } | null;
+  onStop?: () => void;
+  stopPending?: boolean;
+  stopMessage?: string | null;
 }) {
   if (selectedCount > 1) {
     return (
@@ -153,6 +163,10 @@ export function TaskDetailPanel({
         onSourceAction={onSourceAction}
         onDelete={onDelete}
         onOpenDetail={onOpenDetail}
+        stopEligible={stopEligible}
+        onStop={onStop}
+        stopPending={stopPending}
+        stopMessage={stopMessage}
       />
     );
   }
@@ -578,6 +592,10 @@ function AgentDetail({
   onSourceAction,
   onDelete,
   onOpenDetail,
+  stopEligible,
+  onStop,
+  stopPending,
+  stopMessage,
 }: {
   task: Task;
   caps?: TaskSourceCapabilities;
@@ -589,6 +607,10 @@ function AgentDetail({
   onSourceAction: (action: 'release' | 'reopen' | 'complete' | 'cancel') => void;
   onDelete: () => void;
   onOpenDetail: (tab?: 'trace' | 'config' | 'session') => void;
+  stopEligible?: { reason?: string } | null;
+  onStop?: () => void;
+  stopPending?: boolean;
+  stopMessage?: string | null;
 }) {
   const { dispatch } = useStore();
   const say = useCallback(
@@ -891,6 +913,21 @@ function AgentDetail({
 
       <div className="tasks__detail-section tasks__detail-section--spaced">Lifecycle</div>
       <div className="tasks__detail-actions">
+        {/* task-710003dbc2c6 (U3) — ■ Stop: ends the task's live session
+            (kill the local pty if bound, then release the claim) so the row
+            frees up instead of staying claimed-but-dead. Shown whenever
+            actionsFor deems a session plausibly live for this task. */}
+        {stopEligible && (
+          <button
+            type="button"
+            className="tasks__btn tasks__btn--warn"
+            disabled={!!stopPending}
+            title={stopEligible.reason}
+            onClick={() => onStop?.()}
+          >
+            {stopPending ? 'Stopping…' : '■ Stop'}
+          </button>
+        )}
         {canClaim && claimedByMe && (
           <button
             type="button"
@@ -930,6 +967,10 @@ function AgentDetail({
           </button>
         )}
       </div>
+      {/* task-710003dbc2c6 (U3) — Stop's outcome, never silent. */}
+      {stopMessage && (
+        <div className="tasks__detail-notes-body tasks__detail-muted">{stopMessage}</div>
+      )}
 
       {/* task-b8306d2b85c2 — lifecycle timeline (Created → Claimed → status
           transitions), folded from the per-task audit trail. Supersedes the

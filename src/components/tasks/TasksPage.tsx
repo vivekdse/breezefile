@@ -44,10 +44,11 @@ import type { RemoteSchedule, Task, TaskStatus } from '../../types';
 import { partitionTasks, resolveBlockedBy } from './sections.mjs';
 import { classify } from '../../projects/attention.mjs';
 import type { AgentRow } from './sections.mjs';
-import { primaryActionFor } from './primaryAction.mjs';
+import { primaryActionFor, actionsFor } from './primaryAction.mjs';
 import type { PrimaryAction } from './primaryAction.mjs';
 import { useTaskActions } from './useTaskActions';
 import { useStartAction } from './useStartAction';
+import { useStopAction } from './useStopAction';
 import { useRunningSessions } from './useRunningSessions';
 import { TaskRow, TaskRowHeader } from './TaskRow';
 import { TaskDetailPanel } from './TaskDetailPanel';
@@ -74,6 +75,9 @@ function TasksPageInner() {
   // status bar (useTaskActions.retry already calls say()); this additionally
   // guarantees the click can never no-op.
   const retryAction = useStartAction();
+  // task-710003dbc2c6 (U3) — the shared stop wrapper for the detail panel's
+  // ■ Stop footer button (never-silent, keyed by task id).
+  const stopAction = useStopAction();
   const { byId: sourcesById } = useTaskSources();
   const tbReady = useTypebuildReadiness();
   const myEmail = (tbReady as { email?: string | null }).email ?? null;
@@ -356,6 +360,15 @@ function TasksPageInner() {
       lastRunRunning,
       hasOpenChildren,
     });
+  }
+
+  // task-710003dbc2c6 (U3) — Stop eligibility for the detail panel's footer,
+  // via the SAME pure actionsFor() rule the roster row uses.
+  function stopFor(task: Task): { reason?: string } | null {
+    const session = sessions.get(task.id);
+    const list = actionsFor(task, { caps: capsFor(task), tbReady, myEmail, session });
+    const stop = list.find((a) => a.id === 'stop');
+    return stop ? { reason: stop.reason } : null;
   }
 
   function invokePrimary(task: Task, action: PrimaryAction) {
@@ -1253,6 +1266,13 @@ function TasksPageInner() {
               onSourceAction={(act) => detailTask && void actions.sourceAction(detailTask, act)}
               onOpenRuns={() => detailTask && openRuns(detailTask)}
               onOpenDetail={(tab) => detailTask && openDetail(detailTask, tab)}
+              stopEligible={detailTask ? stopFor(detailTask) : null}
+              onStop={() =>
+                detailTask &&
+                void stopAction.run(detailTask.id, detailTask, sessions.get(detailTask.id))
+              }
+              stopPending={detailTask ? stopAction.pendingFor(detailTask.id) : false}
+              stopMessage={detailTask ? stopAction.errorFor(detailTask.id) : null}
             />
           </div>
       </>

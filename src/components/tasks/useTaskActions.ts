@@ -10,6 +10,7 @@
 
 import { useCallback } from 'react';
 import { useStore } from '../../store';
+import { fm } from '../../bridge';
 import {
   deleteTask,
   runTaskNow,
@@ -92,6 +93,15 @@ export type TaskActions = {
    *  reason (never the raw server token) and short-circuits before any claim
    *  is attempted, so a failed reopen can never strand a claim. */
   retry: (task: Task) => Promise<StartOutcome>;
+  /** task-710003dbc2c6 (U3) — STOP: end the task's live session (if any local
+   *  tab is bound to it — killManagedPty via window.fm.termKill) and release
+   *  the TypeBuild claim so the task frees up rather than staying claimed but
+   *  dead. `session` is the caller's useRunningSessions() lookup for this
+   *  task (undefined when no local tab is bound — the running session may be
+   *  on another machine; the release call alone still frees the claim).
+   *  Always resolves — never throws — and reports a status-line either way,
+   *  same never-silent contract as start/retry. */
+  stop: (task: Task, session?: { ptyId: number }) => Promise<{ ok: boolean; message: string }>;
 };
 
 // Apply a management patch to ONE task using the RIGHT transport for its
@@ -447,6 +457,53 @@ export function useTaskActions(): TaskActions {
     [start, say],
   );
 
+  // task-710003dbc2c6 (U3) — STOP. Kills the local pty (if we have one bound
+  // to this task) THEN releases the claim — in that order, so a kill that
+  // throws never skips the release (the claim is the thing that actually
+  // matters: a dead session with a held claim is worse than a live one, since
+  // nothing can restart it). Both steps are best-effort/independent; either
+  // can fail without masking the other, and the combined result is always
+  // reported (never a silent no-op — the whole point of this task).
+  const stop = useCallback(
+    async (task: Task, session?: { ptyId: number }): Promise<{ ok: boolean; message: string }> => {
+      let killErr: string | null = null;
+      if (session) {
+        try {
+          await fm.termKill(session.ptyId);
+        } catch (e) {
+          killErr = e instanceof Error ? e.message : String(e);
+        }
+      }
+      if (task.source !== 'typebuild') {
+        // No claim to free — the local kill (if any) is the whole story.
+        const message = killErr ? `couldn't stop · ${killErr}` : 'stopped';
+        say(`${message} · ${task.title}`);
+        return { ok: !killErr, message };
+      }
+      try {
+        const res = (await taskSourceAction(task.source, task.id, 'release')) as
+          | { ok?: boolean; reason?: string; claimedBy?: string | null }
+          | undefined;
+        if (res && res.ok === false) {
+          const friendly = formatSourceReason(res.reason, { claimedBy: res.claimedBy });
+          const message = `couldn't release the claim · ${friendly}`;
+          say(`${message} · ${task.title}`);
+          return { ok: false, message };
+        }
+        const message = killErr
+          ? `session may still be ending (${killErr}) — claim released`
+          : 'stopped — claim released';
+        say(`${message} · ${task.title}`);
+        return { ok: true, message };
+      } catch (e) {
+        const message = formatOpError('release', e);
+        say(`${message} · ${task.title}`);
+        return { ok: false, message };
+      }
+    },
+    [say],
+  );
+
   return {
     caps: capsFor,
     patch,
@@ -459,6 +516,7 @@ export function useTaskActions(): TaskActions {
     sourceAction,
     retry,
     start,
+    stop,
   };
 }
 

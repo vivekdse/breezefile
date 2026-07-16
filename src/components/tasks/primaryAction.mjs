@@ -182,3 +182,128 @@ export function primaryActionFor(task, ctx) {
   // Unknown source / shape: be safe, offer nothing actionable.
   return { kind: 'none' };
 }
+
+// ─── task-710003dbc2c6 (U3) — full action list ─────────────────────────────
+// actionsFor() is the ONE action model behind every surface (roster row,
+// detail dialog/panel, and — later — copilot): it returns an ORDERED list of
+// every action applicable to `task` right now, each carrying enabled/reason
+// so a disabled control always has a tooltip instead of just vanishing.
+// primaryActionFor() remains the single "what's the ONE button" decision
+// (used by the icon-only row slot); actionsFor() is the superset a kebab
+// menu / detail footer renders from — no per-surface hardcoding of which
+// verbs exist.
+//
+// STOP is the one action with no prior existence anywhere in the UI: it
+// kills the task's live session (a managed pty, via window.fm.termKill) and
+// releases the TypeBuild claim so the task frees up instead of staying
+// claimed-but-dead. actionsFor() decides ELIGIBILITY only (pure, no IPC) —
+// the actual kill+release call lives in useTaskActions().stop.
+
+/**
+ * @typedef {{
+ *   id: 'start'|'stop'|'retry'|'cancel'|'reopen'|'answer'|'open-session'|'view-run'|'done-toggle',
+ *   label: string,
+ *   enabled: boolean,
+ *   reason?: string,
+ * }} TaskAction
+ */
+
+/**
+ * @param {Task} task
+ * @param {{
+ *   caps?: { canEdit?: boolean, canClaim?: boolean, canDelete?: boolean } | undefined,
+ *   tbReady?: { signedIn: boolean, claudeOk: boolean, chromeOk: boolean, ready: boolean } | undefined,
+ *   myEmail?: string|null,
+ *   session?: { ptyId: number, tabIndex: number } | undefined,
+ *   lastRunRunning?: boolean,
+ *   hasOpenChildren?: boolean,
+ * }} ctx
+ * @returns {TaskAction[]}
+ */
+export function actionsFor(task, ctx) {
+  const out = [];
+  const isTypebuild = task.source === 'typebuild';
+  const session = (ctx && ctx.session) || undefined;
+  const myEmail = (ctx && ctx.myEmail) || null;
+  const claimedBy = task.claimedBy ?? null;
+  const iAmClaimer = !claimedBy || claimedBy === myEmail;
+
+  // ── ANSWER — a pending-question row always gets this first; it's not part
+  // of primaryActionFor's table (that lives in the roster's own status
+  // branch — see RowAction's 'needs' case), so actionsFor surfaces it
+  // directly off task.status.
+  if (task.status === 'needs') {
+    out.push({ id: 'answer', label: 'Answer', enabled: true });
+  }
+
+  // ── STOP — offered whenever a session is plausibly live for this task: a
+  // focusable local session tab, OR the server says in_progress (a session
+  // may be running elsewhere/out-of-process — Stop still attempts the local
+  // kill-if-any + release, and the release alone frees a claim stuck on a
+  // dead remote session). Never offered for a local (non-TypeBuild) task —
+  // there's no claim to free and no managed session-registry entry to kill
+  // outside the pty-per-tab the row already offers via open-session.
+  if (isTypebuild && (session || isInProgress(task))) {
+    out.push({
+      id: 'stop',
+      label: 'Stop',
+      enabled: true,
+      reason: session
+        ? 'End this session and free the claim'
+        : 'Free the claim — no local session to kill, but this releases it server-side',
+    });
+  }
+
+  // ── the primary (single) action, folded into the ordered list under its
+  // own id so a surface that wants "everything" doesn't also need a second
+  // call to primaryActionFor.
+  const primary = primaryActionFor(task, ctx);
+  switch (primary.kind) {
+    case 'open-session':
+      out.push({ id: 'open-session', label: 'Open session', enabled: true });
+      break;
+    case 'view-run':
+      out.push({ id: 'view-run', label: 'View run', enabled: true });
+      break;
+    case 'done-toggle':
+      out.push({ id: 'done-toggle', label: 'Mark done', enabled: true });
+      break;
+    case 'reopen':
+      out.push({ id: 'reopen', label: 'Reopen', enabled: true });
+      break;
+    case 'retry':
+      out.push({ id: 'retry', label: 'Retry', enabled: true, reason: primary.reason });
+      break;
+    case 'run-now':
+      out.push({ id: 'start', label: 'Run now', enabled: true });
+      break;
+    case 'start':
+      out.push({
+        id: 'start',
+        label: primary.reentry ? 'Open operator' : 'Start',
+        enabled: primary.enabled,
+        reason: primary.tooltip,
+      });
+      break;
+    case 'none':
+      // Nothing primary to add beyond STOP/ANSWER above — 'none' with a note
+      // (claimed by someone else / children first / in-progress-elsewhere)
+      // is already covered by primaryActionFor's tooltip text; a disabled
+      // ghost 'start' with that reason keeps the row visually consistent
+      // (a control to hover, not a silent gap) EXCEPT when Stop already
+      // explains the row (in-progress-elsewhere — Stop's own reason covers
+      // it, a second disabled Start would just repeat the same sentence).
+      if (primary.note && !(isTypebuild && isInProgress(task))) {
+        out.push({ id: 'start', label: 'Start', enabled: false, reason: primary.note });
+      }
+      break;
+  }
+
+  // ── CANCEL — any non-terminal TypeBuild task the caller isn't locked out
+  // of (someone else's claim is a hard stop, same rule Start uses).
+  if (isTypebuild && !isTerminal(task) && iAmClaimer) {
+    out.push({ id: 'cancel', label: 'Cancel', enabled: true, reason: 'Withdraw this task' });
+  }
+
+  return out;
+}
