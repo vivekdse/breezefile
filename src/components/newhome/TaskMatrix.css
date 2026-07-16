@@ -115,11 +115,17 @@
   min-width: max-content;
   font-size: var(--fs-sm);
 }
+/* The lead column carries one quiet date line + the icon actions — nothing that
+   wants 220px. The width it gave back goes to the INPUT columns, which are what
+   tell a reader which instance this row IS. */
 .tm-col-lead {
-  width: 220px;
+  width: 132px;
 }
 .tm-col-field {
   width: 160px;
+}
+.tm-col-field--in {
+  width: 200px;
 }
 .tm-table th,
 .tm-table td {
@@ -225,9 +231,9 @@
   z-index: 2;
   background: var(--bg-1);
   border-right: 1px solid var(--border-2);
-  /* Layout-cleanup (QA round): the lead cell now holds "Run N" + chip +
-     compact actions, not a repeated template title — keep it lean. */
-  min-width: 150px;
+  /* The lead cell holds a status glyph, one date line and the icon actions —
+     no run label, no repeated template title. Keep it lean. */
+  min-width: 0;
 }
 .tm-lead-th,
 .tm-field-row .tm-lead-th {
@@ -239,37 +245,25 @@
   color: var(--muted-on-panel);
   font-weight: 700;
 }
-/* Layout-cleanup round 2: ONE line per run — [status icon] Run N …… [▶][↗].
+/* Layout-cleanup round 2: ONE line per run — [status icon] Finished 12:15…[▶][↗].
    The status word rides the icon tooltip; actions are compact icon buttons. */
 .tm-lead-inner {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
 }
-/* Run identity stacks vertically: the "Run N" (or custom title) on top and a
-   muted relative time under it, so a reviewer sees at a glance when the run
-   happened. task-run-order */
-.tm-run-id {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.15;
-}
-.tm-run-title {
-  font-weight: 600;
-  color: var(--text-on-panel);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
-}
+/* task-run-order — the row's date: "Finished 12:15" / "Created Jul 16" as ONE
+   compact line. Deliberately the quietest text in the row (muted ink, normal
+   weight, small): it dates the row, it doesn't identify it — the bold IN cells
+   do that. Verb + date never wrap apart. */
 .tm-run-when {
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-xs);
+  font-weight: 400;
   color: var(--muted-on-panel);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 220px;
+  min-width: 0;
 }
 /* Colored status glyph — same --nh-* status vocabulary as the roster pills,
    rendered as a small filled disc so the color reads at a glance. */
@@ -430,19 +424,23 @@
   align-items: center;
   gap: var(--sp-2);
   flex: none;
-  width: 220px;
+  /* Mirrors .tm-col-lead, so the swap from skeleton to real table is a fill,
+     not a jump. */
+  width: 132px;
   font-size: var(--fs-2xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   color: var(--muted-on-panel);
 }
+/* The data rows' lead is the same quiet date the real table shows. */
 .tm-skel-row:not(.tm-skel-row--head) .tm-skel-lead {
-  font-size: var(--fs-sm);
-  font-weight: 600;
+  font-size: var(--fs-xs);
+  font-weight: 400;
   text-transform: none;
   letter-spacing: normal;
-  color: var(--text-on-panel);
+  color: var(--muted-on-panel);
+  white-space: nowrap;
 }
 .tm-skel-bar {
   flex: none;
@@ -536,7 +534,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The INPUT values are the answer to "what is this task about" — the row's real
+   identity now that the lead column no longer names it. They carry the strongest
+   weight and ink in the row; OUT values stay at the default. The truncation
+   above still applies (fixed columns don't grow), so a bold value ellipsizes
+   exactly like a plain one. An EMPTY input is a prompt, not an identity — it
+   stays muted and un-bolded. */
+.tm-cell-td--in .tm-val {
+  font-weight: 700;
+  color: var(--text-on-panel);
+}
 .tm-val--empty {
+  color: var(--muted-on-panel);
+}
+.tm-cell-td--in .tm-val--empty {
+  font-weight: 400;
   color: var(--muted-on-panel);
 }
 .tm-cell-note {

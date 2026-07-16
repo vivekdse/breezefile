@@ -68,23 +68,65 @@ type PillKind = StatusBucket;
 // The schedule-bearing slice of a Task — enough to tell 'scheduled' from 'open'.
 type Schedulable = Pick<Task, 'cron' | 'next_run_at'>;
 
-// task-run-order — a run's created stamp, as "5 minutes ago", so a reviewer
-// knows when a run happened (and thus when it's worth reviewing) instead of a
-// meaningless "Run N" alone. Returns '' when we have no usable stamp.
-function relativeTime(createdAt: number | undefined, now: number): string {
-  if (typeof createdAt !== 'number' || !Number.isFinite(createdAt) || createdAt <= 0) return '';
-  const secs = Math.round((now - createdAt) / 1000);
-  if (secs < 45) return 'just now';
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
-  const days = Math.round(hrs / 24);
-  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
-  const months = Math.round(days / 30);
-  if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
-  const years = Math.round(months / 12);
-  return `${years} year${years === 1 ? '' : 's'} ago`;
+// task-run-order — a run's stamp for the lead DATE column.
+//
+// A relative time ("3 days ago") can't say WHICH event it dates, so the same
+// string stood for "created then", "touched then" and "finished then" — three
+// different facts wearing one face. Every stamp here is therefore VERB-LABELLED
+// and reads as one compact line: the verb names the event, the date locates it.
+//
+// SMART DATE: today collapses to the clock time (the only case where the day is
+// implied); any other day is "Jul 16", and a date outside the current year
+// carries the year — a bare "Jul 16" two years out is the same lie in a
+// different costume.
+function smartDate(ts: number, now: number): string {
+  const d = new Date(ts);
+  const n = new Date(now);
+  const sameDay =
+    d.getFullYear() === n.getFullYear() &&
+    d.getMonth() === n.getMonth() &&
+    d.getDate() === n.getDate();
+  if (sameDay) {
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  const month = d.toLocaleString(undefined, { month: 'short' });
+  const base = `${month} ${d.getDate()}`;
+  return d.getFullYear() === n.getFullYear() ? base : `${base} ${d.getFullYear()}`;
+}
+
+function usableStamp(ts: number | null | undefined): number | null {
+  return typeof ts === 'number' && Number.isFinite(ts) && ts > 0 ? ts : null;
+}
+
+// updated_at trails created_at by a hair on rows that were only ever created
+// (the server writes both in one transaction, and clock skew can push them a
+// second or two apart). Below this the row hasn't meaningfully been touched and
+// "Modified" would be inventing an edit that never happened.
+const MODIFIED_EPSILON_MS = 60_000;
+
+// Which event this row's date names, given only the fields we actually have.
+//   - terminal-and-completed → Finished, at completed_at. The server doesn't
+//     always emit completed_at (older rows, some transitions), so fall back to
+//     updated_at — the last write, which for a terminal row IS the finish —
+//     rather than printing nothing about a run that plainly finished.
+//   - cancelled/failed → their OWN verbs. A withdrawn or broken run never
+//     "finished"; saying so is the deception this column exists to remove.
+//   - touched since creation → Modified, at updated_at.
+//   - otherwise → Created, at created_at.
+// Returns null only when the row carries no usable timestamp at all.
+function runStamp(run: Task, now: number): string | null {
+  const created = usableStamp(run.created_at);
+  const updated = usableStamp(run.updated_at);
+  const completed = usableStamp(run.completed_at);
+  const { kind } = pillFor(run.status, run.rawStatus, run);
+  const terminalAt = completed ?? updated ?? created;
+  if (kind === 'done' && terminalAt) return `Finished ${smartDate(terminalAt, now)}`;
+  if (kind === 'cancelled' && terminalAt) return `Cancelled ${smartDate(terminalAt, now)}`;
+  if (kind === 'failed' && terminalAt) return `Failed ${smartDate(terminalAt, now)}`;
+  if (updated && (!created || updated - created >= MODIFIED_EPSILON_MS))
+    return `Modified ${smartDate(updated, now)}`;
+  if (created) return `Created ${smartDate(created, now)}`;
+  return updated ? `Modified ${smartDate(updated, now)}` : null;
 }
 
 // ── Status → pill mapping ────────────────────────────────────────────────
@@ -408,31 +450,21 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     };
   }, [childrenOf, runs]);
 
-  // task-run-order — the caller hands runs oldest-first. Show them NEWEST-first
-  // (latest run to review is at the top), but keep each run's "Run N" number
-  // stable in CHRONOLOGICAL order (Run 1 = the first run ever), so a run's
-  // number never shifts as new runs arrive. We also stamp each with a relative
-  // time for the left column.
-  //   `now` ticks once a minute so "5 minutes ago" stays honest without a
-  //   per-render churn.
+  // task-run-order — the caller hands runs oldest-first; show them NEWEST-first,
+  // so the latest instance to review sits at the top.
+  //   `now` still ticks once a minute, but for the TODAY boundary rather than a
+  // relative time: smartDate prints a bare clock time only for rows dated today,
+  // so a matrix left open across midnight would keep calling yesterday's rows
+  // "12:15" until something else re-rendered it.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(id);
   }, []);
-  const orderedRuns = useMemo(() => {
-    // Chronological index (oldest = 1), assigned before reversing for display.
-    const chrono = [...runs].sort(
-      (a, b) => (a.created_at ?? 0) - (b.created_at ?? 0),
-    );
-    const numberOf = new Map<string, number>();
-    chrono.forEach((r, i) => numberOf.set(r.id, i + 1));
-    // Display newest-first.
-    return [...chrono].reverse().map((run) => ({
-      run,
-      runNumber: numberOf.get(run.id) ?? 0,
-    }));
-  }, [runs]);
+  const orderedRuns = useMemo(
+    () => [...runs].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)),
+    [runs],
+  );
 
   // Every step id across every run (primitive key so effects re-run only when
   // the SET of steps actually changes, not on each parent render). For a simple
@@ -609,16 +641,27 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
   };
 
   // One <col> per rendered column, matching the header's colSpan arithmetic: a
-  // fieldless step still renders its single "—" column, which is why both use
-  // g.span. See TaskMatrix.css — the widths live there, and they're what makes
+  // fieldless step still renders its single "—" column, so a group with no
+  // fields contributes one col — the same g.span the header spans. See
+  // TaskMatrix.css — the widths live there, and they're what makes
   // table-layout: fixed hold the columns still across the value wave.
+  //   INPUT columns get their own width class: the inputs are what identifies a
+  // row (the lead column no longer names it), so they're the columns worth the
+  // space the lead gave back.
   const colGroup = (
     <colgroup>
       <col className="tm-col-lead" />
       {stepGroups.flatMap((g) =>
-        Array.from({ length: g.span }, (_, i) => (
-          <col key={`c${g.index}-${i}`} className="tm-col-field" />
-        )),
+        g.inputs.length + g.outputs.length === 0
+          ? [<col key={`ce${g.index}`} className="tm-col-field" />]
+          : [
+              ...g.inputs.map((key) => (
+                <col key={`ci${g.index}-${key}`} className="tm-col-field tm-col-field--in" />
+              )),
+              ...g.outputs.map((o) => (
+                <col key={`co${g.index}-${o.key}`} className="tm-col-field" />
+              )),
+            ],
       )}
     </colgroup>
   );
@@ -665,20 +708,20 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             </div>
           ) : (
             <div className="tm-skel" role="status" aria-live="polite" aria-busy="true">
-              {/* The Run column is already known (runs come in as props), so the
-                  skeleton shows the real run identities and shimmers only what
-                  we're actually still waiting on: the step columns. */}
+              {/* The Date column is already known (runs come in as props), so the
+                  skeleton shows the real stamps and shimmers only what we're
+                  actually still waiting on: the step columns. */}
               <div className="tm-skel-row tm-skel-row--head">
-                <span className="tm-skel-lead">Run</span>
+                <span className="tm-skel-lead">Date</span>
                 <span className="tm-skel-bar" />
                 <span className="tm-skel-bar" />
                 <span className="tm-skel-bar" />
               </div>
-              {orderedRuns.slice(0, 6).map(({ run, runNumber }) => (
+              {orderedRuns.slice(0, 6).map((run) => (
                 <div className="tm-skel-row" key={run.id}>
                   <span className="tm-skel-lead">
                     <StatusIcon task={run} />
-                    Run {runNumber}
+                    {runStamp(run, now)}
                   </span>
                   <span className="tm-skel-bar" />
                   <span className="tm-skel-bar" />
@@ -699,7 +742,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             {showGroupHeader && (
               <tr className="tm-group-row">
                 <th className="tm-lead-th" rowSpan={2}>
-                  Run
+                  Date
                 </th>
                 {stepGroups.map((g) => (
                   <th
@@ -715,7 +758,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             )}
             {/* Field header: input keys (IN) then output fields (OUT + ✳). */}
             <tr className="tm-field-row">
-              {!showGroupHeader && <th className="tm-lead-th">Run</th>}
+              {!showGroupHeader && <th className="tm-lead-th">Date</th>}
               {stepGroups.map((g) => {
                 // task-dc5ad168cd3a — mild per-step-group banding: alternating
                 // groups carry a --surface-band tint so each step's columns read
@@ -751,28 +794,31 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {orderedRuns.map(({ run, runNumber }) => {
+            {orderedRuns.map((run) => {
               const rowChildren = stepsOf(run.id);
-              // Layout-cleanup (QA round): every run of a template shares the
-              // template's name, so repeating the title per row said nothing.
-              // Identify a run by its NUMBER; a custom title (differs from the
-              // panel title) is real information and still shows.
-              const runLabel =
+              // A row of this matrix is a fresh INSTANCE of the template, not a
+              // "run" of it, and its identity is its INPUTS — which the IN cells
+              // already carry, in bold. So the lead column is one quiet, verb-
+              // labelled date and nothing else; a run number named nothing a
+              // reader could act on and cost the inputs their width.
+              const runWhen = runStamp(run, now);
+              // A CUSTOM title (one that differs from the panel's) is the row's
+              // only fact not visible elsewhere — it rides the lead cell's
+              // tooltip rather than spending a line on it.
+              const customTitle =
                 run.title && run.title.trim() && run.title.trim() !== chainTitle.trim()
                   ? run.title
-                  : `Run ${runNumber}`;
-              // task-run-order — when this run ran, so a reviewer knows what's
-              // fresh. Sits under the run label as a muted second line.
-              const runWhen = relativeTime(run.created_at, now);
+                  : null;
               return (
                 <tr key={run.id}>
                   <td className="tm-lead-td">
                     {(() => {
                       // Layout-cleanup round 2: ONE line per run — colored
-                      // status icon + "Run N" + compact icon actions. The
-                      // status word rides the icon's tooltip; '✓ Complete' is
-                      // simply the done icon now, not a separate note. Errors
-                      // (the only thing worth a second line) drop below.
+                      // status icon + the verb-labelled date + compact icon
+                      // actions. The status word rides the icon's tooltip;
+                      // '✓ Complete' is simply the done icon now, not a separate
+                      // note. Errors (the only thing worth a second line) drop
+                      // below.
                       const next = firstRunnableChild(rowChildren);
                       // QA round 3 — a run whose steps are all terminal but
                       // that ISN'T done (cancelled/failed) gets ↻ Retry
@@ -806,10 +852,11 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                         <>
                           <div className="tm-lead-inner">
                             <StatusIcon task={run} />
-                            <span className="tm-run-id">
-                              <span className="tm-run-title">{runLabel}</span>
-                              {runWhen && <span className="tm-run-when">{runWhen}</span>}
-                            </span>
+                            {runWhen && (
+                              <span className="tm-run-when" title={customTitle ?? undefined}>
+                                {runWhen}
+                              </span>
+                            )}
                             <span className="tm-lead-actions">
                               {next && (
                                 <button
