@@ -187,14 +187,15 @@
 
 .nh-roster__pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-roster__pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
-.nh-roster__pill--queued { background: var(--nh-queued-soft); color: var(--nh-queued); }
+.nh-roster__pill--scheduled { background: var(--nh-scheduled-soft); color: var(--nh-scheduled); }
+.nh-roster__pill--open { background: var(--nh-open-soft); color: var(--nh-open); }
 .nh-roster__pill--needs { background: var(--nh-needs-soft); color: var(--nh-needs); }
 .nh-roster__pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
 /* task-c0edffef25c6 — cancelled reads as muted/withdrawn, not a failure hue.
    Mirrors task-f26e7745eda6's grey + strikethrough treatment for step chips
    (see .nh-dialog__pipeline-pill--cancelled). */
 .nh-roster__pill--cancelled {
-  background: var(--nh-queued-soft);
+  background: var(--nh-scheduled-soft);
   color: var(--muted-on-panel);
   text-decoration: line-through;
 }

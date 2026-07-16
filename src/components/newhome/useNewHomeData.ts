@@ -23,11 +23,19 @@
 //   progress — ONLY a task an agent is actively on: status 'in_progress'
 //              with a live worker (a stalled in_progress row lands in
 //              'needs' via classify().stalled above).
-//   queued   — everything else still open (status 'pending' — created but
-//              not claimed/being worked). classify().overdue is folded into
-//              'queued' here — New Home doesn't have a due-date lane yet;
-//              TODO(New Home follow-up) surface overdue separately if the
-//              roster needs it.
+//   scheduled — still pending, but the system will genuinely get to it: the
+//              task carries an execution schedule (`cron` or `next_run_at`).
+//   open     — everything else still open (status 'pending' — created but not
+//              claimed/being worked) with NO schedule: nothing and nobody is
+//              coming. The catch-all.
+//
+// scheduled/open replace what was one 'queued' bucket. "Queued" told the user
+// the system had it in hand, which was only true when something was actually
+// scheduled to run it; an unscheduled pending task was queued behind nothing.
+// A DUE DATE is deliberately not a schedule — `due_at`/`start_at` are human
+// deadlines, so classify().overdue stays folded into 'open' rather than
+// promising execution. (New Home still has no due-date lane; an overdue task
+// is an open task until one exists.)
 //
 // `who` derivation prefers the per-task AUDIT trail (fm.typebuild.audit /
 // getAudit — task-1af4f59428eb, Item 2) when we have it: the audit's latest
@@ -62,6 +70,7 @@ import type { NewHomeStatus, NewHomeTask, TaskDef } from './types';
 import { metaStatus as metaStatusOf, parseTaskFieldsBlock, parseTaskTemplateBlock } from './taskSchema.mjs';
 import { buildJobValuesByRef, classifyJob, fieldedSchemaSource, partitionJobs, resolveFieldedJob, rewriteTaskFieldsBlock } from './pipelineRoster.mjs';
 import { filterByGroup } from './groupScope.mjs';
+import { isScheduled } from './rosterGroups.mjs';
 
 // task-6c62e6f0905e — deriveStatus and deriveLive share ONE classify() call so
 // "is this task an active agent" is never computed two different ways. classify()
@@ -78,9 +87,12 @@ function deriveStatus(t: Task, c: ReturnType<typeof classify>): NewHomeStatus {
   if (c.failed) return 'failed';
   if (c.asked || c.blocked || c.stalled) return 'needs';
   // "In Progress" means an agent is actively on it — a live in_progress
-  // claim (stalled claims were already routed to 'needs' above). A pending,
-  // unclaimed task is merely queued.
-  return t.status === 'in_progress' ? 'progress' : 'queued';
+  // claim (stalled claims were already routed to 'needs' above).
+  if (t.status === 'in_progress') return 'progress';
+  // A pending, unclaimed task splits on whether anything will actually pick it
+  // up. isScheduled() is the SAME predicate rosterGroups.statusBucket uses, so
+  // a row's pill and a group's breakdown count can never disagree.
+  return isScheduled(t) ? 'scheduled' : 'open';
 }
 
 /** Compact relative age for the roster's Last Action column: "10m", "2h",
@@ -509,7 +521,8 @@ export function useNewHomeData(
     const c: Record<NewHomeStatus, number> = {
       done: 0,
       progress: 0,
-      queued: 0,
+      scheduled: 0,
+      open: 0,
       needs: 0,
       failed: 0,
       cancelled: 0,
@@ -1052,10 +1065,19 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
 // immutable for display); the cache never reaches disk.
 const TASK_DATA_CONCURRENCY = 4;
 
-export function useTaskDataValues(
-  requests: { taskId: string; keys: string[] }[],
-): Map<string, Record<string, string>> {
+export function useTaskDataValues(requests: { taskId: string; keys: string[] }[]): {
+  values: Map<string, Record<string, string>>;
+  isPending: (taskId: string, key: string) => boolean;
+} {
   const [byTask, setByTask] = useState<Map<string, Record<string, string>>>(new Map());
+  // Pairs we've asked about AND heard back on — resolved, empty, absent, or
+  // failed. `byTask` alone CANNOT answer "is this still loading?": a ref that
+  // resolves to '' or to nothing never lands there (see the commit below), so
+  // gating on `byTask.get(taskId)?.[key]` would pin every genuinely-empty ref to
+  // a permanent shimmer. This is the honest "we asked and heard back" set — the
+  // same discipline TaskMatrix's `detailSettled` uses — and it's what `isPending`
+  // reads. State, not a ref: unlike `fetchedRef` this IS a render input.
+  const [settled, setSettled] = useState<Set<string>>(new Set());
   // task-24cd55d8a607 — per-key data-bag value resolves are a NON-ESSENTIAL
   // enrichment wave; defer them while the origin breaker is open. Already-
   // resolved values stay in state (input cells keep their last-known value).
@@ -1075,6 +1097,17 @@ export function useTaskDataValues(
         .join(','),
     [requests],
   );
+
+  // The pairs currently asked for — `isPending`'s domain, so a caller asking
+  // about a (taskId,key) this hook was never handed gets `false` rather than a
+  // shimmer. Keyed off reqKey (which encodes the full content of `requests`) so
+  // it moves in lockstep with the effect's wave, not on every parent render.
+  const requestedPairs = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of requests) for (const k of r.keys) s.add(`${r.taskId} ${k}`);
+    return s;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reqKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1108,7 +1141,14 @@ export function useTaskDataValues(
       await Promise.all(
         Array.from({ length: Math.min(TASK_DATA_CONCURRENCY, due.length) }, () => worker()),
       );
-      if (cancelled) return;
+      if (cancelled) {
+        // We're dropping this wave's values, so drop its cache entries too. The
+        // workers mark pairs fetched up front (that's what bounds the fan-out);
+        // leaving them marked after discarding the results would make the pairs
+        // un-refetchable AND never settled — i.e. pending forever.
+        for (const { taskId, key } of due) fetchedRef.current.delete(`${taskId} ${key}`);
+        return;
+      }
       setByTask((prev) => {
         const next = new Map(prev);
         for (const [taskId, key, value] of results) {
@@ -1117,6 +1157,14 @@ export function useTaskDataValues(
           rec[key] = value;
           next.set(taskId, rec);
         }
+        return next;
+      });
+      // Every pair we asked about is settled now — including the ones that threw
+      // and the ones that resolved to nothing and so never reach `byTask`.
+      // Otherwise a permanently-absent ref would hold its cell's shimmer open.
+      setSettled((prev) => {
+        const next = new Set(prev);
+        for (const { taskId, key } of due) next.add(`${taskId} ${key}`);
         return next;
       });
     })();
@@ -1129,5 +1177,19 @@ export function useTaskDataValues(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqKey, degraded]);
 
-  return byTask;
+  // task-24cd55d8a607 — while the breaker is open NOTHING is in flight and
+  // nothing will land, so a requested-but-unsettled pair is DEFERRED, not
+  // pending: reporting it pending would shimmer forever behind an open breaker.
+  // Callers get `false` and show the last-known value (or the em-dash) until the
+  // breaker clears and the effect's wave actually runs.
+  const isPending = useCallback(
+    (taskId: string, key: string): boolean => {
+      if (degraded) return false;
+      const pair = `${taskId} ${key}`;
+      return requestedPairs.has(pair) && !settled.has(pair);
+    },
+    [degraded, requestedPairs, settled],
+  );
+
+  return { values: byTask, isPending };
 }

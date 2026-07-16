@@ -10,6 +10,7 @@ import {
   groupKeyFor,
   deriveInstanceId,
   buildRosterGroups,
+  isScheduled,
   statusBucket,
   summarizeGroupRows,
   STATUS_BUCKETS,
@@ -108,7 +109,7 @@ test('buildRosterGroups: field-less tasks go to the other bucket, not a section'
   assert.deepEqual(groups[0].rows.map((r) => r.taskId), ['f1']);
   assert.deepEqual(other.map((o) => o.taskId), ['p1', 'p2']);
   assert.equal(other[0].title, 'Email the ops report');
-  assert.equal(other[0].status, 'queued');
+  assert.equal(other[0].status, 'queued'); // raw input status, echoed verbatim
 });
 
 // ── the "news selection" acceptance case ──────────────────────────────────────
@@ -136,8 +137,8 @@ test('buildRosterGroups: tolerates empty / malformed input', () => {
 
 // ── task-ecabeafa41e1: Level-1 group summary (status buckets + assignees) ─────
 // task-c0edffef25c6 — cancelled got its own bucket, split out of the old
-// queued catch-all, so it never gets counted as (or confused with) failed.
-test('statusBucket: raw/coarse statuses map onto the six buckets', () => {
+// catch-all, so it never gets counted as (or confused with) failed.
+test('statusBucket: raw/coarse statuses map onto the seven buckets', () => {
   assert.equal(statusBucket('done'), 'done');
   assert.equal(statusBucket('completed'), 'done');
   assert.equal(statusBucket('succeeded'), 'done');
@@ -152,20 +153,56 @@ test('statusBucket: raw/coarse statuses map onto the six buckets', () => {
   assert.equal(statusBucket('needs_review'), 'needs');
   assert.equal(statusBucket('blocked'), 'needs');
   assert.equal(statusBucket('asked'), 'needs');
-  // cancelled/canceled are their own bucket — NOT failed, NOT queued.
+  // cancelled/canceled are their own bucket — NOT failed, NOT open.
   assert.equal(statusBucket('cancelled'), 'cancelled');
   assert.equal(statusBucket('canceled'), 'cancelled');
-  // pending/queued/unknown/empty all fall to queued
-  assert.equal(statusBucket('queued'), 'queued');
-  assert.equal(statusBucket('pending'), 'queued');
-  assert.equal(statusBucket('deferred'), 'queued');
-  assert.equal(statusBucket('something-odd'), 'queued');
-  assert.equal(statusBucket(undefined), 'queued');
-  assert.equal(statusBucket(null), 'queued');
+  // pending/queued/unknown/empty all fall to open when NO task is supplied:
+  // without the task we cannot see a schedule, and 'open' is the honest answer.
+  assert.equal(statusBucket('queued'), 'open');
+  assert.equal(statusBucket('pending'), 'open');
+  assert.equal(statusBucket('deferred'), 'open');
+  assert.equal(statusBucket('something-odd'), 'open');
+  assert.equal(statusBucket(undefined), 'open');
+  assert.equal(statusBucket(null), 'open');
 });
 
-test('STATUS_BUCKETS lists the six buckets in display order', () => {
-  assert.deepEqual(STATUS_BUCKETS, ['done', 'progress', 'queued', 'needs', 'failed', 'cancelled']);
+// A pending task is 'scheduled' ONLY when something will actually run it.
+test('statusBucket: a pending task with a real schedule is scheduled, not open', () => {
+  assert.equal(statusBucket('pending', { cron: '0 9 * * *' }), 'scheduled');
+  assert.equal(statusBucket('pending', { next_run_at: 1700000000000 }), 'scheduled');
+  assert.equal(statusBucket('pending', { cron: null, next_run_at: null }), 'open');
+  assert.equal(statusBucket('pending', { cron: '   ' }), 'open');
+  assert.equal(statusBucket('pending', {}), 'open');
+  assert.equal(statusBucket('pending', null), 'open');
+  // A due date is a HUMAN deadline, not an execution schedule — still open.
+  assert.equal(statusBucket('pending', { due_at: '2026-01-01', start_at: '2026-01-01' }), 'open');
+  // A schedule never overrides a settled bucket.
+  assert.equal(statusBucket('done', { cron: '0 9 * * *' }), 'done');
+  assert.equal(statusBucket('failed', { cron: '0 9 * * *' }), 'failed');
+  assert.equal(statusBucket('cancelled', { next_run_at: 1 }), 'cancelled');
+});
+
+test('isScheduled: only cron / next_run_at count', () => {
+  assert.equal(isScheduled({ cron: '0 9 * * *' }), true);
+  assert.equal(isScheduled({ next_run_at: 0 }), false); // 0 = unset sentinel, not epoch
+  assert.equal(isScheduled({ cron: '', next_run_at: null }), false);
+  assert.equal(isScheduled({ next_run_at: Number.NaN }), false);
+  assert.equal(isScheduled({ next_run_at: 1700000000000 }), true);
+  assert.equal(isScheduled({ due_at: '2026-01-01' }), false);
+  assert.equal(isScheduled(null), false);
+  assert.equal(isScheduled(undefined), false);
+});
+
+test('STATUS_BUCKETS lists the seven buckets in display order', () => {
+  assert.deepEqual(STATUS_BUCKETS, [
+    'done',
+    'progress',
+    'scheduled',
+    'open',
+    'needs',
+    'failed',
+    'cancelled',
+  ]);
 });
 
 test('summarizeGroupRows: counts runs, buckets statuses, and de-dups assignees', () => {
@@ -174,10 +211,18 @@ test('summarizeGroupRows: counts runs, buckets statuses, and de-dups assignees',
     { status: 'done', assignee: 'a@x.com' }, // same assignee → still 1 distinct
     { status: 'in_progress', assignee: 'b@x.com' },
     { status: 'failed', assignee: null }, // no assignee → not counted
-    { status: 'queued' }, // missing assignee → not counted
+    { status: 'queued' }, // missing assignee → not counted; no raw → open
   ]);
   assert.equal(s.runCount, 5);
-  assert.deepEqual(s.statusCounts, { done: 2, progress: 1, queued: 1, needs: 0, failed: 1, cancelled: 0 });
+  assert.deepEqual(s.statusCounts, {
+    done: 2,
+    progress: 1,
+    scheduled: 0,
+    open: 1,
+    needs: 0,
+    failed: 1,
+    cancelled: 0,
+  });
   assert.deepEqual([...s.assignees].sort(), ['a@x.com', 'b@x.com']); // 2 distinct
 });
 
@@ -186,7 +231,28 @@ test('summarizeGroupRows: a cancelled run counts as cancelled, not failed', () =
     { status: 'cancelled', assignee: 'a@x.com' },
     { status: 'failed', assignee: 'b@x.com' },
   ]);
-  assert.deepEqual(s.statusCounts, { done: 0, progress: 0, queued: 0, needs: 0, failed: 1, cancelled: 1 });
+  assert.deepEqual(s.statusCounts, {
+    done: 0,
+    progress: 0,
+    scheduled: 0,
+    open: 0,
+    needs: 0,
+    failed: 1,
+    cancelled: 1,
+  });
+});
+
+// A run carrying its underlying task splits scheduled from open; one without
+// falls through to open, so a mixed group reports both.
+test('summarizeGroupRows: a run whose task has a schedule counts as scheduled', () => {
+  const s = summarizeGroupRows([
+    { status: 'pending', raw: { cron: '0 9 * * *' } },
+    { status: 'pending', raw: { next_run_at: 1700000000000 } },
+    { status: 'pending', raw: { cron: null, next_run_at: null } },
+    { status: 'pending' },
+  ]);
+  assert.equal(s.statusCounts.scheduled, 2);
+  assert.equal(s.statusCounts.open, 2);
 });
 
 test('summarizeGroupRows: multiple distinct assignees across chain-like runs (can exceed 1)', () => {
@@ -201,7 +267,15 @@ test('summarizeGroupRows: multiple distinct assignees across chain-like runs (ca
 test('summarizeGroupRows: empty input yields zeroed summary, no throw', () => {
   const s = summarizeGroupRows([]);
   assert.equal(s.runCount, 0);
-  assert.deepEqual(s.statusCounts, { done: 0, progress: 0, queued: 0, needs: 0, failed: 0, cancelled: 0 });
+  assert.deepEqual(s.statusCounts, {
+    done: 0,
+    progress: 0,
+    scheduled: 0,
+    open: 0,
+    needs: 0,
+    failed: 0,
+    cancelled: 0,
+  });
   assert.deepEqual(s.assignees, []);
   // defensive: non-array
   const s2 = summarizeGroupRows(undefined);

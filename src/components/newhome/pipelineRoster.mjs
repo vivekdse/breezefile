@@ -343,7 +343,7 @@ export function rewriteTaskFieldsBlock(body, templateId, taskDefId, values) {
  * The shared root cause of tasks f26e7745eda6 + 48cd46a0e2da: step status was
  * derived PURELY from output-value presence + neededWhen — it never consulted
  * the child TASK's actual server status. So a server-CANCELLED child rendered
- * as "queued" and got picked as the next runnable step (silent no-op on Start).
+ * as "open" and got picked as the next runnable step (silent no-op on Start).
  *
  * Status vocabulary (electron/sources/typebuild.ts mapStatus/rawStatusOf):
  *   rawStatus ∈ open | in_progress | done | partial | cancelled | failed | blocked
