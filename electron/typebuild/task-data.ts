@@ -20,10 +20,14 @@
 //   1. PATIENT/customer PHI — encrypted per task, lives in the task `data` bag,
 //      resolved by (taskId, ref). Arbitrary keys, e.g. "patient.ssn".
 //   2. The USER's OWN credentials/identifiers — NPI, practice Tax ID, portal
-//      login IDs. Per-user, reusable across that user's tasks, NOT patient PHI,
-//      NOT shared cross-user. Addressed by a reserved "me." ref prefix
-//      (e.g. "me.npi") and resolved against a per-user vault, independent of any
-//      task. (This file's class-2 path.)
+//      login IDs — PLUS named NON-default vault entities (e.g. a practice or
+//      facility record kept separately from the user's own "me" identity, such
+//      as "Manhattan Beach practice"). Per-user, reusable across that user's
+//      tasks, NOT patient PHI, NOT shared cross-user. Addressed by a reserved
+//      "me." ref prefix (e.g. "me.npi", entity defaults to the caller's own
+//      self entity) or, to name a specific non-default entity, "me@<entityId>."
+//      (e.g. "me@ent_manhattan_beach.npi") — resolved against a per-user vault,
+//      independent of any task. (This file's class-2 path.)
 //   3. Shared NON-PHI how-to — navigation prose in skills. Never a value.
 // The agent surface is identical for classes 1 and 2: it fills a KEY via
 // fill-ref/type-ref and never sees the value. Only THIS resolver routes by the
@@ -58,9 +62,20 @@
 // the remainder is the `field` (entity defaults to `me`). e.g. "me.npi" →
 // ?field=npi. Multi-segment refs (the old "me.npi.<location>" idea) are NOT
 // flat dotted keys in the shipped model — disambiguation is by separate ENTITIES
-// (entity=<id>). For now we pass the whole remainder through as the field name
-// verbatim and let the server's resolver/canonicalizer decide; client-side
-// location routing (multi-entity selection) is a deliberate follow-up punt.
+// (entity=<id>).
+//
+// NAMED (non-"me") entity refs — "me@<entityId>.<field>" (task-e9f621ba1a37):
+// disambiguation by separate ENTITIES, addressed with an "@<entityId>" suffix
+// on the reserved "me" head, e.g. "me@ent_manhattan_beach.npi" → entity=
+// ent_manhattan_beach&field=npi. This still starts with the reserved "me"
+// prefix (so isUserDataRef's existing startsWith check keeps working
+// unmodified) but before the first "." there may be an "@<entityId>" segment
+// naming which vault entity to resolve against instead of the default self
+// entity. Chosen over an "entity:<id>.<field>" prefix because it keeps ALL
+// class-2 refs under the one reserved "me" head instead of adding a second
+// top-level prefix, and "@" cannot appear in a field name (canonical registry
+// names are identifier-like), so "me@<id>.<field>" vs "me.<field>" is
+// unambiguous to parse: split on the first ".", then check the head for "@".
 
 import { getIdToken } from './auth';
 import { fetchWithTimeout } from './http';
@@ -99,11 +114,16 @@ export async function typebuildFetch(reqUrl: string, init?: RequestInit): Promis
 // Reserved prefix for class-2 (the user's own credentials/identifiers). A ref
 // like "me.npi" resolves against the per-user vault, not the task `data` bag.
 const USER_REF_PREFIX = 'me.';
+// Reserved prefix for a class-2 ref naming a specific NON-default vault entity
+// (task-e9f621ba1a37), e.g. "me@ent_manhattan_beach.npi". Still the reserved
+// "me" head, just with an "@<entityId>" scope before the field's ".".
+const USER_ENTITY_REF_PREFIX = 'me@';
 
 /** True when `ref` addresses the signed-in user's own credential vault (class 2)
- *  rather than the current task's PHI bag (class 1). */
+ *  rather than the current task's PHI bag (class 1) — either the default "me."
+ *  self entity or a named "me@<entityId>." entity. */
 export function isUserDataRef(ref: string): boolean {
-  return ref.startsWith(USER_REF_PREFIX);
+  return ref.startsWith(USER_REF_PREFIX) || ref.startsWith(USER_ENTITY_REF_PREFIX);
 }
 
 /** Resolve one placeholder ref to its decrypted string value, routing by class:
@@ -263,9 +283,33 @@ function joinNames(names: unknown): string {
   return shown.join(', ') + suffix;
 }
 
-/** Resolve a class-2 "me.*" ref against the per-user entity resolver. Strips the
- *  "me." prefix to the `field`; entity defaults to `me` (omitted). The server
- *  canonicalizes aliases and refuses secret fields, so we pass the bare field.
+// "@<entityId>" scoping on the reserved "me" head — task-e9f621ba1a37. A ref
+// like "me@ent_manhattan_beach.npi" names a specific, non-default vault entity
+// instead of the caller's own self entity. Matches "me" or "me@<id>" as the
+// segment before the first ".". Kept permissive on the id charset (entity ids
+// are server-assigned opaque strings) but anchored to avoid eating the "."
+// that separates head from field.
+const ENTITY_HEAD_RE = /^me(?:@([^.]+))?$/;
+
+/** Split a class-2 ref into its entity id (undefined = default "me") and field
+ *  name. Throws if the ref doesn't start with the reserved "me"/"me@<id>" head
+ *  or has no field after the first ".". */
+function parseUserRef(ref: string): { entityId?: string; field: string } {
+  const dot = ref.indexOf('.');
+  if (dot === -1) throw new Error(`ref "${ref}" has no field (expected "me.<field>" or "me@<entityId>.<field>")`);
+  const head = ref.slice(0, dot);
+  const field = ref.slice(dot + 1);
+  const m = ENTITY_HEAD_RE.exec(head);
+  if (!m) throw new Error(`ref "${ref}" has an invalid entity head "${head}"`);
+  if (!field) throw new Error(`ref "${ref}" has no field after "${head}."`);
+  return { entityId: m[1] || undefined, field };
+}
+
+/** Resolve a class-2 "me.*" / "me@<entityId>.*" ref against the per-user entity
+ *  resolver. Splits the reserved head from the `field`; entity defaults to `me`
+ *  (omitted) unless the ref names one via "me@<entityId>". The server
+ *  canonicalizes field aliases and refuses secret fields, so we pass the bare
+ *  field.
  *
  *  On `resolved:true` returns the string value (NEVER logged — same memory-only
  *  discipline as class 1). On `resolved:false` throws a value-free, name-careful
@@ -275,16 +319,15 @@ function joinNames(names: unknown): string {
  *    ambiguous_secret → generic "ambiguous / refused" — discloses NOTHING.
  *  Never caches; one value per call. */
 async function resolveUserField(ref: string, format?: string): Promise<string> {
-  // Strip the reserved "me." prefix → the field. Multi-segment remainders pass
-  // through verbatim (see header: location routing is a server/follow-up concern).
-  const field = ref.slice(USER_REF_PREFIX.length);
-  if (!field) throw new Error(`ref "${ref}" has no field after "me."`);
+  const { entityId, field } = parseUserRef(ref);
 
-  // entity defaults to `me`, so we omit it. `format` (bare|dashed) is forwarded
-  // only when the caller asks for a specific shape; omitted = server default.
+  // entity defaults to `me` server-side, so we omit it unless the ref named one
+  // explicitly via "me@<entityId>". `format` (bare|dashed) is forwarded only
+  // when the caller asks for a specific shape; omitted = server default.
   const fmt = typeof format === 'string' ? format.trim() : '';
   const reqUrl =
     `${API_BASE}/chromeext/entities/resolve?field=${encodeURIComponent(field)}` +
+    (entityId ? `&entity=${encodeURIComponent(entityId)}` : '') +
     (fmt ? `&format=${encodeURIComponent(fmt)}` : '');
   const res = await typebuildFetch(reqUrl);
   if (!res.ok) {

@@ -71,9 +71,32 @@ const USER_BAG = {
   npi: NPI_CANARY,
 };
 
-// Mirror electron/typebuild/task-data.ts isUserDataRef + the me.* -> field strip.
-const isUserRef = (ref) => ref.startsWith('me.');
+// task-e9f621ba1a37 — a NAMED, non-default vault entity (e.g. a practice or
+// facility record kept separately from the user's own "me" identity). Ref
+// syntax: "me@<entityId>.<field>" -> ?field=<field>&entity=<entityId>. Keyed
+// by `${entityId}::${field}` here since the stub's flat USER_BAG is per-field
+// only and entity-scoped fields are a separate namespace server-side.
+const PRACTICE_ENTITY_ID = 'ent_manhattan_beach';
+const PRACTICE_NPI_CANARY = 'NPI-9876543210-CANARY';
+const ENTITY_REF = `me@${PRACTICE_ENTITY_ID}.npi`;
+const ENTITY_BAG = {
+  [`${PRACTICE_ENTITY_ID}::npi`]: PRACTICE_NPI_CANARY,
+};
+
+// Mirror electron/typebuild/task-data.ts isUserDataRef + the me.* -> field
+// strip, PLUS the new me@<entityId>. head (task-e9f621ba1a37).
+const isUserRef = (ref) => ref.startsWith('me.') || ref.startsWith('me@');
 const refToField = (ref) => ref.slice('me.'.length);
+// Mirror parseUserRef: split on the first ".", entity id (if any) lives after
+// an "@" in the head.
+function parseUserRefForStub(ref) {
+  const dot = ref.indexOf('.');
+  const head = ref.slice(0, dot);
+  const field = ref.slice(dot + 1);
+  const at = head.indexOf('@');
+  const entityId = at === -1 ? undefined : head.slice(at + 1);
+  return { entityId, field };
+}
 
 function startStub() {
   const server = http.createServer((req, res) => {
@@ -99,21 +122,28 @@ function startStub() {
     // resolved/not-resolved envelope. entity defaults to `me`. The vault bag is
     // keyed by the bare field name (the canonical registry is mocked as identity
     // here). This is what the shipped server exposes; the client maps a `me.npi`
-    // ref to ?field=npi.
+    // ref to ?field=npi, and a named "me@<entityId>.npi" ref (task-e9f621ba1a37)
+    // to ?field=npi&entity=<entityId>.
     if (u.pathname === '/chromeext/entities/resolve' && req.method === 'GET') {
       const field = u.searchParams.get('field') ?? '';
+      const entity = u.searchParams.get('entity') ?? '';
       if (!field) {
         res.statusCode = 400;
         return res.end(JSON.stringify({ error: 'field required' }));
       }
-      const value = USER_BAG[field];
+      // A non-"me"/absent entity param looks up the ENTITY_BAG namespace
+      // instead of the default self vault (USER_BAG).
+      const value = entity && entity !== 'me' ? ENTITY_BAG[`${entity}::${field}`] : USER_BAG[field];
       res.statusCode = 200;
       if (typeof value === 'string') {
         return res.end(JSON.stringify({ resolved: true, field, value }));
       }
       // not_found carries non-secret field NAMES only — never a value.
+      const available = entity && entity !== 'me'
+        ? Object.keys(ENTITY_BAG).filter((k) => k.startsWith(`${entity}::`)).map((k) => k.split('::')[1])
+        : Object.keys(USER_BAG);
       return res.end(
-        JSON.stringify({ resolved: false, reason: 'not_found', available: Object.keys(USER_BAG) }),
+        JSON.stringify({ resolved: false, reason: 'not_found', available }),
       );
     }
 
@@ -129,7 +159,13 @@ function startStub() {
         res.statusCode = 400;
         return res.end(JSON.stringify({ error: 'ref required (and taskId for non-me.* refs)' }));
       }
-      const value = isUserRef(ref) ? USER_BAG[refToField(ref)] : DATA_BAG[ref];
+      let value;
+      if (isUserRef(ref)) {
+        const { entityId, field } = parseUserRefForStub(ref);
+        value = entityId ? ENTITY_BAG[`${entityId}::${field}`] : USER_BAG[field];
+      } else {
+        value = DATA_BAG[ref];
+      }
       if (typeof value !== 'string') {
         res.statusCode = 404;
         return res.end(JSON.stringify({ error: `no data for ref "${ref}"` }));
@@ -259,6 +295,93 @@ test('control API: an unknown "me." ref is a 404 and invents no value', async ()
     assert.equal(r.status, 404, 'unknown me.* ref must map to non-200');
     assert.equal(r.json?.value, undefined, 'a non-200 must never carry a value');
     assert.ok(!r.body.includes(NPI_CANARY), 'error body leaked the vault canary');
+  } finally {
+    server.close();
+  }
+});
+
+// ── Named entity ("me@<entityId>.<field>") routing contract (task-e9f621ba1a37) ──
+// A ref naming a specific NON-default vault entity (a practice/facility record
+// kept separately from the user's own "me" identity) must still route to the
+// class-2 vault path (no taskId needed) AND must forward `entity=<id>` on the
+// resolver call so the server resolves against THAT entity, not the caller's
+// self entity.
+
+test('isUserRef: a "me@<entityId>." ref is still routed to the class-2 vault', async () => {
+  const { server, port } = await startStub();
+  try {
+    const r = await get(port, `/app/task-data?ref=${encodeURIComponent(ENTITY_REF)}`);
+    assert.equal(r.status, 200, 'me@<entityId>.<field> ref must resolve with no taskId');
+    assert.equal(r.json.ok, true);
+    assert.equal(r.json.ref, ENTITY_REF, 'envelope must echo the opaque entity-scoped ref');
+    assert.equal(
+      r.json.value,
+      PRACTICE_NPI_CANARY,
+      'me@<entityId>.<field> ref must resolve against the NAMED entity, not the self vault',
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test('typebuild REST: a named-entity ref forwards entity=<id> to the resolver', async () => {
+  const { server, port } = await startStub();
+  try {
+    // Mirrors resolveUserField's parse: "me@ent_manhattan_beach.npi" ->
+    // ?field=npi&entity=ent_manhattan_beach.
+    const r = await get(
+      port,
+      `/chromeext/entities/resolve?field=npi&entity=${encodeURIComponent(PRACTICE_ENTITY_ID)}`,
+    );
+    assert.equal(r.status, 200);
+    assert.equal(r.json.resolved, true, 'a known (entity, field) pair must resolve');
+    assert.equal(r.json.value, PRACTICE_NPI_CANARY, 'must return the entity-scoped value, not the self one');
+  } finally {
+    server.close();
+  }
+});
+
+test('typebuild REST: a named entity does NOT fall back to the self vault', async () => {
+  const { server, port } = await startStub();
+  try {
+    // `npi` exists in USER_BAG (the self vault) but the request names a DIFFERENT
+    // entity that has no `fax` field — must be not_found, never silently resolve
+    // against `me`.
+    const r = await get(
+      port,
+      `/chromeext/entities/resolve?field=fax&entity=${encodeURIComponent(PRACTICE_ENTITY_ID)}`,
+    );
+    assert.equal(r.status, 200);
+    assert.equal(r.json.resolved, false);
+    assert.equal(r.json.reason, 'not_found');
+    assert.ok(!r.body.includes(NPI_CANARY), 'must not leak an unrelated self-vault value');
+  } finally {
+    server.close();
+  }
+});
+
+test('control API: an unknown "me@<entityId>." ref is a 404 and invents no value', async () => {
+  const { server, port } = await startStub();
+  try {
+    const r = await get(port, `/app/task-data?ref=me@${PRACTICE_ENTITY_ID}.unknown`);
+    assert.equal(r.status, 404, 'unknown me@<entityId>.<field> ref must map to non-200');
+    assert.equal(r.json?.value, undefined, 'a non-200 must never carry a value');
+    assert.ok(!r.body.includes(PRACTICE_NPI_CANARY), 'error body leaked the entity vault canary');
+  } finally {
+    server.close();
+  }
+});
+
+test('SECURITY: a named-entity ref never co-mingles with the self vault or task bag', async () => {
+  const { server, port } = await startStub();
+  try {
+    // Same field name ("npi") resolves to a DIFFERENT value depending on entity
+    // scope — proves the two namespaces are genuinely separate, not aliased.
+    const selfR = await get(port, `/app/task-data?ref=${encodeURIComponent(USER_REF)}`);
+    const entityR = await get(port, `/app/task-data?ref=${encodeURIComponent(ENTITY_REF)}`);
+    assert.equal(selfR.json.value, NPI_CANARY);
+    assert.equal(entityR.json.value, PRACTICE_NPI_CANARY);
+    assert.notEqual(selfR.json.value, entityR.json.value, 'self and named-entity vaults must not collide');
   } finally {
     server.close();
   }
