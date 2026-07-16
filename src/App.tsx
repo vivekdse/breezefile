@@ -50,7 +50,6 @@ import { ConnectionsPanel } from './components/ConnectionsPanel';
 import { TerminalSplit } from './components/TerminalSplit';
 import { TypebuildSessionBanner } from './components/TypebuildSessionBanner';
 import { TipsChip, isTipsEnabled, setTipsEnabled } from './components/TipsChip';
-import { IconSprite } from './components/icons';
 import { StoreProvider, useStore, makeTab } from './store';
 import { PlatformProvider } from './platform';
 import { formatOpError, humanizeError } from './errorMessages';
@@ -1489,7 +1488,6 @@ function Shell() {
       // the user's dragged/persisted width drives the grid column when open.
       style={tab.chat ? ({ ['--chat-w']: `${chatWidth}px` } as CSSProperties) : undefined}
     >
-      <IconSprite />
       {/* title slot — owned by fm-9w0 */}
       <div className="shell__title">
         <Titlebar />

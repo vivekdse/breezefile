@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
+import { IconSprite } from './components/icons';
 import { OperatorSession } from './components/OperatorSession';
 import { applyTheme, getStoredTheme } from './theme';
 import './styles/fonts.css';
@@ -57,6 +58,17 @@ function renderRoot() {
   const op = readOperatorParams();
   root.render(
     <React.StrictMode>
+      {/* The icon sprite belongs to the ROOT, not to App. <Icon> emits
+          `<use href="#i-name">`, which resolves only against defs in the SAME
+          document — so a root that omits the sprite paints NOTHING at all (not
+          a mis-colored glyph: no geometry). It used to be mounted inside App,
+          which the operator window never renders, so every icon in the operator
+          session — the whole BrowserSurface toolbar: back / forward / reload /
+          record / screenshot→PDF — was an invisible button you could only find
+          by hovering for its tooltip. Mounting it here covers BOTH branches and
+          any root added later, instead of a second copy per window that drifts.
+          Zero-size + position:absolute, so it never affects layout. */}
+      <IconSprite />
       {op.isOperator ? (
         // Key on the pty so a re-point to a NEW session remounts the pane (fresh
         // terminal subscribe + replay) instead of diffing into a stale one.

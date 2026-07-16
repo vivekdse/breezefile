@@ -1,5 +1,7 @@
 // Icon sprite — ported from design-assets/inspirations/themes.html (defs block).
-// Rendered once at the app root (see <IconSprite />). Individual icons are
+// Rendered once at the REACT ROOT in main.tsx (see <IconSprite />), so every
+// root -- the main app AND the operator session window -- gets the defs.
+// Individual icons are
 // rendered via <Icon name="..." /> which emits a <use href="#i-<name>" />.
 //
 // All icons share a 24x24 viewBox and use stroke="currentColor" / fill="none"

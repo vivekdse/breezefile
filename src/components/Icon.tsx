@@ -1,7 +1,8 @@
 // <Icon name="folder" size={18} /> — thin wrapper around the shared sprite.
 // The actual path data lives in ./icons.tsx (mounted once via <IconSprite />
-// at the app root). Icons inherit color from surrounding text via
-// stroke="currentColor".
+// at the React root in main.tsx -- it must be in the SAME document as this
+// <use>, or the icon paints nothing at all). Icons inherit color from
+// surrounding text via stroke="currentColor".
 
 import type { IconName } from './icons';
 
