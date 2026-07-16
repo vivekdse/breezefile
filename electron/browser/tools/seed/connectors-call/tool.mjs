@@ -1,5 +1,5 @@
 // Seed tool for the `connectors` first-party MCP catalog server — see tool.json.
-// channel:'mcp', so the runner (bin/breeze-tools.mjs runMcpSteps) supplies
+// channel:'mcp', so the runner (bin/breeze-tools.mjs runMcpChannel) supplies
 // ctx.mcpCall(toolName, args) instead of a Playwright page; no browser opens.
 
 function parseArgs(raw) {

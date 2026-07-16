@@ -353,7 +353,7 @@ async function cmdRun(args) {
   // to connect to at all, so this runs BEFORE the CDP layer loads and returns
   // without ever touching playwright-core.
   if (toolChannel(t.meta) === 'mcp') {
-    return runMcpSteps(t, steps, plan, params, { started, nowIso, log });
+    return runMcpChannel(t, steps, plan, params, { started, nowIso, log });
   }
 
   // Lazy-load the CDP layer (playwright-core) — only `run` needs a browser.
@@ -405,6 +405,52 @@ async function cmdRun(args) {
   const replay = async (spec, opts) => replayRequest(page, spec, opts);
   const ctx = { page, browser, log, loc, EXIT, ToolError, params, verbose, state, fillRef, replay };
 
+  try {
+    return await runSteps(t, steps, plan, params, declared, { started, nowIso, log, ctx, state,
+      // ToolError carries its own category; anything else is 'unexpected_state'
+      // (matching cmdRun's historical `status: 'error'` / stack-in-verbose-mode
+      // behavior for a non-ToolError throw).
+      classifyError: (e) => (e instanceof ToolError
+        ? { category: e.category, message: e.message, extra: e.extra, isToolError: true }
+        : { category: 'unexpected_state', message: e.message || String(e), extra: verbose ? { stack: e.stack } : {}, isToolError: false }),
+      successPayload: (lastResult) => ({ result: lastResult, validation: lastResult.__validation, warnings: lastResult.__warnings, suggestions: lastResult.__suggestions }),
+    });
+  } finally {
+    // Detach the CDP client only — never close Breeze or the tab.
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+/** Run a channel:'mcp' tool's steps — same step/resume/finish/promotion
+ *  contract as cmdRun's browser path, but ctx exposes ctx.mcpCall(tool, args)
+ *  (electron/browser/tools/mcp-client.mjs, HTTP to tool.meta.service_url using
+ *  TYPEBUILD_MCP_TOKEN from the PTY env) instead of a Playwright page. No CDP
+ *  connection is ever opened for this channel. */
+async function runMcpChannel(t, steps, plan, params, { started, nowIso, log }) {
+  const { callMcpTool } = await import('../electron/browser/tools/mcp-client.mjs');
+  const serviceUrl = t.meta.service_url;
+  const state = {};
+  const mcpCall = (toolName, toolArgs) => callMcpTool(serviceUrl, toolName, toolArgs);
+  const ctx = { log, EXIT, ToolError, params, state, mcpCall, serviceUrl };
+
+  return runSteps(t, steps, plan, params, t.meta.params || {}, { started, nowIso, log, ctx, state,
+    // mcp-client.mjs throws with a .category already drawn from the same
+    // ERROR_CATEGORY vocabulary a ToolError uses, so one lookup covers both.
+    classifyError: (e) => ({ category: e.category || 'unexpected_state', message: e.message, extra: e.extra || {}, isToolError: true }),
+    successPayload: (lastResult) => ({ result: lastResult }),
+  });
+}
+
+/** Shared step-runner: the step-loop/resume/finish/PARTIAL-classification
+ *  contract used by BOTH the browser channel (cmdRun) and the mcp channel
+ *  (runMcpChannel). The two channels differ only in the ctx they hand steps
+ *  and in how a thrown error is classified into { category, message, extra }
+ *  (a real ToolError vs. an mcp-client error that already carries .category) —
+ *  everything else (step ordering, pre/post hooks, the resumable-cursor math,
+ *  finish()'s runs.jsonl write, and promotion) is identical, so it lives here
+ *  once. A future change to the step/resume contract now only needs one edit
+ *  instead of two hand-kept-in-sync copies. */
+async function runSteps(t, steps, plan, params, declaredParams, { started, nowIso, log, ctx, state, classifyError, successPayload }) {
   // Steps skipped by the resume plan count as already done — seed the cursor so
   // a fresh partial record still reflects the full completed set.
   const stepsDone = [...plan.skip];
@@ -413,7 +459,7 @@ async function cmdRun(args) {
     // runs.jsonl is NON-PHI: only step NAMES, statuses, indices — never values.
     recordRun(t.runsPath, {
       timestamp: nowIso(), status, code, duration_ms: duration,
-      params: redact(params, declared),
+      params: redact(params, declaredParams),
       steps_done: stepsDone,
       failed_step: extra.failed_step ?? null,
     });
@@ -461,7 +507,7 @@ async function cmdRun(args) {
       lastResult = (r && typeof r === 'object') ? { ...lastResult, ...r } : lastResult;
     }
     log.ok(`SUCCESS${started ? ` (${Date.now() - started}ms)` : ''}`);
-    finish('success', EXIT.SUCCESS, { result: lastResult, validation: lastResult.__validation, warnings: lastResult.__warnings, suggestions: lastResult.__suggestions });
+    finish('success', EXIT.SUCCESS, successPayload(lastResult));
     // PROMOTION HOOK (candidate → active). A tool auto-emitted by the promotion
     // path starts status:candidate; once it's actually worked a run or two it
     // graduates to active. finish() just appended this success to runs.jsonl, so
@@ -471,103 +517,49 @@ async function cmdRun(args) {
     return EXIT.SUCCESS;
   } catch (e) {
     // Which step broke? The next not-yet-done step is where a resume restarts.
-    const failedStep = steps[stepsDone.length === plan.skip.length ? plan.startIndex : steps.findIndex((s) => !stepsDone.includes(s.name))];
-    const failed_step = failedStep ? failedStep.name : null;
-    const nextStep = failed_step; // resume restarts AT the broken step
-    if (e instanceof ToolError) {
-      let code = ERROR_CATEGORY[e.category] ?? EXIT.FAILURE;
-      // A break PARTWAY through a multi-step tool is a PARTIAL (exit 6) when some
-      // steps already completed — the resumable signal. A break on the very
-      // first step keeps the category's own code (nothing to resume yet).
-      const madeProgress = stepsDone.length > plan.skip.length;
-      if (madeProgress && steps.length > 1) code = EXIT.PARTIAL;
-      log.fail(`${e.category}: ${e.message}`);
-      finish(code === EXIT.PARTIAL ? 'partial' : 'failure', code,
-        { error: withCause({ category: e.category, message: e.message, ...e.extra }), failed_step, resume_from: nextStep },
-        { failed_step });
-      return code;
-    }
-    log.fail(e.message || String(e));
+    // `resolveFailedStep` is the load-bearing fix for the stale-cursor edge
+    // case: if EVERY step is already in stepsDone (a prior partial run's
+    // cursor recorded steps under names a since-edited tool.json no longer
+    // has), findIndex returns -1 and there is genuinely no "next step" to
+    // blame — this is a fresh, unrelated failure, not a resumable break in a
+    // known step. Silently coercing that -1 into steps[-1] (undefined →
+    // failed_step: null) would hide the real cause from the repair loop, so
+    // we make the "no step to resume" case an explicit, visible signal instead.
+    const failed_step = resolveFailedStep(steps, stepsDone, plan);
+    const { category, message, extra, isToolError } = classifyError(e);
+    let code = ERROR_CATEGORY[category] ?? EXIT.FAILURE;
+    // A break PARTWAY through a multi-step tool is a PARTIAL (exit 6) when some
+    // steps already completed — the resumable signal. A break on the very
+    // first step keeps the category's own code (nothing to resume yet).
     const madeProgress = stepsDone.length > plan.skip.length;
-    const code = (madeProgress && steps.length > 1) ? EXIT.PARTIAL : EXIT.FAILURE;
-    finish(code === EXIT.PARTIAL ? 'partial' : 'error', code,
-      { error: withCause({ category: 'unexpected_state', message: e.message || String(e), stack: verbose ? e.stack : undefined }), failed_step, resume_from: nextStep },
+    if (madeProgress && steps.length > 1) code = EXIT.PARTIAL;
+    log.fail(`${category}: ${message}`);
+    // Preserve each channel's historical status string: cmdRun's browser path
+    // said 'failure' for a categorized ToolError and 'error' for anything
+    // else; runMcpChannel always said 'failure' (mcp-client errors always
+    // carry a category, so isToolError is always true there).
+    const status = code === EXIT.PARTIAL ? 'partial' : (isToolError ? 'failure' : 'error');
+    finish(status, code,
+      { error: withCause({ category, message, ...extra }), failed_step, resume_from: failed_step },
       { failed_step });
     return code;
-  } finally {
-    // Detach the CDP client only — never close Breeze or the tab.
-    if (browser) await browser.close().catch(() => {});
   }
 }
 
-/** Run a channel:'mcp' tool's steps — same step/resume/finish/promotion
- *  contract as cmdRun's browser path, but ctx exposes ctx.mcpCall(tool, args)
- *  (electron/browser/tools/mcp-client.mjs, HTTP to tool.meta.service_url using
- *  TYPEBUILD_MCP_TOKEN from the PTY env) instead of a Playwright page. No CDP
- *  connection is ever opened for this channel. */
-async function runMcpSteps(t, steps, plan, params, { started, nowIso, log }) {
-  const { callMcpTool } = await import('../electron/browser/tools/mcp-client.mjs');
-  const serviceUrl = t.meta.service_url;
-  const state = {};
-  const mcpCall = (toolName, toolArgs) => callMcpTool(serviceUrl, toolName, toolArgs);
-  const ctx = { log, EXIT, ToolError, params, state, mcpCall, serviceUrl };
-
-  const stepsDone = [...plan.skip];
-  const finish = (status, code, payload, extra = {}) => {
-    const duration = started ? Date.now() - started : null;
-    recordRun(t.runsPath, {
-      timestamp: nowIso(), status, code, duration_ms: duration,
-      params: redact(params, t.meta.params || {}),
-      steps_done: stepsDone,
-      failed_step: extra.failed_step ?? null,
-    });
-    out({
-      status, code, tool: t.id, version: t.meta.version || '1.0',
-      timestamp: nowIso(), duration_ms: duration, steps_done: stepsDone, ...payload,
-    });
-  };
-
-  try {
-    let lastResult = {};
-    for (let i = plan.startIndex; i < steps.length; i++) {
-      const step = steps[i];
-      const tag = `[${i + 1}/${steps.length}] ${step.name}${step.sideEffect ? ' (side-effect)' : ''}`;
-      if (step.pre) {
-        const okPre = await step.pre(ctx, params, state);
-        if (okPre === false) {
-          throw new ToolError('precondition_not_met', `pre-condition for step "${step.name}" not met`, { step: step.name });
-        }
-      }
-      log.step(tag);
-      const r = (await step.run(ctx, params, state)) ?? {};
-      if (step.post) {
-        const okPost = await step.post(ctx, params, state, r);
-        if (okPost === false) {
-          throw new ToolError('validation_failed', `post-condition for step "${step.name}" failed`, { step: step.name });
-        }
-      }
-      stepsDone.push(step.name);
-      lastResult = (r && typeof r === 'object') ? { ...lastResult, ...r } : lastResult;
-    }
-    log.ok(`SUCCESS${started ? ` (${Date.now() - started}ms)` : ''}`);
-    finish('success', EXIT.SUCCESS, { result: lastResult });
-    maybePromote(t, log);
-    return EXIT.SUCCESS;
-  } catch (e) {
-    const failedStep = steps[stepsDone.length === plan.skip.length ? plan.startIndex : steps.findIndex((s) => !stepsDone.includes(s.name))];
-    const failed_step = failedStep ? failedStep.name : null;
-    // mcp-client.mjs throws with a .category already drawn from the same
-    // ERROR_CATEGORY vocabulary a ToolError uses, so one lookup covers both.
-    const category = e.category || 'unexpected_state';
-    let code = ERROR_CATEGORY[category] !== undefined ? ERROR_CATEGORY[category] : EXIT.FAILURE;
-    const madeProgress = stepsDone.length > plan.skip.length;
-    if (madeProgress && steps.length > 1) code = EXIT.PARTIAL;
-    log.fail(`${category}: ${e.message}`);
-    finish(code === EXIT.PARTIAL ? 'partial' : 'failure', code,
-      { error: withCause({ category, message: e.message, ...(e.extra || {}) }), failed_step, resume_from: failed_step },
-      { failed_step });
-    return code;
-  }
+/** Which step to blame on a thrown error, for `failed_step` / `resume_from`.
+ *  Normally it's the first step NOT in stepsDone (the next one a resume would
+ *  retry). But `steps.findIndex(...)` returns -1 when stepsDone already
+ *  covers every step — e.g. a tool.json's steps[] was renamed/edited after a
+ *  prior partial run recorded the OLD names under an existing runs.jsonl
+ *  cursor, so none of today's step names appear as "not done". That -1 must
+ *  never be used to index `steps` (steps[-1] is undefined, silently coercing
+ *  failed_step to null and hiding the real cause). Treat it as its own
+ *  explicit case: no resumable step is at fault, this is a break outside the
+ *  known step set. */
+function resolveFailedStep(steps, stepsDone, plan) {
+  if (stepsDone.length === plan.skip.length) return steps[plan.startIndex]?.name ?? null;
+  const idx = steps.findIndex((s) => !stepsDone.includes(s.name));
+  return idx === -1 ? null : steps[idx].name;
 }
 
 /** After a successful run, promote a candidate tool to active if its health now

@@ -358,7 +358,7 @@ test('run with no live browser exits with a precondition/timeout code', async ()
 });
 
 // ─── channel:'mcp' (connectors-call) ─────────────────────────────────────────
-// No CDP/browser involved for this channel — the runner (runMcpSteps in
+// No CDP/browser involved for this channel — the runner (runMcpChannel in
 // bin/breeze-tools.mjs) calls a first-party MCP server over plain HTTP via
 // electron/browser/tools/mcp-client.mjs, authenticated with TYPEBUILD_MCP_TOKEN
 // from the PTY env. These tests stand up a tiny local JSON-RPC server instead
@@ -476,6 +476,52 @@ test('connectors-call round-trips a tool call through a local fake MCP server', 
     srv.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ─── stale-cursor failed_step (code review fix) ──────────────────────────────
+// A prior partial run's runs.jsonl cursor can name steps that no longer exist
+// in the tool (steps[] renamed/reordered since). On the NEXT run, if that
+// stale cursor is (mis-)used as steps_done, `steps.findIndex(s =>
+// !stepsDone.includes(s.name))` returns -1 because every CURRENT step name is
+// "in" stepsDone by coincidence of the auto-resume seeding. The fix
+// (resolveFailedStep in bin/breeze-tools.mjs) must surface failed_step: null
+// explicitly rather than crash or silently misattribute the failure. This
+// tool always throws on its only step, so the assertion is: a real failure
+// still gets clean, well-formed JSON with a non-crashing failed_step.
+test('run against a tool whose steps[] no longer match a stale cursor stays well-formed (no crash, honest failed_step)', () => {
+  const dir = freshRepoWithSeeds();
+  try {
+    // channel:'mcp' so the run never touches CDP/playwright (no live browser
+    // needed) and reaches the step loop directly — the same runSteps() helper
+    // the browser channel shares.
+    mkdirSync(join(dir, 'flaky-tool'), { recursive: true });
+    writeFileSync(join(dir, 'flaky-tool', 'tool.json'), JSON.stringify({
+      id: 'flaky-tool', name: 'Flaky', description: 'always throws', match: ['*'],
+      channel: 'mcp', service_url: 'http://127.0.0.1:1/mcp',
+      steps: [{ name: 'do-thing', sideEffect: false }],
+    }) + '\n');
+    writeFileSync(join(dir, 'flaky-tool', 'tool.mjs'),
+      'export const steps = [{ name: "do-thing", sideEffect: false, run: async () => { throw new Error("boom"); } }];\n');
+    // Stale cursor: an OLD step name ('old-step-name') that was renamed away,
+    // recorded as done under a PARTIAL run — simulates a tool.json edit after
+    // the cursor was written. Auto-resume will seed steps_done with this,
+    // which does not match any current step name.
+    appendFileSync(
+      join(dir, 'flaky-tool', 'runs.jsonl'),
+      JSON.stringify({ timestamp: '2026-06-28T00:00:00Z', status: 'partial', steps_done: ['old-step-name'], failed_step: 'old-step-name' }) + '\n',
+    );
+    const r = run(['run', 'flaky-tool'], dir);
+    // Must not crash the process — always well-formed JSON on stdout.
+    const o = JSON.parse(r.stdout);
+    assert.equal(o.status, 'failure');
+    assert.ok(o.error);
+    assert.equal(o.error.category, 'unexpected_state');
+    assert.match(o.error.message, /boom/);
+    // The load-bearing assertion: failed_step is present in the payload (even
+    // if null, since no CURRENT step name matches the stale cursor) — never
+    // `undefined` / a crash from indexing steps[-1].
+    assert.ok('failed_step' in o, 'failed_step key must be present, not silently dropped');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('connectors-call surfaces an MCP tool error as unexpected_state (exit 1)', async () => {
