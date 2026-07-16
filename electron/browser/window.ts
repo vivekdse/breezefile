@@ -21,8 +21,8 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, ipcMain, screen } from 'electron';
-import { killManagedPty } from '../ipc';
+import { BrowserWindow, dialog, ipcMain, screen } from 'electron';
+import { killManagedPty, isManagedPtyAlive } from '../ipc';
 // The shared embedded-browser view backend (one registry drives both the in-app
 // tab and this operator pane). Credential capture + record + autofill all ride
 // the view created here — no operator-specific browser IPC any more.
@@ -130,13 +130,32 @@ export function getOperatorViewId(): number | null {
  *  terminal RIGHT, one resizer. When `ptyId` is given the right pane mirrors
  *  that PTY's terminal; without it the window is just the browser pane (the
  *  HTTP `open-browser` verb). Reuse does NOT renavigate — the agent drives
- *  navigation via the helper's `goto`. */
-export function openBrowserWindow(
+ *  navigation via the helper's `goto`.
+ *
+ *  task-207afa3fcec2 — TAKEOVER GUARD. The window is a process-wide
+ *  singleton, but there are now TWO independent callers that can adopt a
+ *  brand-new ptyId into it: a TypeBuild task launch (interactive.ts, via
+ *  typebuild.ts) and the task-less ad-hoc Ctrl+B session
+ *  (adhoc-browser.ts). Each has its OWN reuse guard for repeat calls with
+ *  its OWN ptyId (a second Start / a second Ctrl+B just focuses), but
+ *  neither knows about the OTHER's session — so if session A's window is
+ *  open and session B calls in with a genuinely different, still-alive
+ *  ptyId, the old code silently re-pointed the terminal pane out from under
+ *  A (and the close handler's owned-pty box with it), hijacking whatever A
+ *  was doing. We now ask before doing that: if declined, the window stays
+ *  on the original session and the NEW ptyId is left un-adopted (its pty
+ *  keeps running headless in the managed-pty registry — the caller spawned
+ *  it before it could know whether the window would be free — but nothing
+ *  visibly steals A's session). Returns true iff this call ended up hosted
+ *  in (or already reflected by) the window; false if a takeover was
+ *  offered and declined. Async ONLY on the confirm path — every other path
+ *  returns synchronously-resolved. */
+export async function openBrowserWindow(
   url?: string,
   ptyId?: number,
   launching?: boolean,
   sessionTitle?: string,
-): void {
+): Promise<boolean> {
   // Resolve the requested url through the single chokepoint: empty/missing OR a
   // stale example.com placeholder both become the themed splash (in the current
   // splashTheme) rather than overriding it — example.com must never load on task
@@ -144,13 +163,58 @@ export function openBrowserWindow(
   // 'https://example.com' here; the resolver neutralizes that and any
   // example.com start_url that reaches the `open-browser` verb. A REAL url
   // (the agent's explicit `goto` target) still passes through.
-  pendingUrl = resolveStartUrl(url, splashTheme);
+  const resolvedUrl = resolveStartUrl(url, splashTheme);
   const prevPtyId = operatorPtyId;
+  const existing = getBrowserWindow();
+  // A takeover is only a real conflict when: the window already exists, the
+  // caller is adopting a DIFFERENT pty than the one it currently mirrors, AND
+  // that prior pty is still a live process (not just a stale id nobody
+  // cleared — e.g. a task that finished but whose window is still up showing
+  // the "done" splash presents no live session to steal).
+  if (
+    existing &&
+    ptyId != null &&
+    ptyId !== prevPtyId &&
+    prevPtyId != null &&
+    isManagedPtyAlive(prevPtyId)
+  ) {
+    const priorLabel = operatorTitle.replace(/^TypeBuild Operator(?: — )?/, '').trim();
+    const nextLabel = sessionTitle?.trim();
+    const { response } = await dialog.showMessageBox(existing, {
+      type: 'warning',
+      buttons: ['Cancel', 'Take Over'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Operator session already running',
+      message: priorLabel
+        ? `An operator session for "${priorLabel}" is still active.`
+        : 'Another operator session is still active.',
+      detail: `${nextLabel ? `Starting "${nextLabel}"` : 'This new session'} would replace it in the one operator window — the running session keeps executing, but you won't see it here anymore. Take over the window?`,
+    });
+    if (response !== 1) {
+      // Declined: leave the window exactly as it is, pointed at the prior
+      // session. The new ptyId is NOT adopted — operatorPtyId/ownedPtyRef
+      // stay on the prior session so its close handler still kills the
+      // right pty.
+      existing.focus();
+      return false;
+    }
+    // Taking over: fall through to the normal repoint below, but bring the
+    // NOW-ORPHANED prior pty down first. It already lost its only visible
+    // window and has no way back into one (the singleton just adopted a
+    // different session) — leaving it running invisibly would be a stray
+    // background `claude` process the user can't see or stop.
+    try {
+      killManagedPty(prevPtyId);
+    } catch {
+      /* already gone */
+    }
+  }
+  pendingUrl = resolvedUrl;
   if (ptyId != null) operatorPtyId = ptyId;
   operatorTitle = sessionTitle?.trim()
     ? `TypeBuild Operator — ${sessionTitle.trim()}`
     : 'TypeBuild Operator';
-  const existing = getBrowserWindow();
   if (existing) {
     existing.setTitle(operatorTitle);
     if (existing.isMinimized()) existing.restore();
@@ -169,7 +233,7 @@ export function openBrowserWindow(
       ownedPtyRef.current = ptyId;
       loadOperatorChrome(existing, ptyId, operatorViewId);
     }
-    return;
+    return true;
   }
   const win = new BrowserWindow({
     width: 1400,
@@ -253,6 +317,7 @@ export function openBrowserWindow(
   loadOperatorChrome(win, ptyId, operatorViewId, launching);
 
   fillScreen(win);
+  return true;
 }
 
 // task-1b3eeb1aae1f — OPTIMISTIC LAUNCH. Pop the operator window showing the
@@ -290,7 +355,9 @@ export function openSessionStartingSplash(): void {
   // "Starting session…" for the whole wait instead of "No agent session"
   // (task-7ba4409eeb5c).
   pendingUrl = fresh;
-  openBrowserWindow(undefined, undefined, true);
+  // No ptyId on this call (the optimistic pre-spawn splash), so it can never
+  // hit the takeover-guard branch above — nothing to await.
+  void openBrowserWindow(undefined, undefined, true);
 }
 
 // task-1b3eeb1aae1f — tear the optimistic session-starting splash back down when

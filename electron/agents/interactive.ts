@@ -27,6 +27,7 @@ import {
   awaitPtyLiveness,
   awaitPtyInputReady,
   writeManagedPty,
+  killManagedPty,
 } from '../ipc';
 import type { PtyLivenessVerdict } from '../ipc';
 import { CDP_URL, BROWSER_CLI, TOOLS_CLI } from '../browser/automation';
@@ -398,8 +399,34 @@ export async function runTaskInteractive(
   // the first REAL navigation via the helper's `goto`. We used to pass a literal
   // 'https://example.com' here, which made task start flash that meaningless
   // placeholder instead of the splash — never do that.
+  //
+  // task-207afa3fcec2 — the singleton window may already be hosting a
+  // DIFFERENT live session (a task's operator window vs. an ad-hoc Ctrl+B
+  // pair, or two overlapping tasks); openBrowserWindow now asks before
+  // stealing it and returns false if the human declined. Operator-hosted
+  // sessions have NO fallback tab (App.tsx's tasks:interactiveRun handler
+  // returns early on payload.operator — see its comment), so a pty that
+  // loses the takeover has no UI anywhere it could ever become reachable
+  // from. Kill it immediately and report an unlaunched run rather than
+  // leaving an invisible orphan `claude` process the user can't see or
+  // stop: this lands the child's onExit before awaitLiveness even starts,
+  // so liveness resolves dead and callers take the existing "died right
+  // away" path (release claim, record why) instead of a new failure mode.
   if (playwright || opts.hostInOperator) {
-    openBrowserWindow(undefined, ptyId, undefined, payload.title);
+    const hosted = await openBrowserWindow(undefined, ptyId, undefined, payload.title);
+    if (!hosted) {
+      console.warn(
+        '[interactive] operator window takeover declined; killing pty',
+        ptyId,
+        '(no UI surface to run it in)',
+      );
+      try {
+        killManagedPty(ptyId);
+      } catch {
+        /* already gone */
+      }
+      return { run, ptyId, launched: false };
+    }
   }
 
   // task-6fc9e503623e — LIVENESS GATE. When the caller asked, wait for the

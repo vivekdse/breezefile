@@ -944,6 +944,15 @@ function reservePtyId(): number {
   return nextPtyId++;
 }
 
+/** Is this pty id still a live, running managed process? task-207afa3fcec2 —
+ *  the operator window's takeover guard uses this to tell "the window's
+ *  current session already exited, repoint freely" apart from "a DIFFERENT
+ *  live session is still running there, ask before stealing the window."
+ *  Same registry check (`ptys.has`) the liveness/kill paths already use. */
+function isManagedPtyAlive(id: number): boolean {
+  return ptys.has(id);
+}
+
 /** Gracefully terminate a managed PTY by id from the main process (no IPC
  *  round-trip). Used by the TypeBuild expiry relaunch (fm-b5at.10) to retire
  *  the old, expired session before respawning a fresh one. The proc's own
@@ -979,7 +988,7 @@ function writeManagedPty(id: number, data: string): void {
   }
 }
 
-export { spawnManagedPty, reservePtyId, killManagedPty, writeManagedPty };
+export { spawnManagedPty, reservePtyId, killManagedPty, writeManagedPty, isManagedPtyAlive };
 export type { SpawnManagedPtyOpts };
 
 export function registerIpc() {

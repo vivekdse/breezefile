@@ -258,7 +258,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     // this just points it at the requested url.
     if (p === '/app/open-browser' && m === 'POST') {
       const body = await readJson<{ url?: string }>(req).catch(() => ({}) as { url?: string });
-      openBrowserWindow(body.url);
+      // No ptyId on this call, so it can never hit the takeover-guard branch
+      // in openBrowserWindow (task-207afa3fcec2) — it only ever navigates the
+      // window's existing session or opens a bare browser pane.
+      await openBrowserWindow(body.url);
       return sendJson(res, 200, { ok: true });
     }
 
