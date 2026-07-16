@@ -419,8 +419,11 @@ test('connectors-call redacts --args in runs.jsonl (may carry PHI, e.g. an email
     meta.service_url = `http://127.0.0.1:${port}/mcp`;
     writeFileSync(toolJsonPath, JSON.stringify(meta, null, 2));
 
-    const secretArgs = '{"to":"patient@example.com","body":"sensitive content"}';
-    const r = await spawnAsync('node', [cli, 'run', 'connectors-call', '--op', 'send_email', `--args=${secretArgs}`], {
+    const secretArgs = JSON.stringify({
+      action: 'GMAIL_SEND_EMAIL',
+      arguments: { recipient_email: 'patient@example.com', subject: 'hi', body: 'sensitive content', is_html: false, cc: [], bcc: [] },
+    });
+    const r = await spawnAsync('node', [cli, 'run', 'connectors-call', '--op', 'execute', '--toolkit', 'gmail', `--args=${secretArgs}`], {
       env: { ...process.env, BREEZE_TOOLS_DIR: dir, TYPEBUILD_MCP_TOKEN: 'test-token-123' },
     });
     assert.equal(r.status, 0, `unexpected exit ${r.status}: ${r.stdout}${r.stderr}`);

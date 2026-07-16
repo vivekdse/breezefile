@@ -1,25 +1,26 @@
 {
   "id": "connectors-call",
   "name": "Connected Services — generic first-party MCP call",
-  "description": "Calls the `connectors` first-party MCP catalog server (Connected Services — Gmail, Slack, etc.) directly over HTTP, without going through a browser or re-deriving the call shape each session. Use `available connectors` first to see this tool, then `run connectors-call --op list_catalog` (or list_connections/connect/poll/disconnect/call/send_email) to drive it. Prefer this over ad-hoc mcp__connectors__* calls when the SAME operation recurs across tasks — once a toolkit/method/path shape is proven, note it in the tool's known_issues or promote a narrower wrapper tool for it.",
+  "description": "Calls the `connectors` first-party MCP catalog server (Connected Services — Gmail, Slack, etc.) directly over HTTP, without going through a browser or re-deriving the call shape each session. Use `available connectors` first to see this tool, then `run connectors-call --op list_catalog` (or list_connections/connect/poll/disconnect/call/execute/list_actions/describe_action) to drive it. Prefer `execute` for 'do something in a provider' — it runs backend-side with the vaulted token (works with Composio secret-masking ON) — over the raw `call` passthrough, which needs masking OFF. Prefer this over ad-hoc mcp__connectors__* calls when the SAME operation recurs across tasks — once a toolkit/method/path or toolkit/action shape is proven, note it in the tool's known_issues or promote a narrower wrapper tool for it.",
   "match": ["connectors", "connectors.typebuild.com"],
   "channel": "mcp",
   "service_url": "https://connectors.typebuild.com/mcp",
   "version": "1.0",
   "status": "active",
   "params": {
-    "op": { "required": true, "type": "string", "description": "the connectors MCP tool to invoke: list_catalog | list_connections | connect | poll | disconnect | call | send_email" },
-    "toolkit": { "required": false, "type": "string", "description": "op:call/connect/poll/disconnect — the third-party toolkit (e.g. gmail, slack)" },
+    "op": { "required": true, "type": "string", "description": "the connectors MCP tool to invoke: list_catalog | list_connections | connect | poll | disconnect | call | execute | list_actions | describe_action" },
+    "toolkit": { "required": false, "type": "string", "description": "op:call/connect/poll/disconnect/execute/list_actions/describe_action — the third-party toolkit (e.g. gmail, slack)" },
     "method": { "required": false, "type": "string", "description": "op:call — HTTP method for the generic passthrough (GET/POST/...)" },
     "path": { "required": false, "type": "string", "description": "op:call — the toolkit API path" },
-    "args": { "required": false, "type": "string", "secret": true, "description": "op:call/send_email — JSON-encoded string of the remaining call arguments (body/query/etc.); parsed and merged into the request. May carry PHI/PII (e.g. an email body) — marked secret so runs.jsonl (redact() in bin/breeze-tools.mjs) never persists it" }
+    "args": { "required": false, "type": "string", "secret": true, "description": "JSON-encoded string of the remaining call arguments, parsed and merged into the request. op:call — body/query/etc. for the raw REST passthrough. op:execute — {\"action\":\"<ACTION_NAME>\",\"arguments\":{...}} e.g. {\"action\":\"GMAIL_SEND_EMAIL\",\"arguments\":{\"recipient_email\":\"a@b.com\",\"subject\":\"...\",\"body\":\"...\",\"is_html\":false,\"cc\":[],\"bcc\":[]}}. op:list_actions — {\"search\":\"...\",\"limit\":20} (both optional). op:describe_action — {\"action\":\"<ACTION_NAME>\"}. May carry PHI/PII (e.g. an email body) — marked secret so runs.jsonl (redact() in bin/breeze-tools.mjs) never persists it" }
   },
   "output": {
-    "result": "the connectors MCP tool's structured result, unwrapped"
+    "result": "the connectors MCP tool's structured result, unwrapped. op:list_actions returns [{action, description}]; op:describe_action returns {action, description, required[], properties{}}"
   },
   "dependencies": "Must run inside an operator/task session — reads the TYPEBUILD_MCP_TOKEN the session already has in its PTY env (electron/browser/tools/mcp-client.mjs). No separate login/auth step.",
   "known_issues": [
-    "This is the GENERIC fallback tool — one call per invocation, args passed raw. If a specific (toolkit, method, path) combination is used repeatedly, promote a narrower purpose-built tool.json/tool.mjs for it (breeze-tools create) rather than re-typing --args each time.",
-    "op:send_email/call are mutating for some toolkits — check the connectors server's own response before assuming success; this wrapper does not retry mutating calls."
+    "This is the GENERIC fallback tool — one call per invocation, args passed raw. If a specific (toolkit, method, path) or (toolkit, action) combination is used repeatedly, promote a narrower purpose-built tool.json/tool.mjs for it (breeze-tools create) rather than re-typing --args each time.",
+    "op:execute/call are mutating for some toolkits — check the connectors server's own response before assuming success; this wrapper does not retry mutating calls.",
+    "op:execute is the preferred 'do something' path (works with Composio secret-masking ON); op:call is a raw-token REST passthrough that needs masking OFF — prefer execute unless no action exists for the need."
   ]
 }
