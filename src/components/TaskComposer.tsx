@@ -122,11 +122,6 @@ export type TaskComposerRequest =
       mode: 'create';
       defaultFolder: string;
       projectId?: string;
-      /** The active GROUP scope (opaque id) — the create lands in this group so
-       *  a new task joins the currently-selected team. Set by New Home from its
-       *  group picker; omitted when there's no group scope. Rides the create as
-       *  `groupId` (TaskCreate → server `group_id`). */
-      groupId?: string;
       /** Prefill from a caller that already gathered title/notes elsewhere
        *  (e.g. the copilot create_task action) — seeds the fields, the human
        *  still reviews/edits/submits through this same form. */
@@ -3178,8 +3173,11 @@ export function TaskComposer(props: Props) {
               // task-464e739dc9fa — the group is NOT sent: it lives on the
               // project now. The server derives the task's group from the
               // resolved (explicit or per-user default) project and 422s a
-              // client-sent group_id. props.groupId remains a VIEW scope only
-              // (member picker, list filtering).
+              // client-sent group_id. There is no groupId create field at all
+              // (task-6d8e65ad34a7) — a task's group is purely a read of its
+              // project's group_id, surfaced by group-scoped VIEWS (New
+              // Home's group picker filters `projectId` options, member
+              // picker, list filtering), never a create-time input.
               // task-896f3f7f5e75 — the chosen agent rides the create as
               // `agentId` (TaskCreate models it; the TypeBuild source maps it to
               // `agent_id`). '' (None) → omit the key so a create that doesn't

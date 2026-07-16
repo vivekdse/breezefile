@@ -391,10 +391,12 @@ export function NewHomePage() {
         detail: {
           mode: 'create',
           defaultFolder: '',
+          // task-6d8e65ad34a7 — projectId is the only scope the create needs.
+          // The GROUP scope (selectedGroupId) already narrows which project this
+          // is (flatProjectOptions filters by group above), and a task's group is
+          // derived server-side from its project — there is no separate group
+          // field on create. Do not re-add a groupId here (see cb354's fix #3).
           projectId: selectedProjectId ?? undefined,
-          // The active GROUP scope so a new task lands in the currently-selected
-          // team (the server may require a group). Omitted for "All groups".
-          groupId: selectedGroupId ?? undefined,
           initialKind: kind,
         },
       }),
