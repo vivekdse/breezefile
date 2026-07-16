@@ -33,6 +33,17 @@ export interface BreezeHost {
   onTasksChanged(detail?: TasksChangedDetail): void;
   /** A run row changed for `taskId` (scheduled/queued/finished). */
   onRunsChanged(taskId: string): void;
+  /** task-6589ec3934a4 (follow-up) — a source poll pass completed SUCCESSFULLY,
+   *  whether or not it found anything to change. Distinct from onTasksChanged,
+   *  which fires only on a real diff: a quiet period (nothing moved server-side)
+   *  produces successful passes and NO diffs, so a host relying on
+   *  onTasksChanged alone never hears that the sync clock advanced and Home's
+   *  "last synced" reading freezes at the last change — which the staleness
+   *  banner then reports as "this view may be out of date" while the poll is in
+   *  fact perfectly healthy. This is the heartbeat that keeps that reading
+   *  honest; it carries NO task data (PHI-free by construction). Optional:
+   *  headless hosts have no renderer to inform and default to a no-op. */
+  onSynced?(): void;
   /** An auto/scheduled run terminally failed. */
   onRunFailed(task: { id: string; title: string }, body: string): void;
   /** fm-h8g7 — a NON-manual (scheduled/auto) run completed successfully.

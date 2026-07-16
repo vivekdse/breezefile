@@ -415,6 +415,11 @@ type Fm = {
   // poll that silently stops running (this task's bug) never trips the
   // origin breaker at all.
   typebuildHealth: () => Promise<{ degraded: boolean; lastSyncedAt: number | null }>;
+  typebuildSyncNow: () => Promise<{
+    ok: boolean;
+    lastSyncedAt?: number | null;
+    reason?: string;
+  }>;
   onTypebuildHealth: (
     cb: (e: { degraded: boolean; lastSyncedAt: number | null }) => void,
   ) => () => void;

@@ -416,6 +416,32 @@
     opacity: 1;
   }
 }
+/* The stale-sync banner's Sync-now action. Sits at the far end of the banner and
+   borrows its warn ink, so it reads as part of the same quiet note rather than a
+   competing call to action. */
+.nh__slow-banner-action {
+  margin-left: auto;
+  flex: 0 0 auto;
+  appearance: none;
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  border-radius: var(--r-sm);
+  padding: 2px var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--motion-hover), opacity var(--motion-hover);
+}
+.nh__slow-banner-action:hover:not(:disabled) {
+  background: var(--nh-needs-soft);
+  filter: brightness(1.25);
+}
+.nh__slow-banner-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 
 /* Shared "this is a stub" affordance — every placeholder component (until a
    follow-up task fills it in) renders this small caption so it's obvious in

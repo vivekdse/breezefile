@@ -3174,6 +3174,26 @@ end tell`;
     }
   });
 
+  // task-6589ec3934a4 (follow-up) — "Sync now", the action behind Home's
+  // stale-sync banner. Forces one immediate reconcile pass so a user staring at
+  // a stale roster can unstick it themselves instead of only being told it's
+  // stale. No health push is needed here: a successful pass fires BreezeHost's
+  // onSynced heartbeat, which broadcasts the new clock (and so clears the
+  // banner) on its own; a failed one leaves the clock — and the banner —
+  // untouched, which is exactly right.
+  ipcMain.handle('typebuild:syncNow', async () => {
+    const src = getTaskSource('typebuild');
+    if (!src?.syncNow) return { ok: false as const, reason: 'unavailable' };
+    try {
+      await src.syncNow();
+      return { ok: true as const, lastSyncedAt: readLastSyncedAt() };
+    } catch (e) {
+      // PHI-free: syncNow throws a fixed marker string, never task content.
+      console.warn('[typebuild:syncNow] failed:', (e as Error)?.message);
+      return { ok: false as const, reason: 'failed' };
+    }
+  });
+
   ipcMain.handle('tasks:list', async (_e, filter?: TaskFilter) => {
     const out: Array<Record<string, unknown>> = [];
     // Aggregate across every registered source (local + e.g. TypeBuild),

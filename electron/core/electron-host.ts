@@ -94,6 +94,19 @@ export const ElectronBreezeHost: BreezeHost = {
     broadcast('task-runs:changed', { taskId });
   },
 
+  // task-6589ec3934a4 (follow-up) — sync heartbeat. The piggyback in
+  // onTasksChanged above only covers passes that found a DIFF, so during a quiet
+  // stretch the renderer's "last synced" reading stopped advancing and Home
+  // eventually declared a perfectly live view stale. Push the same health
+  // payload on every successful pass so that reading tracks the real clock.
+  // Cheap: one small IPC message per poll, no task data.
+  onSynced() {
+    broadcast('typebuild:health', {
+      degraded: isOriginDegraded(),
+      lastSyncedAt: getTaskSource('typebuild')?.lastSyncedAt?.() ?? null,
+    });
+  },
+
   hasInteractiveWindow() {
     return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed());
   },

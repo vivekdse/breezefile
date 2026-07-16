@@ -974,6 +974,11 @@ export class TypeBuildTaskSource implements TaskSource {
   // interval) arrived mid-poll so we run exactly one more pass afterward.
   private pollInFlight = false;
   private pollAgain = false;
+  // task-6589ec3934a4 (follow-up) — the in-flight pass's promise, so a coalesced
+  // poll() call can AWAIT the pass instead of resolving immediately. The timer
+  // and SSE triggers are fire-and-forget and never cared; syncNow() does, since
+  // it reports an outcome to a user watching a spinner.
+  private pollInFlightPromise: Promise<void> | null = null;
 
   // task-6589ec3934a4 — warn-once latch for pollOnce's catch, so a broken poll
   // (auth blip, network error, future regression) leaves ONE visible trace in
@@ -5386,6 +5391,34 @@ export class TypeBuildTaskSource implements TaskSource {
     breezeHost().onTasksChanged();
   }
 
+  // task-6589ec3934a4 (follow-up) — user-triggered "Sync now", the escape hatch
+  // behind Home's stale-sync banner. The banner exists for the case where the
+  // 30s poll stops running entirely; telling the user their view is frozen
+  // without giving them a way to unfreeze it is a dead end, so this exposes ONE
+  // immediate pass.
+  //
+  // Routed through poll() (not pollOnce()) deliberately, for three properties we
+  // get for free: the single-flight guard (a user mashing the button can't stack
+  // concurrent pulls that race the cursor + cache swap), the broadcastDiff that
+  // pushes any newly-seen rows to the roster, and lastSyncedAtMs being stamped
+  // on success — which is what actually clears the banner. It resolves only once
+  // the pass has landed, including when it coalesces onto one already in flight,
+  // so the caller can hold a spinner over the real work.
+  //
+  // Reports the outcome via the sync CLOCK, not by catching: pollOnce swallows
+  // its own errors (by design — the timer must never die on a blip), so the only
+  // trustworthy "did it work" signal is whether the pass stamped a new
+  // lastSyncedAtMs. Unchanged → the pull failed or was skipped, and we throw so
+  // the caller can tell the user plainly instead of clearing the spinner and
+  // leaving them to guess why the banner never moved.
+  async syncNow(): Promise<void> {
+    const before = this.lastSyncedAtMs;
+    await this.poll();
+    if (this.lastSyncedAtMs === before) {
+      throw new Error('sync did not complete');
+    }
+  }
+
   // ─── polling lifecycle ──────────────────────────────────────────────────
   // Called by the registration wiring when the source is registered /
   // unregistered (sign-in / sign-out).
@@ -5549,21 +5582,30 @@ export class TypeBuildTaskSource implements TaskSource {
     // swap / double-broadcast. Serialize: if a poll is running, mark that another
     // is wanted and return; the in-flight one re-runs once when it finishes so a
     // change that landed mid-poll is never missed.
+    // Returning the in-flight promise (rather than undefined) means a coalesced
+    // caller waits for the pass that will include its own requested re-run — the
+    // do-while below loops while pollAgain is set. Callers that don't await are
+    // unaffected.
     if (this.pollInFlight) {
       this.pollAgain = true;
-      return;
+      return this.pollInFlightPromise ?? undefined;
     }
     this.pollInFlight = true;
-    try {
-      do {
-        this.pollAgain = false;
-        await this.pollOnce();
-        // Re-run only if another trigger arrived mid-poll AND we're still armed
-        // (stopPolling clears pollTimer on sign-out — don't keep pulling then).
-      } while (this.pollAgain && this.pollTimer !== null);
-    } finally {
-      this.pollInFlight = false;
-    }
+    const pass = (async () => {
+      try {
+        do {
+          this.pollAgain = false;
+          await this.pollOnce();
+          // Re-run only if another trigger arrived mid-poll AND we're still armed
+          // (stopPolling clears pollTimer on sign-out — don't keep pulling then).
+        } while (this.pollAgain && this.pollTimer !== null);
+      } finally {
+        this.pollInFlight = false;
+        this.pollInFlightPromise = null;
+      }
+    })();
+    this.pollInFlightPromise = pass;
+    await pass;
   }
 
   // One reconcile pass (delta or full). Extracted so poll() can serialize + coalesce.
@@ -5616,6 +5658,11 @@ export class TypeBuildTaskSource implements TaskSource {
       // sync timestamp the UI reads via lastSyncedAt().
       this.warnedPollFailure = false;
       this.lastSyncedAtMs = Date.now();
+      // Tell the host the clock moved, even when the pass found nothing to
+      // broadcast. Without this the renderer only learns of a sync when a diff
+      // rides onTasksChanged, so a quiet stretch (no server-side changes) looks
+      // identical to a dead poll and Home's staleness banner cries wolf.
+      breezeHost().onSynced?.();
     } catch (err) {
       // Signed-out / network blip — the next poll retries with the SAME
       // cursor (we never advanced it on failure) and the last-known cache is

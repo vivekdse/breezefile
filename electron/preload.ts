@@ -861,6 +861,16 @@ const fm = {
       // without throwing, or null before the first one lands.
       lastSyncedAt: number | null;
     }>,
+  // task-6589ec3934a4 (follow-up) — force one immediate reconcile pass, backing
+  // "Sync now" on Home's stale-sync banner. Resolves once the pass has landed;
+  // { ok:false } means it genuinely didn't sync (the main side pushes a fresh
+  // 'typebuild:health' either way, so the banner reflects the real clock).
+  typebuildSyncNow: () =>
+    ipcRenderer.invoke('typebuild:syncNow') as Promise<{
+      ok: boolean;
+      lastSyncedAt?: number | null;
+      reason?: string;
+    }>,
   onTypebuildHealth: (
     cb: (e: { degraded: boolean; lastSyncedAt: number | null }) => void,
   ) => {

@@ -28,7 +28,7 @@
 // PHI: task titles/custom-field values render in-app only; never persisted
 // to disk/logs (see docs/typebuild-data-field-contract.md).
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { useNewHomeData } from './useNewHomeData';
 import { compileTaskQuery, runTaskQuery } from './taskQuery';
@@ -266,6 +266,13 @@ export function NewHomePage() {
   // poll guard died and the cache was filled once at startup and never
   // again, with zero user-visible signal). `now` re-renders every 15s purely
   // to keep the relative-time label fresh without polling anything new.
+  // A note on why this reading can be TRUSTED: `lastSyncedAt` only advances when
+  // the main process pushes 'typebuild:health', and that push used to ride
+  // onTasksChanged — which fires only when a poll finds a DIFF. So a quiet hour
+  // with no server-side changes froze this clock and the banner declared a
+  // perfectly healthy view stale (a false alarm that made the banner worth less
+  // than nothing). Every successful pass now pushes a heartbeat (BreezeHost's
+  // onSynced), so a stale reading here means a genuinely stale view.
   const STALE_AFTER_MS = 90_000;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -274,6 +281,27 @@ export function NewHomePage() {
   }, []);
   const syncIsStale =
     lastSyncedAt != null && now - lastSyncedAt > STALE_AFTER_MS;
+  // The banner's Sync-now action. `syncing` holds the button in a pending state
+  // (and blocks a second click — the main side coalesces concurrent passes, but
+  // the button shouldn't invite it). `syncFailed` is cleared on every fresh
+  // attempt so a retry starts from a clean slate, and never outlives the banner:
+  // a successful pass makes syncIsStale false and unmounts the whole thing.
+  const [syncing, setSyncing] = useState(false);
+  const [syncFailed, setSyncFailed] = useState(false);
+  const doSyncNow = useCallback(async () => {
+    setSyncing(true);
+    setSyncFailed(false);
+    try {
+      const res = await fm.typebuildSyncNow();
+      // A refused/failed pass leaves lastSyncedAt untouched, so the banner stays
+      // up by itself — all this adds is naming what happened.
+      setSyncFailed(!res?.ok);
+    } catch {
+      setSyncFailed(true);
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
   const { tasks, counts, projects, groups, loading, refresh, refreshProjects } = useNewHomeData(
     selectedProjectId,
     // task-group-scope-picker — pass the group scope into the data layer so it
@@ -807,10 +835,27 @@ export function NewHomePage() {
           that class of failure too, not just a slow-but-alive origin. Shown
           only once we've actually synced at least once, to avoid a false
           "stale" flash during normal startup before the first poll lands. */}
+      {/* The banner carries its own SYNC NOW action: reporting a frozen view
+          without offering a way to unfreeze it just tells the user they're
+          stuck. It forces one immediate reconcile pass in the main process — so
+          it repairs the dead-poll case the banner exists for, rather than only
+          re-reading the same frozen cache. On success the pass stamps a new sync
+          time and the banner clears itself; on failure we say so in place and
+          leave the banner up, since the view really is still stale. */}
       {!originDegraded && syncIsStale && (
         <div className="nh__slow-banner" role="status" aria-live="polite">
           <span className="nh__slow-banner-dot" aria-hidden="true" />
-          {`Last synced ${relTime(lastSyncedAt as number)} — this view may be out of date.`}
+          {syncFailed
+            ? `Sync failed — still showing work from ${relTime(lastSyncedAt as number)}.`
+            : `Last synced ${relTime(lastSyncedAt as number)} — this view may be out of date.`}
+          <button
+            type="button"
+            className="nh__slow-banner-action"
+            onClick={() => void doSyncNow()}
+            disabled={syncing}
+          >
+            {syncing ? 'Syncing…' : syncFailed ? 'Retry' : 'Sync now'}
+          </button>
         </div>
       )}
       <div className="nh__topbar">

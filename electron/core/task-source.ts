@@ -174,6 +174,15 @@ export interface TaskSource {
    *  fix. Optional: only polling remote sources (TypeBuild) implement it;
    *  local-style stores have no poll cadence to report. */
   lastSyncedAt?(): number | null;
+
+  /** task-6589ec3934a4 (follow-up) — force ONE immediate reconcile pass, outside
+   *  the source's own cadence. Backs the "Sync now" action on Home's stale-sync
+   *  banner: a banner that reports a frozen view without offering a way to
+   *  unfreeze it is a dead end. Resolves once the pass has landed (so the caller
+   *  can hold a spinner); REJECTS if it didn't sync, so the UI can say so rather
+   *  than implying success. Optional, and paired with lastSyncedAt(): only
+   *  polling remote sources have a cadence to short-circuit. */
+  syncNow?(): Promise<void>;
 }
 
 /** Serializable descriptor returned by the tasks:sources IPC so the
