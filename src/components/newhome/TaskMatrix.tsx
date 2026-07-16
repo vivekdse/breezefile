@@ -648,21 +648,36 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
   //   INPUT columns get their own width class: the inputs are what identifies a
   // row (the lead column no longer names it), so they're the columns worth the
   // space the lead gave back.
+  //   fixed layout distributes any width the table has left over PROPORTIONALLY
+  // across every column that declares a px width — so on a wide matrix the lead
+  // column, despite its tight declared width, balloons right along with the
+  // field columns. Flatten the field cols first and mark the LAST one
+  // `tm-col-flex` (width: auto): an auto column absorbs 100% of the leftover
+  // width itself, which leaves every px-declared column — crucially the lead —
+  // holding exactly its declared size.
+  const fieldCols = stepGroups.flatMap((g) =>
+    g.inputs.length + g.outputs.length === 0
+      ? [<col key={`ce${g.index}`} className="tm-col-field" />]
+      : [
+          ...g.inputs.map((key) => (
+            <col key={`ci${g.index}-${key}`} className="tm-col-field tm-col-field--in" />
+          )),
+          ...g.outputs.map((o) => (
+            <col key={`co${g.index}-${o.key}`} className="tm-col-field" />
+          )),
+        ],
+  );
+  const lastFieldCol = fieldCols[fieldCols.length - 1];
+  if (lastFieldCol) {
+    const flexClassName = `${lastFieldCol.props.className} tm-col-flex`;
+    fieldCols[fieldCols.length - 1] = (
+      <col key={lastFieldCol.key} className={flexClassName} />
+    );
+  }
   const colGroup = (
     <colgroup>
       <col className="tm-col-lead" />
-      {stepGroups.flatMap((g) =>
-        g.inputs.length + g.outputs.length === 0
-          ? [<col key={`ce${g.index}`} className="tm-col-field" />]
-          : [
-              ...g.inputs.map((key) => (
-                <col key={`ci${g.index}-${key}`} className="tm-col-field tm-col-field--in" />
-              )),
-              ...g.outputs.map((o) => (
-                <col key={`co${g.index}-${o.key}`} className="tm-col-field" />
-              )),
-            ],
-      )}
+      {fieldCols}
     </colgroup>
   );
 
@@ -675,7 +690,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
         <div className="tm-heading">
           <div className="tm-title">{chainTitle}</div>
           <div className="tm-subtitle">
-            {runs.length} {runs.length === 1 ? 'run' : 'runs'}
+            {runs.length} {runs.length === 1 ? 'task' : 'tasks'}
           </div>
         </div>
         {/* task-57e1470fad6f — edit the template DEFINITION (rename, fields,
@@ -686,7 +701,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
             type="button"
             className="tm-edit-tmpl"
             onClick={() => setEditing(true)}
-            title="Edit this template's definition (does not change existing runs)"
+            title="Edit this template's definition (does not change existing tasks)"
           >
             ✎ Edit template
           </button>

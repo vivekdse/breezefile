@@ -117,15 +117,24 @@
 }
 /* The lead column carries one quiet date line + the icon actions — nothing that
    wants 220px. The width it gave back goes to the INPUT columns, which are what
-   tell a reader which instance this row IS. */
+   tell a reader which instance this row IS.
+     196px is measured, not guessed: status glyph (18px) + gap + the longest
+   real date line ("Cancelled Jul 12", ~80px) + gap + both icon buttons (~50px)
+   + cell padding, so the date line never ellipsizes on a normal row. */
 .tm-col-lead {
-  width: 132px;
+  width: 196px;
 }
 .tm-col-field {
   width: 160px;
 }
 .tm-col-field--in {
   width: 200px;
+}
+/* The last field column absorbs whatever width table-layout: fixed has left
+   over, instead of that slack being spread proportionally across every
+   px-declared column (which is what was ballooning .tm-col-lead). */
+.tm-col-flex {
+  width: auto;
 }
 .tm-table th,
 .tm-table td {
@@ -299,7 +308,6 @@
 .tm-lead-actions {
   display: inline-flex;
   gap: 6px;
-  margin-left: auto;
 }
 .tm-icon-btn {
   appearance: none;
@@ -426,7 +434,7 @@
   flex: none;
   /* Mirrors .tm-col-lead, so the swap from skeleton to real table is a fill,
      not a jump. */
-  width: 132px;
+  width: 196px;
   font-size: var(--fs-2xs);
   font-weight: 700;
   text-transform: uppercase;
