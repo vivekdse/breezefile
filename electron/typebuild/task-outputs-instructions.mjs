@@ -9,16 +9,15 @@
 // module is the missing half: given a task body, it renders a clearly
 // delimited instruction section an agent-facing prompt can append.
 //
-// TWIN / SEAM TO CONSOLIDATE (unify, don't mirror): the renderer already owns
-// a parser for the SAME block — `parseTaskOutputsBlock` in
-// src/components/newhome/taskSchema.mjs. This file is Electron's `electron/`
-// layer, which by convention does not import from `src/` (renderer) code, so
-// `parseTaskOutputsBlock` below is a deliberate, minimal RE-IMPLEMENTATION —
-// same block tag, same JSON shape, same defensive "malformed → absent" rule.
-// If the two ever drift, that is a bug: this module and taskSchema.mjs must
-// keep parsing ```task-outputs identically. A follow-up should hoist both
-// into one shared module either side of the Electron/renderer boundary can
-// import (e.g. promoted to a package both `electron/` and `src/` depend on).
+// task-1425579c1194 — CONSOLIDATED (unify, don't mirror): parsing the
+// ```task-outputs block used to be reimplemented here because `electron/`
+// doesn't normally import `src/` (renderer) code. That convention already has
+// exceptions for plain, Electron-free `.mjs` helpers (e.g.
+// electron/tag-store.ts imports src/tagStore.mjs, electron/sources/typebuild.ts
+// imports src/components/tasks/startOutcome.mjs) — same shape here:
+// `parseTaskOutputsBlock` is re-exported from the renderer's
+// src/components/newhome/taskSchema.mjs, the ONE place that owns every
+// task-body fenced-block parser, instead of being duplicated.
 //
 // PHI: field DEFINITIONS (key/label/type/required) are NON-PHI configuration
 // (docs/typebuild-data-field-contract.md) — safe to render into a system-
@@ -26,40 +25,9 @@
 // operator-instructions.ts / task-context-bundle.ts. Field VALUES are never
 // handled here; this module only ever emits the SCHEMA plus instructions.
 
-const OUTPUT_FIELD_TYPES = ['text', 'number', 'date', 'select', 'bool'];
+import { parseTaskOutputsBlock } from '../../src/components/newhome/taskSchema.mjs';
 
-function isTaskDefFieldLike(v) {
-  if (!v || typeof v !== 'object') return false;
-  if (typeof v.key !== 'string' || !v.key) return false;
-  if (typeof v.label !== 'string' || !v.label) return false;
-  if (!OUTPUT_FIELD_TYPES.includes(v.type)) return false;
-  if (v.options !== undefined && !Array.isArray(v.options)) return false;
-  if (v.required !== undefined && typeof v.required !== 'boolean') return false;
-  return true;
-}
-
-/** Parse the first ```task-outputs fenced block out of a task body. Returns
- *  `{taskDefId, fields}` (fields filtered to well-shaped entries) or null when
- *  the block is absent, not valid JSON, or missing a usable taskDefId. Never
- *  throws — a malformed block degrades to "absent" so a caller's fallback
- *  (no instructions appended) is exactly the no-block case. Mirrors
- *  `parseTaskOutputsBlock` in src/components/newhome/taskSchema.mjs — see the
- *  module header for why this is a separate implementation, not an import. */
-export function parseTaskOutputsBlock(body) {
-  if (typeof body !== 'string' || !body) return null;
-  const match = /```task-outputs\r?\n([\s\S]*?)```/m.exec(body);
-  if (!match) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(match[1].trim());
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  if (typeof parsed.taskDefId !== 'string' || !parsed.taskDefId) return null;
-  const fields = Array.isArray(parsed.fields) ? parsed.fields.filter(isTaskDefFieldLike) : [];
-  return { taskDefId: parsed.taskDefId, fields };
-}
+export { parseTaskOutputsBlock };
 
 /** Render the agent-facing instruction section for a task body's
  *  ```task-outputs block, or '' when the body carries no valid block (so a
