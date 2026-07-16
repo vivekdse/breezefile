@@ -11,6 +11,8 @@ import {
   shouldNotifySuccess,
   shouldNotifyTransition,
 } from './notify-settings.mjs';
+import { isOriginDegraded } from '../typebuild/http';
+import { getTaskSource } from '../sources/registry';
 
 function broadcast(channel: string, payload?: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) {
@@ -78,6 +80,14 @@ export const ElectronBreezeHost: BreezeHost = {
     // when present so the renderer can prune removed rows / skip a full re-pull.
     // Legacy callers pass nothing → payload is undefined → full re-pull path.
     broadcast('tasks:changed', detail);
+    // task-6589ec3934a4 — every successful poll pass fires onTasksChanged
+    // (see typebuild.ts broadcastDiff), so piggyback a fresh 'typebuild:health'
+    // push here too: keeps the renderer's "last synced Nm ago" current on
+    // every reconcile, not only on a degraded/recovered transition.
+    broadcast('typebuild:health', {
+      degraded: isOriginDegraded(),
+      lastSyncedAt: getTaskSource('typebuild')?.lastSyncedAt?.() ?? null,
+    });
   },
 
   onRunsChanged(taskId: string) {
@@ -86,6 +96,16 @@ export const ElectronBreezeHost: BreezeHost = {
 
   hasInteractiveWindow() {
     return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed());
+  },
+
+  // task-6589ec3934a4 — moved off the ad hoc browserWindows()/require('electron')
+  // helper in typebuild.ts (see the hasInteractiveWindow doc in host.ts for why).
+  onSessionRelaunched(detail) {
+    broadcast('typebuild:sessionRelaunched', detail);
+  },
+
+  onReleasePrompt(detail) {
+    broadcast('typebuild:releasePrompt', detail);
   },
 
   onRunFailed(task: { id: string; title: string }, body: string) {

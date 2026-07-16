@@ -165,6 +165,15 @@ export interface TaskSource {
    *  it; local-style stores omit it. The returned task carries its decrypted
    *  body in memory (PHI) when the source is phiSensitive. */
   claimNext?(): Promise<SourcedTask | null>;
+
+  /** task-6589ec3934a4 — epoch ms of the last poll pass that completed
+   *  without throwing (a full OR delta reconcile — either counts as "synced"),
+   *  or null before the first one has finished. Lets the UI show "last synced
+   *  Nm ago" / a degraded chip instead of silently presenting a frozen roster
+   *  as though it were current — the exact failure mode this task exists to
+   *  fix. Optional: only polling remote sources (TypeBuild) implement it;
+   *  local-style stores have no poll cadence to report. */
+  lastSyncedAt?(): number | null;
 }
 
 /** Serializable descriptor returned by the tasks:sources IPC so the

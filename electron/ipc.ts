@@ -3139,11 +3139,28 @@ end tell`;
   // reads this (synchronous getter for the initial value) AND subscribes to the
   // 'typebuild:health' broadcast (below) so it can show "responding slowly" and
   // defer the non-essential enrichment waves without collapsing the cached view.
-  ipcMain.handle('typebuild:health', () => ({ degraded: isOriginDegraded() }));
+  //
+  // task-6589ec3934a4 — piggyback `lastSyncedAt` on the same payload/channel
+  // rather than adding a new one: epoch ms of the last poll pass that
+  // completed without throwing (TypeBuildTaskSource.lastSyncedAt()), or null
+  // before the first one lands. Lets Home show "last synced Nm ago" so a
+  // frozen roster (e.g. the poll-guard bug this task fixes, or any future
+  // regression like it) is visible instead of silently presented as current.
+  const readLastSyncedAt = (): number | null => {
+    const src = getTaskSource('typebuild');
+    return src?.lastSyncedAt?.() ?? null;
+  };
+  ipcMain.handle('typebuild:health', () => ({
+    degraded: isOriginDegraded(),
+    lastSyncedAt: readLastSyncedAt(),
+  }));
   onOriginHealthChange((degraded) => {
     for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed()) {
-        w.webContents.send('typebuild:health', { degraded });
+        w.webContents.send('typebuild:health', {
+          degraded,
+          lastSyncedAt: readLastSyncedAt(),
+        });
       }
     }
   });

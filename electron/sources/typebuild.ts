@@ -131,31 +131,6 @@ const POLL_INTERVAL_MS = 30_000;
 // reconcile every ~5 minutes — cheap insurance against drift.
 const FULL_RECONCILE_EVERY = 10;
 
-// Lazy Electron `BrowserWindow` accessor. The GUI methods (runNow,
-// relaunchSession, onSessionExit, poll) broadcast to windows; the daemon never
-// calls them (it only uses claimNext + the REST verbs). Requiring electron
-// lazily keeps this module Electron-free AT LOAD so breezed can construct the
-// source and call claimNext() without pulling a hard `electron` dependency into
-// its bundle. Returns [] when electron isn't present (headless).
-function browserWindows(): Array<{
-  isDestroyed(): boolean;
-  webContents: { send(channel: string, payload: unknown): void };
-}> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require('electron') as {
-      BrowserWindow?: { getAllWindows(): unknown[] };
-    };
-    const all = electron.BrowserWindow?.getAllWindows() ?? [];
-    return all as Array<{
-      isDestroyed(): boolean;
-      webContents: { send(channel: string, payload: unknown): void };
-    }>;
-  } catch {
-    return [];
-  }
-}
-
 // Env var the minted MCP token is injected under (PTY env only — never argv:
 // /proc/<pid>/cmdline is world-readable). The inline --mcp-config below
 // references it as ${TYPEBUILD_MCP_TOKEN}; claude expands it from the spawned
@@ -1000,6 +975,21 @@ export class TypeBuildTaskSource implements TaskSource {
   private pollInFlight = false;
   private pollAgain = false;
 
+  // task-6589ec3934a4 — warn-once latch for pollOnce's catch, so a broken poll
+  // (auth blip, network error, future regression) leaves ONE visible trace in
+  // the log instead of being silently indistinguishable from "nothing to
+  // sync". Reset in startPolling so a fresh sign-in gets a fresh warning if it
+  // also fails.
+  private warnedPollFailure = false;
+
+  // task-6589ec3934a4 — epoch ms of the last poll pass (full or delta) that
+  // completed without throwing. null before the first one finishes. Read by
+  // lastSyncedAt() so the renderer can show "last synced Nm ago" / a degraded
+  // chip instead of silently trusting a frozen cache — the exact bug this
+  // task fixes (the poll guard died silently and this would have read null
+  // forever, which is precisely the signal that was missing).
+  private lastSyncedAtMs: number | null = null;
+
   // fm-b5at.10 — task ids whose session is mid-relaunch. The relaunch kills the
   // old PTY, whose onExit would otherwise fire the "Release this task?" prompt
   // (the user still holds the claim during the swap). We suppress that prompt
@@ -1393,6 +1383,12 @@ export class TypeBuildTaskSource implements TaskSource {
   // PHI: the decrypted body rides home in the returned SourcedTask.notes and
   // lives in daemon memory only. We never log it and never seed it into the
   // poll cache's persisted/broadcast path here (the daemon doesn't poll).
+  // task-6589ec3934a4 — see lastSyncedAtMs's field doc. Public so ipc.ts can
+  // surface it to the renderer alongside the existing origin-health broadcast.
+  lastSyncedAt(): number | null {
+    return this.lastSyncedAtMs;
+  }
+
   async claimNext(): Promise<SourcedTask | null> {
     const res = await this.request('POST', '/chromeext/tasks/claim-next');
     if (res.status === 409) {
@@ -4151,16 +4147,14 @@ export class TypeBuildTaskSource implements TaskSource {
 
     // Tell the renderer to repoint the tab that hosted oldPtyId onto the new
     // ptyId — avoids closing/reopening a tab under the user. PHI-free payload.
-    for (const w of browserWindows()) {
-      if (!w.isDestroyed()) {
-        w.webContents.send('typebuild:sessionRelaunched', {
-          oldPtyId,
-          newPtyId: res.ptyId,
-          cwd: os.homedir(),
-          title: `TypeBuild task ${shortId(taskId)}`,
-        });
-      }
-    }
+    // Routed through breezeHost() (task-6589ec3934a4) rather than a raw
+    // BrowserWindow lookup — see the hasInteractiveWindow doc in core/host.ts.
+    breezeHost().onSessionRelaunched?.({
+      oldPtyId,
+      newPtyId: res.ptyId,
+      cwd: os.homedir(),
+      title: `TypeBuild task ${shortId(taskId)}`,
+    });
     return { ok: true, ptyId: res.ptyId };
   }
 
@@ -4943,11 +4937,7 @@ export class TypeBuildTaskSource implements TaskSource {
     const me = getAuthState().email;
     const row = this.cache.get(id);
     if (me && row?.claimedBy && row.claimedBy === me) {
-      for (const w of browserWindows()) {
-        if (!w.isDestroyed()) {
-          w.webContents.send('typebuild:releasePrompt', { taskId: id });
-        }
-      }
+      breezeHost().onReleasePrompt?.({ taskId: id });
     }
   }
 
@@ -5321,6 +5311,8 @@ export class TypeBuildTaskSource implements TaskSource {
     // WITHOUT an intervening unregister, this early-return would keep the old
     // principal; that wiring must recreate the source instead.
     if (this.pollTimer) return;
+    // task-6589ec3934a4 — fresh sign-in, fresh warn-once latch.
+    this.warnedPollFailure = false;
     // task-ac9f4a27be7d — capture the principal this source is bound to (for the
     // sign-out teardown, which runs AFTER auth has flipped to signed-out and so
     // can no longer read it) and open the encrypted PHI DB for it. Opening is
@@ -5491,7 +5483,29 @@ export class TypeBuildTaskSource implements TaskSource {
   private async pollOnce(): Promise<void> {
     // Pause when there's no window to update — saves a token round-trip and
     // server load while the app is closed-but-running (macOS dock).
-    if (browserWindows().every((w) => w.isDestroyed())) return;
+    //
+    // task-6589ec3934a4 — this guard used to call a hand-rolled
+    // browserWindows() that did `require('electron')` directly. Both bundles
+    // that carry this module are ESM (vite's dist-electron/main.js and
+    // daemon/build.mjs), and ESM has no `require` binding, so that call threw
+    // a ReferenceError EVERY time and the surrounding try/catch silently
+    // returned []. `[].every(...)` is vacuously true, so this guard returned
+    // BEFORE pulling on every single poll, forever — the in-memory cache was
+    // filled once at startup and never reconciled again, so nothing ever
+    // broadcast `tasks:changed` and new tasks stayed invisible until reload.
+    //
+    // Fixed by routing through the injected breezeHost() seam instead (see
+    // hasInteractiveWindow's doc in core/host.ts) — no `require` anywhere.
+    // Critically, this ALSO fails OPEN: `skip` is true only when the host
+    // affirmatively answers `false` ("I checked, there is definitely no
+    // window"). If the host can't answer (returns undefined — no host
+    // registered yet, or a host that doesn't implement this), we poll
+    // anyway. A wrong "definitely no window" reading is exactly how this bug
+    // froze Home on its mount snapshot; a redundant pull only costs one
+    // extra request.
+    const hasWindow = breezeHost().hasInteractiveWindow?.();
+    const skip = hasWindow === false;
+    if (skip) return;
 
     // Read the persisted cursor. A read failure → treat as no cursor (full).
     let cursor: string | null = null;
@@ -5509,10 +5523,25 @@ export class TypeBuildTaskSource implements TaskSource {
       } else {
         await this.pollFull();
       }
-    } catch {
-      // Signed-out / network blip — stay quiet; the next poll retries with the
-      // SAME cursor (we never advanced it on failure) and the last-known cache
-      // is left intact (we never wipe on error). sign-out unregisters anyway.
+      // task-6589ec3934a4 — a successful pass re-arms the warn-once latch so a
+      // LATER failure (after a recovered stretch) is reported again rather
+      // than staying silenced by an unrelated earlier blip, and records the
+      // sync timestamp the UI reads via lastSyncedAt().
+      this.warnedPollFailure = false;
+      this.lastSyncedAtMs = Date.now();
+    } catch (err) {
+      // Signed-out / network blip — the next poll retries with the SAME
+      // cursor (we never advanced it on failure) and the last-known cache is
+      // left intact (we never wipe on error). sign-out unregisters anyway.
+      // task-6589ec3934a4 — this used to be a bare `catch {}`, so a broken
+      // poll (auth blip, network error, or a future regression) was silently
+      // invisible forever, indistinguishable from "nothing changed". Warn
+      // once per source instance so this class of failure always leaves a
+      // trace, without spamming the log every 30s while genuinely offline.
+      if (!this.warnedPollFailure) {
+        this.warnedPollFailure = true;
+        console.warn('[typebuild] poll failed (will keep retrying silently after this):', err);
+      }
     }
   }
 

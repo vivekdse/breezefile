@@ -408,9 +408,16 @@ type Fm = {
   // breaker opens after N consecutive origin timeouts; the renderer defers
   // enrichment waves + shows "responding slowly" while degraded, and RETAINS
   // cached groups/projects/tasks so a slow episode doesn't strip the view.
-  // PHI-free: a single boolean, no URLs/bodies.
-  typebuildHealth: () => Promise<{ degraded: boolean }>;
-  onTypebuildHealth: (cb: (e: { degraded: boolean }) => void) => () => void;
+  // PHI-free: a boolean + an epoch-ms timestamp, no URLs/bodies.
+  // task-6589ec3934a4 — `lastSyncedAt` is the last successful main-process
+  // poll pass (full or delta), or null before the first one lands. Lets the
+  // UI show "last synced Nm ago" independent of the degraded flag, since a
+  // poll that silently stops running (this task's bug) never trips the
+  // origin breaker at all.
+  typebuildHealth: () => Promise<{ degraded: boolean; lastSyncedAt: number | null }>;
+  onTypebuildHealth: (
+    cb: (e: { degraded: boolean; lastSyncedAt: number | null }) => void,
+  ) => () => void;
   // fm-zf3m — task runs
   tasksRunsList: (taskId: string, limit?: number) => Promise<TaskRun[]>;
   tasksRunsListAll: (limit?: number) => Promise<TaskRunWithTitle[]>;

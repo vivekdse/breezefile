@@ -61,7 +61,20 @@ export interface BreezeHost {
    *  interactive (embedded-terminal) run. The Electron host returns true
    *  when a BrowserWindow exists; the headless breezed host returns false
    *  so interactive tasks fall back to a headless run. Optional so old
-   *  hosts default to headless-only. */
+   *  hosts default to headless-only.
+   *
+   *  task-6589ec3934a4 — ALSO reused by TypeBuildTaskSource's poll guard
+   *  (electron/sources/typebuild.ts pollOnce) as the "is any window open to
+   *  receive a broadcast" check, replacing an ad hoc browserWindows()
+   *  helper that called `require('electron')` directly. That call threw a
+   *  ReferenceError in both ESM bundles (main and the breezed daemon have
+   *  no `require` binding) and was silently swallowed into `[]`, making the
+   *  poll guard's `.every()` vacuously true forever — the poll never
+   *  reconciled past the first pull. Callers gating work on this method
+   *  MUST fail OPEN when it's undefined (no host registered / a host that
+   *  doesn't implement it) — treat "can't tell" as "poll anyway", never as
+   *  "no window". A redundant pull costs one request; a wrongly-skipped
+   *  one freezes the roster silently, which is the bug this task fixes. */
   hasInteractiveWindow?(): boolean;
   /** fm-5xy — a grouped start-at / near-due reminder. PHI-FREE: callers pass
    *  only counts (never task titles/bodies), so the host builds a generic
@@ -70,6 +83,22 @@ export interface BreezeHost {
    *  raises ONE native notification summarizing both. Optional so old/headless
    *  hosts default to log-only. */
   onTaskReminders?(counts: { startCount: number; dueCount: number }): void;
+  /** task-6589ec3934a4 — an interactive session's PTY was relaunched (e.g.
+   *  after a resume). Tells the renderer to repoint the tab that hosted
+   *  `oldPtyId` onto `newPtyId` instead of closing/reopening it. PHI-free:
+   *  only opaque ids + a generic title cross the seam. Optional so headless
+   *  hosts (no PTY-hosting window) default to a no-op. */
+  onSessionRelaunched?(detail: {
+    oldPtyId: number;
+    newPtyId: number;
+    cwd: string;
+    title: string;
+  }): void;
+  /** task-6589ec3934a4 — an interactive session's PTY exited while this
+   *  principal still holds the claim; gently prompt the renderer to offer
+   *  releasing it. PHI-free: only the opaque task id crosses the seam.
+   *  Optional so headless hosts default to a no-op. */
+  onReleasePrompt?(detail: { taskId: string }): void;
 }
 
 const noop: BreezeHost = {

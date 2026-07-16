@@ -42,6 +42,7 @@ import type { StartOutcome } from '../tasks/useTaskActions';
 import { setNewHomeContext, clearNewHomeContext } from '../../copilot/newHomeContext';
 import { fm } from '../../bridge';
 import { getTask, useOriginHealth } from '../../tasks';
+import { relTime } from '../TaskIndicators';
 import type { Project } from '../../types';
 import { ancestorChain, buildProjectTree } from '../../projects/index.mjs';
 import { buildSubprojectSections } from './subprojectSections.mjs';
@@ -257,7 +258,22 @@ export function NewHomePage() {
   // show a calm "responding slowly" banner AND (in useNewHomeData / the
   // enrichment hooks) retain cached groups/projects/tasks + defer enrichment,
   // so the surface degrades to slower, not to the stripped-down empty view.
-  const { degraded: originDegraded } = useOriginHealth();
+  const { degraded: originDegraded, lastSyncedAt } = useOriginHealth();
+  // task-6589ec3934a4 — "last synced Nm ago" / stale detector. The main-process
+  // poll runs every 30s (POLL_INTERVAL_MS in electron/sources/typebuild.ts);
+  // 3 missed cycles (90s) with no successful reconcile is well past normal
+  // jitter and is the exact silent-freeze failure mode this task fixes (the
+  // poll guard died and the cache was filled once at startup and never
+  // again, with zero user-visible signal). `now` re-renders every 15s purely
+  // to keep the relative-time label fresh without polling anything new.
+  const STALE_AFTER_MS = 90_000;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  const syncIsStale =
+    lastSyncedAt != null && now - lastSyncedAt > STALE_AFTER_MS;
   const { tasks, counts, projects, groups, loading, refresh, refreshProjects } = useNewHomeData(
     selectedProjectId,
     // task-group-scope-picker — pass the group scope into the data layer so it
@@ -781,6 +797,20 @@ export function NewHomePage() {
           <span className="nh__slow-banner-dot" aria-hidden="true" />
           TypeBuild is responding slowly — showing your last-loaded work; details
           will refresh once it recovers.
+        </div>
+      )}
+      {/* task-6589ec3934a4 — stale-sync banner. Distinct from the slow-episode
+          banner above: the origin breaker only trips on TIMEOUTS, so a poll
+          that silently stops running entirely (this task's root cause) never
+          set `degraded` — the roster just froze with no signal at all. This
+          reads the main-process poll's own success timestamp, so it catches
+          that class of failure too, not just a slow-but-alive origin. Shown
+          only once we've actually synced at least once, to avoid a false
+          "stale" flash during normal startup before the first poll lands. */}
+      {!originDegraded && syncIsStale && (
+        <div className="nh__slow-banner" role="status" aria-live="polite">
+          <span className="nh__slow-banner-dot" aria-hidden="true" />
+          {`Last synced ${relTime(lastSyncedAt as number)} — this view may be out of date.`}
         </div>
       )}
       <div className="nh__topbar">

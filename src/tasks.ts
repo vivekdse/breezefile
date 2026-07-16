@@ -566,27 +566,40 @@ export function useTypebuildReadiness(): {
 // list poll + user actions keep hitting a slow server, and (b) show a calm
 // "responding slowly" banner instead of the stripped-down empty view. Reads the
 // current value once on mount, then tracks transitions via the broadcast.
-export function useOriginHealth(): { degraded: boolean } {
+// task-6589ec3934a4 — `lastSyncedAt` rides the same broadcast: epoch ms of the
+// last poll pass that completed without throwing, or null before the first
+// one lands. Lets callers show "last synced Nm ago" so a frozen roster is
+// never mistaken for a known-good empty/current one (the bug this task
+// exists to fix presented exactly that way: no error, no spinner, just a
+// silently stale snapshot).
+export function useOriginHealth(): { degraded: boolean; lastSyncedAt: number | null } {
   const [degraded, setDegraded] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
     void fm
       .typebuildHealth()
       .then((h) => {
-        if (!cancelled) setDegraded(!!h.degraded);
+        if (!cancelled) {
+          setDegraded(!!h.degraded);
+          setLastSyncedAt(h.lastSyncedAt ?? null);
+        }
       })
       .catch(() => {
-        /* best-effort; default to healthy */
+        /* best-effort; default to healthy/unknown */
       });
     const off = fm.onTypebuildHealth((h) => {
-      if (!cancelled) setDegraded(!!h.degraded);
+      if (!cancelled) {
+        setDegraded(!!h.degraded);
+        setLastSyncedAt(h.lastSyncedAt ?? null);
+      }
     });
     return () => {
       cancelled = true;
       off();
     };
   }, []);
-  return { degraded };
+  return { degraded, lastSyncedAt };
 }
 
 // fm-zf3m — runs API + hooks for the renderer.

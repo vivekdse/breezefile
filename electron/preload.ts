@@ -855,9 +855,19 @@ const fm = {
   // transitions so it can show "responding slowly" and defer enrichment waves
   // during a slow episode without collapsing the cached view.
   typebuildHealth: () =>
-    ipcRenderer.invoke('typebuild:health') as Promise<{ degraded: boolean }>,
-  onTypebuildHealth: (cb: (e: { degraded: boolean }) => void) => {
-    const handler = (_: unknown, payload: { degraded: boolean }) => cb(payload);
+    ipcRenderer.invoke('typebuild:health') as Promise<{
+      degraded: boolean;
+      // task-6589ec3934a4 — epoch ms of the last poll pass that completed
+      // without throwing, or null before the first one lands.
+      lastSyncedAt: number | null;
+    }>,
+  onTypebuildHealth: (
+    cb: (e: { degraded: boolean; lastSyncedAt: number | null }) => void,
+  ) => {
+    const handler = (
+      _: unknown,
+      payload: { degraded: boolean; lastSyncedAt: number | null },
+    ) => cb(payload);
     ipcRenderer.on('typebuild:health', handler);
     return () => ipcRenderer.off('typebuild:health', handler);
   },
