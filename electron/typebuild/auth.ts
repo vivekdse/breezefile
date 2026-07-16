@@ -28,9 +28,12 @@
 // `safeStorage`/`app` (so merely importing this module headlessly never pulls a
 // hard `electron` dependency at load time — the import happens on first
 // persistence call, which the daemon never makes). The daemon installs a
-// memory-only store via `initHeadlessAuth()` / `signInHeadless()`: credentials
-// come from env (TYPEBUILD_EMAIL / TYPEBUILD_PASSWORD), the refresh token stays
-// in memory only, and a restart re-signs-in from env.
+// memory-only store via `initHeadlessAuth()`, which prefers a raw refresh
+// token (env TYPEBUILD_REFRESH_TOKEN, via `signInHeadlessWithRefreshToken()`)
+// when present — the only path that works for a Google-OAuth-only account —
+// and otherwise falls back to email/password (TYPEBUILD_EMAIL /
+// TYPEBUILD_PASSWORD, via `signInHeadless()`). Either way the refresh token
+// stays in memory only, and a restart re-bootstraps from env.
 
 // Public web API key + auth domain for the Firebase project the TypeBuild
 // server (general.typebuild.com) verifies against. These are the values the
@@ -432,14 +435,43 @@ export async function signInHeadless(
 }
 
 /**
- * Headless startup helper for the daemon: read TYPEBUILD_EMAIL /
- * TYPEBUILD_PASSWORD from the environment and sign in. Returns the resulting
- * AuthState on success, or null when the env credentials are absent (the daemon
- * then runs without the TypeBuild loop rather than crashing). Re-throws on a
- * genuine sign-in failure with creds present, so a misconfigured password is
- * loud rather than silently disabling the loop.
+ * Bootstrap a headless session from an already-minted Firebase refresh token
+ * (e.g. one produced by a GUI sign-in on another machine) — for accounts that
+ * are Google-OAuth-only and so have no Firebase password, `signInHeadless`
+ * cannot sign them in at all. Installs the memory-only credential store (same
+ * as `signInHeadless`) and exchanges the token via `doRefresh()`, which never
+ * writes to disk and never logs the token — the ONLY output on failure is the
+ * Firebase error code (e.g. TOKEN_EXPIRED), same discipline as `doRefresh`
+ * elsewhere in this file. Throws on failure (revoked/expired token), same as
+ * `signInHeadless` throwing on a bad password.
+ */
+export async function signInHeadlessWithRefreshToken(
+  refreshToken: string,
+): Promise<AuthState> {
+  setCredentialStore(memoryOnlyStore);
+  await doRefresh(refreshToken, '');
+  notify();
+  return currentState();
+}
+
+/**
+ * Headless startup helper for the daemon: prefer TYPEBUILD_REFRESH_TOKEN (a
+ * raw Firebase refresh token minted interactively elsewhere) when present —
+ * it's the only path that works for a Google-OAuth-only account, which has no
+ * Firebase password and so cannot use the email/password path below. Falls
+ * back to TYPEBUILD_EMAIL / TYPEBUILD_PASSWORD when the token env var is
+ * unset. Returns the resulting AuthState on success, or null when NEITHER set
+ * of env credentials is present (the daemon then runs without the TypeBuild
+ * loop rather than crashing). Re-throws on a genuine sign-in/refresh failure
+ * with creds present, so a misconfigured credential is loud rather than
+ * silently disabling the loop. The refresh token is never logged, partially
+ * or otherwise, and never persisted (memory-only store, same as the
+ * email/password path).
  */
 export async function initHeadlessAuth(): Promise<AuthState | null> {
+  const refreshToken = process.env.TYPEBUILD_REFRESH_TOKEN?.trim();
+  if (refreshToken) return signInHeadlessWithRefreshToken(refreshToken);
+
   const email = process.env.TYPEBUILD_EMAIL?.trim();
   const password = process.env.TYPEBUILD_PASSWORD;
   if (!email || !password) return null;

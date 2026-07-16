@@ -5,24 +5,29 @@ Grounded entirely in the client source as of 2026-07-12; every claim cites a
 `file:line`.
 
 **Verdict up front.** A **fully-headless** breezed daemon (no GUI, ssh only)
-**can** authenticate to TypeBuild today — but **not** by transplanting a session
-or forwarding a browser. The one working path is a **service credential**:
-`TYPEBUILD_EMAIL` + `TYPEBUILD_PASSWORD` in the daemon's environment, which
-`initHeadlessAuth()` feeds straight into the Firebase Identity Toolkit
-email/password REST call — no Electron, no `BrowserWindow`, no keyring
-(`electron/typebuild/auth.ts:442`, `:426`, `:224`; wired at
-`daemon/breezed.ts:506`). Of the three candidate paths this task asked about:
+**can** authenticate to TypeBuild today — including transplanting a session, as
+of `initHeadlessAuth()`'s `TYPEBUILD_REFRESH_TOKEN` path (task-6e6f4acb5d65;
+see §1 below). There is still no ssh-forwarded browser flow. Of the three
+candidate paths this task asked about:
 
 | Path | Works today? | Why |
 | --- | --- | --- |
-| **A. Transplant the persisted refresh token** from a GUI box | **No** | `safeStorage` blob is per-OS-user/keyring — not portable; and there is no headless entry point that accepts a raw refresh token. |
+| **A. Transplant the persisted refresh token** from a GUI box | **Yes, as of task-6e6f4acb5d65** | `initHeadlessAuth()` reads a raw refresh token from `TYPEBUILD_REFRESH_TOKEN` and bootstraps the session via `doRefresh()` — see §1. |
 | **B. ssh-forward the loopback OAuth callback** | **No** | The flow requires an Electron `BrowserWindow` and runs the token exchange in the same GUI process — headless breezed has neither. |
 | **C. Provisioned daemon service credential (client_credentials)** | **Not built** | No such grant exists; presented below as a design proposal. |
 
-The **actually-working** path (email/password env creds) is neither A, B, nor C
-in the sense the task framed them — it is a *human* service account's
-email/password, used headlessly. It is documented first, with copy-pasteable
-steps.
+There are now **two** working headless entry points, tried in this priority
+order by `initHeadlessAuth()`:
+
+1. **`TYPEBUILD_REFRESH_TOKEN`** (§1) — a raw Firebase refresh token minted
+   interactively (e.g. on a GUI machine) and handed to the daemon via env. This
+   is the **only** path that works for a **Google-OAuth-only account** (no
+   Firebase password), since it skips `signInWithPassword` entirely.
+2. **`TYPEBUILD_EMAIL` + `TYPEBUILD_PASSWORD`** (§0) — the original service
+   credential, for an account that has a Firebase password.
+
+Both are memory-only: the refresh token is held in module memory only and
+**never written to disk**, per the discipline documented in §4.
 
 ---
 
@@ -102,41 +107,66 @@ visibility / group membership), out of scope for this client repo.
 
 ## 1. Path A — transplant the persisted refresh token
 
-**Does not work today.** Two independent blockers.
+**Works today** (task-6e6f4acb5d65). `initHeadlessAuth()`
+(`electron/typebuild/auth.ts:448-477`) checks `TYPEBUILD_REFRESH_TOKEN` first;
+if set, it calls `signInHeadlessWithRefreshToken(refreshToken)`
+(`auth.ts:448-455`), which installs the memory-only credential store (same one
+`signInHeadless` uses) and exchanges the token via the existing `doRefresh()`
+securetoken call (`auth.ts:305-347`) — no `signInWithPassword`, no password
+needed. This is the path that makes a **Google-OAuth-only** account usable
+headlessly: mint a session interactively (GUI sign-in, any provider), read the
+resulting refresh token, and hand it to the daemon's environment.
 
-**A.1 — the persisted blob is not portable.** The GUI stores the refresh token
-**encrypted via Electron `safeStorage`** to `userData/typebuild-auth.bin`
-(`electron/typebuild/auth.ts:113-115`). `safeStorage` keys are derived per
-OS-user / OS-keyring (macOS Keychain, GNOME/KWallet Secret Service, etc.), so a
-blob written on the laptop **cannot be decrypted on the server** — the keys are
-not shared across machines. `load()` on the server would simply fail the
-`decryptString` and return `null` (`auth.ts:123-135`).
+### Copy-pasteable setup
 
-**A.2 — on this project's Linux boxes there is often no blob at all.** When no OS
-keyring backs `safeStorage`, `isEncryptionAvailable()` is `false` and `save()`
-**refuses to write plaintext** — it logs `safeStorage unavailable; refresh token
-not persisted` and returns, leaving the session in-memory only for that run
-(`auth.ts:105-111`). There is deliberately **no plaintext or derivable on-disk
-store** — the only persistence is the `safeStorage` path (GUI) and the
-`memoryOnlyStore` no-op (headless) (`auth.ts:99-163`). So on an LXQt / no-keyring
-box (this repo's dev boxes — see MEMORY) there is frequently nothing to copy.
+```sh
+# On the server, as the user that owns the breezed service.
+mkdir -p ~/.config/systemd/user/breezed.service.d
+cat > ~/.config/systemd/user/breezed.service.d/typebuild-creds.conf <<'EOF'
+[Service]
+Environment=TYPEBUILD_REFRESH_TOKEN=REDACTED
+EOF
+chmod 600 ~/.config/systemd/user/breezed.service.d/typebuild-creds.conf
 
-**A.3 — even with the raw token in hand, there is no entry point for it.** The
-only headless sign-in entry points are `signInHeadless(email, password)` and
-`initHeadlessAuth()` (`auth.ts:426`, `:442`). Neither accepts a raw refresh
-token. `adoptSession()` (`auth.ts:267`) *would* take a session, but it is only
-reachable from the GUI browser-signin flow and still expects an `idToken` +
-`refreshToken` pair minted seconds earlier, then hands the refresh token to the
-active `CredentialStore` — which, headless, is the memory-only no-op.
+systemctl --user daemon-reload
+systemctl --user restart breezed
+journalctl --user -u breezed -n 20 --no-pager   # expect: "[breezed] signed in to TypeBuild as ..."
+```
 
-**Footguns if you tried anyway:** copying `typebuild-auth.bin` to the server is a
-no-op at best (undecryptable) and a **long-lived secret leak** at worst if the
-account's `safeStorage` were ever available in plaintext. Do not.
+`TYPEBUILD_REFRESH_TOKEN` takes priority over `TYPEBUILD_EMAIL` /
+`TYPEBUILD_PASSWORD` when both are set (`auth.ts:471-478`). If the token is
+revoked or expired, `doRefresh()` throws the Firebase error code (e.g.
+`TOKEN_EXPIRED`) and `initHeadlessAuth()` re-throws it — loud, not silently
+disabling the loop, same as a bad password today.
 
-**What would make A work** (design note, not steps): a headless entry point that
-accepts a raw Firebase refresh token from the environment (e.g.
-`TYPEBUILD_REFRESH_TOKEN`) and calls `doRefresh()` to bootstrap the session. That
-is a small, self-contained client change — see §4.
+**Caveat — this is still a bootstrap, not a renewal mechanism.** The
+refresh token itself may eventually be revoked (e.g. the source GUI session
+signs out, or the token is rotated away). There's no admin flow yet for
+minting a long-lived, non-interactive refresh token independent of a human
+GUI sign-in — mint a fresh one and update the env var if the daemon's session
+stops refreshing.
+
+**What still does NOT work, and never will: copying the raw `safeStorage`
+blob file.** The GUI persists the refresh token **encrypted via Electron
+`safeStorage`** to `userData/typebuild-auth.bin` (`electron/typebuild/auth.ts:113-115`).
+`safeStorage` keys are derived per OS-user / OS-keyring (macOS Keychain,
+GNOME/KWallet Secret Service, etc.), so a blob written on the laptop **cannot
+be decrypted on the server** — the keys are not shared across machines.
+`load()` on the server would simply fail the `decryptString` and return `null`
+(`auth.ts:123-135`). On this project's Linux boxes there is often no blob at
+all: when no OS keyring backs `safeStorage`, `isEncryptionAvailable()` is
+`false` and `save()` **refuses to write plaintext** (`auth.ts:105-111`), so on
+an LXQt / no-keyring dev box there is frequently nothing to copy either.
+**Footgun:** copying `typebuild-auth.bin` to the server is a no-op at best
+(undecryptable) and a **long-lived secret leak** at worst if the account's
+`safeStorage` were ever available in plaintext. Do not.
+
+**What DOES work (as of task-6e6f4acb5d65):** don't transplant the encrypted
+file — extract the *raw* refresh token from a live GUI session (e.g. log it
+once from a debug build, or read it via a one-off `getIdToken`-adjacent debug
+hook on the GUI machine) and hand that raw string to the server via
+`TYPEBUILD_REFRESH_TOKEN`. `initHeadlessAuth()` now has an entry point for
+exactly this (`auth.ts:448-477`) — see the setup steps above.
 
 ---
 
@@ -203,17 +233,25 @@ JWT assertion) that returns a Firebase-equivalent or AS-audienced token the REST
 `TaskSource` can present. The daemon reads the secret from its environment
 (`~/.breezefile`-scoped, `0600`) exactly as it reads `TYPEBUILD_*` today, and a
 new `auth.ts` headless entry point performs the grant instead of
-`signInWithPassword`. This removes the "service account needs a human-style
-email/password" awkwardness of the working path in §0.
+`signInWithPassword`. This would remove the last operational rough edge of
+§1's `TYPEBUILD_REFRESH_TOKEN` path — a periodic manual re-mint if the token
+is ever revoked — by having the daemon itself hold a durable, revocable
+machine credential instead of a borrowed human-session token.
 
 ---
 
 ## 4. Security notes and naming
 
 - **The Firebase refresh token is the only persisted secret**, and headless it is
-  **not persisted at all** — the daemon uses the memory-only store
-  (`electron/typebuild/auth.ts:157-163`); a restart re-signs-in from env creds.
-  On the GUI it is persisted **only** encrypted via `safeStorage`
+  **not persisted at all** — both headless entry points
+  (`signInHeadlessWithRefreshToken()`, `signInHeadless()`) install the
+  memory-only store (`electron/typebuild/auth.ts:157-163`) before signing in;
+  a restart re-bootstraps from env (`TYPEBUILD_REFRESH_TOKEN` or
+  `TYPEBUILD_EMAIL`/`TYPEBUILD_PASSWORD`). The `TYPEBUILD_REFRESH_TOKEN` value
+  itself is never logged, not even partially (`auth.ts:426-478`) — the only
+  thing that flows to logs on failure is the Firebase error code (e.g.
+  `TOKEN_EXPIRED`), same as every other failure path in this module. On the
+  GUI the refresh token is persisted **only** encrypted via `safeStorage`
   (`auth.ts:113-115`).
 - **Never write ID tokens or PKCE material to disk or logs.** ID tokens live in
   main-process / module memory only (`auth.ts:10-22`); the authorization code and

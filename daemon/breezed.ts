@@ -496,10 +496,11 @@ server.listen(0, '127.0.0.1', () => {
   void startTypeBuildLoop();
 });
 
-// Sign in headlessly from env creds and start the poll-claim-execute loop. If
-// TYPEBUILD_EMAIL / TYPEBUILD_PASSWORD are unset, log a clear warning and run
-// WITHOUT the loop — the HTTP server still serves task-http (run-history /
-// overlay) so a laptop can attach.
+// Sign in headlessly from env creds and start the poll-claim-execute loop.
+// initHeadlessAuth() prefers TYPEBUILD_REFRESH_TOKEN when set, falling back to
+// TYPEBUILD_EMAIL / TYPEBUILD_PASSWORD. If NEITHER is set, log a clear warning
+// and run WITHOUT the loop — the HTTP server still serves task-http
+// (run-history / overlay) so a laptop can attach.
 async function startTypeBuildLoop(): Promise<void> {
   let authed;
   try {
@@ -514,8 +515,9 @@ async function startTypeBuildLoop(): Promise<void> {
   }
   if (!authed) {
     console.warn(
-      '[breezed] TYPEBUILD_EMAIL / TYPEBUILD_PASSWORD not set — running ' +
-        'WITHOUT the TypeBuild loop (HTTP server still serves run-history/overlay)',
+      '[breezed] neither TYPEBUILD_REFRESH_TOKEN nor TYPEBUILD_EMAIL/' +
+        'TYPEBUILD_PASSWORD set — running WITHOUT the TypeBuild loop ' +
+        '(HTTP server still serves run-history/overlay)',
     );
     return;
   }
