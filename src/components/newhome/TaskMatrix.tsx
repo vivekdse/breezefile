@@ -465,37 +465,50 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
       // turn: the columns can't render until the LAST of these lands, so a
       // serial loop made the whole schema wait on the sum of every round-trip.
       // Same shape/limit as useTaskDataValues' resolve pool.
+      //
+      // task-06b39e952c4e — STREAM each result into state as it lands instead
+      // of batching every worker's output behind one Promise.all and a single
+      // setDetail/setDetailSettled at the very end. Batching meant the
+      // dataRequests memo (built from `detail`) — and thus the value fan-out —
+      // couldn't start for step A's fields even once step A's getTask resolved,
+      // if step D's getTask (same wave) was still in flight. Streaming lets
+      // useTaskDataValues begin resolving a step's inputs the instant that
+      // step's detail settles, so the detail→dataRequests barrier only holds
+      // per-task, not for the whole matrix.
       let idx = 0;
-      const fetched: [string, Task][] = [];
       async function worker(): Promise<void> {
         while (idx < missing.length) {
           const id = missing[idx++];
           try {
             const t = await getTask(id);
-            if (t) fetched.push([id, t]);
+            if (cancelled) return;
+            if (t) {
+              setDetail((prev) => {
+                const next = new Map(prev);
+                next.set(id, t);
+                return next;
+              });
+            }
           } catch {
             // Offline / no access — leave undetailed; columns fall back to list rows.
           }
+          if (cancelled) return;
+          // Every id we asked about is settled the moment ITS OWN fetch
+          // returns, including a throw — otherwise a permanently-failing id
+          // would hold the skeleton open. Marking it per-id (not after the
+          // whole wave) is what lets schemaReady/dataRequests progress
+          // per-step instead of waiting on the slowest sibling.
+          setDetailSettled((prev) => {
+            if (prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+          });
         }
       }
       await Promise.all(
         Array.from({ length: Math.min(DETAIL_CONCURRENCY, missing.length) }, () => worker()),
       );
-      if (cancelled) return;
-      if (fetched.length > 0) {
-        setDetail((prev) => {
-          const next = new Map(prev);
-          for (const [id, t] of fetched) next.set(id, t);
-          return next;
-        });
-      }
-      // Every id we asked about is settled now, including the ones that threw —
-      // otherwise a permanently-failing id would hold the skeleton open.
-      setDetailSettled((prev) => {
-        const next = new Set(prev);
-        for (const id of missing) next.add(id);
-        return next;
-      });
     })();
     return () => {
       cancelled = true;
