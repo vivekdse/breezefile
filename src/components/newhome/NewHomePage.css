@@ -1,3 +1,5 @@
+@import './statusTokens.css';
+
 /* task-b9cdad64ab9c — New Home shell. Layout skeleton adapted from the V11
    unified-prototype design reference (topbar / hero / stats grid / filter
    pills / table card / centered dialog+backdrop / split modal), reworked
@@ -5,22 +7,9 @@
    hardcoded light-mode hex values. Dark-first; light overrides via
    [data-theme="light"] below.
 
-   Shared status colors — every New Home stub CSS file reuses these four
-   custom properties instead of hardcoding its own status palette, so a
-   retune here propagates everywhere (ApprovalBar, HeroStats, RosterTable,
-   TaskDetailDialog, OutcomesPanel all read them). */
+   The shared --nh-* status palette this file's rules read is defined once in
+   statusTokens.css (on .nh and .tm together) — retune a status hue there. */
 .nh {
-  --nh-done: var(--ok);
-  --nh-done-soft: color-mix(in srgb, var(--ok) 16%, transparent);
-  --nh-progress: var(--accent);
-  --nh-progress-soft: var(--accent-soft);
-  --nh-queued: var(--muted-on-panel);
-  --nh-queued-soft: color-mix(in srgb, var(--muted-on-panel) 14%, transparent);
-  --nh-needs: var(--warn);
-  --nh-needs-soft: var(--warn-soft);
-  --nh-failed: var(--err);
-  --nh-failed-soft: var(--err-soft);
-
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -497,7 +486,8 @@
    shared, theme-aware --nh-* tokens — no per-theme hex. */
 .nh-filter-chip--done { border-color: var(--nh-done); background: var(--nh-done-soft); color: var(--nh-done); }
 .nh-filter-chip--progress { border-color: var(--nh-progress); background: var(--nh-progress-soft); color: var(--nh-progress); }
-.nh-filter-chip--queued { border-color: var(--nh-queued); background: var(--nh-queued-soft); color: var(--nh-queued); }
+.nh-filter-chip--scheduled { border-color: var(--nh-scheduled); background: var(--nh-scheduled-soft); color: var(--nh-scheduled); }
+.nh-filter-chip--open { border-color: var(--nh-open); background: var(--nh-open-soft); color: var(--nh-open); }
 .nh-filter-chip--needs { border-color: var(--nh-needs); background: var(--nh-needs-soft); color: var(--nh-needs); }
 .nh-filter-chip--failed { border-color: var(--nh-failed); background: var(--nh-failed-soft); color: var(--nh-failed); }
 .nh-filter-chip__kind {

@@ -59,6 +59,7 @@ import {
   resultFields,
   taskDefStatus,
   fieldRef,
+  DEF_STATUS_LABEL,
 } from './taskSchema.mjs';
 import { runnableStepId, mergeChildStatus, childStatusMap, toChildStatus } from './pipelineRoster.mjs';
 import type { ChildStatusLike } from './pipelineRoster.mjs';
@@ -148,18 +149,11 @@ const MARKER: Record<EvidenceEntry['kind'], string> = {
 // from its children. Both degrade to nothing when the body carries neither
 // block — see the file-header non-regression note.
 
-// task-4045bcee23cb (U3a polish a) — 'pending' says "Queued" here too, matching
-// the roster's own status vocabulary (STATUS_LABEL/META_PILL in RosterTable.tsx)
-// so a step never says "Pending" in one place and "Queued" in another for the
-// identical not-yet-started state.
-const DEF_STATUS_LABEL: Record<MergedStepStatus, string> = {
-  done: 'Done',
-  active: 'In progress',
-  pending: 'Queued',
-  skip: 'Not needed',
-  cancelled: 'Cancelled',
-  failed: 'Failed',
-};
+// task-ea465f2c5964 — DEF_STATUS_LABEL was hand-maintained here AND (byte-
+// identically) in TaskDetailDrawer.tsx; both now import the single
+// taskSchema.mjs export so the two surfaces can't drift apart again the way
+// the roster's own three status-bucket mappers already had (task-c0edffef25c6,
+// task-4045bcee23cb: 'pending' reads "Open" to match the roster's vocabulary).
 
 function hasValue(v: unknown): boolean {
   return v !== undefined && v !== null && v !== '';

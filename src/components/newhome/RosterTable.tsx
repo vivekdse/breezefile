@@ -5,7 +5,7 @@
 // UNIFIED ROSTER (2026-07-05 redesign): ONE table renders every kind of work
 // with the SAME columns — Title · Status · Last Run · Who · Runs · Actions:
 //   • a TEMPLATE GROUP row (rosterGroups.mjs) aggregates a template's run
-//     instances: Status shows a per-bucket breakdown ("3 done · 2 queued"),
+//     instances: Status shows a per-bucket breakdown ("3 done · 2 open"),
 //     Runs = instance count, Actions = View → (Level-2 matrix) / ▶ Run all /
 //     + New run.
 //   • a CHAINED row (a v2-chained job OR a thin parent container with step
@@ -46,7 +46,7 @@ import {
   shouldResolveParent,
 } from './chainParentResolve.mjs';
 import type { ChildStatusLike } from './pipelineRoster.mjs';
-import { buildRosterGroups, summarizeGroupRows, statusBucket, STATUS_BUCKETS } from './rosterGroups.mjs';
+import { buildRosterGroups, summarizeGroupRows, statusBucket, STATUS_BUCKETS, STATUS_LABELS } from './rosterGroups.mjs';
 import type {
   RosterGroup,
   RosterGroupInput,
@@ -77,23 +77,18 @@ const WHO_GLYPH: Record<NewHomeTask['who'], string> = {
   both: '\u{1F916}+\u{1F464}', // 🤖+👤
 };
 
-const STATUS_LABEL: Record<NewHomeStatus, string> = {
-  done: 'Done',
-  progress: 'In Progress',
-  queued: 'Queued',
-  needs: 'Needs You',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-};
+// task-ea465f2c5964 — STATUS_LABEL was one of three hand-maintained copies of
+// the same NewHomeStatus/StatusBucket label map (RosterTable, HeroStats,
+// TaskMatrix); now a re-export of rosterGroups.mjs's single STATUS_LABELS so
+// there is exactly one place to edit a status's display word.
+const STATUS_LABEL: Record<NewHomeStatus, string> = STATUS_LABELS;
 
-const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = {
-  done: 'done',
-  progress: 'in progress',
-  queued: 'queued',
-  needs: 'needs you',
-  failed: 'failed',
-  cancelled: 'cancelled',
-};
+// The breakdown chip's lowercase variant ("3 done · 2 open") is derived from
+// the SAME map, not a fourth hand-written record — verified 1:1
+// (`STATUS_LABELS[b].toLowerCase()`) for every bucket.
+const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = Object.fromEntries(
+  STATUS_BUCKETS.map((b) => [b, STATUS_LABELS[b].toLowerCase()]),
+) as Record<StatusBucket, string>;
 
 const BASE_COLUMN_COUNT = 6; // Title, Status, Last Run, Who, Runs, Actions
 
@@ -109,7 +104,7 @@ function liveTooltip(task: NewHomeTask): string {
 }
 
 /** Aggregate status cell — one small pill per non-zero bucket ("3 done ·
- *  2 queued"). Used for any row that summarizes several tasks (a template
+ *  2 open"). Used for any row that summarizes several tasks (a template
  *  group's runs, a chained row's steps). */
 function StatusBreakdown({ counts }: { counts: Record<StatusBucket, number> }) {
   const active = STATUS_BUCKETS.filter((b) => counts[b] > 0);
@@ -892,7 +887,7 @@ export function RosterTable({
   // double-counted them (QA round: the scaffold chain showed its parent AND
   // both failed steps). A child only folds while its parent row is actually
   // in the current (filtered) list — filter to "failed" and the failed steps
-  // surface as rows because their queued parent is filtered out.
+  // surface as rows because their open parent is filtered out.
   const hiddenChildIds = useMemo(() => {
     const set = new Set<string>();
     for (const res of resolutions.values()) {
@@ -1011,6 +1006,10 @@ export function RosterTable({
         return {
           status: r.status,
           assignee: t?.assignedTo ?? t?.claimedBy ?? null,
+          // The underlying Task — statusBucket reads only its cron /
+          // next_run_at off it, to tell 'scheduled' from 'open' for a row whose
+          // status string alone can't say.
+          raw: t ?? null,
         };
       });
       m.set(g.key, summarizeGroupRows(runs));
@@ -1095,7 +1094,8 @@ export function RosterTable({
     const counts: Record<StatusBucket, number> = {
       done: 0,
       progress: 0,
-      queued: 0,
+      scheduled: 0,
+      open: 0,
       needs: 0,
       failed: 0,
       cancelled: 0,
@@ -1105,15 +1105,17 @@ export function RosterTable({
       // attempts-exhausted → failed, stalled → needs, etc., so the parent's
       // breakdown can never disagree with the pill the child's own row would
       // show (QA round: raw 'open' children with exhausted attempts read
-      // "2 queued" on the parent while rendering as Failed rows). Fall back
+      // "2 open" on the parent while rendering as Failed rows). Fall back
       // to the raw status for a child outside the scoped roster.
       const row = rowsById.get(cid);
       if (row) {
+        // The derived row status is already scheduled-or-open — statusBucket
+        // maps each onto itself, so no schedule lookup is needed here.
         counts[statusBucket(row.status)] += 1;
         continue;
       }
       const child = allTasksById.get(cid);
-      counts[statusBucket(child?.rawStatus ?? child?.status)] += 1;
+      counts[statusBucket(child?.rawStatus ?? child?.status, child)] += 1;
     }
     return counts;
   };
@@ -1447,7 +1449,12 @@ export function RosterTable({
               const { runCount, statusCounts, assignees } = summary;
               const last = groupLastRun(g);
               const hasRunnable =
-                statusCounts.queued + statusCounts.needs + statusCounts.failed + statusCounts.progress > 0;
+                statusCounts.scheduled +
+                  statusCounts.open +
+                  statusCounts.needs +
+                  statusCounts.failed +
+                  statusCounts.progress >
+                0;
               const runAllPending = runAllPendingFor(g);
               const assigneeTitle = assignees.length > 0 ? assignees.join(', ') : 'Unassigned';
               // task-3b290d420607 — a group with EXACTLY ONE run is the same

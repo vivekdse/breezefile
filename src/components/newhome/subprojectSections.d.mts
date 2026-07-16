@@ -16,7 +16,14 @@ export type SubprojectSection = {
 };
 
 export function buildSubprojectSections(
-  tasks: { id: string; projectId?: string | null; status?: string }[],
+  tasks: {
+    id: string;
+    projectId?: string | null;
+    status?: string;
+    /** Schedule metadata ONLY — statusBucket reads `cron`/`next_run_at` off it
+     *  to tell 'scheduled' from 'open'. No field values are read. */
+    raw?: { cron?: string | null; next_run_at?: number | null } | null;
+  }[],
   roots: ProjectNode[],
   selectedProjectId: string | null | undefined,
 ): { ownTaskIds: string[]; sections: SubprojectSection[] };

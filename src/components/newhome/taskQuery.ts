@@ -35,7 +35,7 @@ type QueryableField = { key: string; type: 'text' | 'date' | 'select' | 'number'
 /** Base task fields always queryable, independent of the project template. */
 const BASE_FIELDS: FieldCatalogue = {
   title: 'string',
-  status: 'string', // done | progress | queued | needs | failed
+  status: 'string', // done | progress | scheduled | open | needs | failed
   who: 'string', // agent | human | both
   project: 'string', // project id
   risk: 'string',
@@ -49,7 +49,7 @@ const BASE_FIELDS: FieldCatalogue = {
 /** Human-facing field reference for the query box + copilot grounding. */
 export const TASK_QUERY_FIELDS: { name: string; kind: string; note: string }[] = [
   { name: 'title', kind: 'string', note: 'task title' },
-  { name: 'status', kind: 'string', note: 'done | progress | queued | needs | failed' },
+  { name: 'status', kind: 'string', note: 'done | progress | scheduled | open | needs | failed' },
   { name: 'who', kind: 'string', note: 'agent | human | both' },
   { name: 'project', kind: 'string', note: 'project id' },
   { name: 'risk', kind: 'string', note: 'risk/flag annotation' },

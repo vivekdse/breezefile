@@ -87,9 +87,23 @@ const PAGE_SIZE = 50;
 
 type FilterState = 'all' | NewHomeStatus;
 
-const FILTER_STATES: FilterState[] = ['all', 'done', 'progress', 'queued', 'needs', 'failed'];
+const FILTER_STATES: FilterState[] = ['all', 'done', 'progress', 'scheduled', 'open', 'needs', 'failed'];
 function isFilterState(v: unknown): v is FilterState {
   return typeof v === 'string' && (FILTER_STATES as string[]).includes(v);
+}
+
+// The filter is in-memory only (useState below — nothing persists it to the URL,
+// localStorage, or settings), so a retired bucket name can only arrive from an
+// EXTERNAL caller: the copilot's set_roster_filter, which reaches us through the
+// 'fm:newhome:filter' event. 'queued' split into 'scheduled' + 'open', and a
+// copilot working from a stale vocabulary would otherwise fail isFilterState
+// and silently no-op. Map the legacy name onto 'open' — the bucket that
+// inherited the old catch-all's meaning — instead of dropping the request.
+const LEGACY_FILTER_ALIASES: Record<string, FilterState> = { queued: 'open' };
+function coerceFilterState(v: unknown): FilterState | null {
+  if (typeof v !== 'string') return null;
+  if (isFilterState(v)) return v;
+  return LEGACY_FILTER_ALIASES[v] ?? null;
 }
 
 // task-group-scope-picker — display label for a group in the picker / chip.
@@ -109,7 +123,8 @@ function groupLabel(id: string, names: Map<string, string>): string {
 const FILTER_LABELS: Record<Exclude<FilterState, 'all'>, string> = {
   done: 'Done',
   progress: 'In Progress',
-  queued: 'Queued',
+  scheduled: 'Scheduled',
+  open: 'Open',
   needs: 'Needs You',
   failed: 'Failed',
   cancelled: 'Cancelled',
@@ -529,7 +544,8 @@ export function NewHomePage() {
   useEffect(() => {
     function onFilter(e: Event) {
       const detail = (e as CustomEvent<{ filter?: string; search?: string }>).detail;
-      if (detail && isFilterState(detail.filter)) setFilter(detail.filter);
+      const coerced = coerceFilterState(detail?.filter);
+      if (coerced) setFilter(coerced);
       // A search string of '' explicitly clears the text filter, so honor the
       // key's PRESENCE rather than truthiness.
       if (detail && typeof detail.search === 'string') setSearch(detail.search);

@@ -79,7 +79,7 @@ function openTaskComposer(prefill: {
   return `Opened the New Task form pre-filled with "${prefill.title}"${fieldNote} for the human to review and submit.`;
 }
 
-const FILTER_VALUES = ['all', 'done', 'progress', 'queued', 'needs', 'failed'] as const;
+const FILTER_VALUES = ['all', 'done', 'progress', 'scheduled', 'open', 'needs', 'failed'] as const;
 type FilterValue = (typeof FILTER_VALUES)[number];
 
 function isFilterValue(v: string): v is FilterValue {
@@ -572,7 +572,9 @@ export function CopilotActions() {
       filter: z
         .string()
         .optional()
-        .describe('Status bucket: one of all, done, progress, queued, needs, failed.'),
+        .describe(
+          'Status bucket: one of all, done, progress, scheduled, open, needs, failed. `scheduled` is pending work with an execution schedule (it will run on its own); `open` is pending work with nothing scheduled and nobody assigned.',
+        ),
       search: z
         .string()
         .optional()

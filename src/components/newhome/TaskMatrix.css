@@ -1,20 +1,12 @@
+@import './statusTokens.css';
+
 /* TaskMatrix — Level-2 chain matrix (task-ecabeafa41e1 / task-2bcdd6c237bd).
    Colors route through the shared theme tokens (--bg-*, --border-*, --text-*)
-   and the roster's --nh-* status vars so both the dusk and light themes resolve
-   without an override. The --nh-* block is mirrored from NewHomePage.css so this
-   panel is legible even when rendered outside a .nh ancestor. */
+   and the --nh-* status vars so both the dusk and light themes resolve without
+   an override. statusTokens.css defines those vars on .tm as well as .nh, so
+   this panel stays legible when rendered outside a .nh ancestor without
+   carrying its own copy of the palette. */
 .tm {
-  --nh-done: var(--ok);
-  --nh-done-soft: color-mix(in srgb, var(--ok) 16%, transparent);
-  --nh-progress: var(--accent);
-  --nh-progress-soft: var(--accent-soft);
-  --nh-queued: var(--muted-on-panel);
-  --nh-queued-soft: color-mix(in srgb, var(--muted-on-panel) 14%, transparent);
-  --nh-needs: var(--warn);
-  --nh-needs-soft: var(--warn-soft);
-  --nh-failed: var(--err);
-  --nh-failed-soft: var(--err-soft);
-
   background: var(--bg-1);
   border: 1px solid var(--border-1);
   border-radius: var(--r-lg);
@@ -105,12 +97,29 @@
   overflow-x: auto;
   padding: var(--sp-3);
 }
+/* table-layout: fixed — the columns are sized from the <colgroup> BEFORE any
+   cell content exists, so the values arriving in the second data wave can only
+   fill cells, never re-measure the columns. Under `auto` the table re-laid
+   itself out the instant a value landed and the whole matrix twitched.
+     The widths MUST come from the colgroup, not the first row: a fixed table
+   takes its columns from the first row's cells, and this table's first row is
+   the group-band header, whose cells are colSpan'd across each step's fields —
+   there are no single-column cells there to measure. An explicit <col> per
+   rendered column sidesteps that entirely and the banded colSpan/rowSpan header
+   lays out correctly on top of it. */
 .tm-table {
   border-collapse: separate;
   border-spacing: 0;
+  table-layout: fixed;
   width: 100%;
   min-width: max-content;
   font-size: var(--fs-sm);
+}
+.tm-col-lead {
+  width: 220px;
+}
+.tm-col-field {
+  width: 160px;
 }
 .tm-table th,
 .tm-table td {
@@ -119,6 +128,10 @@
   border-bottom: 1px solid var(--border-1);
   vertical-align: middle;
   white-space: nowrap;
+  /* Fixed columns don't grow for long content — clip it here rather than let a
+     long value spill across its neighbours. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tm-table tbody tr:last-child td {
   border-bottom: none;
@@ -275,12 +288,18 @@
 }
 .tm-status--done { color: var(--nh-done); background: var(--nh-done-soft); }
 .tm-status--progress { color: var(--nh-progress); background: var(--nh-progress-soft); }
-.tm-status--queued { color: var(--nh-queued); background: var(--nh-queued-soft); }
+.tm-status--scheduled { color: var(--nh-scheduled); background: var(--nh-scheduled-soft); }
+.tm-status--open { color: var(--nh-open); background: var(--nh-open-soft); }
 .tm-status--needs { color: var(--nh-needs); background: var(--nh-needs-soft); }
 .tm-status--failed { color: var(--nh-failed); background: var(--nh-failed-soft); }
-/* Cancelled shares the queued (muted) palette but its ⊘ glyph reads slightly
-   dimmer so it can't be mistaken for a waiting run. */
-.tm-status--cancelled { opacity: 0.75; }
+/* Cancelled now has its OWN palette (task-c0edffef25c6) — it used to borrow the
+   waiting color, so a withdrawn run was painted as though it were still coming.
+   Muted + struck through: withdrawn, not waiting. */
+.tm-status--cancelled {
+  color: var(--nh-cancelled);
+  background: var(--nh-cancelled-soft);
+  opacity: 0.75;
+}
 
 /* Icon actions, right-aligned on the same line. */
 .tm-lead-actions {
@@ -371,9 +390,102 @@
 }
 .tm-pill--done { background: var(--nh-done-soft); color: var(--nh-done); }
 .tm-pill--progress { background: var(--nh-progress-soft); color: var(--nh-progress); }
-.tm-pill--queued { background: var(--nh-queued-soft); color: var(--nh-queued); }
+.tm-pill--scheduled { background: var(--nh-scheduled-soft); color: var(--nh-scheduled); }
+.tm-pill--open { background: var(--nh-open-soft); color: var(--nh-open); }
 .tm-pill--needs { background: var(--nh-needs-soft); color: var(--nh-needs); }
 .tm-pill--failed { background: var(--nh-failed-soft); color: var(--nh-failed); }
+/* Withdrawn: no fill at all, just a hairline outline — the quietest pill here. */
+.tm-pill--cancelled {
+  background: transparent;
+  color: var(--nh-cancelled);
+  box-shadow: inset 0 0 0 1px var(--nh-cancelled-soft);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* ── Loading state ──────────────────────────────────────────────────────────
+   The matrix's columns are DEFINED by data that arrives after the first paint,
+   so rendering the table early meant rendering the wrong shape and then
+   correcting it — twice — in front of the user. This stands in until the column
+   schema is known. It deliberately mirrors the table's geometry (the same lead
+   column width, the same row rhythm) so the swap to the real table is a fill,
+   not a jump, and it keeps the real run identities — those are known from the
+   start, and shimmering them would be pretending we know less than we do. */
+.tm-skel {
+  padding: var(--sp-3);
+  min-width: max-content;
+}
+.tm-skel-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border-1);
+}
+.tm-skel-row--head {
+  border-bottom: 1px solid var(--border-2);
+}
+.tm-skel-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  width: 220px;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--muted-on-panel);
+}
+.tm-skel-row:not(.tm-skel-row--head) .tm-skel-lead {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-on-panel);
+}
+.tm-skel-bar {
+  flex: none;
+  width: 128px;
+  height: 10px;
+  border-radius: var(--r-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-band),
+    color-mix(in srgb, var(--muted-on-panel) 16%, transparent),
+    var(--surface-band)
+  );
+  background-size: 200% 100%;
+  animation: tm-shimmer 1.1s linear infinite;
+}
+/* The in-cell variant: same shimmer, sized to sit inside a data cell. */
+.tm-skel-bar--cell {
+  width: 100%;
+  min-width: 48px;
+  height: 8px;
+}
+.tm-cell--loading {
+  width: 100%;
+}
+@keyframes tm-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.tm-skel-note {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--muted-on-panel);
+  font-style: italic;
+}
+/* task-24cd55d8a607 — while the origin breaker is open both enrichment waves
+   are deliberately deferred, so nothing is in flight and a shimmer would spin
+   forever. Say what's actually happening instead. */
+.tm-notice {
+  padding: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--muted-on-panel);
+  text-align: center;
+}
 
 /* ── Body cells ─────────────────────────────────────────────────────────── */
 .tm-cell-td {
@@ -416,6 +528,9 @@
 }
 .tm-val {
   color: var(--text-on-panel);
+  /* Flex item: needs min-width:0 to shrink below its text and ellipsize inside
+     a fixed-width column. */
+  min-width: 0;
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -528,5 +643,10 @@
   }
   .tm-back {
     transition: none;
+  }
+  /* Still visibly a placeholder — just a static one. */
+  .tm-skel-bar {
+    animation: none;
+    background: var(--surface-band);
   }
 }

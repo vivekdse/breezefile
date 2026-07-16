@@ -57,7 +57,18 @@ export type OtherRow = { taskId: string; title: string; status: string | undefin
 
 export type RosterGroups = { groups: RosterGroup[]; other: OtherRow[] };
 
-export type StatusBucket = 'done' | 'progress' | 'queued' | 'needs' | 'failed' | 'cancelled';
+export type StatusBucket =
+  | 'done'
+  | 'progress'
+  | 'scheduled'
+  | 'open'
+  | 'needs'
+  | 'failed'
+  | 'cancelled';
+
+/** The task fields that decide 'scheduled' vs 'open' — a real execution
+ *  schedule, not a human deadline (`due_at`/`start_at` deliberately excluded). */
+export type ScheduleInfo = { cron?: string | null; next_run_at?: number | null };
 
 export type GroupSummary = {
   runCount: number;
@@ -66,7 +77,22 @@ export type GroupSummary = {
 };
 
 export const STATUS_BUCKETS: StatusBucket[];
-export function statusBucket(status: string | undefined | null): StatusBucket;
+/** The ONE label map over StatusBucket — see rosterGroups.mjs header comment. */
+export const STATUS_LABELS: Record<StatusBucket, string>;
+/** Raw server status strings statusBucket recognizes. */
+export const KNOWN_RAW_STATUSES: Set<string>;
+/** The fullest-input {kind, label} mapper — prefers rawStatus, falls back to
+ *  the coarse status, both routed through statusBucket/STATUS_LABELS. */
+export function pillForStatus(
+  coarseStatus: string | undefined | null,
+  rawStatus: string | undefined | null,
+  schedule?: ScheduleInfo | null,
+): { kind: StatusBucket; label: string };
+export function statusBucket(
+  status: string | undefined | null,
+  task?: ScheduleInfo | null,
+): StatusBucket;
+export function isScheduled(task: ScheduleInfo | null | undefined): boolean;
 export function summarizeGroupRows(
   runs: { status?: string; assignee?: string | null }[],
 ): GroupSummary;

@@ -1,12 +1,16 @@
-/* task-cc9a4ef6f38a — HeroStats: 4-up stat-card grid, left-border status
-   color (V11 reference), active card = current roster filter. */
+/* task-cc9a4ef6f38a — HeroStats: stat-card grid, left-border status color
+   (V11 reference), active card = current roster filter. */
 .nh-hero-stats {
   margin-bottom: var(--sp-5);
 }
 
+/* Six cards. auto-fit + a minmax floor rather than a fixed repeat(6, 1fr) so
+   the row reflows to 3-up / 2-up as the window narrows instead of crushing six
+   columns into unreadable slivers — the numeral is the point of this grid and
+   it must never be the thing that gets squeezed. */
 .nh-hero-stats__grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
   gap: var(--sp-3);
 }
 
@@ -14,10 +18,17 @@
    properties (defaulting to the neutral border/panel tokens), so the shared
    hover/active rules below reference one pair of vars instead of repeating a
    selector per status. Both derive from the theme-aware --nh-* tokens, so the
-   active treatment holds up across every theme with no hardcoded hex. */
+   active treatment holds up across every theme with no hardcoded hex.
+
+   --nh-card-ink / --nh-card-label-ink are the EMPHASIS channel: routing text
+   color through vars (rather than per-class `color:` rules) lets the emphasis
+   and active treatments layer by var-cascade order instead of fighting over
+   identical specificity. */
 .nh-hero-stats__stat {
   --nh-card-accent: var(--border-2);
   --nh-card-accent-soft: var(--bg-2);
+  --nh-card-ink: var(--text-on-panel);
+  --nh-card-label-ink: var(--muted-on-panel);
   appearance: none;
   text-align: left;
   background: var(--bg-1);
@@ -37,33 +48,61 @@
 
 .nh-hero-stats__stat--done { --nh-card-accent: var(--nh-done); --nh-card-accent-soft: var(--nh-done-soft); }
 .nh-hero-stats__stat--progress { --nh-card-accent: var(--nh-progress); --nh-card-accent-soft: var(--nh-progress-soft); }
-.nh-hero-stats__stat--queued { --nh-card-accent: var(--nh-queued); --nh-card-accent-soft: var(--nh-queued-soft); }
+.nh-hero-stats__stat--scheduled { --nh-card-accent: var(--nh-scheduled); --nh-card-accent-soft: var(--nh-scheduled-soft); }
+.nh-hero-stats__stat--open { --nh-card-accent: var(--nh-open); --nh-card-accent-soft: var(--nh-open-soft); }
 .nh-hero-stats__stat--needs { --nh-card-accent: var(--nh-needs); --nh-card-accent-soft: var(--nh-needs-soft); }
 .nh-hero-stats__stat--failed { --nh-card-accent: var(--nh-failed); --nh-card-accent-soft: var(--nh-failed-soft); }
+
+/* Emphasis: the cards are NOT weighted equally. An attention bucket holding
+   real work reads loudest (accent ink, biggest numeral, heaviest rule); an
+   empty card and the Done record both recede. The emphasis channel is SIZE +
+   INK only — deliberately no background fill, because the fill is what marks
+   the active filter (below). One card can be both urgent and active; keeping
+   the two signals on different channels is what stops them reading as the
+   same thing. */
+.nh-hero-stats__stat--urgent {
+  border-left-width: 6px;
+  --nh-card-ink: var(--nh-card-accent);
+  --nh-card-label-ink: var(--nh-card-accent);
+}
+.nh-hero-stats__stat--urgent .nh-hero-stats__value {
+  font-size: 34px;
+}
+.nh-hero-stats__stat--urgent .nh-hero-stats__label {
+  font-weight: 700;
+}
+
+.nh-hero-stats__stat--quiet {
+  border-left-width: 2px;
+  --nh-card-ink: var(--muted-on-panel);
+}
+.nh-hero-stats__stat--quiet .nh-hero-stats__value {
+  font-size: 22px;
+  font-weight: 600;
+}
 
 /* Active = this card's status is the current roster filter. Filled with the
    status' soft tint, ringed by the full-strength accent on all four sides
    (not just the left rule), and lifted with a matching outer glow so the
-   selection reads at a glance rather than as a 1px inset hairline. */
+   selection reads at a glance rather than as a 1px inset hairline.
+   Declared AFTER the emphasis rules so its ink override wins the var cascade
+   on a quiet-but-selected card (e.g. filtering to an empty Done). */
 .nh-hero-stats__stat--active {
   background: var(--nh-card-accent-soft);
   border-color: var(--nh-card-accent);
-  border-left-width: 4px;
   box-shadow: inset 0 0 0 1px var(--nh-card-accent),
     0 0 0 1px var(--nh-card-accent);
+  /* Pull the label + value into the accent when active so the whole card, not
+     just its frame, signals the live filter. */
+  --nh-card-ink: var(--nh-card-accent);
+  --nh-card-label-ink: var(--nh-card-accent);
 }
 .nh-hero-stats__stat--active:hover {
   background: var(--nh-card-accent-soft);
 }
-/* Pull the label + value into the accent when active so the whole card, not
-   just its frame, signals the live filter. */
-.nh-hero-stats__stat--active .nh-hero-stats__label,
-.nh-hero-stats__stat--active .nh-hero-stats__value {
-  color: var(--nh-card-accent);
-}
 
 .nh-hero-stats__label {
-  color: var(--muted-on-panel);
+  color: var(--nh-card-label-ink);
   font-size: var(--fs-2xs);
   font-weight: 500;
   text-transform: uppercase;
@@ -75,5 +114,5 @@
   font-weight: 700;
   margin-top: 4px;
   letter-spacing: -0.02em;
-  color: var(--text-on-panel);
+  color: var(--nh-card-ink);
 }

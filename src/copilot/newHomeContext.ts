@@ -30,7 +30,7 @@ export type NewHomeContext = {
   /** Every project the picker offers (id + name), so the copilot can SEE the
    *  options and pick one via the select_home_project action. NON-PHI. */
   availableProjects: { id: string; name: string }[];
-  counts: Record<'done' | 'progress' | 'queued' | 'needs' | 'failed', number>;
+  counts: Record<'done' | 'progress' | 'scheduled' | 'open' | 'needs' | 'failed', number>;
   /** Titles + ids only (NOT bodies) of tasks in the 'needs' bucket. */
   needsYou: NeedsYouTaskSummary[];
   /** The roster's live filter: status bucket + free-text search. NON-PHI on
@@ -42,7 +42,7 @@ const EMPTY: NewHomeContext = {
   surface: 'other',
   project: null,
   availableProjects: [],
-  counts: { done: 0, progress: 0, queued: 0, needs: 0, failed: 0 },
+  counts: { done: 0, progress: 0, scheduled: 0, open: 0, needs: 0, failed: 0 },
   needsYou: [],
   rosterFilter: { status: 'all', search: '' },
 };

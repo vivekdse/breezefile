@@ -16,6 +16,7 @@ import {
   evalCondition,
   taskDefStatus,
   metaStatus,
+  DEF_STATUS_LABEL,
   aggregateInputs,
   normalizeFieldKey,
   isValidFieldKey,
@@ -514,6 +515,22 @@ test('taskDefStatus: neededWhen met → normal (non-skip) status derivation appl
     taskDefStatus(gatedDef, { 'intake.has_stains': 'Yes', 'stain.treated': true }),
     'done',
   );
+});
+
+// ── task-ea465f2c5964: DEF_STATUS_LABEL — the single label map over
+// MergedStepStatus, shared by TaskDetailDialog.tsx and TaskDetailDrawer.tsx
+// (previously two byte-identical hand-maintained records). A DIFFERENT axis
+// from rosterGroups.mjs's STATUS_LABELS (a task's New Home bucket) — see
+// taskSchema.d.mts and the roster's own STATUS_LABELS header comment.
+test('DEF_STATUS_LABEL: exhaustive over MergedStepStatus, "pending" reads Open', () => {
+  assert.deepEqual(DEF_STATUS_LABEL, {
+    done: 'Done',
+    active: 'In progress',
+    pending: 'Open',
+    skip: 'Not needed',
+    cancelled: 'Cancelled',
+    failed: 'Failed',
+  });
 });
 
 // ── metaStatus ─────────────────────────────────────────────────────────────
