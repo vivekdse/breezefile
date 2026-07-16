@@ -398,7 +398,9 @@ export async function runTaskInteractive(
   // the first REAL navigation via the helper's `goto`. We used to pass a literal
   // 'https://example.com' here, which made task start flash that meaningless
   // placeholder instead of the splash — never do that.
-  if (playwright || opts.hostInOperator) openBrowserWindow(undefined, ptyId);
+  if (playwright || opts.hostInOperator) {
+    openBrowserWindow(undefined, ptyId, undefined, payload.title);
+  }
 
   // task-6fc9e503623e — LIVENESS GATE. When the caller asked, wait for the
   // verdict: the child must stay alive (or emit first output) within the grace

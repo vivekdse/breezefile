@@ -71,6 +71,14 @@ let operatorPtyId: number | null = null;
 // comment in openBrowserWindow. Re-pointed on window reuse.
 let ownedPtyRef: { current: number | null } = { current: null };
 
+// The window title for the CURRENT session, e.g. "TypeBuild Operator — Fix
+// login bug". Falls back to the bare "TypeBuild Operator" when no task/label
+// is known yet (the optimistic splash window, or the plain open-browser
+// verb). Re-applied on every navigation via the page-title-updated guard
+// below, since the operator chrome's static <title>TypeBuild</title> would
+// otherwise clobber it the instant the page (re)loads.
+let operatorTitle = 'TypeBuild Operator';
+
 /** The live operator/browser window, or null if none is open. */
 export function getBrowserWindow(): BrowserWindow | null {
   return browserWin && !browserWin.isDestroyed() ? browserWin : null;
@@ -123,7 +131,12 @@ export function getOperatorViewId(): number | null {
  *  that PTY's terminal; without it the window is just the browser pane (the
  *  HTTP `open-browser` verb). Reuse does NOT renavigate — the agent drives
  *  navigation via the helper's `goto`. */
-export function openBrowserWindow(url?: string, ptyId?: number, launching?: boolean): void {
+export function openBrowserWindow(
+  url?: string,
+  ptyId?: number,
+  launching?: boolean,
+  sessionTitle?: string,
+): void {
   // Resolve the requested url through the single chokepoint: empty/missing OR a
   // stale example.com placeholder both become the themed splash (in the current
   // splashTheme) rather than overriding it — example.com must never load on task
@@ -134,8 +147,12 @@ export function openBrowserWindow(url?: string, ptyId?: number, launching?: bool
   pendingUrl = resolveStartUrl(url, splashTheme);
   const prevPtyId = operatorPtyId;
   if (ptyId != null) operatorPtyId = ptyId;
+  operatorTitle = sessionTitle?.trim()
+    ? `TypeBuild Operator — ${sessionTitle.trim()}`
+    : 'TypeBuild Operator';
   const existing = getBrowserWindow();
   if (existing) {
+    existing.setTitle(operatorTitle);
     if (existing.isMinimized()) existing.restore();
     existing.focus();
     // Re-point the terminal pane to a NEW session. The ptyId is baked into the
@@ -157,7 +174,7 @@ export function openBrowserWindow(url?: string, ptyId?: number, launching?: bool
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'TypeBuild Operator',
+    title: operatorTitle,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
@@ -172,6 +189,15 @@ export function openBrowserWindow(url?: string, ptyId?: number, launching?: bool
     },
   });
   browserWin = win;
+  // The operator chrome is the same bundle as the main window and carries the
+  // same static <title>TypeBuild</title>, which fires page-title-updated and
+  // clobbers our task-specific title the instant the chrome (re)loads (e.g.
+  // loadOperatorChrome on reuse). Re-assert the current operatorTitle instead
+  // of letting the page win, mirroring the profile-suffix guard in main.ts.
+  win.on('page-title-updated', (e) => {
+    e.preventDefault();
+    win.setTitle(operatorTitle);
+  });
   // task-6fc9e503623e — the pty THIS window currently hosts, captured per
   // window (a closure ref), NOT read from the mutable module-level
   // `operatorPtyId`. ROOT-CAUSE FIX for the auto-continue instant-exit race:
