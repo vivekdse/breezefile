@@ -400,10 +400,17 @@ function ChainAutomation({
 
   // ── chain-parent resolution (client-side interim) ─────────────────────────
   // When the LAST non-skipped child of a chain reaches a terminal state,
-  // resolve the PARENT container server-side (complete/cancel via the existing
-  // source verbs) so claim_next stops handing out a finished empty container.
-  // IDEMPOTENT + SAFE: shouldResolveParent gates on the parent's CURRENT
-  // server rawStatus; the in-flight ref stops a concurrent double-fire.
+  // resolve the PARENT container server-side so claim_next stops handing out
+  // a finished empty container. IDEMPOTENT + SAFE: shouldResolveParent gates
+  // on the parent's CURRENT server rawStatus; the in-flight ref stops a
+  // concurrent double-fire.
+  //
+  // task-bba383067f2f — a 'done' resolution now carries the chain's
+  // aggregate evidence via the result-carrying `submit_result` verb (was:
+  // bare `complete`, evidence built but discarded). A 'partial' resolution
+  // (any non-skip child cancelled/blocked/failed/partial) now uses the
+  // dedicated `partial` verb instead of `cancel` — 'cancelled' falsely
+  // implied the chain never ran.
   const parentResolveInFlightRef = useRef(false);
   useEffect(() => {
     if (childrenLoading) return; // don't act on a partially-loaded job
@@ -422,15 +429,22 @@ function ChainAutomation({
     if (!shouldResolveParent(parent?.rawStatus ?? null, resolutionStatus)) return;
     if (!resolutionStatus) return; // (shouldResolveParent already ensures this)
 
-    // Build the aggregate chain evidence for the parent's submission. Held in
-    // memory ONLY for the payload — never logged/persisted (PHI).
-    const aggregate = buildChainAggregateResult({ defs, valuesByRef });
-    void aggregate; // consumed by a result-carrying submit when the source supports it
-
     const parentSource = parent?.source ?? 'typebuild';
     parentResolveInFlightRef.current = true;
-    const verb = resolutionStatus.status === 'done' ? 'complete' : 'cancel';
-    void taskSourceAction(parentSource, jobId, verb)
+
+    let action: Promise<unknown>;
+    if (resolutionStatus.status === 'done') {
+      // Build the aggregate chain evidence for the parent's submission. Held
+      // in memory ONLY for the payload — never logged/persisted (PHI).
+      const aggregate = buildChainAggregateResult({ defs, valuesByRef });
+      action = taskSourceAction(parentSource, jobId, 'submit_result', {
+        result: { type: aggregate.type, payload: aggregate.fields },
+      });
+    } else {
+      action = taskSourceAction(parentSource, jobId, 'partial');
+    }
+
+    void action
       .then(() => {
         // Leave the guard SET on success — the next render's
         // shouldResolveParent sees the terminal rawStatus and short-circuits.

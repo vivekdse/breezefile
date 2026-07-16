@@ -4973,6 +4973,17 @@ export class TypeBuildTaskSource implements TaskSource {
         return this.cancel(taskId);
       case 'complete':
         return this.complete(taskId);
+      // task-bba383067f2f — result-carrying submit: set the structured
+      // {type, payload} result (POST /chromeext/<id>/result), THEN mark done
+      // via the same PATCH path as `complete`. See submitResult() below.
+      case 'submit_result':
+        return this.submitResult(taskId, payload);
+      // task-bba383067f2f — a chain with a cancelled/blocked/failed/partial
+      // child resolves its parent 'partial', not 'cancelled' (which the
+      // interim client watcher used to send — semantically lossy: 'cancelled'
+      // implies nobody ran it, not "ran, and didn't fully succeed").
+      case 'partial':
+        return this.partial(taskId);
       // fm-j7w0 (S4) — generic field edit. The renderer passes a whitelisted
       // subset {assigned_to?, priority?, due_at?, defer_until?}; we route it
       // to patchTask with a matching optimistic cache patch. Any field outside
@@ -5284,6 +5295,82 @@ export class TypeBuildTaskSource implements TaskSource {
         completed_at: Date.now(),
       },
     );
+  }
+
+  // task-bba383067f2f — a chain parent that resolved with at least one
+  // cancelled/blocked/failed/partial (non-skip) child. Distinct from
+  // `cancel`: 'cancelled' means the work never ran; 'partial' means it ran
+  // and some step(s) didn't fully succeed. Server-side status vocabulary
+  // already accepts 'partial' on the same management PATCH (task_manager_api
+  // routers/chromeext.py update_task_fields: status in {done, failed,
+  // partial, ...}), so this is a one-line sibling of complete()/cancel().
+  private async partial(taskId: string): Promise<unknown> {
+    return this.patchTask(
+      taskId,
+      { status: 'partial' },
+      {
+        // mapStatus('partial') → 'done' (typebuild-wire.mjs) — the mapped
+        // TaskStatus enum has no 'partial' bucket; rawStatus is what carries
+        // the distinction through to the UI badge.
+        status: 'done',
+        rawStatus: 'partial',
+        claimedBy: null,
+        completed_at: Date.now(),
+      },
+    );
+  }
+
+  // ─── result-carrying submit (task-bba383067f2f) ──────────────────────────
+  // Today `complete()` only PATCHes {status:'done'} — no aggregate evidence
+  // rides along. The server already has a dedicated structured-result verb
+  // (POST /chromeext/<id>/result, name=set_task_result — same convention as
+  // askUser/postTaskMessage above: anyone who can see the task may set it,
+  // no claim required, replaces any prior result) that is otherwise only
+  // reachable from the MCP `submit_task_result` tool an agent calls itself.
+  // This wires the SAME verb to the REST source so a client-side caller
+  // (chain-parent resolution, or any other done-with-evidence submit) can
+  // attach the aggregate result and mark done in one call.
+  //
+  // `payload` shape: { result?: { type: string; payload: unknown } }. When
+  // `result` is omitted or its `fields` payload is empty, we skip the POST
+  // entirely and just complete — a chain with no output-bearing steps (e.g.
+  // every def was a skip) still needs the parent to resolve done.
+  //
+  // PHI: `result.payload` may carry task OUTPUT values — passed straight
+  // through the request body (encrypted at rest server-side, same rule as
+  // askUser's `text`); NEVER logged here, and not folded into the persisted
+  // skeleton cache (mirrors `result` on DetailRow, which is memory-only).
+  private async submitResult(taskId: string, payload?: unknown): Promise<unknown> {
+    const input = (payload ?? {}) as { result?: { type?: unknown; payload?: unknown } };
+    const result = input.result;
+    const rtype = typeof result?.type === 'string' ? result.type.trim() : '';
+    const hasPayload =
+      rtype !== '' &&
+      result?.payload !== undefined &&
+      result?.payload !== null &&
+      !(
+        typeof result.payload === 'object' &&
+        result.payload !== null &&
+        'fields' in (result.payload as Record<string, unknown>) &&
+        Object.keys((result.payload as { fields?: Record<string, unknown> }).fields ?? {}).length === 0
+      );
+
+    if (hasPayload) {
+      const res = await this.request(
+        'POST',
+        `/chromeext/${encodeURIComponent(taskId)}/result`,
+        { type: rtype, payload: result!.payload },
+      );
+      if (res.status === 404) return { ok: false, reason: 'not visible' };
+      if (!res.ok && res.status !== 400) {
+        throw new Error(`typebuild: submit_result failed (${res.status})`);
+      }
+      // A 400 (empty type/payload) is non-fatal here — fall through and still
+      // mark done; the caller asked to submit-and-complete, and a malformed
+      // result shouldn't block the completion itself.
+    }
+    // Reuse complete()'s PATCH + optimistic-cache path for the status flip.
+    return this.complete(taskId);
   }
 
   // ─── cache refresh + broadcast ──────────────────────────────────────────
