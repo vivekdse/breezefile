@@ -128,3 +128,37 @@ Two instances run side-by-side from separate checkouts, isolated by profile
   `breeze_stable`, `npm run stable`, CDP 9222, no stripe. Never commit there;
   when asked to update it: `git pull --rebase && npm run stable` inside the
   tmux session (Ctrl-C the running instance first).
+
+### If `npm run dev`'s watcher goes stale (task-9256aea43313)
+
+`npm run dev`'s main/preload watcher can silently stop rebuilding after the
+first successful build. Root cause: Vite 6.4.2's own bundled
+`@rollup/plugin-commonjs` throws `[commonjs] Cannot read properties of
+undefined (reading 'resolved')` on an incremental (watch-mode) rebuild of the
+main/preload rollup graph — never on the initial build — which aborts that
+rebuild with only that one line printed, no other error, and no new
+`dist-electron/main-<hash>.js` written. **Electron can still restart (new pid)
+while running the stale bundle** — there is no reliable visual cue that
+anything went wrong short of checking the hash yourself.
+
+Two mitigations are in place:
+- `electron/main.ts` always logs `[bundle] main process running from
+  file://.../dist-electron/main-<hash>.js` at module load. If this hash is
+  unchanged after an edit that should have changed it, the watcher silently
+  failed to rebuild.
+- **`npm run dev:main`** (`scripts/dev-main-rebuild.mjs`) deterministically
+  rebuilds main + preload with a one-shot build (reusing the exact options
+  `vite.config.ts` feeds the dev server, via `electron/vite-electron-options.mjs`,
+  so the two configs can't drift) and restarts the Electron child pointed at
+  the still-running renderer dev server — safe to run alongside `npm run dev`.
+  Do this whenever the `breeze` pane goes quiet after an `electron/` edit
+  instead of assuming it loaded. (Unlike this, `npm run build` / `vite build`
+  at the project root rebuilds the RENDERER too and clobbers
+  `dist-electron/main.js` with a production-hash build while the dev server
+  is running — never run that alongside `npm run dev`.)
+
+A comment-only edit is not a valid probe for either the watcher or `dev:main`
+— comments get stripped and output can be byte-identical. Probe with real code
+(a `console.warn`) and confirm the marker actually landed in the built chunk:
+`grep -ac '<marker>' dist-electron/main-<hash>.js` (the `-a` matters — some
+bundles carry NULs).

@@ -51,6 +51,21 @@ import './agents';
 
 mark('main:module-loaded');
 
+// task-9256aea43313 — the dev watcher (vite-plugin-electron 1.1.0's rollup
+// build.watch path, on top of a vite/rollup-commonjs incremental-rebuild bug:
+// "[commonjs] Cannot read properties of undefined (reading 'resolved')") can
+// silently stop rebuilding after an electron/ edit while STILL restarting the
+// app with the previous bundle — no error, no rebuild message, just a stale
+// pid. Always (not just under BREEZE_STARTUP_PROFILE) log which built chunk
+// is actually executing, so a stale reload is obvious in the terminal instead
+// of silently misleading whoever is debugging. `import.meta.url` resolves to
+// the on-disk chunk path, which carries rollup's content hash
+// (dist-electron/main-<hash>.js) — if this hash doesn't change after an edit
+// that should have changed it, the watcher didn't rebuild; run
+// `npm run dev:main` to force a rebuild + relaunch.
+// eslint-disable-next-line no-console
+console.log(`[bundle] main process running from ${import.meta.url} (loaded @ ${new Date().toISOString()})`);
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Prefer IPv4 when a host resolves to both A and AAAA records. Node 17+
