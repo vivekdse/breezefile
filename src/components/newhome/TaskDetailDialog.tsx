@@ -148,14 +148,16 @@ const MARKER: Record<EvidenceEntry['kind'], string> = {
 // from its children. Both degrade to nothing when the body carries neither
 // block — see the file-header non-regression note.
 
-// task-4045bcee23cb (U3a polish a) — 'pending' says "Queued" here too, matching
-// the roster's own status vocabulary (STATUS_LABEL/META_PILL in RosterTable.tsx)
-// so a step never says "Pending" in one place and "Queued" in another for the
-// identical not-yet-started state.
+// task-4045bcee23cb (U3a polish a) — 'pending' borrows the roster's own status
+// vocabulary (STATUS_LABEL in RosterTable.tsx) so a step never says one thing
+// here and another there for the identical not-yet-started state. That word is
+// now "Open", not "Queued": a step nobody has scheduled is not waiting in any
+// queue, and only `cron`/`next_run_at` earn the "Scheduled" promise. A step
+// carries no schedule of its own, so pending always reads Open here.
 const DEF_STATUS_LABEL: Record<MergedStepStatus, string> = {
   done: 'Done',
   active: 'In progress',
-  pending: 'Queued',
+  pending: 'Open',
   skip: 'Not needed',
   cancelled: 'Cancelled',
   failed: 'Failed',

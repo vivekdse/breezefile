@@ -54,8 +54,14 @@ export interface TaskMatrixProps {
   errorFor?: (childId: string) => string | null;
 }
 
+// Bounded fan-out for the per-step getTask wave. Matches useNewHomeData's
+// TASK_DATA_CONCURRENCY — same origin, same reason to not stampede it.
+const DETAIL_CONCURRENCY = 4;
+
 type OutputField = NonNullable<Task['outputSchema']>[number];
-type PillKind = 'done' | 'progress' | 'queued' | 'needs' | 'failed';
+type PillKind = 'done' | 'progress' | 'scheduled' | 'open' | 'needs' | 'failed' | 'cancelled';
+// The schedule-bearing slice of a Task — enough to tell 'scheduled' from 'open'.
+type Schedulable = Pick<Task, 'cron' | 'next_run_at'>;
 
 // task-run-order — a run's created stamp, as "5 minutes ago", so a reviewer
 // knows when a run happened (and thus when it's worth reviewing) instead of a
@@ -78,9 +84,35 @@ function relativeTime(createdAt: number | undefined, now: number): string {
 
 // ── Status → pill mapping ────────────────────────────────────────────────
 // Prefer the server rawStatus (richer) and fall back to the coarse local
-// TaskStatus. Everything routes to one of the five roster pill kinds so both
-// themes resolve via the shared --nh-* tokens.
-function pillFor(status?: TaskStatus, rawStatus?: string): { kind: PillKind; label: string } {
+// TaskStatus. Everything routes to one of the roster pill kinds so both themes
+// resolve via the shared --nh-* tokens.
+//
+// The waiting bucket is TWO kinds, not one: 'scheduled' means the system will
+// actually get to this (the task carries a cron or a next_run_at) and reads
+// calm; 'open' means pending with nothing scheduled — nobody is coming, a human
+// has to. The RAW server strings are untouched by that split: 'pending' /
+// 'queued' / 'todo' / 'deferred' still arrive on the wire and are still
+// accepted here; only the bucket they resolve TO moved. A raw string alone
+// can't say whether anything is scheduled, so callers pass the Task (`sched`)
+// and we read cron/next_run_at off it; with no task we fall back to 'open',
+// since promising "Scheduled" for work nobody has scheduled is the worse lie.
+//
+// task-c0edffef25c6 — 'cancelled' has its OWN kind. It used to resolve to the
+// waiting bucket, which painted a withdrawn run in the waiting color; only the
+// ⊘ glyph hinted otherwise. TaskMatrix was the last of the three parallel
+// status mappers still doing that.
+function pillFor(
+  status?: TaskStatus,
+  rawStatus?: string,
+  sched?: Schedulable | null,
+): { kind: PillKind; label: string } {
+  const scheduled = !!(
+    sched &&
+    (sched.cron || (typeof sched.next_run_at === 'number' && sched.next_run_at > 0))
+  );
+  const waiting: { kind: PillKind; label: string } = scheduled
+    ? { kind: 'scheduled', label: 'Scheduled' }
+    : { kind: 'open', label: 'Open' };
   const raw = (rawStatus ?? '').toLowerCase();
   if (raw) {
     if (raw === 'done' || raw === 'completed' || raw === 'succeeded')
@@ -91,9 +123,8 @@ function pillFor(status?: TaskStatus, rawStatus?: string): { kind: PillKind; lab
     if (raw === 'needs_review' || raw === 'blocked' || raw === 'asked' || raw === 'review')
       return { kind: 'needs', label: 'Needs You' };
     if (raw === 'cancelled' || raw === 'canceled')
-      return { kind: 'queued', label: 'Cancelled' };
-    if (raw === 'pending' || raw === 'queued' || raw === 'todo' || raw === 'deferred')
-      return { kind: 'queued', label: 'Queued' };
+      return { kind: 'cancelled', label: 'Cancelled' };
+    if (raw === 'pending' || raw === 'queued' || raw === 'todo' || raw === 'deferred') return waiting;
   }
   switch (status) {
     case 'done':
@@ -101,18 +132,17 @@ function pillFor(status?: TaskStatus, rawStatus?: string): { kind: PillKind; lab
     case 'in_progress':
       return { kind: 'progress', label: 'In Progress' };
     case 'cancelled':
-      return { kind: 'queued', label: 'Cancelled' };
+      return { kind: 'cancelled', label: 'Cancelled' };
     default:
-      return { kind: 'queued', label: 'Queued' };
+      return waiting;
   }
 }
 
 // Layout-cleanup round 2: the lead column shows status as a colored ICON
-// (tooltip + aria-label carry the word) instead of a text pill — one glyph
-// per roster status kind, plus a distinct ⊘ for Cancelled (which shares the
-// 'queued' color kind but must not read as "waiting").
-function statusGlyph(kind: PillKind, label: string): string {
-  if (label === 'Cancelled') return '⊘';
+// (tooltip + aria-label carry the word) instead of a text pill — one glyph per
+// roster status kind. Cancelled's ⊘ now rides its own kind rather than a label
+// special-case, so the glyph and the color agree.
+function statusGlyph(kind: PillKind): string {
   switch (kind) {
     case 'done':
       return '✓';
@@ -122,21 +152,20 @@ function statusGlyph(kind: PillKind, label: string): string {
       return '!';
     case 'failed':
       return '✕';
+    case 'cancelled':
+      return '⊘';
+    case 'scheduled':
+      return '◷';
     default:
       return '○';
   }
 }
 
-function StatusIcon({ status, rawStatus }: { status?: TaskStatus; rawStatus?: string }): JSX.Element {
-  const { kind, label } = pillFor(status, rawStatus);
+function StatusIcon({ task }: { task: Task }): JSX.Element {
+  const { kind, label } = pillFor(task.status, task.rawStatus, task);
   return (
-    <span
-      className={`tm-status tm-status--${kind}${label === 'Cancelled' ? ' tm-status--cancelled' : ''}`}
-      title={label}
-      aria-label={label}
-      role="img"
-    >
-      {statusGlyph(kind, label)}
+    <span className={`tm-status tm-status--${kind}`} title={label} aria-label={label} role="img">
+      {statusGlyph(kind)}
     </span>
   );
 }
@@ -167,6 +196,10 @@ interface CellProps {
   fieldKey: string;
   siblingKeys: string[]; // full data bag keys, so a patch preserves siblings
   value?: string; // resolved (dataValues / result) value
+  // This value is still in flight. `value === undefined` alone can't say
+  // whether the field is empty or unfetched, and rendering '—' for the latter
+  // claims "no value" about something we simply haven't heard back on yet.
+  loading?: boolean;
   required?: boolean; // OUTPUT only — drives the "—✳" empty state
   onStart: () => void;
   onOpen: () => void;
@@ -181,6 +214,7 @@ function MatrixCell({
   fieldKey,
   siblingKeys,
   value,
+  loading,
   required,
   onStart,
   onOpen,
@@ -254,6 +288,9 @@ function MatrixCell({
 
   const display = override ?? value ?? '';
   const isEmpty = display === '';
+  // A locally-committed override, or a value that's already landed, outranks
+  // the loading flag — we know what this cell says regardless of the wave.
+  const isLoading = !!loading && override === null && value === undefined && !editing;
 
   async function commit(next: string): Promise<void> {
     const trimmed = next.trim();
@@ -273,12 +310,16 @@ function MatrixCell({
   return (
     <div
       ref={cellRef}
-      className={`tm-cell${isEmpty && !editing ? ' tm-cell--empty' : ''}`}
+      className={`tm-cell${isLoading ? ' tm-cell--loading' : ''}${
+        isEmpty && !editing && !isLoading ? ' tm-cell--empty' : ''
+      }`}
       onMouseEnter={openMenu}
       onMouseLeave={scheduleClose}
     >
       {editing ? (
         <InlineEditor initial={display} onCommit={commit} onCancel={() => setEditing(false)} />
+      ) : isLoading ? (
+        <span className="tm-skel-bar tm-skel-bar--cell" aria-label="Loading value" role="img" />
       ) : (
         <span className={`tm-val${isEmpty ? ' tm-val--empty' : ''}`}>
           {isEmpty ? (io === 'out' && required ? '—✳' : '—') : display}
@@ -438,6 +479,11 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
 
   // DETAIL for every child (getTask): outputSchema / dataKeys / result / status.
   const [detail, setDetail] = useState<Map<string, Task>>(new Map());
+  // Ids whose detail fetch has SETTLED — resolved or failed. `detail` alone
+  // can't answer "is this still loading?": a 404/offline id never lands there,
+  // so gating on `detail.has(id)` would skeleton forever. This is the honest
+  // "we asked and heard back" set, and it's what every loading check reads.
+  const [detailSettled, setDetailSettled] = useState<Set<string>>(new Set());
   // task-24cd55d8a607 — defer this matrix enrichment wave while the origin
   // breaker is open; already-fetched details persist so the matrix keeps
   // rendering last-known cells.
@@ -446,22 +492,42 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     let cancelled = false;
     if (degraded) return; // origin slow — defer matrix child-detail enrichment
     const ids = idKey ? idKey.split(',') : [];
-    const missing = ids.filter((id) => !detail.has(id));
+    const missing = ids.filter((id) => !detailSettled.has(id));
     if (missing.length === 0) return;
     void (async () => {
+      // Fan out over a bounded worker pool rather than awaiting each getTask in
+      // turn: the columns can't render until the LAST of these lands, so a
+      // serial loop made the whole schema wait on the sum of every round-trip.
+      // Same shape/limit as useTaskDataValues' resolve pool.
+      let idx = 0;
       const fetched: [string, Task][] = [];
-      for (const id of missing) {
-        try {
-          const t = await getTask(id);
-          if (t) fetched.push([id, t]);
-        } catch {
-          // Offline / no access — leave undetailed; columns fall back to list rows.
+      async function worker(): Promise<void> {
+        while (idx < missing.length) {
+          const id = missing[idx++];
+          try {
+            const t = await getTask(id);
+            if (t) fetched.push([id, t]);
+          } catch {
+            // Offline / no access — leave undetailed; columns fall back to list rows.
+          }
         }
       }
-      if (cancelled || fetched.length === 0) return;
-      setDetail((prev) => {
-        const next = new Map(prev);
-        for (const [id, t] of fetched) next.set(id, t);
+      await Promise.all(
+        Array.from({ length: Math.min(DETAIL_CONCURRENCY, missing.length) }, () => worker()),
+      );
+      if (cancelled) return;
+      if (fetched.length > 0) {
+        setDetail((prev) => {
+          const next = new Map(prev);
+          for (const [id, t] of fetched) next.set(id, t);
+          return next;
+        });
+      }
+      // Every id we asked about is settled now, including the ones that threw —
+      // otherwise a permanently-failing id would hold the skeleton open.
+      setDetailSettled((prev) => {
+        const next = new Set(prev);
+        for (const id of missing) next.add(id);
         return next;
       });
     })();
@@ -482,7 +548,11 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     }
     return reqs;
   }, [idKey, detail]);
-  const dataValues = useTaskDataValues(dataRequests);
+  // `values` is the resolved bag (empty/absent refs are dropped from it, so it
+  // can't double as a loading signal); `isPending` is the hook's own explicit
+  // per-(taskId,key) in-flight answer, and already reports `false` for pairs it
+  // has deferred behind the origin breaker (task-24cd55d8a607).
+  const { values: dataValues, isPending: inputPending } = useTaskDataValues(dataRequests);
 
   // COLUMNS come from the FIRST run's ordered steps (its step-children, or the
   // run itself when it's a childless simple-template run).
@@ -518,6 +588,39 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     stepGroups.length > 1 ||
     (stepGroups.length === 1 && stepGroups[0].title !== chainTitle && runs.some((r) => childrenOf(r.id).length > 0));
 
+  // The matrix's data lands in two serial waves — the per-step detail (which
+  // DEFINES the columns) and then the per-key values that fill them. Rendering
+  // between them made the user watch the table change SHAPE twice: first a lone
+  // Run column, then every field column popping in empty, then the widths
+  // re-measuring as values arrived. Instead we hold the final shape back until
+  // the column schema is known and say, plainly, that it's loading; the widths
+  // are then pinned (table-layout: fixed + colgroup) so wave two can only fill
+  // cells, never move them.
+  //
+  // The schema comes from the FIRST run's steps, so those are the ids that
+  // gate. `detailSettled` (not `detail`) is the test, so a step whose fetch
+  // failed resolves to "known, no fields" instead of an eternal skeleton — and
+  // a matrix with no runs at all has nothing to wait for and renders empty.
+  const schemaReady = steps.every((s) => detailSettled.has(s.id));
+  // While the origin breaker is open both waves are deliberately deferred
+  // (task-24cd55d8a607), so nothing is in flight and nothing will land. Saying
+  // "loading" then would be a spinner that never resolves: report the defer
+  // instead, and let already-fetched cells render as last-known rather than
+  // shimmering.
+  const deferred = degraded && !schemaReady;
+
+  // A cell is LOADING when its value is still in flight — distinct from known-
+  // absent, which is the '—' the cell has always shown. An unsettled step means
+  // we don't even know its fields yet; a settled one means only the pairs we
+  // requested and haven't heard back on are pending.
+  const inputLoading = (childId: string, key: string): boolean => {
+    if (degraded) return false;
+    if (!detailSettled.has(childId)) return true;
+    return inputPending(childId, key);
+  };
+  // Outputs ride the step's own detail (`result`), so they're pending exactly
+  // while that detail is.
+  const outputLoading = (childId: string): boolean => !degraded && !detailSettled.has(childId);
   const inputValue = (childId: string, key: string): string | undefined =>
     dataValues.get(childId)?.[key];
   const outputValue = (childId: string, key: string): string | undefined => {
@@ -525,6 +628,21 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
     const raw = parsed?.fields?.[key];
     return raw == null ? undefined : String(raw);
   };
+
+  // One <col> per rendered column, matching the header's colSpan arithmetic: a
+  // fieldless step still renders its single "—" column, which is why both use
+  // g.span. See TaskMatrix.css — the widths live there, and they're what makes
+  // table-layout: fixed hold the columns still across the value wave.
+  const colGroup = (
+    <colgroup>
+      <col className="tm-col-lead" />
+      {stepGroups.flatMap((g) =>
+        Array.from({ length: g.span }, (_, i) => (
+          <col key={`c${g.index}-${i}`} className="tm-col-field" />
+        )),
+      )}
+    </colgroup>
+  );
 
   return (
     <div className="tm">
@@ -557,8 +675,45 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
         <TemplateEditPanel templateId={templateId} onClose={() => setEditing(false)} />
       )}
 
+      {/* The header above renders immediately and never moves; only this region
+          waits. */}
+      {!schemaReady ? (
+        <div className="tm-scroll">
+          {deferred ? (
+            <div className="tm-notice" role="status">
+              ⏳ The task service is slow right now — this matrix will fill in as soon as it
+              responds.
+            </div>
+          ) : (
+            <div className="tm-skel" role="status" aria-live="polite" aria-busy="true">
+              {/* The Run column is already known (runs come in as props), so the
+                  skeleton shows the real run identities and shimmers only what
+                  we're actually still waiting on: the step columns. */}
+              <div className="tm-skel-row tm-skel-row--head">
+                <span className="tm-skel-lead">Run</span>
+                <span className="tm-skel-bar" />
+                <span className="tm-skel-bar" />
+                <span className="tm-skel-bar" />
+              </div>
+              {orderedRuns.slice(0, 6).map(({ run, runNumber }) => (
+                <div className="tm-skel-row" key={run.id}>
+                  <span className="tm-skel-lead">
+                    <StatusIcon task={run} />
+                    Run {runNumber}
+                  </span>
+                  <span className="tm-skel-bar" />
+                  <span className="tm-skel-bar" />
+                  <span className="tm-skel-bar" />
+                </div>
+              ))}
+              <div className="tm-skel-note">Loading run data…</div>
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="tm-scroll">
         <table className="tm-table">
+          {colGroup}
           <thead>
             {/* Group header: each step title spans its field columns. Skipped
                 for single-step matrices — the panel header already names it. */}
@@ -643,9 +798,9 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                       // QA round 3 — a run whose steps are all terminal but
                       // that ISN'T done (cancelled/failed) gets ↻ Retry
                       // (reopen → claim → launch) so it's never action-less.
-                      const p = pillFor(run.status, run.rawStatus);
+                      const p = pillFor(run.status, run.rawStatus, run);
                       const retryable =
-                        !next && props.onRetryRun && (p.label === 'Cancelled' || p.kind === 'failed');
+                        !next && props.onRetryRun && (p.kind === 'cancelled' || p.kind === 'failed');
                       // task-reenter — a DONE/PARTIAL run has no runnable next
                       // step and isn't retryable, so it used to offer only
                       // "↗ Open". Give it a launch-first ▶ that re-opens the
@@ -671,7 +826,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                       return (
                         <>
                           <div className="tm-lead-inner">
-                            <StatusIcon status={run.status} rawStatus={run.rawStatus} />
+                            <StatusIcon task={run} />
                             <span className="tm-run-id">
                               <span className="tm-run-title">{runLabel}</span>
                               {runWhen && <span className="tm-run-when">{runWhen}</span>}
@@ -770,6 +925,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                             fieldKey={key}
                             siblingKeys={sibling}
                             value={inputValue(child.id, key)}
+                            loading={inputLoading(child.id, key)}
                             onStart={() => onStartChild(child.id)}
                             onOpen={() => onOpenTask(child.id)}
                             startPending={pendingFor(child.id)}
@@ -787,6 +943,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                             fieldKey={o.key}
                             siblingKeys={sibling}
                             value={outputValue(child.id, o.key)}
+                            loading={outputLoading(child.id)}
                             required={o.required}
                             onStart={() => onStartChild(child.id)}
                             onOpen={() => onOpenTask(child.id)}
@@ -799,7 +956,11 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
                     if (cells.length === 0) {
                       // Step with no declared fields yet — a single placeholder cell
                       // that still carries the step's status + hover actions.
-                      const p = pillFor(childDetail?.status ?? child.status, childDetail?.rawStatus ?? child.rawStatus);
+                      const p = pillFor(
+                        childDetail?.status ?? child.status,
+                        childDetail?.rawStatus ?? child.rawStatus,
+                        childDetail ?? child,
+                      );
                       cells.push(
                         <td key={`cp${g.index}`} className={`tm-cell-td${band}`}>
                           <div className="tm-cell tm-cell--placeholder">
@@ -816,6 +977,7 @@ export function TaskMatrix(props: TaskMatrixProps): JSX.Element {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

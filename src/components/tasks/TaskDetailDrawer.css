@@ -726,7 +726,8 @@ body:has([data-testid='copilot-sidebar'].cpk\:translate-x-0) .tdd-overlay {
    task-df41bfd4291c — soft-tinted pill per status, matching the dialog's
    nh-dialog__pipeline-pill treatment (background tint + matching ink),
    mapped onto this surface's own tokens: done→ok, active→accent (working),
-   pending→warn (queued, matches the roster's queued hue), skip→neutral,
+   pending→warn (matches the roster's 'open' hue — not-yet-started with nothing
+   scheduled), skip→neutral,
    cancelled: grey + strikethrough (dead-but-real, ≠ n/a); failed: failed hue. */
 .tdd__pipeline-pill {
   display: inline-flex;

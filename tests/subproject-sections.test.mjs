@@ -61,7 +61,7 @@ test('buildSubprojectSections — parent with NO direct tasks still surfaces sub
   const tasks = [
     { id: 't1', projectId: 'engine', status: 'needs' },
     { id: 't2', projectId: 'engine-deep', status: 'done' }, // deep — rolls into engine
-    { id: 't3', projectId: 'content', status: 'queued' },
+    { id: 't3', projectId: 'content', status: 'open' },
     { id: 't4', projectId: 'qa', status: 'failed' },
   ];
   const { ownTaskIds, sections } = buildSubprojectSections(tasks, roots, 'guruandai');
@@ -83,7 +83,7 @@ test('buildSubprojectSections — own tasks stay own; subproject tasks section',
   const roots = buildProjectTree(PROJECTS);
   const tasks = [
     { id: 'own1', projectId: 'guruandai', status: 'progress' },
-    { id: 'sub1', projectId: 'content', status: 'queued' },
+    { id: 'sub1', projectId: 'content', status: 'open' },
   ];
   const { ownTaskIds, sections } = buildSubprojectSections(tasks, roots, 'guruandai');
   assert.deepEqual(ownTaskIds, ['own1']);
@@ -102,7 +102,7 @@ test('buildSubprojectSections — "All projects" makes each top-level project a 
   const tasks = [
     { id: 't1', projectId: 'engine', status: 'done' }, // under guruandai
     { id: 't2', projectId: 'other-root', status: 'needs' },
-    { id: 't3', projectId: null, status: 'queued' }, // orphan → own
+    { id: 't3', projectId: null, status: 'open' }, // orphan → own
   ];
   const { ownTaskIds, sections } = buildSubprojectSections(tasks, roots, null);
   assert.deepEqual(ownTaskIds, ['t3']);

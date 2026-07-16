@@ -12,13 +12,15 @@
 // the SAME building block a template group is (name + per-bucket status counts +
 // a count + drill-in) — no new parallel surface.
 //
-// DELIBERATELY value-free: reads only id / projectId / coarse status. Task
-// TITLES and field values (PHI) never flow through here.
+// DELIBERATELY value-free: reads only id / projectId / coarse status, plus the
+// task's schedule metadata (cron / next_run_at) that tells the 'scheduled'
+// bucket from 'open'. Task TITLES and field values (PHI) never flow through
+// here.
 
 import { indexTree } from '../../projects/tree.mjs';
 import { statusBucket, STATUS_BUCKETS } from './rosterGroups.mjs';
 
-/** A fresh { done, progress, queued, needs, failed } zeroed count bag. */
+/** A fresh { done, progress, scheduled, open, needs, failed } zeroed count bag. */
 function emptyCounts() {
   /** @type {Record<string, number>} */
   const c = {};
@@ -94,7 +96,7 @@ export function buildSubprojectSections(tasks, roots, selectedProjectId) {
         acc.set(sectionId, entry);
       }
       entry.taskIds.push(t.id);
-      entry.statusCounts[statusBucket(t.status)] += 1;
+      entry.statusCounts[statusBucket(t.status, t.raw)] += 1;
     } else {
       // pid === selfId, or no/foreign project → belongs to the selected scope.
       ownTaskIds.push(t.id);

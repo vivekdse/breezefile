@@ -1,0 +1,47 @@
+/* The New Home status palette — ONE definition, read by every surface that
+   paints a status (HeroStats, RosterTable, TaskDetailDialog, ApprovalBar,
+   OutcomesPanel, TaskMatrix). Every value routes through the theme-aware base
+   tokens (src/styles/tokens.css), so [data-theme="light"] needs no overrides
+   and no file ever hardcodes a status hue.
+
+   This block previously existed TWICE — once on .nh (NewHomePage.css) and once
+   mirrored onto .tm (TaskMatrix.css), because the matrix can render outside a
+   .nh ancestor and still needs the vars to resolve. The copies drifted on the
+   first retune that touched them: --nh-open landed as --accent in the matrix
+   and a --warn cut in the roster, so one status wore two colors depending on
+   which surface you were looking at. The selector list below keeps the matrix
+   self-sufficient without a second source of truth — add a surface by adding
+   it here, never by copying the block.
+
+   On the pairs that carry meaning:
+
+   scheduled vs open are the two halves of the old --nh-queued pair, and they
+   are deliberately NOT the same hue — the whole point of the split is that the
+   two states feel different. `scheduled` keeps the old muted neutral: it's
+   handled, the clock has it, nothing for you to do. `open` leans toward the
+   attention end (a desaturated cut of --warn) because nobody is coming and it
+   wants a human — but it is mixed DOWN toward the muted token on purpose so it
+   stays clearly subordinate to --nh-needs (full --warn) and --nh-failed, which
+   are asking for you SPECIFICALLY. `open` must also stay off --accent: that is
+   --nh-progress, and "nobody is coming" reading identically to "an agent is on
+   it right now" inverts the meaning.
+
+   cancelled is the flattest thing on the panel — quieter than either waiting
+   state, so a withdrawn run can never be mistaken for one still to come. */
+.nh,
+.tm {
+  --nh-done: var(--ok);
+  --nh-done-soft: color-mix(in srgb, var(--ok) 16%, transparent);
+  --nh-progress: var(--accent);
+  --nh-progress-soft: var(--accent-soft);
+  --nh-scheduled: var(--muted-on-panel);
+  --nh-scheduled-soft: color-mix(in srgb, var(--muted-on-panel) 14%, transparent);
+  --nh-open: color-mix(in srgb, var(--warn) 45%, var(--muted-on-panel));
+  --nh-open-soft: color-mix(in srgb, var(--warn) 9%, transparent);
+  --nh-needs: var(--warn);
+  --nh-needs-soft: var(--warn-soft);
+  --nh-failed: var(--err);
+  --nh-failed-soft: var(--err-soft);
+  --nh-cancelled: color-mix(in srgb, var(--muted-on-panel) 70%, transparent);
+  --nh-cancelled-soft: color-mix(in srgb, var(--muted-on-panel) 8%, transparent);
+}

@@ -129,14 +129,14 @@ function basename(p: string): string {
 function hasValue(v: unknown): boolean {
   return v !== undefined && v !== null && v !== '';
 }
-// task-4045bcee23cb (U3a polish a) — 'pending' says "Queued" here too, matching
+// task-4045bcee23cb (U3a polish a) — 'pending' says "Open" here too, matching
 // the roster's own status vocabulary (STATUS_LABEL/META_PILL in RosterTable.tsx)
-// so a step never says "Pending" in one place and "Queued" in another for the
+// so a step never says "Pending" in one place and "Open" in another for the
 // identical not-yet-started state.
 const DEF_STATUS_LABEL: Record<MergedStepStatus, string> = {
   done: 'Done',
   active: 'In progress',
-  pending: 'Queued',
+  pending: 'Open',
   skip: 'Not needed',
   // task-f26e7745eda6 — merged-in from the child's server status.
   cancelled: 'Cancelled',

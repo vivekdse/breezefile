@@ -24,7 +24,7 @@
 
 // Terminal buckets subject to the recency cutoff. 'failed' stays visible
 // regardless of age — a failure needs a human even if it's old; only cleanly
-// finished work (done) ages out. 'needs'/'progress'/'queued' are live by
+// finished work (done) ages out. 'needs'/'progress'/'scheduled'/'open' are live by
 // definition and never cut.
 const AGING_STATUSES = new Set(['done']);
 

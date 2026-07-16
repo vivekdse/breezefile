@@ -26,7 +26,7 @@ test('recencyOf: reads lastActionAt, 0 when missing/invalid', () => {
 test('sortByRecency: newest activity first', () => {
   const out = sortByRecency([
     row('a', 'done', 100),
-    row('b', 'queued', 300),
+    row('b', 'open', 300),
     row('c', 'progress', 200),
   ]);
   assert.deepEqual(out.map((r) => r.id), ['b', 'c', 'a']);
@@ -34,9 +34,9 @@ test('sortByRecency: newest activity first', () => {
 
 test('sortByRecency: ties break by priority (higher first) then id', () => {
   const out = sortByRecency([
-    row('a', 'queued', 100, { priority: 1 }),
-    row('b', 'queued', 100, { priority: 5 }),
-    row('c', 'queued', 100, { priority: 5 }),
+    row('a', 'open', 100, { priority: 1 }),
+    row('b', 'open', 100, { priority: 5 }),
+    row('c', 'open', 100, { priority: 5 }),
   ]);
   // b and c both priority 5 (b<c by id), then a.
   assert.deepEqual(out.map((r) => r.id), ['b', 'c', 'a']);
@@ -44,14 +44,14 @@ test('sortByRecency: ties break by priority (higher first) then id', () => {
 
 test('sortByRecency: reads priority off raw.priority when not top-level', () => {
   const out = sortByRecency([
-    row('a', 'queued', 100, { raw: { priority: 2 } }),
-    row('b', 'queued', 100, { raw: { priority: 9 } }),
+    row('a', 'open', 100, { raw: { priority: 2 } }),
+    row('b', 'open', 100, { raw: { priority: 9 } }),
   ]);
   assert.deepEqual(out.map((r) => r.id), ['b', 'a']);
 });
 
 test('sortByRecency: does not mutate input; missing timestamps sort last', () => {
-  const input = [row('a', 'queued', null), row('b', 'queued', 500)];
+  const input = [row('a', 'open', null), row('b', 'open', 500)];
   const out = sortByRecency(input);
   assert.deepEqual(out.map((r) => r.id), ['b', 'a']);
   assert.deepEqual(input.map((r) => r.id), ['a', 'b']); // unmutated
@@ -69,7 +69,7 @@ test('partitionByRecency: old DONE tasks go cold; live work stays hot', () => {
     [
       row('recent-done', 'done', now - 2 * DAY),
       row('old-done', 'done', now - 30 * DAY),
-      row('old-queued', 'queued', now - 30 * DAY), // live status → never cold
+      row('old-open', 'open', now - 30 * DAY), // live status → never cold
       row('old-progress', 'progress', now - 30 * DAY),
       row('old-needs', 'needs', now - 30 * DAY),
     ],
@@ -78,7 +78,7 @@ test('partitionByRecency: old DONE tasks go cold; live work stays hot', () => {
   assert.deepEqual(cold.map((r) => r.id), ['old-done']);
   assert.deepEqual(
     hot.map((r) => r.id).sort(),
-    ['old-needs', 'old-progress', 'old-queued', 'recent-done'],
+    ['old-needs', 'old-open', 'old-progress', 'recent-done'],
   );
 });
 
@@ -110,7 +110,7 @@ test('partitionByRecency: cutoff boundary — exactly hotDays old is still hot',
 const noGroups = () => null;
 
 test('paginateGroupAware: limits ungrouped rows to N units', () => {
-  const rows = [row('a', 'queued', 5), row('b', 'queued', 4), row('c', 'queued', 3)];
+  const rows = [row('a', 'open', 5), row('b', 'open', 4), row('c', 'open', 3)];
   const { page, shown, total, hasMore } = paginateGroupAware(rows, noGroups, { limit: 2 });
   assert.deepEqual(page.map((r) => r.id), ['a', 'b']);
   assert.equal(shown, 2);
@@ -122,9 +122,9 @@ test('paginateGroupAware: a group counts as ONE unit and never splits', () => {
   // g1 has two rows (a,c) interleaved with an ungrouped row b in sort order.
   const rows = [
     row('a', 'done', 9), // g1
-    row('b', 'queued', 8), // ungrouped
+    row('b', 'open', 8), // ungrouped
     row('c', 'done', 7), // g1 (same group as a)
-    row('d', 'queued', 6), // ungrouped
+    row('d', 'open', 6), // ungrouped
   ];
   const key = (r) => (r.id === 'a' || r.id === 'c' ? 'g1' : null);
   // limit 2 units: unit1 = g1 (admits a AND its later row c), unit2 = b. d dropped.
@@ -136,7 +136,7 @@ test('paginateGroupAware: a group counts as ONE unit and never splits', () => {
 });
 
 test('paginateGroupAware: limit >= total units returns everything, hasMore false', () => {
-  const rows = [row('a', 'queued', 2), row('b', 'queued', 1)];
+  const rows = [row('a', 'open', 2), row('b', 'open', 1)];
   const { page, shown, total, hasMore } = paginateGroupAware(rows, noGroups, { limit: 10 });
   assert.deepEqual(page.map((r) => r.id), ['a', 'b']);
   assert.equal(shown, 2);
@@ -147,7 +147,7 @@ test('paginateGroupAware: limit >= total units returns everything, hasMore false
 test('paginateGroupAware: an already-admitted group later row is kept even past the unit limit', () => {
   const rows = [
     row('a', 'done', 9), // g1
-    row('b', 'queued', 8), // ungrouped (unit 2)
+    row('b', 'open', 8), // ungrouped (unit 2)
     row('c', 'done', 1), // g1 again, sorts last
   ];
   const key = (r) => (r.id === 'a' || r.id === 'c' ? 'g1' : null);
@@ -158,7 +158,7 @@ test('paginateGroupAware: an already-admitted group later row is kept even past 
 
 test('paginateGroupAware: tolerates empty / no-limit', () => {
   assert.deepEqual(paginateGroupAware([], noGroups, { limit: 5 }).page, []);
-  const rows = [row('a', 'queued', 1)];
+  const rows = [row('a', 'open', 1)];
   // limit 0 falls back to "all"
   const r = paginateGroupAware(rows, noGroups, { limit: 0 });
   assert.deepEqual(r.page.map((x) => x.id), ['a']);
