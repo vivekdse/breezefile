@@ -267,6 +267,19 @@ type Fm = {
     count: number;
     webContentsId: number | null;
   }>;
+  // Brain (task-35dde066caf7 "Brain C5"): tiered, curated knowledge — SiteNote
+  // list (tier + confidence), get_tool, and client-side reject bookkeeping for
+  // CANDIDATE knowledge. NON-PHI. See electron/typebuild/brain-client.ts +
+  // site-memory.ts + brain-confirm.ts.
+  brainSiteNotes: (
+    domain: string,
+    opts?: { limit?: number },
+  ) => Promise<{ domain: string; notes: BrainSiteNote[]; offline: boolean }>;
+  brainGetTool: (opts: {
+    toolId?: string;
+    signature?: string;
+  }) => Promise<BrainSiteNoteRow | null>;
+  brainRejectCandidate: (id: string) => Promise<{ ok: boolean }>;
   // Full-page screenshot → PDF: auto-scroll + capture each viewport, save as
   // one PDF (electron/browser/screenshot-pdf.ts).
   browserScreenshotPdf: (
@@ -989,6 +1002,42 @@ export type UrlSuggestion = {
   host: string;
   title?: string;
   kind: 'history' | 'bookmark' | 'known';
+};
+
+// One SiteNote as it crosses the bridge (task-35dde066caf7 "Brain C5") — mirrors
+// electron/typebuild/site-memory.ts SiteNote. Brain-sourced notes carry tier +
+// confidence; legacy chromeext notes omit them. NON-PHI.
+export type BrainSiteNote = {
+  id: string;
+  domain: string;
+  task_tag?: string | null;
+  kind: string;
+  body: string;
+  url_pattern?: string | null;
+  updated_at?: string | null;
+  tier?: 'global' | 'org' | 'task';
+  tierLabel?: string;
+  tierDescription?: string;
+  confidence?: number;
+  confidenceLevel?: 'high' | 'medium' | 'low';
+  source?: 'chromeext' | 'brain';
+};
+
+// A raw brain MemoryRowOut as returned by get_tool (electron/typebuild/
+// brain-client.ts BrainMemoryRow). NON-PHI: tool code / operational content.
+export type BrainSiteNoteRow = {
+  id: string;
+  tier: 'global' | 'org' | 'task';
+  content: string;
+  summary?: string | null;
+  artifact?: string | null;
+  hit_rate?: number | null;
+  downstream_success_rate?: number | null;
+  staleness_score: number;
+  avg_latency_ms?: number | null;
+  vec_distance: number;
+  composite_score: number;
+  source_rank: number;
 };
 
 // One credential-vault entry as it crosses the bridge (NAMES only — never a

@@ -1,0 +1,58 @@
+/* task-35dde066caf7 ("Brain C5") — SiteNote list surface. */
+
+.site-notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.site-notes-panel__candidates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.site-notes-panel__empty,
+.site-notes-panel__offline {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  padding: var(--sp-2) 0;
+}
+
+.site-notes-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.site-notes-panel__row {
+  padding: var(--sp-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.site-notes-panel__row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.site-notes-panel__kind {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.site-notes-panel__body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink-2, var(--ink));
+}

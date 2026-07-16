@@ -31,7 +31,7 @@ import { addMemory } from './tools/memory.mjs';
 // MAIN-process write-through to the SHARED online site-memory store. record.ts
 // runs in MAIN (it holds the real Firebase token via typebuildFetch), so it
 // reaches the server directly — no localhost /app/site-memory proxy hop needed.
-import { addSiteMemory } from '../typebuild/site-memory';
+import { addSiteMemory, captureTool } from '../typebuild/site-memory';
 
 export type RawCandidate = { kind: string; selector: string };
 export type ScoredCandidate = RawCandidate & { matchCount?: number; score?: number };
@@ -282,9 +282,22 @@ export async function stopRecording(opts: { skillName?: string } = {}): Promise<
     try {
       // WRITE-THROUGH to the SHARED online store so the recorded skill is shared
       // like other site memory. addSiteMemory also refreshes the local cache.
-      await addSiteMemory(site, text, { kind: 'flow' });
+      // skipBrain: true here — a recorded flow is a discovered REUSABLE PATH,
+      // which fits the brain's propose_tool primitive better than a generic
+      // memory observation (addSiteMemory's default mirror below), so we call
+      // captureTool explicitly instead of double-writing both shapes for the
+      // same content (task-1a6da52a3017 "Brain C1").
+      await addSiteMemory(site, text, { kind: 'flow', skipBrain: true });
       saved = true;
       online = true;
+      // Brain C1: propose the recorded flow as a candidate reusable tool —
+      // fire-and-forget, never blocks/throws into the recording stop path.
+      // The formatted skill text IS the "code" (a numbered selector/step
+      // sequence) built from selectors + placeholder KEYS only (formatSkill),
+      // same NON-PHI guarantee as the site-memory write above.
+      captureTool(text, `Recorded browser flow${opts.skillName ? `: ${opts.skillName}` : ''} on ${site}`, {
+        domain: site,
+      });
     } catch {
       // Offline / server unreachable / rejected — keep the recording on THIS
       // machine as the offline cache so it isn't lost. A later online recall

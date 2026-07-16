@@ -4327,6 +4327,13 @@ export class TypeBuildTaskSource implements TaskSource {
     //  - contextBundleAddendum (task-9bd1389e64c6): the pre-prepared relevant-sites
     //    + memories bundle (NON-PHI), appended as its own addendum so the agent
     //    skips discovery round-trips. Skipped on resume (--continue already has it).
+    //  - brainContextAddendum (task-8f71349656db "Brain C2"): the anticipatory
+    //    planner's SIBLING addendum — the federated brain's assemble_context,
+    //    called from NON-PHI facets already sitting in the cached list row
+    //    (templateId as a task-type proxy; no title/body ever sent). Layers
+    //    global tools + org rules + task notes + Brain #7 candidate_sites on
+    //    top of contextBundleAddendum, not instead of it. Skipped on resume for
+    //    the same reason (--continue already has it).
     //  - projectCtx (task-ab1d7955e23f): project-derived cwd + cascading
     //    instructions when the task belongs to a project. {} on miss.
     //  - detail (getTask): the task detail (title/body/dataKeys/outputSchema/skills)
@@ -4364,8 +4371,16 @@ export class TypeBuildTaskSource implements TaskSource {
     const { ensureTypebuildPlugin } = await import('../typebuild/plugin-bootstrap');
 
     timing(tflow, 'wave1 dispatch');
-    const [minted, operatorInstructions, contextBundleAddendum, projectCtx, detail, connectionPlan, pluginBoot] =
-      await Promise.all([
+    const [
+      minted,
+      operatorInstructions,
+      contextBundleAddendum,
+      brainContextAddendum,
+      projectCtx,
+      detail,
+      connectionPlan,
+      pluginBoot,
+    ] = await Promise.all([
         // QA 2026-07-13 — one bounded retry on a transient 'unreachable' mint
         // (the server has episodes of multi-second stalls; a single 8s-timeout
         // strike used to fail the whole Start). Only the unreachable code
@@ -4387,6 +4402,25 @@ export class TypeBuildTaskSource implements TaskSource {
               .then(({ fetchTaskContextBundle, renderBundleAddendum }) =>
                 fetchTaskContextBundle(id).then((bundle) => renderBundleAddendum(bundle)),
               )
+              .catch(() => '')),
+        probe('brain-context', opts.resume
+          ? Promise.resolve('')
+          : import('../typebuild/anticipatory-context')
+              .then(({ fetchAnticipatoryAddendum }) => {
+                // NON-PHI facets only, all available synchronously from the
+                // cached list row — no extra fetch, matching "immediately, as
+                // the task lands." templateId is the task-type proxy (never
+                // the PHI title/body); domain/url/entities are left unset
+                // here (the intake schema that would populate them from
+                // start_url is not implemented yet — see anticipatory-
+                // context.ts's header) so the server's Brain #7
+                // candidate-site inference does the work instead.
+                const cachedRow = this.cache.get(id);
+                return fetchAnticipatoryAddendum({
+                  taskId: id,
+                  taskType: cachedRow?.templateId ?? undefined,
+                }).then((r) => r.addendum);
+              })
               .catch(() => '')),
         probe('project', this.resolveLaunchContext(id)),
         probe('getTask', opts.resume ? Promise.resolve(null) : this.getTask(id).catch(() => null)),
@@ -4636,6 +4670,14 @@ export class TypeBuildTaskSource implements TaskSource {
         // there is no ready bundle (or on a resume).
         ...(contextBundleAddendum
           ? ['--append-system-prompt', contextBundleAddendum]
+          : []),
+        // task-8f71349656db "Brain C2" — the anticipatory planner's SIBLING
+        // addendum from the federated brain (global tools + org rules + task
+        // notes + Brain #7 candidate_sites). Layered on independently of
+        // contextBundleAddendum above — either, both, or neither may be
+        // present; each degrades to '' on its own failure.
+        ...(brainContextAddendum
+          ? ['--append-system-prompt', brainContextAddendum]
           : []),
       ],
       env: {

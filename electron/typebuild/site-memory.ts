@@ -39,6 +39,26 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { stateDir } from '../core/profile.mjs';
 import { API_BASE, typebuildFetch } from './task-data';
+import {
+  confidenceLevel,
+  confidenceScore,
+  recall as brainRecall,
+  tierDescription,
+  tierLabel,
+  type BrainMemoryRow,
+  type BrainTier,
+  type ConfidenceLevel,
+} from './brain-client';
+// RUNTIME edge capture (task-1a6da52a3017 "Brain C1"): stream writes to the
+// brain DURING a run, never blocking on curation. See the "Brain edge capture"
+// section below for the non-blocking wrappers every call site should use
+// instead of brain-writes.ts directly.
+import {
+  link as brainLink,
+  proposeTool as brainProposeTool,
+  recordObservation as brainRecordObservation,
+  type BrainWriteResult,
+} from './brain-writes';
 
 /** Root of the local cache (mirrors memory.mjs memoryDir()). Override with
  *  $BREEZE_MEMORY_DIR (tests). Server is canonical; this is the offline read. */
@@ -56,7 +76,17 @@ function cacheFileFor(scope: CacheScope, key: string): string {
   return path.join(memoryDir(), scope === 'task' ? 'tasks' : 'sites', safe + '.json');
 }
 
-/** One shared site-memory note (the NON-PHI fields we consume). */
+/** One shared site-memory note (the NON-PHI fields we consume).
+ *
+ *  task-35dde066caf7 ("Brain C5"): notes can now come from TWO stores —
+ *    - the legacy chromeext /chromeext/site-memory sqlite store (no tier
+ *      concept; `tier`/scoring fields below are absent for these notes), and
+ *    - the Brain's tiered, curated knowledge (brain-client.ts `recall`/
+ *      `getTool`), which DOES carry a tier (global/org/task) and quality
+ *      signals. The optional fields below let ONE rendering surface show both
+ *      uniformly — present only for brain-sourced notes. See
+ *      brainRowToSiteNote() for the mapping and mergeBrainNotes() for pulling
+ *      brain recall results alongside the legacy store's notes. */
 export interface SiteNote {
   id: string;
   domain: string;
@@ -66,6 +96,47 @@ export interface SiteNote {
   body: string;
   url_pattern?: string | null;
   updated_at?: string | null;
+  /** Brain-sourced notes only: which of the three isolation tiers this came
+   *  from (doc §2.2) — global (cross-org), org (this tenant), or task (this
+   *  run only). Absent for legacy chromeext notes (no tier concept there). */
+  tier?: BrainTier;
+  /** Human label/description for `tier`, precomputed so the renderer doesn't
+   *  need to import brain-client just to label a badge. */
+  tierLabel?: string;
+  tierDescription?: string;
+  /** Brain-sourced notes only: a 0-1 confidence/quality indicator derived from
+   *  the brain's scoring fields (hit_rate, downstream_success_rate,
+   *  staleness_score, composite_score — see brain-client.ts confidenceScore).
+   *  Display-only; the brain remains the ranking source of truth. */
+  confidence?: number;
+  confidenceLevel?: ConfidenceLevel;
+  /** Which store this note came from — lets the UI badge legacy vs brain notes
+   *  distinctly if it wants to, without inferring it from tier's presence. */
+  source?: 'chromeext' | 'brain';
+}
+
+/** Map one brain MemoryRow (from recall/get_tool) into the shared SiteNote
+ *  shape so the existing site-notes UI can render brain-sourced knowledge
+ *  alongside legacy chromeext notes with no separate code path. ACTIVE only:
+ *  every row recall()/getTool() can return is already active — see
+ *  brain-client.ts and brain_api's assemble_context/recall docstrings
+ *  ("Returns only active (curated) rows"). */
+export function brainRowToSiteNote(row: BrainMemoryRow, domain = ''): SiteNote {
+  const score = confidenceScore(row);
+  return {
+    id: row.id,
+    domain,
+    kind: row.artifact ? 'tool' : 'memory',
+    body: row.summary || row.content,
+    url_pattern: row.artifact ?? null,
+    updated_at: null,
+    tier: row.tier,
+    tierLabel: tierLabel(row.tier),
+    tierDescription: tierDescription(row.tier),
+    confidence: score,
+    confidenceLevel: confidenceLevel(score),
+    source: 'brain',
+  };
 }
 
 function asNotes(value: unknown): SiteNote[] {
@@ -115,6 +186,130 @@ function readSiteCache(domain: string): SiteNote[] {
   return readCache('site', domain);
 }
 
+// ─── Brain edge capture (task-1a6da52a3017 "Brain C1") ─────────────────────
+//
+// The operator streams captures to the brain DURING a run, never blocking on
+// curation: write locally first (fast, always available — the cache helpers
+// above), then forward to the brain API ASYNCHRONOUSLY. If the brain call
+// fails (network, 401, PHI rejection, whatever) we log and continue — the
+// local write and the run itself are never at risk.
+//
+// `tier` is 'org' or 'task' ONLY: an edge caller never writes 'global' (only
+// the curator promotes there, via its own async sweep). Callers pick:
+//   - 'task' for anything scoped to just this run (a one-off DOM shape, a
+//     failure seen only in this execution, a metric for this run).
+//   - 'org' for anything this tenant should keep seeing across future runs
+//     (a durable site quirk, a reusable workaround, a human correction that
+//     will recur).
+//
+// Every wrapper below returns void — it never blocks or throws into the
+// caller's control flow. Failures are logged (console.warn) with NO body
+// content, matching the addSiteMemory/addTaskMemory "never log a body"
+// discipline above.
+
+function logBrainWriteFailure(op: string, result: BrainWriteResult): void {
+  // NON-PHI: reason/status/hits are heuristic labels, never the body/code we
+  // sent. `hits` (PHI reason only) are category names (e.g. "ssn", "dob"),
+  // not the flagged text itself.
+  if (result.reason === 'phi') {
+    console.warn(`[brain] ${op} rejected (PHI-shaped text)`, { hits: result.hits });
+  } else {
+    console.warn(`[brain] ${op} failed`, { reason: result.reason, status: result.status });
+  }
+}
+
+/** Options common to every capture call: which tenant/run this write is under. */
+export interface BrainCaptureContext {
+  tenantId?: string;
+  taskId?: string;
+  projectId?: string;
+}
+
+/** Fire-and-forget: record a NON-PHI observation (novel env, failure state,
+ *  DOM shape, human correction, execution metric — anything worth the brain
+ *  remembering that isn't a reusable tool/code path). Runs async; never
+ *  awaited by the caller, never throws, logs (no body) on failure. */
+export function captureObservation(
+  kind: 'memory' | 'tool',
+  body: string,
+  opts: BrainCaptureContext & {
+    tier?: 'org' | 'task';
+    domain?: string;
+    urlPattern?: string;
+    summary?: string;
+    evidence?: Record<string, unknown>;
+  } = {},
+): void {
+  void brainRecordObservation({
+    tier: opts.tier ?? (opts.taskId ? 'task' : 'org'),
+    kind,
+    body,
+    domain: opts.domain,
+    urlPattern: opts.urlPattern,
+    taskId: opts.taskId,
+    projectId: opts.projectId,
+    summary: opts.summary,
+    evidence: opts.evidence,
+    tenantId: opts.tenantId,
+  })
+    .then((r) => {
+      if (!r.ok) logBrainWriteFailure('record_observation', r);
+    })
+    .catch(() => {
+      /* recordObservation itself never throws; this is defense in depth */
+    });
+}
+
+/** Fire-and-forget: propose a candidate reusable tool/workaround the run just
+ *  discovered (code + a human-readable description of what it does). Lands as
+ *  status='candidate' — the curator decides whether it generalizes further.
+ *  Runs async; never throws, logs (no body) on failure. */
+export function captureTool(
+  code: string,
+  context: string,
+  opts: BrainCaptureContext & { domain?: string; evidence?: Record<string, unknown> } = {},
+): void {
+  void brainProposeTool({
+    code,
+    context,
+    domain: opts.domain,
+    evidence: opts.evidence,
+    tenantId: opts.tenantId,
+  })
+    .then((r) => {
+      if (!r.ok) logBrainWriteFailure('propose_tool', r);
+    })
+    .catch(() => {
+      /* proposeTool itself never throws; defense in depth */
+    });
+}
+
+/** Fire-and-forget: link two memory nodes with a directed relation (e.g. this
+ *  carrier <-> this exception, this tool <-> this portal version) — the agent
+ *  noticing a relationship mid-run. Runs async; never throws, logs on failure.
+ *  Both node ids must already exist (typically ids echoed back by a prior
+ *  captureObservation/captureTool call in the SAME run). */
+export function captureLink(
+  fromId: string,
+  toId: string,
+  relation: string,
+  opts: BrainCaptureContext & { weight?: number } = {},
+): void {
+  void brainLink({
+    fromId,
+    toId,
+    relation,
+    weight: opts.weight,
+    tenantId: opts.tenantId,
+  })
+    .then((r) => {
+      if (!r.ok) logBrainWriteFailure('link', r);
+    })
+    .catch(() => {
+      /* link itself never throws; defense in depth */
+    });
+}
+
 /** Recall the shared notes for a page (domain or full URL). Server-canonical;
  *  on a transport/HTTP failure (offline) we serve the local cache instead so a
  *  session start still gets whatever was last synced. The server normalizes the
@@ -150,7 +345,7 @@ export async function recallSiteMemory(
 export async function addSiteMemory(
   domain: string,
   body: string,
-  opts: { kind?: string; url_pattern?: string } = {},
+  opts: { kind?: string; url_pattern?: string; tenantId?: string; skipBrain?: boolean } = {},
 ): Promise<{ ok: boolean; id?: string; note?: SiteNote }> {
   const payload: Record<string, string> = { domain, body };
   if (opts.kind) payload.kind = opts.kind;
@@ -175,6 +370,20 @@ export async function addSiteMemory(
   const note = asNotes([data.note])[0];
   // Refresh the cache so an immediate offline recall sees the new note.
   void recallSiteMemory(domain).catch(() => {});
+  // Brain C1: write-through-buffer semantics — the legacy write above is the
+  // fast, always-available local-first path (it just landed, cache refreshed);
+  // now mirror it to the brain ASYNCHRONOUSLY as an 'org'-tier observation (a
+  // site note is durable how-to, meant to recur across future runs on this
+  // domain — not scoped to just one task). Never awaited, never blocks the
+  // caller, failure is logged only (see captureObservation).
+  if (!opts.skipBrain) {
+    captureObservation('memory', body, {
+      tier: 'org',
+      domain,
+      urlPattern: opts.url_pattern,
+      tenantId: opts.tenantId,
+    });
+  }
   return { ok: true, id: data.id, note };
 }
 
@@ -208,7 +417,7 @@ export async function recallTaskMemory(
 export async function addTaskMemory(
   taskTag: string,
   body: string,
-  opts: { kind?: string; url_pattern?: string } = {},
+  opts: { kind?: string; url_pattern?: string; tenantId?: string; skipBrain?: boolean } = {},
 ): Promise<{ ok: boolean; id?: string; note?: SiteNote }> {
   const payload: Record<string, string> = { task_tag: taskTag, body };
   if (opts.kind) payload.kind = opts.kind;
@@ -232,6 +441,17 @@ export async function addTaskMemory(
   }
   const note = asNotes([data.note])[0];
   void recallTaskMemory(taskTag).catch(() => {});
+  // Brain C1: mirror to the brain as a 'task'-tier observation — scoped to
+  // THIS run's task_tag, matching the local write's own scope. Async,
+  // non-blocking, failure-logged-only (see captureObservation).
+  if (!opts.skipBrain) {
+    captureObservation('memory', body, {
+      tier: 'task',
+      taskId: taskTag,
+      urlPattern: opts.url_pattern,
+      tenantId: opts.tenantId,
+    });
+  }
   return { ok: true, id: data.id, note };
 }
 
@@ -248,4 +468,45 @@ export async function deleteSiteMemory(noteId: string): Promise<{ ok: boolean }>
     });
   }
   return { ok: true };
+}
+
+/** Recall a page's notes from BOTH stores and merge for the SiteNote surface
+ *  (task-35dde066caf7 "Brain C5"): the legacy chromeext notes (recallSiteMemory
+ *  above) PLUS the Brain's tiered, curated knowledge for the same domain
+ *  (brain-client.ts `recall`, scoped by a `domain` filter). Brain rows are
+ *  mapped via brainRowToSiteNote so tier + confidence render in the same list.
+ *
+ *  ACTIVE-ONLY GUARANTEE: brain_api's recall/assemble_context return only
+ *  active (curated) rows by contract (never candidates) — see brain-client.ts
+ *  and brain_api's api.py docstrings. So the notes returned here, and the
+ *  cache written for them, mirror ACTIVE knowledge only; nothing CANDIDATE-
+ *  tier ever reaches the on-disk cache through this path. A candidate a
+ *  session just proposed (record_observation/propose_tool's echoed node_id)
+ *  is handled separately by brain-confirm.ts and is NEVER written to this
+ *  cache before the curator promotes it.
+ *
+ *  Best-effort: a brain recall failure (offline brain, no tenant resolved,
+ *  etc.) never fails the overall call — it just contributes zero brain notes,
+ *  same degrade-to-nothing discipline as brain-client.ts's own functions. */
+export async function recallSiteMemoryWithBrain(
+  domain: string,
+  opts: { kind?: string; limit?: number; tenantId?: string } = {},
+): Promise<{ domain: string; notes: SiteNote[]; offline: boolean }> {
+  const legacy = await recallSiteMemory(domain, opts);
+  let brainNotes: SiteNote[] = [];
+  try {
+    const rows = await brainRecall(domain, {
+      filters: { domain },
+      topK: opts.limit ?? 10,
+      tenantId: opts.tenantId,
+    });
+    brainNotes = rows.map((r) => brainRowToSiteNote(r, domain));
+  } catch {
+    /* brain recall is best-effort; legacy notes still returned */
+  }
+  return {
+    domain: legacy.domain,
+    notes: [...brainNotes, ...legacy.notes],
+    offline: legacy.offline,
+  };
 }

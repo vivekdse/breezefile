@@ -1,0 +1,50 @@
+/* task-35dde066caf7 ("Brain C5") — confirm/reject card for CANDIDATE brain
+   knowledge. Same "bordered inline panel reusing ConfirmDialog's .confirm__*
+   typography/buttons" convention as src/copilot/actionKit.css's
+   .ck-confirm-card (that one is scoped to the copilot chat transcript; this
+   file gives the SAME look to call sites outside the CopilotKit tree, e.g. a
+   site-notes panel, without importing across the copilot/ directory). */
+
+.candidate-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  margin: var(--sp-1) 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.candidate-card .confirm__actions {
+  justify-content: flex-start;
+  margin-top: 0;
+}
+
+.candidate-card__preview {
+  font-family: ui-monospace, monospace;
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: var(--sp-2);
+  border-left: 2px solid var(--rule);
+  background: var(--bg-2, var(--panel-2));
+  border-radius: var(--r-sm, 4px);
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.candidate-card__note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.candidate-card--done {
+  padding: var(--sp-2) var(--sp-3);
+}
+.candidate-card--done .confirm__body {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}

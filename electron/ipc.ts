@@ -2776,6 +2776,31 @@ end tell`;
   );
   ipcMain.handle('browser:record:state', () => currentBrowserRecording());
 
+  // ─── Brain (task-35dde066caf7 "Brain C5") ─────────────────────────────────
+  // Renderer-facing IPC for the tiered, curated knowledge surface: SiteNote
+  // list (tier + confidence), get_tool, and the client-side reject bookkeeping
+  // for CANDIDATE knowledge. See electron/typebuild/brain-client.ts +
+  // electron/typebuild/site-memory.ts (recallSiteMemoryWithBrain) +
+  // electron/typebuild/brain-confirm.ts for the actual logic; this just wires
+  // it to the renderer the same way browser:suggest wires suggestUrls above.
+  // NON-PHI throughout.
+  ipcMain.handle('brain:site-notes', async (_e, domain: string, opts?: { limit?: number }) => {
+    const { recallSiteMemoryWithBrain } = await import('./typebuild/site-memory');
+    return recallSiteMemoryWithBrain(domain, opts ?? {});
+  });
+  ipcMain.handle(
+    'brain:get-tool',
+    async (_e, opts: { toolId?: string; signature?: string }) => {
+      const { getTool } = await import('./typebuild/brain-client');
+      return getTool(opts);
+    },
+  );
+  ipcMain.handle('brain:reject-candidate', async (_e, id: string) => {
+    const { rejectCandidateLocally } = await import('./typebuild/brain-confirm');
+    rejectCandidateLocally({ id });
+    return { ok: true };
+  });
+
   // Full-page screenshot → PDF: auto-scroll the view, screenshot each
   // viewport, assemble into one PDF (electron/browser/screenshot-pdf.ts).
   ipcMain.handle(

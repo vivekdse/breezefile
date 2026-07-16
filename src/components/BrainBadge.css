@@ -1,0 +1,62 @@
+/* task-35dde066caf7 ("Brain C5") — tier + confidence pills for the SiteNote
+   surface. Text-pill style, same "small badge over raw number" convention as
+   TaskIndicators.css's task-attn. */
+
+.brain-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  border: 1px solid var(--rule);
+  color: var(--ink-2, var(--ink));
+  background: transparent;
+}
+
+/* Tier pills — global gets the strongest accent (most broadly trusted/shared),
+   org a neutral outline, task the quietest (most ephemeral/local). */
+.brain-badge--tier-global {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.brain-badge--tier-org {
+  border-color: var(--rule);
+  color: var(--ink-2, var(--ink));
+}
+.brain-badge--tier-task {
+  border-color: var(--rule);
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+/* Confidence pills reuse the same red/amber/green semantics as the task
+   status dot (task-dot--pending/in_progress/done in TaskIndicators.css). */
+.brain-badge__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.brain-badge--conf-high .brain-badge__dot {
+  background: var(--ok);
+}
+.brain-badge--conf-medium .brain-badge__dot {
+  background: var(--warn);
+}
+.brain-badge--conf-low .brain-badge__dot {
+  background: var(--err);
+}
+.brain-badge--conf-high {
+  border-color: var(--ok);
+}
+.brain-badge--conf-medium {
+  border-color: var(--warn);
+}
+.brain-badge--conf-low {
+  border-color: var(--err);
+}

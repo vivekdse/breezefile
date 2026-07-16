@@ -386,6 +386,119 @@ async function route(req: IncomingMessage, res: ServerResponse) {
       return sendJson(res, 200, out);
     }
 
+    // task-1334a1d49948 "Brain C3" — client inline metacognition. The browser
+    // helper (electron/browser/cli.mjs, via tools/run-metrics-brain.mjs)
+    // times every verb invocation LOCALLY (no token needed for that) but has
+    // no Firebase session to write the brain observation itself, so it
+    // proxies through MAIN here — same shape as /app/site-memory above.
+    // NON-PHI: verb name, domain, timing numbers, streak count only.
+    if (p === '/app/run-metric' && m === 'POST') {
+      const body = await readJson<{
+        kind?: 'memory' | 'tool';
+        body?: string;
+        domain?: string;
+        task_id?: string;
+        evidence?: Record<string, unknown>;
+        proposeTool?: boolean;
+        code?: string;
+        context?: string;
+      }>(req);
+      const { captureObservation, captureTool } = await import('./typebuild/site-memory');
+      if (body.proposeTool) {
+        if (!body.code || !body.context) {
+          throw Object.assign(new Error('code and context required for a tool proposal'), {
+            status: 400,
+          });
+        }
+        captureTool(body.code, body.context, { domain: body.domain });
+        return sendJson(res, 202, { ok: true });
+      }
+      if (!body.body) {
+        throw Object.assign(new Error('body required'), { status: 400 });
+      }
+      captureObservation(body.kind ?? 'memory', body.body, {
+        tier: body.task_id ? 'task' : 'org',
+        domain: body.domain,
+        taskId: body.task_id,
+        evidence: body.evidence,
+      });
+      // Fire-and-forget by design (captureObservation never blocks/throws) —
+      // ack immediately so the CLI subprocess (which doesn't await this) never
+      // waits on the brain round-trip.
+      return sendJson(res, 202, { ok: true });
+    }
+
+    // task-8f71349656db "Brain C2" — mid-run recall(query, scope, filters) for
+    // whatever the launch-time anticipatory-planner bundle didn't cover
+    // (POST /brain/recall via brain-client.ts). Same shape as /app/site-memory
+    // above: the agent's session holds no Firebase token, so it proxies the
+    // brain's recall through MAIN here. NON-PHI free-text query only — this is
+    // a peer of recall_site/recall_task, not a replacement; the launch bundle
+    // is the fast path, this is the fallback for what it missed.
+    if (p === '/app/brain-recall' && m === 'POST') {
+      const body = await readJson<{
+        query?: string;
+        scope?: string;
+        filters?: { domain?: string; task_type?: string };
+        top_k?: number;
+      }>(req);
+      const query = (body.query ?? '').trim();
+      if (!query) throw Object.assign(new Error('query required'), { status: 400 });
+      const { recall } = await import('./typebuild/brain-client');
+      const rows = await recall(query, {
+        scope: body.scope,
+        filters: body.filters,
+        topK: body.top_k,
+      });
+      return sendJson(res, 200, { rows });
+    }
+
+    // task-35dde066caf7 ("Brain C5") — the client's window onto the Brain's
+    // tiered, curated knowledge (a SEPARATE service from TypeBuild proper, see
+    // electron/typebuild/brain-client.ts). Same proxy shape as /app/site-memory
+    // above: the CLI subprocess holds no token, so it reaches the brain THROUGH
+    // main, which holds the real authkit token. NON-PHI only.
+    //
+    // GET /app/brain/tool?tool_id=<id> | ?signature=<sig>
+    //   -> the stored generalized tool artifact (get_tool), or { tool: null }.
+    if (p === '/app/brain/tool' && m === 'GET') {
+      const toolId = url.searchParams.get('tool_id') ?? '';
+      const signature = url.searchParams.get('signature') ?? '';
+      if ((!toolId && !signature) || (toolId && signature)) {
+        throw Object.assign(new Error('provide exactly one of tool_id or signature'), {
+          status: 400,
+        });
+      }
+      const { getTool } = await import('./typebuild/brain-client');
+      const tool = await getTool({ toolId: toolId || undefined, signature: signature || undefined });
+      return sendJson(res, 200, { tool });
+    }
+    // GET /app/brain/recall?query=<q>&scope=<taskId>&top_k=<n>
+    //   -> { rows: MemoryRowOut[] } — mid-run hybrid lookup, always active-tier.
+    if (p === '/app/brain/recall' && m === 'GET') {
+      const query = url.searchParams.get('query') ?? '';
+      const scope = url.searchParams.get('scope') ?? undefined;
+      const topKRaw = url.searchParams.get('top_k');
+      const topK = topKRaw ? Number(topKRaw) : undefined;
+      if (!query) throw Object.assign(new Error('query required'), { status: 400 });
+      const { recall } = await import('./typebuild/brain-client');
+      const rows = await recall(query, { scope, topK });
+      return sendJson(res, 200, { rows });
+    }
+    // POST /app/brain/reject-candidate  { id }
+    //   Client-side-only bookkeeping (brain-confirm.ts): there is no server
+    //   promote/reject endpoint today (curator-driven only), so this just
+    //   remembers the rejection locally so the candidate never re-surfaces a
+    //   confirm/reject card. See brain-confirm.ts's header for the full
+    //   explanation of what "reject" can and cannot do here.
+    if (p === '/app/brain/reject-candidate' && m === 'POST') {
+      const body = await readJson<{ id?: string }>(req);
+      if (!body.id) throw Object.assign(new Error('id required'), { status: 400 });
+      const { rejectCandidateLocally } = await import('./typebuild/brain-confirm');
+      rejectCandidateLocally({ id: body.id });
+      return sendJson(res, 200, { ok: true });
+    }
+
     // docs/connections-design.md §D.1(c) — the kind:'rest' operator-tool
     // surface. The agent's spawned session holds no Firebase token and no
     // brokered credential directly (both stay in MAIN's memory); it presents

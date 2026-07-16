@@ -84,6 +84,8 @@ import {
 import { scrubError } from './scrub.mjs';
 import { observeNetwork, replayRequest } from './net.mjs';
 import { apiSpecFromRequest, recordApiSpec, validateApiSpec } from './tools/api-spec.mjs';
+import { timeVerb, takeLastMetric } from './tools/run-metrics.mjs';
+import { reportRunMetric } from './tools/run-metrics-brain.mjs';
 
 function fail(msg) {
   process.stderr.write(String(msg) + '\n');
@@ -229,180 +231,202 @@ async function main() {
 
     const page = await resolvePage(browser);
 
-    switch (verb) {
-      case 'url':
-        process.stdout.write(page.url() + '\n');
-        break;
-      case 'title':
-        process.stdout.write((await page.title()) + '\n');
-        break;
-      case 'goto': {
-        const url = rest[0];
-        if (!url) fail('goto needs a url');
-        await page.goto(url, { waitUntil: 'domcontentloaded' });
-        process.stdout.write(`navigated to ${page.url()}\n`);
-        break;
-      }
-      case 'snapshot': {
-        const sel = rest[0] || 'body';
-        process.stdout.write((await loc(page, sel).ariaSnapshot()) + '\n');
-        break;
-      }
-      case 'text': {
-        const sel = rest[0] || 'body';
-        process.stdout.write((await loc(page, sel).innerText()) + '\n');
-        break;
-      }
-      case 'click': {
-        const sel = rest[0];
-        if (!sel) fail('click needs a selector');
-        await loc(page, sel).click();
-        process.stdout.write(`clicked ${sel}\n`);
-        break;
-      }
-      case 'fill': {
-        const [sel, ...v] = rest;
-        if (!sel) fail('fill needs a selector and value');
-        await loc(page, sel).fill(v.join(' '));
-        process.stdout.write(`filled ${sel}\n`);
-        break;
-      }
-      case 'type': {
-        const [sel, ...v] = rest;
-        if (!sel) fail('type needs a selector and value');
-        await loc(page, sel).pressSequentially(v.join(' '));
-        process.stdout.write(`typed into ${sel}\n`);
-        break;
-      }
-      case 'fill-ref': {
-        const [sel, ref] = rest;
-        if (!sel || !ref) fail('fill-ref needs a selector and a data ref');
-        const value = await resolveDataRef(ref);
-        // The fill itself is the value-bearing step: a Playwright failure here
-        // (selector timeout, non-editable element, …) carries the value in its
-        // "Call log:". Scrub before it can reach stderr.
-        try {
-          await loc(page, sel).fill(value);
-        } catch (e) {
-          fail(`could not fill ${sel} (ref ${ref}): ${scrubError(e, value)}`);
-        }
-        // Print the OPAQUE ref, never the value.
-        process.stdout.write(`filled ${sel} (ref ${ref})\n`);
-        break;
-      }
-      case 'type-ref': {
-        const [sel, ref] = rest;
-        if (!sel || !ref) fail('type-ref needs a selector and a data ref');
-        const value = await resolveDataRef(ref);
-        try {
-          await loc(page, sel).pressSequentially(value);
-        } catch (e) {
-          fail(`could not type into ${sel} (ref ${ref}): ${scrubError(e, value)}`);
-        }
-        process.stdout.write(`typed into ${sel} (ref ${ref})\n`);
-        break;
-      }
-      case 'press': {
-        const key = rest[0];
-        if (!key) fail('press needs a key (e.g. Enter)');
-        await page.keyboard.press(key);
-        process.stdout.write(`pressed ${key}\n`);
-        break;
-      }
-      case 'wait': {
-        const sel = rest[0];
-        if (!sel) fail('wait needs a selector');
-        await loc(page, sel).waitFor();
-        process.stdout.write(`visible: ${sel}\n`);
-        break;
-      }
-      case 'eval': {
-        const expr = rest.join(' ');
-        if (!expr) fail('eval needs a JS expression');
-        // Playwright evaluates a string as a JS expression in the page's main
-        // world. Wrap so both `1+1` and `() => …` / async forms work.
-        const result = await page.evaluate(`(async () => (${expr}))()`);
-        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-        break;
-      }
-      case 'screenshot': {
-        // `screenshot [path] [full]` — default to a stable, predictable path so
-        // the agent can Read the PNG to SEE the tab. Viewport by default (what's
-        // on screen); pass `full` for the whole scrollable page.
-        const full = rest.includes('full');
-        // Default into the CALLER's cwd (the agent's session dir, which is
-        // --add-dir'd) so the agent can Read the PNG back without a prompt.
-        const out =
-          rest.find((a) => a !== 'full') || path.join(process.cwd(), 'browser-shot.png');
-        await page.screenshot({ path: out, fullPage: full });
-        process.stdout.write(out + '\n');
-        break;
-      }
-      case 'net-observe': {
-        // Watch the page's XHR/fetch and print the API requests seen (NON-PHI
-        // metadata only — method/url/status/content-type, never bodies). The
-        // discovery step for the API shortcut: run it, then nudge the page, and
-        // read which request actually carries the data.
-        const { pos, flags } = splitFlags(rest);
-        const filter = pos[0] || '';
-        const durationMs = flags.ms && flags.ms !== true ? Number(flags.ms) : 4000;
-        const includeAssets = !!flags.assets;
-        const result = await observeNetwork(page, { filter, durationMs, includeAssets });
-        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-        break;
-      }
-      case 'net-replay': {
-        // Re-issue a request through the page's OWN signed-in context (no DOM,
-        // no re-auth). GET/HEAD are safe reads; a MUTATING method (POST/PUT/…)
-        // is a side effect, REFUSED unless --allow-mutation (human-gated-submit).
-        // NOTE: --data carries a literal payload, so this verb must NOT be used
-        // with raw PHI/credential values — resolve those via fill-ref equivalents
-        // in a tool step, not on this argv. Body lands in stdout (this process).
-        const { pos, flags } = splitFlags(rest);
-        const url = pos[0];
-        if (!url) fail('net-replay needs a url (e.g. net-replay https://host/api/x --method GET)');
-        const method = flags.method && flags.method !== true ? String(flags.method) : 'GET';
-        const headers = {};
-        for (const h of [].concat(flags.header ?? [])) {
-          if (h === true) continue;
-          const idx = String(h).indexOf(':');
-          if (idx > 0) headers[String(h).slice(0, idx).trim()] = String(h).slice(idx + 1).trim();
-        }
-        const data = flags.data && flags.data !== true ? flags.data : undefined;
-        try {
-          const result = await replayRequest(
-            page,
-            { method, url, headers: Object.keys(headers).length ? headers : undefined, data },
-            { allowMutation: !!flags['allow-mutation'] },
-          );
-          // AUTO-RECORD the discovered API (Operator Speed, task-8ba139c23d18):
-          // a SUCCESSFUL replay just proved this endpoint works, so persist the
-          // domain-keyed api-spec note WITHOUT the agent driving raw `memory add`.
-          // KEYS ONLY: method + url (→ domain/path) and header NAMES only (never
-          // the --data payload, never header VALUES). validateApiSpec is the gate
-          // — a value-shaped token is refused before any write. Best-effort: a
-          // record miss (offline) must never fail the replay that just succeeded.
-          if (result && result.ok) {
-            try {
-              const spec = apiSpecFromRequest(
-                { method, url, header_names: Object.keys(headers) },
-                { auth: flags.auth && flags.auth !== true ? String(flags.auth) : undefined },
-              );
-              if (validateApiSpec(spec).ok) await recordApiSpec(spec);
-            } catch { /* advisory — never fail a successful replay over recall memory */ }
-          }
-          process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-        } catch (e) {
-          fail(e.message || String(e));
-        }
-        break;
-      }
-      default:
-        fail(`unknown verb: ${verb}`);
-    }
+    // task-1334a1d49948 "Brain C3" — time this verb (wall-clock, local-only,
+    // no network) so a slow call or a stuck retry loop can surface a hint on
+    // THIS invocation's own stdout for the agent's NEXT turn to read (see
+    // run-metrics.mjs's header for why this is the mechanism, not a mid-run
+    // stdin injection). `rest[0]` is the verb's first positional arg — a URL
+    // for goto/net-*, a selector for click/fill/etc; run-metrics only keeps a
+    // derived domain from it (domainOf), never the raw selector/URL text.
+    await timeVerb(verb, rest[0], () => dispatchVerb(verb, rest, page));
   } finally {
     // Detach the CDP client. Does NOT close Breeze or the tab.
     await browser.close().catch(() => {});
+    // Emit the threshold-breach hint (if any) as a TRAILING stdout line, once
+    // the verb's own output has already been written above — the agent reads
+    // this tool result's full stdout on its next turn either way, so this
+    // rides the existing turn instead of a separate injection. Best-effort:
+    // reporting to the brain is async/fire-and-forget and must never block or
+    // fail this process's exit.
+    const metric = takeLastMetric();
+    if (metric && metric.hint) {
+      process.stdout.write(metric.hint + '\n');
+      reportRunMetric(verb, metric).catch(() => {});
+    }
+  }
+}
+
+async function dispatchVerb(verb, rest, page) {
+  switch (verb) {
+    case 'url':
+      process.stdout.write(page.url() + '\n');
+      break;
+    case 'title':
+      process.stdout.write((await page.title()) + '\n');
+      break;
+    case 'goto': {
+      const url = rest[0];
+      if (!url) fail('goto needs a url');
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      process.stdout.write(`navigated to ${page.url()}\n`);
+      break;
+    }
+    case 'snapshot': {
+      const sel = rest[0] || 'body';
+      process.stdout.write((await loc(page, sel).ariaSnapshot()) + '\n');
+      break;
+    }
+    case 'text': {
+      const sel = rest[0] || 'body';
+      process.stdout.write((await loc(page, sel).innerText()) + '\n');
+      break;
+    }
+    case 'click': {
+      const sel = rest[0];
+      if (!sel) fail('click needs a selector');
+      await loc(page, sel).click();
+      process.stdout.write(`clicked ${sel}\n`);
+      break;
+    }
+    case 'fill': {
+      const [sel, ...v] = rest;
+      if (!sel) fail('fill needs a selector and value');
+      await loc(page, sel).fill(v.join(' '));
+      process.stdout.write(`filled ${sel}\n`);
+      break;
+    }
+    case 'type': {
+      const [sel, ...v] = rest;
+      if (!sel) fail('type needs a selector and value');
+      await loc(page, sel).pressSequentially(v.join(' '));
+      process.stdout.write(`typed into ${sel}\n`);
+      break;
+    }
+    case 'fill-ref': {
+      const [sel, ref] = rest;
+      if (!sel || !ref) fail('fill-ref needs a selector and a data ref');
+      const value = await resolveDataRef(ref);
+      // The fill itself is the value-bearing step: a Playwright failure here
+      // (selector timeout, non-editable element, …) carries the value in its
+      // "Call log:". Scrub before it can reach stderr.
+      try {
+        await loc(page, sel).fill(value);
+      } catch (e) {
+        fail(`could not fill ${sel} (ref ${ref}): ${scrubError(e, value)}`);
+      }
+      // Print the OPAQUE ref, never the value.
+      process.stdout.write(`filled ${sel} (ref ${ref})\n`);
+      break;
+    }
+    case 'type-ref': {
+      const [sel, ref] = rest;
+      if (!sel || !ref) fail('type-ref needs a selector and a data ref');
+      const value = await resolveDataRef(ref);
+      try {
+        await loc(page, sel).pressSequentially(value);
+      } catch (e) {
+        fail(`could not type into ${sel} (ref ${ref}): ${scrubError(e, value)}`);
+      }
+      process.stdout.write(`typed into ${sel} (ref ${ref})\n`);
+      break;
+    }
+    case 'press': {
+      const key = rest[0];
+      if (!key) fail('press needs a key (e.g. Enter)');
+      await page.keyboard.press(key);
+      process.stdout.write(`pressed ${key}\n`);
+      break;
+    }
+    case 'wait': {
+      const sel = rest[0];
+      if (!sel) fail('wait needs a selector');
+      await loc(page, sel).waitFor();
+      process.stdout.write(`visible: ${sel}\n`);
+      break;
+    }
+    case 'eval': {
+      const expr = rest.join(' ');
+      if (!expr) fail('eval needs a JS expression');
+      // Playwright evaluates a string as a JS expression in the page's main
+      // world. Wrap so both `1+1` and `() => …` / async forms work.
+      const result = await page.evaluate(`(async () => (${expr}))()`);
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      break;
+    }
+    case 'screenshot': {
+      // `screenshot [path] [full]` — default to a stable, predictable path so
+      // the agent can Read the PNG to SEE the tab. Viewport by default (what's
+      // on screen); pass `full` for the whole scrollable page.
+      const full = rest.includes('full');
+      // Default into the CALLER's cwd (the agent's session dir, which is
+      // --add-dir'd) so the agent can Read the PNG back without a prompt.
+      const out =
+        rest.find((a) => a !== 'full') || path.join(process.cwd(), 'browser-shot.png');
+      await page.screenshot({ path: out, fullPage: full });
+      process.stdout.write(out + '\n');
+      break;
+    }
+    case 'net-observe': {
+      // Watch the page's XHR/fetch and print the API requests seen (NON-PHI
+      // metadata only — method/url/status/content-type, never bodies). The
+      // discovery step for the API shortcut: run it, then nudge the page, and
+      // read which request actually carries the data.
+      const { pos, flags } = splitFlags(rest);
+      const filter = pos[0] || '';
+      const durationMs = flags.ms && flags.ms !== true ? Number(flags.ms) : 4000;
+      const includeAssets = !!flags.assets;
+      const result = await observeNetwork(page, { filter, durationMs, includeAssets });
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      break;
+    }
+    case 'net-replay': {
+      // Re-issue a request through the page's OWN signed-in context (no DOM,
+      // no re-auth). GET/HEAD are safe reads; a MUTATING method (POST/PUT/…)
+      // is a side effect, REFUSED unless --allow-mutation (human-gated-submit).
+      // NOTE: --data carries a literal payload, so this verb must NOT be used
+      // with raw PHI/credential values — resolve those via fill-ref equivalents
+      // in a tool step, not on this argv. Body lands in stdout (this process).
+      const { pos, flags } = splitFlags(rest);
+      const url = pos[0];
+      if (!url) fail('net-replay needs a url (e.g. net-replay https://host/api/x --method GET)');
+      const method = flags.method && flags.method !== true ? String(flags.method) : 'GET';
+      const headers = {};
+      for (const h of [].concat(flags.header ?? [])) {
+        if (h === true) continue;
+        const idx = String(h).indexOf(':');
+        if (idx > 0) headers[String(h).slice(0, idx).trim()] = String(h).slice(idx + 1).trim();
+      }
+      const data = flags.data && flags.data !== true ? flags.data : undefined;
+      try {
+        const result = await replayRequest(
+          page,
+          { method, url, headers: Object.keys(headers).length ? headers : undefined, data },
+          { allowMutation: !!flags['allow-mutation'] },
+        );
+        // AUTO-RECORD the discovered API (Operator Speed, task-8ba139c23d18):
+        // a SUCCESSFUL replay just proved this endpoint works, so persist the
+        // domain-keyed api-spec note WITHOUT the agent driving raw `memory add`.
+        // KEYS ONLY: method + url (→ domain/path) and header NAMES only (never
+        // the --data payload, never header VALUES). validateApiSpec is the gate
+        // — a value-shaped token is refused before any write. Best-effort: a
+        // record miss (offline) must never fail the replay that just succeeded.
+        if (result && result.ok) {
+          try {
+            const spec = apiSpecFromRequest(
+              { method, url, header_names: Object.keys(headers) },
+              { auth: flags.auth && flags.auth !== true ? String(flags.auth) : undefined },
+            );
+            if (validateApiSpec(spec).ok) await recordApiSpec(spec);
+          } catch { /* advisory — never fail a successful replay over recall memory */ }
+        }
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      } catch (e) {
+        fail(e.message || String(e));
+      }
+      break;
+    }
+    default:
+      fail(`unknown verb: ${verb}`);
   }
 }
 

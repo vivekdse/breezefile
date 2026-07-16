@@ -73,6 +73,8 @@ const HELPERS = [
   ['electron', 'browser', 'tools', 'param-bindings.mjs'],
   ['electron', 'browser', 'tools', 'promote.mjs'],
   ['electron', 'browser', 'tools', 'registry.mjs'],
+  ['electron', 'browser', 'tools', 'run-metrics.mjs'],
+  ['electron', 'browser', 'tools', 'run-metrics-brain.mjs'],
 ];
 
 // Heavy deps — copied once (skipped when the destination already exists).

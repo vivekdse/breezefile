@@ -592,6 +592,44 @@ const fm = {
       count: number;
       webContentsId: number | null;
     }>,
+  // Brain (task-35dde066caf7 "Brain C5"): tiered, curated knowledge. NON-PHI.
+  brainSiteNotes: (domain: string, opts?: { limit?: number }) =>
+    ipcRenderer.invoke('brain:site-notes', domain, opts) as Promise<{
+      domain: string;
+      notes: Array<{
+        id: string;
+        domain: string;
+        task_tag?: string | null;
+        kind: string;
+        body: string;
+        url_pattern?: string | null;
+        updated_at?: string | null;
+        tier?: 'global' | 'org' | 'task';
+        tierLabel?: string;
+        tierDescription?: string;
+        confidence?: number;
+        confidenceLevel?: 'high' | 'medium' | 'low';
+        source?: 'chromeext' | 'brain';
+      }>;
+      offline: boolean;
+    }>,
+  brainGetTool: (opts: { toolId?: string; signature?: string }) =>
+    ipcRenderer.invoke('brain:get-tool', opts) as Promise<{
+      id: string;
+      tier: 'global' | 'org' | 'task';
+      content: string;
+      summary?: string | null;
+      artifact?: string | null;
+      hit_rate?: number | null;
+      downstream_success_rate?: number | null;
+      staleness_score: number;
+      avg_latency_ms?: number | null;
+      vec_distance: number;
+      composite_score: number;
+      source_rank: number;
+    } | null>,
+  brainRejectCandidate: (id: string) =>
+    ipcRenderer.invoke('brain:reject-candidate', id) as Promise<{ ok: boolean }>,
   // Full-page screenshot → PDF: auto-scroll + capture each viewport, save as
   // one PDF (electron/browser/screenshot-pdf.ts).
   browserScreenshotPdf: (id: number, opts?: { outPath?: string }) =>
