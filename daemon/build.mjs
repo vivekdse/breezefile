@@ -24,7 +24,17 @@ import { build } from 'esbuild';
 // used in electron/sources/typebuild.ts:
 //   await import('../ipc')
 //   await import('../agents/interactive')
-const GUI_ONLY_DYNAMIC = new Set(['../ipc', '../agents/interactive']);
+//   await import('../browser/window')   ← splash + getPrimaryHostWindow
+//
+// Keep this in sync with electron/sources/typebuild.ts: a GUI-only dynamic
+// import that is NOT listed here gets INLINED, and esbuild then hoists that
+// module's `import ... from "electron"` to the top of the bundle — turning a
+// lazy GUI path into a load-time crash for the headless daemon.
+const GUI_ONLY_DYNAMIC = new Set([
+  '../ipc',
+  '../agents/interactive',
+  '../browser/window',
+]);
 
 /** esbuild plugin: mark the GUI-only dynamic relative imports external so the
  *  bundler doesn't follow them into the Electron/PTY graph. */
@@ -53,6 +63,17 @@ await build({
     'better-sqlite3',
     '@homebridge/node-pty-prebuilt-multiarch',
     'electron',
+    // Playwright loads from node_modules at runtime instead of being bundled,
+    // matching the main build (see the same pair in vite.config.ts). It reaches
+    // the daemon graph via electron/browser/connect.mjs (tools/memory.mjs →
+    // record.ts). playwright-core ships zero deps, so the lazy
+    // `require('chromium-bidi/...')` inside its bidiOverCdp path is
+    // unresolvable by design and fails the bundle unless externalized; it only
+    // executes on the BiDi-over-CDP path, which the daemon never takes.
+    'playwright-core',
+    'playwright-core/*',
+    'chromium-bidi',
+    'chromium-bidi/*',
   ],
   plugins: [externalizeGuiOnly],
   banner: {
