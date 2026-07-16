@@ -4,6 +4,7 @@
 // status. Colors route through the shared --nh-* status vars (see .nh in
 // NewHomePage.css) via the left-border treatment from the V11 design reference.
 import type { NewHomeStatus } from './types';
+import { STATUS_LABELS } from './rosterGroups.mjs';
 import './HeroStats.css';
 
 // task-c0edffef25c6 — 'cancelled' deliberately has no card here: the hero grid
@@ -26,15 +27,10 @@ const ORDER: NewHomeStatus[] = ['needs', 'open', 'progress', 'scheduled', 'faile
 // because it's a record, not a call to action.
 const ATTENTION: ReadonlySet<NewHomeStatus> = new Set<NewHomeStatus>(['needs', 'open', 'failed']);
 
-const LABELS: Record<NewHomeStatus, string> = {
-  done: 'Done',
-  progress: 'In Progress',
-  scheduled: 'Scheduled',
-  open: 'Open',
-  needs: 'Needs You',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-};
+// task-ea465f2c5964 — was a second hand-maintained copy of the label map
+// (alongside RosterTable's STATUS_LABEL and TaskMatrix's inline pill labels);
+// now re-exported from rosterGroups.mjs's single STATUS_LABELS.
+const LABELS: Record<NewHomeStatus, string> = STATUS_LABELS;
 
 /** Which of the three weights a card renders at.
  *  'urgent' — an attention bucket with work in it: full accent ink, biggest

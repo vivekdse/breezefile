@@ -46,7 +46,7 @@ import {
   shouldResolveParent,
 } from './chainParentResolve.mjs';
 import type { ChildStatusLike } from './pipelineRoster.mjs';
-import { buildRosterGroups, summarizeGroupRows, statusBucket, STATUS_BUCKETS } from './rosterGroups.mjs';
+import { buildRosterGroups, summarizeGroupRows, statusBucket, STATUS_BUCKETS, STATUS_LABELS } from './rosterGroups.mjs';
 import type {
   RosterGroup,
   RosterGroupInput,
@@ -77,25 +77,18 @@ const WHO_GLYPH: Record<NewHomeTask['who'], string> = {
   both: '\u{1F916}+\u{1F464}', // 🤖+👤
 };
 
-const STATUS_LABEL: Record<NewHomeStatus, string> = {
-  done: 'Done',
-  progress: 'In Progress',
-  scheduled: 'Scheduled',
-  open: 'Open',
-  needs: 'Needs You',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-};
+// task-ea465f2c5964 — STATUS_LABEL was one of three hand-maintained copies of
+// the same NewHomeStatus/StatusBucket label map (RosterTable, HeroStats,
+// TaskMatrix); now a re-export of rosterGroups.mjs's single STATUS_LABELS so
+// there is exactly one place to edit a status's display word.
+const STATUS_LABEL: Record<NewHomeStatus, string> = STATUS_LABELS;
 
-const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = {
-  done: 'done',
-  progress: 'in progress',
-  scheduled: 'scheduled',
-  open: 'open',
-  needs: 'needs you',
-  failed: 'failed',
-  cancelled: 'cancelled',
-};
+// The breakdown chip's lowercase variant ("3 done · 2 open") is derived from
+// the SAME map, not a fourth hand-written record — verified 1:1
+// (`STATUS_LABELS[b].toLowerCase()`) for every bucket.
+const STATUS_SUMMARY_LABEL: Record<StatusBucket, string> = Object.fromEntries(
+  STATUS_BUCKETS.map((b) => [b, STATUS_LABELS[b].toLowerCase()]),
+) as Record<StatusBucket, string>;
 
 const BASE_COLUMN_COUNT = 6; // Title, Status, Last Run, Who, Runs, Actions
 

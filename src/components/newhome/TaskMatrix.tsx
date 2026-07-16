@@ -24,6 +24,8 @@ import { fm } from '../../bridge';
 import { getTask, useOriginHealth } from '../../tasks';
 import { useTaskDataValues } from './useNewHomeData';
 import { resultFields } from './taskSchema.mjs';
+import { pillForStatus } from './rosterGroups.mjs';
+import type { StatusBucket } from './rosterGroups.mjs';
 import { TemplateEditPanel } from './TemplateEditPanel';
 import './TaskMatrix.css';
 
@@ -59,7 +61,10 @@ export interface TaskMatrixProps {
 const DETAIL_CONCURRENCY = 4;
 
 type OutputField = NonNullable<Task['outputSchema']>[number];
-type PillKind = 'done' | 'progress' | 'scheduled' | 'open' | 'needs' | 'failed' | 'cancelled';
+// task-ea465f2c5964 — PillKind IS the shared StatusBucket axis (rosterGroups.mjs
+// / useNewHomeData.ts); no longer a fourth hand-maintained enum of the same
+// seven values.
+type PillKind = StatusBucket;
 // The schedule-bearing slice of a Task — enough to tell 'scheduled' from 'open'.
 type Schedulable = Pick<Task, 'cron' | 'next_run_at'>;
 
@@ -83,59 +88,20 @@ function relativeTime(createdAt: number | undefined, now: number): string {
 }
 
 // ── Status → pill mapping ────────────────────────────────────────────────
-// Prefer the server rawStatus (richer) and fall back to the coarse local
-// TaskStatus. Everything routes to one of the roster pill kinds so both themes
-// resolve via the shared --nh-* tokens.
-//
-// The waiting bucket is TWO kinds, not one: 'scheduled' means the system will
-// actually get to this (the task carries a cron or a next_run_at) and reads
-// calm; 'open' means pending with nothing scheduled — nobody is coming, a human
-// has to. The RAW server strings are untouched by that split: 'pending' /
-// 'queued' / 'todo' / 'deferred' still arrive on the wire and are still
-// accepted here; only the bucket they resolve TO moved. A raw string alone
-// can't say whether anything is scheduled, so callers pass the Task (`sched`)
-// and we read cron/next_run_at off it; with no task we fall back to 'open',
-// since promising "Scheduled" for work nobody has scheduled is the worse lie.
-//
-// task-c0edffef25c6 — 'cancelled' has its OWN kind. It used to resolve to the
-// waiting bucket, which painted a withdrawn run in the waiting color; only the
-// ⊘ glyph hinted otherwise. TaskMatrix was the last of the three parallel
-// status mappers still doing that.
+// task-ea465f2c5964 — this used to be a full THIRD re-implementation of the
+// same raw-status ladder rosterGroups.statusBucket and useNewHomeData's
+// deriveStatus already encoded (the copy that shipped the task-c0edffef25c6
+// cancelled-vs-waiting bug the longest, since it was the last of the three to
+// get the fix). It now DELEGATES entirely to rosterGroups.pillForStatus — the
+// one exported {kind,label} mapper — which prefers the server rawStatus's
+// full vocabulary and falls back to the coarser local TaskStatus exactly the
+// way this function used to inline.
 function pillFor(
   status?: TaskStatus,
   rawStatus?: string,
   sched?: Schedulable | null,
 ): { kind: PillKind; label: string } {
-  const scheduled = !!(
-    sched &&
-    (sched.cron || (typeof sched.next_run_at === 'number' && sched.next_run_at > 0))
-  );
-  const waiting: { kind: PillKind; label: string } = scheduled
-    ? { kind: 'scheduled', label: 'Scheduled' }
-    : { kind: 'open', label: 'Open' };
-  const raw = (rawStatus ?? '').toLowerCase();
-  if (raw) {
-    if (raw === 'done' || raw === 'completed' || raw === 'succeeded')
-      return { kind: 'done', label: 'Done' };
-    if (raw === 'in_progress' || raw === 'running' || raw === 'claimed')
-      return { kind: 'progress', label: 'In Progress' };
-    if (raw === 'failed' || raw === 'error') return { kind: 'failed', label: 'Failed' };
-    if (raw === 'needs_review' || raw === 'blocked' || raw === 'asked' || raw === 'review')
-      return { kind: 'needs', label: 'Needs You' };
-    if (raw === 'cancelled' || raw === 'canceled')
-      return { kind: 'cancelled', label: 'Cancelled' };
-    if (raw === 'pending' || raw === 'queued' || raw === 'todo' || raw === 'deferred') return waiting;
-  }
-  switch (status) {
-    case 'done':
-      return { kind: 'done', label: 'Done' };
-    case 'in_progress':
-      return { kind: 'progress', label: 'In Progress' };
-    case 'cancelled':
-      return { kind: 'cancelled', label: 'Cancelled' };
-    default:
-      return waiting;
-  }
+  return pillForStatus(status, rawStatus, sched);
 }
 
 // Layout-cleanup round 2: the lead column shows status as a colored ICON

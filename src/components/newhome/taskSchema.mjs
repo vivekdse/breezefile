@@ -561,6 +561,24 @@ export function taskDefStatus(taskDef, valuesByRef) {
   return 'active';
 }
 
+// task-ea465f2c5964 — TaskDetailDialog.tsx and TaskDetailDrawer.tsx each hand-
+// maintained a byte-identical DEF_STATUS_LABEL over MergedStepStatus (a chain
+// STEP's render status — done/active/pending/skip/cancelled/failed). This is a
+// DIFFERENT axis from NewHomeStatus/StatusBucket (a TASK's New Home bucket —
+// done/progress/scheduled/open/needs/failed/cancelled) and must not be folded
+// into that map (see rosterGroups.mjs STATUS_LABELS); it is its own single
+// source here instead of two copies. 'pending' reads "Open" to match the
+// roster's own vocabulary for the identical not-yet-started state
+// (task-4045bcee23cb).
+export const DEF_STATUS_LABEL = {
+  done: 'Done',
+  active: 'In progress',
+  pending: 'Open',
+  skip: 'Not needed',
+  cancelled: 'Cancelled',
+  failed: 'Failed',
+};
+
 /** Job-level rollup over every non-skipped task-def:
  *   - 'done'    — all non-skip defs are done.
  *   - 'active'  — at least one non-skip def is done or active (but not all

@@ -41,6 +41,10 @@ export type TaskDefRenderStatus = 'done' | 'active' | 'pending' | 'skip';
 export type MergedStepStatus = TaskDefRenderStatus | 'cancelled' | 'failed';
 export type MetaStatus = 'done' | 'active' | 'pending';
 
+/** The ONE label map over MergedStepStatus — see taskSchema.mjs header
+ *  comment. Distinct from rosterGroups.mjs's STATUS_LABELS (a different axis). */
+export const DEF_STATUS_LABEL: Record<MergedStepStatus, string>;
+
 export function fieldRef(taskDefId: string, key: string): string;
 
 // task-f9a723379aa8 — field-key normalization (see taskSchema.mjs for the

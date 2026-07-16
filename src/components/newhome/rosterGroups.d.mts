@@ -77,6 +77,17 @@ export type GroupSummary = {
 };
 
 export const STATUS_BUCKETS: StatusBucket[];
+/** The ONE label map over StatusBucket — see rosterGroups.mjs header comment. */
+export const STATUS_LABELS: Record<StatusBucket, string>;
+/** Raw server status strings statusBucket recognizes. */
+export const KNOWN_RAW_STATUSES: Set<string>;
+/** The fullest-input {kind, label} mapper — prefers rawStatus, falls back to
+ *  the coarse status, both routed through statusBucket/STATUS_LABELS. */
+export function pillForStatus(
+  coarseStatus: string | undefined | null,
+  rawStatus: string | undefined | null,
+  schedule?: ScheduleInfo | null,
+): { kind: StatusBucket; label: string };
 export function statusBucket(
   status: string | undefined | null,
   task?: ScheduleInfo | null,

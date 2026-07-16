@@ -60,6 +60,7 @@ import {
   resultFields,
   taskDefStatus,
   fieldRef,
+  DEF_STATUS_LABEL,
 } from '../newhome/taskSchema.mjs';
 import { TaskDataInputs } from './TaskDataInputs';
 import {
@@ -129,19 +130,10 @@ function basename(p: string): string {
 function hasValue(v: unknown): boolean {
   return v !== undefined && v !== null && v !== '';
 }
-// task-4045bcee23cb (U3a polish a) — 'pending' says "Open" here too, matching
-// the roster's own status vocabulary (STATUS_LABEL/META_PILL in RosterTable.tsx)
-// so a step never says "Pending" in one place and "Open" in another for the
-// identical not-yet-started state.
-const DEF_STATUS_LABEL: Record<MergedStepStatus, string> = {
-  done: 'Done',
-  active: 'In progress',
-  pending: 'Open',
-  skip: 'Not needed',
-  // task-f26e7745eda6 — merged-in from the child's server status.
-  cancelled: 'Cancelled',
-  failed: 'Failed',
-};
+// task-ea465f2c5964 — DEF_STATUS_LABEL was hand-maintained here AND (byte-
+// identically) in TaskDetailDialog.tsx; both now import the single
+// taskSchema.mjs export (see its header comment) rather than risking the two
+// copies drifting the way the roster's own status-bucket mappers had.
 
 // A live-status descriptor: the ONE colored signal per the design language
 // (working=accent, needs-you=warn, blocked=err, neutral otherwise).

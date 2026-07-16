@@ -14,6 +14,8 @@ import {
   statusBucket,
   summarizeGroupRows,
   STATUS_BUCKETS,
+  STATUS_LABELS,
+  pillForStatus,
 } from '../src/components/newhome/rosterGroups.mjs';
 
 const out = (key, label, extra = {}) => ({ key, label, type: 'text', ...extra });
@@ -203,6 +205,91 @@ test('STATUS_BUCKETS lists the seven buckets in display order', () => {
     'failed',
     'cancelled',
   ]);
+});
+
+// ── task-ea465f2c5964: STATUS_LABELS + pillForStatus (the single mapper the
+// RosterTable, HeroStats, and TaskMatrix pill/label surfaces all now share) ──
+test('STATUS_LABELS: exhaustive over the seven buckets, one label each', () => {
+  for (const b of STATUS_BUCKETS) {
+    assert.equal(typeof STATUS_LABELS[b], 'string');
+    assert.ok(STATUS_LABELS[b].length > 0);
+  }
+  assert.deepEqual(STATUS_LABELS, {
+    done: 'Done',
+    progress: 'In Progress',
+    scheduled: 'Scheduled',
+    open: 'Open',
+    needs: 'Needs You',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+  });
+});
+
+test('pillForStatus: normal statuses map to their bucket + label via rawStatus', () => {
+  assert.deepEqual(pillForStatus('done', 'done'), { kind: 'done', label: 'Done' });
+  assert.deepEqual(pillForStatus('done', 'completed'), { kind: 'done', label: 'Done' });
+  assert.deepEqual(pillForStatus('in_progress', 'in_progress'), { kind: 'progress', label: 'In Progress' });
+  assert.deepEqual(pillForStatus('in_progress', 'running'), { kind: 'progress', label: 'In Progress' });
+  assert.deepEqual(pillForStatus(undefined, 'failed'), { kind: 'failed', label: 'Failed' });
+  assert.deepEqual(pillForStatus(undefined, 'blocked'), { kind: 'needs', label: 'Needs You' });
+  assert.deepEqual(pillForStatus(undefined, 'asked'), { kind: 'needs', label: 'Needs You' });
+});
+
+// task-c0edffef25c6 / d70b783 — TaskMatrix's pillFor was the one of the three
+// status mappers that painted a CANCELLED run in the waiting color; this is
+// the regression test for the fix, now exercised against the single shared
+// mapper rather than a TaskMatrix-local implementation.
+test('pillForStatus: cancelled gets its OWN kind — never the waiting/open color', () => {
+  assert.deepEqual(pillForStatus('cancelled', 'cancelled'), { kind: 'cancelled', label: 'Cancelled' });
+  assert.deepEqual(pillForStatus('cancelled', 'canceled'), { kind: 'cancelled', label: 'Cancelled' });
+  // Coarse-status-only path (no rawStatus) must also resolve cancelled, not open.
+  assert.deepEqual(pillForStatus('cancelled', undefined), { kind: 'cancelled', label: 'Cancelled' });
+});
+
+test('pillForStatus: scheduled vs open — full-context path (a schedule is visible)', () => {
+  assert.deepEqual(pillForStatus(undefined, 'pending', { cron: '0 9 * * *' }), {
+    kind: 'scheduled',
+    label: 'Scheduled',
+  });
+  assert.deepEqual(pillForStatus(undefined, 'queued', { next_run_at: 1700000000000 }), {
+    kind: 'scheduled',
+    label: 'Scheduled',
+  });
+  assert.deepEqual(pillForStatus(undefined, 'pending', { cron: null, next_run_at: null }), {
+    kind: 'open',
+    label: 'Open',
+  });
+  // A due date is a deadline, not a schedule — still open.
+  assert.deepEqual(pillForStatus(undefined, 'pending', { due_at: '2026-01-01' }), {
+    kind: 'open',
+    label: 'Open',
+  });
+});
+
+test('pillForStatus: scheduled vs open — degraded string-only path (no schedule info at all)', () => {
+  // No third argument at all: must fall through to 'open', never claim a
+  // schedule it cannot see (promising "Scheduled" for nobody's work is the
+  // worse lie — see rosterGroups.mjs statusBucket's doc comment).
+  assert.deepEqual(pillForStatus(undefined, 'pending'), { kind: 'open', label: 'Open' });
+  assert.deepEqual(pillForStatus(undefined, 'queued'), { kind: 'open', label: 'Open' });
+  assert.deepEqual(pillForStatus('in_progress', undefined), { kind: 'progress', label: 'In Progress' });
+});
+
+test('pillForStatus: an unrecognized rawStatus falls back to the coarse TaskStatus, not straight to open', () => {
+  // A rawStatus this client's vocabulary doesn't know (e.g. a newer server
+  // status) must not silently resolve to "waiting" when the coarse local
+  // status already says something more specific.
+  assert.deepEqual(pillForStatus('done', 'some_future_status'), { kind: 'done', label: 'Done' });
+  assert.deepEqual(pillForStatus('in_progress', 'some_future_status'), {
+    kind: 'progress',
+    label: 'In Progress',
+  });
+  assert.deepEqual(pillForStatus('cancelled', 'some_future_status'), {
+    kind: 'cancelled',
+    label: 'Cancelled',
+  });
+  // Coarse status itself unrecognized/absent too → degrades all the way to open.
+  assert.deepEqual(pillForStatus(undefined, 'some_future_status'), { kind: 'open', label: 'Open' });
 });
 
 test('summarizeGroupRows: counts runs, buckets statuses, and de-dups assignees', () => {
