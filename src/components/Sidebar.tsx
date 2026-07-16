@@ -32,6 +32,7 @@ import { deriveRunState } from './TaskIndicators';
 import { formatOpError } from '../errorMessages';
 import { useOpenResumeInTab } from '../openResumeInTab';
 import { useSources } from '../sources';
+import { useTaskActions } from './tasks/useTaskActions';
 import './Sidebar.css';
 
 const MAX_VISIBLE_TASKS = 5;
@@ -952,6 +953,9 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
   const tbReady = useTypebuildReadiness();
   const myEmail = (tbReady as { email?: string | null }).email ?? null;
   const primary = primaryActionFor(task, { caps, tbReady, myEmail });
+  // task-27c25207829c — Retry (blocked TypeBuild task) needs the composite
+  // reopen→claim→launch chain, same as the roster's Retry button.
+  const taskActions = useTaskActions();
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -1009,6 +1013,9 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
     if (primary.kind === 'reopen') {
       return updateTask(task.id, { status: 'pending' }, task.source);
     }
+    if (primary.kind === 'retry') {
+      return taskActions.retry(task);
+    }
     if (primary.kind === 'view-run') {
       window.dispatchEvent(
         new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),
@@ -1026,9 +1033,11 @@ function TaskContextMenu({ task, x, y, onClose }: TaskContextMenuProps) {
             ? '✓ Mark done'
             : primary.kind === 'reopen'
               ? '↺ Reopen'
-              : primary.kind === 'view-run'
-                ? '◷ View run'
-                : null;
+              : primary.kind === 'retry'
+                ? '↺ Retry'
+                : primary.kind === 'view-run'
+                  ? '◷ View run'
+                  : null;
   const onViewRuns = act(() => {
     window.dispatchEvent(
       new CustomEvent('fm:openRunHistory', { detail: { taskId: task.id } }),

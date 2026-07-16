@@ -780,7 +780,9 @@ export function RosterTable({
     // Already running/claimed → the normal in-flight state; stay calm.
     if (pa.kind === 'open-session') return null;
     // task-48cd46a0e2da (A#1) — a BLOCKED next step resolves to 'reopen'.
-    if (pa.kind === 'reopen') {
+    // task-27c25207829c — a blocked task now returns 'retry' (composite
+    // reopen→claim→launch), not 'reopen'; keep the message specific.
+    if (pa.kind === 'reopen' || pa.kind === 'retry') {
       return { disabled: true, reason: `${target.stepName} is blocked — open it to reopen/continue` };
     }
     const note = pa.kind === 'none' ? pa.note ?? '' : '';
