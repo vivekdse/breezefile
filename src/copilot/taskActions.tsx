@@ -15,7 +15,7 @@
 // is a clear audit trail of what actually happened.
 import { useRef } from 'react';
 import { z } from 'zod';
-import { useTasks } from '../tasks';
+import { useTasks, updateTask } from '../tasks';
 import { useTaskActions } from '../components/tasks/useTaskActions';
 import { useNewHomeData } from '../components/newhome/useNewHomeData';
 import {
@@ -24,8 +24,21 @@ import {
   TASK_QUERY_FIELDS,
 } from '../components/newhome/taskQuery';
 import type { NewHomeTask } from '../components/newhome/types';
-import type { Task } from '../types';
+import type { Task, TaskUpdate } from '../types';
 import { immediateAction, confirmedAction } from './actionKit';
+import { formatOpError, formatSourceReason } from '../errorMessages';
+
+// task-675877235d26 — patchReason mirrors TaskDetailPanel.tsx's own helper:
+// the widened TypeBuild updateTask (task-e11b8a8b033c) re-throws a soft
+// (409/400) rejection as a `[typebuild-patch:<reason>]`-tagged Error (IPC
+// strips custom Error props, so the machine reason rides the message). Pulled
+// out here too so update_task's failure string is humanized the same way the
+// human-facing detail panel's field edits are, instead of leaking the raw tag.
+function patchReason(err: unknown): string | null {
+  const raw = err instanceof Error ? err.message : String(err);
+  const m = /\[typebuild-patch:([a-z_ ]+)\]/.exec(raw);
+  return m ? m[1] : null;
+}
 
 // Blast-radius cap for query-driven bulk updates: refuse (don't truncate) if a
 // single query would touch more than this many tasks, so an over-broad query
@@ -45,6 +58,9 @@ export function TaskActions() {
   // last_action/due fields live on these rows, not raw Task) — same source
   // query_data reads for entity="tasks". Read through the live ref below so the
   // once-registered bulk_update_tasks_by_query handler never sees a stale roster.
+  // Also the project registry (id+name) update_task resolves a "move to
+  // project X" ask against — same list select_home_project/resolveProjectRef
+  // use in actions.tsx.
   const home = useNewHomeData();
 
   // STALE-CLOSURE NOTE (see FormCopilotBridge): immediateAction/confirmedAction
@@ -53,8 +69,57 @@ export function TaskActions() {
   // since tasks load async. That's exactly why "retrieve any task" failed.
   // Read through `live` (a ref refreshed each render) so handlers always see
   // the current task inventory + mutation fns.
-  const live = useRef({ tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch, roster: home.tasks });
-  live.current = { tasks, setStatus, togglePin, setDue, bulkDelete, bulkPatch, roster: home.tasks };
+  const live = useRef({
+    tasks,
+    setStatus,
+    togglePin,
+    setDue,
+    bulkDelete,
+    bulkPatch,
+    roster: home.tasks,
+    projects: home.projects,
+  });
+  live.current = {
+    tasks,
+    setStatus,
+    togglePin,
+    setDue,
+    bulkDelete,
+    bulkPatch,
+    roster: home.tasks,
+    projects: home.projects,
+  };
+
+  // task-a9841cfc0e1b-style name-or-id resolution, mirrored from actions.tsx's
+  // resolveProjectRef (not exported from there — that module owns project
+  // CRUD, this one owns task CRUD; duplicating this small pure lookup is
+  // cheaper than threading a cross-file export for one helper).
+  function resolveProjectRef(
+    ref: string,
+  ): { ok: true; id: string; name: string } | { ok: false; error: string } {
+    const list = live.current.projects;
+    const raw = (ref ?? '').trim();
+    if (!raw) return { ok: false, error: 'Failed: a project name or id is required.' };
+    const ql = raw.toLowerCase();
+    const subs = list.filter((p) => p.name.toLowerCase().includes(ql));
+    const match =
+      list.find((p) => p.id === raw) ??
+      list.find((p) => p.name.toLowerCase() === ql) ??
+      (subs.length === 1 ? subs[0] : null);
+    if (!match) {
+      if (subs.length > 1) {
+        return {
+          ok: false,
+          error: `"${ref}" is ambiguous — matches ${subs.map((p) => p.name).join(', ')}. Be more specific.`,
+        };
+      }
+      return {
+        ok: false,
+        error: `Failed: no project matches "${ref}". Available: ${list.map((p) => p.name).join(', ') || '(none loaded)'}.`,
+      };
+    }
+    return { ok: true, id: match.id, name: match.name };
+  }
 
   const find = (taskId: string): Task | undefined =>
     live.current.tasks.find((t) => t.id === taskId);
@@ -251,6 +316,114 @@ export function TaskActions() {
       if (!task) return `No task found with id "${taskId}".`;
       window.dispatchEvent(new CustomEvent('fm:openTask', { detail: { mode: 'edit', task } }));
       return `Opened "${task.title}" in the editor.`;
+    },
+  });
+
+  // task-675877235d26 — the missing GENERIC field-update action. Before this,
+  // the copilot could only change status/pin/due (set_task_status/pin_task/
+  // set_task_due/bulk_update_tasks*) — a "retitle this task", "change
+  // priority to 5", or "move to project X" ask had no action to attempt at
+  // all, because those fields are absent from every registered action's
+  // parameters. Root cause of why routing it through useTaskActions().patch
+  // wouldn't have worked either: that hook's applyTaskPatch (useTaskActions.ts)
+  // only forwards status/due_at/pinned for a canEdit:false source, and
+  // TypeBuild is deliberately canEdit:false (fm-j7w0) — title/notes/priority/
+  // projectId/assignedTo/deferUntil patches would silently no-op through it.
+  // TaskDetailPanel.tsx sidesteps that same gate by calling the widened
+  // updateTask (task-e11b8a8b033c) DIRECTLY — this action does the same,
+  // rather than reusing useTaskActions.patch, so it actually reaches the
+  // fields the human-facing detail panel can already edit.
+  immediateAction({
+    name: 'update_task',
+    description:
+      "Change a task's title, notes, priority, due date, defer-until date, project, or assignee. Pass the task id " +
+      "(from find_tasks) and only the fields to change — omitted fields are left untouched. To change status use " +
+      'set_task_status instead; to pin/unpin use pin_task/unpin_task. Project is resolved by name or id against the ' +
+      'project registry (same resolution as select_home_project).',
+    parameters: z.object({
+      taskId: z.string().describe('The id of the task to update.'),
+      title: z.string().optional().describe('New title.'),
+      notes: z.string().optional().describe('New notes/body. Empty string clears it.'),
+      priority: z.number().optional().describe('New priority (integer; lower usually means more urgent).'),
+      due: z
+        .string()
+        .optional()
+        .describe('New due date as an ISO date (e.g. 2026-07-15), or "" to clear it.'),
+      deferUntil: z
+        .string()
+        .optional()
+        .describe('New defer-until date/time (ISO), or "" to clear it.'),
+      project: z
+        .string()
+        .optional()
+        .describe('New project, by name or id (resolved against the project registry). "" moves it to no project.'),
+      assignedTo: z
+        .string()
+        .optional()
+        .describe('New assignee (email/principal), or "" to unassign.'),
+    }),
+    perform: async ({ taskId, title, notes, priority, due, deferUntil, project, assignedTo }) => {
+      const task = find(taskId);
+      if (!task) return `No task found with id "${taskId}".`;
+      if (
+        title === undefined &&
+        notes === undefined &&
+        priority === undefined &&
+        due === undefined &&
+        deferUntil === undefined &&
+        project === undefined &&
+        assignedTo === undefined
+      ) {
+        return 'Failed: nothing to change — set at least one of title, notes, priority, due, deferUntil, project, or assignedTo.';
+      }
+      const patch: TaskUpdate = {};
+      const changed: string[] = [];
+      if (title !== undefined) {
+        const t = title.trim();
+        if (!t) return 'Failed: title cannot be empty.';
+        patch.title = t;
+        changed.push(`title → "${t}"`);
+      }
+      if (notes !== undefined) {
+        patch.notes = notes;
+        changed.push('notes updated');
+      }
+      if (priority !== undefined) {
+        patch.priority = priority;
+        changed.push(`priority → ${priority}`);
+      }
+      if (due !== undefined) {
+        patch.due_at = due.trim() ? due.trim() : null;
+        changed.push(due.trim() ? `due → ${due.trim()}` : 'due cleared');
+      }
+      if (deferUntil !== undefined) {
+        patch.deferUntil = deferUntil.trim() ? deferUntil.trim() : null;
+        changed.push(deferUntil.trim() ? `defer until → ${deferUntil.trim()}` : 'defer cleared');
+      }
+      if (project !== undefined) {
+        if (project.trim()) {
+          const resolved = resolveProjectRef(project);
+          if (!resolved.ok) return resolved.error;
+          patch.projectId = resolved.id;
+          changed.push(`project → "${resolved.name}"`);
+        } else {
+          patch.projectId = '';
+          changed.push('project cleared');
+        }
+      }
+      if (assignedTo !== undefined) {
+        patch.assignedTo = assignedTo.trim() ? assignedTo.trim() : null;
+        changed.push(assignedTo.trim() ? `assignee → ${assignedTo.trim()}` : 'assignee cleared');
+      }
+      try {
+        await updateTask(task.id, patch, task.source);
+        return `Updated "${task.title}": ${changed.join(', ')}.`;
+      } catch (e) {
+        const reason = patchReason(e);
+        return reason
+          ? `Couldn't update "${task.title}": ${formatSourceReason(reason)}.`
+          : formatOpError('update', e);
+      }
     },
   });
 
