@@ -953,21 +953,72 @@ function isManagedPtyAlive(id: number): boolean {
   return ptys.has(id);
 }
 
-/** Gracefully terminate a managed PTY by id from the main process (no IPC
- *  round-trip). Used by the TypeBuild expiry relaunch (fm-b5at.10) to retire
- *  the old, expired session before respawning a fresh one. The proc's own
- *  onExit handler removes it from the registry and fires term:exit; we also
- *  delete defensively in case the kill races. No-op if the id is unknown. */
-function killManagedPty(id: number, signal?: string): void {
-  const r = ptys.get(id);
-  if (!r) return;
+/** Kill a pty's whole PROCESS GROUP, not just its immediate child.
+ *
+ *  node-pty puts the child in its own session (forkpty → setsid), so the
+ *  child is a process-group leader and its pgid == its pid. `proc.kill()`
+ *  signals ONLY that pid — which for a `claude` session leaves its
+ *  grandchildren (MCP servers, node subprocesses) running: they aren't in
+ *  the pty's foreground group, so they never see the master-close SIGHUP
+ *  either. They reparent to init and survive app quit AND app restart, which
+ *  is why stranded agents used to only clear on a machine reboot
+ *  (task fix/orphaned-agent-ptys). Signalling -pid takes the group.
+ *
+ *  Best-effort and idempotent: a missing group / already-reaped child throws
+ *  ESRCH, which is the success case as far as callers are concerned. */
+function killPtyGroup(proc: PtyRecord['proc'], signal: string = 'SIGTERM'): void {
+  const pid = proc.pid;
+  if (typeof pid === 'number' && pid > 0) {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      /* no such group, or already gone — fall through to the direct kill */
+    }
+  }
   try {
-    r.proc.kill(signal);
+    proc.kill(signal);
   } catch {
     /* already gone */
   }
+}
+
+/** Gracefully terminate a managed PTY by id from the main process (no IPC
+ *  round-trip). Used by the TypeBuild expiry relaunch (fm-b5at.10) to retire
+ *  the old, expired session before respawning a fresh one, and by the operator
+ *  window's close/reuse paths. The proc's own onExit handler removes it from
+ *  the registry and fires term:exit; we also delete defensively in case the
+ *  kill races. No-op if the id is unknown. Reaps the child's whole process
+ *  group — see killPtyGroup. */
+function killManagedPty(id: number, signal?: string): void {
+  const r = ptys.get(id);
+  if (!r) return;
+  killPtyGroup(r.proc, signal ?? 'SIGTERM');
   ptys.delete(id);
 }
+
+// ─── Quit-time PTY sweep (task fix/orphaned-agent-ptys) ───────────────
+// Every managed pty dies with the app. Without this, agent ptys outlived it
+// entirely: `ensurePtyDestroyHook` (the only reaping hook) is wired ONLY from
+// the `term:spawn` IPC handler, and runTaskInteractive calls spawnManagedPty
+// directly from main — so agent sessions were registered against the MAIN
+// window's webContents (which only dies at quit) and had no hook at all. A
+// ~440MB / ~40%-CPU `claude` per stranded session accumulated across Retries,
+// window closes, and app restarts until the box had to be rebooted.
+//
+// 'before-quit' (not 'window-all-closed') so this also covers an explicit
+// app.quit() with windows still up. Synchronous: SIGTERM every group, then
+// leave it — we don't block quit waiting for children to ack. Anything that
+// ignores SIGTERM is orphaned as before, but claude/node honor it.
+app.on('before-quit', () => {
+  for (const [id, r] of ptys) {
+    try {
+      killPtyGroup(r.proc, 'SIGTERM');
+    } catch (e) {
+      console.error('[pty] quit sweep:', id, e);
+    }
+  }
+  ptys.clear();
+});
 
 /** Write raw data into a managed PTY's stdin from MAIN (no IPC round-trip,
  *  no renderer involvement) — the same write path term:write uses (r.proc.

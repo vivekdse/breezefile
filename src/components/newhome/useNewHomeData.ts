@@ -893,7 +893,23 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
     // Also suspended while the origin breaker is open — the fast poll is the
     // single heaviest recurring wave, so it's the first thing to stop.
     if (degraded || !anyChainActive || visibleChildren.length === 0) return;
+    // task fix/orphaned-agent-ptys — this is the heaviest recurring wave in the
+    // app: one UNCACHED https GET per visible child (it deliberately bypasses
+    // the updated_at gate), each carrying a safeStorage-encrypted PHI write in
+    // main. Two guards keep it from compounding:
+    //
+    //  1. Visibility. main.ts sets `backgroundThrottling: false`, so a hidden
+    //     or minimized window otherwise polls at FULL rate forever — and N open
+    //     instances multiply it linearly. A hidden roster nobody is looking at
+    //     doesn't need 5s freshness; the next visible tick catches it up.
+    //  2. Overlap. When a wave takes longer than the interval (slow origin, big
+    //     roster), setInterval keeps firing and the waves stack, each re-issuing
+    //     the full N-request fan-out. Skip a tick while one is still in flight.
+    let inFlight = false;
     const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (inFlight) return;
+      inFlight = true;
       void (async () => {
         const targets = visibleChildren;
         const results: Array<[string, TaskDetail | null]> = [];
@@ -921,7 +937,9 @@ export function useChainedRoster(opts: { jobIds: string[] }): {
           }
           return next;
         });
-      })();
+      })().finally(() => {
+        inFlight = false;
+      });
     }, CHAIN_ACTIVE_POLL_MS);
     return () => clearInterval(timer);
   }, [anyChainActive, visibleChildren, degraded]);

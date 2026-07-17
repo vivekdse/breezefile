@@ -158,18 +158,30 @@ export function WelcomeDemo() {
 
   useEffect(() => {
     let cancelled = false;
+    // Every in-flight sleep's timer id → its resolve. Cleanup clears the timer
+    // AND resolves, so `run()` wakes immediately and falls out at its next
+    // `if (cancelled) return`, rather than parking forever on a promise that
+    // will never settle.
+    //
+    // This used to poll a `cancelled` flag on an 80ms setInterval per sleep —
+    // but that interval was only ever cleared on the CANCELLED branch, so on
+    // the normal path (timeout fires, resolve, done) it was left running at
+    // 12.5Hz forever. `typeText` awaits one sleep PER CHARACTER and `run()`
+    // loops SCRIPT endlessly, so live timers grew without bound for as long as
+    // the card was on screen — thousands of leaked 12.5Hz callbacks, each
+    // retaining its closure. A tracked timeout needs no polling at all.
+    const pending = new Map<number, () => void>();
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
-        const id = window.setTimeout(resolve, ms);
-        // If cancelled, clear early so the loop doesn't keep running
-        // tasks after unmount.
-        const cancelCheck = window.setInterval(() => {
-          if (cancelled) {
-            window.clearTimeout(id);
-            window.clearInterval(cancelCheck);
-            resolve();
-          }
-        }, 80);
+        if (cancelled) {
+          resolve();
+          return;
+        }
+        const id = window.setTimeout(() => {
+          pending.delete(id);
+          resolve();
+        }, ms);
+        pending.set(id, resolve);
       });
 
     async function typeText(text: string, pace: number) {
@@ -240,6 +252,11 @@ export function WelcomeDemo() {
     void run();
     return () => {
       cancelled = true;
+      for (const [id, resolve] of pending) {
+        window.clearTimeout(id);
+        resolve();
+      }
+      pending.clear();
     };
   }, []);
 

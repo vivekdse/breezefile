@@ -227,6 +227,15 @@ export async function openBrowserWindow(
     // the SAME view id so the browser pane stays untouched; only the Claude
     // terminal re-attaches.
     if (ptyId != null && ptyId !== prevPtyId) {
+      // NOTE (task fix/orphaned-agent-ptys): reaching here with a still-live
+      // prevPtyId would STRAND that agent — repointing the chrome leaves it
+      // running with no pane mirroring it and no close handler owning it
+      // (~440MB / ~40% CPU each, accumulating until the box needs a reboot).
+      // The takeover guard above is what upholds that: it either kills a live
+      // prevPtyId (on Take Over) or returns early (on Cancel), so by this
+      // point prevPtyId is always already dead. Keep it that way — if that
+      // guard is ever relaxed, this repoint needs its own kill.
+      //
       // task-6fc9e503623e — re-point the REUSED window's owned-pty box to the
       // new session so its close handler kills the current pty, not the prior
       // one (and never the successor).
