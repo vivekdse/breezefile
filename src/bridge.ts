@@ -756,6 +756,12 @@ type Fm = {
     // on this hop. See docs/typebuild-data-field-contract.md.
     taskData: {
       resolve: (taskId: string, ref: string) => Promise<string | null>;
+      // task-780730a010a2 follow-up — one call per task, every key at once.
+      resolveBulk: (
+        taskId: string,
+        keys: string[],
+        format?: string,
+      ) => Promise<Record<string, string>>;
       // task-4a8d2c98f667 — Inputs section edit/add (full-bag resolve-merge-
       // replace happens in main; see electron/typebuild/task-data.ts).
       patch: (

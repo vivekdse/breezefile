@@ -529,6 +529,36 @@ export function getCachedDataValue(
   return row.value;
 }
 
+/** CLASS 1, BULK: read every cached data-bag value for one task in a SINGLE
+ *  query (task-780730a010a2 follow-up) — the read-side counterpart to firing
+ *  one resolve per key. `refs` narrows to the keys the caller actually wants
+ *  (a task's `data_keys` list); rows for any OTHER ref cached under this
+ *  task_id are ignored. Same freshness contract as getCachedDataValue: a row
+ *  whose `server_updated_at` doesn't match `currentUpdatedAtIso` is stale and
+ *  excluded (the caller must resolve it fresh). Returns {} on any miss (DB not
+ *  open, task not cached at all). */
+export function getCachedDataValuesForTask(
+  taskId: string,
+  refs: string[],
+  currentUpdatedAtIso: string | null,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!current || refs.length === 0) return out;
+  const rows = current.db
+    .prepare(
+      `SELECT ref, value, server_updated_at AS serverUpdatedAt FROM task_data_cache
+       WHERE task_id = ? AND ref IN (${refs.map(() => '?').join(',')})`,
+    )
+    .all(taskId, ...refs) as Array<{ ref: string; value: string; serverUpdatedAt: string | null }>;
+  for (const row of rows) {
+    if (currentUpdatedAtIso != null && row.serverUpdatedAt != null) {
+      if (row.serverUpdatedAt !== currentUpdatedAtIso) continue; // stale — caller re-resolves
+    }
+    out[row.ref] = row.value;
+  }
+  return out;
+}
+
 /** CLASS 1: write-through a resolved data-bag value. `serverUpdatedAtIso` is
  *  the task's skeleton `updated_at` AT RESOLVE TIME, stamped alongside the
  *  value so a later read can detect the task having moved on. No-ops when the

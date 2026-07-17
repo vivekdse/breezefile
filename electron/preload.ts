@@ -1145,6 +1145,16 @@ const fm = {
     taskData: {
       resolve: (taskId: string, ref: string) =>
         ipcRenderer.invoke('typebuild:data:resolve', taskId, ref) as Promise<string | null>,
+      // task-780730a010a2 follow-up — one call per TASK for every key at once
+      // (local-cache-first, network only for misses). A key absent from the
+      // resolved map has no value to show — never a thrown rejection.
+      resolveBulk: (taskId: string, keys: string[], format?: string) =>
+        ipcRenderer.invoke(
+          'typebuild:data:resolveBulk',
+          taskId,
+          keys,
+          format,
+        ) as Promise<Record<string, string>>,
       // task-4a8d2c98f667 — Inputs section edit/add. See ipc-task-data.ts
       // registerTypebuildTaskDataIpc for the resolve-merge-replace mechanics.
       patch: (

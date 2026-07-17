@@ -19,7 +19,7 @@
 // electron/main.ts (sibling to registerTypebuildVaultIpc). Idempotent.
 
 import { ipcMain } from 'electron';
-import { resolveTaskDataRef, patchTaskData } from './task-data';
+import { resolveTaskDataRef, resolveTaskDataBulk, patchTaskData } from './task-data';
 
 let registered = false;
 
@@ -39,6 +39,23 @@ export function registerTypebuildTaskDataIpc(): void {
         // (which could echo the ref but never a value) to the renderer as a
         // thrown rejection that a display read has to special-case.
         return null;
+      }
+    },
+  );
+
+  // task-780730a010a2 follow-up — the IN-column BULK display read: one call
+  // per TASK instead of one per (taskId,key). Same best-effort, never-throw
+  // discipline as resolve() above (a missing/failed key is simply absent from
+  // the returned map) — see resolveTaskDataBulk for the local-cache-first,
+  // network-only-for-misses mechanics.
+  ipcMain.handle(
+    'typebuild:data:resolveBulk',
+    async (_e, taskId: string, keys: string[], format?: string): Promise<Record<string, string>> => {
+      if (!taskId || !Array.isArray(keys) || keys.length === 0) return {};
+      try {
+        return await resolveTaskDataBulk(taskId, keys, format);
+      } catch {
+        return {};
       }
     },
   );

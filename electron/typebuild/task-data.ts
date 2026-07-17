@@ -184,6 +184,93 @@ async function resolveClass1Ref(taskId: string, ref: string): Promise<string> {
   return value;
 }
 
+// task-780730a010a2 follow-up — the IN-column display read (New Home's
+// TaskDetailDialog / TaskMatrix / roster) was firing ONE ipc+resolve per
+// (taskId, key), even for refs the encrypted cache already had, because the
+// per-key resolve path has no way to ask for "everything you already have for
+// this task" in one shot. This is the BULK counterpart: one local cache query
+// covers every already-known CLASS-1 ref for the task instantly, and only the
+// genuine misses pay a network round trip — still one ref per HTTP call (the
+// server has no bulk endpoint), but no longer one IPC hop per cell for data
+// we already have on disk. Best-effort per key: a key that 404s/empties/errors
+// is simply ABSENT from the returned map (mirrors the ipc-task-data.ts
+// resolve() display-read contract — never throws, never surfaces the
+// underlying error to the renderer). `format` applies to any class-2 ("me.*")
+// keys mixed into the same batch (the drawer's Inputs grid may show both
+// classes side by side).
+const BULK_MISS_CONCURRENCY = 4;
+
+export async function resolveTaskDataBulk(
+  taskId: string,
+  keys: string[],
+  format?: string,
+): Promise<Record<string, string>> {
+  const uniqueKeys = Array.from(new Set(keys.filter((k): k is string => typeof k === 'string' && !!k)));
+  const out: Record<string, string> = {};
+  if (uniqueKeys.length === 0) return out;
+
+  const class1Keys = uniqueKeys.filter((k) => !isUserDataRef(k));
+  const class2Keys = uniqueKeys.filter((k) => isUserDataRef(k));
+
+  // ── CLASS 1: one local query for every already-cached ref, then network
+  // only for the misses. ──────────────────────────────────────────────────
+  let class1Misses = class1Keys;
+  if (class1Keys.length > 0 && taskId) {
+    const [{ getCachedDataValuesForTask, putCachedDataValue }, { getSkeletonUpdatedAtIso }] =
+      await Promise.all([
+        import('../sources/task-phi-store'),
+        import('../sources/task-skeleton-store'),
+      ]);
+    const currentUpdatedAtIso = getSkeletonUpdatedAtIso(taskId);
+    const hits = getCachedDataValuesForTask(taskId, class1Keys, currentUpdatedAtIso);
+    Object.assign(out, hits);
+    class1Misses = class1Keys.filter((k) => !(k in hits));
+
+    if (class1Misses.length > 0) {
+      let idx = 0;
+      const worker = async (): Promise<void> => {
+        while (idx < class1Misses.length) {
+          const key = class1Misses[idx++];
+          try {
+            const value = await fetchDataValue(
+              `${API_BASE}/chromeext/${encodeURIComponent(taskId)}/data?ref=${encodeURIComponent(key)}`,
+              key,
+            );
+            out[key] = value;
+            putCachedDataValue(taskId, key, value, currentUpdatedAtIso);
+          } catch {
+            // 404 / empty / transport — absent from the map, not a thrown error.
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(BULK_MISS_CONCURRENCY, class1Misses.length) }, worker),
+      );
+    }
+  }
+
+  // ── CLASS 2: vault fields aren't task-scoped, so there's no per-task bulk
+  // query — but each is still a local cache read first, network only on miss.
+  if (class2Keys.length > 0) {
+    let idx = 0;
+    const worker = async (): Promise<void> => {
+      while (idx < class2Keys.length) {
+        const key = class2Keys[idx++];
+        try {
+          out[key] = await resolveUserField(key, format);
+        } catch {
+          // not_found / ambiguous / refused — absent from the map.
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(BULK_MISS_CONCURRENCY, class2Keys.length) }, worker),
+    );
+  }
+
+  return out;
+}
+
 /** One-value-per-call fetch shared by both data classes' cache-miss path.
  *  Holds the auth/404/empty-value discipline so class 1 and class 2 behave
  *  identically. Never logs the value — only the opaque ref key may appear in

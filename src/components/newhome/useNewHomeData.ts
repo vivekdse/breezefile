@@ -1127,65 +1127,75 @@ export function useTaskDataValues(requests: { taskId: string; keys: string[] }[]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqKey]);
 
-  useEffect(() => {
+useEffect(() => {
     let cancelled = false;
     if (degraded) return; // origin slow — defer data-bag value resolves
-    const due: { taskId: string; key: string }[] = [];
+
+    // task-780730a010a2 follow-up — ONE resolveBulk call per TASK (not one
+    // resolve call per key): the main process answers every already-cached
+    // key from a single local encrypted-DB query and only pays a network
+    // round trip for genuine misses (task-data.ts resolveTaskDataBulk). Commit
+    // EACH task's result as soon as ITS call lands, rather than waiting for
+    // every task in this wave to settle — a slow/uncached task no longer
+    // blocks every other row's cells from showing (the anti-pattern this hook
+    // used to share with the old per-key loop, already fixed for the detail
+    // wave by task-06b39e952c4e and now fixed here too).
+    const dueByTask: { taskId: string; keys: string[] }[] = [];
     for (const r of requests) {
-      for (const k of r.keys) {
-        const cacheKey = `${r.taskId} ${k}`;
-        if (!fetchedRef.current.has(cacheKey)) due.push({ taskId: r.taskId, key: k });
+      const keys = r.keys.filter((k) => !fetchedRef.current.has(`${r.taskId} ${k}`));
+      if (keys.length > 0) dueByTask.push({ taskId: r.taskId, keys });
+    }
+    if (dueByTask.length === 0) return;
+
+    for (const { taskId, keys } of dueByTask) {
+      for (const k of keys) fetchedRef.current.add(`${taskId} ${k}`);
+    }
+
+    let idx = 0;
+    async function worker() {
+      while (idx < dueByTask.length) {
+        const { taskId, keys } = dueByTask[idx++];
+        let resolved: Record<string, string> = {};
+        try {
+          resolved = await fm.typebuild.taskData.resolveBulk(taskId, keys);
+        } catch {
+          // Signed out / offline — every key in this task's batch stays absent;
+          // the input column simply renders an em-dash for each.
+        }
+        if (cancelled) {
+          // Dropping this task's values — un-mark its keys so a later wave can
+          // retry them (mirrors the old rollback: marked-fetched is what bounds
+          // the fan-out, so leaving them marked would pin them pending forever).
+          for (const k of keys) fetchedRef.current.delete(`${taskId} ${k}`);
+          continue;
+        }
+        setByTask((prev) => {
+          const next = new Map(prev);
+          const rec = { ...(next.get(taskId) ?? {}) };
+          let changed = false;
+          for (const k of keys) {
+            const value = resolved[k];
+            if (value == null || value === '') continue;
+            rec[k] = value;
+            changed = true;
+          }
+          if (changed) next.set(taskId, rec);
+          return changed ? next : prev;
+        });
+        // Every key in THIS task's batch is settled now, streamed in as soon as
+        // this one task's call lands — including keys that came back absent, so
+        // a permanently-missing ref doesn't hold its cell's shimmer open.
+        setSettled((prev) => {
+          const next = new Set(prev);
+          for (const k of keys) next.add(`${taskId} ${k}`);
+          return next;
+        });
       }
     }
-    if (due.length === 0) return;
 
-    void (async () => {
-      let idx = 0;
-      const results: Array<[string, string, string | null]> = [];
-      async function worker() {
-        while (idx < due.length) {
-          const { taskId, key } = due[idx++];
-          fetchedRef.current.add(`${taskId} ${key}`);
-          try {
-            const value = await fm.typebuild.taskData.resolve(taskId, key);
-            results.push([taskId, key, value]);
-          } catch {
-            // Signed out / offline / no value — leave the cell empty; the input
-            // column simply renders an em-dash for this ref.
-            results.push([taskId, key, null]);
-          }
-        }
-      }
-      await Promise.all(
-        Array.from({ length: Math.min(TASK_DATA_CONCURRENCY, due.length) }, () => worker()),
-      );
-      if (cancelled) {
-        // We're dropping this wave's values, so drop its cache entries too. The
-        // workers mark pairs fetched up front (that's what bounds the fan-out);
-        // leaving them marked after discarding the results would make the pairs
-        // un-refetchable AND never settled — i.e. pending forever.
-        for (const { taskId, key } of due) fetchedRef.current.delete(`${taskId} ${key}`);
-        return;
-      }
-      setByTask((prev) => {
-        const next = new Map(prev);
-        for (const [taskId, key, value] of results) {
-          if (value == null || value === '') continue;
-          const rec = { ...(next.get(taskId) ?? {}) };
-          rec[key] = value;
-          next.set(taskId, rec);
-        }
-        return next;
-      });
-      // Every pair we asked about is settled now — including the ones that threw
-      // and the ones that resolved to nothing and so never reach `byTask`.
-      // Otherwise a permanently-absent ref would hold its cell's shimmer open.
-      setSettled((prev) => {
-        const next = new Set(prev);
-        for (const { taskId, key } of due) next.add(`${taskId} ${key}`);
-        return next;
-      });
-    })();
+    void Promise.all(
+      Array.from({ length: Math.min(TASK_DATA_CONCURRENCY, dueByTask.length) }, () => worker()),
+    );
 
     return () => {
       cancelled = true;
