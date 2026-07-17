@@ -15,5 +15,11 @@ export const PHI_TABLE_SQL: string;
 /** Additive migration specs for a legacy (id/title/body-only) task_phi. */
 export const PHI_MIGRATION_COLUMNS: Array<{ name: string; spec: string }>;
 
+/** CREATE TABLE DDL for the CLASS-1 task-data value cache (task-780730a010a2). */
+export const DATA_CACHE_TABLE_SQL: string;
+
+/** CREATE TABLE DDL for the CLASS-2 vault field value cache. */
+export const VAULT_CACHE_TABLE_SQL: string;
+
 /** Parse the column names out of a CREATE TABLE statement. */
 export function parsePhiColumnNames(createTableSql: string): string[];

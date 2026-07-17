@@ -2,7 +2,9 @@
 // TypeBuild task cache (child of epic task-b3fb2928bb3c). The companion to the
 // PHI-FREE task-skeleton-store: the skeleton persists routing metadata in the
 // clear (it's NON-PHI and drives order/filter/counts); THIS store persists the
-// only PHI fields — task `title` and `body`/`notes` — in a whole-file-encrypted
+// PHI-tier payload — task `title`/`body`/`notes`, PLUS (task-780730a010a2) the
+// resolved CLASS-1 (per-task data-bag) and CLASS-2 (user vault field) values
+// task-data.ts's fill-time resolver reads through — in a whole-file-encrypted
 // SQLCipher DB so Home shows real titles instantly on cold start WITHOUT a
 // durable plaintext PHI copy on disk.
 //
@@ -37,7 +39,12 @@ import { principalTag } from '../typebuild/db-key-derive.mjs';
 // task-fe9e4c4cda44 — the shared DDL + column allow-list (also imported by the
 // on-disk no-plaintext-PHI test so store + test build byte-identical tables).
 // The SKELETON-vs-PHI two-store decision is documented in that module's header.
-import { PHI_TABLE_SQL, PHI_MIGRATION_COLUMNS } from './task-phi-schema.mjs';
+import {
+  PHI_TABLE_SQL,
+  PHI_MIGRATION_COLUMNS,
+  DATA_CACHE_TABLE_SQL,
+  VAULT_CACHE_TABLE_SQL,
+} from './task-phi-schema.mjs';
 
 // The PHI projection we persist: id + the two PHI fields, PLUS the NON-PHI
 // sync-metadata (task-fe9e4c4cda44) carried on every row. `title` comes from the
@@ -192,6 +199,11 @@ async function doOpen(
     // Touch the DB to force the key to be validated NOW (a wrong key throws
     // "file is not a database" here rather than at first query).
     db.exec(SCHEMA_SQL);
+    // task-780730a010a2 — the task-data value cache tables. CREATE IF NOT
+    // EXISTS, so an existing encrypted DB gains them on first open with no
+    // migration step (they're new tables, not new columns on task_phi).
+    db.exec(DATA_CACHE_TABLE_SQL);
+    db.exec(VAULT_CACHE_TABLE_SQL);
     // task-fe9e4c4cda44 — bring a legacy (id/title/body-only) table up to the
     // current sync-metadata schema before the first read/write.
     migratePhi(db);
@@ -412,8 +424,13 @@ export function pruneTo(liveIds: Set<string>): void {
       current.db.prepare('SELECT id FROM task_phi').all() as { id: string }[]
     ).map((r) => r.id);
     const del = current.db.prepare('DELETE FROM task_phi WHERE id = ?');
+    const delCache = current.db.prepare('DELETE FROM task_data_cache WHERE task_id = ?');
     const txn = current.db.transaction(() => {
-      for (const id of ids) if (!liveIds.has(id)) del.run(id);
+      for (const id of ids) {
+        if (liveIds.has(id)) continue;
+        del.run(id);
+        delCache.run(id);
+      }
     });
     txn();
     return;
@@ -432,8 +449,12 @@ export function pruneIds(ids: string[]): void {
   if (ids.length === 0) return;
   if (current) {
     const del = current.db.prepare('DELETE FROM task_phi WHERE id = ?');
+    const delCache = current.db.prepare('DELETE FROM task_data_cache WHERE task_id = ?');
     const txn = current.db.transaction(() => {
-      for (const id of ids) del.run(id);
+      for (const id of ids) {
+        del.run(id);
+        delCache.run(id);
+      }
     });
     txn();
     return;
@@ -465,6 +486,112 @@ export function clearPhi(principal?: string): void {
     removeDbFile(principal);
   }
   memoryFallback = null;
+}
+
+// ─── task-data value cache (task-780730a010a2) ────────────────────────────
+//
+// CLASS 1 (per-task data-bag values) + CLASS 2 (the user's own vault fields).
+// Both ride the SAME encrypted connection as title/body above, so they're
+// encrypted-at-rest, per-principal, and wiped by clearPhi() on sign-out —
+// no new key material, no new lifecycle.
+//
+// PERF-ONLY, never correctness-load-bearing: when the encrypted DB isn't open
+// (no keychain — memory-only mode), these simply behave as an always-miss
+// cache. Callers (task-data.ts) already have a working network-fetch fallback
+// for every ref, so skipping the cache here just forgoes the speedup rather
+// than breaking anything. Unlike title/body there is no memoryFallback map for
+// these — the value would otherwise sit decrypted in JS heap for the rest of
+// the session, and this cache exists to avoid a REPEATED round-trip, not a
+// single one, so an always-miss degrade is an acceptable trade.
+
+/** CLASS 1: read a cached data-bag value, honoring the freshness contract —
+ *  the caller passes the task's CURRENT skeleton `updated_at` (ISO, NON-PHI);
+ *  a cached row whose stored `server_updated_at` doesn't match is stale (the
+ *  task changed since we cached this ref) and is treated as a miss. Returns
+ *  null on any miss (not cached, DB not open, or stale). */
+export function getCachedDataValue(
+  taskId: string,
+  ref: string,
+  currentUpdatedAtIso: string | null,
+): string | null {
+  if (!current) return null;
+  const row = current.db
+    .prepare(
+      'SELECT value, server_updated_at AS serverUpdatedAt FROM task_data_cache WHERE task_id = ? AND ref = ?',
+    )
+    .get(taskId, ref) as { value: string; serverUpdatedAt: string | null } | undefined;
+  if (!row) return null;
+  // No freshness signal on either side (server predates updated_at, or we never
+  // recorded one) — trust the cached value rather than never caching at all.
+  if (currentUpdatedAtIso != null && row.serverUpdatedAt != null) {
+    if (row.serverUpdatedAt !== currentUpdatedAtIso) return null;
+  }
+  return row.value;
+}
+
+/** CLASS 1: write-through a resolved data-bag value. `serverUpdatedAtIso` is
+ *  the task's skeleton `updated_at` AT RESOLVE TIME, stamped alongside the
+ *  value so a later read can detect the task having moved on. No-ops when the
+ *  encrypted DB isn't open (memory-only mode — see header note). */
+export function putCachedDataValue(
+  taskId: string,
+  ref: string,
+  value: string,
+  serverUpdatedAtIso: string | null,
+): void {
+  if (!current) return;
+  current.db
+    .prepare(
+      `INSERT INTO task_data_cache (task_id, ref, value, server_updated_at, local_updated_at)
+       VALUES (@task_id, @ref, @value, @server_updated_at, @local_updated_at)
+       ON CONFLICT(task_id, ref) DO UPDATE SET
+         value = excluded.value,
+         server_updated_at = excluded.server_updated_at,
+         local_updated_at = excluded.local_updated_at`,
+    )
+    .run({
+      task_id: taskId,
+      ref,
+      value,
+      server_updated_at: serverUpdatedAtIso,
+      local_updated_at: Date.now(),
+    });
+}
+
+/** CLASS 2: read a cached vault field value (`format` is the bare|dashed hint,
+ *  '' when omitted — same key shape the resolver already uses). Returns null
+ *  on any miss. No staleness check here: correctness comes from
+ *  invalidateCachedVaultValue being called on every write (see below), not
+ *  from a time-based guess. */
+export function getCachedVaultValue(ref: string, format: string | undefined): string | null {
+  if (!current) return null;
+  const row = current.db
+    .prepare('SELECT value FROM vault_data_cache WHERE ref = ? AND format = ?')
+    .get(ref, format ?? '') as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+/** CLASS 2: write-through a resolved vault field value. */
+export function putCachedVaultValue(ref: string, format: string | undefined, value: string): void {
+  if (!current) return;
+  current.db
+    .prepare(
+      `INSERT INTO vault_data_cache (ref, format, value, local_updated_at)
+       VALUES (@ref, @format, @value, @local_updated_at)
+       ON CONFLICT(ref, format) DO UPDATE SET
+         value = excluded.value,
+         local_updated_at = excluded.local_updated_at`,
+    )
+    .run({ ref, format: format ?? '', value, local_updated_at: Date.now() });
+}
+
+/** CLASS 2: drop every cached format-variant for one vault ref. Called by
+ *  user-vault.ts on setUserSecret/deleteUserSecret so a write is immediately
+ *  reflected — a stale credential silently filled into a form is worse than a
+ *  cache miss, so writes always win over the cache rather than racing a TTL. */
+export function invalidateCachedVaultValue(ref: string): void {
+  if (!current) return;
+  current.db.prepare('DELETE FROM vault_data_cache WHERE ref = ?').run(ref);
 }
 
 // For tests / explicit cleanup.

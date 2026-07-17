@@ -72,6 +72,45 @@ export const PHI_MIGRATION_COLUMNS = [
   { name: 'origin', spec: "origin TEXT NOT NULL DEFAULT 'server'" },
 ];
 
+// task-780730a010a2 — the task-data VALUE cache, same encrypted DB file as
+// task_phi (same security tier: PHI/credential values, per-principal, wiped on
+// sign-out). Two tables for the two data classes task-data.ts resolves:
+//
+//   task_data_cache  — CLASS 1 (per-task patient data-bag values), keyed by
+//     (task_id, ref). Freshness is checked against the NON-PHI skeleton store's
+//     `updated_at_iso` for that task (getSkeletonUpdatedAtIso) — a mismatch
+//     means the task changed since we cached this value, so treat as a miss.
+//   vault_data_cache — CLASS 2 (the user's own vault fields, "me.*"/"me@id.*"),
+//     keyed by (ref, format). No task is involved, so there is no server
+//     updated_at to compare against; instead the vault WRITE path
+//     (user-vault.ts setUserSecret/deleteUserSecret) invalidates the ref
+//     directly on every write, so a cache hit is always the value WE last
+//     wrote or fetched — never a guess bounded by a TTL.
+//
+// Both tables hold plaintext-when-unencrypted VALUES, same as task_phi's
+// title/body, so they ride the SAME SQLCipher connection/key/wipe lifecycle —
+// no separate store, no separate key derivation.
+export const DATA_CACHE_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS task_data_cache (
+    task_id           TEXT NOT NULL,
+    ref               TEXT NOT NULL,
+    value             TEXT NOT NULL,
+    server_updated_at TEXT,
+    local_updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (task_id, ref)
+  );
+`;
+
+export const VAULT_CACHE_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS vault_data_cache (
+    ref              TEXT NOT NULL,
+    format           TEXT NOT NULL DEFAULT '',
+    value            TEXT NOT NULL,
+    local_updated_at INTEGER NOT NULL,
+    PRIMARY KEY (ref, format)
+  );
+`;
+
 // Reuse the skeleton schema's PHI-column parser/guard shape here too, so the test
 // can assert that the NON-PHI sync-metadata column NAMES don't accidentally
 // carry a PHI-suggesting substring (title/body/notes are EXPECTED here — they're

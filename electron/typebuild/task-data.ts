@@ -7,10 +7,13 @@
 // control API (electron/api-server.ts → electron/browser/cli.mjs `fill-ref`).
 // The agent's MCP context never receives them.
 //
-// PHI invariant (typebuild.ts): decrypted values are MEMORY-ONLY and transient.
-// We deliberately do NOT cache them — each resolve is a fresh fetch so a value
-// never lingers in main's heap beyond the request that needs it, and is never
-// persisted or logged.
+// PHI invariant (typebuild.ts): a resolved value never lingers in main's heap
+// beyond the request that needs it, and is never logged. It MAY be persisted —
+// task-780730a010a2 — but only inside the SAME encrypted, per-principal,
+// wiped-on-sign-out store as task title/body (task-phi-store.ts's
+// task_data_cache/vault_data_cache tables), never in plaintext and never in an
+// unencrypted or shared location. See resolveClass1Ref/resolveUserField below
+// for the read-through-cache + write-through-on-write discipline.
 //
 // THREAT MODEL (load-bearing): this is a cooperative boundary, NOT a sandbox.
 // The agent can still read the page / screenshot / eval the filled field, so it
@@ -155,16 +158,38 @@ export async function resolveTaskDataRef(
 
   // Class 1 — patient PHI on this task.
   if (!taskId) throw new Error('taskId required');
-  return fetchDataValue(
+  return resolveClass1Ref(taskId, ref);
+}
+
+/** CLASS 1, read-through the encrypted task-data cache (task-780730a010a2).
+ *  Freshness is checked against the task's NON-PHI skeleton `updated_at` — a
+ *  mismatch (or no cache row at all) means fetch fresh and write the result
+ *  back through, stamped with the CURRENT updated_at at fetch time. Lazily
+ *  imported so a caller that never touches class-1 data never pulls in the
+ *  encrypted-DB native driver. */
+async function resolveClass1Ref(taskId: string, ref: string): Promise<string> {
+  const [{ getCachedDataValue, putCachedDataValue }, { getSkeletonUpdatedAtIso }] =
+    await Promise.all([
+      import('../sources/task-phi-store'),
+      import('../sources/task-skeleton-store'),
+    ]);
+  const currentUpdatedAtIso = getSkeletonUpdatedAtIso(taskId);
+  const cached = getCachedDataValue(taskId, ref, currentUpdatedAtIso);
+  if (cached != null) return cached;
+  const value = await fetchDataValue(
     `${API_BASE}/chromeext/${encodeURIComponent(taskId)}/data?ref=${encodeURIComponent(ref)}`,
     ref,
   );
+  putCachedDataValue(taskId, ref, value, currentUpdatedAtIso);
+  return value;
 }
 
-/** One-value-per-call fetch shared by both data classes. Holds the auth/404/
- *  empty-value discipline so class 1 and class 2 behave identically. Never
- *  caches (PHI/credentials are transient, memory-only) and never logs the
- *  value — only the opaque ref key may appear in errors. */
+/** One-value-per-call fetch shared by both data classes' cache-miss path.
+ *  Holds the auth/404/empty-value discipline so class 1 and class 2 behave
+ *  identically. Never logs the value — only the opaque ref key may appear in
+ *  errors. The result is write-through cached by the caller (resolveClass1Ref /
+ *  resolveUserField), not here — patchTaskData also calls this directly for
+ *  its sibling-resolve merge and must NOT cache those (see its own comment). */
 async function fetchDataValue(reqUrl: string, ref: string): Promise<string> {
   const res = await typebuildFetch(reqUrl);
   if (res.status === 404) {
@@ -317,7 +342,11 @@ function parseUserRef(ref: string): { entityId?: string; field: string } {
  *    not_found        → "field not found" (may list the user's non-secret fields)
  *    ambiguous        → "ambiguous — disambiguate" (may list candidate fields)
  *    ambiguous_secret → generic "ambiguous / refused" — discloses NOTHING.
- *  Never caches; one value per call. */
+ *  Read-through the encrypted vault cache (task-780730a010a2), keyed by
+ *  (ref, format) — no server updated_at to check freshness against here (no
+ *  task involved), so correctness instead comes from user-vault.ts's
+ *  setUserSecret/deleteUserSecret calling invalidateCachedVaultValue on every
+ *  write, not from a time-based guess. */
 async function resolveUserField(ref: string, format?: string): Promise<string> {
   const { entityId, field } = parseUserRef(ref);
 
@@ -325,6 +354,11 @@ async function resolveUserField(ref: string, format?: string): Promise<string> {
   // explicitly via "me@<entityId>". `format` (bare|dashed) is forwarded only
   // when the caller asks for a specific shape; omitted = server default.
   const fmt = typeof format === 'string' ? format.trim() : '';
+
+  const { getCachedVaultValue, putCachedVaultValue } = await import('../sources/task-phi-store');
+  const cached = getCachedVaultValue(ref, fmt);
+  if (cached != null) return cached;
+
   const reqUrl =
     `${API_BASE}/chromeext/entities/resolve?field=${encodeURIComponent(field)}` +
     (entityId ? `&entity=${encodeURIComponent(entityId)}` : '') +
@@ -348,6 +382,7 @@ async function resolveUserField(ref: string, format?: string): Promise<string> {
     if (body.value === '') {
       throw Object.assign(new Error(`no data for ref "${ref}" (empty)`), { status: 404 });
     }
+    putCachedVaultValue(ref, fmt, body.value);
     return body.value;
   }
 

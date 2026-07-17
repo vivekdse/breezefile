@@ -52,6 +52,16 @@
 // resolveUserField). All scoped to the signed-in user by the Firebase token.
 
 import { API_BASE, isUserDataRef, resolveTaskDataRef, typebuildFetch } from './task-data';
+// task-780730a010a2 — the vault fill-time resolver now caches values in the
+// encrypted PHI store (task-phi-store.ts's vault_data_cache). This is the ONE
+// write surface for class-2 data, so every accepted write must invalidate the
+// ref's cache entries here — otherwise a stale value could keep filling forms
+// after the user changed it. Lazy import mirrors task-data.ts's own pattern
+// (only pull in the native encrypted-DB driver when actually needed).
+async function invalidateVaultCache(ref: string): Promise<void> {
+  const { invalidateCachedVaultValue } = await import('../sources/task-phi-store');
+  invalidateCachedVaultValue(ref);
+}
 
 const ME_URL = `${API_BASE}/chromeext/entities/me`;
 
@@ -175,6 +185,7 @@ export async function setUserSecret(rawKey: string, value: string): Promise<stri
     const reason = result.reason ? `: ${result.reason}` : '';
     throw Object.assign(new Error(`invalid value for "${ref}"${reason}`), { status: 400 });
   }
+  await invalidateVaultCache(ref);
   return ref;
 }
 
@@ -195,7 +206,10 @@ export async function deleteUserSecret(rawKey: string): Promise<void> {
   const field = toEntityField(ref);
   const { id } = await fetchMeEntity();
   const result = await putField(id, field, '', ref);
-  if (result.ok) return;
+  if (result.ok) {
+    await invalidateVaultCache(ref);
+    return;
+  }
   // The only expected failure here is a validated field refusing an empty value.
   // Translate the generic validation reason into a delete-specific message so
   // the user understands WHY (and what to do): replace the value instead.

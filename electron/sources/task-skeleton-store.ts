@@ -172,6 +172,20 @@ function existingRow(d: Database.Database, id: string): SkelRow | undefined {
     | undefined;
 }
 
+/** The server's last-known `updated_at` (ISO) for one task, or null when the
+ *  task is unknown locally. NON-PHI (routing metadata only). Used by the
+ *  task-data value cache (task-data.ts / task-phi-store's data-cache tables) as
+ *  a cheap freshness signal: a cached data-bag/vault value is trusted only
+ *  while it matches the task's current skeleton `updated_at` — no need to open
+ *  the encrypted PHI DB just to check staleness. */
+export function getSkeletonUpdatedAtIso(id: string): string | null {
+  const d = open();
+  const row = d.prepare('SELECT updated_at_iso FROM task_skeleton WHERE id = ?').get(id) as
+    | { updated_at_iso: string | null }
+    | undefined;
+  return row?.updated_at_iso ?? null;
+}
+
 // ─── Reconcile ─────────────────────────────────────────────────────────────
 // Replace the live set with `fresh`, computing the added/changed/removed diff
 // against what was live. Upserts every fresh row (clearing any tombstone),
