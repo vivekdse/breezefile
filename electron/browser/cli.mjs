@@ -46,6 +46,27 @@
 //                               caps options at 50 (--filter narrows the full
 //                               list); a custom combobox is probed to refine
 //                               combobox-static vs -async without side effects.
+//
+//   ── FIELD ACTIONS (phase 3 — the ref-based setters, field-verbs.mjs) ───────
+//   field-fill <ref> <value…>   fill a text/date field by ref; reads the value
+//                               back into the receipt (`filled "<label>" = "<v>"`,
+//                               + [remapped] when the ref was remapped). Refuses a
+//                               select/combobox/checkbox (points at field-select).
+//   field-fill <ref> --data-ref <key>   fill with a TypeBuild task `data` value
+//                               resolved in-process — the value never enters
+//                               argv/stdout; receipt names the key + length only.
+//                               A sensitive target's read-back is masked («filled»).
+//   field-select <ref> --pick <label> [--query <text> | --query-ref <key>]
+//                               commit a choice by ref, dispatched per species:
+//                               native select (selectOption), static combobox
+//                               (open+harvest+click), async autocomplete (type
+//                               --query, wait for "N results available.", pick),
+//                               virtualized listbox (arrow-walk aria-activedescendant
+//                               + Enter). Match ladder: exact → normalized →
+//                               unambiguous substring against the FULL option
+//                               list; ambiguous/no-match prints ≤10 nearest
+//                               candidates + a retry line and exits 1 (never
+//                               guesses). --query-ref is PHI (never echoed).
 //   text [selector]            innerText of selector (default body)
 //   click <selector>            click first match (css, text=, xpath=)
 //   fill <selector> <value>     clear + type into an input
@@ -102,7 +123,7 @@ import {
   API_FILE,
 } from './connect.mjs';
 import { scrubError } from './scrub.mjs';
-import { describePage, describeFields, describeField } from './field-verbs.mjs';
+import { describePage, describeFields, describeField, fillField, selectField } from './field-verbs.mjs';
 import { observeNetwork, replayRequest } from './net.mjs';
 import { apiSpecFromRequest, recordApiSpec, validateApiSpec } from './tools/api-spec.mjs';
 import { timeVerb, takeLastMetric } from './tools/run-metrics.mjs';
@@ -356,6 +377,49 @@ async function dispatchVerb(verb, rest, page) {
         // stdout — the agent reads tool stdout — and exit non-zero. (An
         // unactionable KIND is handled inside describeField, which returns the
         // JSON with kind 'unknown' rather than throwing — never a bare error.)
+        process.stdout.write((e?.message || String(e)) + '\n');
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'field-fill': {
+      // Set a text/date field by ref. `field-fill <ref> <value…>` or
+      // `field-fill <ref> --data-ref <key>` (PHI: value resolved in-process,
+      // never on argv/stdout). Logic lives in field-verbs.mjs; this stays thin.
+      const { pos, flags } = splitFlags(rest);
+      const ref = pos[0];
+      if (!ref) fail('field-fill needs a <ref> (run `fields` first to list them)');
+      const dataRef = flags['data-ref'] && flags['data-ref'] !== true ? String(flags['data-ref']) : null;
+      const value = pos.slice(1).join(' ');
+      if (!dataRef && value === '') fail('field-fill needs a <value> or --data-ref <key>');
+      try {
+        const out = await fillField(page, ref, { value, dataRef, resolveDataRef });
+        process.stdout.write(out.text + '\n');
+        if (out.code) process.exitCode = out.code;
+      } catch (e) {
+        // resolveByRef's staleness/unknown-ref text is the agent's next command —
+        // surface it UNTOUCHED on stdout (like `field`), exit non-zero.
+        process.stdout.write((e?.message || String(e)) + '\n');
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'field-select': {
+      // Commit a choice by ref, dispatched per species in field-verbs.mjs.
+      // --query-ref is PHI (resolved in-process, never echoed). Ambiguity /
+      // no-match / refusal / timeout come back as {code:1} + a stdout message.
+      const { pos, flags } = splitFlags(rest);
+      const ref = pos[0];
+      if (!ref) fail('field-select needs a <ref> (run `fields` first to list them)');
+      const pick = flags.pick && flags.pick !== true ? String(flags.pick) : undefined;
+      if (!pick) fail('field-select needs --pick <label>');
+      const query = flags.query && flags.query !== true ? String(flags.query) : undefined;
+      const queryRef = flags['query-ref'] && flags['query-ref'] !== true ? String(flags['query-ref']) : undefined;
+      try {
+        const out = await selectField(page, ref, { pick, query, queryRef, resolveDataRef });
+        process.stdout.write(out.text + '\n');
+        if (out.code) process.exitCode = out.code;
+      } catch (e) {
         process.stdout.write((e?.message || String(e)) + '\n');
         process.exitCode = 1;
       }
