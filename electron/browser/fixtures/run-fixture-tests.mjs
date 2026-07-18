@@ -191,33 +191,138 @@ const CASES = [
       { verb: 'title', args: [], expectStdoutMatches: 'step 2 of 2' },
     ],
   },
+
+  // ── FIELD PERCEPTION (phase 2) — the `page` / `fields` / `field` verbs ──────
+  //
+  // These drive the real perception layer end to end. Aria refs are HARDCODED
+  // (e5/e8/e11, e4, …): they are deterministic for a fixed fixture DOM (assigned
+  // in AX-tree document order) and each case re-runs `goto`+`fields` first so the
+  // ref map is minted for this runner process (shared ppid => shared runKey)
+  // before any `field` step resolves against it.
+
+  // 8. fields enumerates a native-select page (small select, HUGE select w/ its
+  //    option count, text input) WITHOUT dumping option bodies.
+  {
+    name: 'fields-native-select',
+    fixture: 'native-select.html',
+    steps: [
+      { verb: 'goto', args: ['$FIXTURE_URL'], expectStdoutMatches: /navigated to/ },
+      { verb: 'fields', args: [],
+        expectStdoutMatches: ['fields (3)', 'State', 'Provider', 'Member ID',
+          'select', 'text', 'options:10001', '→ inspect: field <ref>'],
+        // the 10001 options are NEVER dumped into the fields listing.
+        expectStdoutAbsent: [/Provider 00500/, /Provider 09999/] },
+    ],
+  },
+
+  // 9. field on the 10k select: capped at 50 (option bodies far down are ABSENT),
+  //    and --filter narrows the FULL list to the one match without a 10k dump.
+  {
+    name: 'field-native-huge-capped-and-filtered',
+    fixture: 'native-select.html',
+    steps: [
+      { verb: 'goto', args: ['$FIXTURE_URL'], expectStdoutMatches: /navigated to/ },
+      { verb: 'fields', args: [], expectStdoutMatches: /fields \(/ },
+      // unfiltered: kind select, capped receipt present, deep options ABSENT.
+      { verb: 'field', args: ['e8'],
+        expectStdoutMatches: ['"kind": "select"', 'showing 50 of 10001', 'Provider 00001'],
+        expectStdoutAbsent: [/Provider 05000/, /Provider 09999/] },
+      // --filter resolves the single match without enumerating the rest.
+      { verb: 'field', args: ['e8', '--filter', '00042'],
+        expectStdoutMatches: ['"kind": "select"', 'Provider 00042', '10001'],
+        expectStdoutAbsent: [/Provider 00500/, /Provider 09999/] },
+    ],
+  },
+
+  // 10. field on a STATIC custom combobox: species refined to combobox-static,
+  //     options harvested by opening — and the probe is SIDE-EFFECT-SAFE (the
+  //     committed-value readout is unchanged afterward).
+  {
+    name: 'field-combobox-static-side-effect-safe',
+    fixture: 'combobox-static.html',
+    steps: [
+      { verb: 'goto', args: ['$FIXTURE_URL'], expectStdoutMatches: /navigated to/ },
+      { verb: 'fields', args: [], expectStdoutMatches: 'Diagnosis' },
+      { verb: 'field', args: ['e4'],
+        expectStdoutMatches: ['"kind": "combobox-static"', 'Condition 07', 'field-select e4 --pick'] },
+      // readout untouched by the open/close probe.
+      { verb: 'text', args: ['#committed-readout'], expectStdoutMatches: 'committed value: (none)' },
+    ],
+  },
+
+  // 11. field on an ASYNC autocomplete: species refined to combobox-async, no
+  //     option harvest (must not type), optionsHint points at --query.
+  {
+    name: 'field-combobox-async',
+    fixture: 'autocomplete-async.html',
+    steps: [
+      { verb: 'goto', args: ['$FIXTURE_URL'], expectStdoutMatches: /navigated to/ },
+      { verb: 'fields', args: [], expectStdoutMatches: 'Patient' },
+      { verb: 'field', args: ['e4'],
+        expectStdoutMatches: ['"kind": "combobox-async"', 'async — options come from typing',
+          '--query'],
+        expectStdoutAbsent: [/"options": \[/] },
+    ],
+  },
+
+  // 12. fields across NESTED IFRAMES: all 4 fields, each non-top one carrying its
+  //     [frame fN] marker (frames number FLAT: f1, f2).
+  {
+    name: 'fields-iframe-descends-frames',
+    fixture: 'iframe-form.html',
+    steps: [
+      { verb: 'goto', args: ['$FIXTURE_URL'], expectStdoutMatches: /navigated to/ },
+      { verb: 'fields', args: [],
+        expectStdoutMatches: ['fields (4)', 'Case number', 'Diagnosis note', 'Priority',
+          'Authorization PIN', '[frame f1]', '[frame f2]'] },
+    ],
+  },
+
+  // 13. broken (div-soup) page: NO ARIA field semantics => fields degrades with an
+  //     escape-hatch pointer, never claims an option enumeration.
+  {
+    name: 'fields-broken-aria-escape-hatch',
+    fixture: 'broken-aria.html',
+    steps: [
+      { verb: 'goto', args: ['$FIXTURE_URL'], expectStdoutMatches: /navigated to/ },
+      { verb: 'fields', args: [],
+        expectStdoutMatches: [/no accessible fields/i, /net-observe/],
+        expectStdoutAbsent: [/\boption\b/, /\blistbox\b/] },
+    ],
+  },
+
+  // 14. STALENESS: capture a step-1 ref, click Continue (DOM replace + navigate),
+  //     then `field <ref>` surfaces perceive.mjs's 'page changed … re-run: fields'
+  //     text on stdout and exits non-zero — never silently mis-targets.
+  {
+    name: 'field-stale-ref-after-navigation',
+    fixture: 'navigating.html',
+    steps: [
+      { verb: 'goto', args: ['$FIXTURE_URL'], expectStdoutMatches: /navigated to/ },
+      { verb: 'fields', args: [], expectStdoutMatches: 'Applicant name' },
+      { verb: 'click', args: ['#continue'], expectStdoutMatches: /clicked/ },
+      { verb: 'field', args: ['e4'], expectExitCode: 1,
+        expectStdoutMatches: [/page changed/, /re-run: fields/] },
+    ],
+  },
 ];
 
-// ── PENDING CASES (skeleton) — the FUTURE field-perception verbs ────────────
-// These are NOT run today; they document the acceptance tests the new layer must
-// pass. Un-comment + move into CASES as each verb (`fields`, `field`,
-// `field-select`, `field-fill`) lands. Left commented so the runner stays green
-// against today's CLI.
+// ── PENDING CASES (skeleton) — the phase-3 ACT verbs, not yet built ──────────
+// `fields` / `field` are ACTIVE above. `field-select` / `field-fill` (the
+// value-committing setters) land in phase 3; their acceptance tests are kept
+// here (commented) so the runner stays green until those verbs exist. Un-comment
+// + move into CASES as each lands. Refs are captured by a preceding `fields`
+// step (same runner process => same ref map), as the active cases do.
 //
 // const PENDING_CASES = [
-//   {
-//     name: 'PENDING fields-enumerates-native-select',
-//     fixture: 'native-select.html',
-//     steps: [
-//       { verb: 'goto',   args: ['$FIXTURE_URL'] },
-//       // `fields` should classify: State→native-select(8), Provider→native-select
-//       // (10000, NOT enumerated), Member ID→text.
-//       { verb: 'fields', args: [], expectStdoutMatches: ['native-select', '10000', 'text'] },
-//     ],
-//   },
 //   {
 //     name: 'PENDING field-select-small-native-by-label',
 //     fixture: 'native-select.html',
 //     steps: [
 //       { verb: 'goto',         args: ['$FIXTURE_URL'] },
+//       { verb: 'fields',       args: [] },
 //       // field-select <ref-of-State> --pick "Texas"  => commits value "TX".
-//       { verb: 'field-select', args: ['<STATE_REF>', '--pick', 'Texas'] },
-//       // Read-back receipt via the committed-value readout:
+//       { verb: 'field-select', args: ['e5', '--pick', 'Texas'] },
 //       { verb: 'text', args: ['#committed-readout'], expectStdoutMatches: 'State = TX (Texas)' },
 //     ],
 //   },
@@ -226,8 +331,9 @@ const CASES = [
 //     fixture: 'native-select.html',
 //     steps: [
 //       { verb: 'goto',         args: ['$FIXTURE_URL'] },
+//       { verb: 'fields',       args: [] },
 //       // --query narrows the 10000-option select WITHOUT enumerating them.
-//       { verb: 'field-select', args: ['<PROVIDER_REF>', '--query', '00042', '--pick', 'Provider 00042 — Specialty B'] },
+//       { verb: 'field-select', args: ['e8', '--query', '00042', '--pick', 'Provider 00042 — Specialty C'] },
 //       { verb: 'text', args: ['#committed-readout'], expectStdoutMatches: 'P00042' },
 //     ],
 //   },
@@ -236,7 +342,8 @@ const CASES = [
 //     fixture: 'combobox-static.html',
 //     steps: [
 //       { verb: 'goto',         args: ['$FIXTURE_URL'] },
-//       { verb: 'field-select', args: ['<COMBO_REF>', '--query', 'Condition 07', '--pick', 'Condition 07'] },
+//       { verb: 'fields',       args: [] },
+//       { verb: 'field-select', args: ['e4', '--query', 'Condition 07', '--pick', 'Condition 07'] },
 //       { verb: 'text', args: ['#committed-readout'], expectStdoutMatches: 'Diagnosis = Condition 07' },
 //     ],
 //   },
@@ -245,8 +352,9 @@ const CASES = [
 //     fixture: 'autocomplete-async.html',
 //     steps: [
 //       { verb: 'goto',         args: ['$FIXTURE_URL'] },
+//       { verb: 'fields',       args: [] },
 //       // Must debounce+await the role=status "3 results available." before picking.
-//       { verb: 'field-select', args: ['<PATIENT_REF>', '--query', 'ram', '--pick', 'Ramachandran, Arun'] },
+//       { verb: 'field-select', args: ['e4', '--query', 'ram', '--pick', 'Ramachandran, Arun'] },
 //       { verb: 'text', args: ['#committed-readout'], expectStdoutMatches: 'Ramachandran, Arun' },
 //     ],
 //   },
@@ -255,38 +363,20 @@ const CASES = [
 //     fixture: 'virtualized.html',
 //     steps: [
 //       { verb: 'goto',         args: ['$FIXTURE_URL'] },
+//       { verb: 'fields',       args: [] },
 //       // No full enumeration possible — arrow-through fallback to "Code 0004".
-//       { verb: 'field-select', args: ['<PROC_REF>', '--pick', 'Code 0004'] },
+//       { verb: 'field-select', args: ['e4', '--pick', 'Code 0004'] },
 //       { verb: 'text', args: ['#committed-readout'], expectStdoutMatches: 'Code 0004' },
 //     ],
 //   },
 //   {
-//     name: 'PENDING field-fill-iframe-descends-frames',
+//     name: 'PENDING field-fill-iframe-text',
 //     fixture: 'iframe-form.html',
 //     steps: [
-//       { verb: 'goto',   args: ['$FIXTURE_URL'] },
-//       // fields must list all 4 across the 3 frames.
-//       { verb: 'fields', args: [], expectStdoutMatches: ['Case number', 'Diagnosis note', 'Priority', 'Authorization PIN'] },
-//     ],
-//   },
-//   {
-//     name: 'PENDING field-select-broken-aria-degrades',
-//     fixture: 'broken-aria.html',
-//     steps: [
-//       { verb: 'goto',   args: ['$FIXTURE_URL'] },
-//       // The layer must REFUSE to claim a role=option enumeration here and
-//       // report the control as div-soup / unknown.
-//       { verb: 'fields', args: [], expectStdoutMatches: /unknown|div-soup|no accessible/i },
-//     ],
-//   },
-//   {
-//     name: 'PENDING field-select-stale-ref-fails-loud',
-//     fixture: 'navigating.html',
-//     steps: [
-//       { verb: 'goto',  args: ['$FIXTURE_URL'] },
-//       // Capture a step-1 ref, click Continue (DOM replaced + navigation), then
-//       // acting on the stale ref MUST fail (non-zero), not silently mis-target.
-//       { verb: 'field', args: ['<STALE_REF>'], expectExitCode: 1, expectStdoutMatches: /stale|not found|re-?snapshot/i },
+//       { verb: 'goto',       args: ['$FIXTURE_URL'] },
+//       { verb: 'fields',     args: [] },
+//       // field-fill must reach a text input inside a nested frame by ref.
+//       { verb: 'field-fill', args: ['f2e3', '1234'] },
 //     ],
 //   },
 // ];

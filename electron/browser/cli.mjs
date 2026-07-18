@@ -30,6 +30,22 @@
 //   title                       print the page title
 //   goto <url>                  navigate the tab
 //   snapshot [selector]         ARIA snapshot (the agent's "eyes"; default body)
+//
+//   ── FIELD PERCEPTION (phase 2 — the JAWS-style form reader, perceive.mjs) ──
+//   page                        orientation skeleton: title/url, landmarks,
+//                               headings, frame count+titles, interactive counts
+//                               (a few hundred bytes — NOT a full tree dump)
+//   fields                      one line per form field (ref, kind, label, value,
+//                               state flags, option count, [frame fN]) + a terse
+//                               links/buttons section. Mints the ref map the
+//                               field*/act verbs resolve against. Refs look like
+//                               e35 (top frame) / f1e3 (frame 1) and DIE across
+//                               processes — always re-derived via `fields`.
+//   field <ref> [--filter s]    one field's contract as JSON (kind, value,
+//                               constraints, options, howToSet). A native select
+//                               caps options at 50 (--filter narrows the full
+//                               list); a custom combobox is probed to refine
+//                               combobox-static vs -async without side effects.
 //   text [selector]            innerText of selector (default body)
 //   click <selector>            click first match (css, text=, xpath=)
 //   fill <selector> <value>     clear + type into an input
@@ -86,6 +102,7 @@ import {
   API_FILE,
 } from './connect.mjs';
 import { scrubError } from './scrub.mjs';
+import { describePage, describeFields, describeField } from './field-verbs.mjs';
 import { observeNetwork, replayRequest } from './net.mjs';
 import { apiSpecFromRequest, recordApiSpec, validateApiSpec } from './tools/api-spec.mjs';
 import { timeVerb, takeLastMetric } from './tools/run-metrics.mjs';
@@ -310,6 +327,38 @@ async function dispatchVerb(verb, rest, page) {
     case 'snapshot': {
       const sel = rest[0] || 'body';
       process.stdout.write((await loc(page, sel).ariaSnapshot()) + '\n');
+      break;
+    }
+    case 'page': {
+      // Orientation skeleton: title/url + landmarks/headings/frames + interactive
+      // counts. A few hundred bytes; the FULL-tree dump is `snapshot`, not this.
+      process.stdout.write((await describePage(page)) + '\n');
+      break;
+    }
+    case 'fields': {
+      // The JAWS Insert+F5 analog: one line per form field (ref/kind/label/value/
+      // flags), then links/buttons. Persists the ref map for later field* verbs.
+      process.stdout.write((await describeFields(page)) + '\n');
+      break;
+    }
+    case 'field': {
+      // One field's full contract as JSON. `--filter <substr>` narrows a native
+      // select's option list without dumping all of them.
+      const { pos, flags } = splitFlags(rest);
+      const ref = pos[0];
+      if (!ref) fail('field needs a <ref> (run `fields` first to list them)');
+      const filter = flags.filter && flags.filter !== true ? String(flags.filter) : undefined;
+      try {
+        process.stdout.write((await describeField(page, ref, { filter })) + '\n');
+      } catch (e) {
+        // resolveByRef's staleness/unknown-ref text is the agent's next command
+        // (it names the recovery: re-run `fields`). Surface it UNTOUCHED on
+        // stdout — the agent reads tool stdout — and exit non-zero. (An
+        // unactionable KIND is handled inside describeField, which returns the
+        // JSON with kind 'unknown' rather than throwing — never a bare error.)
+        process.stdout.write((e?.message || String(e)) + '\n');
+        process.exitCode = 1;
+      }
       break;
     }
     case 'text': {
