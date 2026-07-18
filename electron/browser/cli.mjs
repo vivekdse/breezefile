@@ -263,7 +263,18 @@ async function main() {
     // stdin injection). `rest[0]` is the verb's first positional arg — a URL
     // for goto/net-*, a selector for click/fill/etc; run-metrics only keeps a
     // derived domain from it (domainOf), never the raw selector/URL text.
-    await timeVerb(verb, rest[0], () => dispatchVerb(verb, rest, page));
+    const startedAt = new Date();
+    try {
+      await timeVerb(verb, rest[0], () => dispatchVerb(verb, rest, page));
+    } finally {
+      // Always-on timing receipt (trailing line, after the verb's own output)
+      // so the agent sees wall-clock cost of every action, not just breaches.
+      const endedAt = new Date();
+      process.stdout.write(
+        `[timing] ${verb} in=${startedAt.toISOString()} out=${endedAt.toISOString()} ` +
+          `(${endedAt - startedAt}ms)\n`,
+      );
+    }
   } finally {
     // Detach the CDP client. Does NOT close Breeze or the tab.
     await browser.close().catch(() => {});
