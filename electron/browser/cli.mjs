@@ -134,6 +134,158 @@ function fail(msg) {
   process.exit(1);
 }
 
+// ─── VERBS — the ONE source of truth for `help` (and the unknown-verb guard) ──
+// The self-describing manual a confused agent reads. `help` renders the compact
+// table; `help <verb>` renders one verb's usage + example. Grouped by tier so the
+// table teaches the CHEAPEST-first climb (field layer before raw selectors),
+// mirroring the session playbook (electron/browser/automation.ts playbookBody).
+// Every verb the CLI accepts appears here so the pre-connect unknown-verb guard
+// can suggest a nearest match instead of connecting just to fail.
+const VERB_GROUPS = [
+  {
+    title: 'Orient / read (start here — cheap, read-only)',
+    verbs: [
+      { name: 'page', usage: 'page', when: 'orientation skeleton: title/url, landmarks, interactive counts', example: 'page' },
+      { name: 'fields', usage: 'fields', when: 'one line per form field — MINTS the refs the field* verbs use', example: 'fields' },
+      { name: 'field', usage: 'field <ref> [--filter <substr>]', when: "one field's contract (kind/value/options/howToSet)", example: 'field e8 --filter 00042' },
+      { name: 'snapshot', usage: 'snapshot [selector]', when: 'full ARIA tree of selector (default body) — heavier than page/fields', example: 'snapshot form' },
+      { name: 'text', usage: 'text [selector]', when: 'innerText of selector (default body)', example: 'text #summary' },
+      { name: 'url', usage: 'url', when: "the browser tab's current URL", example: 'url' },
+      { name: 'title', usage: 'title', when: 'the page title', example: 'title' },
+      { name: 'pages', usage: 'pages', when: 'list attachable pages (debug)', example: 'pages' },
+    ],
+  },
+  {
+    title: 'Field layer — set a control by REF (PREFER over raw click/fill on forms)',
+    verbs: [
+      { name: 'field-fill', usage: 'field-fill <ref> <value…> | field-fill <ref> --data-ref <key>', when: 'fill a text/date field by ref (--data-ref = PHI key, never on argv/stdout)', example: 'field-fill f2e3 1234' },
+      { name: 'field-select', usage: 'field-select <ref> --pick <label> [--query <text> | --query-ref <key>]', when: 'commit a choice (native select / combobox / listbox); async needs --query', example: 'field-select e4 --pick "Texas"' },
+    ],
+  },
+  {
+    title: 'Raw driving (lowest rung — when the field layer can\'t perceive the control)',
+    verbs: [
+      { name: 'open', usage: 'open [url]', when: 'open/focus the Breeze browser window, then drive it', example: 'open https://example.com' },
+      { name: 'goto', usage: 'goto <url>', when: 'navigate the tab', example: 'goto https://example.com' },
+      { name: 'click', usage: 'click <selector>', when: 'click first match (css, text=, xpath=)', example: 'click "text=Continue"' },
+      { name: 'fill', usage: 'fill <selector> <value>', when: 'clear + type into an input', example: 'fill #email a@b.com' },
+      { name: 'type', usage: 'type <selector> <value>', when: 'type into an element (no clear)', example: 'type #notes hello' },
+      { name: 'fill-ref', usage: 'fill-ref <selector> <ref>', when: 'clear + fill with a PHI task-data value by ref (never on argv/stdout)', example: 'fill-ref #ssn patient.ssn' },
+      { name: 'type-ref', usage: 'type-ref <selector> <ref>', when: 'type a PHI task-data value by ref (no clear)', example: 'type-ref #ssn patient.ssn' },
+      { name: 'press', usage: 'press <key>', when: 'keyboard press (e.g. Enter, Control+a)', example: 'press Enter' },
+      { name: 'wait', usage: 'wait <selector>', when: 'wait for a selector to attach', example: 'wait #result' },
+      { name: 'eval', usage: 'eval <jsExpression>', when: 'page.evaluate a JS expression, print JSON result', example: 'eval "document.title"' },
+      { name: 'screenshot', usage: 'screenshot [path] [full]', when: 'PNG of the tab (default ./browser-shot.png; `full` = whole page)', example: 'screenshot shot.png full' },
+    ],
+  },
+  {
+    title: 'API shortcut (the fastest click is the one you never make)',
+    verbs: [
+      { name: 'net-observe', usage: 'net-observe [urlFilter] [--ms n] [--assets]', when: "watch the page's XHR/fetch (NON-PHI metadata) to find the data request", example: 'net-observe /api --ms 5000' },
+      { name: 'net-replay', usage: 'net-replay <url> [--method M] [--data s] [--header k:v]', when: "re-issue a request in the page's signed-in context; mutating needs --allow-mutation", example: 'net-replay https://host/api/x --method GET' },
+    ],
+  },
+  {
+    title: 'Session / connections (no browser tab needed)',
+    verbs: [
+      { name: 'escalate', usage: 'escalate [url]  (alias use-browser)', when: 'bring THIS terminal-only session\'s browser pane up ON DEMAND', example: 'escalate' },
+      { name: 'connections', usage: 'connections', when: "list this job's mounted REST Connections (no credential)", example: 'connections' },
+      { name: 'connection-call', usage: 'connection-call <connectionId> <callSpecJson> [paramsJson]', when: 'execute a declarative CallSpec against a mounted Connection', example: 'connection-call c1 \'{"method":"GET","path":"/x"}\'' },
+    ],
+  },
+  {
+    title: 'Meta',
+    verbs: [
+      { name: 'help', usage: 'help [verb]', when: 'this table, or one verb\'s usage + example', example: 'help field-select' },
+    ],
+  },
+];
+
+// Verb → group entry (incl. aliases), so `help <verb>` and the unknown-verb
+// guard resolve any accepted spelling to its doc.
+const VERB_INDEX = (() => {
+  const idx = new Map();
+  for (const g of VERB_GROUPS) for (const v of g.verbs) idx.set(v.name, v);
+  // Aliases share their canonical verb's doc.
+  idx.set('use-browser', idx.get('escalate'));
+  return idx;
+})();
+
+/** Every verb name (+ aliases) the CLI accepts — the closed set the pre-connect
+ *  unknown-verb guard checks membership against. */
+const KNOWN_VERBS = new Set(VERB_INDEX.keys());
+
+/** Render the compact `help` table (one line per verb: name + one-line when),
+ *  grouped by tier — the ONE source both the table and `help <verb>` draw from. */
+function renderHelpTable() {
+  const lines = [
+    'breeze browser driver — verbs (cheapest first; `help <verb>` for one verb\'s usage + example)',
+  ];
+  // Pad the verb column to the widest name for a readable table.
+  let width = 0;
+  for (const g of VERB_GROUPS) for (const v of g.verbs) width = Math.max(width, v.name.length);
+  for (const g of VERB_GROUPS) {
+    lines.push('');
+    lines.push(g.title + ':');
+    for (const v of g.verbs) {
+      lines.push(`  ${v.name.padEnd(width)}  ${v.when}`);
+    }
+  }
+  lines.push('');
+  lines.push('Refs come from `fields` and die on any page change — re-run `fields` after navigating.');
+  lines.push('When confused, go UP a perception level — re-run `fields` (or `page`), don\'t retry the failing action.');
+  return lines.join('\n');
+}
+
+/** Render `help <verb>`: usage + one example, or a nearest-match hint if unknown. */
+function renderVerbHelp(verb) {
+  const v = VERB_INDEX.get(verb);
+  if (!v) {
+    const near = nearestVerb(verb);
+    return `no such verb: ${verb}` + (near ? ` — did you mean \`${near}\`?` : '') + '\ntry: help';
+  }
+  const alias = verb !== v.name ? `  (alias of ${v.name})` : '';
+  return [
+    `${verb}${alias}`,
+    `  usage:   ${v.usage}`,
+    `  ${v.when}`,
+    `  example: node <cli> ${v.example}`,
+  ].join('\n');
+}
+
+/** Levenshtein-lite nearest known verb for a typo: prefix match first, else the
+ *  smallest edit distance within a small threshold. Returns null if nothing close. */
+function nearestVerb(verb) {
+  const v = String(verb || '').toLowerCase();
+  if (!v) return null;
+  // Prefer a prefix/substring hit (e.g. "field-fil" → "field-fill").
+  const pref = [...KNOWN_VERBS].find((k) => k.startsWith(v) || v.startsWith(k));
+  if (pref) return pref;
+  let best = null;
+  let bestD = Infinity;
+  for (const k of KNOWN_VERBS) {
+    const d = editDistance(v, k);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  // Only suggest when it's actually close (≤ ~40% of the name length).
+  return bestD <= Math.max(2, Math.ceil(v.length * 0.4)) ? best : null;
+}
+
+/** Classic Levenshtein edit distance (small strings — verb names). */
+function editDistance(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[m][n];
+}
+
 /** Split a verb's `rest` into positional args + --flags. Minimal (the rest of
  *  this CLI is positional); used only by the network verbs which take options.
  *  `--ms 4000` → { ms:'4000' }; `--assets` → { assets:true }; repeated --header
@@ -271,6 +423,29 @@ async function main() {
     });
     process.stdout.write(JSON.stringify(body, null, 2) + '\n');
     return;
+  }
+
+  // `help` is the manual for a CONFUSED agent — it must work with NO CDP
+  // connection (like `escalate`/`connections` above): handled and returned
+  // BEFORE any connect() attempt. `help` prints the compact verb table;
+  // `help <verb>` prints that verb's usage + one example.
+  if (verb === 'help') {
+    const target = rest[0];
+    process.stdout.write((target ? renderVerbHelp(target) : renderHelpTable()) + '\n');
+    return;
+  }
+
+  // UNKNOWN-VERB GUARD (pre-connect). A wrong verb should never require a CDP
+  // connection just to learn it's wrong — resolve it against the closed verb set
+  // HERE and answer with a nearest-match suggestion + a pointer to `help`, so a
+  // confused agent's next move is named instead of a bare error after a connect.
+  if (!KNOWN_VERBS.has(verb)) {
+    const near = nearestVerb(verb);
+    fail(
+      `unknown verb: ${verb}` +
+        (near ? ` — did you mean \`${near}\`?` : '') +
+        '\ntry: help   (lists every verb; `help <verb>` for one verb\'s usage)',
+    );
   }
 
   // `open` reaches Breeze BEFORE attaching over CDP: ask it to create the tab,
@@ -575,7 +750,10 @@ async function dispatchVerb(verb, rest, page) {
       break;
     }
     default:
-      fail(`unknown verb: ${verb}`);
+      // Unreachable for a user typo (the pre-connect KNOWN_VERBS guard in main()
+      // catches those with a suggestion). This only fires if a KNOWN verb lacks a
+      // switch arm — a code bug — so still point at the manual.
+      fail(`unknown verb: ${verb}\ntry: help`);
   }
 }
 

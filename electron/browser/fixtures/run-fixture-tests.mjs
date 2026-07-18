@@ -31,6 +31,9 @@
 //                             (substring for string, .test() for RegExp)
 //     - expectStdoutAbsent  : RegExp | string | array — NONE may match (used for
 //                             the iframe frame-scope / broken-aria negative paths)
+//     - expectStderrMatches : RegExp | string | array — ALL must match against
+//                             stderr (for verbs that report via stderr, e.g. the
+//                             unknown-verb guard's suggestion)
 //     - expectExitCode      : expected process exit code (default 0)
 //
 // The CLI appends a trailing `[timing] …` line to every verb's stdout, so
@@ -469,6 +472,46 @@ const CASES = [
     ],
   },
 
+  // ── DISCOVERABILITY (phase 4) — `help` / `help <verb>` / unknown-verb guard ──
+  // These run PRE-CONNECT (the manual for a confused agent), so they pass even
+  // with CDP down / no fixture navigated. No goto step — the fixture field is a
+  // placeholder the steps never reference.
+
+  // 26. `help` prints the compact verb table from the ONE VERBS source of truth:
+  //     grouped tiers, the field layer, and the recovery rule. Exit 0, no CDP.
+  {
+    name: 'help-lists-verbs',
+    fixture: 'native-select.html',
+    steps: [
+      { verb: 'help', args: [],
+        expectStdoutMatches: ['breeze browser driver', 'Field layer', 'fields', 'field-select',
+          'field-fill', 'net-replay', /When confused, go UP a perception level/],
+        expectExitCode: 0 },
+    ],
+  },
+
+  // 27. `help <verb>` prints that one verb's usage + a runnable example.
+  {
+    name: 'help-one-verb-field-select',
+    fixture: 'native-select.html',
+    steps: [
+      { verb: 'help', args: ['field-select'],
+        expectStdoutMatches: ['field-select', 'usage:', '--pick <label>', 'example:'],
+        expectExitCode: 0 },
+    ],
+  },
+
+  // 28. UNKNOWN VERB: a typo gets a nearest-match suggestion + `try: help` on
+  //     stderr and exits 1 — never a bare "unknown verb", never a CDP connect.
+  {
+    name: 'unknown-verb-suggests-nearest',
+    fixture: 'native-select.html',
+    steps: [
+      { verb: 'feild-fil', args: [], expectExitCode: 1,
+        expectStderrMatches: [/unknown verb: feild-fil/, /did you mean `field-fill`/, /try: help/] },
+    ],
+  },
+
   // NOTE — UNTESTED-LIVE (PHI path). `field-fill <ref> --data-ref <key>` and
   // `field-select <ref> --query-ref <key>` resolve their value in-process via the
   // SAME resolveDataRef plumbing as fill-ref/type-ref and require a running
@@ -520,6 +563,11 @@ function runStep(fixture, step) {
   }
   for (const m of asArray(step.expectStdoutAbsent)) {
     if (matches(stdout, m)) failures.push(`stdout unexpectedly matched (should be ABSENT) ${m}`);
+  }
+  // stderr matchers — for verbs that write to stderr (the unknown-verb guard's
+  // suggestion goes to stderr via fail(), matching every other CLI usage error).
+  for (const m of asArray(step.expectStderrMatches)) {
+    if (!matches(stderr, m)) failures.push(`stderr did not match ${m}`);
   }
   return { failures, stdout, stderr, exitCode };
 }

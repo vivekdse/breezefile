@@ -83,6 +83,17 @@ import {
   actionsFromRecording,
   promotionDecision,
 } from '../electron/browser/tools/promote.mjs';
+// Field-perception verbs (electron/browser/field-verbs.mjs). Pure-node (page is
+// passed in; no playwright-core import), so a top-level import is safe — it does
+// NOT pull the browser layer, so discovery (available/help/list) still runs
+// without playwright-core. Exposed to a running tool's ctx (cmdRun) as the SHARED
+// implementation the raw-driver CLI verbs use — no mirrored copy.
+import {
+  describeFields,
+  describeField,
+  fillField,
+  selectField,
+} from '../electron/browser/field-verbs.mjs';
 import {
   recallApiSpecs,
   recordApiSpec,
@@ -403,7 +414,25 @@ async function cmdRun(args) {
     return { filled: selector, ref }; // NON-PHI: the KEY, never the value
   };
   const replay = async (spec, opts) => replayRequest(page, spec, opts);
-  const ctx = { page, browser, log, loc, EXIT, ToolError, params, verbose, state, fillRef, replay };
+  // FIELD-LAYER PARITY (task field-perception phase 4). Expose the ref-based
+  // perceive/act primitives to a tool's ctx as THIN delegations to the ONE shared
+  // implementation in field-verbs.mjs — the same functions the raw-driver CLI's
+  // `fields`/`field`/`field-fill`/`field-select` verbs call — so a saved tool can
+  // perceive+act by ref without hand-crafting selectors, and never a mirrored copy.
+  // PHI: fieldFill/fieldSelect thread the SAME in-process resolveDataRef so a
+  // --data-ref/--query-ref value never enters the tool's code, argv, or stdout.
+  //   ctx.fields()                         → the `fields` listing (string; mints refs)
+  //   ctx.field(ref, {filter?})            → one field's contract JSON (string)
+  //   ctx.fieldFill(ref, {value|dataRef})  → { text, code }
+  //   ctx.fieldSelect(ref, {pick, query|queryRef}) → { text, code }
+  const fields = () => describeFields(page);
+  const field = (ref, opts = {}) => describeField(page, ref, opts);
+  const fieldFill = (ref, { value, dataRef } = {}) =>
+    fillField(page, ref, { value, dataRef, resolveDataRef });
+  const fieldSelect = (ref, { pick, query, queryRef } = {}) =>
+    selectField(page, ref, { pick, query, queryRef, resolveDataRef });
+  const ctx = { page, browser, log, loc, EXIT, ToolError, params, verbose, state,
+    fillRef, replay, fields, field, fieldFill, fieldSelect };
 
   try {
     return await runSteps(t, steps, plan, params, declared, { started, nowIso, log, ctx, state,

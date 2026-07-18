@@ -679,7 +679,13 @@ export async function fillField(page, ref, { value, dataRef, resolveDataRef } = 
       await locator.fill(v);
     } catch (e) {
       // A fill failure ("Call log:" interpolates the typed value) is scrubbed.
-      return { text: `could not fill "${label}" (data-ref ${dataRef}): ${scrubError(e, v)}`, code: 1 };
+      // Name the recovery so the line is never a dead end: the field may have
+      // moved/detached — go UP a level and re-derive it.
+      return {
+        text: `could not fill "${label}" (data-ref ${dataRef}): ${scrubError(e, v)}` +
+          ` — re-run \`fields\` (the page may have changed) then retry`,
+        code: 1,
+      };
     }
     // Receipt names the ref + char count ONLY — never the value, never a read-back.
     return {
@@ -688,7 +694,17 @@ export async function fillField(page, ref, { value, dataRef, resolveDataRef } = 
     };
   }
 
-  await locator.fill(String(value ?? ''));
+  try {
+    await locator.fill(String(value ?? ''));
+  } catch (e) {
+    // Never a dead end: the plain value is already on argv (non-PHI), but scrub
+    // the error anyway (a Playwright "Call log:" can echo it) and name the fix.
+    return {
+      text: `could not fill "${label}": ${scrubError(e, String(value ?? ''))}` +
+        ` — re-run \`fields\` (the page may have changed) then retry`,
+      code: 1,
+    };
+  }
   const committed = await readBackValue(locator, d);
   return { text: `filled "${label}" = "${committed}"${remap}`, code: 0 };
 }
@@ -921,7 +937,11 @@ export async function selectField(page, ref, opts = {}) {
     try {
       await locator.setChecked(want === 'checked');
     } catch (e) {
-      return { text: `could not set "${label}": ${e.message || e}`, code: 1 };
+      return {
+        text: `could not set "${label}": ${e.message || e}` +
+          ` — re-run \`fields\` (the page may have changed) then retry`,
+        code: 1,
+      };
     }
     const now = (await locator.isChecked().catch(() => null)) ? 'checked' : 'unchecked';
     return { text: `selected "${pick}" = "${now}"${remap}`, code: 0 };
@@ -930,7 +950,11 @@ export async function selectField(page, ref, opts = {}) {
     try {
       await locator.check();
     } catch (e) {
-      return { text: `could not check "${label}": ${e.message || e}`, code: 1 };
+      return {
+        text: `could not check "${label}": ${e.message || e}` +
+          ` — re-run \`fields\` (the page may have changed) then retry`,
+        code: 1,
+      };
     }
     return { text: `selected "${pick}" = "checked"${remap}`, code: 0 };
   }
@@ -959,14 +983,22 @@ export async function selectField(page, ref, opts = {}) {
     try {
       await locator.selectOption({ label: chosen });
     } catch (e) {
-      return { text: `could not select "${chosen}" on "${label}": ${e.message || e}`, code: 1 };
+      return {
+        text: `could not select "${chosen}" on "${label}": ${e.message || e}` +
+          ` — re-run \`fields\` (the page may have changed) then retry`,
+        code: 1,
+      };
     }
     const committed = await locator.evaluate((el) => {
       const o = el.options[el.selectedIndex];
       return o ? (o.textContent || '').trim() : '';
     });
     if (normLabel(committed) !== normLabel(chosen)) {
-      return { text: `select "${label}" did not commit "${chosen}" (now "${committed}")`, code: 1 };
+      return {
+        text: `select "${label}" did not commit "${chosen}" (now "${committed}")` +
+          ` — re-run \`fields\` and retry, or inspect it with: field ${liveRef}`,
+        code: 1,
+      };
     }
     return { text: `selected "${pick}" = "${committed}"${remap}`, code: 0 };
   }
@@ -1040,7 +1072,11 @@ export async function selectField(page, ref, opts = {}) {
     const chosen = options[m.index];
     const committed = await commitComboOption(locator, m.index, chosen);
     if (committed == null) {
-      return { text: `could not commit "${chosen}" on "${label}" (value did not change)`, code: 1 };
+      return {
+        text: `could not commit "${chosen}" on "${label}" (value did not change)` +
+          ` — re-run \`fields\` and retry, or inspect it with: field ${liveRef}`,
+        code: 1,
+      };
     }
     // A --query-ref query is PHI, but the COMMITTED option label is the agent's
     // necessary confirmation (like on-page content) — echo it unless the FIELD
