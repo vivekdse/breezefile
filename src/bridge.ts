@@ -762,6 +762,12 @@ type Fm = {
         keys: string[],
         format?: string,
       ) => Promise<Record<string, string>>;
+      // task-84fab71f2026 — cache-only whole-matrix read: one hop answers every
+      // requested row's already-cached values at once (absent key = miss, the
+      // caller follows up with resolveBulk — never "no value").
+      resolveCachedMany: (
+        requests: { taskId: string; keys: string[] }[],
+      ) => Promise<Record<string, Record<string, string>>>;
       // task-4a8d2c98f667 — Inputs section edit/add (full-bag resolve-merge-
       // replace happens in main; see electron/typebuild/task-data.ts).
       patch: (

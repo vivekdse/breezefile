@@ -271,6 +271,50 @@ export async function resolveTaskDataBulk(
   return out;
 }
 
+// task-84fab71f2026 — the CACHE-ONLY, WHOLE-MATRIX read: one IPC hop answers
+// every locally-cached (taskId, key) pair across ALL the rows the caller is
+// rendering, straight from the encrypted on-disk cache — no network, ever.
+// A key absent from the reply means MISS (not "no value"): the caller follows
+// up with resolveTaskDataBulk for just those, which pays the network cost and
+// write-throughs the cache so the NEXT cold render is answered here. Never
+// throws; an unavailable store (memory-only mode) simply returns {} — every
+// key is then a miss, which is exactly the pre-cache behavior.
+export async function resolveCachedTaskDataMany(
+  requests: { taskId: string; keys: string[] }[],
+): Promise<Record<string, Record<string, string>>> {
+  const out: Record<string, Record<string, string>> = {};
+  if (!Array.isArray(requests) || requests.length === 0) return out;
+  try {
+    const [{ getCachedDataValuesForTask, getCachedVaultValue }, { getSkeletonUpdatedAtIso }] =
+      await Promise.all([
+        import('../sources/task-phi-store'),
+        import('../sources/task-skeleton-store'),
+      ]);
+    for (const r of requests) {
+      if (!r || typeof r.taskId !== 'string' || !r.taskId || !Array.isArray(r.keys)) continue;
+      const keys = r.keys.filter((k): k is string => typeof k === 'string' && !!k);
+      if (keys.length === 0) continue;
+      const class1Keys = keys.filter((k) => !isUserDataRef(k));
+      const class2Keys = keys.filter((k) => isUserDataRef(k));
+      const hits: Record<string, string> = {};
+      if (class1Keys.length > 0) {
+        const currentUpdatedAtIso = getSkeletonUpdatedAtIso(r.taskId);
+        Object.assign(hits, getCachedDataValuesForTask(r.taskId, class1Keys, currentUpdatedAtIso));
+      }
+      for (const k of class2Keys) {
+        // Display reads never pass a format, so probe the unformatted variant
+        // only — same key shape resolveUserField caches under for format=''.
+        const v = getCachedVaultValue(k, undefined);
+        if (v != null) hits[k] = v;
+      }
+      if (Object.keys(hits).length > 0) out[r.taskId] = hits;
+    }
+  } catch {
+    // Store unavailable — treat the whole wave as a miss.
+  }
+  return out;
+}
+
 /** One-value-per-call fetch shared by both data classes' cache-miss path.
  *  Holds the auth/404/empty-value discipline so class 1 and class 2 behave
  *  identically. Never logs the value — only the opaque ref key may appear in

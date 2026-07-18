@@ -19,7 +19,12 @@
 // electron/main.ts (sibling to registerTypebuildVaultIpc). Idempotent.
 
 import { ipcMain } from 'electron';
-import { resolveTaskDataRef, resolveTaskDataBulk, patchTaskData } from './task-data';
+import {
+  resolveTaskDataRef,
+  resolveTaskDataBulk,
+  resolveCachedTaskDataMany,
+  patchTaskData,
+} from './task-data';
 
 let registered = false;
 
@@ -54,6 +59,25 @@ export function registerTypebuildTaskDataIpc(): void {
       if (!taskId || !Array.isArray(keys) || keys.length === 0) return {};
       try {
         return await resolveTaskDataBulk(taskId, keys, format);
+      } catch {
+        return {};
+      }
+    },
+  );
+
+  // task-84fab71f2026 — the CACHE-ONLY whole-matrix read: one hop, every row's
+  // already-cached values at once, straight off the encrypted local store. A
+  // key absent from the reply is a MISS the renderer follows up on via
+  // resolveBulk — never "no value". Same never-throw display-read discipline.
+  ipcMain.handle(
+    'typebuild:data:resolveCachedMany',
+    async (
+      _e,
+      requests: { taskId: string; keys: string[] }[],
+    ): Promise<Record<string, Record<string, string>>> => {
+      if (!Array.isArray(requests) || requests.length === 0) return {};
+      try {
+        return await resolveCachedTaskDataMany(requests);
       } catch {
         return {};
       }

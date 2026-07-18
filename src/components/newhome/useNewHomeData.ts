@@ -1128,78 +1128,110 @@ export function useTaskDataValues(requests: { taskId: string; keys: string[] }[]
   }, [reqKey]);
 
 useEffect(() => {
-    let cancelled = false;
     if (degraded) return; // origin slow — defer data-bag value resolves
 
-    // task-780730a010a2 follow-up — ONE resolveBulk call per TASK (not one
-    // resolve call per key): the main process answers every already-cached
-    // key from a single local encrypted-DB query and only pays a network
-    // round trip for genuine misses (task-data.ts resolveTaskDataBulk). Commit
-    // EACH task's result as soon as ITS call lands, rather than waiting for
-    // every task in this wave to settle — a slow/uncached task no longer
-    // blocks every other row's cells from showing (the anti-pattern this hook
-    // used to share with the old per-key loop, already fixed for the detail
-    // wave by task-06b39e952c4e and now fixed here too).
+    // task-84fab71f2026 — the wave has TWO stages, and NO cancellation:
+    //
+    //   1. ONE resolveCachedMany IPC hop answers every locally-cached pair for
+    //      the ENTIRE wave (all tasks at once) from the encrypted on-disk cache
+    //      — the whole matrix fills in a single round trip when the values are
+    //      already known.
+    //   2. Only the genuine misses then pay a network resolve, ONE resolveBulk
+    //      call per task over a bounded pool, each task's result committed as
+    //      soon as ITS call lands (a slow task never blocks its siblings —
+    //      same streaming discipline as the detail wave, task-06b39e952c4e).
+    //
+    // Landed results are ALWAYS committed, even when this effect has been
+    // superseded by a newer reqKey. The old cancel-and-rollback pattern had an
+    // unfixable race: the successor effect run reads fetchedRef BEFORE the
+    // superseded wave's in-flight promise lands and un-marks its pairs, so the
+    // successor skips them, the rollback then strips them, and nothing ever
+    // re-requests them — requested-but-never-settled, a permanent skeleton
+    // (exactly the stuck IN cells this task was filed for; the detail-wave
+    // streaming change re-runs this effect on every landing getTask, which is
+    // what turned the race from occasional into every-mount). Committing a
+    // superseded wave is safe: a (taskId,key) value is immutable for display,
+    // `settled` is the honest "we asked and heard back" record regardless of
+    // which wave asked, and requestedPairs already scopes isPending to the
+    // pairs the CURRENT callers care about. Post-unmount commits are React
+    // no-ops.
     const dueByTask: { taskId: string; keys: string[] }[] = [];
     for (const r of requests) {
-      const keys = r.keys.filter((k) => !fetchedRef.current.has(`${r.taskId} ${k}`));
+      const keys = r.keys.filter((k) => !fetchedRef.current.has(`${r.taskId} ${k}`));
       if (keys.length > 0) dueByTask.push({ taskId: r.taskId, keys });
     }
     if (dueByTask.length === 0) return;
+    console.warn('[tdv2] wave', JSON.stringify(dueByTask.map((d) => d.taskId + ':' + d.keys.length)));
 
     for (const { taskId, keys } of dueByTask) {
-      for (const k of keys) fetchedRef.current.add(`${taskId} ${k}`);
+      for (const k of keys) fetchedRef.current.add(`${taskId} ${k}`);
     }
 
-    let idx = 0;
-    async function worker() {
-      while (idx < dueByTask.length) {
-        const { taskId, keys } = dueByTask[idx++];
-        let resolved: Record<string, string> = {};
-        try {
-          resolved = await fm.typebuild.taskData.resolveBulk(taskId, keys);
-        } catch {
-          // Signed out / offline — every key in this task's batch stays absent;
-          // the input column simply renders an em-dash for each.
+    const commit = (taskId: string, resolved: Record<string, string>, settledKeys: string[]) => {
+      setByTask((prev) => {
+        const next = new Map(prev);
+        const rec = { ...(next.get(taskId) ?? {}) };
+        let changed = false;
+        for (const k of settledKeys) {
+          const value = resolved[k];
+          if (value == null || value === '') continue;
+          rec[k] = value;
+          changed = true;
         }
-        if (cancelled) {
-          // Dropping this task's values — un-mark its keys so a later wave can
-          // retry them (mirrors the old rollback: marked-fetched is what bounds
-          // the fan-out, so leaving them marked would pin them pending forever).
-          for (const k of keys) fetchedRef.current.delete(`${taskId} ${k}`);
-          continue;
-        }
-        setByTask((prev) => {
-          const next = new Map(prev);
-          const rec = { ...(next.get(taskId) ?? {}) };
-          let changed = false;
-          for (const k of keys) {
-            const value = resolved[k];
-            if (value == null || value === '') continue;
-            rec[k] = value;
-            changed = true;
-          }
-          if (changed) next.set(taskId, rec);
-          return changed ? next : prev;
-        });
-        // Every key in THIS task's batch is settled now, streamed in as soon as
-        // this one task's call lands — including keys that came back absent, so
-        // a permanently-missing ref doesn't hold its cell's shimmer open.
-        setSettled((prev) => {
-          const next = new Set(prev);
-          for (const k of keys) next.add(`${taskId} ${k}`);
-          return next;
-        });
-      }
-    }
-
-    void Promise.all(
-      Array.from({ length: Math.min(TASK_DATA_CONCURRENCY, dueByTask.length) }, () => worker()),
-    );
-
-    return () => {
-      cancelled = true;
+        if (changed) next.set(taskId, rec);
+        return changed ? next : prev;
+      });
+      // Every key in this batch is settled — including keys that came back
+      // absent, so a permanently-missing ref doesn't hold its shimmer open.
+      setSettled((prev) => {
+        const next = new Set(prev);
+        for (const k of settledKeys) next.add(`${taskId} ${k}`);
+        return next;
+      });
     };
+
+    void (async () => {
+      // Stage 1 — one hop, whole wave, local cache only. Cache HITS are
+      // committed and settled immediately; a key absent from the reply is a
+      // MISS (not "no value") and stays pending for stage 2.
+      console.warn('[tdv2] stage1 start');
+      let cached: Record<string, Record<string, string>> = {};
+      try {
+        cached = await fm.typebuild.taskData.resolveCachedMany(dueByTask);
+      } catch {
+        // No cache (signed out / store unavailable) — everything is a miss.
+      }
+      const missByTask: { taskId: string; keys: string[] }[] = [];
+      for (const { taskId, keys } of dueByTask) {
+        const hits = cached[taskId] ?? {};
+        const hitKeys = keys.filter((k) => hits[k] != null && hits[k] !== '');
+        if (hitKeys.length > 0) commit(taskId, hits, hitKeys);
+        const missKeys = keys.filter((k) => hits[k] == null || hits[k] === '');
+        if (missKeys.length > 0) missByTask.push({ taskId, keys: missKeys });
+      }
+      console.warn('[tdv2] misses', JSON.stringify(missByTask.map((d) => d.taskId + ':' + d.keys.length)));
+      if (missByTask.length === 0) return;
+
+      // Stage 2 — network for the misses, per task, streaming.
+      let idx = 0;
+      async function worker() {
+        while (idx < missByTask.length) {
+          const { taskId, keys } = missByTask[idx++];
+          let resolved: Record<string, string> = {};
+          try {
+            resolved = await fm.typebuild.taskData.resolveBulk(taskId, keys);
+          } catch {
+            // Signed out / offline — every key in this task's batch stays
+            // absent; the input column simply renders an em-dash for each.
+          }
+          console.warn('[tdv2] landed', taskId, Object.keys(resolved).length);
+          commit(taskId, resolved, keys);
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(TASK_DATA_CONCURRENCY, missByTask.length) }, () => worker()),
+      );
+    })();
     // reqKey encodes the full content of `requests`; re-run when it moves OR
     // when the origin breaker clears (`degraded`) so deferred resolves resume.
     // eslint-disable-next-line react-hooks/exhaustive-deps

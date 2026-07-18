@@ -1155,6 +1155,13 @@ const fm = {
           keys,
           format,
         ) as Promise<Record<string, string>>,
+      // task-84fab71f2026 — cache-only whole-matrix read: one hop, every
+      // requested row's already-cached values at once. Absent key = miss
+      // (follow up with resolveBulk), never "no value".
+      resolveCachedMany: (requests: { taskId: string; keys: string[] }[]) =>
+        ipcRenderer.invoke('typebuild:data:resolveCachedMany', requests) as Promise<
+          Record<string, Record<string, string>>
+        >,
       // task-4a8d2c98f667 — Inputs section edit/add. See ipc-task-data.ts
       // registerTypebuildTaskDataIpc for the resolve-merge-replace mechanics.
       patch: (
