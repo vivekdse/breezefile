@@ -1,0 +1,111 @@
+<!--
+  FIXTURE SPECIES: native <select> (small + huge) + text input + submit
+  ============================================================================
+  EXPECTED OUTCOMES (contract for the field-perception layer under test):
+    - expected classification (small state select): native-select
+    - expected classification (huge provider select): native-select-large
+        (10000 options; a field-layer MUST NOT dump 10000 options — it should
+         report the count and support --query filtering, never enumerate all)
+    - expected classification (text input): text
+    - small select accessible name: "State"        options: 8
+    - huge  select accessible name: "Provider"      options: 10000
+    - text  input  accessible name: "Member ID"
+    - a `field-select` of the small select by visible label "Texas" must
+      commit value "TX"; the committed-value readout must then read
+      "State = TX (Texas)".
+    - a `field-select` of the huge select with --query "00042" must resolve to
+      option label "Provider 00042 — Specialty B" (value "P00042") without the
+      layer ever enumerating all 10000 options.
+    - read-back receipt: after any commit, #committed-readout innerText is the
+      source of truth a setter's receipt can be verified against.
+  TODAY (CLI as-is): `snapshot` contains the visible label text ("State",
+  "Provider", "Member ID", "Submit"); the 10000 <option>s are NOT all present
+  in the ariaSnapshot for a collapsed native select (browser renders them lazily
+  / the AX tree omits them until opened) — do not assert on option bodies here.
+-->
+<title>native-select — native small + huge select</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  .field { margin: 1rem 0; }
+  label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  #committed-readout { margin-top: 1.5rem; padding: .75rem; background: #eef;
+    border: 1px solid #99c; font-family: ui-monospace, monospace; white-space: pre-line; }
+</style>
+
+<h1>Native select fixture</h1>
+
+<div class="field">
+  <label for="state">State</label>
+  <select id="state" name="state">
+    <option value="">— choose —</option>
+    <option value="CA">California</option>
+    <option value="TX">Texas</option>
+    <option value="NY">New York</option>
+    <option value="FL">Florida</option>
+    <option value="IL">Illinois</option>
+    <option value="WA">Washington</option>
+    <option value="MA">Massachusetts</option>
+    <option value="OR">Oregon</option>
+  </select>
+</div>
+
+<div class="field">
+  <label for="provider">Provider</label>
+  <select id="provider" name="provider">
+    <option value="">— choose —</option>
+    <!-- 10000 options injected by inline JS below -->
+  </select>
+</div>
+
+<div class="field">
+  <label for="member-id">Member ID</label>
+  <input id="member-id" name="member-id" type="text" autocomplete="off" />
+</div>
+
+<button id="submit" type="button">Submit</button>
+
+<div id="committed-readout" aria-live="polite">committed value: (none)</div>
+
+<script>
+  // Generate 10000 provider options deterministically, all at load, no network.
+  (function generateProviders() {
+    var sel = document.getElementById('provider');
+    var specialties = ['A', 'B', 'C', 'D', 'E'];
+    var frag = document.createDocumentFragment();
+    for (var i = 1; i <= 10000; i++) {
+      var n = String(i).padStart(5, '0');
+      var spec = specialties[i % specialties.length];
+      var opt = document.createElement('option');
+      opt.value = 'P' + n;
+      opt.textContent = 'Provider ' + n + ' — Specialty ' + spec;
+      frag.appendChild(opt);
+    }
+    sel.appendChild(frag);
+  })();
+
+  var readout = document.getElementById('committed-readout');
+  var state = document.getElementById('state');
+  var provider = document.getElementById('provider');
+  var member = document.getElementById('member-id');
+
+  function commit(what, value, label) {
+    readout.textContent = 'committed value: ' + what + ' = ' + value +
+      (label ? ' (' + label + ')' : '');
+  }
+
+  state.addEventListener('change', function () {
+    var o = state.options[state.selectedIndex];
+    commit('State', state.value, o ? o.textContent : '');
+  });
+  provider.addEventListener('change', function () {
+    var o = provider.options[provider.selectedIndex];
+    commit('Provider', provider.value, o ? o.textContent : '');
+  });
+  member.addEventListener('change', function () {
+    commit('Member ID', member.value, '');
+  });
+  document.getElementById('submit').addEventListener('click', function () {
+    readout.textContent = 'SUBMITTED: state=' + state.value +
+      ' provider=' + provider.value + ' member=' + member.value;
+  });
+</script>

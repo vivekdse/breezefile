@@ -1,0 +1,128 @@
+<!--
+  FIXTURE SPECIES: async autocomplete combobox (aria-autocomplete=list)
+  ============================================================================
+  EXPECTED OUTCOMES (contract for the field-perception layer under test):
+    - expected classification: combobox-async
+    - accessible name: "Patient"
+    - role=combobox, aria-autocomplete="list", aria-controls -> #listbox.
+    - typing is DEBOUNCED 300ms, then a MOCK async lookup (setTimeout 400ms, NO
+      network) filters a built-in 200-name dataset by SURNAME PREFIX (display
+      string startsWith query, case-insensitive).
+    - a role=status live region updates to exactly "N results available."
+      (ARIA authoring-practices convention) once results land.
+    - AMBIGUITY set (deliberately similar):
+        "Ramachandran, Anita" / "Ramachandran, Arun" / "Ramamurthy, S"
+    - expected options for query "ram"  : 3   (the ambiguity set)
+    - expected options for query "rama" : 3   (same three)
+    - expected options for query "ramac": 2   (the two Ramachandrans)
+    - expected options for query "zzzz" : 0   (status: "0 results available.")
+    - selecting an option commits it; #committed-readout reads
+      "Patient = <name>".
+    - TIMING NOTE for the field layer / setter: after typing, results are NOT
+      synchronous — a correct reader must WAIT for the role=status region to
+      report a count (up to ~700ms) before enumerating options.
+  TODAY (CLI as-is): `snapshot` shows the combobox + label "Patient"; the
+  listbox is empty until a query drives the async lookup, so today's snapshot
+  contains no option bodies.
+-->
+<title>autocomplete-async — debounced async combobox, 200-name dataset</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  #combo { width: 22rem; padding: .4rem; }
+  #listbox { list-style: none; margin: .25rem 0 0; padding: 0; max-height: 12rem;
+    overflow-y: auto; border: 1px solid #99c; width: 22rem; }
+  #listbox:empty { display: none; }
+  #listbox li { padding: .3rem .5rem; cursor: pointer; }
+  #listbox li[aria-selected="true"] { background: #cde; }
+  #status { color: #555; font-size: 12px; margin-top: .25rem; }
+  #committed-readout { margin-top: 1.5rem; padding: .75rem; background: #eef;
+    border: 1px solid #99c; font-family: ui-monospace, monospace; }
+</style>
+
+<h1>Async autocomplete fixture</h1>
+
+<label id="combo-label" for="combo">Patient</label>
+<input id="combo" role="combobox" aria-expanded="false" aria-controls="listbox"
+       aria-labelledby="combo-label" aria-autocomplete="list"
+       autocomplete="off" type="text" />
+<ul id="listbox" role="listbox" aria-label="Patient results"></ul>
+<div id="status" role="status" aria-live="polite"></div>
+
+<div id="committed-readout" aria-live="polite">committed value: (none)</div>
+
+<script>
+  // ---- Build a deterministic 200-name dataset (no network). --------------
+  // The three-name AMBIGUITY set is injected first; the remaining 197 are
+  // generated from surname/first stems chosen so NONE start with "Ram".
+  var NAMES = ['Ramachandran, Anita', 'Ramachandran, Arun', 'Ramamurthy, S'];
+  var SURNAMES = ['Nguyen', 'Okafor', 'Johnson', 'Silva', 'Kowalski', 'Tanaka',
+    'Hernandez', 'Weiss', 'Petrov', 'Bianchi', 'Andersson', 'Costa', 'Dubois',
+    'Fitzgerald', 'Goldberg', 'Haddad', 'Ivanova', 'Jensen', 'Khan', 'Lindqvist',
+    'Mbeki', 'Novak', 'Oyelaran', 'Park', 'Quinn'];
+  var FIRSTS = ['David', 'Maria', 'Chen', 'Fatima', 'John', 'Yuki', 'Sofia',
+    'Omar', 'Elena', 'Marco', 'Priya', 'Liam', 'Aisha', 'Noah', 'Grace'];
+  (function fill() {
+    var s = 0, f = 0;
+    while (NAMES.length < 200) {
+      var disp = SURNAMES[s % SURNAMES.length] + ', ' + FIRSTS[f % FIRSTS.length] +
+        ' ' + String(NAMES.length).padStart(3, '0'); // suffix keeps every entry unique
+      NAMES.push(disp);
+      f++;
+      if (f % FIRSTS.length === 0) s++;
+    }
+  })();
+
+  var input = document.getElementById('combo');
+  var listbox = document.getElementById('listbox');
+  var statusEl = document.getElementById('status');
+  var readout = document.getElementById('committed-readout');
+  var debounceTimer = null, lookupTimer = null, current = [];
+
+  function lookup(query) {
+    // MOCK async: 400ms setTimeout, purely local filter. NO fetch, NO network.
+    return new Promise(function (resolve) {
+      lookupTimer = setTimeout(function () {
+        var q = query.trim().toLowerCase();
+        var hits = q ? NAMES.filter(function (n) { return n.toLowerCase().indexOf(q) === 0; }) : [];
+        resolve(hits);
+      }, 400);
+    });
+  }
+
+  function renderResults(hits) {
+    current = hits;
+    listbox.innerHTML = '';
+    hits.forEach(function (name, idx) {
+      var li = document.createElement('li');
+      li.id = 'opt-' + idx;
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', 'false');
+      li.textContent = name;
+      li.addEventListener('mousedown', function (e) { e.preventDefault(); commit(idx); });
+      listbox.appendChild(li);
+    });
+    input.setAttribute('aria-expanded', hits.length ? 'true' : 'false');
+    // EXACT ARIA authoring-practices convention string:
+    statusEl.textContent = hits.length + ' results available.';
+  }
+
+  function commit(idx) {
+    if (idx < 0 || idx >= current.length) return;
+    input.value = current[idx];
+    readout.textContent = 'committed value: Patient = ' + current[idx];
+    listbox.innerHTML = '';
+    input.setAttribute('aria-expanded', 'false');
+    statusEl.textContent = '';
+  }
+
+  input.addEventListener('input', function () {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    if (lookupTimer) clearTimeout(lookupTimer);
+    var q = input.value;
+    statusEl.textContent = q.trim() ? 'Searching…' : '';
+    debounceTimer = setTimeout(function () {           // 300ms debounce
+      lookup(q).then(renderResults);                   // + 400ms mock latency
+    }, 300);
+  });
+</script>

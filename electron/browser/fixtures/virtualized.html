@@ -1,0 +1,112 @@
+<!--
+  FIXTURE SPECIES: virtualized/windowed listbox (1000 logical, ~10 in DOM)
+  ============================================================================
+  EXPECTED OUTCOMES (contract for the field-perception layer under test):
+    - expected classification: listbox-virtualized
+    - accessible name: "Procedure code"
+    - 1000 LOGICAL options ("Code 0001".."Code 1000") but only ~10 option DOM
+      nodes exist at any moment (windowing on scroll / arrow).
+    - aria-activedescendant on the listbox tracks the logical active index and
+      the window follows it; ArrowDown/ArrowUp move it, Enter commits.
+    - Because the full set is never in the DOM, a snapshot/enumeration reader
+      CANNOT see all options at once — this fixture exercises the ARROW-THROUGH
+      FALLBACK: the layer must arrow across items and read aria-activedescendant,
+      not scrape a full list.
+    - after 3x ArrowDown from rest, active option label is "Code 0004"
+      (index starts at 0 = "Code 0001").
+    - committing (Enter) with active "Code 0004" sets #committed-readout to
+      "Procedure code = Code 0004".
+  TODAY (CLI as-is): `snapshot` of body shows the listbox + label; only the ~10
+  currently-windowed options are present — assert on the label, not on a
+  specific far-down option.
+-->
+<title>virtualized — windowed listbox, 1000 logical / ~10 DOM options</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  #lb-label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  #listbox { height: 220px; overflow-y: auto; border: 1px solid #99c;
+    width: 18rem; position: relative; outline-offset: 2px; }
+  #spacer { position: relative; width: 100%; }
+  #listbox [role="option"] { position: absolute; left: 0; right: 0;
+    height: 22px; line-height: 22px; padding: 0 .5rem; box-sizing: border-box; }
+  #listbox [role="option"][aria-selected="true"] { background: #cde; }
+  #committed-readout { margin-top: 1.5rem; padding: .75rem; background: #eef;
+    border: 1px solid #99c; font-family: ui-monospace, monospace; }
+</style>
+
+<h1>Virtualized listbox fixture</h1>
+
+<span id="lb-label">Procedure code</span>
+<div id="listbox" role="listbox" aria-labelledby="lb-label" tabindex="0">
+  <div id="spacer"></div>
+</div>
+
+<div id="committed-readout" aria-live="polite">committed value: (none)</div>
+
+<script>
+  var TOTAL = 1000;
+  var ROW_H = 22;
+  var WINDOW = 10;              // ~10 DOM nodes rendered at a time
+  var listbox = document.getElementById('listbox');
+  var spacer = document.getElementById('spacer');
+  var readout = document.getElementById('committed-readout');
+  var activeIndex = 0;
+
+  spacer.style.height = (TOTAL * ROW_H) + 'px';
+
+  function label(i) { return 'Code ' + String(i + 1).padStart(4, '0'); }
+  function optId(i) { return 'opt-' + i; }
+
+  function render() {
+    // Which logical rows fall in the current scroll window.
+    var scrollTop = listbox.scrollTop;
+    var first = Math.max(0, Math.floor(scrollTop / ROW_H) - 2);
+    var last = Math.min(TOTAL - 1, first + WINDOW + 3);
+    // Remove existing option nodes (keep the spacer).
+    Array.prototype.slice.call(listbox.querySelectorAll('[role="option"]'))
+      .forEach(function (n) { n.remove(); });
+    for (var i = first; i <= last; i++) {
+      var opt = document.createElement('div');
+      opt.setAttribute('role', 'option');
+      opt.id = optId(i);
+      opt.style.top = (i * ROW_H) + 'px';
+      opt.setAttribute('aria-selected', i === activeIndex ? 'true' : 'false');
+      opt.textContent = label(i);
+      (function (idx) {
+        opt.addEventListener('mousedown', function (e) { e.preventDefault(); activeIndex = idx; commit(); });
+      })(i);
+      listbox.appendChild(opt);
+    }
+    listbox.setAttribute('aria-activedescendant', optId(activeIndex));
+  }
+
+  function ensureVisible() {
+    var top = activeIndex * ROW_H;
+    var bottom = top + ROW_H;
+    if (top < listbox.scrollTop) listbox.scrollTop = top;
+    else if (bottom > listbox.scrollTop + listbox.clientHeight)
+      listbox.scrollTop = bottom - listbox.clientHeight;
+  }
+
+  function commit() {
+    readout.textContent = 'committed value: Procedure code = ' + label(activeIndex);
+  }
+
+  listbox.addEventListener('scroll', render);
+  listbox.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIndex = Math.min(TOTAL - 1, activeIndex + 1);
+      ensureVisible(); render();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIndex = Math.max(0, activeIndex - 1);
+      ensureVisible(); render();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      commit();
+    }
+  });
+
+  render();
+</script>

@@ -1,0 +1,137 @@
+<!--
+  FIXTURE SPECIES: ARIA-correct custom combobox (React-Select style), STATIC list
+  ============================================================================
+  EXPECTED OUTCOMES (contract for the field-perception layer under test):
+    - expected classification: combobox (custom, aria 1.2 combobox pattern)
+    - accessible name: "Diagnosis"
+    - the combobox is role=combobox, aria-expanded reflects open state,
+      aria-controls points at the listbox rendered in a PORTAL at end of <body>.
+    - static list: 50 items ("Condition 01".."Condition 50").
+    - expected options for query "condition 1" : 10  (Condition 10..19; note the
+      list is zero-padded to 2 digits, so "01".."09" do NOT match "condition 1")
+    - expected options for query "condition 05": 1   (Condition 05)
+    - keyboard contract:
+        ArrowDown / ArrowUp move aria-activedescendant across VISIBLE options,
+        Enter commits the active option, Escape closes (aria-expanded=false),
+        typing filters the list client-side (no network).
+    - a `field-select` by --pick "Condition 07" must commit and the readout
+      #committed-readout must then read "Diagnosis = Condition 07".
+  TODAY (CLI as-is): `snapshot` of body shows the combobox and its label
+  "Diagnosis"; the listbox lives in a PORTAL so it is present in the DOM but the
+  options are only rendered/visible while open — the field layer is expected to
+  OPEN the control (ArrowDown / click) before enumerating.
+-->
+<title>combobox-static — ARIA custom combobox, portal listbox, static 50 items</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  #combo { width: 20rem; padding: .4rem; }
+  #listbox { list-style: none; margin: 0; padding: 0; max-height: 12rem;
+    overflow-y: auto; border: 1px solid #99c; background: #fff; width: 20rem; }
+  #listbox[hidden] { display: none; }
+  #listbox li { padding: .3rem .5rem; cursor: pointer; }
+  #listbox li[aria-selected="true"] { background: #cde; }
+  #committed-readout { margin-top: 1.5rem; padding: .75rem; background: #eef;
+    border: 1px solid #99c; font-family: ui-monospace, monospace; }
+</style>
+
+<h1>Static combobox fixture</h1>
+
+<label id="combo-label" for="combo">Diagnosis</label>
+<input id="combo" role="combobox" aria-expanded="false" aria-controls="listbox"
+       aria-labelledby="combo-label" aria-autocomplete="list"
+       autocomplete="off" type="text" />
+
+<div id="committed-readout" aria-live="polite">committed value: (none)</div>
+
+<script>
+  // Build a static 50-item dataset.
+  var ITEMS = [];
+  for (var i = 1; i <= 50; i++) ITEMS.push('Condition ' + String(i).padStart(2, '0'));
+
+  var input = document.getElementById('combo');
+  var readout = document.getElementById('committed-readout');
+  var listbox, activeIndex = -1, filtered = [];
+
+  // PORTAL: the listbox lives at the very end of <body>, positioned absolutely
+  // under the input (React-Select / Downshift convention).
+  listbox = document.createElement('ul');
+  listbox.id = 'listbox';
+  listbox.setAttribute('role', 'listbox');
+  listbox.hidden = true;
+  listbox.style.position = 'absolute';
+  document.body.appendChild(listbox);
+
+  function positionListbox() {
+    var r = input.getBoundingClientRect();
+    listbox.style.left = (r.left + window.scrollX) + 'px';
+    listbox.style.top = (r.bottom + window.scrollY) + 'px';
+  }
+
+  function optId(idx) { return 'opt-' + idx; }
+
+  function render() {
+    var q = input.value.trim().toLowerCase();
+    filtered = q ? ITEMS.filter(function (it) { return it.toLowerCase().indexOf(q) !== -1; }) : ITEMS.slice();
+    listbox.innerHTML = '';
+    filtered.forEach(function (label, idx) {
+      var li = document.createElement('li');
+      li.id = optId(idx);
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', 'false');
+      li.textContent = label;
+      li.addEventListener('mousedown', function (e) { e.preventDefault(); commit(idx); });
+      listbox.appendChild(li);
+    });
+    activeIndex = filtered.length ? 0 : -1;
+    paintActive();
+  }
+
+  function paintActive() {
+    Array.prototype.forEach.call(listbox.children, function (li, idx) {
+      li.setAttribute('aria-selected', idx === activeIndex ? 'true' : 'false');
+    });
+    if (activeIndex >= 0) {
+      input.setAttribute('aria-activedescendant', optId(activeIndex));
+      var el = listbox.children[activeIndex];
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    } else {
+      input.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  function open() {
+    positionListbox();
+    listbox.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+  function close() {
+    listbox.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
+  function commit(idx) {
+    if (idx < 0 || idx >= filtered.length) return;
+    input.value = filtered[idx];
+    readout.textContent = 'committed value: Diagnosis = ' + filtered[idx];
+    close();
+  }
+
+  input.addEventListener('input', function () { open(); render(); });
+  input.addEventListener('focus', function () { open(); render(); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') {
+      if (listbox.hidden) { open(); render(); return; }
+      e.preventDefault();
+      if (filtered.length) { activeIndex = (activeIndex + 1) % filtered.length; paintActive(); }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (filtered.length) { activeIndex = (activeIndex - 1 + filtered.length) % filtered.length; paintActive(); }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      commit(activeIndex);
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+</script>

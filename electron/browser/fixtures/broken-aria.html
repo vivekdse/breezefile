@@ -1,0 +1,62 @@
+<!--
+  FIXTURE SPECIES: div-soup dropdown — DELIBERATELY accessibility-HOSTILE
+  ============================================================================
+  THIS IS THE ONE INTENTIONALLY-BROKEN FIXTURE. Everything a screen reader
+  relies on is missing on purpose.
+  EXPECTED OUTCOMES (contract for the field-perception layer under test):
+    - expected classification: unknown / div-soup (NOT a combobox, NOT a select)
+    - NO role=combobox, NO role=listbox, NO role=option anywhere.
+    - NO aria-* attributes, NO <label>, NO <select>, NO <input> for the dropdown.
+    - the "control" is a clickable <div>; the "menu" is <div>s toggled via
+      style.display none/block; the "value" is written into a plain <div>.
+    - a JAWS-style perception layer SHOULD detect that this is NOT a real field
+      and DEGRADE GRACEFULLY: fall back to coordinate/text clicking, and NEVER
+      claim a role=option enumeration. This fixture verifies the negative path.
+    - after clicking the trigger and then the "Approved" cell, #plain-value
+      innerText reads "Approved" (verifiable only via text/DOM, not via a11y).
+  TODAY (CLI as-is): `snapshot` of body is nearly EMPTY of semantics — the
+  ariaSnapshot has generic text but no listbox/option/combobox roles. The
+  runner asserts the ABSENCE of those role words in the snapshot.
+-->
+<title>broken-aria — div-soup dropdown (intentionally JAWS-hostile)</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  .trigger { width: 18rem; padding: .5rem; border: 1px solid #999;
+    background: #f5f5f5; cursor: pointer; user-select: none; }
+  .menu { width: 18rem; border: 1px solid #999; border-top: none; }
+  .menu .cell { padding: .4rem .5rem; cursor: pointer; }
+  .menu .cell:hover { background: #eee; }
+  #plain-value { margin-top: 1.5rem; padding: .75rem; background: #fee;
+    border: 1px solid #c99; font-family: ui-monospace, monospace; }
+</style>
+
+<h1>Broken (div-soup) dropdown fixture</h1>
+
+<!-- No label, no roles, no aria — this is the anti-pattern on purpose. -->
+<div class="field-ish">Determination</div>
+<div class="trigger" id="trigger">— pick a determination —</div>
+<div class="menu" id="menu" style="display:none">
+  <div class="cell" data-v="Approved">Approved</div>
+  <div class="cell" data-v="Denied">Denied</div>
+  <div class="cell" data-v="Pended">Pended</div>
+  <div class="cell" data-v="More info needed">More info needed</div>
+</div>
+
+<div id="plain-value">value: (none)</div>
+
+<script>
+  var trigger = document.getElementById('trigger');
+  var menu = document.getElementById('menu');
+  var out = document.getElementById('plain-value');
+  trigger.addEventListener('click', function () {
+    // Options appear/disappear via display toggling only.
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  });
+  Array.prototype.forEach.call(menu.querySelectorAll('.cell'), function (cell) {
+    cell.addEventListener('click', function () {
+      trigger.textContent = cell.getAttribute('data-v');
+      out.textContent = cell.getAttribute('data-v');   // value only in plain text
+      menu.style.display = 'none';
+    });
+  });
+</script>

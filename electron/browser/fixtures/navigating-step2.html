@@ -1,0 +1,23 @@
+<!--
+  FIXTURE SPECIES: step 2 of the staleness-guard navigation fixture
+  ============================================================================
+  EXPECTED OUTCOMES:
+    - reached ONLY by navigating from navigating.html (Continue button); also
+      loadable directly via file:// for isolation.
+    - one field: "Approval reason" (text input) + a Back button to step 1.
+    - title "navigating-step2 — step 2 of 2" — the observable proof that the
+      navigation completed and step-1 refs are now stale.
+-->
+<title>navigating-step2 — step 2 of 2</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  a { display: inline-block; margin-top: 1rem; }
+</style>
+
+<h1>Step 2 of 2</h1>
+
+<label for="reason">Approval reason</label>
+<input id="reason" name="reason" type="text" autocomplete="off" />
+
+<a href="navigating.html">Back to step 1</a>

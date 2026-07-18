@@ -1,0 +1,34 @@
+<!--
+  FIXTURE SPECIES: nested same-origin iframes (top -> inner -> innermost)
+  ============================================================================
+  EXPECTED OUTCOMES (contract for the field-perception layer under test):
+    - expected classification (top field): text  (accessible name "Case number")
+    - the top page embeds iframe-inner.html, which itself embeds
+      iframe-innermost.html — all same-origin file:// documents.
+    - the field layer, once it lands, MUST descend frames:
+        top:       1 field  ("Case number")
+        inner:     2 fields ("Diagnosis note" text input, "Priority" native select)
+        innermost: 1 field  ("Authorization PIN" text input)
+      => a full frame-aware `fields` enumeration expects 4 fields total.
+  TODAY (CLI as-is) — STALENESS / FRAME-SCOPE MARKER:
+    `snapshot` and `text` run against the TOP frame only (loc = page.locator on
+    the top document). The inner/innermost iframe content is therefore ABSENT
+    from today's ariaSnapshot. The runner ASSERTS that absence and carries a
+    TODO-flip comment: when the field-perception layer adds frame descent, flip
+    those cases to EXPECT the inner labels ("Diagnosis note", "Priority",
+    "Authorization PIN") to appear.
+-->
+<title>iframe-form — nested same-origin iframes (top frame)</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 44rem; }
+  label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  iframe { width: 100%; height: 320px; border: 2px solid #99c; margin-top: 1rem; }
+</style>
+
+<h1>Top-level iframe form fixture</h1>
+
+<label for="case-number">Case number</label>
+<input id="case-number" name="case-number" type="text" autocomplete="off" />
+
+<p>Embedded inner form (separate same-origin document):</p>
+<iframe id="inner" src="iframe-inner.html" title="Inner claim form"></iframe>

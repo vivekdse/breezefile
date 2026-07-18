@@ -1,0 +1,48 @@
+<!--
+  FIXTURE SPECIES: DOM-replacing, then navigating, two-step form (STALENESS guard)
+  ============================================================================
+  EXPECTED OUTCOMES (contract for the field-perception layer under test):
+    - expected classification (step 1 field): text ("Applicant name")
+    - clicking the "Continue" button (#continue) REPLACES the entire step-1 DOM
+      (document.body is re-rendered — every element gets a NEW identity), shows a
+      transient "Loading step 2…" state, then after 500ms (setTimeout, no
+      network) NAVIGATES to navigating-step2.html.
+    - STALENESS CONTRACT: any ariaSnapshot ref captured against step 1 is STALE
+      after Continue — both because the nodes were replaced in place AND because
+      the document then navigates. A correct setter must re-snapshot (re-derive
+      refs) after an action that mutates/navigates; acting on a pre-click ref
+      must fail loudly, not silently target the wrong element.
+    - after navigation, `title` is "navigating-step2 — step 2 of 2" and the page
+      shows an "Approval reason" field.
+  TODAY (CLI as-is): `title` on the freshly-loaded page is
+  "navigating — step 1 of 2"; after a `click #continue` + navigation settles, a
+  later `title` reads the step-2 title. The runner keeps these as SEPARATE steps
+  so the title flip is observable.
+-->
+<title>navigating — step 1 of 2</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+  label { display: block; font-weight: 600; margin-bottom: .25rem; }
+  button { margin-top: 1rem; padding: .5rem 1rem; }
+  .note { color: #555; margin-top: 1rem; }
+</style>
+
+<h1 id="step-heading">Step 1 of 2</h1>
+
+<label for="applicant">Applicant name</label>
+<input id="applicant" name="applicant" type="text" autocomplete="off" />
+
+<button id="continue" type="button">Continue</button>
+<p class="note">Clicking Continue re-renders the DOM, then navigates to step 2.</p>
+
+<script>
+  document.getElementById('continue').addEventListener('click', function () {
+    // 1) REPLACE the DOM: every prior element identity is now invalid.
+    document.body.innerHTML =
+      '<h1>Submitting…</h1><p id="loading" class="note">Loading step 2…</p>';
+    // 2) Then navigate (500ms mock latency, no network).
+    setTimeout(function () {
+      window.location.href = 'navigating-step2.html';
+    }, 500);
+  });
+</script>

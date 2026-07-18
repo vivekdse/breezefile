@@ -1,0 +1,17 @@
+<!--
+  FIXTURE SPECIES: innermost iframe document (embedded by iframe-inner.html)
+  ============================================================================
+  EXPECTED OUTCOMES:
+    - one field: "Authorization PIN" (text input).
+    - deepest node of the 3-level same-origin frame nest; its label
+      ("Authorization PIN") is the deepest string a frame-aware reader must
+      reach and is ABSENT from the top page's snapshot today.
+-->
+<title>iframe-innermost — deepest frame (1 field)</title>
+<style>
+  body { font: 13px system-ui, sans-serif; margin: 1rem; }
+  label { display: block; font-weight: 600; margin-bottom: .2rem; }
+</style>
+
+<label for="auth-pin">Authorization PIN</label>
+<input id="auth-pin" name="auth-pin" type="text" autocomplete="off" />

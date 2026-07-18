@@ -1,0 +1,33 @@
+<!--
+  FIXTURE SPECIES: middle iframe document (embedded by iframe-form.html)
+  ============================================================================
+  EXPECTED OUTCOMES:
+    - two fields: "Diagnosis note" (text input) and "Priority" (native select,
+      3 options); it further embeds iframe-innermost.html.
+    - loadable directly via file:// too (self-contained, no network).
+-->
+<title>iframe-inner — middle frame (2 fields + nested iframe)</title>
+<style>
+  body { font: 13px system-ui, sans-serif; margin: 1rem; }
+  label { display: block; font-weight: 600; margin-bottom: .2rem; }
+  .field { margin: .6rem 0; }
+  iframe { width: 100%; height: 140px; border: 2px dashed #c99; margin-top: .6rem; }
+</style>
+
+<div class="field">
+  <label for="dx-note">Diagnosis note</label>
+  <input id="dx-note" name="dx-note" type="text" autocomplete="off" />
+</div>
+
+<div class="field">
+  <label for="priority">Priority</label>
+  <select id="priority" name="priority">
+    <option value="">— choose —</option>
+    <option value="routine">Routine</option>
+    <option value="urgent">Urgent</option>
+    <option value="stat">STAT</option>
+  </select>
+</div>
+
+<p>Nested innermost form:</p>
+<iframe id="innermost" src="iframe-innermost.html" title="Innermost auth form"></iframe>
