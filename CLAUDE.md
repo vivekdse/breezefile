@@ -50,6 +50,17 @@ task `data` field as placeholder keys only — see
 [`docs/typebuild-data-field-contract.md`](docs/typebuild-data-field-contract.md)
 and [`docs/pii-data-injection-design.md`](docs/pii-data-injection-design.md).
 
+## Driving the embedded browser: use the field layer
+When you (or a script/test you write) need to drive the operator browser, use
+the **field-layer verbs** of `electron/browser/cli.mjs` — perceive with
+`page`/`fields`/`field <ref>`, act with `field-fill`/`field-select <ref>` —
+before reaching for raw `snapshot`/`click`/`fill` selectors. Refs come from
+`fields`, pierce iframes, and die on page change (errors say how to recover).
+From a plain shell set `BREEZE_PROFILE=dev BREEZE_CDP_URL=http://127.0.0.1:9223`
+first. Cheat-sheet + testing harness:
+[`docs/browser-field-verbs.md`](docs/browser-field-verbs.md); `help [verb]` in
+the CLI itself.
+
 ## Cross-platform (Mac + Linux)
 The client targets both macOS and Linux. **Before adding any OS-coupled feature** (search, app launching, volumes, sound, share, window chrome, etc.), read [`docs/cross-platform-strategy.md`](docs/cross-platform-strategy.md). Rules in brief: no `process.platform` outside `electron/platform/`; OS-coupled work goes through the `PlatformAdapter`; UI gates on the capability manifest via `PlatformContext`; verbs declare `requires: '<capability>'`. Default to full or degraded parity — single-platform features require justification.
 
