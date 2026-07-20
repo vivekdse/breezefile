@@ -124,6 +124,7 @@ import {
 } from './connect.mjs';
 import { scrubError } from './scrub.mjs';
 import { describePage, describeFields, describeField, fillField, selectField } from './field-verbs.mjs';
+import { perceiveVisual } from './perceive-visual.mjs';
 import { observeNetwork, replayRequest } from './net.mjs';
 import { apiSpecFromRequest, recordApiSpec, validateApiSpec } from './tools/api-spec.mjs';
 import { timeVerb, takeLastMetric } from './tools/run-metrics.mjs';
@@ -147,6 +148,7 @@ const VERB_GROUPS = [
     verbs: [
       { name: 'page', usage: 'page', when: 'orientation skeleton: title/url, landmarks, interactive counts', example: 'page' },
       { name: 'fields', usage: 'fields', when: 'one line per form field — MINTS the refs the field* verbs use', example: 'fields' },
+      { name: 'perceive', usage: 'perceive [--width N] [--crop <ref>]', when: 'CAPTURE PASS: fields + fingerprints JSON + ref-badged screenshot from ONE enumeration — run on first visit, store via remember_site', example: 'perceive' },
       { name: 'field', usage: 'field <ref> [--filter <substr>]', when: "one field's contract (kind/value/options/howToSet)", example: 'field e8 --filter 00042' },
       { name: 'snapshot', usage: 'snapshot [selector]', when: 'full ARIA tree of selector (default body) — heavier than page/fields', example: 'snapshot form' },
       { name: 'text', usage: 'text [selector]', when: 'innerText of selector (default body)', example: 'text #summary' },
@@ -535,6 +537,18 @@ async function dispatchVerb(verb, rest, page) {
       // The JAWS Insert+F5 analog: one line per form field (ref/kind/label/value/
       // flags), then links/buttons. Persists the ref map for later field* verbs.
       process.stdout.write((await describeFields(page)) + '\n');
+      break;
+    }
+    case 'perceive': {
+      // The capture pass (perceive-visual.mjs): fields listing + fingerprints
+      // JSON + ref-badged screenshot, all minted from ONE enumeration. Run this
+      // on a page's FIRST visit (or on drift), store the fingerprints via
+      // remember_site, and let the next visit act from memory without perceiving.
+      const { flags } = splitFlags(rest);
+      const width = flags.width && flags.width !== true ? Number(flags.width) : 768;
+      const cropRef = flags.crop && flags.crop !== true ? String(flags.crop) : undefined;
+      const out = await perceiveVisual(page, { width, crop: cropRef });
+      process.stdout.write(out.text + '\n');
       break;
     }
     case 'field': {

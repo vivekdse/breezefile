@@ -4,6 +4,7 @@
 **Date:** 2026-07-14
 **Epic:** Operator Speed (TypeBuild task-32b7db557a49); this doc is task-4bd791686ef7
 **Audience:** Breeze client + TypeBuild server teams
+**Companion:** [`perceive-once-act-from-memory.md`](perceive-once-act-from-memory.md) — this doc compresses the loop BEFORE the page (arrive resolved); that one compresses the loop ON the page (arrive perceived: run-1 perception is captured as certified field memory so runs 2..N act without perceiving).
 **Related (read these, don't duplicate them):**
 - [`docs/pii-data-injection-design.md`](../pii-data-injection-design.md) — the three data classes, the `me.*`/entity vault, the cooperative PHI boundary. **The reference-vs-value split here is theirs; this doc reuses it.**
 - [`docs/typebuild-data-field-contract.md`](../typebuild-data-field-contract.md) — the task `data` bag (flat `string→string`, keys non-PHI, values encrypted, resolved one-per-call).

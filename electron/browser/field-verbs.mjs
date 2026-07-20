@@ -194,6 +194,19 @@ function pad(s, n) {
  * @returns {Promise<string>} the full text to print
  */
 export async function describeFields(page) {
+  const { classified } = await collectFields(page);
+  return renderFieldsText(classified);
+}
+
+/**
+ * The ONE enumeration: snapshot the merged tree, classify every interactive
+ * node, and persist the ref map. `fields` renders this; `perceive` (the visual
+ * capture pass, perceive-visual.mjs) reuses the SAME collection so its
+ * fingerprints/badges share the exact refs — never a parallel enumeration.
+ *
+ * @returns {Promise<{ text, nodes, classified: Array<{node,kind,d,loc}> }>}
+ */
+export async function collectFields(page) {
   const { text, nodes } = await snapshotMerged(page);
   const interactive = refsFromNodes(nodes).filter((n) => !SKIP_ROLES.has(n.role));
 
@@ -206,6 +219,15 @@ export async function describeFields(page) {
     classified.push({ node: n, kind, d, loc });
   }
 
+  // Persist ALL refs (form fields + radios + nav) so the next process can
+  // resolve them. saveRefMap stores refs/roles/names/framePaths + url only.
+  saveRefMap({ url: page.url(), refs: classified.map((c) => c.node), text });
+
+  return { text, nodes, classified };
+}
+
+/** Render the `fields` listing text from a collectFields() result. */
+export async function renderFieldsText(classified) {
   const formFields = classified.filter((c) => FORM_KINDS.has(c.kind) && c.kind !== 'radio');
   const radios = classified.filter((c) => c.kind === 'radio');
   const nav = classified.filter((c) => NAV_ROLES.has(c.kind));
@@ -268,11 +290,6 @@ export async function describeFields(page) {
         'roles; fall back to: snapshot [selector] or net-observe)',
     );
   }
-
-  // Persist ALL listed refs (form fields + radios + nav) so the next process can
-  // resolve them. saveRefMap stores refs/roles/names/framePaths + url only.
-  const allRefs = classified.map((c) => c.node);
-  saveRefMap({ url: page.url(), refs: allRefs, text });
 
   lines.push(
     '→ inspect: field <ref> · act: field-select <ref> --pick <label> | field-fill <ref> <value>',
