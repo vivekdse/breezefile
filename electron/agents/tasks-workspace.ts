@@ -21,7 +21,7 @@ const TASKS_SETTINGS = path.join(TASKS_DIR, '.claude', 'settings.json');
 // The browser playbook lives HERE as project memory rather than in the injected
 // prompt: a session launched with cwd=TASKS_DIR auto-loads it, so the prompt we
 // inject carries only the task. App-owned dir, so we (over)write-if-changed.
-const TASKS_CLAUDE_MD = path.join(TASKS_DIR, 'CLAUDE.md');
+export const TASKS_CLAUDE_MD = path.join(TASKS_DIR, 'CLAUDE.md');
 
 // Tools an interactive browser session must call unattended:
 //   mcp__typebuild        — the TypeBuild MCP server (task lifecycle verbs).
@@ -65,7 +65,11 @@ export function ensureTasksWorkspace(): { cwd: string; settingsPath: string } {
     writeFileSync(TASKS_SETTINGS, JSON.stringify(settings, null, 2) + '\n');
   }
   // Seed the browser playbook as workspace memory (auto-loaded from cwd). Write
-  // only when content differs so we don't churn the file every launch.
+  // only when content differs so we don't churn the file every launch — and
+  // NEVER when the file is server-derived (refreshWorkspaceInstructions wrote
+  // it from the server-hosted `playbook` doc; the marker on line one says so).
+  // The bundled copy is the first-run/offline seed only; once the server doc
+  // exists, it is authoritative and the fire-and-forget refresh maintains it.
   const playbook = browserPlaybookMarkdown();
   let playbookCurrent = '';
   try {
@@ -73,7 +77,8 @@ export function ensureTasksWorkspace(): { cwd: string; settingsPath: string } {
   } catch {
     /* absent/unreadable — write it */
   }
-  if (playbookCurrent !== playbook) {
+  const serverDerived = playbookCurrent.startsWith('<!-- source: typebuild-playbook');
+  if (!serverDerived && playbookCurrent !== playbook) {
     writeFileSync(TASKS_CLAUDE_MD, playbook);
   }
   return { cwd: TASKS_DIR, settingsPath: TASKS_SETTINGS };

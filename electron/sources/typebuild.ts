@@ -4305,6 +4305,11 @@ export class TypeBuildTaskSource implements TaskSource {
     // App-owned workspace + permission grant (see ensureTasksWorkspace). The
     // session runs here and loads the seeded settings via --settings below.
     const { cwd: tasksCwd, settingsPath } = ensureTasksWorkspace();
+    // Server-populated playbook refresh — fire-and-forget, never on the spawn
+    // path (this launch reads the on-disk copy; the update lands for the next).
+    void import('../agents/instruction-assembly').then((m) =>
+      m.refreshWorkspaceInstructions(),
+    );
 
     // task-aaa1bf931e32 — PARALLEL PRE-SPAWN WAVE. Every one of these fetches is
     // independent of the others (none consumes another's result), so they now run

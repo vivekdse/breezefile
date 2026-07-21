@@ -99,6 +99,9 @@ export async function runAdHocBrowserSession(): Promise<AdHocBrowserResult> {
   // browser helper CLI, so the agent can drive the browser without stalling on
   // per-tool prompts.
   const { cwd, settingsPath } = ensureTasksWorkspace();
+  // Server-populated playbook refresh — fire-and-forget (this launch reads the
+  // copy already on disk; the fetched update lands for the next one).
+  void import('./instruction-assembly').then((m) => m.refreshWorkspaceInstructions());
   const task = syntheticAdHocTask(plan.flags);
 
   // Pi-only pre-spawn wiring (both best-effort — the ad-hoc session is useful

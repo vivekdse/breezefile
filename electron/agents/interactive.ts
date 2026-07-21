@@ -307,10 +307,17 @@ export async function runTaskInteractive(
   // first-party pi extension lands), no --add-dir (cwd-scoped), and the
   // positional prompt needs no `--` sentinel. Callers pass pi-native flags
   // (e.g. --no-session) via extraArgs.
+  // Pi has no --append-system-prompt, so the server-hosted global operator
+  // instructions (NON-PHI standing guidance, browser runs only) ride the
+  // first-turn prompt instead — same doc, different delivery. Argv-safe: the
+  // doc is non-PHI by contract and the prompt already rides argv.
+  const piPrompt = operatorInstructions
+    ? `${effectivePrompt}\n\n---\n\n${operatorInstructions}`
+    : effectivePrompt;
   const args = agentId === 'pi'
     ? [
         ...(opts.extraArgs ?? []),
-        ...(suppressPositional ? [] : [effectivePrompt]),
+        ...(suppressPositional ? [] : [piPrompt]),
       ]
     : [
         ...flagArgs,
