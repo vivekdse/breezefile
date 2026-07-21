@@ -45,18 +45,25 @@ Run-N speed is the goal (see
 [`operator-speed/perceive-once-act-from-memory.md`](operator-speed/perceive-once-act-from-memory.md)):
 
 - **First visit** to a repeatable page: `perceive`, Read the PNG, do the work,
-  then store the used fields' fingerprints + proven recipes (species, receipt,
-  idempotence, ambiguity discriminators) via TypeBuild `remember_site` —
-  structure only, never values.
-- **Next visit**: `recall_site` FIRST. If memory covers the page, one cheap
-  `fields` to re-mint refs (matched to remembered fingerprints by
-  label/domId), then act straight through — no `perceive`, no screenshot, no
-  re-probing. Bypass perception unless an error occurs.
+  then `remember_site` a **curated distillation** — only the fields this task
+  used or recurring tasks on this site will plausibly need, with their proven
+  recipes (species, receipt, idempotence, ambiguity discriminators) and the
+  dead-ends hit. `perceive.json` is a per-run working artifact you read to
+  decide what matters — **never paste it into memory wholesale**. Structure
+  only, never values.
+- **Save flows as single chained commands** (one Bash invocation — the ref map
+  is per-shell; never mint refs inside `$(...)`). Rule of three: the third run
+  of the same flow gets promoted to a `breeze-tools` tool; its workaround
+  notes retire into the tool's code and the memory shrinks to a pointer.
+- **Next visit**: `breeze-tools available <url>` then `recall_site` FIRST. If
+  a tool or flow covers the page, act straight through — no `perceive`, no
+  screenshot, no re-probing. Bypass perception unless an error occurs.
 - **On error only** (stale ref / ambiguous / receipt mismatch): go up a
   perception level, fix the step, and write the corrected memory back.
 - Never blind-retry a non-idempotent action (toggle, submit) after an unclear
-  outcome — re-perceive first. Screenshots are per-page working state: don't
-  carry old pages' PNGs forward in context.
+  outcome — re-perceive first. Verify with receipts that cannot lie:
+  visibility by geometry, never innerText. Screenshots are per-page working
+  state: don't carry old pages' PNGs forward in context.
 
 ## Testing
 

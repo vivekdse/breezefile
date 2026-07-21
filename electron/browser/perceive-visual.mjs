@@ -339,7 +339,8 @@ export async function perceiveVisual(page, { width = 768, crop, outDir } = {}) {
   );
   lines.push(
     `[fingerprints] ${jsonPath} — durable signals per ref (structure only). ` +
-      'Store the useful ones via remember_site so the NEXT visit can act from memory without re-perceiving.',
+      'This file is a per-run working artifact: READ it to decide what matters, then remember_site a CURATED distillation — ' +
+      'only the fields this task used or recurring tasks here will plausibly need (+ their recipes/receipts). Never store the raw dump.',
   );
   lines.push(
     `[uniqueness] ${unique}/${records.length} refs unique by (kind, label) at capture` +
