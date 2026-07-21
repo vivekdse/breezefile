@@ -66,6 +66,11 @@ const HELPERS = [
   ['electron', 'core', 'profile.mjs'],
   ['electron', 'browser', 'cli.mjs'],
   ['electron', 'browser', 'connect.mjs'],
+  // Field-layer verbs (perceive/act) + the visual capture pass — imported by
+  // cli.mjs (and field-verbs by breeze-tools.mjs), task-4c942f2c303c.
+  ['electron', 'browser', 'field-verbs.mjs'],
+  ['electron', 'browser', 'perceive.mjs'],
+  ['electron', 'browser', 'perceive-visual.mjs'],
   ['electron', 'browser', 'net.mjs'],
   ['electron', 'browser', 'scrub.mjs'],
   ['electron', 'browser', 'tools', 'api-spec.mjs'],

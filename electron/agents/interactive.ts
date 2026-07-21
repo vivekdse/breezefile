@@ -34,8 +34,11 @@ import { browserCliEnv } from '../browser/automation';
 import { startTiming, timing } from '../core/launch-timing';
 
 export type InteractiveRunOptions = {
-  /** Agent id for the run row. Defaults to task.auto_agent or the registry
-   *  default. Only 'claude' is launchable interactively today. */
+  /** Agent id for the run row AND the spawned binary. Defaults to
+   *  task.auto_agent or the registry default. 'claude' and 'pi' are launchable
+   *  interactively today (task-c4846651004b v1: pi rides the same pty/window/
+   *  CDP plumbing; only the binary + argv shape differ — see the arg build
+   *  below). */
   agentId?: string;
   /** Override the resolved prompt (TypeBuild Start passes a custom one). */
   prompt?: string;
@@ -229,7 +232,9 @@ export async function runTaskInteractive(
     : null;
   if (run) tasks.updateRun(run.id, { started_at: Date.now() });
 
-  const bin = await resolveClaudeBin();
+  const bin = agentId === 'pi'
+    ? await (await import('./pi')).resolvePiBin()
+    : await resolveClaudeBin();
   const { args: flagArgs, unknown, playwright } = flagsToArgs(task.flags);
   if (unknown.length) {
     console.warn('[interactive] ignoring unknown task flags:', unknown.join(', '));
@@ -294,15 +299,28 @@ export async function runTaskInteractive(
   // agent's first turn instead — see injectWorkBundle; this is what stops the
   // pre-claimed agent from opening with a redundant get_task).
   const suppressPositional = opts.omitPrompt || opts.promptViaBundle;
-  const args = [
-    ...flagArgs,
-    ...(opts.extraArgs ?? []),
-    // task-93576169693f — global operator instructions as a system-prompt
-    // addendum (browser runs only; empty when unset/offline → omitted).
-    ...(operatorInstructions ? ['--append-system-prompt', operatorInstructions] : []),
-    '--add-dir', cwd,
-    ...(suppressPositional ? [] : ['--', effectivePrompt]),
-  ];
+  // Pi argv shape (task-c4846651004b v1): pi shares NONE of claude's flag
+  // vocabulary — no --permission-mode/--continue (flagArgs), no
+  // --append-system-prompt (the workspace CLAUDE.md playbook still loads:
+  // pi reads CLAUDE.md context files natively from cwd; the server-hosted
+  // operator-instructions addendum is a v1 degradation, folded in when the
+  // first-party pi extension lands), no --add-dir (cwd-scoped), and the
+  // positional prompt needs no `--` sentinel. Callers pass pi-native flags
+  // (e.g. --no-session) via extraArgs.
+  const args = agentId === 'pi'
+    ? [
+        ...(opts.extraArgs ?? []),
+        ...(suppressPositional ? [] : [effectivePrompt]),
+      ]
+    : [
+        ...flagArgs,
+        ...(opts.extraArgs ?? []),
+        // task-93576169693f — global operator instructions as a system-prompt
+        // addendum (browser runs only; empty when unset/offline → omitted).
+        ...(operatorInstructions ? ['--append-system-prompt', operatorInstructions] : []),
+        '--add-dir', cwd,
+        ...(suppressPositional ? [] : ['--', effectivePrompt]),
+      ];
 
   const ptyId = reservePtyId();
   // task fix/launch-latency-debug — pty-scoped timing flow. Started here so

@@ -24,6 +24,13 @@ import { getBrowserWindow, getPrimaryHostWindow } from '../browser/window';
 // row (recordRun is false), only rides BREEZE_TASK_ID env for the helper CLI.
 const ADHOC_TASK_ID = 'adhoc-browser';
 
+// Which agent Ctrl+B spawns (task-c4846651004b v1). 'pi' is the CURRENT
+// default so the Pi operator path is testable end-to-end; flip back to
+// 'claude' here (one line) to restore the Claude Code ad-hoc session. A
+// per-launch/user-visible selector is the productized follow-up
+// (task-98a63ab4466e).
+const ADHOC_AGENT_ID: 'claude' | 'pi' = 'pi';
+
 // The pty of the CURRENTLY-LIVE ad-hoc browser session, or null when none is
 // running. This is the reuse guard: a second Ctrl+B focuses the existing pair
 // instead of spawning a second orphan session (requirement #5). Cleared on the
@@ -57,7 +64,7 @@ function syntheticAdHocTask(flags: string[]): Task {
     cron: null,
     next_run_at: null,
     auto_mode: false,
-    auto_agent: 'claude',
+    auto_agent: ADHOC_AGENT_ID,
     auto_prompt: null,
     flags,
     created_at: now,
@@ -94,11 +101,35 @@ export async function runAdHocBrowserSession(): Promise<AdHocBrowserResult> {
   const { cwd, settingsPath } = ensureTasksWorkspace();
   const task = syntheticAdHocTask(plan.flags);
 
+  // Pi-only pre-spawn wiring (both best-effort — the ad-hoc session is useful
+  // as a pure browser driver even without TypeBuild MCP access):
+  //   - seed the pi-mcp-adapter's mcp.json entry (env-var reference only,
+  //     never a token on disk);
+  //   - mint a TypeBuild MCP token into the PTY env, same env-var contract as
+  //     the operator task launch (typebuild.ts MCP_TOKEN_ENV). Signed-out /
+  //     offline → no token, the adapter's typebuild server just fails to
+  //     connect and the session proceeds browser-only.
+  // The Claude ad-hoc path stays MCP-less by design (see extraArgs below).
+  let piEnv: Record<string, string> = {};
+  if (ADHOC_AGENT_ID === 'pi') {
+    try {
+      await (await import('./pi')).ensurePiMcpConfig();
+    } catch {
+      /* config seed is additive — never block the launch */
+    }
+    try {
+      const { mintMcpToken } = await import('../typebuild/mcp-token');
+      piEnv = { TYPEBUILD_MCP_TOKEN: (await mintMcpToken()).accessToken };
+    } catch {
+      /* signed out / unreachable → browser-only session */
+    }
+  }
+
   // Captured before the await so the onExit closure below never references the
   // yet-unassigned `res` (mirrors the operator launcher's `let ptyId` pattern).
   let launchedPtyId = 0;
   const res = await runTaskInteractive(task, {
-    agentId: 'claude',
+    agentId: ADHOC_AGENT_ID,
     // Bind the pty to a live MAIN window (never the operator window, which may
     // be focused after a prior session) — the operator window ADOPTS the pty
     // from the term registry regardless. undefined falls through to
@@ -110,10 +141,19 @@ export async function runAdHocBrowserSession(): Promise<AdHocBrowserResult> {
     recordRun: false,
     label: plan.label,
     source: plan.source,
-    // Match the operator task flow: pin the model + load the seeded permission
-    // grant explicitly (so it applies regardless of folder-trust). No MCP
-    // config — this session drives the browser only; it is not a TypeBuild task.
-    extraArgs: ['--settings', settingsPath, '--model', 'claude-sonnet-5'],
+    // Claude: match the operator task flow — pin the model + load the seeded
+    // permission grant explicitly (so it applies regardless of folder-trust);
+    // no MCP config (browser-only by design).
+    // Pi: --no-session is MANDATORY (pi session transcripts are plaintext
+    // JSONL and PHI can flow through the typebuild MCP tools mid-session);
+    // provider/model come from the user's own ~/.pi/agent settings. Pi has no
+    // permission system — nothing to grant, nothing gates its tools (v1
+    // trade-off; the tool_call-gating pi extension is task-7782ec5b0cca).
+    extraArgs:
+      ADHOC_AGENT_ID === 'pi'
+        ? ['--no-session']
+        : ['--settings', settingsPath, '--model', 'claude-sonnet-5'],
+    env: piEnv,
     // Clear the reuse guard when the pty exits so the NEXT Ctrl+B spawns fresh.
     onExit: () => {
       if (adHocPtyId === launchedPtyId) adHocPtyId = null;
