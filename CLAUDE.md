@@ -1,15 +1,29 @@
-# TypeBuild (client)
+# Breeze File — file manager only
 
-The desktop **client for getting work done with AI agents.** A person (and their
-team, across machines) sees the tasks they have, executes them, and watches
-automated tasks run — with the file-manager surface as one of the abilities the
-agent uses, not the point of the product.
+> ## ⛔ SCOPE (2026-07-23): this repo is the **file manager**, nothing else.
+>
+> **breezefile is only for file management going forward.** The TypeBuild
+> task **client** — task UI, operator / browser automation, TypeBuild MCP
+> wiring, PHI/PII handling — has moved to its **own repo**:
+> **`vivekdse/typebuild-client`** (checked out as the
+> `software/typebuild-client` submodule of `small_business_software`).
+>
+> **All task-client work now happens in `typebuild-client`, not here.** Do
+> not add, extend, or "fix" task/operator/TypeBuild-client features in this
+> repo. If a request is about the task client, do that work in
+> `typebuild-client`. This repo keeps only the ranger-inspired file-manager
+> surface (vim navigation, selection/yank/paste, tabs, bookmarks, bulk
+> rename, tagging, miller columns, "Open With", native drag-out, etc.).
+>
+> Everything below this banner predates the split and describes the old
+> "breezefile *is* the TypeBuild client" era. It is retained for historical
+> context on the code that still physically lives here, but the task-client
+> direction it sets is **superseded** — treat `typebuild-client` as the home
+> for that work.
 
-> **Renaming in progress.** This repo started as **Breeze File** (a ranger-inspired
-> file manager) and is being reframed as the **TypeBuild client**. User-facing
-> names move to "TypeBuild"; internal identifiers (package name, bundle id
-> `com.vivek.breezefile`, the Homebrew cask, `breeze*` code symbols) are kept
-> for now and renamed in a later mechanical pass. Expect both names in the code.
+The ranger-inspired **file manager** with native drag-out (macOS first,
+cross-platform target). A person navigates files, selects/yanks/pastes,
+sorts, tags, bulk-renames, and drags files out to web apps.
 
 ## What this is now
 - **Tasks are the fundamental primitive.** A task is a unit of work — for the
